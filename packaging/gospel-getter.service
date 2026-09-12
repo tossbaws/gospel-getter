@@ -1,0 +1,14 @@
+[Unit]
+Description=Gospel Getter - Bible reader
+After=network.target
+
+[Service]
+ExecStart=%h/.local/bin/gospel_getter
+WorkingDirectory=%h/.local/share/gospel-getter
+Environment=DATABASE_URL=sqlite:%h/.local/share/gospel-getter/data/gospel_getter.db
+Environment=LISTEN_ADDR=127.0.0.1:3002
+Environment=RUST_LOG=info
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

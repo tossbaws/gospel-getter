@@ -1,0 +1,60 @@
+# Maintainer: <your name and email here>
+#
+# DRAFT — not ready to submit to the AUR yet. Before it can be:
+#   1. Push this project to a public git repository and tag a release
+#      (this PKGBUILD assumes one at `source=`, below — replace the URL).
+#   2. Run `makepkg` locally against that tag and fix whatever it finds;
+#      this has not been test-built.
+#   3. Get real checksums: `updpkgsums` (needs network access to the repo).
+#   4. Only then create an AUR account and `git push` it to a new
+#      aur.archlinux.org/gospel-getter.git — see
+#      https://wiki.archlinux.org/title/AUR_submission_guidelines
+#
+# Mirrors what packaging/install.sh does, but declaratively: builds the
+# binary, and installs it plus the systemd user service, desktop launcher,
+# and icon to their standard system-wide (not per-user) locations.
+
+pkgname=gospel-getter
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A Bible reader with KJV and WEB translations, faded surrounding chapters, and quick keyboard navigation"
+arch=('x86_64' 'aarch64')
+url="<TODO: repo URL>"
+license=('MIT')
+depends=('gcc-libs')
+makedepends=('cargo')
+backup=()
+source=("$pkgname-$pkgver.tar.gz::<TODO: repo URL>/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP') # replace with `updpkgsums` once `source` is a real URL
+
+build() {
+  cd "$pkgname-$pkgver"
+  cargo build --release --locked
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  install -Dm755 target/release/gospel_getter "$pkgdir/usr/bin/gospel_getter"
+
+  install -Dm644 packaging/gospel-getter.service \
+    "$pkgdir/usr/lib/systemd/user/gospel-getter.service"
+
+  install -Dm644 packaging/icon.png \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/gospel-getter.png"
+
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/gospel-getter.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Gospel Getter
+Comment=Read the Bible, book by book, chapter by chapter
+Icon=gospel-getter
+Exec=xdg-open http://127.0.0.1:3002
+Terminal=false
+Categories=Education;Spirituality;
+EOF
+}
+
+post_install() {
+  echo "Enable the reading server with: systemctl --user enable --now gospel-getter"
+}

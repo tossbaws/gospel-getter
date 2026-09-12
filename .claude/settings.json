@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo *)",
+      "Bash(rustfmt *)",
+      "Bash(clippy *)",
+      "Bash(git *)",
+      "Read",
+      "Edit",
+      "Write"
+    ]
+  },
+  "extraInstructions": "Use the rust-coding-standards skill for all Rust coding decisions. Do not use unwrap() or panic!() on recoverable errors in library code. Use anyhow::Context for error propagation. Run cargo fmt and cargo clippy -- -D warnings after every change — a build that compiles but fails clippy is not done. Use the biblical-text-integrity skill for ANY work touching Bible/scripture text (seed data, ingestion, translations, verse rendering) — never alter verse wording for any reason, including cleanup or fixing apparent typos in a source dataset."
+}

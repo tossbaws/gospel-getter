@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gospel Getter</title>
+    <style>
+        :root {
+            /* Same palette as packaging/icon.svg, so the app and the
+               taskbar icon read as one consistent theme. */
+            --vw-bg-top: #14082c;
+            --vw-bg-mid: #441768;
+            --vw-bg-magenta: #972378;
+            --vw-bg-coral: #bf5349;
+            --vw-bg-gold: #bf8545;
+            --vw-teal: #04a3ae;
+            --vw-teal-dim: rgba(4, 163, 174, 0.45);
+            --vw-text: #f2e9ff;
+            --vw-text-dim: #b9a9d9;
+            --vw-panel-bg: rgba(20, 8, 44, 0.55);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Georgia, 'Times New Roman', serif;
+            background: linear-gradient(
+                180deg,
+                var(--vw-bg-top) 0%,
+                var(--vw-bg-mid) 35%,
+                var(--vw-bg-magenta) 62%,
+                var(--vw-bg-coral) 82%,
+                var(--vw-bg-gold) 100%
+            );
+            background-attachment: fixed;
+            color: var(--vw-text);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 2.5rem 1.5rem 6rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 3px double var(--vw-teal-dim);
+        }
+
+        h1 {
+            font-size: 2.6rem;
+            font-weight: normal;
+            letter-spacing: 0.03em;
+            color: var(--vw-teal);
+            text-shadow: 0 0 18px rgba(4, 163, 174, 0.55);
+        }
+
+        .subtitle {
+            font-size: 0.9rem;
+            font-style: italic;
+            color: var(--vw-text-dim);
+            margin-top: 0.25rem;
+        }
+
+        .translation-bar {
+            text-align: center;
+            margin-bottom: 1.5rem;
+            font-size: 0.85rem;
+            color: var(--vw-text-dim);
+        }
+
+        .translation-bar select {
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--vw-text);
+            background: var(--vw-panel-bg);
+            border: 1px solid var(--vw-teal-dim);
+            border-radius: 6px;
+            padding: 0.25rem 0.5rem;
+            cursor: pointer;
+        }
+
+        .book-list {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-bottom: 1.5rem;
+        }
+
+        @media (max-width: 640px) {
+            .book-list {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .testament-title {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--vw-teal);
+            margin-bottom: 0.6rem;
+            border-bottom: 1px solid var(--vw-teal-dim);
+            padding-bottom: 0.3rem;
+        }
+
+        .book-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+
+        .book-item {
+            background: var(--vw-panel-bg);
+            border: 1px solid var(--vw-teal-dim);
+            border-radius: 6px;
+            padding: 0.35rem 0.7rem;
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--vw-text);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .book-item:hover {
+            background: rgba(4, 163, 174, 0.3);
+            border-color: var(--vw-teal);
+        }
+
+        .book-item.active {
+            background: var(--vw-teal);
+            color: var(--vw-bg-top);
+            border-color: var(--vw-teal);
+            box-shadow: 0 0 14px rgba(4, 163, 174, 0.6);
+        }
+
+        #chapter-list {
+            min-height: 3rem;
+            margin: 1.5rem 0;
+        }
+
+        .chapter-grid-title {
+            font-size: 1rem;
+            font-weight: normal;
+            font-style: italic;
+            color: var(--vw-teal);
+            margin-bottom: 0.6rem;
+        }
+
+        .chapter-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+
+        .chapter-btn {
+            width: 2.4rem;
+            height: 2.4rem;
+            border: 1px solid var(--vw-teal-dim);
+            border-radius: 50%;
+            background: var(--vw-panel-bg);
+            font-family: inherit;
+            font-size: 0.9rem;
+            color: var(--vw-text);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .chapter-btn:hover {
+            background: rgba(4, 163, 174, 0.3);
+            border-color: var(--vw-teal);
+        }
+
+        .chapter-btn.active {
+            background: var(--vw-teal);
+            color: var(--vw-bg-top);
+            border-color: var(--vw-teal);
+            box-shadow: 0 0 14px rgba(4, 163, 174, 0.6);
+        }
+
+        #reading-pane {
+            border-top: 3px double var(--vw-teal-dim);
+            padding-top: 1.5rem;
+        }
+
+        .reading-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 1.25rem;
+        }
+
+        .chapter-main {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        /* The chapter being read sits in the wide center column. The chapter
+           before and after it (same book, or the neighboring book once a
+           book's first/last chapter is reached) sit in full, at reduced
+           opacity, in narrower side columns — and scroll along with the
+           page as one continuous reading surface, not as separate boxes. */
+        .chapter-side {
+            flex: 0 0 260px;
+            max-width: 260px;
+            opacity: 0.7;
+            filter: blur(0.3px);
+            transition: opacity 0.2s;
+        }
+
+        .chapter-side:hover {
+            opacity: 0.95;
+        }
+
+        .chapter-side .verse {
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .chapter-heading-link {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: none;
+            border: none;
+            border-bottom: 1px solid var(--vw-teal-dim);
+            font-family: inherit;
+            font-size: 1.2rem;
+            color: var(--vw-teal);
+            margin-bottom: 0.8rem;
+            padding: 0 0 0.4rem;
+            cursor: pointer;
+        }
+
+        .chapter-heading-link:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 800px) {
+            .reading-row {
+                flex-direction: column;
+            }
+
+            .chapter-side {
+                flex-basis: auto;
+                max-width: 100%;
+                opacity: 0.8;
+            }
+        }
+
+        .chapter-heading {
+            font-size: 1.5rem;
+            font-weight: normal;
+            color: var(--vw-teal);
+            margin-bottom: 0.8rem;
+            padding-bottom: 0.4rem;
+            border-bottom: 1px solid var(--vw-teal-dim);
+            text-shadow: 0 0 12px rgba(4, 163, 174, 0.4);
+        }
+
+        .verse {
+            font-size: 1.05rem;
+            line-height: 1.7;
+            margin-bottom: 0.5rem;
+            color: var(--vw-text);
+        }
+
+        .verse-num {
+            display: inline-block;
+            min-width: 1.4rem;
+            font-size: 0.7rem;
+            font-weight: bold;
+            color: var(--vw-teal);
+            vertical-align: super;
+            margin-right: 0.2rem;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 3rem;
+            font-size: 0.75rem;
+            font-style: italic;
+            color: var(--vw-text-dim);
+        }
+
+        .nav-hint {
+            text-align: center;
+            font-size: 0.75rem;
+            color: var(--vw-text-dim);
+            margin-top: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Gospel Getter</h1>
+            <p class="subtitle">The Holy Bible</p>
+        </header>
+
+        <div class="translation-bar">
+            <label for="translation-select">Translation:</label>
+            <select id="translation-select">
+                {% for t in translations %}
+                <option value="{{ t.code }}"{% if t.code == current_translation_code %} selected{% endif %}>{{ t.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="book-list">
+            <div>
+                <div class="testament-title">Old Testament</div>
+                <div class="book-grid">
+                    {% for book in ot_books %}
+                    <button type="button" class="book-item{% if book.id == current_book_id %} active{% endif %}" data-book-id="{{ book.id }}">{{ book.name }}</button>
+                    {% endfor %}
+                </div>
+            </div>
+            <div>
+                <div class="testament-title">New Testament</div>
+                <div class="book-grid">
+                    {% for book in nt_books %}
+                    <button type="button" class="book-item{% if book.id == current_book_id %} active{% endif %}" data-book-id="{{ book.id }}">{{ book.name }}</button>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div id="chapter-list">{{ chapters_html|safe }}</div>
+
+        <div id="reading-pane">{{ reading_pane_html|safe }}</div>
+
+        <p class="nav-hint">Use &larr; and &rarr; to move a chapter at a time.</p>
+
+        <footer>Gospel Getter &mdash; read the whole counsel of God, one chapter at a time.</footer>
+    </div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            const chapterList = document.getElementById('chapter-list');
+            const readingPane = document.getElementById('reading-pane');
+            const translationSelect = document.getElementById('translation-select');
+
+            function currentTranslation() {
+                return translationSelect.value;
+            }
+
+            function currentInner() {
+                return document.getElementById('reading-pane-inner');
+            }
+
+            function setActiveBook(bookId) {
+                document.querySelectorAll('.book-item').forEach((el) => {
+                    el.classList.toggle('active', el.dataset.bookId === String(bookId));
+                });
+            }
+
+            function setActiveChapterButton(chapter) {
+                document.querySelectorAll('.chapter-btn').forEach((el) => {
+                    el.classList.toggle('active', el.dataset.chapter === String(chapter));
+                });
+            }
+
+            function loadChapters(bookId, activeChapter) {
+                const url = activeChapter
+                    ? `/books/${bookId}/chapters?active=${activeChapter}`
+                    : `/books/${bookId}/chapters`;
+                return fetch(url)
+                    .then((r) => (r.ok ? r.text() : ''))
+                    .then((html) => {
+                        chapterList.innerHTML = html;
+                        setActiveBook(bookId);
+                    })
+                    .catch(() => {});
+            }
+
+            function loadReading(bookId, chapter, { syncChapters } = { syncChapters: true }) {
+                return fetch(`/read/${bookId}/${chapter}?translation=${encodeURIComponent(currentTranslation())}`)
+                    .then((r) => (r.ok ? r.text() : ''))
+                    .then((html) => {
+                        if (!html) return;
+                        readingPane.innerHTML = html;
+                        setActiveBook(bookId);
+
+                        const grid = document.getElementById('chapter-grid-inner');
+                        const gridBookId = grid ? grid.dataset.bookId : null;
+
+                        if (syncChapters && gridBookId !== String(bookId)) {
+                            loadChapters(bookId, chapter);
+                        } else {
+                            setActiveChapterButton(chapter);
+                        }
+
+                        if (window.history && window.history.pushState) {
+                            window.history.pushState({ bookId, chapter }, '', `#${bookId}/${chapter}`);
+                        }
+                    })
+                    .catch(() => {});
+            }
+
+            // Primary navigation: clicking a book jumps straight to its
+            // first chapter (and brings its chapter grid up, in case the
+            // reader wants a different one); clicking a chapter number then
+            // reads that one instead.
+            document.body.addEventListener('click', function (event) {
+                const bookBtn = event.target.closest('.book-item');
+                if (bookBtn) {
+                    loadReading(bookBtn.dataset.bookId, 1);
+                    return;
+                }
+
+                const chapterBtn = event.target.closest('.chapter-btn');
+                if (chapterBtn) {
+                    const grid = document.getElementById('chapter-grid-inner');
+                    loadReading(grid.dataset.bookId, chapterBtn.dataset.chapter, { syncChapters: false });
+                    return;
+                }
+
+                // Clicking a neighboring chapter's heading jumps there, same
+                // as pressing the corresponding arrow key would. The rest of
+                // that chapter's text is plain, selectable text — only the
+                // heading is a navigation control.
+                const sideHeading = event.target.closest('.chapter-heading-link');
+                if (sideHeading) {
+                    loadReading(sideHeading.dataset.book, sideHeading.dataset.chapter);
+                }
+            });
+
+            // Secondary navigation: arrow keys leaf through the whole Bible
+            // a chapter at a time, using the prev/next chapter this fragment
+            // was rendered with (computed server-side, so book boundaries —
+            // e.g. the end of Genesis into the start of Exodus — are handled
+            // without the client needing to know the Bible's structure).
+            document.addEventListener('keydown', function (event) {
+                if (event.target && /^(INPUT|TEXTAREA)$/.test(event.target.tagName)) {
+                    return;
+                }
+                const inner = currentInner();
+                if (!inner) return;
+
+                if (event.key === 'ArrowLeft' && inner.dataset.prevBook) {
+                    loadReading(inner.dataset.prevBook, inner.dataset.prevChapter);
+                } else if (event.key === 'ArrowRight' && inner.dataset.nextBook) {
+                    loadReading(inner.dataset.nextBook, inner.dataset.nextChapter);
+                }
+            });
+
+            window.addEventListener('popstate', function (event) {
+                if (event.state && event.state.bookId && event.state.chapter) {
+                    loadReading(event.state.bookId, event.state.chapter);
+                }
+            });
+
+            // Switching translations re-reads whatever chapter is currently
+            // on screen, in the newly selected translation. The server
+            // remembers this as the reader's position too (see
+            // read_fragment), so reopening the app comes back to it.
+            translationSelect.addEventListener('change', function () {
+                const inner = currentInner();
+                const bookId = inner ? inner.dataset.currentBook : 1;
+                const chapter = inner ? inner.dataset.currentChapter : 1;
+                loadReading(bookId, chapter);
+            });
+        })();
+    </script>
+</body>
+</html>

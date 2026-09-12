@@ -1,0 +1,37 @@
+<div id="reading-pane-inner"
+     data-current-book="{{ current_book_id }}"
+     data-current-chapter="{{ current_chapter }}"
+     {% if let Some(p) = prev %}data-prev-book="{{ p.book_id }}" data-prev-chapter="{{ p.chapter }}"{% endif %}
+     {% if let Some(n) = next %}data-next-book="{{ n.book_id }}" data-next-chapter="{{ n.chapter }}"{% endif %}
+>
+    <div class="reading-row">
+        <div class="chapter-side chapter-side-prev">
+            {% if let Some(p) = prev %}
+            <section>
+                <button type="button" class="chapter-heading-link" data-book="{{ p.book_id }}" data-chapter="{{ p.chapter }}">{{ p.book_name }} {{ p.chapter }}</button>
+                {% for v in p.verses %}
+                <p class="verse"><span class="verse-num">{{ v.number }}</span>{{ v.text }}</p>
+                {% endfor %}
+            </section>
+            {% endif %}
+        </div>
+
+        <section class="chapter-main">
+            <h2 class="chapter-heading">{{ current_book_name }} {{ current_chapter }}</h2>
+            {% for v in current_verses %}
+            <p class="verse"><span class="verse-num">{{ v.number }}</span>{{ v.text }}</p>
+            {% endfor %}
+        </section>
+
+        <div class="chapter-side chapter-side-next">
+            {% if let Some(n) = next %}
+            <section>
+                <button type="button" class="chapter-heading-link" data-book="{{ n.book_id }}" data-chapter="{{ n.chapter }}">{{ n.book_name }} {{ n.chapter }}</button>
+                {% for v in n.verses %}
+                <p class="verse"><span class="verse-num">{{ v.number }}</span>{{ v.text }}</p>
+                {% endfor %}
+            </section>
+            {% endif %}
+        </div>
+    </div>
+</div>

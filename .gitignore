@@ -1,0 +1,10 @@
+/target
+**/*.rs.bck
+.env
+.env.*
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+.idea/
+*.iml

@@ -1,0 +1,8 @@
+<div id="chapter-grid-inner" data-book-id="{{ book_id }}">
+    <h3 class="chapter-grid-title">{{ book_name }} &mdash; Chapters</h3>
+    <div class="chapter-grid">
+        {% for c in chapters %}
+        <button type="button" class="chapter-btn{% if c.is_active %} active{% endif %}" data-chapter="{{ c.number }}">{{ c.number }}</button>
+        {% endfor %}
+    </div>
+</div>
