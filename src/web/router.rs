@@ -34,5 +34,9 @@ pub fn build_router(store: Store, books: Vec<Book>, translations: Vec<Translatio
             "/read/{book_id}/{chapter}",
             get(crate::web::handlers::read_fragment),
         )
+        .route(
+            "/xref-text/{book_id}/{chapter}/{verse}",
+            get(crate::web::handlers::xref_text_fragment),
+        )
         .with_state(state)
 }

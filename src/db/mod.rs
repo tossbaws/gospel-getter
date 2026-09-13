@@ -8,4 +8,4 @@ pub use connect::create_pool;
 pub use migrate::migrate;
 pub use models::*;
 pub use queries::*;
-pub use seed::seed_missing;
+pub use seed::{seed_cross_references_if_empty, seed_missing};

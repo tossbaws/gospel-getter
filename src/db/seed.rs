@@ -142,3 +142,76 @@ pub async fn seed_missing(pool: &SqlitePool) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+const CROSS_REFERENCES_JSON: &str = include_str!("../../data/cross_references.json");
+
+#[derive(Deserialize)]
+struct RawCrossRefBook {
+    #[allow(dead_code)] // provenance only, not used at runtime
+    code: String,
+    chapters: Vec<Vec<Vec<RawCrossRef>>>,
+}
+
+#[derive(Deserialize)]
+struct RawCrossRef {
+    book: i64,
+    chapter: i64,
+    verse: i64,
+    #[serde(rename = "endVerse")]
+    end_verse: Option<i64>,
+    score: i64,
+}
+
+/// Populate `cross_references` from the bundled dataset, but only if it's
+/// currently empty.
+pub async fn seed_cross_references_if_empty(pool: &SqlitePool) -> anyhow::Result<()> {
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM cross_references")
+        .fetch_one(pool)
+        .await
+        .context("Failed to check cross-reference count")?;
+    if count > 0 {
+        return Ok(());
+    }
+
+    let books: Vec<RawCrossRefBook> = serde_json::from_str(CROSS_REFERENCES_JSON)
+        .context("Failed to parse bundled cross-reference data")?;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Failed to start cross-reference seed transaction")?;
+
+    for (book_index, book) in books.iter().enumerate() {
+        let book_id = book_index as i64 + 1;
+        for (chapter_index, verses) in book.chapters.iter().enumerate() {
+            let chapter = chapter_index as i64 + 1;
+            for (verse_index, refs) in verses.iter().enumerate() {
+                let verse = verse_index as i64 + 1;
+                for r in refs {
+                    sqlx::query(
+                        "INSERT INTO cross_references \
+                         (book_id, chapter, verse, ref_book_id, ref_chapter, ref_verse, ref_end_verse, score) \
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    )
+                    .bind(book_id)
+                    .bind(chapter)
+                    .bind(verse)
+                    .bind(r.book)
+                    .bind(r.chapter)
+                    .bind(r.verse)
+                    .bind(r.end_verse)
+                    .bind(r.score)
+                    .execute(&mut *tx)
+                    .await
+                    .context("Failed to insert cross reference")?;
+                }
+            }
+        }
+    }
+
+    tx.commit()
+        .await
+        .context("Failed to commit cross-reference seed transaction")?;
+    tracing::info!("Seeded cross-reference data");
+    Ok(())
+}
