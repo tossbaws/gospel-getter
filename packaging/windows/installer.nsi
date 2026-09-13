@@ -8,9 +8,7 @@
 ;                           systemd unit does on Linux via `Environment=`
 ;   data\                   where the SQLite database self-creates on first run
 ;   gospel-getter.ico       used for shortcuts
-;   open-gospel-getter.vbs  opens the app in an Edge --app= window (falls back
-;                           to the default browser), so a click on Start Menu
-;                           feels like opening a native app, not just a URL
+;   open-gospel-getter.vbs  opens the app in the user's default browser
 ;
 ; A Startup-folder shortcut launches gospel_getter.exe silently at login —
 ; the Windows equivalent of the systemd --user service on Linux. A Start
