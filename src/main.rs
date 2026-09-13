@@ -1,3 +1,8 @@
+// On Windows, this is a background server with no console UI of its own —
+// suppress the console window that would otherwise pop up when launched
+// from a shortcut or at login. No effect on other platforms.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use anyhow::Context;
 use axum::serve;
 use clap::Parser;

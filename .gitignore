@@ -8,3 +8,4 @@
 *.db-wal
 .idea/
 *.iml
+packaging/windows/GospelGetterSetup.exe
