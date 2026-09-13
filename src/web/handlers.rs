@@ -4,15 +4,25 @@ use axum::{
     response::Html,
 };
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::db::{Book, Translation};
 use crate::domain::bible::{self, ChapterRef};
 use crate::web::router::AppState;
 
+struct CrossRefView {
+    book_id: i64,
+    chapter: i64,
+    verse: i64,
+    end_verse: Option<i64>,
+    citation: String,
+}
+
 struct VerseView {
     number: i64,
     text: String,
+    xrefs: Vec<CrossRefView>,
 }
 
 /// A neighboring chapter shown in full, at reduced opacity, beside the one
@@ -34,6 +44,7 @@ struct ReadingPaneTemplate {
     current_verses: Vec<VerseView>,
     prev: Option<ChapterSide>,
     next: Option<ChapterSide>,
+    has_chapter_xrefs: bool,
 }
 
 struct ChapterEntry {
@@ -67,6 +78,22 @@ fn book_name(state: &AppState, book_id: i64) -> Option<&str> {
         .iter()
         .find(|b| b.id == book_id)
         .map(|b| b.name.as_str())
+}
+
+/// Render a cross-reference's target passage as a human-readable citation,
+/// e.g. "Romans 8:28" or "Romans 8:28-30" for a verse range.
+fn build_citation(
+    state: &AppState,
+    ref_book_id: i64,
+    ref_chapter: i64,
+    ref_verse: i64,
+    ref_end_verse: Option<i64>,
+) -> String {
+    let name = book_name(state, ref_book_id).unwrap_or("?");
+    match ref_end_verse {
+        Some(end) if end != ref_verse => format!("{name} {ref_chapter}:{ref_verse}-{end}"),
+        _ => format!("{name} {ref_chapter}:{ref_verse}"),
+    }
 }
 
 /// Resolve a `?translation=` query value to a translation id, falling back
@@ -127,6 +154,7 @@ async fn build_side(
             .map(|v| VerseView {
                 number: v.verse,
                 text: v.text,
+                xrefs: Vec::new(),
             })
             .collect(),
     })
@@ -159,6 +187,32 @@ async fn build_reading_pane(
     let current_book_name = book_name(state, book_id)
         .ok_or_else(|| anyhow::anyhow!("unknown book id in navigation"))?
         .to_string();
+
+    let cross_refs = state
+        .store
+        .chapter_cross_references(book_id, chapter)
+        .await?;
+    let mut xrefs_by_verse: HashMap<i64, Vec<CrossRefView>> = HashMap::new();
+    for r in cross_refs {
+        xrefs_by_verse
+            .entry(r.verse)
+            .or_default()
+            .push(CrossRefView {
+                book_id: r.ref_book_id,
+                chapter: r.ref_chapter,
+                verse: r.ref_verse,
+                end_verse: r.ref_end_verse,
+                citation: build_citation(
+                    state,
+                    r.ref_book_id,
+                    r.ref_chapter,
+                    r.ref_verse,
+                    r.ref_end_verse,
+                ),
+            });
+    }
+    let has_chapter_xrefs = !xrefs_by_verse.is_empty();
+
     let current_verses = state
         .store
         .chapter_verses(translation_id, book_id, chapter)
@@ -167,6 +221,7 @@ async fn build_reading_pane(
         .map(|v| VerseView {
             number: v.verse,
             text: v.text,
+            xrefs: xrefs_by_verse.remove(&v.verse).unwrap_or_default(),
         })
         .collect();
 
@@ -177,6 +232,7 @@ async fn build_reading_pane(
         current_verses,
         prev,
         next,
+        has_chapter_xrefs,
     })
 }
 
@@ -293,6 +349,59 @@ pub async fn read_fragment(
         }
         Err(e) => {
             tracing::error!("Failed to build reading pane for {book_id}:{chapter}: {e}");
+            Html(String::new())
+        }
+    }
+}
+
+struct SimpleVerseView {
+    number: i64,
+    text: String,
+}
+
+#[derive(Template)]
+#[template(path = "xref_verses.html")]
+struct XrefVersesTemplate {
+    verses: Vec<SimpleVerseView>,
+}
+
+#[derive(Deserialize)]
+pub struct XrefTextQuery {
+    pub translation: Option<String>,
+    pub end_verse: Option<i64>,
+}
+
+/// The verse text a cross-reference citation expands to, fetched on click
+/// rather than embedded up front, since only a small fraction of citations
+/// actually get expanded in any given reading session.
+pub async fn xref_text_fragment(
+    State(state): State<Arc<AppState>>,
+    Path((book_id, chapter, verse)): Path<(i64, i64, i64)>,
+    Query(query): Query<XrefTextQuery>,
+) -> Html<String> {
+    let translation_id = resolve_translation(&state, query.translation.as_deref());
+    let end_verse = query.end_verse.unwrap_or(verse);
+    match state
+        .store
+        .verse_range(translation_id, book_id, chapter, verse, end_verse)
+        .await
+    {
+        Ok(verses) => {
+            let template = XrefVersesTemplate {
+                verses: verses
+                    .into_iter()
+                    .map(|v| SimpleVerseView {
+                        number: v.verse,
+                        text: v.text,
+                    })
+                    .collect(),
+            };
+            Html(template.render().unwrap_or_default())
+        }
+        Err(e) => {
+            tracing::error!(
+                "Failed to fetch xref verse text for {book_id} {chapter}:{verse}-{end_verse}: {e}"
+            );
             Html(String::new())
         }
     }

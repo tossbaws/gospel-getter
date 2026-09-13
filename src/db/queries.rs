@@ -1,7 +1,7 @@
 use anyhow::Context;
 use sqlx::SqlitePool;
 
-use crate::db::models::{Book, Translation, Verse};
+use crate::db::models::{Book, CrossReference, Translation, Verse};
 
 /// Get every book, in canonical order.
 pub async fn get_all_books(pool: &SqlitePool) -> anyhow::Result<Vec<Book>> {
@@ -70,4 +70,47 @@ pub async fn save_reading_position(
     .await
     .context("Failed to save reading position")?;
     Ok(())
+}
+
+/// Cross-references for every verse in one chapter, ordered by verse then
+/// descending relevance score.
+pub async fn get_chapter_cross_references(
+    pool: &SqlitePool,
+    book_id: i64,
+    chapter: i64,
+) -> anyhow::Result<Vec<CrossReference>> {
+    sqlx::query_as::<_, CrossReference>(
+        "SELECT verse, ref_book_id, ref_chapter, ref_verse, ref_end_verse, score \
+         FROM cross_references WHERE book_id = $1 AND chapter = $2 \
+         ORDER BY verse, score DESC",
+    )
+    .bind(book_id)
+    .bind(chapter)
+    .fetch_all(pool)
+    .await
+    .context("Failed to fetch cross references")
+}
+
+/// The text of a verse or verse range, for expanding a cross-reference.
+pub async fn get_verse_range(
+    pool: &SqlitePool,
+    translation_id: i64,
+    book_id: i64,
+    chapter: i64,
+    start_verse: i64,
+    end_verse: i64,
+) -> anyhow::Result<Vec<Verse>> {
+    sqlx::query_as::<_, Verse>(
+        "SELECT verse, text FROM verses \
+         WHERE translation_id = $1 AND book_id = $2 AND chapter = $3 \
+         AND verse BETWEEN $4 AND $5 ORDER BY verse",
+    )
+    .bind(translation_id)
+    .bind(book_id)
+    .bind(chapter)
+    .bind(start_verse)
+    .bind(end_verse)
+    .fetch_all(pool)
+    .await
+    .context("Failed to fetch verse range")
 }

@@ -12,7 +12,7 @@ mod dotenv;
 mod web;
 
 use config::Config;
-use db::{create_pool, migrate, seed_missing};
+use db::{create_pool, migrate, seed_cross_references_if_empty, seed_missing};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -43,6 +43,9 @@ pub async fn run() -> anyhow::Result<()> {
     seed_missing(&pool)
         .await
         .context("Failed to seed Bible data")?;
+    seed_cross_references_if_empty(&pool)
+        .await
+        .context("Failed to seed cross-reference data")?;
 
     let books = db::get_all_books(&pool)
         .await

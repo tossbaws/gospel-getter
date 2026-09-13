@@ -25,3 +25,16 @@ pub struct Translation {
     pub code: String,
     pub name: String,
 }
+
+/// A cross-reference from one verse to another passage. `ref_end_verse` is
+/// set when the reference is to a verse range rather than a single verse.
+#[derive(Debug, Clone, FromRow)]
+pub struct CrossReference {
+    pub verse: i64,
+    pub ref_book_id: i64,
+    pub ref_chapter: i64,
+    pub ref_verse: i64,
+    pub ref_end_verse: Option<i64>,
+    #[allow(dead_code)] // only used by the SQL ORDER BY, not read in Rust
+    pub score: i64,
+}

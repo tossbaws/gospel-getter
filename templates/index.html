@@ -280,6 +280,125 @@
             margin-right: 0.2rem;
         }
 
+        .chapter-main .verse {
+            position: relative;
+        }
+
+        .chapter-main .verse.has-xref {
+            cursor: pointer;
+        }
+
+        .chapter-main .verse.verse-selected {
+            background: rgba(4, 163, 174, 0.12);
+            border-radius: 4px;
+            box-shadow: 0 0 0 4px rgba(4, 163, 174, 0.12);
+        }
+
+        .xref-popup:not([hidden]) {
+            display: block;
+            margin-top: 0.4rem;
+            padding: 0.6rem 0.8rem;
+            background: var(--vw-panel-bg);
+            border: 1px solid var(--vw-teal-dim);
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+
+        .xref-popup-title {
+            display: block;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--vw-text-dim);
+            margin-bottom: 0.4rem;
+        }
+
+        .xref-entry {
+            display: block;
+            margin-bottom: 0.3rem;
+        }
+
+        .xref-citation {
+            background: none;
+            border: none;
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--vw-teal);
+            cursor: pointer;
+            padding: 0;
+            text-decoration: underline dotted;
+        }
+
+        .xref-citation:hover {
+            text-decoration: underline solid;
+        }
+
+        .xref-expanded:not([hidden]) {
+            display: block;
+            margin: 0.3rem 0 0.3rem 0.8rem;
+            padding-left: 0.6rem;
+            border-left: 2px solid var(--vw-teal-dim);
+            color: var(--vw-text);
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .xref-verse-text {
+            margin-bottom: 0.3rem;
+        }
+
+        .xref-summary {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--vw-teal-dim);
+        }
+
+        .xref-summary-title {
+            font-size: 1rem;
+            font-weight: normal;
+            color: var(--vw-teal);
+            margin-bottom: 0.6rem;
+        }
+
+        .xref-summary-row {
+            display: flex;
+            gap: 0.6rem;
+            font-size: 0.85rem;
+            margin-bottom: 0.4rem;
+            flex-wrap: wrap;
+        }
+
+        .xref-summary-verse {
+            flex: 0 0 auto;
+            color: var(--vw-teal);
+            font-weight: bold;
+        }
+
+        .xref-summary-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+
+        .xref-summary-chip {
+            color: var(--vw-text-dim);
+        }
+
+        .xref-summary-chip:not(:last-child)::after {
+            content: ',';
+        }
+
+        .xref-credit {
+            margin-top: 0.8rem;
+            font-size: 0.7rem;
+            font-style: italic;
+            color: var(--vw-text-dim);
+        }
+
+        .xref-credit a {
+            color: var(--vw-teal);
+        }
+
         footer {
             text-align: center;
             margin-top: 3rem;
@@ -348,6 +467,16 @@
             const readingPane = document.getElementById('reading-pane');
             const translationSelect = document.getElementById('translation-select');
 
+            let selectedVerseEl = null;
+
+            function closeVerseSelection() {
+                if (!selectedVerseEl) return;
+                selectedVerseEl.classList.remove('verse-selected');
+                const popup = selectedVerseEl.querySelector('.xref-popup');
+                if (popup) popup.hidden = true;
+                selectedVerseEl = null;
+            }
+
             function currentTranslation() {
                 return translationSelect.value;
             }
@@ -387,6 +516,7 @@
                     .then((html) => {
                         if (!html) return;
                         readingPane.innerHTML = html;
+                        selectedVerseEl = null;
                         setActiveBook(bookId);
 
                         const grid = document.getElementById('chapter-grid-inner');
@@ -430,7 +560,60 @@
                 const sideHeading = event.target.closest('.chapter-heading-link');
                 if (sideHeading) {
                     loadReading(sideHeading.dataset.book, sideHeading.dataset.chapter);
+                    return;
                 }
+
+                // Clicking a cross-reference citation "expands" it in place:
+                // fetch the referenced verse(s) and show them right under
+                // the citation. Clicking it again collapses it back down.
+                const citation = event.target.closest('.xref-citation');
+                if (citation) {
+                    const expanded = citation.parentElement.querySelector('.xref-expanded');
+                    if (!expanded.hidden) {
+                        expanded.hidden = true;
+                        return;
+                    }
+                    if (expanded.dataset.loaded) {
+                        expanded.hidden = false;
+                        return;
+                    }
+                    const translation = encodeURIComponent(currentTranslation());
+                    let url = `/xref-text/${citation.dataset.book}/${citation.dataset.chapter}/${citation.dataset.verse}?translation=${translation}`;
+                    if (citation.dataset.endVerse) {
+                        url += `&end_verse=${citation.dataset.endVerse}`;
+                    }
+                    fetch(url)
+                        .then((r) => (r.ok ? r.text() : ''))
+                        .then((html) => {
+                            if (!html) return;
+                            expanded.innerHTML = html;
+                            expanded.dataset.loaded = 'true';
+                            expanded.hidden = false;
+                        })
+                        .catch(() => {});
+                    return;
+                }
+
+                // Clicking a verse that has cross-references toggles a small
+                // popup listing them, underneath the verse, until the popup's
+                // citation is clicked (handled above) or the reader clicks
+                // away (handled below).
+                const verse = event.target.closest('.chapter-main .verse.has-xref');
+                if (verse) {
+                    const popup = verse.querySelector('.xref-popup');
+                    if (selectedVerseEl === verse) {
+                        closeVerseSelection();
+                    } else {
+                        closeVerseSelection();
+                        verse.classList.add('verse-selected');
+                        popup.hidden = false;
+                        selectedVerseEl = verse;
+                    }
+                    return;
+                }
+
+                // Anything else is a click away from the current selection.
+                closeVerseSelection();
             });
 
             // Secondary navigation: arrow keys leaf through the whole Bible

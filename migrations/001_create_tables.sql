@@ -32,3 +32,20 @@ CREATE TABLE IF NOT EXISTS reading_position (
     book_id INTEGER NOT NULL REFERENCES books(id),
     chapter INTEGER NOT NULL
 );
+
+-- Cross-references are citations between passages, not text, so they're
+-- translation-independent — keyed only by book/chapter/verse.
+-- `ref_end_verse` is set when the reference is to a verse range.
+CREATE TABLE IF NOT EXISTS cross_references (
+    book_id INTEGER NOT NULL REFERENCES books(id),
+    chapter INTEGER NOT NULL,
+    verse INTEGER NOT NULL,
+    ref_book_id INTEGER NOT NULL REFERENCES books(id),
+    ref_chapter INTEGER NOT NULL,
+    ref_verse INTEGER NOT NULL,
+    ref_end_verse INTEGER,
+    score INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cross_references_verse
+    ON cross_references (book_id, chapter, verse);

@@ -65,5 +65,37 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .await
     .context("Failed to create reading_position table")?;
 
+    // Cross-references are translation-independent (they're citations
+    // between passages, not text), so they're keyed only by book/chapter/
+    // verse. `ref_end_verse` is set when the reference is to a verse range
+    // rather than a single verse.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS cross_references (
+            book_id INTEGER NOT NULL REFERENCES books(id),
+            chapter INTEGER NOT NULL,
+            verse INTEGER NOT NULL,
+            ref_book_id INTEGER NOT NULL REFERENCES books(id),
+            ref_chapter INTEGER NOT NULL,
+            ref_verse INTEGER NOT NULL,
+            ref_end_verse INTEGER,
+            score INTEGER NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create cross_references table")?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_cross_references_verse
+            ON cross_references (book_id, chapter, verse)
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create cross_references index")?;
+
     Ok(())
 }

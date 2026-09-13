@@ -19,8 +19,40 @@
         <section class="chapter-main">
             <h2 class="chapter-heading">{{ current_book_name }} {{ current_chapter }}</h2>
             {% for v in current_verses %}
-            <p class="verse"><span class="verse-num">{{ v.number }}</span>{{ v.text }}</p>
+            <p class="verse{% if !v.xrefs.is_empty() %} has-xref{% endif %}" data-book="{{ current_book_id }}" data-chapter="{{ current_chapter }}" data-verse="{{ v.number }}">
+                <span class="verse-num">{{ v.number }}</span>{{ v.text }}
+                {% if !v.xrefs.is_empty() %}
+                <span class="xref-popup" hidden>
+                    <span class="xref-popup-title">Cross references</span>
+                    {% for x in v.xrefs %}
+                    <span class="xref-entry">
+                        <button type="button" class="xref-citation" data-book="{{ x.book_id }}" data-chapter="{{ x.chapter }}" data-verse="{{ x.verse }}"{% if let Some(e) = x.end_verse %} data-end-verse="{{ e }}"{% endif %}>{{ x.citation }}</button>
+                        <span class="xref-expanded" hidden></span>
+                    </span>
+                    {% endfor %}
+                </span>
+                {% endif %}
+            </p>
             {% endfor %}
+
+            {% if has_chapter_xrefs %}
+            <div class="xref-summary">
+                <h3 class="xref-summary-title">Cross References</h3>
+                <div class="xref-summary-list">
+                    {% for v in current_verses %}
+                    {% if !v.xrefs.is_empty() %}
+                    <div class="xref-summary-row">
+                        <span class="xref-summary-verse">{{ current_chapter }}:{{ v.number }}</span>
+                        <span class="xref-summary-chips">
+                            {% for x in v.xrefs %}<span class="xref-summary-chip">{{ x.citation }}</span>{% endfor %}
+                        </span>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+                <p class="xref-credit">Cross-reference data from <a href="https://www.openbible.info/labs/cross-references/" target="_blank" rel="noopener noreferrer">OpenBible.info</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
+            </div>
+            {% endif %}
         </section>
 
         <div class="chapter-side chapter-side-next">
