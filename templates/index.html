@@ -5,19 +5,97 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gospel Getter</title>
     <style>
+        /* Default theme: vaporwave (same palette as packaging/icon.svg, so
+           the app and the taskbar icon read as one consistent theme). Every
+           theme defines this same set of custom properties — see the
+           `[data-theme="..."]` blocks below for the others. `--accent-rgb`
+           is a bare "r, g, b" triplet so glow/tint effects can composite it
+           at whatever alpha they need via rgba(var(--accent-rgb), X). */
         :root {
-            /* Same palette as packaging/icon.svg, so the app and the
-               taskbar icon read as one consistent theme. */
-            --vw-bg-top: #14082c;
-            --vw-bg-mid: #441768;
-            --vw-bg-magenta: #972378;
-            --vw-bg-coral: #bf5349;
-            --vw-bg-gold: #bf8545;
-            --vw-teal: #04a3ae;
-            --vw-teal-dim: rgba(4, 163, 174, 0.45);
-            --vw-text: #f2e9ff;
-            --vw-text-dim: #b9a9d9;
-            --vw-panel-bg: rgba(20, 8, 44, 0.55);
+            /* `color-scheme` and `--option-bg` exist for one reason: native
+               <select> popup lists don't reliably composite our translucent
+               --panel-bg the way the rest of the page does, and without a
+               color-scheme hint the browser defaults the popup to a light
+               native palette regardless of our theme — pairing light text
+               with a near-white popup on the dark themes. color-scheme
+               tells the browser which native palette family to use;
+               --option-bg is a fully opaque fallback background so the
+               popup itself is legible no matter how that compositing goes. */
+            color-scheme: dark;
+            --bg: linear-gradient(
+                180deg,
+                #14082c 0%,
+                #441768 35%,
+                #972378 62%,
+                #bf5349 82%,
+                #bf8545 100%
+            );
+            --text: #f2e9ff;
+            --text-dim: #b9a9d9;
+            --accent: #04a3ae;
+            --accent-rgb: 4, 163, 174;
+            --accent-dim: rgba(4, 163, 174, 0.45);
+            --panel-bg: rgba(20, 8, 44, 0.55);
+            --option-bg: #1e0f3a;
+            --on-accent: #14082c;
+        }
+
+        :root[data-theme="classic-dark"] {
+            color-scheme: dark;
+            --bg: #121417;
+            --text: #e8e8ea;
+            --text-dim: #9a9aa2;
+            --accent: #4da6ff;
+            --accent-rgb: 77, 166, 255;
+            --accent-dim: rgba(77, 166, 255, 0.35);
+            --panel-bg: rgba(255, 255, 255, 0.05);
+            --option-bg: #1a1c1f;
+            --on-accent: #06141f;
+        }
+
+        :root[data-theme="classic-light"] {
+            color-scheme: light;
+            --bg: #f7f7f5;
+            --text: #1c1c1e;
+            --text-dim: #6b6b70;
+            --accent: #2563eb;
+            --accent-rgb: 37, 99, 235;
+            --accent-dim: rgba(37, 99, 235, 0.25);
+            --panel-bg: rgba(0, 0, 0, 0.035);
+            --option-bg: #ffffff;
+            --on-accent: #ffffff;
+        }
+
+        :root[data-theme="matrix"] {
+            color-scheme: dark;
+            --bg: #020a02;
+            --text: #ccffcc;
+            --text-dim: #4d9a4d;
+            --accent: #00ff41;
+            --accent-rgb: 0, 255, 65;
+            --accent-dim: rgba(0, 255, 65, 0.35);
+            --panel-bg: rgba(0, 255, 65, 0.06);
+            --option-bg: #041404;
+            --on-accent: #001a00;
+        }
+
+        :root[data-theme="monster-hunter"] {
+            color-scheme: dark;
+            --bg: linear-gradient(
+                180deg,
+                #1a1410 0%,
+                #2e1f16 40%,
+                #4a2c1a 70%,
+                #6b3a1f 100%
+            );
+            --text: #f0e4d0;
+            --text-dim: #c2a583;
+            --accent: #d4a017;
+            --accent-rgb: 212, 160, 23;
+            --accent-dim: rgba(212, 160, 23, 0.4);
+            --panel-bg: rgba(26, 20, 16, 0.55);
+            --option-bg: #241a12;
+            --on-accent: #1a1410;
         }
 
         * {
@@ -28,16 +106,9 @@
 
         body {
             font-family: Georgia, 'Times New Roman', serif;
-            background: linear-gradient(
-                180deg,
-                var(--vw-bg-top) 0%,
-                var(--vw-bg-mid) 35%,
-                var(--vw-bg-magenta) 62%,
-                var(--vw-bg-coral) 82%,
-                var(--vw-bg-gold) 100%
-            );
+            background: var(--bg);
             background-attachment: fixed;
-            color: var(--vw-text);
+            color: var(--text);
             min-height: 100vh;
         }
 
@@ -47,44 +118,102 @@
             padding: 2.5rem 1.5rem 6rem;
         }
 
+        .settings-toggle {
+            position: fixed;
+            top: 1rem;
+            right: 1.5rem;
+            z-index: 20;
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            color: var(--accent);
+            font-size: 1.4rem;
+            line-height: 1;
+            padding: 0.4rem 0.6rem;
+            cursor: pointer;
+        }
+
+        .settings-toggle:hover {
+            border-color: var(--accent);
+        }
+
+        .settings-menu {
+            position: fixed;
+            top: 3.4rem;
+            right: 1.5rem;
+            z-index: 20;
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 8px;
+            padding: 1rem;
+            min-width: 220px;
+            max-width: calc(100vw - 2rem);
+            backdrop-filter: blur(6px);
+        }
+
+        .settings-menu:not([hidden]) {
+            display: block;
+        }
+
+        .settings-field {
+            display: block;
+            margin-bottom: 0.9rem;
+        }
+
+        .settings-field:last-child {
+            margin-bottom: 0;
+        }
+
+        .settings-field label {
+            display: block;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+            margin-bottom: 0.3rem;
+        }
+
+        .settings-field select {
+            width: 100%;
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--text);
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            padding: 0.35rem 0.5rem;
+            cursor: pointer;
+        }
+
+        /* The open option list is a native popup, not part of the page's
+           own rendering — style it explicitly with an opaque background
+           rather than relying on it picking up --panel-bg's translucency
+           (see the note on color-scheme/--option-bg up in :root). */
+        .settings-field select option {
+            background-color: var(--option-bg);
+            color: var(--text);
+        }
+
         header {
             text-align: center;
             margin-bottom: 2rem;
             padding-bottom: 1.5rem;
-            border-bottom: 3px double var(--vw-teal-dim);
+            border-bottom: 3px double var(--accent-dim);
         }
 
         h1 {
             font-size: 2.6rem;
             font-weight: normal;
             letter-spacing: 0.03em;
-            color: var(--vw-teal);
-            text-shadow: 0 0 18px rgba(4, 163, 174, 0.55);
+            color: var(--accent);
+            text-shadow: 0 0 18px rgba(var(--accent-rgb), 0.55);
         }
 
         .subtitle {
             font-size: 0.9rem;
             font-style: italic;
-            color: var(--vw-text-dim);
+            color: var(--text-dim);
             margin-top: 0.25rem;
-        }
-
-        .translation-bar {
-            text-align: center;
-            margin-bottom: 1.5rem;
-            font-size: 0.85rem;
-            color: var(--vw-text-dim);
-        }
-
-        .translation-bar select {
-            font-family: inherit;
-            font-size: 0.85rem;
-            color: var(--vw-text);
-            background: var(--vw-panel-bg);
-            border: 1px solid var(--vw-teal-dim);
-            border-radius: 6px;
-            padding: 0.25rem 0.5rem;
-            cursor: pointer;
         }
 
         .book-list {
@@ -104,9 +233,9 @@
             font-size: 0.85rem;
             text-transform: uppercase;
             letter-spacing: 0.12em;
-            color: var(--vw-teal);
+            color: var(--accent);
             margin-bottom: 0.6rem;
-            border-bottom: 1px solid var(--vw-teal-dim);
+            border-bottom: 1px solid var(--accent-dim);
             padding-bottom: 0.3rem;
         }
 
@@ -117,27 +246,27 @@
         }
 
         .book-item {
-            background: var(--vw-panel-bg);
-            border: 1px solid var(--vw-teal-dim);
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
             border-radius: 6px;
             padding: 0.35rem 0.7rem;
             font-family: inherit;
             font-size: 0.85rem;
-            color: var(--vw-text);
+            color: var(--text);
             cursor: pointer;
             transition: all 0.15s;
         }
 
         .book-item:hover {
-            background: rgba(4, 163, 174, 0.3);
-            border-color: var(--vw-teal);
+            background: rgba(var(--accent-rgb), 0.3);
+            border-color: var(--accent);
         }
 
         .book-item.active {
-            background: var(--vw-teal);
-            color: var(--vw-bg-top);
-            border-color: var(--vw-teal);
-            box-shadow: 0 0 14px rgba(4, 163, 174, 0.6);
+            background: var(--accent);
+            color: var(--on-accent);
+            border-color: var(--accent);
+            box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.6);
         }
 
         #chapter-list {
@@ -149,7 +278,7 @@
             font-size: 1rem;
             font-weight: normal;
             font-style: italic;
-            color: var(--vw-teal);
+            color: var(--accent);
             margin-bottom: 0.6rem;
         }
 
@@ -162,30 +291,30 @@
         .chapter-btn {
             width: 2.4rem;
             height: 2.4rem;
-            border: 1px solid var(--vw-teal-dim);
+            border: 1px solid var(--accent-dim);
             border-radius: 50%;
-            background: var(--vw-panel-bg);
+            background: var(--panel-bg);
             font-family: inherit;
             font-size: 0.9rem;
-            color: var(--vw-text);
+            color: var(--text);
             cursor: pointer;
             transition: all 0.15s;
         }
 
         .chapter-btn:hover {
-            background: rgba(4, 163, 174, 0.3);
-            border-color: var(--vw-teal);
+            background: rgba(var(--accent-rgb), 0.3);
+            border-color: var(--accent);
         }
 
         .chapter-btn.active {
-            background: var(--vw-teal);
-            color: var(--vw-bg-top);
-            border-color: var(--vw-teal);
-            box-shadow: 0 0 14px rgba(4, 163, 174, 0.6);
+            background: var(--accent);
+            color: var(--on-accent);
+            border-color: var(--accent);
+            box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.6);
         }
 
         #reading-pane {
-            border-top: 3px double var(--vw-teal-dim);
+            border-top: 3px double var(--accent-dim);
             padding-top: 1.5rem;
         }
 
@@ -228,10 +357,10 @@
             text-align: left;
             background: none;
             border: none;
-            border-bottom: 1px solid var(--vw-teal-dim);
+            border-bottom: 1px solid var(--accent-dim);
             font-family: inherit;
             font-size: 1.2rem;
-            color: var(--vw-teal);
+            color: var(--accent);
             margin-bottom: 0.8rem;
             padding: 0 0 0.4rem;
             cursor: pointer;
@@ -256,18 +385,18 @@
         .chapter-heading {
             font-size: 1.5rem;
             font-weight: normal;
-            color: var(--vw-teal);
+            color: var(--accent);
             margin-bottom: 0.8rem;
             padding-bottom: 0.4rem;
-            border-bottom: 1px solid var(--vw-teal-dim);
-            text-shadow: 0 0 12px rgba(4, 163, 174, 0.4);
+            border-bottom: 1px solid var(--accent-dim);
+            text-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4);
         }
 
         .verse {
             font-size: 1.05rem;
             line-height: 1.7;
             margin-bottom: 0.5rem;
-            color: var(--vw-text);
+            color: var(--text);
         }
 
         .verse-num {
@@ -275,7 +404,7 @@
             min-width: 1.4rem;
             font-size: 0.7rem;
             font-weight: bold;
-            color: var(--vw-teal);
+            color: var(--accent);
             vertical-align: super;
             margin-right: 0.2rem;
         }
@@ -289,17 +418,17 @@
         }
 
         .chapter-main .verse.verse-selected {
-            background: rgba(4, 163, 174, 0.12);
+            background: rgba(var(--accent-rgb), 0.12);
             border-radius: 4px;
-            box-shadow: 0 0 0 4px rgba(4, 163, 174, 0.12);
+            box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
         }
 
         .xref-popup:not([hidden]) {
             display: block;
             margin-top: 0.4rem;
             padding: 0.6rem 0.8rem;
-            background: var(--vw-panel-bg);
-            border: 1px solid var(--vw-teal-dim);
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
             border-radius: 6px;
             font-size: 0.85rem;
         }
@@ -309,7 +438,7 @@
             font-size: 0.7rem;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            color: var(--vw-text-dim);
+            color: var(--text-dim);
             margin-bottom: 0.4rem;
         }
 
@@ -323,7 +452,7 @@
             border: none;
             font-family: inherit;
             font-size: 0.85rem;
-            color: var(--vw-teal);
+            color: var(--accent);
             cursor: pointer;
             padding: 0;
             text-decoration: underline dotted;
@@ -337,8 +466,8 @@
             display: block;
             margin: 0.3rem 0 0.3rem 0.8rem;
             padding-left: 0.6rem;
-            border-left: 2px solid var(--vw-teal-dim);
-            color: var(--vw-text);
+            border-left: 2px solid var(--accent-dim);
+            color: var(--text);
             font-size: 0.9rem;
             line-height: 1.5;
         }
@@ -350,13 +479,13 @@
         .xref-summary {
             margin-top: 2rem;
             padding-top: 1rem;
-            border-top: 1px solid var(--vw-teal-dim);
+            border-top: 1px solid var(--accent-dim);
         }
 
         .xref-summary-title {
             font-size: 1rem;
             font-weight: normal;
-            color: var(--vw-teal);
+            color: var(--accent);
             margin-bottom: 0.6rem;
         }
 
@@ -370,7 +499,7 @@
 
         .xref-summary-verse {
             flex: 0 0 auto;
-            color: var(--vw-teal);
+            color: var(--accent);
             font-weight: bold;
         }
 
@@ -381,7 +510,7 @@
         }
 
         .xref-summary-chip {
-            color: var(--vw-text-dim);
+            color: var(--text-dim);
         }
 
         .xref-summary-chip:not(:last-child)::after {
@@ -392,11 +521,11 @@
             margin-top: 0.8rem;
             font-size: 0.7rem;
             font-style: italic;
-            color: var(--vw-text-dim);
+            color: var(--text-dim);
         }
 
         .xref-credit a {
-            color: var(--vw-teal);
+            color: var(--accent);
         }
 
         footer {
@@ -404,32 +533,58 @@
             margin-top: 3rem;
             font-size: 0.75rem;
             font-style: italic;
-            color: var(--vw-text-dim);
+            color: var(--text-dim);
         }
 
         .nav-hint {
             text-align: center;
             font-size: 0.75rem;
-            color: var(--vw-text-dim);
+            color: var(--text-dim);
             margin-top: 0.5rem;
         }
     </style>
+    <script>
+        // Applied here (before <body> paints) rather than only in the main
+        // script at the bottom, so a returning visitor with a saved theme
+        // never sees a flash of the default vaporwave theme first.
+        (function () {
+            try {
+                var t = localStorage.getItem('gospel-getter-theme');
+                if (t && t !== 'vaporwave') {
+                    document.documentElement.dataset.theme = t;
+                }
+            } catch (e) {}
+        })();
+    </script>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Gospel Getter</h1>
-            <p class="subtitle">The Holy Bible</p>
-        </header>
-
-        <div class="translation-bar">
-            <label for="translation-select">Translation:</label>
+    <button type="button" id="settings-toggle" class="settings-toggle" aria-label="Settings">&#9776;</button>
+    <div id="settings-menu" class="settings-menu" hidden>
+        <div class="settings-field">
+            <label for="theme-select">Theme</label>
+            <select id="theme-select">
+                <option value="vaporwave">Vaporwave</option>
+                <option value="classic-dark">Classic Dark</option>
+                <option value="classic-light">Classic Light</option>
+                <option value="matrix">Matrix</option>
+                <option value="monster-hunter">Monster Hunter</option>
+            </select>
+        </div>
+        <div class="settings-field">
+            <label for="translation-select">Translation</label>
             <select id="translation-select">
                 {% for t in translations %}
                 <option value="{{ t.code }}"{% if t.code == current_translation_code %} selected{% endif %}>{{ t.name }}</option>
                 {% endfor %}
             </select>
         </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>Gospel Getter</h1>
+            <p class="subtitle">The Holy Bible</p>
+        </header>
 
         <div class="book-list">
             <div>
@@ -466,6 +621,11 @@
             const chapterList = document.getElementById('chapter-list');
             const readingPane = document.getElementById('reading-pane');
             const translationSelect = document.getElementById('translation-select');
+            const settingsToggle = document.getElementById('settings-toggle');
+            const settingsMenu = document.getElementById('settings-menu');
+            const themeSelect = document.getElementById('theme-select');
+
+            const THEME_KEY = 'gospel-getter-theme';
 
             let selectedVerseEl = null;
 
@@ -476,6 +636,38 @@
                 if (popup) popup.hidden = true;
                 selectedVerseEl = null;
             }
+
+            function closeSettingsMenu() {
+                settingsMenu.hidden = true;
+            }
+
+            function currentTheme() {
+                try {
+                    return localStorage.getItem(THEME_KEY) || 'vaporwave';
+                } catch (e) {
+                    return 'vaporwave';
+                }
+            }
+
+            function applyTheme(theme) {
+                if (theme && theme !== 'vaporwave') {
+                    document.documentElement.dataset.theme = theme;
+                } else {
+                    delete document.documentElement.dataset.theme;
+                }
+            }
+
+            // Reflect whatever the anti-flash script in <head> already
+            // applied (or the default) in the dropdown itself.
+            themeSelect.value = currentTheme();
+
+            themeSelect.addEventListener('change', function () {
+                const theme = themeSelect.value;
+                applyTheme(theme);
+                try {
+                    localStorage.setItem(THEME_KEY, theme);
+                } catch (e) {}
+            });
 
             function currentTranslation() {
                 return translationSelect.value;
@@ -540,6 +732,19 @@
             // reader wants a different one); clicking a chapter number then
             // reads that one instead.
             document.body.addEventListener('click', function (event) {
+                const settingsBtn = event.target.closest('#settings-toggle');
+                if (settingsBtn) {
+                    settingsMenu.hidden = !settingsMenu.hidden;
+                    return;
+                }
+
+                // Interacting with anything inside the settings menu itself
+                // (the selects, their labels) should never be treated as a
+                // "click away" that closes it.
+                if (event.target.closest('#settings-menu')) {
+                    return;
+                }
+
                 const bookBtn = event.target.closest('.book-item');
                 if (bookBtn) {
                     loadReading(bookBtn.dataset.bookId, 1);
@@ -612,8 +817,9 @@
                     return;
                 }
 
-                // Anything else is a click away from the current selection.
+                // Anything else is a click away from the current selection(s).
                 closeVerseSelection();
+                closeSettingsMenu();
             });
 
             // Secondary navigation: arrow keys leaf through the whole Bible
