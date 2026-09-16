@@ -12,6 +12,16 @@
            is a bare "r, g, b" triplet so glow/tint effects can composite it
            at whatever alpha they need via rgba(var(--accent-rgb), X). */
         :root {
+            /* `color-scheme` and `--option-bg` exist for one reason: native
+               <select> popup lists don't reliably composite our translucent
+               --panel-bg the way the rest of the page does, and without a
+               color-scheme hint the browser defaults the popup to a light
+               native palette regardless of our theme — pairing light text
+               with a near-white popup on the dark themes. color-scheme
+               tells the browser which native palette family to use;
+               --option-bg is a fully opaque fallback background so the
+               popup itself is legible no matter how that compositing goes. */
+            color-scheme: dark;
             --bg: linear-gradient(
                 180deg,
                 #14082c 0%,
@@ -26,10 +36,12 @@
             --accent-rgb: 4, 163, 174;
             --accent-dim: rgba(4, 163, 174, 0.45);
             --panel-bg: rgba(20, 8, 44, 0.55);
+            --option-bg: #1e0f3a;
             --on-accent: #14082c;
         }
 
         :root[data-theme="classic-dark"] {
+            color-scheme: dark;
             --bg: #121417;
             --text: #e8e8ea;
             --text-dim: #9a9aa2;
@@ -37,10 +49,12 @@
             --accent-rgb: 77, 166, 255;
             --accent-dim: rgba(77, 166, 255, 0.35);
             --panel-bg: rgba(255, 255, 255, 0.05);
+            --option-bg: #1a1c1f;
             --on-accent: #06141f;
         }
 
         :root[data-theme="classic-light"] {
+            color-scheme: light;
             --bg: #f7f7f5;
             --text: #1c1c1e;
             --text-dim: #6b6b70;
@@ -48,10 +62,12 @@
             --accent-rgb: 37, 99, 235;
             --accent-dim: rgba(37, 99, 235, 0.25);
             --panel-bg: rgba(0, 0, 0, 0.035);
+            --option-bg: #ffffff;
             --on-accent: #ffffff;
         }
 
         :root[data-theme="matrix"] {
+            color-scheme: dark;
             --bg: #020a02;
             --text: #ccffcc;
             --text-dim: #4d9a4d;
@@ -59,10 +75,12 @@
             --accent-rgb: 0, 255, 65;
             --accent-dim: rgba(0, 255, 65, 0.35);
             --panel-bg: rgba(0, 255, 65, 0.06);
+            --option-bg: #041404;
             --on-accent: #001a00;
         }
 
         :root[data-theme="monster-hunter"] {
+            color-scheme: dark;
             --bg: linear-gradient(
                 180deg,
                 #1a1410 0%,
@@ -76,6 +94,7 @@
             --accent-rgb: 212, 160, 23;
             --accent-dim: rgba(212, 160, 23, 0.4);
             --panel-bg: rgba(26, 20, 16, 0.55);
+            --option-bg: #241a12;
             --on-accent: #1a1410;
         }
 
@@ -164,6 +183,15 @@
             border-radius: 6px;
             padding: 0.35rem 0.5rem;
             cursor: pointer;
+        }
+
+        /* The open option list is a native popup, not part of the page's
+           own rendering — style it explicitly with an opaque background
+           rather than relying on it picking up --panel-bg's translucency
+           (see the note on color-scheme/--option-bg up in :root). */
+        .settings-field select option {
+            background-color: var(--option-bg);
+            color: var(--text);
         }
 
         header {
