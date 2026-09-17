@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::db::{Book, Translation};
 use crate::domain::Store;
+use crate::web::handlers::serve_favicon;
 
 /// Application state shared across all handlers.
 pub struct AppState {
@@ -25,6 +26,7 @@ pub fn build_router(store: Store, books: Vec<Book>, translations: Vec<Translatio
     });
 
     Router::new()
+        .route("/favicon.ico", get(serve_favicon))
         .route("/", get(crate::web::handlers::home))
         .route(
             "/books/{book_id}/chapters",
