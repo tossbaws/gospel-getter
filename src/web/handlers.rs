@@ -1,8 +1,14 @@
 use askama::Template;
+use axum::body::Body;
 use axum::{
     extract::{Path, Query, State},
-    response::Html,
+    http::header,
+    response::{Html, Response},
 };
+
+/// Bundled application favicon (the same icon used for the Windows build).
+const FAVICON_BYTES: &[u8] = include_bytes!("../../packaging/windows/gospel-getter.ico");
+
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -405,4 +411,12 @@ pub async fn xref_text_fragment(
             Html(String::new())
         }
     }
+}
+
+/// Serve the application's favicon from the bundled Windows icon.
+pub async fn serve_favicon() -> Response {
+    Response::builder()
+        .header(header::CONTENT_TYPE, "image/x-icon")
+        .body(Body::from(FAVICON_BYTES.to_vec()))
+        .unwrap()
 }
