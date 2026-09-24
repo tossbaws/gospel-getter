@@ -371,15 +371,15 @@
             text-decoration: underline;
         }
 
+        /* Below this width there isn't room to show a chapter and its two
+           faded neighbors side by side without forcing the reader to scroll
+           past the previous chapter to reach the current one, so the
+           neighbors are hidden entirely and only .chapter-main is shown.
+           They stay in the DOM (data attributes, arrow-key navigation, and
+           heading-jump navigation are untouched) — this is display-only. */
         @media (max-width: 800px) {
-            .reading-row {
-                flex-direction: column;
-            }
-
             .chapter-side {
-                flex-basis: auto;
-                max-width: 100%;
-                opacity: 0.8;
+                display: none;
             }
         }
 

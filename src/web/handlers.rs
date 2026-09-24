@@ -420,3 +420,51 @@ pub async fn serve_favicon() -> Response {
         .body(Body::from(FAVICON_BYTES.to_vec()))
         .unwrap()
 }
+
+#[cfg(test)]
+mod tests {
+    /// Regression guard for GH-1: on narrow screens the reader must only
+    /// see the current chapter, not scroll past the full previous one
+    /// first. This pins down the `@media (max-width: 800px)` rule in
+    /// index.html that hides `.chapter-side` (the prev/next chapter
+    /// columns) rather than just re-stacking them under `.chapter-main`.
+    #[test]
+    fn mobile_breakpoint_hides_chapter_side_neighbors() {
+        let css = include_str!("../../templates/index.html");
+        let start = css
+            .find("@media (max-width: 800px)")
+            .expect("mobile breakpoint rule should exist in index.html");
+        let block_start = css[start..].find('{').map(|i| start + i).unwrap();
+
+        // Walk forward from the block's opening brace, tracking nesting
+        // depth, to find the brace that closes the whole `@media` rule
+        // (not just the first nested selector inside it).
+        let mut depth = 0usize;
+        let mut block_end = None;
+        for (i, ch) in css[block_start..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        block_end = Some(block_start + i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let block_end = block_end.expect("mobile breakpoint rule should be closed");
+        let block = &css[block_start..block_end];
+
+        assert!(
+            block.contains(".chapter-side"),
+            "mobile breakpoint should target .chapter-side"
+        );
+        assert!(
+            block.contains("display: none"),
+            "mobile breakpoint should hide .chapter-side instead of just \
+             restacking it, so only the current chapter is visible"
+        );
+    }
+}
