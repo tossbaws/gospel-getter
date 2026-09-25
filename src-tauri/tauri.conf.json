@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Gospel Getter",
+  "version": "2.0.0",
+  "identifier": "com.tossbaws.gospel-getter",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Gospel Getter",
+        "width": 1280,
+        "height": 900,
+        "minWidth": 380,
+        "minHeight": 400,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "publisher": "tossbaws",
+    "copyright": "Gospel Getter contributors",
+    "category": "Education",
+    "shortDescription": "Read the Bible, book by book, chapter by chapter",
+    "longDescription": "A Bible reader with KJV and WEB translations bundled offline, faded surrounding chapters, cross-references, and quick keyboard navigation.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

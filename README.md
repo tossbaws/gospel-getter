@@ -22,8 +22,8 @@ with you as one continuous page.
   so you never have to touch the mouse.
 - It remembers where you left off — close it and reopen it and you're back
   on the same chapter and translation.
-- `packaging/install.sh` sets it up as a real desktop app: an
-  always-running background service with its own taskbar icon.
+- A real native desktop app (built with Tauri): no browser, no background
+  server, no open port — just a window with its own taskbar icon.
 
 ## Screenshots
 
@@ -34,41 +34,46 @@ with you as one continuous page.
 ## Running it
 
 ```bash
-cargo run
+cd src-tauri
+cargo tauri dev
 ```
 
-Then open http://localhost:3002.
+Opens straight into a native window — nothing to browse to.
 
 ## Installing as a desktop app
 
-`packaging/install.sh` builds a release binary, installs it as an
-always-running `systemd --user` service, and sets up a real taskbar
-launcher (`omarchy webapp install` on Omarchy, a plain `.desktop` file
-elsewhere). See `packaging/` for details; `packaging/uninstall.sh` undoes
-it.
+`packaging/install.sh` builds a release AppImage (via `cargo tauri build`)
+and drops a `.desktop` launcher and icon into the usual per-user
+locations, so Gospel Getter shows up as a normal app in your launcher. See
+`packaging/` for details; `packaging/uninstall.sh` undoes it.
 
-It's also how you update — after a code change, just run it again:
+It's also how you update — after a code change, just run it again. It
+rebuilds the AppImage and reinstalls it in place; running it again when
+nothing's changed just gives you the same build back.
 
-```bash
-packaging/install.sh
-```
+Bundled Bible data only ever gets added to, not overwritten. Adding a
+translation to `TRANSLATIONS` and reinstalling seeds just that new one
+into your existing database — it checks by translation code what's
+actually missing, not just whether the database is empty. Fixing a typo
+in a translation that's already seeded won't reach an existing install on
+its own; you'd need to clear that translation's rows (or the whole
+database — see "Where your data lives" below) so it re-seeds.
 
-It rebuilds and restarts the running service in place; there's no separate
-update command, and running it again when nothing's changed just gives you
-the same binary back.
+### Where your data lives
 
-Two things worth knowing about what "update" means here:
+The app's database (translations, cross-references, reading position)
+lives in the platform's standard per-app data directory — on Linux,
+`~/.local/share/com.tossbaws.gospel-getter/gospel_getter.db`.
 
-- Code changes (routes, navigation, templates, styling) take effect on the
-  next restart. Always — Askama templates are compiled into the binary, so
-  there's no live reload for an installed instance.
-- Bundled Bible data only gets added to, not overwritten. Reinstalling
-  after adding a translation to `TRANSLATIONS` seeds just the new one into
-  your existing database — it checks by translation code what's actually
-  missing, not just whether the database is empty. But fixing a typo in a
-  translation that's already seeded won't reach an existing install on its
-  own; you'd need to clear that translation's rows (or the whole database,
-  at `~/.local/share/gospel-getter/data/gospel_getter.db`) so it re-seeds.
+If you're upgrading from the old browser-based version of Gospel Getter
+(the one that ran a local server at `localhost:3002`), the first launch
+of the new app copies your existing database from its old location,
+`~/.local/share/gospel-getter/data/gospel_getter.db`, into the new one —
+your reading position and everything else carries over automatically.
+That copy is one-way and non-destructive: the old file is left exactly
+where it was, untouched, so nothing is lost even if something goes wrong.
+It's safe to delete once you've confirmed the new app has everything you
+expect.
 
 ## Navigating
 
@@ -104,12 +109,12 @@ NIV and ESV aren't included, and that's deliberate:
 For anything with a compatible license (public domain, or terms that
 permit an offline/bulk copy):
 
-1. Build a JSON file shaped like `data/kjv.json` — an array of 66 objects,
-   `{"name": "...", "testament": "OT"|"NT", "chapters": [[verse, verse, ...], ...]}`,
+1. Build a JSON file shaped like `src-tauri/data/kjv.json` — an array of 66
+   objects, `{"name": "...", "testament": "OT"|"NT", "chapters": [[verse, verse, ...], ...]}`,
    in canonical Genesis-to-Revelation order.
-2. Drop it in `data/`.
-3. Add one entry to the `TRANSLATIONS` list in `src/db/seed.rs` (`code`,
-   `name`, `include_str!(...)` for the new file).
+2. Drop it in `src-tauri/data/`.
+3. Add one entry to the `TRANSLATIONS` list in `src-tauri/src/db/seed.rs`
+   (`code`, `name`, `include_str!(...)` for the new file).
 
 That's it — the seed step, schema, and translation picker all pick it up
 automatically. A translation that can only be accessed live, like ESV,
@@ -118,22 +123,27 @@ file. Nobody's built that yet, since neither bundled translation needs it.
 
 ## How it's put together
 
-- `axum` + `askama` + `sqlx`/SQLite.
+- A Tauri 2 desktop app: `src-tauri/` is the Rust backend (`sqlx`/SQLite),
+  `ui/` is a single static `index.html` — plain HTML/CSS/JS, no framework
+  and no Node build step. The frontend calls a handful of typed Tauri
+  commands (`get_home`, `get_chapters`, `get_reading`, `get_xref_text`)
+  instead of making HTTP requests; there's no server and nothing listens
+  on a port.
 - `books` (name/testament/chapter count) is shared across translations,
   but `verses` is keyed by `(translation_id, book_id, chapter, verse)`, so
   each translation has its own verse text and its own verse counts per
   chapter. Translations occasionally split or number a verse differently —
   chapter counts line up across KJV and WEB, but individual verse counts
   don't always, and that's expected, not a bug.
-- `src/domain/bible.rs` holds the only interesting logic: computing the
-  chapter before and after any given one, crossing book boundaries as
-  needed. It's pure, unit-tested without touching a database, and doesn't
-  care which translation is selected.
-- The reading pane (current chapter plus its faded neighbors) is rendered
-  from one template, `templates/reading_pane.html`, used for both the
-  initial page load and the AJAX fragment endpoint that arrow keys and
-  chapter clicks hit — so there's exactly one copy of that markup to keep
-  correct.
+- `src-tauri/src/domain/bible.rs` holds the only interesting logic:
+  computing the chapter before and after any given one, crossing book
+  boundaries as needed. It's pure, unit-tested without touching a
+  database, and doesn't care which translation is selected.
+- The reading pane (current chapter plus its faded neighbors) is built
+  from one command, `get_reading`, and rendered by one function in
+  `ui/index.html` — used both on startup and for every chapter click,
+  arrow key press, and translation switch — so there's exactly one code
+  path for putting a chapter on screen.
 
 ## Data provenance and textual integrity
 

@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gospel Getter</title>
-    <link rel="icon" href="/favicon.ico">
     <style>
         /* Default theme: vaporwave (same palette as packaging/icon.svg, so
            the app and the taskbar icon read as one consistent theme). Every
@@ -641,11 +640,7 @@
         </div>
         <div class="settings-field">
             <label for="translation-select">Translation</label>
-            <select id="translation-select">
-                {% for t in translations %}
-                <option value="{{ t.code }}"{% if t.code == current_translation_code %} selected{% endif %}>{{ t.name }}</option>
-                {% endfor %}
-            </select>
+            <select id="translation-select"></select>
         </div>
     </div>
 
@@ -659,25 +654,17 @@
         <div class="book-list">
             <div>
                 <div class="testament-title">Old Testament</div>
-                <div class="book-grid">
-                    {% for book in ot_books %}
-                    <button type="button" class="book-item{% if book.id == current_book_id %} active{% endif %}" data-book-id="{{ book.id }}" data-chapter-count="{{ book.chapter_count }}">{{ book.name }}</button>
-                    {% endfor %}
-                </div>
+                <div class="book-grid" id="ot-book-grid"></div>
             </div>
             <div>
                 <div class="testament-title">New Testament</div>
-                <div class="book-grid">
-                    {% for book in nt_books %}
-                    <button type="button" class="book-item{% if book.id == current_book_id %} active{% endif %}" data-book-id="{{ book.id }}" data-chapter-count="{{ book.chapter_count }}">{{ book.name }}</button>
-                    {% endfor %}
-                </div>
+                <div class="book-grid" id="nt-book-grid"></div>
             </div>
         </div>
 
-        <div id="chapter-list">{{ chapters_html|safe }}</div>
+        <div id="chapter-list"></div>
 
-        <div id="reading-pane">{{ reading_pane_html|safe }}</div>
+        <div id="reading-pane"></div>
 
         <p class="nav-hint">Use &larr; and &rarr; to move a chapter at a time.</p>
 
@@ -688,6 +675,10 @@
         (function () {
             'use strict';
 
+            const invoke = window.__TAURI__.core.invoke;
+
+            const otBookGrid = document.getElementById('ot-book-grid');
+            const ntBookGrid = document.getElementById('nt-book-grid');
             const chapterList = document.getElementById('chapter-list');
             const readingPane = document.getElementById('reading-pane');
             const translationSelect = document.getElementById('translation-select');
@@ -698,6 +689,16 @@
             const THEME_KEY = 'gospel-getter-theme';
 
             let selectedVerseEl = null;
+
+            function escapeHtml(value) {
+                return String(value).replace(/[&<>"']/g, (c) => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;',
+                }[c]));
+            }
 
             function closeVerseSelection() {
                 if (!selectedVerseEl) return;
@@ -726,10 +727,6 @@
                     delete document.documentElement.dataset.theme;
                 }
             }
-
-            // Reflect whatever the anti-flash script in <head> already
-            // applied (or the default) in the dropdown itself.
-            themeSelect.value = currentTheme();
 
             themeSelect.addEventListener('change', function () {
                 const theme = themeSelect.value;
@@ -781,42 +778,166 @@
                 });
             }
 
-            function loadChapters(bookId, activeChapter) {
-                const url = activeChapter
-                    ? `/books/${bookId}/chapters?active=${activeChapter}`
-                    : `/books/${bookId}/chapters`;
-                return fetch(url)
-                    .then((r) => (r.ok ? r.text() : ''))
-                    .then((html) => {
-                        chapterList.innerHTML = html;
-                        setActiveBook(bookId);
-                    })
-                    .catch(() => {});
+            // ---- Rendering: builds the same markup the old server-rendered
+            // Askama templates produced, from the plain data the Tauri
+            // commands return, so the CSS above (and the DOM-driven logic
+            // in this script) needs no changes at all.
+
+            function renderBookButton(book, activeBookId) {
+                const active = book.id === activeBookId ? ' active' : '';
+                return `<button type="button" class="book-item${active}" data-book-id="${book.id}" data-chapter-count="${book.chapterCount}">${escapeHtml(book.name)}</button>`;
             }
 
-            function loadReading(bookId, chapter, { syncChapters } = { syncChapters: true }) {
-                return fetch(`/read/${bookId}/${chapter}?translation=${encodeURIComponent(currentTranslation())}`)
-                    .then((r) => (r.ok ? r.text() : ''))
-                    .then((html) => {
-                        if (!html) return;
-                        readingPane.innerHTML = html;
-                        selectedVerseEl = null;
-                        setActiveBook(bookId);
+            function renderBookLists(home) {
+                otBookGrid.innerHTML = home.otBooks.map((b) => renderBookButton(b, home.currentBookId)).join('');
+                ntBookGrid.innerHTML = home.ntBooks.map((b) => renderBookButton(b, home.currentBookId)).join('');
+            }
 
-                        const grid = document.getElementById('chapter-grid-inner');
-                        const gridBookId = grid ? grid.dataset.bookId : null;
-
-                        if (syncChapters && gridBookId !== String(bookId)) {
-                            loadChapters(bookId, chapter);
-                        } else {
-                            setActiveChapterButton(chapter);
-                        }
-
-                        if (window.history && window.history.pushState) {
-                            window.history.pushState({ bookId, chapter }, '', `#${bookId}/${chapter}`);
-                        }
+            function renderTranslationOptions(home) {
+                translationSelect.innerHTML = home.translations
+                    .map((t) => {
+                        const selected = t.code === home.currentTranslationCode ? ' selected' : '';
+                        return `<option value="${t.code}"${selected}>${escapeHtml(t.name)}</option>`;
                     })
-                    .catch(() => {});
+                    .join('');
+            }
+
+            function renderChapters(dto) {
+                const buttons = dto.chapters
+                    .map((c) => `<button type="button" class="chapter-btn${c.isActive ? ' active' : ''}" data-chapter="${c.number}">${c.number}</button>`)
+                    .join('');
+                return `<div id="chapter-grid-inner" data-book-id="${dto.bookId}">
+                    <h3 class="chapter-grid-title">${escapeHtml(dto.bookName)} &mdash; Chapters</h3>
+                    <div class="chapter-grid">${buttons}</div>
+                </div>`;
+            }
+
+            function renderSideChapter(side) {
+                if (!side) return '';
+                const verses = side.verses
+                    .map((v) => `<p class="verse"><span class="verse-num">${v.number}</span>${escapeHtml(v.text)}</p>`)
+                    .join('');
+                return `<section>
+                    <button type="button" class="chapter-heading-link" data-book="${side.bookId}" data-chapter="${side.chapter}">${escapeHtml(side.bookName)} ${side.chapter}</button>
+                    ${verses}
+                </section>`;
+            }
+
+            function renderXrefPopup(xrefs) {
+                if (!xrefs.length) return '';
+                const entries = xrefs
+                    .map((x) => {
+                        const endAttr = x.endVerse != null ? ` data-end-verse="${x.endVerse}"` : '';
+                        return `<span class="xref-entry">
+                            <button type="button" class="xref-citation" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${endAttr}>${escapeHtml(x.citation)}</button>
+                            <span class="xref-expanded" hidden></span>
+                        </span>`;
+                    })
+                    .join('');
+                return `<span class="xref-popup" hidden>
+                    <span class="xref-popup-title">Cross references</span>
+                    ${entries}
+                </span>`;
+            }
+
+            function renderVerse(v, bookId, chapter) {
+                const hasXref = v.xrefs.length > 0;
+                return `<p class="verse${hasXref ? ' has-xref' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}">
+                    <span class="verse-num">${v.number}</span>${escapeHtml(v.text)}
+                    ${hasXref ? renderXrefPopup(v.xrefs) : ''}
+                </p>`;
+            }
+
+            function renderXrefSummary(dto) {
+                if (!dto.hasChapterXrefs) return '';
+                const rows = dto.currentVerses
+                    .filter((v) => v.xrefs.length > 0)
+                    .map((v) => {
+                        const chips = v.xrefs.map((x) => `<span class="xref-summary-chip">${escapeHtml(x.citation)}</span>`).join('');
+                        return `<div class="xref-summary-row">
+                            <span class="xref-summary-verse">${dto.currentChapter}:${v.number}</span>
+                            <span class="xref-summary-chips">${chips}</span>
+                        </div>`;
+                    })
+                    .join('');
+                return `<div class="xref-summary">
+                    <h3 class="xref-summary-title">Cross References</h3>
+                    <div class="xref-summary-list">${rows}</div>
+                    <p class="xref-credit">Cross-reference data from <a href="https://www.openbible.info/labs/cross-references/" target="_blank" rel="noopener noreferrer">OpenBible.info</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
+                </div>`;
+            }
+
+            function renderReadingPane(dto) {
+                const prevAttrs = dto.prev ? ` data-prev-book="${dto.prev.bookId}" data-prev-chapter="${dto.prev.chapter}"` : '';
+                const nextAttrs = dto.next ? ` data-next-book="${dto.next.bookId}" data-next-chapter="${dto.next.chapter}"` : '';
+                const verses = dto.currentVerses.map((v) => renderVerse(v, dto.currentBookId, dto.currentChapter)).join('');
+                return `<div id="reading-pane-inner"
+                     data-current-book="${dto.currentBookId}"
+                     data-current-chapter="${dto.currentChapter}"${prevAttrs}${nextAttrs}
+                >
+                    <div class="reading-row">
+                        <div class="chapter-side chapter-side-prev">${renderSideChapter(dto.prev)}</div>
+                        <section class="chapter-main">
+                            <h2 class="chapter-heading">${escapeHtml(dto.currentBookName)} ${dto.currentChapter}</h2>
+                            ${verses}
+                            ${renderXrefSummary(dto)}
+                        </section>
+                        <div class="chapter-side chapter-side-next">${renderSideChapter(dto.next)}</div>
+                    </div>
+                </div>`;
+            }
+
+            function renderXrefVerses(verses) {
+                return verses
+                    .map((v) => `<p class="verse xref-verse-text"><span class="verse-num">${v.number}</span>${escapeHtml(v.text)}</p>`)
+                    .join('');
+            }
+
+            // ---- Loading: calls the Tauri commands and splats the
+            // rendered markup into the DOM, same shape as the old
+            // network-fetched fragment loads used to.
+
+            async function loadChapters(bookId, activeChapter) {
+                try {
+                    const dto = await invoke('get_chapters', {
+                        bookId: Number(bookId),
+                        active: activeChapter ? Number(activeChapter) : null,
+                    });
+                    if (!dto) return;
+                    chapterList.innerHTML = renderChapters(dto);
+                    setActiveBook(bookId);
+                } catch (e) {
+                    console.error('Failed to load chapters', e);
+                }
+            }
+
+            async function loadReading(bookId, chapter, { syncChapters } = { syncChapters: true }) {
+                try {
+                    const dto = await invoke('get_reading', {
+                        bookId: Number(bookId),
+                        chapter: Number(chapter),
+                        translationCode: currentTranslation(),
+                    });
+                    if (!dto) return;
+                    readingPane.innerHTML = renderReadingPane(dto);
+                    selectedVerseEl = null;
+                    setActiveBook(bookId);
+
+                    const grid = document.getElementById('chapter-grid-inner');
+                    const gridBookId = grid ? grid.dataset.bookId : null;
+
+                    if (syncChapters && gridBookId !== String(bookId)) {
+                        await loadChapters(bookId, chapter);
+                    } else {
+                        setActiveChapterButton(chapter);
+                    }
+
+                    if (window.history && window.history.pushState) {
+                        window.history.pushState({ bookId, chapter }, '', `#${bookId}/${chapter}`);
+                    }
+                } catch (e) {
+                    console.error('Failed to load reading pane', e);
+                }
             }
 
             // Primary navigation: clicking a book jumps straight to its
@@ -883,20 +1004,21 @@
                         expanded.hidden = false;
                         return;
                     }
-                    const translation = encodeURIComponent(currentTranslation());
-                    let url = `/xref-text/${citation.dataset.book}/${citation.dataset.chapter}/${citation.dataset.verse}?translation=${translation}`;
-                    if (citation.dataset.endVerse) {
-                        url += `&end_verse=${citation.dataset.endVerse}`;
-                    }
-                    fetch(url)
-                        .then((r) => (r.ok ? r.text() : ''))
-                        .then((html) => {
-                            if (!html) return;
-                            expanded.innerHTML = html;
+                    const payload = {
+                        bookId: Number(citation.dataset.book),
+                        chapter: Number(citation.dataset.chapter),
+                        verse: Number(citation.dataset.verse),
+                        endVerse: citation.dataset.endVerse ? Number(citation.dataset.endVerse) : null,
+                        translationCode: currentTranslation(),
+                    };
+                    invoke('get_xref_text', payload)
+                        .then((verses) => {
+                            if (!verses) return;
+                            expanded.innerHTML = renderXrefVerses(verses);
                             expanded.dataset.loaded = 'true';
                             expanded.hidden = false;
                         })
-                        .catch(() => {});
+                        .catch((e) => console.error('Failed to load cross-reference text', e));
                     return;
                 }
 
@@ -925,9 +1047,10 @@
 
             // Secondary navigation: arrow keys leaf through the whole Bible
             // a chapter at a time, using the prev/next chapter this fragment
-            // was rendered with (computed server-side, so book boundaries —
-            // e.g. the end of Genesis into the start of Exodus — are handled
-            // without the client needing to know the Bible's structure).
+            // was rendered with (computed by the get_reading command, so
+            // book boundaries — e.g. the end of Genesis into the start of
+            // Exodus — are handled without the client needing to know the
+            // Bible's structure).
             document.addEventListener('keydown', function (event) {
                 if (event.target && /^(INPUT|TEXTAREA)$/.test(event.target.tagName)) {
                     return;
@@ -949,15 +1072,34 @@
             });
 
             // Switching translations re-reads whatever chapter is currently
-            // on screen, in the newly selected translation. The server
+            // on screen, in the newly selected translation. The backend
             // remembers this as the reader's position too (see
-            // read_fragment), so reopening the app comes back to it.
+            // get_reading), so reopening the app comes back to it.
             translationSelect.addEventListener('change', function () {
                 const inner = currentInner();
                 const bookId = inner ? inner.dataset.currentBook : 1;
                 const chapter = inner ? inner.dataset.currentChapter : 1;
                 loadReading(bookId, chapter);
             });
+
+            // Initial load: fetch the book/translation lists and whichever
+            // chapter the reader was last on, then read it the same way any
+            // other navigation would — so there's exactly one code path for
+            // rendering a chapter, at startup or afterward.
+            async function boot() {
+                themeSelect.value = currentTheme();
+                try {
+                    const home = await invoke('get_home');
+                    renderBookLists(home);
+                    renderTranslationOptions(home);
+                    await loadChapters(home.currentBookId, home.currentChapter);
+                    await loadReading(home.currentBookId, home.currentChapter, { syncChapters: false });
+                } catch (e) {
+                    console.error('Failed to load Gospel Getter', e);
+                }
+            }
+
+            boot();
         })();
     </script>
 </body>

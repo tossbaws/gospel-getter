@@ -10,38 +10,38 @@
 #      aur.archlinux.org/gospel-getter.git — see
 #      https://wiki.archlinux.org/title/AUR_submission_guidelines
 #
-# Mirrors what packaging/install.sh does, but declaratively: builds the
-# binary, and installs it plus the systemd user service, desktop launcher,
-# and icon to their standard system-wide (not per-user) locations.
+# Builds the Tauri desktop binary directly from source (not through the
+# AppImage bundler — makepkg already gives us a proper native package, so
+# there's no need for AppImage's self-contained-runtime wrapping) and
+# installs it plus its desktop launcher and icon to their standard
+# system-wide locations. There's no service to enable: it's a normal
+# windowed app that only runs while it's open.
 
 pkgname=gospel-getter
-pkgver=0.1.0
+pkgver=2.0.0
 pkgrel=1
 pkgdesc="A Bible reader with KJV and WEB translations, faded surrounding chapters, and quick keyboard navigation"
 arch=('x86_64' 'aarch64')
 url="<TODO: repo URL>"
 license=('MIT')
-depends=('gcc-libs')
+depends=('webkit2gtk-4.1' 'gtk3')
 makedepends=('cargo')
 backup=()
 source=("$pkgname-$pkgver.tar.gz::<TODO: repo URL>/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP') # replace with `updpkgsums` once `source` is a real URL
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname-$pkgver/src-tauri"
   cargo build --release --locked
 }
 
 package() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname-$pkgver/src-tauri"
 
   install -Dm755 target/release/gospel_getter "$pkgdir/usr/bin/gospel_getter"
 
-  install -Dm644 packaging/gospel-getter.service \
-    "$pkgdir/usr/lib/systemd/user/gospel-getter.service"
-
-  install -Dm644 packaging/icon.png \
-    "$pkgdir/usr/share/icons/hicolor/256x256/apps/gospel-getter.png"
+  install -Dm644 icons/128x128.png \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/gospel-getter.png"
 
   install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/gospel-getter.desktop" <<EOF
 [Desktop Entry]
@@ -49,12 +49,8 @@ Type=Application
 Name=Gospel Getter
 Comment=Read the Bible, book by book, chapter by chapter
 Icon=gospel-getter
-Exec=xdg-open http://127.0.0.1:3002
+Exec=gospel_getter
 Terminal=false
 Categories=Education;Spirituality;
 EOF
-}
-
-post_install() {
-  echo "Enable the reading server with: systemctl --user enable --now gospel-getter"
 }
