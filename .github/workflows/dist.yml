@@ -86,6 +86,14 @@ jobs:
             echo "::error::cargo tauri build did not produce a .deb under target/release/bundle/deb"
             exit 1
           fi
+          # Resolve to absolute paths: a bare relative path (no leading
+          # `./` or `/`) is ambiguous to apt-get, which parses a plain
+          # `a/b/c` argument as `package/release` syntax rather than a
+          # filesystem path — it would try (and fail) to install a
+          # package literally named "target/release/bundle/deb" instead
+          # of the .deb file that path points to.
+          appimage="$(realpath "$appimage")"
+          deb="$(realpath "$deb")"
           echo "appimage=$appimage" >> "$GITHUB_OUTPUT"
           echo "deb=$deb" >> "$GITHUB_OUTPUT"
 
