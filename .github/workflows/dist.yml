@@ -13,7 +13,11 @@ name: Distribution Artifacts
 
 on:
   push:
-    branches: [main]
+    # TEMPORARY for this branch's own CI verification — see the commit
+    # that reverts this before merge. workflow_dispatch can't be used to
+    # verify a brand-new workflow because GitHub only allows dispatching a
+    # workflow that already exists on the repo's default branch.
+    branches: [main, feature/installer-distribution]
   pull_request:
   workflow_dispatch:
 
