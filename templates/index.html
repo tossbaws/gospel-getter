@@ -217,6 +217,25 @@
             margin-top: 0.25rem;
         }
 
+        .random-chapter-btn {
+            display: inline-block;
+            margin-top: 0.9rem;
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            padding: 0.4rem 0.9rem;
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--accent);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .random-chapter-btn:hover {
+            background: rgba(var(--accent-rgb), 0.3);
+            border-color: var(--accent);
+        }
+
         .book-list {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -543,6 +562,55 @@
             color: var(--text-dim);
             margin-top: 0.5rem;
         }
+
+        /* Printing should show just the chapter being read — its heading
+           and verses — not the app chrome around it, which is meaningless
+           on paper, or anything tied to on-screen interaction like the
+           cross-reference popups. The custom properties are reset to
+           black-on-white here rather than overriding every themed rule
+           individually, so a printed page looks the same regardless of
+           which on-screen theme was active; !important is needed because
+           `:root[data-theme="..."]` is more specific than a plain `:root`
+           rule and would otherwise win its color back for print. */
+        @media print {
+            :root {
+                --bg: #ffffff !important;
+                --text: #000000 !important;
+                --text-dim: #333333 !important;
+                --accent: #000000 !important;
+                --accent-rgb: 0, 0, 0 !important;
+                --accent-dim: #000000 !important;
+                --panel-bg: transparent !important;
+                --option-bg: #ffffff !important;
+                --on-accent: #ffffff !important;
+            }
+
+            .settings-toggle,
+            .settings-menu,
+            header,
+            .book-list,
+            #chapter-list,
+            .chapter-side,
+            .nav-hint,
+            footer,
+            .xref-popup {
+                display: none !important;
+            }
+
+            body {
+                background: #ffffff !important;
+                color: #000000 !important;
+            }
+
+            .chapter-heading {
+                text-shadow: none !important;
+            }
+
+            .chapter-main .verse.verse-selected {
+                background: none !important;
+                box-shadow: none !important;
+            }
+        }
     </style>
     <script>
         // Applied here (before <body> paints) rather than only in the main
@@ -585,6 +653,7 @@
         <header>
             <h1>Gospel Getter</h1>
             <p class="subtitle">The Holy Bible</p>
+            <button type="button" id="random-chapter-btn" class="random-chapter-btn">Random chapter</button>
         </header>
 
         <div class="book-list">
@@ -592,7 +661,7 @@
                 <div class="testament-title">Old Testament</div>
                 <div class="book-grid">
                     {% for book in ot_books %}
-                    <button type="button" class="book-item{% if book.id == current_book_id %} active{% endif %}" data-book-id="{{ book.id }}">{{ book.name }}</button>
+                    <button type="button" class="book-item{% if book.id == current_book_id %} active{% endif %}" data-book-id="{{ book.id }}" data-chapter-count="{{ book.chapter_count }}">{{ book.name }}</button>
                     {% endfor %}
                 </div>
             </div>
@@ -600,7 +669,7 @@
                 <div class="testament-title">New Testament</div>
                 <div class="book-grid">
                     {% for book in nt_books %}
-                    <button type="button" class="book-item{% if book.id == current_book_id %} active{% endif %}" data-book-id="{{ book.id }}">{{ book.name }}</button>
+                    <button type="button" class="book-item{% if book.id == current_book_id %} active{% endif %}" data-book-id="{{ book.id }}" data-chapter-count="{{ book.chapter_count }}">{{ book.name }}</button>
                     {% endfor %}
                 </div>
             </div>
@@ -678,6 +747,28 @@
                 return document.getElementById('reading-pane-inner');
             }
 
+            // Picks uniformly from the rendered book buttons, then
+            // uniformly from 1..chapter_count for that book, entirely from
+            // data already on the page — no server-side randomness needed.
+            // Malformed or missing data (a button with no id, a
+            // non-numeric or non-positive chapter count) is treated as "no
+            // pick" rather than risking a request for a chapter that
+            // doesn't exist.
+            function pickRandomBookAndChapter() {
+                const bookButtons = document.querySelectorAll('.book-item');
+                if (bookButtons.length === 0) return null;
+
+                const bookBtn = bookButtons[Math.floor(Math.random() * bookButtons.length)];
+                const bookId = bookBtn.dataset.bookId;
+                const chapterCount = Number(bookBtn.dataset.chapterCount);
+                if (!bookId || !Number.isInteger(chapterCount) || chapterCount < 1) {
+                    return null;
+                }
+
+                const chapter = Math.floor(Math.random() * chapterCount) + 1;
+                return { bookId, chapter };
+            }
+
             function setActiveBook(bookId) {
                 document.querySelectorAll('.book-item').forEach((el) => {
                     el.classList.toggle('active', el.dataset.bookId === String(bookId));
@@ -743,6 +834,15 @@
                 // (the selects, their labels) should never be treated as a
                 // "click away" that closes it.
                 if (event.target.closest('#settings-menu')) {
+                    return;
+                }
+
+                const randomBtn = event.target.closest('#random-chapter-btn');
+                if (randomBtn) {
+                    const pick = pickRandomBookAndChapter();
+                    if (pick) {
+                        loadReading(pick.bookId, pick.chapter);
+                    }
                     return;
                 }
 

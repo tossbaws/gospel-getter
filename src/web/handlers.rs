@@ -467,4 +467,146 @@ mod tests {
              restacking it, so only the current chapter is visible"
         );
     }
+
+    /// Regression guard for GH-6: printing a chapter should hide all page
+    /// chrome (settings, header, book list, chapter chooser, neighboring
+    /// chapter panes, nav hint, footer, cross-reference popups) but must
+    /// never target the reading content itself — the chapter heading and
+    /// verses are the whole point of printing the page.
+    #[test]
+    fn print_stylesheet_hides_chrome_but_not_reading_content() {
+        let css = include_str!("../../templates/index.html");
+        let start = css
+            .find("@media print")
+            .expect("a @media print rule should exist in index.html");
+        let block_start = css[start..].find('{').map(|i| start + i).unwrap();
+
+        let mut depth = 0usize;
+        let mut block_end = None;
+        for (i, ch) in css[block_start..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        block_end = Some(block_start + i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let block_end = block_end.expect("@media print rule should be closed");
+        let block = &css[block_start..block_end];
+
+        assert!(
+            block.contains("display: none"),
+            "print stylesheet should actually hide the page chrome it targets"
+        );
+        for chrome_selector in [
+            ".settings-toggle",
+            ".settings-menu",
+            "header",
+            ".book-list",
+            "#chapter-list",
+            ".chapter-side",
+            ".nav-hint",
+            "footer",
+            ".xref-popup",
+        ] {
+            assert!(
+                block.contains(chrome_selector),
+                "print stylesheet should hide `{chrome_selector}` — it's page \
+                 chrome, not reading content"
+            );
+        }
+
+        for reading_selector in ["#reading-pane {", ".chapter-main {", ".verse {"] {
+            assert!(
+                !block.contains(reading_selector),
+                "print stylesheet must not hide `{reading_selector}` — the \
+                 chapter heading and verses are exactly what should remain \
+                 visible when printed"
+            );
+        }
+    }
+
+    /// Regression guard for GH-5: the "Random chapter" feature picks a
+    /// chapter entirely client-side, so each `.book-item` button must carry
+    /// its `chapter_count` as a data attribute (in both the OT and NT
+    /// loops) or the client has no valid upper bound to pick from.
+    #[test]
+    fn book_item_buttons_expose_chapter_count() {
+        let html = include_str!("../../templates/index.html");
+        let occurrences = html
+            .matches(
+                "data-book-id=\"{{ book.id }}\" data-chapter-count=\"{{ book.chapter_count }}\"",
+            )
+            .count();
+        assert_eq!(
+            occurrences, 2,
+            "both the OT and NT book-item loops should render data-chapter-count \
+             alongside data-book-id"
+        );
+    }
+
+    /// Regression guard for GH-5: the random chapter control must be a real,
+    /// labeled `<button>` (not a link or a bare clickable `<div>`) so it's
+    /// reachable and announced correctly by assistive tech.
+    #[test]
+    fn random_chapter_control_is_a_real_labeled_button() {
+        let html = include_str!("../../templates/index.html");
+        let id_pos = html
+            .find("id=\"random-chapter-btn\"")
+            .expect("a #random-chapter-btn control should exist in index.html");
+
+        let tag_start = html[..id_pos]
+            .rfind("<button")
+            .expect("the random chapter control should be a <button> element");
+        let tag_end = html[tag_start..]
+            .find('>')
+            .map(|i| tag_start + i)
+            .expect("the random chapter button's opening tag should be closed");
+        let opening_tag = &html[tag_start..=tag_end];
+        assert!(
+            opening_tag.contains("type=\"button\""),
+            "random chapter control should be an explicit type=\"button\", not a \
+             form-submitting default"
+        );
+
+        let close_pos = html[tag_end..]
+            .find("</button>")
+            .map(|i| tag_end + i)
+            .expect("the random chapter button should have a matching </button>");
+        let label = html[tag_end + 1..close_pos].trim();
+        assert!(
+            !label.is_empty(),
+            "random chapter button should have a non-empty visible label so its \
+             accessible name isn't blank"
+        );
+    }
+
+    /// Regression guard for GH-5: the random-pick logic must be seeded from
+    /// `.book-item` buttons (uniform choice of book, then 1..=chapter_count
+    /// for that book) and must bail out rather than call `loadReading` when
+    /// that data is missing or non-numeric — it must never fabricate a
+    /// request to an invalid chapter.
+    #[test]
+    fn random_chapter_script_guards_against_malformed_data() {
+        let html = include_str!("../../templates/index.html");
+        assert!(
+            html.contains("document.querySelectorAll('.book-item')"),
+            "random pick should choose uniformly from the rendered book buttons"
+        );
+        assert!(
+            html.contains("Number.isInteger(chapterCount) && chapterCount < 1")
+                || html.contains("!Number.isInteger(chapterCount) || chapterCount < 1"),
+            "random pick should guard against a missing/non-numeric/non-positive \
+             chapter count instead of issuing an invalid request"
+        );
+        assert!(
+            html.contains("Math.floor(Math.random() * chapterCount) + 1"),
+            "chapter pick should be uniform over 1..=chapter_count"
+        );
+    }
 }
