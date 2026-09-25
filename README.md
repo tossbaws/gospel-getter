@@ -1,6 +1,7 @@
 # Gospel Getter
 
 [![CI](https://github.com/tossbaws/gospel-getter/actions/workflows/ci.yml/badge.svg)](https://github.com/tossbaws/gospel-getter/actions/workflows/ci.yml)
+[![Distribution Artifacts](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml/badge.svg)](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-c9a227.svg)](LICENSE)
 
 A Bible reader with a vaporwave soul: browse all 66 books, pick a chapter,
@@ -40,7 +41,9 @@ cargo tauri dev
 
 Opens straight into a native window — nothing to browse to.
 
-## Installing as a desktop app
+## Installing
+
+### Build it yourself (local developer installer)
 
 `packaging/install.sh` builds a release AppImage (via `cargo tauri build`)
 and drops a `.desktop` launcher and icon into the usual per-user
@@ -58,6 +61,39 @@ actually missing, not just whether the database is empty. Fixing a typo
 in a translation that's already seeded won't reach an existing install on
 its own; you'd need to clear that translation's rows (or the whole
 database — see "Where your data lives" below) so it re-seeds.
+
+### Downloadable builds (Linux and Windows)
+
+`.github/workflows/dist.yml` builds real installers on every push to
+`main`, on pull requests, and on demand (Actions → Distribution Artifacts
+→ Run workflow), and attaches them to that workflow run as downloadable
+artifacts — see the
+[Actions tab](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml).
+There's no separate downloads page or GitHub release yet; artifacts live
+on the workflow run that built them (GitHub expires run artifacts after a
+retention window, so grab one from a recent run, not an old one).
+
+- **Linux**: an AppImage (works on most distros without installing
+  anything) and a `.deb`, both built on Ubuntu 22.04 — Tauri's documented
+  baseline for AppImage/deb compatibility with older glibc/webkit2gtk than
+  whatever `ubuntu-latest` happens to be this month.
+- **Windows**: an NSIS `setup.exe`, built and silently install/uninstall
+  smoke-tested on `windows-latest`. **These builds are not code-signed.**
+  Windows SmartScreen will very likely warn that the installer is from an
+  "unknown publisher" until a code-signing certificate is set up for this
+  project — that hasn't happened yet, and this README won't claim
+  otherwise. Choosing "More info → Run anyway" is expected for now, not a
+  sign of a broken build. An MSI is also produced when the bundler
+  succeeds in building one; if a given run doesn't have one, the NSIS
+  installer is still there and is the one to use.
+
+### Arch Linux / AUR
+
+`packaging/PKGBUILD` is a source package for Arch, but it is **not yet
+published to the AUR** — publishing needs a tagged GitHub release to build
+from and a real checksum against that tag, and no release has been cut.
+The PKGBUILD itself documents the exact remaining steps at the top of the
+file.
 
 ### Where your data lives
 

@@ -1,34 +1,49 @@
 # Maintainer: <your name and email here>
 #
-# DRAFT — not ready to submit to the AUR yet. Before it can be:
-#   1. Push this project to a public git repository and tag a release
-#      (this PKGBUILD assumes one at `source=`, below — replace the URL).
-#   2. Run `makepkg` locally against that tag and fix whatever it finds;
-#      this has not been test-built.
-#   3. Get real checksums: `updpkgsums` (needs network access to the repo).
-#   4. Only then create an AUR account and `git push` it to a new
+# DRAFT — the metadata, dependencies, and build/package() steps below
+# reflect the actual project layout (src-tauri/, the real dependency list
+# this binary links against, the generated icon set) and there's no
+# placeholder repo URL left. It has NOT been build-tested via `makepkg`,
+# because `source=` points at a git tag that doesn't exist yet. Before
+# this can be submitted to the AUR:
+#
+#   1. Tag a real release at this version and push it:
+#        git tag v2.0.0 && git push origin v2.0.0
+#      Until that tag exists, the `source=` URL below 404s.
+#   2. Refresh the checksum against that tag (needs network access to
+#      github.com):
+#        updpkgsums
+#      sha256sums is deliberately left as SKIP below rather than a
+#      fabricated value — do not hand-write a checksum here.
+#   3. Build it for real from a clean checkout of the tagged tarball, not
+#      from a working tree:
+#        makepkg -si
+#      and fix whatever that turns up — this is a different code path
+#      (extracting a release tarball, not building in place) and hasn't
+#      been exercised.
+#   4. Only then create an AUR account and `git push` this file to a new
 #      aur.archlinux.org/gospel-getter.git — see
 #      https://wiki.archlinux.org/title/AUR_submission_guidelines
 #
 # Builds the Tauri desktop binary directly from source (not through the
 # AppImage bundler — makepkg already gives us a proper native package, so
 # there's no need for AppImage's self-contained-runtime wrapping) and
-# installs it plus its desktop launcher and icon to their standard
-# system-wide locations. There's no service to enable: it's a normal
-# windowed app that only runs while it's open.
+# installs it plus its desktop launcher, icon, and license to their
+# standard system-wide locations. There's no service to enable: it's a
+# normal windowed app that only runs while it's open.
 
 pkgname=gospel-getter
 pkgver=2.0.0
 pkgrel=1
 pkgdesc="A Bible reader with KJV and WEB translations, faded surrounding chapters, and quick keyboard navigation"
 arch=('x86_64' 'aarch64')
-url="<TODO: repo URL>"
+url="https://github.com/tossbaws/gospel-getter"
 license=('MIT')
 depends=('webkit2gtk-4.1' 'gtk3')
 makedepends=('cargo')
 backup=()
-source=("$pkgname-$pkgver.tar.gz::<TODO: repo URL>/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP') # replace with `updpkgsums` once `source` is a real URL
+source=("$pkgname-$pkgver.tar.gz::https://github.com/tossbaws/gospel-getter/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP') # replace with `updpkgsums` once the v$pkgver tag exists
 
 build() {
   cd "$pkgname-$pkgver/src-tauri"
@@ -42,6 +57,8 @@ package() {
 
   install -Dm644 icons/128x128.png \
     "$pkgdir/usr/share/icons/hicolor/128x128/apps/gospel-getter.png"
+
+  install -Dm644 ../LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 
   install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/gospel-getter.desktop" <<EOF
 [Desktop Entry]

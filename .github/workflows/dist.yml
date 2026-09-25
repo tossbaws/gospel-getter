@@ -1,0 +1,247 @@
+name: Distribution Artifacts
+
+# Builds the actual installers — AppImage + .deb on Linux, an NSIS setup.exe
+# (and MSI, when the bundler produces one) on Windows — and smoke-tests
+# each one before uploading it as a workflow artifact. This is separate
+# from ci.yml (which only runs cargo fmt/clippy/test/build): bundling is
+# slow and installs system packages, so it only needs to run when someone
+# actually wants installers to inspect, not on every push.
+#
+# This workflow never creates a GitHub release, tag, or otherwise publishes
+# anything — it only produces downloadable workflow-run artifacts, so a
+# human can review real installers before anything goes out the door.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dist-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  TAURI_CLI_VERSION: "^2.0.0"
+
+jobs:
+  linux:
+    name: Linux (AppImage + deb)
+    # Tauri's own Linux packaging guidance is to build on the oldest
+    # supported Ubuntu LTS, not `ubuntu-latest`: the AppImage/deb bundler
+    # links against the build host's glibc/webkit2gtk, and a binary built
+    # on a newer Ubuntu won't run on an older one. 22.04 is Tauri's
+    # documented minimum baseline for the current AppImage/deb tooling.
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # webkit2gtk/gtk3 headers to build against, plus the bundling
+      # toolchain: patchelf (rpath rewriting), libfuse2 (AppImages are
+      # FUSE-mounted at bundle time), and xvfb (to launch the built app
+      # headlessly for the smoke test below).
+      - name: Install Tauri Linux build & bundling dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            patchelf build-essential libssl-dev libfuse2 xvfb file
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+
+      - name: Build AppImage and deb bundles
+        run: cargo tauri build --bundles appimage,deb
+
+      - name: Locate built artifacts
+        id: artifacts
+        run: |
+          set -euo pipefail
+          appimage="$(find target/release/bundle/appimage -maxdepth 1 -name '*.AppImage')"
+          deb="$(find target/release/bundle/deb -maxdepth 1 -name '*.deb')"
+          if [ -z "$appimage" ]; then
+            echo "::error::cargo tauri build did not produce an .AppImage under target/release/bundle/appimage"
+            exit 1
+          fi
+          if [ -z "$deb" ]; then
+            echo "::error::cargo tauri build did not produce a .deb under target/release/bundle/deb"
+            exit 1
+          fi
+          echo "appimage=$appimage" >> "$GITHUB_OUTPUT"
+          echo "deb=$deb" >> "$GITHUB_OUTPUT"
+
+      - name: "Smoke test: AppImage extracts and launches without crashing"
+        run: |
+          set -euo pipefail
+          appimage="${{ steps.artifacts.outputs.appimage }}"
+          chmod +x "$appimage"
+          "$appimage" --appimage-extract >/dev/null
+          test -x squashfs-root/AppRun
+
+          xvfb-run --auto-servernum ./squashfs-root/AppRun &
+          app_pid=$!
+          sleep 5
+          if ! kill -0 "$app_pid" 2>/dev/null; then
+            echo "::error::the AppImage's app process exited within 5s of launch (crash on startup)"
+            exit 1
+          fi
+          echo "AppImage launched and is still running after 5s (pid $app_pid)"
+          kill "$app_pid"
+          wait "$app_pid" 2>/dev/null || true
+
+      - name: "Smoke test: .deb installs and uninstalls cleanly"
+        run: |
+          set -euo pipefail
+          deb="${{ steps.artifacts.outputs.deb }}"
+          pkg_name="$(dpkg-deb -f "$deb" Package)"
+          echo "Package name: $pkg_name"
+
+          sudo apt-get install -y "$deb"
+          dpkg -s "$pkg_name" | grep -q '^Status: install ok installed'
+
+          owned_files="$(dpkg -L "$pkg_name")"
+          echo "$owned_files" | grep -q '/usr/bin/' \
+            || { echo "::error::package installs no file under /usr/bin"; exit 1; }
+          echo "$owned_files" | grep -q '\.desktop$' \
+            || { echo "::error::package installs no .desktop launcher"; exit 1; }
+
+          sudo apt-get remove -y "$pkg_name"
+          if dpkg -s "$pkg_name" 2>/dev/null | grep -q '^Status: install ok installed'; then
+            echo "::error::package still reports installed after apt-get remove"
+            exit 1
+          fi
+          echo ".deb installed and removed cleanly"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gospel-getter-linux-appimage
+          path: ${{ steps.artifacts.outputs.appimage }}
+          if-no-files-found: error
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gospel-getter-linux-deb
+          path: ${{ steps.artifacts.outputs.deb }}
+          if-no-files-found: error
+
+  windows:
+    name: Windows (NSIS installer)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+
+      # bundle.targets is "all" in tauri.conf.json, so this produces both
+      # an NSIS setup.exe and an MSI on Windows.
+      - name: Build Windows installers
+        run: cargo tauri build
+
+      - name: Locate built artifacts
+        id: artifacts
+        shell: pwsh
+        run: |
+          $nsis = Get-ChildItem -Path "target/release/bundle/nsis" -Filter *.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $nsis) {
+            Write-Error "cargo tauri build did not produce an NSIS setup.exe under target/release/bundle/nsis"
+            exit 1
+          }
+          "nsis=$($nsis.FullName)" >> $env:GITHUB_OUTPUT
+
+          $msi = Get-ChildItem -Path "target/release/bundle/msi" -Filter *.msi -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($msi) {
+            "msi=$($msi.FullName)" >> $env:GITHUB_OUTPUT
+            "msi_built=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Warning "No MSI installer was produced; only the NSIS setup.exe is available this run."
+            "msi_built=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: "Smoke test: silent install and uninstall (NSIS)"
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = "${{ steps.artifacts.outputs.nsis }}"
+
+          Write-Host "Running silent install: $exe /S"
+          Start-Process -FilePath $exe -ArgumentList "/S" -Wait
+          Start-Sleep -Seconds 5
+
+          $uninstallRoots = @(
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+            "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+            "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+          )
+          $entry = Get-ChildItem $uninstallRoots -ErrorAction SilentlyContinue |
+            Get-ItemProperty -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "*Gospel Getter*" } |
+            Select-Object -First 1
+
+          if (-not $entry) {
+            Write-Error "No uninstall registry entry for Gospel Getter found after a silent install — install likely failed."
+            exit 1
+          }
+          Write-Host "Registered: $($entry.DisplayName) v$($entry.DisplayVersion)"
+          Write-Host "Install location: $($entry.InstallLocation)"
+          if ($entry.InstallLocation -and (Test-Path $entry.InstallLocation)) {
+            Write-Host "Install directory contents:"
+            Get-ChildItem $entry.InstallLocation | Format-Table Name, Length
+          }
+
+          $uninstallExe = $entry.UninstallString.Trim('"')
+          Write-Host "Running silent uninstall: $uninstallExe /S"
+          Start-Process -FilePath $uninstallExe -ArgumentList "/S" -Wait
+          Start-Sleep -Seconds 5
+
+          $stillThere = Get-ChildItem $uninstallRoots -ErrorAction SilentlyContinue |
+            Get-ItemProperty -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "*Gospel Getter*" }
+          if ($stillThere) {
+            Write-Error "Uninstall registry entry for Gospel Getter is still present after a silent uninstall."
+            exit 1
+          }
+          Write-Host "Silent install/uninstall smoke test passed."
+
+      - name: Upload NSIS installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gospel-getter-windows-nsis-installer
+          path: ${{ steps.artifacts.outputs.nsis }}
+          if-no-files-found: error
+
+      - name: Upload MSI installer artifact (when built)
+        if: steps.artifacts.outputs.msi_built == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gospel-getter-windows-msi-installer
+          path: ${{ steps.artifacts.outputs.msi }}
+          if-no-files-found: error
