@@ -23,6 +23,10 @@ with you as one continuous page.
   so you never have to touch the mouse.
 - It remembers where you left off — close it and reopen it and you're back
   on the same chapter and translation.
+- Reading comfort controls: text size and line-spacing presets, six color
+  themes (Vaporwave, Classic Dark, Classic Light, Matrix, Beast Slayer,
+  Hot Pink), and a distraction-free reading mode that shows nothing but
+  the chapter you're reading.
 - A real native desktop app (built with Tauri): no browser, no background
   server, no open port — just a window with its own taskbar icon.
 
@@ -122,6 +126,21 @@ expect.
   heading in the faded side columns.
 - The translation dropdown switches translations for whatever you're
   currently reading, and remembers your choice across visits.
+- The &#9776; button (top right) opens settings: theme, translation, text
+  size (Small / Medium / Large / Extra large), line spacing (Compact /
+  Normal / Relaxed) and **Reading mode**. Everything in it is keyboard
+  reachable, and Esc closes it. Text size and spacing only affect the
+  chapter text, not the rest of the interface.
+- Reading mode hides the book list, chapter grid, side columns, header
+  and footer. Arrow keys still turn chapters, and the &#9776; settings
+  button stays available. Leave it with the **Exit reading mode** button or
+  Esc.
+- Theme, text size, line spacing and reading mode are display preferences
+  stored locally in the app's webview, not in the database. They're
+  remembered across restarts, so if you close the app in reading mode it
+  reopens in reading mode, with the exit button showing. Printing always
+  uses black on white at the default size, whatever you've picked on
+  screen.
 
 ## Translations
 
