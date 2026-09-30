@@ -38,6 +38,13 @@
             --panel-bg: rgba(20, 8, 44, 0.55);
             --option-bg: #1e0f3a;
             --on-accent: #14082c;
+            /* Reading-comfort presets (see the text-size/line-spacing
+               blocks below). These only scale the reading content —
+               chapter headings and verses — never the rest of the UI, and
+               these defaults are exactly the fixed values the verses used
+               before the presets existed. */
+            --reading-scale: 1;
+            --reading-leading: 1.7;
         }
 
         :root[data-theme="classic-dark"] {
@@ -79,7 +86,7 @@
             --on-accent: #001a00;
         }
 
-        :root[data-theme="monster-hunter"] {
+        :root[data-theme="beast-slayer"] {
             color-scheme: dark;
             --bg: linear-gradient(
                 180deg,
@@ -97,6 +104,35 @@
             --option-bg: #241a12;
             --on-accent: #1a1410;
         }
+
+        /* Hot pink as the accent on a near-black plum ground, rather than
+           pink text on a pink background: the pink carries headings,
+           verse numbers and highlights, while body text stays a pale,
+           high-contrast blush. */
+        :root[data-theme="hot-pink"] {
+            color-scheme: dark;
+            --bg: linear-gradient(
+                180deg,
+                #12030c 0%,
+                #1f0616 55%,
+                #2d0a20 100%
+            );
+            --text: #fff0f7;
+            --text-dim: #e8a3c6;
+            --accent: #ff3fa4;
+            --accent-rgb: 255, 63, 164;
+            --accent-dim: rgba(255, 63, 164, 0.45);
+            --panel-bg: rgba(255, 63, 164, 0.07);
+            --option-bg: #2a0a1d;
+            --on-accent: #1a0411;
+        }
+
+        :root[data-text-size="small"] { --reading-scale: 0.9; }
+        :root[data-text-size="large"] { --reading-scale: 1.2; }
+        :root[data-text-size="x-large"] { --reading-scale: 1.4; }
+
+        :root[data-line-spacing="compact"] { --reading-leading: 1.45; }
+        :root[data-line-spacing="relaxed"] { --reading-leading: 2.05; }
 
         * {
             margin: 0;
@@ -148,6 +184,8 @@
             padding: 1rem;
             min-width: 220px;
             max-width: calc(100vw - 2rem);
+            max-height: calc(100vh - 4.4rem);
+            overflow-y: auto;
             backdrop-filter: blur(6px);
         }
 
@@ -192,6 +230,76 @@
         .settings-field select option {
             background-color: var(--option-bg);
             color: var(--text);
+        }
+
+        .settings-toggle:focus-visible,
+        .settings-field select:focus-visible,
+        .reader-mode-btn:focus-visible,
+        .reader-exit:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .reader-mode-btn,
+        .reader-exit {
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--accent);
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            padding: 0.35rem 0.7rem;
+            cursor: pointer;
+        }
+
+        .reader-mode-btn {
+            width: 100%;
+        }
+
+        .reader-mode-btn:hover,
+        .reader-exit:hover {
+            border-color: var(--accent);
+        }
+
+        /* Distraction-free reading mode: everything but the chapter being
+           read is hidden, except the settings toggle (so text size and
+           spacing stay adjustable) and an always-visible exit button — the
+           reader can never get stuck in this mode. The mode is purely
+           presentational: #reading-pane-inner and its prev/next data are
+           untouched, so arrow-key navigation keeps working. */
+        .reader-exit {
+            position: fixed;
+            top: 1rem;
+            right: 4.6rem;
+            z-index: 20;
+            padding: 0.45rem 0.8rem;
+        }
+
+        :root:not([data-reader-mode="on"]) .reader-exit {
+            display: none;
+        }
+
+        /* Screen-only, so a page printed from reading mode is laid out
+           exactly like one printed normally. */
+        @media screen {
+            :root[data-reader-mode="on"] header,
+            :root[data-reader-mode="on"] .book-list,
+            :root[data-reader-mode="on"] #chapter-list,
+            :root[data-reader-mode="on"] .chapter-side,
+            :root[data-reader-mode="on"] .nav-hint,
+            :root[data-reader-mode="on"] footer {
+                display: none;
+            }
+
+            :root[data-reader-mode="on"] .container {
+                max-width: 780px;
+                padding-top: 4.5rem;
+            }
+
+            :root[data-reader-mode="on"] #reading-pane {
+                border-top: none;
+                padding-top: 0;
+            }
         }
 
         header {
@@ -366,8 +474,8 @@
         }
 
         .chapter-side .verse {
-            font-size: 0.9rem;
-            line-height: 1.6;
+            font-size: calc(0.9rem * var(--reading-scale));
+            line-height: calc(var(--reading-leading) - 0.1);
         }
 
         .chapter-heading-link {
@@ -402,7 +510,7 @@
         }
 
         .chapter-heading {
-            font-size: 1.5rem;
+            font-size: calc(1.5rem * var(--reading-scale));
             font-weight: normal;
             color: var(--accent);
             margin-bottom: 0.8rem;
@@ -412,8 +520,8 @@
         }
 
         .verse {
-            font-size: 1.05rem;
-            line-height: 1.7;
+            font-size: calc(1.05rem * var(--reading-scale));
+            line-height: var(--reading-leading);
             margin-bottom: 0.5rem;
             color: var(--text);
         }
@@ -421,7 +529,7 @@
         .verse-num {
             display: inline-block;
             min-width: 1.4rem;
-            font-size: 0.7rem;
+            font-size: calc(0.7rem * var(--reading-scale));
             font-weight: bold;
             color: var(--accent);
             vertical-align: super;
@@ -582,10 +690,15 @@
                 --panel-bg: transparent !important;
                 --option-bg: #ffffff !important;
                 --on-accent: #ffffff !important;
+                /* Printed type is always the default size and spacing,
+                   whatever reading-comfort presets are saved on screen. */
+                --reading-scale: 1 !important;
+                --reading-leading: 1.7 !important;
             }
 
             .settings-toggle,
             .settings-menu,
+            .reader-exit,
             header,
             .book-list,
             #chapter-list,
@@ -612,21 +725,169 @@
         }
     </style>
     <script>
-        // Applied here (before <body> paints) rather than only in the main
-        // script at the bottom, so a returning visitor with a saved theme
-        // never sees a flash of the default vaporwave theme first.
+        // Presentation preferences: theme, reading text size, line spacing
+        // and distraction-free reading mode. Kept local to this webview
+        // (localStorage) — they're display-only, so there's no backend
+        // command or schema for them. This script deliberately doesn't
+        // touch window.__TAURI__, and it runs here in <head> so saved
+        // preferences apply before <body> paints (no flash of the default
+        // look), and so the reading-mode exit control keeps working even
+        // if the main script below fails — reading mode can never lock the
+        // reader out of the rest of the app.
         (function () {
-            try {
-                var t = localStorage.getItem('gospel-getter-theme');
-                if (t && t !== 'vaporwave') {
-                    document.documentElement.dataset.theme = t;
+            'use strict';
+
+            // Each preference maps to a data attribute on <html>, which the
+            // CSS keys off. The default value is represented by *no*
+            // attribute, so with nothing saved the page looks exactly as it
+            // did before these preferences existed.
+            var PREFS = {
+                theme: {
+                    key: 'gospel-getter-theme',
+                    attr: 'theme',
+                    select: 'theme-select',
+                    fallback: 'vaporwave',
+                    values: ['vaporwave', 'classic-dark', 'classic-light', 'matrix', 'beast-slayer', 'hot-pink'],
+                    // Theme keys that were renamed: a saved old key is
+                    // rewritten to its new one rather than silently
+                    // dropping the reader back to the default theme.
+                    renamed: { 'monster-hunter': 'beast-slayer' },
+                },
+                textSize: {
+                    key: 'gospel-getter-text-size',
+                    attr: 'textSize',
+                    select: 'text-size-select',
+                    fallback: 'medium',
+                    values: ['small', 'medium', 'large', 'x-large'],
+                    renamed: {},
+                },
+                lineSpacing: {
+                    key: 'gospel-getter-line-spacing',
+                    attr: 'lineSpacing',
+                    select: 'line-spacing-select',
+                    fallback: 'normal',
+                    values: ['compact', 'normal', 'relaxed'],
+                    renamed: {},
+                },
+                readerMode: {
+                    key: 'gospel-getter-reader-mode',
+                    attr: 'readerMode',
+                    select: null,
+                    fallback: 'off',
+                    values: ['off', 'on'],
+                    renamed: {},
+                },
+            };
+
+            function store(pref, value) {
+                try {
+                    localStorage.setItem(pref.key, value);
+                } catch (e) {}
+            }
+
+            // Anything unreadable or unrecognised resolves to the default,
+            // so a stale or hand-edited value can't leave the page in a
+            // state no control can represent.
+            function load(pref) {
+                var value = null;
+                try {
+                    value = localStorage.getItem(pref.key);
+                } catch (e) {}
+                if (value && Object.prototype.hasOwnProperty.call(pref.renamed, value)) {
+                    value = pref.renamed[value];
+                    store(pref, value);
                 }
-            } catch (e) {}
+                return pref.values.indexOf(value) === -1 ? pref.fallback : value;
+            }
+
+            function apply(pref, value) {
+                if (value === pref.fallback) {
+                    delete document.documentElement.dataset[pref.attr];
+                } else {
+                    document.documentElement.dataset[pref.attr] = value;
+                }
+            }
+
+            Object.keys(PREFS).forEach(function (name) {
+                apply(PREFS[name], load(PREFS[name]));
+            });
+
+            document.addEventListener('DOMContentLoaded', function () {
+                var root = document.documentElement;
+                var settingsToggle = document.getElementById('settings-toggle');
+                var settingsMenu = document.getElementById('settings-menu');
+                var readerModeBtn = document.getElementById('reader-mode-btn');
+                var readerExit = document.getElementById('reader-exit');
+
+                function setMenuOpen(open) {
+                    settingsMenu.hidden = !open;
+                    settingsToggle.setAttribute('aria-expanded', String(open));
+                }
+
+                function isReaderMode() {
+                    return root.dataset.readerMode === 'on';
+                }
+
+                function setReaderMode(on) {
+                    var value = on ? 'on' : 'off';
+                    apply(PREFS.readerMode, value);
+                    store(PREFS.readerMode, value);
+                    readerModeBtn.setAttribute('aria-pressed', String(on));
+                    // Move focus to whichever control undoes this, so a
+                    // keyboard user always lands somewhere sensible.
+                    setMenuOpen(false);
+                    (on ? readerExit : settingsToggle).focus();
+                }
+
+                Object.keys(PREFS).forEach(function (name) {
+                    var pref = PREFS[name];
+                    if (!pref.select) return;
+                    var select = document.getElementById(pref.select);
+                    select.value = load(pref);
+                    select.addEventListener('change', function () {
+                        apply(pref, select.value);
+                        store(pref, select.value);
+                    });
+                });
+
+                readerModeBtn.setAttribute('aria-pressed', String(isReaderMode()));
+                readerModeBtn.addEventListener('click', function () {
+                    setReaderMode(!isReaderMode());
+                });
+                readerExit.addEventListener('click', function () {
+                    setReaderMode(false);
+                });
+
+                settingsToggle.addEventListener('click', function () {
+                    setMenuOpen(settingsMenu.hidden);
+                });
+
+                // Clicking anywhere outside the menu (and its toggle)
+                // closes it.
+                document.addEventListener('click', function (event) {
+                    if (!event.target.closest('#settings-menu, #settings-toggle')) {
+                        setMenuOpen(false);
+                    }
+                });
+
+                // Escape backs out one step at a time: first an open
+                // settings menu, then reading mode.
+                document.addEventListener('keydown', function (event) {
+                    if (event.key !== 'Escape') return;
+                    if (!settingsMenu.hidden) {
+                        setMenuOpen(false);
+                        settingsToggle.focus();
+                    } else if (isReaderMode()) {
+                        setReaderMode(false);
+                    }
+                });
+            });
         })();
     </script>
 </head>
 <body>
-    <button type="button" id="settings-toggle" class="settings-toggle" aria-label="Settings">&#9776;</button>
+    <button type="button" id="settings-toggle" class="settings-toggle" aria-label="Settings" aria-controls="settings-menu" aria-expanded="false">&#9776;</button>
+    <button type="button" id="reader-exit" class="reader-exit">Exit reading mode <span aria-hidden="true">(Esc)</span></button>
     <div id="settings-menu" class="settings-menu" hidden>
         <div class="settings-field">
             <label for="theme-select">Theme</label>
@@ -635,12 +896,33 @@
                 <option value="classic-dark">Classic Dark</option>
                 <option value="classic-light">Classic Light</option>
                 <option value="matrix">Matrix</option>
-                <option value="monster-hunter">Monster Hunter</option>
+                <option value="beast-slayer">Beast Slayer</option>
+                <option value="hot-pink">Hot Pink</option>
             </select>
         </div>
         <div class="settings-field">
             <label for="translation-select">Translation</label>
             <select id="translation-select"></select>
+        </div>
+        <div class="settings-field">
+            <label for="text-size-select">Text size</label>
+            <select id="text-size-select">
+                <option value="small">Small</option>
+                <option value="medium">Medium</option>
+                <option value="large">Large</option>
+                <option value="x-large">Extra large</option>
+            </select>
+        </div>
+        <div class="settings-field">
+            <label for="line-spacing-select">Line spacing</label>
+            <select id="line-spacing-select">
+                <option value="compact">Compact</option>
+                <option value="normal">Normal</option>
+                <option value="relaxed">Relaxed</option>
+            </select>
+        </div>
+        <div class="settings-field">
+            <button type="button" id="reader-mode-btn" class="reader-mode-btn" aria-pressed="false">Reading mode</button>
         </div>
     </div>
 
@@ -682,11 +964,6 @@
             const chapterList = document.getElementById('chapter-list');
             const readingPane = document.getElementById('reading-pane');
             const translationSelect = document.getElementById('translation-select');
-            const settingsToggle = document.getElementById('settings-toggle');
-            const settingsMenu = document.getElementById('settings-menu');
-            const themeSelect = document.getElementById('theme-select');
-
-            const THEME_KEY = 'gospel-getter-theme';
 
             let selectedVerseEl = null;
 
@@ -707,34 +984,6 @@
                 if (popup) popup.hidden = true;
                 selectedVerseEl = null;
             }
-
-            function closeSettingsMenu() {
-                settingsMenu.hidden = true;
-            }
-
-            function currentTheme() {
-                try {
-                    return localStorage.getItem(THEME_KEY) || 'vaporwave';
-                } catch (e) {
-                    return 'vaporwave';
-                }
-            }
-
-            function applyTheme(theme) {
-                if (theme && theme !== 'vaporwave') {
-                    document.documentElement.dataset.theme = theme;
-                } else {
-                    delete document.documentElement.dataset.theme;
-                }
-            }
-
-            themeSelect.addEventListener('change', function () {
-                const theme = themeSelect.value;
-                applyTheme(theme);
-                try {
-                    localStorage.setItem(THEME_KEY, theme);
-                } catch (e) {}
-            });
 
             function currentTranslation() {
                 return translationSelect.value;
@@ -945,16 +1194,11 @@
             // reader wants a different one); clicking a chapter number then
             // reads that one instead.
             document.body.addEventListener('click', function (event) {
-                const settingsBtn = event.target.closest('#settings-toggle');
-                if (settingsBtn) {
-                    settingsMenu.hidden = !settingsMenu.hidden;
-                    return;
-                }
-
-                // Interacting with anything inside the settings menu itself
-                // (the selects, their labels) should never be treated as a
-                // "click away" that closes it.
-                if (event.target.closest('#settings-menu')) {
+                // The settings menu, its toggle and the reading-mode exit
+                // are handled by the presentation-preferences script in
+                // <head>; they're never navigation or a "click away" from a
+                // verse selection.
+                if (event.target.closest('#settings-menu, #settings-toggle, #reader-exit')) {
                     return;
                 }
 
@@ -1040,9 +1284,8 @@
                     return;
                 }
 
-                // Anything else is a click away from the current selection(s).
+                // Anything else is a click away from the current selection.
                 closeVerseSelection();
-                closeSettingsMenu();
             });
 
             // Secondary navigation: arrow keys leaf through the whole Bible
@@ -1052,7 +1295,9 @@
             // Exodus — are handled without the client needing to know the
             // Bible's structure).
             document.addEventListener('keydown', function (event) {
-                if (event.target && /^(INPUT|TEXTAREA)$/.test(event.target.tagName)) {
+                // Arrow keys on a focused form control (e.g. a settings
+                // <select>) belong to that control, not chapter navigation.
+                if (event.target && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) {
                     return;
                 }
                 const inner = currentInner();
@@ -1087,7 +1332,6 @@
             // other navigation would — so there's exactly one code path for
             // rendering a chapter, at startup or afterward.
             async function boot() {
-                themeSelect.value = currentTheme();
                 try {
                     const home = await invoke('get_home');
                     renderBookLists(home);
