@@ -73,9 +73,13 @@ database — see "Where your data lives" below) so it re-seeds.
 → Run workflow), and attaches them to that workflow run as downloadable
 artifacts — see the
 [Actions tab](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml).
-There's no separate downloads page or GitHub release yet; artifacts live
-on the workflow run that built them (GitHub expires run artifacts after a
-retention window, so grab one from a recent run, not an old one).
+Those workflow-run artifacts are CI builds of whatever commit triggered
+the run, not releases, and GitHub expires them after a retention window.
+Tagged versions are published separately on the
+[Releases page](https://github.com/tossbaws/gospel-getter/releases), with
+the installers built from that release's tagged commit attached as
+release assets alongside a `SHA256SUMS` file — use a release unless you
+specifically want an untagged build of `main`.
 
 - **Linux**: an AppImage (works on most distros without installing
   anything) and a `.deb`, both built on Ubuntu 22.04 — Tauri's documented
@@ -94,10 +98,10 @@ retention window, so grab one from a recent run, not an old one).
 ### Arch Linux / AUR
 
 `packaging/PKGBUILD` is a source package for Arch, but it is **not yet
-published to the AUR** — publishing needs a tagged GitHub release to build
-from and a real checksum against that tag, and no release has been cut.
-The PKGBUILD itself documents the exact remaining steps at the top of the
-file.
+published to the AUR** — it still needs a real checksum against its
+release tag and a clean `makepkg` build from that tag's tarball, neither
+of which has been done. The PKGBUILD itself documents the exact remaining
+steps at the top of the file.
 
 ### Where your data lives
 

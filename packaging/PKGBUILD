@@ -3,13 +3,13 @@
 # DRAFT — the metadata, dependencies, and build/package() steps below
 # reflect the actual project layout (src-tauri/, the real dependency list
 # this binary links against, the generated icon set) and there's no
-# placeholder repo URL left. It has NOT been build-tested via `makepkg`,
-# because `source=` points at a git tag that doesn't exist yet. Before
-# this can be submitted to the AUR:
+# placeholder repo URL left. It has NOT been build-tested via `makepkg`
+# and has NOT been submitted to the AUR. `source=` points at the GitHub
+# tag for this pkgver (v$pkgver); it only resolves once that tag has been
+# pushed. Before this can be submitted to the AUR:
 #
-#   1. Tag a real release at this version and push it:
-#        git tag v2.0.0 && git push origin v2.0.0
-#      Until that tag exists, the `source=` URL below 404s.
+#   1. Confirm the v$pkgver tag exists on GitHub (it's created as part of
+#      cutting a GitHub release at this version).
 #   2. Refresh the checksum against that tag (needs network access to
 #      github.com):
 #        updpkgsums
@@ -33,7 +33,7 @@
 # normal windowed app that only runs while it's open.
 
 pkgname=gospel-getter
-pkgver=2.0.0
+pkgver=2.1.0
 pkgrel=1
 pkgdesc="A Bible reader with KJV and WEB translations, faded surrounding chapters, and quick keyboard navigation"
 arch=('x86_64' 'aarch64')
@@ -43,7 +43,7 @@ depends=('webkit2gtk-4.1' 'gtk3')
 makedepends=('cargo')
 backup=()
 source=("$pkgname-$pkgver.tar.gz::https://github.com/tossbaws/gospel-getter/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP') # replace with `updpkgsums` once the v$pkgver tag exists
+sha256sums=('SKIP') # replace with `updpkgsums` against the v$pkgver tag; never hand-write
 
 build() {
   cd "$pkgname-$pkgver/src-tauri"
