@@ -4,311 +4,191 @@
 [![Distribution Artifacts](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml/badge.svg)](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-c9a227.svg)](LICENSE)
 
-A Bible reader with a vaporwave soul: browse all 66 books, pick a chapter,
-and read — with the chapter before and after it shown in full, at reduced
-opacity, to the left and right of the one you're reading, scrolling along
-with you as one continuous page.
+An offline Bible reader for Linux and Windows. Read the KJV or WEB a chapter
+at a time with the chapters before and after shown alongside, search the
+whole Bible, compare the two translations verse by verse, and copy or
+bookmark passages. No account and no network needed.
 
-![Gospel Getter — book list and reading view](screenshots/hero-full-page.png)
+![The reading view: John 3 in the centre, with John 2 and John 4 faded on either side, under the chapter picker](screenshots/reading-neighboring-chapters.png)
 
 ## Features
 
-- Two full translations (KJV and WEB) are bundled right into the binary —
-  no network access or API keys needed, it just works offline.
-- The chapter before and after the one you're reading is shown in full,
-  faded a bit, right alongside it, and scrolls with you instead of living
-  behind a "next page" click.
-- Arrow keys move you through the whole Bible a chapter at a time,
-  correctly crossing book boundaries (Genesis 50 into Exodus 1, and so on)
-  so you never have to touch the mouse.
-- Copy a verse, or a range of verses, with its reference: click a verse
-  (Shift-click another in the same chapter for a range), then **Copy** or
-  Ctrl+C. You get the verse text exactly as stored, followed by e.g.
-  `— John 3:16–18 (WEB)`.
-- Bookmarks: ★ Bookmark a selected verse or range, see bookmarked verses
-  starred in the text, and reopen them from the Bookmarks list in
-  settings. They're saved in the app's database and work in either
-  translation.
-- One search box (`/` or Ctrl+K) that both jumps to references — `John
-  3:16`, `jn 3:16-18`, `1 Cor 13`, `Psalm 23` — and finds every verse
-  containing your words in the current translation, fully offline.
-- Compare mode (`C`, or the settings menu) shows the chapter in the KJV
-  and WEB side by side, lined up verse by verse.
-- It remembers where you left off — close it and reopen it and you're back
-  on the same chapter and translation.
-- Reading comfort controls: text size and line-spacing presets, six color
-  themes (Vaporwave, Classic Dark, Classic Light, Matrix, Beast Slayer,
-  Hot Pink), and a distraction-free reading mode that shows nothing but
-  the chapter you're reading.
-- A real native desktop app (built with Tauri): no browser, no background
-  server, no open port — just a window with its own taskbar icon.
+- **Two complete translations, fully offline.** The King James Version and
+  World English Bible are built into the app, so there are no downloads,
+  API keys or network access.
+- **Read in context.** The chapter you're reading sits in the middle with
+  the previous and next chapters faded on either side, scrolling with it.
+  ← and → turn chapters across the whole Bible, from Genesis 50 into
+  Exodus 1 and so on. Or pick a book and chapter, or try **Random chapter**.
+- **Search and go to a reference.** One search box (`/` or Ctrl+K) jumps to
+  references such as `John 3:16`, `jn 3:16-18`, `1 Cor 13` or `Psalm 23`,
+  and searches the text for anything else. Results show every verse in the
+  current translation containing all your words, in Bible order, with the
+  words highlighted.
+- **Copy verses with their reference.** Click a verse, Shift-click another
+  to select a range, then **Copy** or Ctrl+C. You get the text exactly as
+  stored, followed by e.g. `— John 3:16–18 (WEB)`.
+- **Bookmarks.** Save a verse or range with **★ Bookmark**. Bookmarked
+  verses get a ★, and the list in settings reopens any of them in
+  whichever translation you're reading.
+- **Compare translations.** Press `C` to see KJV and WEB side by side, one
+  row per verse number. Where only one translation numbers a verse, the
+  other column says so instead of shifting anything.
+- **Cross-references.** Click a verse to see related passages, and click a
+  citation to read it in place.
+- **Comfortable reading.** Six themes (Vaporwave, Classic Dark, Classic
+  Light, Matrix, Beast Slayer, Hot Pink), four text sizes, three line
+  spacings, and a distraction-free reading mode. Printing is always black
+  on white.
+- **Picks up where you left off.** Your chapter, translation, bookmarks and
+  display settings are remembered between sessions.
+- **A native desktop app.** Built with Tauri: no browser, no background
+  server, nothing listening on a port.
 
-## Screenshots
+## A quick tour
 
-| Reading with translation switching | Responsive on narrow screens |
+**Search the text, or jump straight to a reference.** Matching words are
+highlighted, and clicking a result opens and selects that verse.
+
+![The search panel listing World English Bible verses that contain "love one another", with the words highlighted](screenshots/search-results.png)
+
+**Compare the KJV and WEB verse by verse.** In Romans 14 the WEB numbers
+three verses the KJV doesn't, and the KJV column says so rather than
+shifting anything.
+
+![Romans 14 in compare mode, with KJV and WEB columns side by side and verses 24 to 26 marked "Not numbered in the KJV"](screenshots/compare-translations.png)
+
+**Select a range and copy it with its reference.** The citation underneath
+shows exactly what will be copied.
+
+![John 3:16 to 18 selected in the WEB, with Copy and Bookmark buttons and the citation "John 3:16–18 (WEB)"](screenshots/copy-verse-range.png)
+
+**Bookmark passages and come back to them.** Bookmarked verses are starred
+in the text, and the list in settings shows each one with a preview.
+
+![Psalm 23 with verses 1 to 4 starred, and the settings menu open on a Bookmarks list of Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
+
+## Keyboard
+
+| Key | Does |
 |---|---|
-| ![Translation switching](screenshots/translations-web.png) | ![Mobile layout](screenshots/mobile-view.png) |
-
-## Running it
-
-```bash
-cd src-tauri
-cargo tauri dev
-```
-
-Opens straight into a native window — nothing to browse to.
+| ← / → | Previous / next chapter, across books |
+| `/` or Ctrl+K | Open search. Enter goes to a reference; ↓ / ↑ move through results |
+| Ctrl+C | Copy the selected verses with their reference. If you've highlighted text yourself, that's copied instead, as usual |
+| `C` | Compare translations on/off |
+| Shift-click | Extend the selection to a range within the chapter |
+| Esc | Close search or settings, then clear the selection, then leave reading mode |
 
 ## Installing
 
-### Build it yourself (local developer installer)
+**Download** an installer from the
+[Releases page](https://github.com/tossbaws/gospel-getter/releases). Each
+release lists a `SHA256SUMS` file to check them with.
 
-`packaging/install.sh` builds a release AppImage (via `cargo tauri build`)
-and drops a `.desktop` launcher and icon into the usual per-user
-locations, so Gospel Getter shows up as a normal app in your launcher. See
-`packaging/` for details; `packaging/uninstall.sh` undoes it.
+- **Linux:** an AppImage (most distros, nothing to install) or a `.deb`
+  (Debian/Ubuntu).
+- **Windows:** the NSIS `setup.exe` (recommended) or an MSI. **The Windows
+  installers aren't code-signed**, so SmartScreen will probably warn about
+  an "unknown publisher". Choose "More info → Run anyway".
 
-It's also how you update — after a code change, just run it again. It
-rebuilds the AppImage and reinstalls it in place; running it again when
-nothing's changed just gives you the same build back.
+**Build and install it yourself (Linux).** `packaging/install.sh` builds a
+release AppImage and adds a launcher and icon to your desktop.
+`packaging/uninstall.sh` removes them. Rerun `install.sh` to update after
+changing the code. You'll need Rust and the Tauri CLI
+(`cargo install tauri-cli --version "^2.0.0" --locked`).
 
-Bundled Bible data only ever gets added to, not overwritten. Adding a
-translation to `TRANSLATIONS` and reinstalling seeds just that new one
-into your existing database — it checks by translation code what's
-actually missing, not just whether the database is empty. Fixing a typo
-in a translation that's already seeded won't reach an existing install on
-its own; you'd need to clear that translation's rows (or the whole
-database — see "Where your data lives" below) so it re-seeds.
+**Run from source.** `cd src-tauri && cargo tauri dev`.
 
-### Downloadable builds (Linux and Windows)
+**Arch Linux.** `packaging/PKGBUILD` is a draft. It hasn't been tested with
+`makepkg` and is **not published to the AUR**; the file lists what's left
+to do.
 
-`.github/workflows/dist.yml` builds real installers on every push to
-`main`, on pull requests, and on demand (Actions → Distribution Artifacts
-→ Run workflow), and attaches them to that workflow run as downloadable
-artifacts — see the
-[Actions tab](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml).
-Those workflow-run artifacts are CI builds of whatever commit triggered
-the run, not releases, and GitHub expires them after a retention window.
-Tagged versions are published separately on the
-[Releases page](https://github.com/tossbaws/gospel-getter/releases), with
-the installers built from that release's tagged commit attached as
-release assets alongside a `SHA256SUMS` file — use a release unless you
-specifically want an untagged build of `main`.
+Every push to `main` also builds untagged installers as
+[workflow artifacts](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml).
+These expire after a while, so use a release unless you want a specific
+`main` build.
 
-- **Linux**: an AppImage (works on most distros without installing
-  anything) and a `.deb`, both built on Ubuntu 22.04 — Tauri's documented
-  baseline for AppImage/deb compatibility with older glibc/webkit2gtk than
-  whatever `ubuntu-latest` happens to be this month.
-- **Windows**: an NSIS `setup.exe`, built and silently install/uninstall
-  smoke-tested on `windows-latest`. **These builds are not code-signed.**
-  Windows SmartScreen will very likely warn that the installer is from an
-  "unknown publisher" until a code-signing certificate is set up for this
-  project — that hasn't happened yet, and this README won't claim
-  otherwise. Choosing "More info → Run anyway" is expected for now, not a
-  sign of a broken build. An MSI is also produced when the bundler
-  succeeds in building one; if a given run doesn't have one, the NSIS
-  installer is still there and is the one to use.
+## Your data
 
-### Arch Linux / AUR
-
-`packaging/PKGBUILD` is a source package for Arch, but it is **not yet
-published to the AUR** — it still needs a real checksum against its
-release tag and a clean `makepkg` build from that tag's tarball, neither
-of which has been done. The PKGBUILD itself documents the exact remaining
-steps at the top of the file.
-
-### Where your data lives
-
-The app's database (translations, cross-references, reading position,
-bookmarks, and the search index) lives in the platform's standard per-app data directory — on Linux,
-`~/.local/share/com.tossbaws.gospel-getter/gospel_getter.db`.
-
-If you're upgrading from the old browser-based version of Gospel Getter
-(the one that ran a local server at `localhost:3002`), the first launch
-of the new app copies your existing database from its old location,
-`~/.local/share/gospel-getter/data/gospel_getter.db`, into the new one —
-your reading position and everything else carries over automatically.
-That copy is one-way and non-destructive: the old file is left exactly
-where it was, untouched, so nothing is lost even if something goes wrong.
-It's safe to delete once you've confirmed the new app has everything you
-expect.
-
-## Navigating
-
-- The books list is always visible — click a book to jump to its first
-  chapter (and bring up its chapter grid if you want a different one),
-  then click a chapter number to read that one.
-- Arrow keys (&larr; / &rarr;) move one chapter at a time through the whole
-  Bible, crossing book boundaries as needed (the end of Genesis leads into
-  the start of Exodus), same as clicking the previous/next chapter's
-  heading in the faded side columns.
-- Click any verse in the chapter you're reading to select it: it shows
-  its cross-references (if it has any) and a **Copy** button. Shift-click
-  a second verse in the same chapter to select the whole range between
-  them; the faded neighboring chapters can't be added. **Copy** (or
-  Ctrl+C) puts the text on the clipboard as
-  `<verse text> — <Book> <chapter>:<verse> (<TRANSLATION>)`, with a range's
-  verses joined by spaces and cited as `3:16–18`. It confirms "Copied", or
-  says why it couldn't. Esc, clicking elsewhere, changing chapter or
-  switching translation clears the selection. If you've highlighted text
-  yourself, Ctrl+C copies just that, as usual.
-- With a verse or range selected, **★ Bookmark** saves it (and becomes
-  **★ Remove bookmark** if that exact passage is already saved).
-  Bookmarked verses get a small ★ after their number. The **Bookmarks**
-  list in settings shows them newest first, each with its reference and
-  the start of its first verse in the current translation; click one to
-  open and select it, or × to remove it. A bookmark is just book,
-  chapter and verse numbers, so it opens in whichever translation you're
-  reading. KJV and WEB number a few verses differently (for example,
-  Matthew 2:23 is only in the WEB's numbering); if the current
-  translation doesn't number a bookmarked verse, the list says so, and
-  opening it shows its chapter with a notice rather than some other
-  verse.
-- Press `/` or Ctrl+K (or the &#8981; button, top right) to search. Type a
-  reference and press Enter to go there and select it: full names or
-  common abbreviations (`gen`, `ex`, `ps`/`psa`, `mt`/`matt`, `jn`/`jhn`,
-  `1 cor`/`1co`, `rev`, …), numbered books as `1 John`, `1jn` or
-  `I John`, then a chapter, `chapter:verse` or `chapter:verse-verse`. In a
-  one-chapter book, `Jude 5` means verse 5. A reference that doesn't exist
-  (`John 22`, `Jude 2:1`) says so instead of going anywhere. Anything else
-  is a word search: every verse in the current translation containing
-  all the words, in Bible order, 50 at a time, with the words
-  highlighted. Words match whole and exactly — no stemming or fuzzy
-  matching. ↓/↑ move through results, Enter or a click opens one, and
-  switching translation reruns the search. Esc closes the box.
-- **Compare translations** (settings, or `C`) replaces the faded
-  neighboring chapters with the chapter in both translations, one row
-  per verse number, each column labeled. Where only one translation
-  numbers a verse, the other column says "Not numbered in the KJV" (or
-  WEB) instead of shifting anything. Select, copy and bookmark in either
-  column — Copy uses the clicked column's text and translation code.
-  Arrow keys, search and bookmarks work as usual; on narrow windows the
-  two translations stack under each verse number. The mode is
-  remembered across restarts.
-- The translation dropdown switches translations for whatever you're
-  currently reading, and remembers your choice across visits.
-- The &#9776; button (top right) opens settings: theme, translation, text
-  size (Small / Medium / Large / Extra large), line spacing (Compact /
-  Normal / Relaxed), **Compare translations**, **Reading mode** and your
-  **Bookmarks**. Everything in it is keyboard
-  reachable, and Esc closes it. Text size and spacing only affect the
-  chapter text, not the rest of the interface.
-- Reading mode hides the book list, chapter grid, side columns, header
-  and footer. Arrow keys still turn chapters, and the &#9776; settings
-  button stays available. Leave it with the **Exit reading mode** button or
-  Esc.
-- Theme, text size, line spacing, compare and reading mode are display preferences
-  stored locally in the app's webview, not in the database. They're
-  remembered across restarts, so if you close the app in reading mode it
-  reopens in reading mode, with the exit button showing. Printing always
-  uses black on white at the default size, whatever you've picked on
-  screen.
+- Everything (translations, cross-references, reading position, bookmarks
+  and the search index) lives in one SQLite database in the per-app data
+  folder. On Linux that's
+  `~/.local/share/com.tossbaws.gospel-getter/gospel_getter.db`; on Windows
+  it's under `%APPDATA%\com.tossbaws.gospel-getter\`.
+- **Upgrades keep your data.** A new version adds any new tables and builds
+  the search index once, in the background, without changing scripture
+  text, your reading position or your bookmarks. Moving back to an older
+  version after upgrading hasn't been tested.
+- Theme, text size, line spacing, compare and reading mode are display
+  settings stored in the app's web storage, not the database.
+- Coming from the old browser-based Gospel Getter (the local server on
+  `localhost:3002`)? The first launch copies its database from
+  `~/.local/share/gospel-getter/data/gospel_getter.db` and leaves the
+  original untouched.
 
 ## Translations
 
-Bundled: King James Version (`kjv`) and World English Bible (`web`) — both
-public domain, so both are embedded in the binary like everything else, no
-API key or network access needed.
+Both bundled translations are public domain, which is what allows them to
+ship offline. Copyrighted translations such as the NIV and ESV aren't
+bundled; including one would need a licence that permits an offline copy.
 
-NIV and ESV aren't included, and that's deliberate:
+**Adding a translation** with a licence that allows an offline copy:
 
-- NIV has no free API or downloadable text. Real access goes through
-  API.Bible and starts around $10/month per translation for commercial
-  use, and the free tier excludes NIV outright.
-- ESV has a free API (`api.esv.org`, non-commercial), but its terms cap
-  cached/downloaded text at 500 verses, and no more than half of any one
-  book — it can't be bundled offline the way KJV and WEB are. Supporting
-  it would mean a second translation module type: a live API call per
-  request, with a reader-supplied API key, instead of an embedded one.
+1. Add a JSON file to `src-tauri/data/` shaped like `kjv.json`: 66 books in
+   canonical order, each `{"name", "testament", "chapters": [[verse, ...], ...]}`.
+2. Add an entry to `TRANSLATIONS` in `src-tauri/src/db/seed.rs`.
 
-### Adding a new translation
-
-For anything with a compatible license (public domain, or terms that
-permit an offline/bulk copy):
-
-1. Build a JSON file shaped like `src-tauri/data/kjv.json` — an array of 66
-   objects, `{"name": "...", "testament": "OT"|"NT", "chapters": [[verse, verse, ...], ...]}`,
-   in canonical Genesis-to-Revelation order.
-2. Drop it in `src-tauri/data/`.
-3. Add one entry to the `TRANSLATIONS` list in `src-tauri/src/db/seed.rs`
-   (`code`, `name`, `include_str!(...)` for the new file).
-
-That's it — the seed step, schema, and translation picker all pick it up
-automatically. A translation that can only be accessed live, like ESV,
-would need some translation-specific fetch code instead of just a data
-file. Nobody's built that yet, since neither bundled translation needs it.
+Existing installs seed only translations they don't already have. To
+correct the text of one that's already seeded, clear its rows (or the
+whole database) so it seeds again.
 
 ## How it's put together
 
-- A Tauri 2 desktop app: `src-tauri/` is the Rust backend (`sqlx`/SQLite),
-  `ui/` is a single static `index.html` — plain HTML/CSS/JS, no framework
-  and no Node build step. The frontend calls a handful of typed Tauri
-  commands (`get_home`, `get_chapters`, `get_reading`, `get_xref_text`,
-  `list_bookmarks`/`add_bookmark`/`remove_bookmark`, `search`,
-  `get_compare`) instead of making HTTP requests; there's no server and nothing listens
-  on a port. Copying uses the webview's own `navigator.clipboard.writeText`
-  (no clipboard plugin or extra permission).
-- `books` (name/testament/chapter count) is shared across translations,
-  but `verses` is keyed by `(translation_id, book_id, chapter, verse)`, so
-  each translation has its own verse text and its own verse counts per
-  chapter. Translations occasionally split or number a verse differently —
-  chapter counts line up across KJV and WEB, but individual verse counts
-  don't always, and that's expected, not a bug.
-- `src-tauri/src/domain/bible.rs` holds the only interesting logic:
-  computing the chapter before and after any given one, crossing book
-  boundaries as needed. It's pure, unit-tested without touching a
-  database, and doesn't care which translation is selected.
-  `domain/query.rs` decides whether search input is a reference (with the
-  book-abbreviation table) or words to search for.
-- Search uses an SQLite FTS5 index, `verse_search`, derived from `verses`
-  and never written back to it. It stores no text of its own, only the
-  words and each verse's coordinates; results always show the text from
-  `verses`. It's built in the background on the first launch after
-  installing or upgrading (a fraction of a second), and again only for a
-  translation that's newly seeded — not on every launch.
-- The reading pane (current chapter plus its faded neighbors) is built
-  from one command, `get_reading`, and rendered by one function in
-  `ui/index.html` — used both on startup and for every chapter click,
-  arrow key press, and translation switch — so there's exactly one code
-  path for putting a chapter on screen.
+- **Two parts:** `src-tauri/` is the Rust backend (Tauri 2, `sqlx`/SQLite),
+  and `ui/index.html` is the whole frontend in plain HTML, CSS and
+  JavaScript, with no framework or build step. The frontend calls typed
+  Tauri commands, not HTTP.
+- **Data model:** book structure is shared between translations, but each
+  translation keeps its own verse text and numbering. KJV and WEB number a
+  few verses differently, which is expected.
+- **Logic:** `domain/bible.rs` works out the previous and next chapter, and
+  `domain/query.rs` decides whether search input is a reference or words.
+- **Search:** uses an SQLite FTS5 index derived from `verses`. It's never
+  written back, and results always show the stored text.
+- **Copying:** uses the webview's own clipboard API, with no plugin or extra
+  permission.
 
 ## Tests
 
-`cargo test` (from `src-tauri/`) covers the backend — including fresh and
-v2.1.0-upgrade databases, bookmarks, the search index and reference
-parsing — and checks the bundled markup. Frontend behavior (selection,
-copying, bookmarks, search, compare, keyboard handling) is tested by
-loading the real `ui/index.html` into jsdom, with its Tauri calls answered
-by the app's real command logic and a throwaway database, through a small
-test-only bridge (`src-tauri/examples/frontend_bridge.rs`, built by
-`npm test`):
-
 ```bash
-cd tests/frontend
-npm ci
-npm test
+# From the repository root; each line runs on its own.
+(cd src-tauri && cargo test)                   # backend: database, upgrades, search, references
+(cd tests/frontend && npm ci && npm test)      # frontend behavior
 ```
+
+The frontend tests load the real `ui/index.html` into jsdom and answer its
+calls with the app's real command code and a throwaway database, through a
+test-only bridge (`src-tauri/examples/frontend_bridge.rs`). CI runs both,
+plus `cargo fmt` and Clippy.
 
 ## Data provenance and textual integrity
 
-No verse text is ever altered, cleaned up, or "corrected" here — both
-translations are stored exactly as their source provides them.
+No verse text is altered, cleaned up or "corrected"; both translations are
+stored exactly as their sources provide them.
 
-- KJV comes from a public-domain JSON dataset, thiagobodruk/bible. That
-  source renders the KJV's translator-supplied-word italics and
-  Hebrew/Greek marginal notes inline as `{...}` groups, affecting roughly
-  56% of verses, and that's preserved verbatim, braces and all — including
-  the handful of spots where the source's own markup is broken (Hebrews
-  10:34 has a stray unmatched `}` in the upstream data, and it stays that
-  way rather than getting "fixed"). The only changes made are non-textual:
-  stripping the file's UTF-8 BOM and reshaping the JSON into this app's
-  schema — splitting it into book/testament/chapters, a restructuring of
-  the container, not the verse text inside it.
-- WEB comes from TehShrike/world-english-bible (public domain, via
-  ebible.org), one file per book. The only transformation is reassembling
-  verse fragments the source itself splits across multiple entries —
-  needed for poetic books like Psalms, where one verse is often several
-  "line" entries — joined in the source's own order, with nothing added,
-  removed, or reworded.
+- **KJV** comes from the public-domain dataset thiagobodruk/bible. That
+  source marks translator-supplied words and marginal notes inline as
+  `{...}`, in about 56% of verses. These are kept verbatim, including a
+  few places where the source's own markup is broken (Hebrews 10:34 has an
+  unmatched `}`). The only changes are structural: removing the file's
+  byte-order mark and reshaping the JSON.
+- **WEB** comes from TehShrike/world-english-bible (public domain, via
+  ebible.org). Verses the source splits into several entries, as in the
+  Psalms' poetry, are joined back together in the source's own order, with
+  nothing added, removed or reworded.
+
+Cross-references are from [OpenBible.info](https://www.openbible.info/labs/cross-references/)
+under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 ## License
 
