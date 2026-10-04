@@ -173,16 +173,210 @@
             border-color: var(--accent);
         }
 
+        /* Search sits beside the settings toggle and, like it, stays
+           available in reading mode. */
+        .search-toggle {
+            position: fixed;
+            top: 1rem;
+            right: 4.6rem;
+            z-index: 20;
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            color: var(--accent);
+            font-size: 1.4rem;
+            line-height: 1;
+            padding: 0.4rem 0.6rem;
+            cursor: pointer;
+        }
+
+        .search-toggle:hover {
+            border-color: var(--accent);
+        }
+
+        /* Opaque (--option-bg), unlike the other panels: results are read
+           over the chapter text underneath. */
+        .search-panel {
+            position: fixed;
+            top: 3.6rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 30;
+            width: min(640px, calc(100vw - 2rem));
+            max-height: calc(100vh - 5rem);
+            overflow-y: auto;
+            background: var(--option-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 8px;
+            padding: 0.9rem;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+        }
+
+        .search-input {
+            width: 100%;
+            font-family: inherit;
+            font-size: 1rem;
+            color: var(--text);
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            padding: 0.5rem 0.7rem;
+        }
+
+        .search-status {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            margin: 0.5rem 0 0.3rem;
+            min-height: 1em;
+        }
+
+        .search-status.is-error {
+            color: var(--text);
+            font-weight: bold;
+        }
+
+        .search-results {
+            list-style: none;
+        }
+
+        .search-result {
+            display: block;
+            width: 100%;
+            text-align: left;
+            font-family: inherit;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: var(--text);
+            background: none;
+            border: none;
+            border-bottom: 1px solid var(--accent-dim);
+            padding: 0.5rem 0.3rem;
+            cursor: pointer;
+        }
+
+        .search-result:hover,
+        .search-result:focus-visible {
+            background: rgba(var(--accent-rgb), 0.12);
+        }
+
+        .search-ref {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .search-text mark {
+            background: rgba(var(--accent-rgb), 0.3);
+            color: inherit;
+            border-radius: 2px;
+        }
+
+        .search-more {
+            margin-top: 0.6rem;
+        }
+
+        .bookmark-list {
+            list-style: none;
+            max-height: 16rem;
+            overflow-y: auto;
+        }
+
+        .bookmark-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.3rem;
+            border-bottom: 1px solid var(--accent-dim);
+        }
+
+        .bookmark-open {
+            flex: 1 1 auto;
+            min-width: 0;
+            text-align: left;
+            font-family: inherit;
+            color: var(--text);
+            background: none;
+            border: none;
+            padding: 0.4rem 0.2rem;
+            cursor: pointer;
+        }
+
+        .bookmark-open:hover {
+            background: rgba(var(--accent-rgb), 0.12);
+        }
+
+        .bookmark-ref {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--accent);
+        }
+
+        /* Two lines of the stored text at most: clipped visually, never
+           shortened. */
+        .bookmark-preview {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            overflow: hidden;
+            font-size: 0.75rem;
+            line-height: 1.35;
+            color: var(--text-dim);
+        }
+
+        .bookmark-preview.is-missing,
+        .bookmark-partial {
+            font-style: italic;
+        }
+
+        .bookmark-partial {
+            display: block;
+            font-size: 0.7rem;
+            color: var(--text-dim);
+        }
+
+        .bookmark-remove {
+            flex: 0 0 auto;
+            font-family: inherit;
+            font-size: 1.1rem;
+            line-height: 1;
+            color: var(--text-dim);
+            background: none;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            padding: 0.3rem 0.45rem;
+            cursor: pointer;
+        }
+
+        .bookmark-remove:hover {
+            color: var(--accent);
+            border-color: var(--accent-dim);
+        }
+
+        .bookmark-empty {
+            font-size: 0.8rem;
+            font-style: italic;
+            color: var(--text-dim);
+        }
+
+        .bookmark-empty.is-error {
+            color: var(--text);
+            font-style: normal;
+            font-weight: bold;
+        }
+
+        /* Opaque (--option-bg), like the search panel: the menu now holds
+           bookmark previews, read over the chapter text underneath. */
         .settings-menu {
             position: fixed;
             top: 3.4rem;
             right: 1.5rem;
             z-index: 20;
-            background: var(--panel-bg);
+            background: var(--option-bg);
             border: 1px solid var(--accent-dim);
             border-radius: 8px;
             padding: 1rem;
-            min-width: 220px;
+            width: 300px;
             max-width: calc(100vw - 2rem);
             max-height: calc(100vh - 4.4rem);
             overflow-y: auto;
@@ -202,7 +396,8 @@
             margin-bottom: 0;
         }
 
-        .settings-field label {
+        .settings-field label,
+        .settings-label {
             display: block;
             font-size: 0.75rem;
             text-transform: uppercase;
@@ -233,6 +428,12 @@
         }
 
         .settings-toggle:focus-visible,
+        .search-toggle:focus-visible,
+        .search-input:focus-visible,
+        .search-more:focus-visible,
+        .bookmark-open:focus-visible,
+        .bookmark-remove:focus-visible,
+        .verse-bookmark-btn:focus-visible,
         .settings-field select:focus-visible,
         .reader-mode-btn:focus-visible,
         .reader-exit:focus-visible {
@@ -241,7 +442,8 @@
         }
 
         .reader-mode-btn,
-        .reader-exit {
+        .reader-exit,
+        .search-more {
             font-family: inherit;
             font-size: 0.85rem;
             color: var(--accent);
@@ -254,6 +456,11 @@
 
         .reader-mode-btn {
             width: 100%;
+        }
+
+        .reader-mode-btn[aria-pressed="true"] {
+            background: var(--accent);
+            color: var(--on-accent);
         }
 
         .reader-mode-btn:hover,
@@ -270,7 +477,7 @@
         .reader-exit {
             position: fixed;
             top: 1rem;
-            right: 4.6rem;
+            right: 7.7rem;
             z-index: 20;
             padding: 0.45rem 0.8rem;
         }
@@ -540,14 +747,160 @@
             position: relative;
         }
 
-        .chapter-main .verse.has-xref {
+        /* Every verse of the chapter being read is selectable (click, then
+           Shift-click to extend). The faded neighbors aren't: they stay
+           plain text. */
+        .chapter-main > .verse {
             cursor: pointer;
         }
 
+        /* The 4px spread on each side exactly fills the 0.5rem gap between
+           verses, so a selected range reads as one continuous block. */
         .chapter-main .verse.verse-selected {
             background: rgba(var(--accent-rgb), 0.12);
             border-radius: 4px;
             box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
+        }
+
+        /* Actions for the current verse selection. Shown under the last
+           selected verse, or at the top of a single verse's
+           cross-reference popup when it has one. */
+        .verse-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.4rem 0.7rem;
+            margin-top: 0.4rem;
+            padding: 0.5rem 0.8rem;
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            cursor: default;
+        }
+
+        .xref-popup .verse-actions {
+            margin: 0 0 0.5rem;
+            padding: 0 0 0.5rem;
+            background: none;
+            border: none;
+            border-bottom: 1px solid var(--accent-dim);
+            border-radius: 0;
+        }
+
+        .verse-copy-btn,
+        .verse-bookmark-btn {
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--accent);
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            padding: 0.2rem 0.7rem;
+            cursor: pointer;
+        }
+
+        .verse-copy-btn:hover,
+        .verse-bookmark-btn:hover {
+            border-color: var(--accent);
+        }
+
+        .verse-copy-btn:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        /* A small star after the number of every bookmarked verse. A
+           pseudo-element, so it's never part of the verse's text. */
+        .chapter-main .verse.is-bookmarked .verse-num::after {
+            content: '\2605';
+            margin-left: 0.15rem;
+            color: var(--accent);
+        }
+
+        .reader-notice:not([hidden]) {
+            display: block;
+            margin-bottom: 1rem;
+            padding: 0.6rem 0.9rem;
+            background: var(--panel-bg);
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+
+        /* Compare: one column per translation, one grid row per verse
+           number, so verses with the same number always sit side by side
+           and both columns scroll together with the page. */
+        .compare-grid {
+            display: grid;
+            grid-template-columns: repeat(var(--compare-columns, 2), minmax(0, 1fr));
+            column-gap: 1.5rem;
+            align-items: start;
+        }
+
+        .compare-head {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: var(--option-bg);
+            color: var(--accent);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 0.4rem 0;
+            margin-bottom: 0.5rem;
+            border-bottom: 1px solid var(--accent-dim);
+        }
+
+        .compare-head-code {
+            color: var(--text-dim);
+        }
+
+        .compare-gap {
+            font-size: calc(0.9rem * var(--reading-scale));
+            line-height: var(--reading-leading);
+            margin-bottom: 0.5rem;
+            color: var(--text-dim);
+            font-style: italic;
+            border: 1px dashed var(--accent-dim);
+            border-radius: 4px;
+            padding: 0 0.4rem;
+        }
+
+        /* Too narrow for columns: each verse number's translations stack,
+           each labeled with its translation's code. */
+        @media (max-width: 640px) {
+            .compare-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .compare-head {
+                display: none;
+            }
+
+            .compare-grid > [data-code]::before {
+                content: attr(data-code);
+                display: inline-block;
+                margin-right: 0.4rem;
+                font-size: 0.65rem;
+                font-style: normal;
+                letter-spacing: 0.05em;
+                color: var(--text-dim);
+            }
+        }
+
+        .verse-actions-ref {
+            color: var(--text-dim);
+        }
+
+        .verse-actions-status {
+            color: var(--accent);
+        }
+
+        .verse-actions-status.is-error {
+            color: var(--text);
+            font-weight: bold;
         }
 
         .xref-popup:not([hidden]) {
@@ -705,8 +1058,16 @@
             .chapter-side,
             .nav-hint,
             footer,
-            .xref-popup {
+            .xref-popup,
+            .verse-actions,
+            .search-toggle,
+            .search-panel,
+            .reader-notice {
                 display: none !important;
+            }
+
+            .chapter-main .verse.is-bookmarked .verse-num::after {
+                content: none !important;
             }
 
             body {
@@ -777,6 +1138,17 @@
                     values: ['off', 'on'],
                     renamed: {},
                 },
+                // Compare translations side by side. The main script reads
+                // the attribute when it renders a chapter, and re-renders
+                // on the 'gospel-getter:compare-change' event below.
+                compare: {
+                    key: 'gospel-getter-compare',
+                    attr: 'compare',
+                    select: null,
+                    fallback: 'off',
+                    values: ['off', 'on'],
+                    renamed: {},
+                },
             };
 
             function store(pref, value) {
@@ -818,6 +1190,7 @@
                 var settingsMenu = document.getElementById('settings-menu');
                 var readerModeBtn = document.getElementById('reader-mode-btn');
                 var readerExit = document.getElementById('reader-exit');
+                var compareBtn = document.getElementById('compare-btn');
 
                 function setMenuOpen(open) {
                     settingsMenu.hidden = !open;
@@ -858,6 +1231,15 @@
                     setReaderMode(false);
                 });
 
+                compareBtn.setAttribute('aria-pressed', String(root.dataset.compare === 'on'));
+                compareBtn.addEventListener('click', function () {
+                    var value = root.dataset.compare === 'on' ? 'off' : 'on';
+                    apply(PREFS.compare, value);
+                    store(PREFS.compare, value);
+                    compareBtn.setAttribute('aria-pressed', String(value === 'on'));
+                    document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
+                });
+
                 settingsToggle.addEventListener('click', function () {
                     setMenuOpen(settingsMenu.hidden);
                 });
@@ -871,9 +1253,13 @@
                 });
 
                 // Escape backs out one step at a time: first an open
-                // settings menu, then reading mode.
+                // settings menu, then a verse selection, then reading
+                // mode. The main script's handler runs first (it's
+                // registered before DOMContentLoaded) and marks an Escape
+                // that cleared a verse selection as handled.
                 document.addEventListener('keydown', function (event) {
                     if (event.key !== 'Escape') return;
+                    if (event.defaultPrevented) return;
                     if (!settingsMenu.hidden) {
                         setMenuOpen(false);
                         settingsToggle.focus();
@@ -887,7 +1273,14 @@
 </head>
 <body>
     <button type="button" id="settings-toggle" class="settings-toggle" aria-label="Settings" aria-controls="settings-menu" aria-expanded="false">&#9776;</button>
+    <button type="button" id="search-toggle" class="search-toggle" aria-label="Search or go to a reference" aria-controls="search-panel" aria-expanded="false" title="Search or go to a reference (/ or Ctrl+K)">&#8981;</button>
     <button type="button" id="reader-exit" class="reader-exit">Exit reading mode <span aria-hidden="true">(Esc)</span></button>
+    <div id="search-panel" class="search-panel" role="dialog" aria-label="Search" hidden>
+        <input type="search" id="search-input" class="search-input" placeholder="Words, or a reference like John 3:16" aria-label="Search the text, or go to a reference" aria-describedby="search-status" autocomplete="off" spellcheck="false">
+        <p id="search-status" class="search-status" role="status" aria-live="polite"></p>
+        <ul id="search-results" class="search-results"></ul>
+        <button type="button" id="search-more" class="search-more" hidden>Show more</button>
+    </div>
     <div id="settings-menu" class="settings-menu" hidden>
         <div class="settings-field">
             <label for="theme-select">Theme</label>
@@ -922,7 +1315,14 @@
             </select>
         </div>
         <div class="settings-field">
+            <button type="button" id="compare-btn" class="reader-mode-btn" aria-pressed="false">Compare translations <span aria-hidden="true">(C)</span></button>
+        </div>
+        <div class="settings-field">
             <button type="button" id="reader-mode-btn" class="reader-mode-btn" aria-pressed="false">Reading mode</button>
+        </div>
+        <div class="settings-field">
+            <span class="settings-label" id="bookmark-list-label">Bookmarks</span>
+            <ul id="bookmark-list" class="bookmark-list" aria-labelledby="bookmark-list-label"></ul>
         </div>
     </div>
 
@@ -946,9 +1346,11 @@
 
         <div id="chapter-list"></div>
 
+        <p id="reader-notice" class="reader-notice" role="status" hidden></p>
+
         <div id="reading-pane"></div>
 
-        <p class="nav-hint">Use &larr; and &rarr; to move a chapter at a time.</p>
+        <p class="nav-hint">Use &larr; and &rarr; to move a chapter at a time, / to search, C to compare translations.</p>
 
         <footer>Gospel Getter &mdash; read the whole counsel of God, one chapter at a time.</footer>
     </div>
@@ -959,13 +1361,65 @@
 
             const invoke = window.__TAURI__.core.invoke;
 
+            const root = document.documentElement;
             const otBookGrid = document.getElementById('ot-book-grid');
             const ntBookGrid = document.getElementById('nt-book-grid');
             const chapterList = document.getElementById('chapter-list');
             const readingPane = document.getElementById('reading-pane');
+            const readerNotice = document.getElementById('reader-notice');
             const translationSelect = document.getElementById('translation-select');
+            const settingsMenu = document.getElementById('settings-menu');
+            const settingsToggle = document.getElementById('settings-toggle');
+            const bookmarkList = document.getElementById('bookmark-list');
+            const searchToggle = document.getElementById('search-toggle');
+            const searchPanel = document.getElementById('search-panel');
+            const searchInput = document.getElementById('search-input');
+            const searchStatus = document.getElementById('search-status');
+            const searchResults = document.getElementById('search-results');
+            const searchMore = document.getElementById('search-more');
 
-            let selectedVerseEl = null;
+            // Every verse the reader can select: the chapter being read, in
+            // each translation column it's shown in. Neither the faded
+            // neighbors nor cross-reference text carry data-translation.
+            const SELECTABLE = '.chapter-main .verse[data-translation]';
+
+            // The chapter in the reading column: which one, and its verses
+            // in each translation on screen (just the selected one, or all
+            // of them while comparing), exactly as the backend returned
+            // them. Anything that acts on a verse selection reads verse
+            // text from here, never from the rendered DOM, so verse
+            // numbers, popup labels and markup can't leak into it.
+            let reading = null;
+
+            // The reader's verse selection: a contiguous, inclusive range
+            // of verse numbers in one translation column of `reading`'s
+            // chapter — `anchor` is the verse clicked first, which
+            // Shift-click extends from — or null. It's dropped whenever a
+            // chapter is rendered (navigation, a translation switch, or
+            // entering/leaving compare), since verse numbering isn't
+            // guaranteed to line up across translations.
+            let selection = null;
+
+            // Every bookmark, newest first, as list_bookmarks returned it
+            // for the selected translation.
+            let bookmarks = [];
+
+            // The last get_reading and get_compare results, so switching
+            // compare on or off re-renders without re-reading the chapter.
+            let lastDto = null;
+            let lastCompare = null;
+            let loadToken = 0;
+
+            const verseActions = document.createElement('span');
+            verseActions.className = 'verse-actions';
+            verseActions.innerHTML = `<button type="button" class="verse-copy-btn">Copy</button>
+                <button type="button" class="verse-bookmark-btn">&#9733; Bookmark</button>
+                <span class="verse-actions-ref"></span>
+                <span class="verse-actions-status" role="status" aria-live="polite"></span>`;
+            const actionStatus = verseActions.querySelector('.verse-actions-status');
+            const bookmarkBtn = verseActions.querySelector('.verse-bookmark-btn');
+            let actionAttempt = 0;
+            let actionStatusTimer = null;
 
             function escapeHtml(value) {
                 return String(value).replace(/[&<>"']/g, (c) => ({
@@ -977,21 +1431,302 @@
                 }[c]));
             }
 
-            function closeVerseSelection() {
-                if (!selectedVerseEl) return;
-                selectedVerseEl.classList.remove('verse-selected');
-                const popup = selectedVerseEl.querySelector('.xref-popup');
-                if (popup) popup.hidden = true;
-                selectedVerseEl = null;
-            }
-
             function currentTranslation() {
                 return translationSelect.value;
+            }
+
+            function translationName(code) {
+                const option = [...translationSelect.options].find((o) => o.value === code);
+                return option ? option.textContent : code.toUpperCase();
             }
 
             function currentInner() {
                 return document.getElementById('reading-pane-inner');
             }
+
+            function isComparing() {
+                return root.dataset.compare === 'on';
+            }
+
+            function verseRange(start, end) {
+                return start === end ? `${start}` : `${start}–${end}`;
+            }
+
+            // ---- Verse selection (GH-10), shared by copying, bookmarks,
+            // search results and compare.
+
+            function columnVerses(code) {
+                const column = reading && reading.columns[code];
+                return column ? column.verses : [];
+            }
+
+            function hasVerse(code, number) {
+                return columnVerses(code).some((v) => v.number === number);
+            }
+
+            function verseElement(code, number) {
+                return document.querySelector(`${SELECTABLE}[data-translation="${code}"][data-verse="${number}"]`);
+            }
+
+            function selectionVerses() {
+                if (!reading || !selection) return [];
+                return columnVerses(selection.translationCode)
+                    .filter((v) => v.number >= selection.start && v.number <= selection.end)
+                    .sort((a, b) => a.number - b.number);
+            }
+
+            // "John 3:16 (WEB)", or "John 3:16–18 (WEB)" for a range.
+            function selectionCitation() {
+                const { start, end, translationCode } = selection;
+                return `${reading.bookName} ${reading.chapter}:${verseRange(start, end)} (${translationCode.toUpperCase()})`;
+            }
+
+            // The verses' stored text, unaltered, joined by single spaces,
+            // then " — " and the citation.
+            function selectionClipboardText() {
+                const text = selectionVerses().map((v) => v.text).join(' ');
+                return `${text} — ${selectionCitation()}`;
+            }
+
+            function setActionStatus(message, isError) {
+                clearTimeout(actionStatusTimer);
+                actionStatus.textContent = message;
+                actionStatus.classList.toggle('is-error', isError);
+                if (message && !isError) {
+                    actionStatusTimer = setTimeout(() => setActionStatus('', false), 2500);
+                }
+            }
+
+            // Reflects `selection` in the reading column: highlights the
+            // selected verses, shows a lone selected verse's
+            // cross-references (a range shows none), and puts the actions
+            // under the last selected verse.
+            function renderSelection() {
+                actionAttempt += 1;
+                setActionStatus('', false);
+                const single = selection && selection.start === selection.end;
+                let last = null;
+                document.querySelectorAll(SELECTABLE).forEach((el) => {
+                    const number = Number(el.dataset.verse);
+                    const selected = !!selection
+                        && el.dataset.translation === selection.translationCode
+                        && number >= selection.start
+                        && number <= selection.end;
+                    el.classList.toggle('verse-selected', selected);
+                    const popup = el.querySelector('.xref-popup');
+                    if (popup) popup.hidden = !(selected && single);
+                    if (selected && number === selection.end) last = el;
+                });
+                if (!last) {
+                    verseActions.remove();
+                    return;
+                }
+                const popup = single ? last.querySelector('.xref-popup') : null;
+                if (popup) {
+                    popup.prepend(verseActions);
+                } else {
+                    last.append(verseActions);
+                }
+                verseActions.querySelector('.verse-actions-ref').textContent = selectionCitation();
+                updateBookmarkButton();
+            }
+
+            function selectVerses(translationCode, anchor, focus) {
+                selection = { translationCode, anchor, start: Math.min(anchor, focus), end: Math.max(anchor, focus) };
+                renderSelection();
+            }
+
+            function clearSelection() {
+                if (!selection) return;
+                selection = null;
+                renderSelection();
+            }
+
+            // Must be called synchronously from the click or keydown that
+            // asked for it: WebKitGTK only allows writeText during a user
+            // gesture. Success or failure is always shown in the actions.
+            function copySelection() {
+                if (!selection || !reading) return;
+                const attempt = ++actionAttempt;
+                let write;
+                try {
+                    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+                        throw new Error('clipboard access is not available');
+                    }
+                    write = Promise.resolve(navigator.clipboard.writeText(selectionClipboardText()));
+                } catch (e) {
+                    write = Promise.reject(e);
+                }
+                write.then(
+                    () => {
+                        if (attempt === actionAttempt) setActionStatus('Copied', false);
+                    },
+                    (e) => {
+                        console.error('Failed to copy verses', e);
+                        if (attempt === actionAttempt) {
+                            setActionStatus(`Couldn't copy: ${(e && e.message) || e}`, true);
+                        }
+                    },
+                );
+            }
+
+            function showNotice(message) {
+                readerNotice.textContent = message;
+                readerNotice.hidden = !message;
+            }
+
+            // ---- Bookmarks (GH-11)
+
+            function bookmarkFor(bookId, chapter, start, end) {
+                return bookmarks.find((b) => b.bookId === bookId && b.chapter === chapter
+                    && b.verseStart === start && b.verseEnd === end) || null;
+            }
+
+            function selectedBookmark() {
+                if (!selection || !reading) return null;
+                return bookmarkFor(reading.bookId, reading.chapter, selection.start, selection.end);
+            }
+
+            function updateBookmarkButton() {
+                bookmarkBtn.innerHTML = selectedBookmark() ? '&#9733; Remove bookmark' : '&#9733; Bookmark';
+            }
+
+            // Marks every bookmarked verse of the chapter on screen, in
+            // every column (bookmarks belong to no one translation).
+            function applyBookmarkMarkers() {
+                document.querySelectorAll(SELECTABLE).forEach((el) => {
+                    const number = Number(el.dataset.verse);
+                    const marked = !!reading && bookmarks.some((b) => b.bookId === reading.bookId
+                        && b.chapter === reading.chapter && number >= b.verseStart && number <= b.verseEnd);
+                    el.classList.toggle('is-bookmarked', marked);
+                });
+            }
+
+            function renderBookmarkList(error) {
+                if (error) {
+                    bookmarkList.innerHTML = `<li class="bookmark-empty is-error">${escapeHtml(error)}</li>`;
+                    return;
+                }
+                if (!bookmarks.length) {
+                    bookmarkList.innerHTML = '<li class="bookmark-empty">No bookmarks yet. Click a verse, then &#9733; Bookmark.</li>';
+                    return;
+                }
+                const code = currentTranslation().toUpperCase();
+                bookmarkList.innerHTML = bookmarks
+                    .map((b) => {
+                        let preview;
+                        if (b.preview == null) {
+                            preview = `<span class="bookmark-preview is-missing">Not numbered in the ${escapeHtml(code)}</span>`;
+                        } else {
+                            const partial = b.complete ? '' : `<span class="bookmark-partial">Not all of it is numbered in the ${escapeHtml(code)}.</span>`;
+                            preview = `<span class="bookmark-preview">${escapeHtml(b.preview)}</span>${partial}`;
+                        }
+                        return `<li class="bookmark-item">
+                            <button type="button" class="bookmark-open" data-bookmark-id="${b.id}">
+                                <span class="bookmark-ref">${escapeHtml(b.reference)}</span>
+                                ${preview}
+                            </button>
+                            <button type="button" class="bookmark-remove" data-bookmark-id="${b.id}" aria-label="Remove bookmark ${escapeHtml(b.reference)}" title="Remove bookmark">&times;</button>
+                        </li>`;
+                    })
+                    .join('');
+            }
+
+            async function refreshBookmarks() {
+                try {
+                    bookmarks = await invoke('list_bookmarks', { translationCode: currentTranslation() });
+                    renderBookmarkList();
+                } catch (e) {
+                    console.error('Failed to load bookmarks', e);
+                    renderBookmarkList(`Bookmarks couldn't be loaded: ${(e && e.message) || e}`);
+                }
+                applyBookmarkMarkers();
+                if (selection) updateBookmarkButton();
+            }
+
+            async function toggleSelectionBookmark() {
+                if (!selection || !reading) return;
+                const attempt = ++actionAttempt;
+                const existing = selectedBookmark();
+                try {
+                    if (existing) {
+                        await invoke('remove_bookmark', { id: existing.id });
+                    } else {
+                        await invoke('add_bookmark', {
+                            bookId: reading.bookId,
+                            chapter: reading.chapter,
+                            verseStart: selection.start,
+                            verseEnd: selection.end,
+                        });
+                    }
+                    await refreshBookmarks();
+                    if (attempt === actionAttempt) {
+                        setActionStatus(existing ? 'Bookmark removed' : 'Bookmarked', false);
+                    }
+                } catch (e) {
+                    console.error('Failed to change bookmark', e);
+                    if (attempt === actionAttempt) {
+                        setActionStatus(`Couldn't ${existing ? 'remove' : 'save'} bookmark: ${(e && e.message) || e}`, true);
+                    }
+                }
+            }
+
+            function closeSettingsMenu() {
+                settingsMenu.hidden = true;
+                settingsToggle.setAttribute('aria-expanded', 'false');
+            }
+
+            // Opens a chapter and selects a verse range in it, in the
+            // selected translation — for bookmarks and search results.
+            // If that translation doesn't number the verses, it opens the
+            // chapter and says so, rather than selecting other verses.
+            async function openPassage(bookId, chapter, start, end) {
+                const loaded = await loadReading(bookId, chapter);
+                if (!loaded || start == null) return loaded;
+                const code = reading.translationCode;
+                if (hasVerse(code, start) && hasVerse(code, end)) {
+                    selectVerses(code, start, end);
+                    const el = verseElement(code, start);
+                    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+                } else {
+                    const verses = columnVerses(code);
+                    const lastVerse = verses.length ? verses[verses.length - 1].number : 0;
+                    showNotice(`${reading.bookName} ${chapter}:${verseRange(start, end)} isn't numbered in the ${translationName(code)} — ${reading.bookName} ${chapter} ends at verse ${lastVerse} there. Showing the whole chapter.`);
+                }
+                return loaded;
+            }
+
+            bookmarkList.addEventListener('click', async function (event) {
+                const remove = event.target.closest('.bookmark-remove');
+                const open = event.target.closest('.bookmark-open');
+                const target = remove || open;
+                if (!target) return;
+                const bookmark = bookmarks.find((b) => String(b.id) === target.dataset.bookmarkId);
+                if (!bookmark) return;
+                if (open) {
+                    closeSettingsMenu();
+                    await openPassage(bookmark.bookId, bookmark.chapter, bookmark.verseStart, bookmark.verseEnd);
+                    return;
+                }
+                try {
+                    await invoke('remove_bookmark', { id: bookmark.id });
+                } catch (e) {
+                    console.error('Failed to remove bookmark', e);
+                    renderBookmarkList(`Couldn't remove ${bookmark.reference}: ${(e && e.message) || e}`);
+                    return;
+                }
+                const index = bookmarks.indexOf(bookmark);
+                await refreshBookmarks();
+                // Keep keyboard focus in the list, on the next bookmark.
+                const buttons = bookmarkList.querySelectorAll('.bookmark-remove');
+                const next = buttons[Math.min(index, buttons.length - 1)];
+                (next || settingsToggle).focus();
+            });
+
+            // ---- Rendering: builds the same markup the old server-rendered
+            // Askama templates produced, from the plain data the Tauri
+            // commands return, so the CSS above (and the DOM-driven logic
+            // in this script) needs no changes at all.
 
             // Picks uniformly from the rendered book buttons, then
             // uniformly from 1..chapter_count for that book, entirely from
@@ -1026,11 +1761,6 @@
                     el.classList.toggle('active', el.dataset.chapter === String(chapter));
                 });
             }
-
-            // ---- Rendering: builds the same markup the old server-rendered
-            // Askama templates produced, from the plain data the Tauri
-            // commands return, so the CSS above (and the DOM-driven logic
-            // in this script) needs no changes at all.
 
             function renderBookButton(book, activeBookId) {
                 const active = book.id === activeBookId ? ' active' : '';
@@ -1089,11 +1819,13 @@
                 </span>`;
             }
 
-            function renderVerse(v, bookId, chapter) {
-                const hasXref = v.xrefs.length > 0;
-                return `<p class="verse${hasXref ? ' has-xref' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}">
+            // Cross-references are keyed by verse number, not translation,
+            // so each column shows the same ones for the same number.
+            function renderVerse(v, bookId, chapter, code, xrefs) {
+                const hasXref = xrefs.length > 0;
+                return `<p class="verse${hasXref ? ' has-xref' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}" data-translation="${escapeHtml(code)}" data-code="${escapeHtml(code.toUpperCase())}">
                     <span class="verse-num">${v.number}</span>${escapeHtml(v.text)}
-                    ${hasXref ? renderXrefPopup(v.xrefs) : ''}
+                    ${hasXref ? renderXrefPopup(xrefs) : ''}
                 </p>`;
             }
 
@@ -1116,22 +1848,52 @@
                 </div>`;
             }
 
-            function renderReadingPane(dto) {
+            // Compare (GH-13): every translation side by side, one row per
+            // verse number. Where a translation doesn't number a verse the
+            // other does, its cell says so — nothing is merged, moved or
+            // renumbered to make the rows line up.
+            function renderCompareGrid(dto, compare) {
+                const xrefsByVerse = new Map(dto.currentVerses.map((v) => [v.number, v.xrefs]));
+                const numbers = [...new Set(compare.columns.flatMap((c) => c.verses.map((v) => v.number)))]
+                    .sort((a, b) => a - b);
+                const byNumber = compare.columns.map((c) => new Map(c.verses.map((v) => [v.number, v])));
+                const heads = compare.columns
+                    .map((c) => `<div class="compare-head" role="columnheader">${escapeHtml(c.name)} <span class="compare-head-code">(${escapeHtml(c.code.toUpperCase())})</span></div>`)
+                    .join('');
+                const rows = numbers
+                    .map((n) => compare.columns
+                        .map((c, i) => {
+                            const v = byNumber[i].get(n);
+                            if (v) return renderVerse(v, dto.currentBookId, dto.currentChapter, c.code, xrefsByVerse.get(n) || []);
+                            return `<p class="compare-gap" data-gap-verse="${n}" data-code="${escapeHtml(c.code.toUpperCase())}"><span class="verse-num">${n}</span><span class="compare-gap-note">Not numbered in the ${escapeHtml(c.code.toUpperCase())}</span></p>`;
+                        })
+                        .join(''))
+                    .join('');
+                return `<div class="compare-grid" style="--compare-columns: ${compare.columns.length}">${heads}${rows}</div>`;
+            }
+
+            function renderReadingPane(dto, compare) {
                 const prevAttrs = dto.prev ? ` data-prev-book="${dto.prev.bookId}" data-prev-chapter="${dto.prev.chapter}"` : '';
                 const nextAttrs = dto.next ? ` data-next-book="${dto.next.bookId}" data-next-chapter="${dto.next.chapter}"` : '';
-                const verses = dto.currentVerses.map((v) => renderVerse(v, dto.currentBookId, dto.currentChapter)).join('');
+                const body = compare
+                    ? renderCompareGrid(dto, compare)
+                    : dto.currentVerses.map((v) => renderVerse(v, dto.currentBookId, dto.currentChapter, reading.translationCode, v.xrefs)).join('');
+                // While comparing, the columns take the place of the faded
+                // neighboring chapters; prev/next stay on the wrapper, so
+                // arrow keys work the same either way.
+                const side = (s, which) => (compare ? '' : `<div class="chapter-side chapter-side-${which}">${renderSideChapter(s)}</div>`);
                 return `<div id="reading-pane-inner"
                      data-current-book="${dto.currentBookId}"
                      data-current-chapter="${dto.currentChapter}"${prevAttrs}${nextAttrs}
                 >
-                    <div class="reading-row">
-                        <div class="chapter-side chapter-side-prev">${renderSideChapter(dto.prev)}</div>
+                    <div class="reading-row${compare ? ' is-comparing' : ''}">
+                        ${side(dto.prev, 'prev')}
                         <section class="chapter-main">
                             <h2 class="chapter-heading">${escapeHtml(dto.currentBookName)} ${dto.currentChapter}</h2>
-                            ${verses}
+                            ${body}
                             ${renderXrefSummary(dto)}
                         </section>
-                        <div class="chapter-side chapter-side-next">${renderSideChapter(dto.next)}</div>
+                        ${side(dto.next, 'next')}
                     </div>
                 </div>`;
             }
@@ -1141,6 +1903,36 @@
                     .map((v) => `<p class="verse xref-verse-text"><span class="verse-num">${v.number}</span>${escapeHtml(v.text)}</p>`)
                     .join('');
             }
+
+            // Puts lastDto (and lastCompare, while comparing) on screen.
+            function renderCurrent() {
+                const compare = isComparing() && lastCompare
+                    && lastCompare.bookId === lastDto.currentBookId && lastCompare.chapter === lastDto.currentChapter
+                    ? lastCompare
+                    : null;
+                const columns = {};
+                columns[reading.translationCode] = { verses: lastDto.currentVerses };
+                if (compare) {
+                    compare.columns.forEach((c) => { columns[c.code] = { verses: c.verses }; });
+                }
+                reading.columns = columns;
+                readingPane.innerHTML = renderReadingPane(lastDto, compare);
+                selection = null;
+                renderSelection();
+                applyBookmarkMarkers();
+            }
+
+            // Resolves to the comparison, or null after logging why not.
+            async function loadCompare(bookId, chapter) {
+                try {
+                    return await invoke('get_compare', { bookId: Number(bookId), chapter: Number(chapter) });
+                } catch (e) {
+                    console.error('Failed to load comparison', e);
+                    return null;
+                }
+            }
+
+            const COMPARE_FAILED = "The translations couldn't be compared for this chapter, so it's shown in one translation.";
 
             // ---- Loading: calls the Tauri commands and splats the
             // rendered markup into the DOM, same shape as the old
@@ -1160,16 +1952,36 @@
                 }
             }
 
+            // Returns whether the chapter was put on screen.
             async function loadReading(bookId, chapter, { syncChapters } = { syncChapters: true }) {
+                const token = ++loadToken;
+                // The reader has asked for another chapter or translation:
+                // drop the selection now, not when the new text arrives, so
+                // nothing (Ctrl+C included) acts on it in the meantime.
+                clearSelection();
                 try {
-                    const dto = await invoke('get_reading', {
-                        bookId: Number(bookId),
-                        chapter: Number(chapter),
-                        translationCode: currentTranslation(),
-                    });
-                    if (!dto) return;
-                    readingPane.innerHTML = renderReadingPane(dto);
-                    selectedVerseEl = null;
+                    const translationCode = currentTranslation();
+                    const [dto, compare] = await Promise.all([
+                        invoke('get_reading', {
+                            bookId: Number(bookId),
+                            chapter: Number(chapter),
+                            translationCode,
+                        }),
+                        isComparing() ? loadCompare(bookId, chapter) : null,
+                    ]);
+                    // A newer navigation has started; let it win.
+                    if (token !== loadToken || !dto) return false;
+                    lastDto = dto;
+                    if (compare) lastCompare = compare;
+                    reading = {
+                        bookId: dto.currentBookId,
+                        bookName: dto.currentBookName,
+                        chapter: dto.currentChapter,
+                        translationCode,
+                        columns: {},
+                    };
+                    showNotice(isComparing() && !compare ? COMPARE_FAILED : '');
+                    renderCurrent();
                     setActiveBook(bookId);
 
                     const grid = document.getElementById('chapter-grid-inner');
@@ -1184,21 +1996,238 @@
                     if (window.history && window.history.pushState) {
                         window.history.pushState({ bookId, chapter }, '', `#${bookId}/${chapter}`);
                     }
+                    return true;
                 } catch (e) {
                     console.error('Failed to load reading pane', e);
+                    return false;
                 }
             }
+
+            // Compare switched on or off (from the settings menu or its
+            // shortcut — the preferences script in <head> owns the setting):
+            // re-render the chapter on screen in the new layout.
+            document.addEventListener('gospel-getter:compare-change', async function () {
+                if (!lastDto) return;
+                if (isComparing()) {
+                    const stale = !lastCompare || lastCompare.bookId !== lastDto.currentBookId
+                        || lastCompare.chapter !== lastDto.currentChapter;
+                    if (stale) {
+                        const token = loadToken;
+                        const compare = await loadCompare(lastDto.currentBookId, lastDto.currentChapter);
+                        if (token !== loadToken) return;
+                        if (compare) lastCompare = compare;
+                        else showNotice(COMPARE_FAILED);
+                    }
+                } else {
+                    showNotice('');
+                }
+                renderCurrent();
+            });
+
+            // ---- Search and go-to-reference (GH-12)
+
+            let searchToken = 0;
+            let searchTimer = null;
+            let lastSearch = null;
+
+            function setSearchOpen(open) {
+                searchPanel.hidden = !open;
+                searchToggle.setAttribute('aria-expanded', String(open));
+                if (open) {
+                    closeSettingsMenu();
+                    searchInput.focus();
+                    searchInput.select();
+                }
+            }
+
+            function setSearchStatus(message, isError) {
+                searchStatus.textContent = message;
+                searchStatus.classList.toggle('is-error', !!isError);
+            }
+
+            // Words matching the search terms, wrapped in <mark>. The text
+            // is split into the same letter/digit runs SQLite's FTS5
+            // tokenizer uses; every character of the verse is kept, and
+            // everything is escaped, so the result's text content is the
+            // stored verse exactly.
+            function highlightTerms(text, terms) {
+                const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+                const wanted = new Set(terms.map(fold));
+                let html = '';
+                let last = 0;
+                for (const match of text.matchAll(/[\p{L}\p{N}\p{Co}]+/gu)) {
+                    html += escapeHtml(text.slice(last, match.index));
+                    const word = escapeHtml(match[0]);
+                    html += wanted.has(fold(match[0])) ? `<mark>${word}</mark>` : word;
+                    last = match.index + match[0].length;
+                }
+                return html + escapeHtml(text.slice(last));
+            }
+
+            function renderSearchResults(result, append) {
+                if (result.kind === 'passage') {
+                    searchResults.innerHTML = `<li><button type="button" class="search-result search-go" data-book="${result.bookId}" data-chapter="${result.chapter}"${result.verseStart != null ? ` data-verse-start="${result.verseStart}" data-verse-end="${result.verseEnd}"` : ''}>Go to <strong>${escapeHtml(result.reference)}</strong></button></li>`;
+                    searchMore.hidden = true;
+                    setSearchStatus('Press Enter to go there.');
+                    return;
+                }
+                if (result.kind !== 'text') {
+                    searchResults.innerHTML = '';
+                    searchMore.hidden = true;
+                    setSearchStatus(result.message || '', result.kind === 'invalid' || result.kind === 'unavailable');
+                    return;
+                }
+                const items = result.results
+                    .map((r) => `<li><button type="button" class="search-result" data-book="${r.bookId}" data-chapter="${r.chapter}" data-verse-start="${r.verse}" data-verse-end="${r.verse}">
+                        <span class="search-ref">${escapeHtml(r.reference)}</span>
+                        <span class="search-text">${highlightTerms(r.text, result.terms)}</span>
+                    </button></li>`)
+                    .join('');
+                if (append) {
+                    searchResults.insertAdjacentHTML('beforeend', items);
+                } else {
+                    searchResults.innerHTML = items;
+                }
+                const shown = result.offset + result.results.length;
+                const code = (lastSearch && lastSearch.translationCode || currentTranslation()).toUpperCase();
+                if (result.total === 0) {
+                    setSearchStatus(`No verses in the ${code} contain all of: ${result.terms.join(', ')}.`);
+                } else {
+                    const count = result.total === 1 ? '1 verse' : `${result.total.toLocaleString('en')} verses`;
+                    setSearchStatus(`${count} in the ${code}${shown < result.total ? `, showing ${shown.toLocaleString('en')}` : ''}.`);
+                }
+                searchMore.hidden = shown >= result.total;
+                searchMore.dataset.offset = String(shown);
+            }
+
+            // Runs the search box query in the selected translation.
+            // Resolves to the result (or null if a newer search replaced
+            // it, or it failed).
+            async function runSearch(offset = 0) {
+                clearTimeout(searchTimer);
+                const token = ++searchToken;
+                const query = searchInput.value;
+                const translationCode = currentTranslation();
+                if (!query.trim()) {
+                    lastSearch = null;
+                    searchResults.innerHTML = '';
+                    searchMore.hidden = true;
+                    setSearchStatus('');
+                    return null;
+                }
+                try {
+                    const result = await invoke('search', { query, translationCode, offset });
+                    if (token !== searchToken) return null;
+                    lastSearch = { query, translationCode, result };
+                    renderSearchResults(result, offset > 0);
+                    return result;
+                } catch (e) {
+                    if (token !== searchToken) return null;
+                    console.error('Search failed', e);
+                    searchResults.innerHTML = '';
+                    searchMore.hidden = true;
+                    setSearchStatus(`Search failed: ${(e && e.message) || e}`, true);
+                    return null;
+                }
+            }
+
+            async function openSearchResult(button) {
+                const start = button.dataset.verseStart != null ? Number(button.dataset.verseStart) : null;
+                const end = button.dataset.verseEnd != null ? Number(button.dataset.verseEnd) : null;
+                setSearchOpen(false);
+                await openPassage(button.dataset.book, button.dataset.chapter, start, end);
+            }
+
+            searchInput.addEventListener('input', function () {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => runSearch(0), 150);
+            });
+
+            searchInput.addEventListener('keydown', async function (event) {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setSearchOpen(false);
+                    searchToggle.focus();
+                } else if (event.key === 'ArrowDown') {
+                    const first = searchResults.querySelector('.search-result');
+                    if (first) {
+                        event.preventDefault();
+                        first.focus();
+                    }
+                } else if (event.key === 'Enter') {
+                    event.preventDefault();
+                    const pending = lastSearch && lastSearch.query === searchInput.value
+                        && lastSearch.translationCode === currentTranslation();
+                    const result = pending ? lastSearch.result : await runSearch(0);
+                    if (result && result.kind === 'passage') {
+                        const go = searchResults.querySelector('.search-go');
+                        if (go) await openSearchResult(go);
+                    }
+                }
+            });
+
+            searchPanel.addEventListener('click', function (event) {
+                const result = event.target.closest('.search-result');
+                if (result) {
+                    openSearchResult(result);
+                    return;
+                }
+                if (event.target.closest('#search-more')) {
+                    runSearch(Number(searchMore.dataset.offset || 0));
+                }
+            });
+
+            searchToggle.addEventListener('click', function () {
+                setSearchOpen(searchPanel.hidden);
+            });
+
+            // Up/Down move between the input and the results; Escape
+            // closes the panel from anywhere in it.
+            searchPanel.addEventListener('keydown', function (event) {
+                if (event.target === searchInput) return;
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setSearchOpen(false);
+                    searchToggle.focus();
+                    return;
+                }
+                if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                const buttons = [searchInput, ...searchResults.querySelectorAll('.search-result')];
+                const index = buttons.indexOf(event.target);
+                if (index === -1) return;
+                event.preventDefault();
+                const next = buttons[Math.max(0, Math.min(buttons.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))];
+                next.focus();
+            });
 
             // Primary navigation: clicking a book jumps straight to its
             // first chapter (and brings its chapter grid up, in case the
             // reader wants a different one); clicking a chapter number then
             // reads that one instead.
             document.body.addEventListener('click', function (event) {
+                // A click anywhere outside the search panel closes it.
+                if (!searchPanel.hidden && !event.target.closest('#search-panel, #search-toggle')) {
+                    setSearchOpen(false);
+                }
+
                 // The settings menu, its toggle and the reading-mode exit
                 // are handled by the presentation-preferences script in
-                // <head>; they're never navigation or a "click away" from a
-                // verse selection.
-                if (event.target.closest('#settings-menu, #settings-toggle, #reader-exit')) {
+                // <head> (and the bookmark list's own handler above);
+                // they're never navigation or a "click away" from a verse
+                // selection. Nor is the search panel.
+                if (event.target.closest('#settings-menu, #settings-toggle, #reader-exit, #search-panel, #search-toggle')) {
+                    return;
+                }
+
+                if (event.target.closest('.verse-copy-btn')) {
+                    copySelection();
+                    return;
+                }
+                if (event.target.closest('.verse-bookmark-btn')) {
+                    toggleSelectionBookmark();
+                    return;
+                }
+                if (event.target.closest('.verse-actions')) {
                     return;
                 }
 
@@ -1236,7 +2265,8 @@
 
                 // Clicking a cross-reference citation "expands" it in place:
                 // fetch the referenced verse(s) and show them right under
-                // the citation. Clicking it again collapses it back down.
+                // the citation, in the translation of the column it's in.
+                // Clicking it again collapses it back down.
                 const citation = event.target.closest('.xref-citation');
                 if (citation) {
                     const expanded = citation.parentElement.querySelector('.xref-expanded');
@@ -1248,12 +2278,13 @@
                         expanded.hidden = false;
                         return;
                     }
+                    const column = citation.closest('[data-translation]');
                     const payload = {
                         bookId: Number(citation.dataset.book),
                         chapter: Number(citation.dataset.chapter),
                         verse: Number(citation.dataset.verse),
                         endVerse: citation.dataset.endVerse ? Number(citation.dataset.endVerse) : null,
-                        translationCode: currentTranslation(),
+                        translationCode: column ? column.dataset.translation : currentTranslation(),
                     };
                     invoke('get_xref_text', payload)
                         .then((verses) => {
@@ -1266,40 +2297,117 @@
                     return;
                 }
 
-                // Clicking a verse that has cross-references toggles a small
-                // popup listing them, underneath the verse, until the popup's
-                // citation is clicked (handled above) or the reader clicks
-                // away (handled below).
-                const verse = event.target.closest('.chapter-main .verse.has-xref');
+                // A selection never extends outside the chapter being
+                // read: Shift-click in a faded neighbor leaves it as is.
+                if (event.shiftKey && event.target.closest('.chapter-side')) {
+                    return;
+                }
+
+                // Clicking a verse selects it (clicking it again clears it),
+                // showing its cross-references, if any, and its actions
+                // underneath until the reader clicks away (handled below).
+                // Shift-click selects the whole range from the verse first
+                // clicked through this one, within the same translation
+                // column.
+                const verse = event.target.closest(SELECTABLE);
                 if (verse) {
-                    const popup = verse.querySelector('.xref-popup');
-                    if (selectedVerseEl === verse) {
-                        closeVerseSelection();
+                    const number = Number(verse.dataset.verse);
+                    const code = verse.dataset.translation;
+                    if (event.shiftKey) {
+                        if (!selection) {
+                            selectVerses(code, number, number);
+                        } else if (selection.translationCode === code) {
+                            selectVerses(code, selection.anchor, number);
+                        }
+                        return;
+                    }
+                    // A click that ends a drag-highlight is the reader
+                    // selecting text, not choosing a verse.
+                    const textSelection = window.getSelection();
+                    if (textSelection && !textSelection.isCollapsed) {
+                        return;
+                    }
+                    if (selection && selection.translationCode === code
+                        && selection.start === number && selection.end === number) {
+                        clearSelection();
                     } else {
-                        closeVerseSelection();
-                        verse.classList.add('verse-selected');
-                        popup.hidden = false;
-                        selectedVerseEl = verse;
+                        selectVerses(code, number, number);
                     }
                     return;
                 }
 
                 // Anything else is a click away from the current selection.
-                closeVerseSelection();
+                clearSelection();
             });
 
-            // Secondary navigation: arrow keys leaf through the whole Bible
-            // a chapter at a time, using the prev/next chapter this fragment
-            // was rendered with (computed by the get_reading command, so
-            // book boundaries — e.g. the end of Genesis into the start of
+            // Shift-click is for verse ranges in the chapter being read, so
+            // it mustn't also extend the browser's own text selection there.
+            document.body.addEventListener('mousedown', function (event) {
+                if (event.shiftKey && event.target.closest(SELECTABLE)) {
+                    event.preventDefault();
+                }
+            });
+
+            // Keyboard: arrow keys leaf through the whole Bible a chapter
+            // at a time, using the prev/next chapter this fragment was
+            // rendered with (computed by the get_reading command, so book
+            // boundaries — e.g. the end of Genesis into the start of
             // Exodus — are handled without the client needing to know the
-            // Bible's structure).
+            // Bible's structure). Plus Escape, copying, search and compare.
             document.addEventListener('keydown', function (event) {
-                // Arrow keys on a focused form control (e.g. a settings
-                // <select>) belong to that control, not chapter navigation.
+                // Keys typed into a form control (e.g. a settings <select>,
+                // or the search box, which handles its own) belong to it.
                 if (event.target && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) {
                     return;
                 }
+                // So do keys pressed on the search results.
+                if (event.target && event.target.closest && event.target.closest('#search-panel')) {
+                    return;
+                }
+
+                // Escape backs out one step at a time: the search panel,
+                // then the settings menu (closed by the preferences
+                // script), then a verse selection, then reading mode (also
+                // the preferences script, which skips an Escape already
+                // handled here).
+                if (event.key === 'Escape') {
+                    if (!searchPanel.hidden) {
+                        setSearchOpen(false);
+                        event.preventDefault();
+                    } else if (selection && settingsMenu.hidden) {
+                        clearSelection();
+                        event.preventDefault();
+                    }
+                    return;
+                }
+
+                const ctrl = event.ctrlKey || event.metaKey;
+                const plain = !ctrl && !event.altKey;
+
+                // `/` or Ctrl+K (Cmd+K) opens search.
+                if ((plain && event.key === '/') || (ctrl && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k')) {
+                    event.preventDefault();
+                    setSearchOpen(true);
+                    return;
+                }
+
+                // Ctrl+C (Cmd+C) copies the selected verses — unless the
+                // reader has highlighted some text, which copies as usual.
+                if (ctrl && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c') {
+                    const textSelection = window.getSelection();
+                    if (selection && (!textSelection || textSelection.isCollapsed)) {
+                        event.preventDefault();
+                        copySelection();
+                    }
+                    return;
+                }
+
+                // C toggles compare, through the settings menu's own toggle.
+                if (plain && !event.shiftKey && (event.key === 'c' || event.key === 'C')) {
+                    document.getElementById('compare-btn').click();
+                    return;
+                }
+
                 const inner = currentInner();
                 if (!inner) return;
 
@@ -1317,7 +2425,8 @@
             });
 
             // Switching translations re-reads whatever chapter is currently
-            // on screen, in the newly selected translation. The backend
+            // on screen, in the newly selected translation, refreshes the
+            // bookmark previews, and reruns any search. The backend
             // remembers this as the reader's position too (see
             // get_reading), so reopening the app comes back to it.
             translationSelect.addEventListener('change', function () {
@@ -1325,6 +2434,8 @@
                 const bookId = inner ? inner.dataset.currentBook : 1;
                 const chapter = inner ? inner.dataset.currentChapter : 1;
                 loadReading(bookId, chapter);
+                refreshBookmarks();
+                if (searchInput.value.trim()) runSearch(0);
             });
 
             // Initial load: fetch the book/translation lists and whichever
@@ -1338,6 +2449,7 @@
                     renderTranslationOptions(home);
                     await loadChapters(home.currentBookId, home.currentChapter);
                     await loadReading(home.currentBookId, home.currentChapter, { syncChapters: false });
+                    await refreshBookmarks();
                 } catch (e) {
                     console.error('Failed to load Gospel Getter', e);
                 }

@@ -554,8 +554,9 @@ fn reading_presets_default_to_the_original_typography() {
 }
 
 /// Text size/spacing apply to the reading content only — verses, verse
-/// numbers and chapter headings — never to the rest of the UI (so the
-/// settings menu, book list etc. don't grow with it).
+/// numbers, chapter headings and compare mode's "not numbered" cells
+/// (which sit in a row beside a verse) — never to the rest of the UI (so
+/// the settings menu, book list etc. don't grow with it).
 #[test]
 fn reading_presets_scale_only_reading_content() {
     for rule in rules() {
@@ -568,7 +569,8 @@ fn reading_presets_scale_only_reading_content() {
                     ".verse",
                     ".chapter-side .verse",
                     ".verse-num",
-                    ".chapter-heading"
+                    ".chapter-heading",
+                    ".compare-gap"
                 ]
                 .contains(&selector),
                 "`{selector}` uses a reading preset, but only reading content should"
