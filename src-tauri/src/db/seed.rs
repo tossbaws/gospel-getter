@@ -90,6 +90,17 @@ pub async fn seed_missing(pool: &SqlitePool) -> anyhow::Result<()> {
             .await
             .context(format!("Failed to insert translation {}", source.code))?;
 
+        // Whatever the search index held for this id (from a translation
+        // since cleared out) is stale now; `ensure_search_index` rebuilds it.
+        sqlx::query("DELETE FROM search_index_state WHERE translation_id = $1")
+            .bind(translation_id)
+            .execute(&mut *tx)
+            .await
+            .context(format!(
+                "Failed to reset search index state for {}",
+                source.code
+            ))?;
+
         let books: Vec<RawBook> = serde_json::from_str(source.json)
             .context(format!("Failed to parse bundled {} data", source.code))?;
 

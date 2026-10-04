@@ -97,5 +97,61 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .await
     .context("Failed to create cross_references index")?;
 
+    // The reader's bookmarks. A bookmark is a passage's coordinates —
+    // book, chapter and an inclusive verse range — with no translation, so
+    // it opens in whichever translation is selected. The CHECKs and the
+    // UNIQUE constraint back up the validation in `db::bookmarks`.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS bookmarks (
+            id INTEGER PRIMARY KEY,
+            book_id INTEGER NOT NULL REFERENCES books(id),
+            chapter INTEGER NOT NULL CHECK (chapter >= 1),
+            verse_start INTEGER NOT NULL CHECK (verse_start >= 1),
+            verse_end INTEGER NOT NULL CHECK (verse_end >= verse_start),
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            UNIQUE (book_id, chapter, verse_start, verse_end)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create bookmarks table")?;
+
+    // Full-text search index over `verses`. It's derived data only: built
+    // from `verses` by `db::search`, never written back, and contentless —
+    // it stores no copy of the text, only the tokens and a rowid encoding
+    // each verse's coordinates (see `db::search`). Results
+    // are always read from `verses` itself.
+    sqlx::query(
+        r#"
+        CREATE VIRTUAL TABLE IF NOT EXISTS verse_search USING fts5(
+            text,
+            content = '',
+            contentless_delete = 1
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create verse_search index")?;
+
+    // Which translations `verse_search` covers, and how many verses each
+    // had when indexed, so startup only (re)indexes a translation that's
+    // missing or has changed instead of rebuilding everything every launch.
+    // Deliberately no foreign key: it mustn't stop a translation's rows
+    // being cleared out for re-seeding (see the README).
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS search_index_state (
+            translation_id INTEGER PRIMARY KEY,
+            verse_count INTEGER NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create search_index_state table")?;
+
     Ok(())
 }

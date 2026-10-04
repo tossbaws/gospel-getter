@@ -21,6 +21,19 @@ with you as one continuous page.
 - Arrow keys move you through the whole Bible a chapter at a time,
   correctly crossing book boundaries (Genesis 50 into Exodus 1, and so on)
   so you never have to touch the mouse.
+- Copy a verse, or a range of verses, with its reference: click a verse
+  (Shift-click another in the same chapter for a range), then **Copy** or
+  Ctrl+C. You get the verse text exactly as stored, followed by e.g.
+  `— John 3:16–18 (WEB)`.
+- Bookmarks: ★ Bookmark a selected verse or range, see bookmarked verses
+  starred in the text, and reopen them from the Bookmarks list in
+  settings. They're saved in the app's database and work in either
+  translation.
+- One search box (`/` or Ctrl+K) that both jumps to references — `John
+  3:16`, `jn 3:16-18`, `1 Cor 13`, `Psalm 23` — and finds every verse
+  containing your words in the current translation, fully offline.
+- Compare mode (`C`, or the settings menu) shows the chapter in the KJV
+  and WEB side by side, lined up verse by verse.
 - It remembers where you left off — close it and reopen it and you're back
   on the same chapter and translation.
 - Reading comfort controls: text size and line-spacing presets, six color
@@ -105,8 +118,8 @@ steps at the top of the file.
 
 ### Where your data lives
 
-The app's database (translations, cross-references, reading position)
-lives in the platform's standard per-app data directory — on Linux,
+The app's database (translations, cross-references, reading position,
+bookmarks, and the search index) lives in the platform's standard per-app data directory — on Linux,
 `~/.local/share/com.tossbaws.gospel-getter/gospel_getter.db`.
 
 If you're upgrading from the old browser-based version of Gospel Getter
@@ -128,18 +141,62 @@ expect.
   Bible, crossing book boundaries as needed (the end of Genesis leads into
   the start of Exodus), same as clicking the previous/next chapter's
   heading in the faded side columns.
+- Click any verse in the chapter you're reading to select it: it shows
+  its cross-references (if it has any) and a **Copy** button. Shift-click
+  a second verse in the same chapter to select the whole range between
+  them; the faded neighboring chapters can't be added. **Copy** (or
+  Ctrl+C) puts the text on the clipboard as
+  `<verse text> — <Book> <chapter>:<verse> (<TRANSLATION>)`, with a range's
+  verses joined by spaces and cited as `3:16–18`. It confirms "Copied", or
+  says why it couldn't. Esc, clicking elsewhere, changing chapter or
+  switching translation clears the selection. If you've highlighted text
+  yourself, Ctrl+C copies just that, as usual.
+- With a verse or range selected, **★ Bookmark** saves it (and becomes
+  **★ Remove bookmark** if that exact passage is already saved).
+  Bookmarked verses get a small ★ after their number. The **Bookmarks**
+  list in settings shows them newest first, each with its reference and
+  the start of its first verse in the current translation; click one to
+  open and select it, or × to remove it. A bookmark is just book,
+  chapter and verse numbers, so it opens in whichever translation you're
+  reading. KJV and WEB number a few verses differently (for example,
+  Matthew 2:23 is only in the WEB's numbering); if the current
+  translation doesn't number a bookmarked verse, the list says so, and
+  opening it shows its chapter with a notice rather than some other
+  verse.
+- Press `/` or Ctrl+K (or the &#8981; button, top right) to search. Type a
+  reference and press Enter to go there and select it: full names or
+  common abbreviations (`gen`, `ex`, `ps`/`psa`, `mt`/`matt`, `jn`/`jhn`,
+  `1 cor`/`1co`, `rev`, …), numbered books as `1 John`, `1jn` or
+  `I John`, then a chapter, `chapter:verse` or `chapter:verse-verse`. In a
+  one-chapter book, `Jude 5` means verse 5. A reference that doesn't exist
+  (`John 22`, `Jude 2:1`) says so instead of going anywhere. Anything else
+  is a word search: every verse in the current translation containing
+  all the words, in Bible order, 50 at a time, with the words
+  highlighted. Words match whole and exactly — no stemming or fuzzy
+  matching. ↓/↑ move through results, Enter or a click opens one, and
+  switching translation reruns the search. Esc closes the box.
+- **Compare translations** (settings, or `C`) replaces the faded
+  neighboring chapters with the chapter in both translations, one row
+  per verse number, each column labeled. Where only one translation
+  numbers a verse, the other column says "Not numbered in the KJV" (or
+  WEB) instead of shifting anything. Select, copy and bookmark in either
+  column — Copy uses the clicked column's text and translation code.
+  Arrow keys, search and bookmarks work as usual; on narrow windows the
+  two translations stack under each verse number. The mode is
+  remembered across restarts.
 - The translation dropdown switches translations for whatever you're
   currently reading, and remembers your choice across visits.
 - The &#9776; button (top right) opens settings: theme, translation, text
   size (Small / Medium / Large / Extra large), line spacing (Compact /
-  Normal / Relaxed) and **Reading mode**. Everything in it is keyboard
+  Normal / Relaxed), **Compare translations**, **Reading mode** and your
+  **Bookmarks**. Everything in it is keyboard
   reachable, and Esc closes it. Text size and spacing only affect the
   chapter text, not the rest of the interface.
 - Reading mode hides the book list, chapter grid, side columns, header
   and footer. Arrow keys still turn chapters, and the &#9776; settings
   button stays available. Leave it with the **Exit reading mode** button or
   Esc.
-- Theme, text size, line spacing and reading mode are display preferences
+- Theme, text size, line spacing, compare and reading mode are display preferences
   stored locally in the app's webview, not in the database. They're
   remembered across restarts, so if you close the app in reading mode it
   reopens in reading mode, with the exit button showing. Printing always
@@ -185,9 +242,11 @@ file. Nobody's built that yet, since neither bundled translation needs it.
 - A Tauri 2 desktop app: `src-tauri/` is the Rust backend (`sqlx`/SQLite),
   `ui/` is a single static `index.html` — plain HTML/CSS/JS, no framework
   and no Node build step. The frontend calls a handful of typed Tauri
-  commands (`get_home`, `get_chapters`, `get_reading`, `get_xref_text`)
-  instead of making HTTP requests; there's no server and nothing listens
-  on a port.
+  commands (`get_home`, `get_chapters`, `get_reading`, `get_xref_text`,
+  `list_bookmarks`/`add_bookmark`/`remove_bookmark`, `search`,
+  `get_compare`) instead of making HTTP requests; there's no server and nothing listens
+  on a port. Copying uses the webview's own `navigator.clipboard.writeText`
+  (no clipboard plugin or extra permission).
 - `books` (name/testament/chapter count) is shared across translations,
   but `verses` is keyed by `(translation_id, book_id, chapter, verse)`, so
   each translation has its own verse text and its own verse counts per
@@ -198,11 +257,36 @@ file. Nobody's built that yet, since neither bundled translation needs it.
   computing the chapter before and after any given one, crossing book
   boundaries as needed. It's pure, unit-tested without touching a
   database, and doesn't care which translation is selected.
+  `domain/query.rs` decides whether search input is a reference (with the
+  book-abbreviation table) or words to search for.
+- Search uses an SQLite FTS5 index, `verse_search`, derived from `verses`
+  and never written back to it. It stores no text of its own, only the
+  words and each verse's coordinates; results always show the text from
+  `verses`. It's built in the background on the first launch after
+  installing or upgrading (a fraction of a second), and again only for a
+  translation that's newly seeded — not on every launch.
 - The reading pane (current chapter plus its faded neighbors) is built
   from one command, `get_reading`, and rendered by one function in
   `ui/index.html` — used both on startup and for every chapter click,
   arrow key press, and translation switch — so there's exactly one code
   path for putting a chapter on screen.
+
+## Tests
+
+`cargo test` (from `src-tauri/`) covers the backend — including fresh and
+v2.1.0-upgrade databases, bookmarks, the search index and reference
+parsing — and checks the bundled markup. Frontend behavior (selection,
+copying, bookmarks, search, compare, keyboard handling) is tested by
+loading the real `ui/index.html` into jsdom, with its Tauri calls answered
+by the app's real command logic and a throwaway database, through a small
+test-only bridge (`src-tauri/examples/frontend_bridge.rs`, built by
+`npm test`):
+
+```bash
+cd tests/frontend
+npm ci
+npm test
+```
 
 ## Data provenance and textual integrity
 

@@ -6,6 +6,13 @@ license = "MIT"
 repository = "https://github.com/tossbaws/gospel-getter"
 edition = "2024"
 
+# The app's code lives in the library, so the frontend test bridge
+# (`examples/frontend_bridge.rs`) can drive the real commands; `main.rs`
+# just calls `gospel_getter_lib::run`.
+[lib]
+name = "gospel_getter_lib"
+path = "src/lib.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -18,3 +25,10 @@ serde_json = "1"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Only for `examples/frontend_bridge.rs` (the frontend tests' stdio bridge);
+# the app itself doesn't read stdin.
+[dev-dependencies]
+tokio = { version = "1", features = ["io-std", "io-util"] }
+# Tauri's mock runtime, for driving the commands through real IPC in tests.
+tauri = { version = "2", features = ["test"] }

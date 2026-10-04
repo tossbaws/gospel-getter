@@ -46,3 +46,19 @@ jobs:
 
       - name: Test
         run: cargo test --all-targets
+
+      # Behavior tests for ui/index.html (selection, copy, bookmarks,
+      # search, compare), run in jsdom against the real command logic and
+      # database through examples/frontend_bridge.rs — built above.
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tests/frontend/package-lock.json
+
+      - name: Frontend behavior tests
+        working-directory: tests/frontend
+        run: |
+          npm ci
+          npm test

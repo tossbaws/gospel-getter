@@ -1,0 +1,15 @@
+{
+  "name": "gospel-getter-frontend-tests",
+  "private": true,
+  "description": "Behavior tests for ui/index.html, run in jsdom against the app's real command logic and database (via src-tauri/examples/frontend_bridge.rs)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "scripts": {
+    "test": "cargo build --quiet --manifest-path ../../src-tauri/Cargo.toml --example frontend_bridge && node --test"
+  },
+  "devDependencies": {
+    "jsdom": "30.1.1"
+  }
+}
