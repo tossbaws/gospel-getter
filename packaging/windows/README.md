@@ -18,9 +18,10 @@ cargo tauri build
 ```
 
 which yields both an NSIS `.exe` and an MSI under
-`src-tauri/target/release/bundle/`. The generated `gospel-getter.ico` in
-`src-tauri/icons/` is used automatically; there's nothing Windows-specific
-left to hand-maintain here.
+`src-tauri/target/release/bundle/`. The generated `icon.ico` in
+`src-tauri/icons/` (made from `packaging/icon.svg` by
+`packaging/generate-icons.sh`) is used automatically; there's nothing
+Windows-specific left to hand-maintain here.
 
 **Not verified as part of the Tauri migration** — that work happened on
 Linux, and Linux artifact verification (the AppImage) was the hard
