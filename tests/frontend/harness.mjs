@@ -228,6 +228,10 @@ export async function openApp({
                 release();
             };
         },
+        /** The answer the next native file dialog gives: a path, or null (cancelled). */
+        async pick(path) {
+            await backend('__set_picker', { path });
+        },
         settingsMenu() {
             return document.getElementById('settings-menu');
         },

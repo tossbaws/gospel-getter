@@ -1,8 +1,12 @@
 use sqlx::SqlitePool;
 
+use std::collections::{HashMap, HashSet};
+
+use crate::db::reader_data::ImportCounts;
 use crate::db::{
     self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, SearchHit, Verse,
 };
+use crate::reader_data::{NewBookmark, NewPosition};
 
 /// The store handles all database access after startup: verses, the
 /// reading position, bookmarks and search. The book and translation lists
@@ -114,5 +118,35 @@ impl Store {
         offset: i64,
     ) -> anyhow::Result<(i64, Vec<SearchHit>)> {
         db::search::search_verses(&self.pool, translation_id, terms, limit, offset).await
+    }
+
+    /// Every bookmark, oldest first, for export.
+    pub async fn all_bookmarks(&self) -> anyhow::Result<Vec<Bookmark>> {
+        db::reader_data::all_bookmarks(&self.pool).await
+    }
+
+    /// The coordinates of every bookmark.
+    pub async fn bookmark_coordinates(&self) -> anyhow::Result<HashSet<(i64, i64, i64, i64)>> {
+        db::reader_data::bookmark_coordinates(&self.pool).await
+    }
+
+    /// The highest verse number any translation has, per (book, chapter).
+    pub async fn last_verses(&self) -> anyhow::Result<HashMap<(i64, i64), i64>> {
+        db::reader_data::last_verses(&self.pool).await
+    }
+
+    /// The current time, in the database's timestamp format.
+    pub async fn now(&self) -> anyhow::Result<String> {
+        db::reader_data::now(&self.pool).await
+    }
+
+    /// Apply a validated import, all or nothing.
+    pub async fn apply_import(
+        &self,
+        bookmarks: &[NewBookmark],
+        replace: bool,
+        position: Option<&NewPosition>,
+    ) -> anyhow::Result<ImportCounts> {
+        db::reader_data::apply_import(&self.pool, bookmarks, replace, position).await
     }
 }

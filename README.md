@@ -9,7 +9,7 @@ at a time with the chapters before and after shown alongside, search the
 whole Bible, compare the two translations verse by verse, and copy or
 bookmark passages. No account and no network needed.
 
-![The reading view: John 3 in the centre, with John 2 and John 4 faded on either side, under the chapter picker](screenshots/reading-neighboring-chapters.png)
+![The reading view in the Matrix theme: John 3 in the centre, with John 2 and John 4 faded on either side, under the chapter picker](screenshots/reading-neighboring-chapters.png)
 
 ## Features
 
@@ -42,31 +42,39 @@ bookmark passages. No account and no network needed.
   on white.
 - **Picks up where you left off.** Your chapter, translation, bookmarks and
   display settings are remembered between sessions.
+- **Back up or move your data.** In Settings, **Export data...** saves your
+  bookmarks, reading position and display settings to a JSON file, and
+  **Import data...** shows what a file contains before adding it (or, if you
+  choose, replacing your bookmarks). Only that personal data is exported,
+  not Bible text or the app's database.
 - **A native desktop app.** Built with Tauri: no browser, no background
   server, nothing listening on a port.
 
 ## A quick tour
 
+All five screenshots in this README, including the one at the top, use the
+Matrix theme. The other five themes are in Settings.
+
 **Search the text, or jump straight to a reference.** Matching words are
 highlighted, and clicking a result opens and selects that verse.
 
-![The search panel listing World English Bible verses that contain "love one another", with the words highlighted](screenshots/search-results.png)
+![The search panel in the Matrix theme, listing World English Bible verses that contain "love one another", with the words highlighted](screenshots/search-results.png)
 
 **Compare the KJV and WEB verse by verse.** In Romans 14 the WEB numbers
 three verses the KJV doesn't, and the KJV column says so rather than
 shifting anything.
 
-![Romans 14 in compare mode, with KJV and WEB columns side by side and verses 24 to 26 marked "Not numbered in the KJV"](screenshots/compare-translations.png)
+![Romans 14 in compare mode in the Matrix theme, with KJV and WEB columns side by side and verses 24 to 26 marked "Not numbered in the KJV"](screenshots/compare-translations.png)
 
 **Select a range and copy it with its reference.** The citation underneath
 shows exactly what will be copied.
 
-![John 3:16 to 18 selected in the WEB, with Copy and Bookmark buttons and the citation "John 3:16–18 (WEB)"](screenshots/copy-verse-range.png)
+![John 3:16 to 18 selected in the WEB in the Matrix theme, with Copy and Bookmark buttons and the citation "John 3:16–18 (WEB)"](screenshots/copy-verse-range.png)
 
 **Bookmark passages and come back to them.** Bookmarked verses are starred
 in the text, and the list in settings shows each one with a preview.
 
-![Psalm 23 with verses 1 to 4 starred, and the settings menu open on a Bookmarks list of Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
+![Psalm 23 with verses 1 to 4 starred, and the settings menu open with Theme set to Matrix and a Bookmarks list of Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
 
 ## Keyboard
 

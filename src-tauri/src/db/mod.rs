@@ -4,6 +4,7 @@ pub mod legacy;
 pub mod migrate;
 pub mod models;
 pub mod queries;
+pub mod reader_data;
 pub mod search;
 pub mod seed;
 
