@@ -5,6 +5,9 @@
 pub mod commands;
 pub mod db;
 pub mod domain;
+pub mod reader_data;
+#[cfg(test)]
+mod reader_data_tests;
 
 use anyhow::Context;
 use tauri::Manager;
@@ -22,6 +25,10 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
+        // Native open/save dialogs, used only from Rust (see
+        // `commands::export_reader_data`); the webview gets no dialog or
+        // file-system permission.
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             setup_app(app).map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })
         })
@@ -43,6 +50,10 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::remove_bookmark,
         commands::search,
         commands::get_compare,
+        commands::export_reader_data,
+        commands::choose_import_file,
+        commands::apply_import,
+        commands::cancel_import,
     ]
 }
 
@@ -146,6 +157,7 @@ mod ipc_tests {
     //! to `invoke` — so a renamed argument on either side fails here.
 
     use serde_json::{Value, json};
+    use tauri::Manager;
     use tauri::ipc::{CallbackFn, InvokeBody};
     use tauri::test::{INVOKE_KEY, get_ipc_response, mock_builder, mock_context, noop_assets};
     use tauri::webview::InvokeRequest;
@@ -175,7 +187,7 @@ mod ipc_tests {
 
     #[test]
     fn frontend_invoke_arguments_reach_every_command() {
-        let (_db, state) = tauri::async_runtime::block_on(async {
+        let (db, state) = tauri::async_runtime::block_on(async {
             let (db, pool) = fresh_database("ipc").await;
             let state = AppState::load(pool).await.expect("load state");
             state.search_index.set_ready();
@@ -273,5 +285,48 @@ mod ipc_tests {
             compare["columns"][1]["verses"].as_array().map(Vec::len),
             Some(26)
         );
+
+        // Import: the file is chosen (in the app, through the native
+        // dialog) and previewed, then confirmed or cancelled over IPC.
+        let file = db.path().with_file_name("ipc.gospel-getter.json");
+        std::fs::write(
+            &file,
+            r#"{"format": "gospel-getter-reader-data", "format_version": 1,
+                "exported_at": "2026-10-04T00:00:00.000Z", "app_version": "2.2.0",
+                "reading_position": {"translation": "web", "book": 19, "chapter": 23},
+                "bookmarks": [{"book": 19, "chapter": 23, "verse_start": 1, "verse_end": 4}]}"#,
+        )
+        .expect("write import file");
+        let preview = |app: &tauri::App<tauri::test::MockRuntime>| {
+            let state = app.state::<AppState>();
+            match tauri::async_runtime::block_on(crate::commands::prepare_import(&state, &file))
+                .expect("prepare")
+            {
+                crate::commands::ImportChoice::Ready { preview } => preview.token,
+                other => panic!("expected a valid file, got {other:?}"),
+            }
+        };
+        let cancelled = preview(&app);
+        assert_eq!(
+            invoke(&webview, "cancel_import", json!({ "token": cancelled })).unwrap(),
+            Value::Null
+        );
+        assert!(
+            invoke(
+                &webview,
+                "apply_import",
+                json!({ "token": cancelled, "replace": false, "restorePosition": true }),
+            )
+            .is_err()
+        );
+        let token = preview(&app);
+        let result = invoke(
+            &webview,
+            "apply_import",
+            json!({ "token": token, "replace": false, "restorePosition": true }),
+        )
+        .unwrap();
+        assert_eq!(result["added"], 1);
+        assert_eq!(result["position"]["reference"], "Psalms 23 (WEB)");
     }
 }

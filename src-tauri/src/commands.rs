@@ -2,13 +2,18 @@ use anyhow::Context;
 use serde::Serialize;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::db::{self, Book, BookmarkError, BookmarkInTranslation, Translation};
 use crate::domain::Store;
 use crate::domain::bible::{self, ChapterRef};
 use crate::domain::query::{self, Interpretation};
+use crate::reader_data::{
+    self, BookmarkRecord, NewBookmark, NewPosition, PositionRecord, Preferences, ReaderData,
+    ValidatedImport,
+};
 
 /// How many text-search results one `search` call returns.
 pub const SEARCH_PAGE_SIZE: i64 = 50;
@@ -27,6 +32,11 @@ pub struct AppState {
     /// Progress of the search index build, which runs in the background
     /// after startup (see `main.rs`) rather than holding up the window.
     pub search_index: Arc<SearchIndexStatus>,
+    /// The import file the reader is previewing, validated and waiting for
+    /// them to confirm (or cancel). Only one at a time; choosing another
+    /// file replaces it.
+    pub pending_import: Mutex<Option<PendingImport>>,
+    next_import_token: AtomicU64,
 }
 
 impl AppState {
@@ -44,6 +54,8 @@ impl AppState {
             books,
             translations,
             search_index: Arc::default(),
+            pending_import: Mutex::new(None),
+            next_import_token: AtomicU64::new(1),
         })
     }
 }
@@ -866,6 +878,508 @@ pub async fn get_compare(
             tracing::error!("Failed to load {book_id}:{chapter} for comparison: {e:#}");
             "The comparison couldn't be loaded.".to_string()
         })
+}
+
+// ---- Export and import the reader's own data
+
+/// An import the reader is previewing: the file, already validated against
+/// this install, waiting for them to confirm. Applying it uses exactly what
+/// was previewed, even if the file has changed on disk since.
+pub struct PendingImport {
+    token: u64,
+    import: ValidatedImport,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionPreviewDto {
+    pub translation_code: String,
+    pub translation_name: String,
+    pub book_id: i64,
+    pub book_name: String,
+    pub chapter: i64,
+    /// e.g. "Romans 8 (WEB)".
+    pub reference: String,
+}
+
+impl From<&NewPosition> for PositionPreviewDto {
+    fn from(p: &NewPosition) -> Self {
+        Self {
+            reference: format!(
+                "{} {} ({})",
+                p.book_name,
+                p.chapter,
+                p.translation_code.to_uppercase()
+            ),
+            translation_code: p.translation_code.clone(),
+            translation_name: p.translation_name.clone(),
+            book_id: p.book_id,
+            book_name: p.book_name.clone(),
+            chapter: p.chapter,
+        }
+    }
+}
+
+/// How an export ended.
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ExportOutcome {
+    /// The reader closed the save dialog; no file was written.
+    Cancelled,
+    /// The file was completely written.
+    Saved {
+        path: String,
+        bookmarks: usize,
+        has_position: bool,
+        preferences: usize,
+    },
+}
+
+/// What's in an import file, and what importing it would do.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreviewDto {
+    pub token: u64,
+    pub file_name: String,
+    pub exported_at: String,
+    pub app_version: String,
+    /// Distinct bookmarks in the file.
+    pub bookmarks_in_file: usize,
+    /// Entries in the file that repeated another one (ignored).
+    pub duplicates_in_file: usize,
+    /// How many of the file's bookmarks aren't bookmarked here yet.
+    pub new_bookmarks: usize,
+    /// How many are already bookmarked here (merge leaves those as they are).
+    pub already_present: usize,
+    /// How many bookmarks there are here now (what replacing would remove).
+    pub current_bookmarks: usize,
+    /// The first few of the file's bookmarks, e.g. "John 3:16–18".
+    pub sample: Vec<String>,
+    pub position: Option<PositionPreviewDto>,
+    pub preferences: Preferences,
+}
+
+/// The result of choosing a file to import.
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ImportChoice {
+    /// The reader closed the open dialog.
+    Cancelled,
+    /// The file can't be imported; nothing was changed.
+    Invalid {
+        file_name: String,
+        message: String,
+        problems: Vec<String>,
+    },
+    /// Valid; here's what it would do. Nothing has been changed yet.
+    Ready { preview: ImportPreviewDto },
+}
+
+/// What a confirmed import did.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResultDto {
+    pub added: usize,
+    pub already_present: usize,
+    pub removed: usize,
+    /// The reading position saved, if the reader chose to restore it.
+    pub position: Option<PositionPreviewDto>,
+}
+
+fn passage_reference_for(state: &AppState, b: &NewBookmark) -> String {
+    passage_reference(
+        book_name(state, b.book_id).unwrap_or("?"),
+        b.chapter,
+        Some((b.verse_start, b.verse_end)),
+    )
+}
+
+/// The reader's data as an export file: bookmarks (oldest first), the
+/// saved reading position, and the display `preferences` the frontend
+/// passed in.
+pub async fn build_reader_data(
+    state: &AppState,
+    preferences: Preferences,
+) -> anyhow::Result<ReaderData> {
+    let bookmarks = state.store.all_bookmarks().await?;
+    let position = state.store.reading_position().await?;
+    let reading_position = position.and_then(|(translation_id, book_id, chapter)| {
+        let translation = state.translations.iter().find(|t| t.id == translation_id)?;
+        Some(PositionRecord {
+            translation: translation.code.clone(),
+            book: book_id,
+            book_name: book_name(state, book_id).map(str::to_string),
+            chapter,
+        })
+    });
+    Ok(ReaderData {
+        format: reader_data::FORMAT.to_string(),
+        format_version: reader_data::FORMAT_VERSION,
+        exported_at: state.store.now().await?,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        reading_position,
+        bookmarks: bookmarks
+            .into_iter()
+            .map(|b| BookmarkRecord {
+                book_name: book_name(state, b.book_id).map(str::to_string),
+                book: b.book_id,
+                chapter: b.chapter,
+                verse_start: b.verse_start,
+                verse_end: b.verse_end,
+                created_at: Some(b.created_at),
+            })
+            .collect(),
+        preferences,
+    })
+}
+
+/// Write `data` to `path`, completely or not at all: it's written to a
+/// temporary file beside `path`, flushed to disk, then renamed over it, so
+/// a failure never leaves a half-written export (or clobbers an existing
+/// file with one).
+pub async fn save_reader_data(data: &ReaderData, path: &Path) -> anyhow::Result<ExportOutcome> {
+    let contents =
+        reader_data::to_file_contents(data).context("The export couldn't be converted to JSON")?;
+    let target = path.to_path_buf();
+    tokio::task::spawn_blocking(move || write_atomically(&target, contents.as_bytes()))
+        .await
+        .context("The save was interrupted")??;
+    Ok(ExportOutcome::Saved {
+        path: path.display().to_string(),
+        bookmarks: data.bookmarks.len(),
+        has_position: data.reading_position.is_some(),
+        preferences: data.preferences.count(),
+    })
+}
+
+fn write_atomically(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    use std::io::Write;
+    let name = path
+        .file_name()
+        .with_context(|| format!("{} isn't a file name", path.display()))?
+        .to_string_lossy()
+        .into_owned();
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    let write = || -> std::io::Result<()> {
+        let mut temp = create_temp_file(&dir, temp_names(&name))?;
+        let file = temp.file.as_mut().expect("open until persisted");
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        temp.persist_as(path)
+    };
+    write().with_context(|| format!("Couldn't write {}", path.display()))
+}
+
+/// A newly created temporary file, deleted when dropped unless it was
+/// renamed into place with `persist_as`.
+pub(crate) struct TempFile {
+    file: Option<std::fs::File>,
+    path: Option<PathBuf>,
+}
+
+impl TempFile {
+    /// Close it and rename it over `target` (replacing any file there).
+    fn persist_as(mut self, target: &Path) -> std::io::Result<()> {
+        drop(self.file.take());
+        let path = self.path.as_ref().expect("not yet persisted");
+        std::fs::rename(path, target)?;
+        self.path = None;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn path(&self) -> &Path {
+        self.path.as_deref().expect("not yet persisted")
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        // Closed first: Windows can't delete a file that's still open.
+        drop(self.file.take());
+        if let Some(path) = self.path.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+/// Hidden candidate names beside `name`, unique to this process, this
+/// moment and each attempt, so simultaneous saves never share one.
+fn temp_names(name: &str) -> impl Iterator<Item = String> + '_ {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    (0..64).map(move |_| {
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        format!(".{name}.{pid}-{nanos:x}-{n:x}.tmp")
+    })
+}
+
+/// Create a brand-new file in `dir` with the first of `names` not already
+/// taken. An existing file is never opened, truncated or removed: a name
+/// that exists is skipped.
+pub(crate) fn create_temp_file(
+    dir: &Path,
+    names: impl IntoIterator<Item = String>,
+) -> std::io::Result<TempFile> {
+    for name in names {
+        let path = dir.join(name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => {
+                return Ok(TempFile {
+                    file: Some(file),
+                    path: Some(path),
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "no unused temporary file name was found",
+    ))
+}
+
+/// Read at most `MAX_FILE_BYTES + 1` bytes, so an oversized file is
+/// reported as too large without reading all of it.
+async fn read_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path)?
+            .take(reader_data::MAX_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        Ok(bytes)
+    })
+    .await
+    .map_err(std::io::Error::other)?
+}
+
+/// Read and check an import file and work out what importing it would do.
+/// Nothing is changed: a valid file becomes the pending import, waiting
+/// for `apply_pending_import` (or `discard_pending_import`).
+pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<ImportChoice> {
+    let file_name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let bytes = match read_bounded(path).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return Ok(ImportChoice::Invalid {
+                file_name,
+                message: format!("The file couldn't be read: {e}."),
+                problems: Vec::new(),
+            });
+        }
+    };
+    let last_verses = state.store.last_verses().await?;
+    let validated = reader_data::parse(&bytes).and_then(|data| {
+        reader_data::validate(data, &state.books, &state.translations, &last_verses)
+    });
+    let import = match validated {
+        Ok(import) => import,
+        Err(e) => {
+            return Ok(ImportChoice::Invalid {
+                file_name,
+                message: e.to_string(),
+                problems: e.problems().to_vec(),
+            });
+        }
+    };
+
+    let existing = state.store.bookmark_coordinates().await?;
+    let new_bookmarks = import
+        .bookmarks
+        .iter()
+        .filter(|b| !existing.contains(&b.coordinates()))
+        .count();
+    let preview = ImportPreviewDto {
+        token: state.next_import_token.fetch_add(1, Ordering::Relaxed),
+        file_name,
+        exported_at: import.exported_at.clone(),
+        app_version: import.app_version.clone(),
+        bookmarks_in_file: import.bookmarks.len(),
+        duplicates_in_file: import.duplicates_in_file,
+        new_bookmarks,
+        already_present: import.bookmarks.len() - new_bookmarks,
+        current_bookmarks: existing.len(),
+        sample: import
+            .bookmarks
+            .iter()
+            .take(5)
+            .map(|b| passage_reference_for(state, b))
+            .collect(),
+        position: import.position.as_ref().map(PositionPreviewDto::from),
+        preferences: import.preferences,
+    };
+    *lock(&state.pending_import) = Some(PendingImport {
+        token: preview.token,
+        import,
+    });
+    Ok(ImportChoice::Ready { preview })
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Apply the pending import the reader previewed (`token`), in one
+/// database transaction. `replace` swaps every current bookmark for the
+/// file's; otherwise they're merged. `restore_position` also saves the
+/// file's reading position. Display preferences live in the webview and
+/// are applied there, after this succeeds.
+pub async fn apply_pending_import(
+    state: &AppState,
+    token: u64,
+    replace: bool,
+    restore_position: bool,
+) -> Result<ImportResultDto, String> {
+    // Cloned out so the lock isn't held across the database work.
+    let import = match lock(&state.pending_import).as_ref() {
+        Some(pending) if pending.token == token => pending.import.clone(),
+        _ => {
+            return Err(
+                "That import is no longer waiting to be confirmed. Choose the file again."
+                    .to_string(),
+            );
+        }
+    };
+    let position = import.position.as_ref().filter(|_| restore_position);
+    let counts = state
+        .store
+        .apply_import(&import.bookmarks, replace, position)
+        .await
+        .map_err(|e| {
+            tracing::error!("Import failed: {e:#}");
+            "The import failed, so nothing was changed.".to_string()
+        })?;
+    discard_pending_import(state, token);
+    Ok(ImportResultDto {
+        added: counts.added,
+        already_present: counts.already_present,
+        removed: counts.removed,
+        position: position.map(PositionPreviewDto::from),
+    })
+}
+
+/// Forget the pending import, if it's still `token`.
+pub fn discard_pending_import(state: &AppState, token: u64) {
+    let mut pending = lock(&state.pending_import);
+    if pending.as_ref().is_some_and(|p| p.token == token) {
+        *pending = None;
+    }
+}
+
+fn reader_data_dialog<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> tauri_plugin_dialog::FileDialogBuilder<R> {
+    use tauri_plugin_dialog::DialogExt;
+    app.dialog()
+        .file()
+        .add_filter("Gospel Getter bookmarks and settings", &["json"])
+}
+
+/// Runs a blocking native file dialog off the async runtime's worker
+/// threads, and turns its answer into a path (`None` if cancelled).
+async fn run_dialog(
+    show: impl FnOnce() -> Option<tauri_plugin_dialog::FilePath> + Send + 'static,
+) -> Result<Option<PathBuf>, String> {
+    let picked = tokio::task::spawn_blocking(show)
+        .await
+        .map_err(|e| format!("The file dialog failed: {e}"))?;
+    picked
+        .map(|p| {
+            p.into_path()
+                .map_err(|e| format!("That location can't be used: {e}"))
+        })
+        .transpose()
+}
+
+/// Export the reader's bookmarks, reading position and display
+/// preferences to a file they choose with the native save dialog.
+#[tauri::command]
+pub async fn export_reader_data<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    preferences: Preferences,
+) -> Result<ExportOutcome, String> {
+    // Gathered before the dialog opens, so a failure is reported without
+    // asking for a file name first.
+    let data = build_reader_data(&state, preferences).await.map_err(|e| {
+        tracing::error!("Failed to gather data to export: {e:#}");
+        "Your data couldn't be read for export.".to_string()
+    })?;
+    let suggested = format!(
+        "gospel-getter-{}{}",
+        data.exported_at.get(..10).unwrap_or("export"),
+        reader_data::FILE_SUFFIX
+    );
+    let dialog = reader_data_dialog(&app)
+        .set_title("Export bookmarks and settings")
+        .set_file_name(suggested);
+    let Some(path) = run_dialog(move || dialog.blocking_save_file()).await? else {
+        return Ok(ExportOutcome::Cancelled);
+    };
+    save_reader_data(&data, &path).await.map_err(|e| {
+        tracing::error!("Export failed: {e:#}");
+        format!("The file couldn't be saved: {e:#}")
+    })
+}
+
+/// Choose a file to import with the native open dialog, and preview it.
+/// Changes nothing.
+#[tauri::command]
+pub async fn choose_import_file<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<ImportChoice, String> {
+    let dialog = reader_data_dialog(&app).set_title("Import bookmarks and settings");
+    let Some(path) = run_dialog(move || dialog.blocking_pick_file()).await? else {
+        return Ok(ImportChoice::Cancelled);
+    };
+    prepare_import(&state, &path).await.map_err(|e| {
+        tracing::error!("Failed to check import file: {e:#}");
+        "The file couldn't be checked against your Bible data.".to_string()
+    })
+}
+
+/// Apply the previewed import (see `apply_pending_import`).
+#[tauri::command]
+pub async fn apply_import(
+    state: tauri::State<'_, AppState>,
+    token: u64,
+    replace: bool,
+    restore_position: bool,
+) -> Result<ImportResultDto, String> {
+    apply_pending_import(&state, token, replace, restore_position).await
+}
+
+/// Forget a previewed import the reader cancelled.
+#[tauri::command]
+pub fn cancel_import(state: tauri::State<'_, AppState>, token: u64) {
+    discard_pending_import(&state, token);
 }
 
 #[cfg(test)]

@@ -276,6 +276,169 @@
             margin-top: 0.6rem;
         }
 
+        .settings-note {
+            font-size: 0.75rem;
+            line-height: 1.4;
+            color: var(--text-dim);
+            margin-bottom: 0.5rem;
+        }
+
+        .data-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.4rem;
+        }
+
+        .data-actions .reader-mode-btn {
+            width: 100%;
+        }
+
+        .data-actions .reader-mode-btn:disabled {
+            opacity: 0.6;
+            cursor: progress;
+        }
+
+        .data-status {
+            font-size: 0.75rem;
+            line-height: 1.4;
+            color: var(--text-dim);
+            margin-top: 0.4rem;
+            overflow-wrap: anywhere;
+        }
+
+        .data-status.is-error {
+            color: var(--text);
+            font-weight: bold;
+        }
+
+        .data-problems {
+            font-size: 0.72rem;
+            line-height: 1.4;
+            color: var(--text);
+            margin: 0.2rem 0 0 1rem;
+        }
+
+        /* Import preview: a modal panel over a dimmed page, so nothing
+           behind it can be clicked until it's confirmed or cancelled. */
+        .import-overlay:not([hidden]) {
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.6);
+        }
+
+        .import-panel {
+            width: min(560px, 100%);
+            max-height: calc(100vh - 2rem);
+            overflow-y: auto;
+            background: var(--option-bg);
+            color: var(--text);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 1.1rem 1.2rem;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .import-title {
+            font-size: 1.1rem;
+            font-weight: normal;
+            color: var(--accent);
+            margin-bottom: 0.4rem;
+        }
+
+        .import-file {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            overflow-wrap: anywhere;
+            margin-bottom: 0.6rem;
+        }
+
+        .import-summary {
+            margin: 0 0 0.8rem 1.1rem;
+        }
+
+        .import-choices {
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            padding: 0.5rem 0.8rem;
+            margin-bottom: 0.6rem;
+        }
+
+        .import-choices legend {
+            padding: 0 0.3rem;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+        }
+
+        .import-choices label,
+        .import-option {
+            display: block;
+            margin: 0.3rem 0;
+            cursor: pointer;
+        }
+
+        .import-option[hidden] {
+            display: none;
+        }
+
+        .import-warning:not([hidden]) {
+            display: block;
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            padding: 0.5rem 0.7rem;
+            margin-bottom: 0.6rem;
+            font-weight: bold;
+        }
+
+        .import-error {
+            font-weight: bold;
+            margin: 0.4rem 0;
+        }
+
+        .import-error:empty {
+            display: none;
+        }
+
+        .import-buttons {
+            display: flex;
+            gap: 0.6rem;
+            margin-top: 0.8rem;
+        }
+
+        .import-buttons .reader-mode-btn {
+            width: auto;
+        }
+
+        .import-confirm {
+            font-family: inherit;
+            font-size: 0.9rem;
+            color: var(--on-accent);
+            background: var(--accent);
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            padding: 0.4rem 0.9rem;
+            cursor: pointer;
+        }
+
+        .import-confirm:disabled {
+            opacity: 0.6;
+            cursor: progress;
+        }
+
+        .import-confirm:focus-visible,
+        .import-panel input:focus-visible,
+        .import-panel .reader-mode-btn:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
         .bookmark-list {
             list-style: none;
             max-height: 16rem;
@@ -1062,7 +1225,8 @@
             .verse-actions,
             .search-toggle,
             .search-panel,
-            .reader-notice {
+            .reader-notice,
+            .import-overlay {
                 display: none !important;
             }
 
@@ -1240,14 +1404,79 @@
                     document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
                 });
 
+                // All display preferences at once, for exporting and
+                // importing them (the main script's "Back up or move your
+                // data"). Names and values are the export file's: theme,
+                // text_size and line_spacing as the menu's option values,
+                // reading_mode and compare as true/false.
+                var FILE_NAMES = {
+                    theme: 'theme',
+                    text_size: 'textSize',
+                    line_spacing: 'lineSpacing',
+                    reading_mode: 'readerMode',
+                    compare: 'compare',
+                };
+                var ON_OFF = { readerMode: true, compare: true };
+
+                window.gospelGetterPreferences = {
+                    // What's in effect now.
+                    current: function () {
+                        var out = {};
+                        Object.keys(FILE_NAMES).forEach(function (name) {
+                            var key = FILE_NAMES[name];
+                            var value = root.dataset[PREFS[key].attr] || PREFS[key].fallback;
+                            out[name] = ON_OFF[key] ? value === 'on' : value;
+                        });
+                        return out;
+                    },
+                    // Apply and save the given preferences. Every value is
+                    // checked first, so an unknown one changes nothing.
+                    // Returns whether they were all saved; if not (storage
+                    // blocked or full), they still apply until the app
+                    // closes.
+                    apply: function (values) {
+                        var changes = Object.keys(values).map(function (name) {
+                            var key = FILE_NAMES[name];
+                            if (!key) throw new Error('Unknown display setting \u201c' + name + '\u201d.');
+                            var raw = values[name];
+                            var value = ON_OFF[key] && typeof raw === 'boolean' ? (raw ? 'on' : 'off') : raw;
+                            if (PREFS[key].values.indexOf(value) === -1) {
+                                throw new Error('\u201c' + raw + '\u201d isn\u2019t a valid ' + name.replace('_', ' ') + '.');
+                            }
+                            return { pref: PREFS[key], value: value };
+                        });
+                        var persisted = true;
+                        var compareChanged = false;
+                        changes.forEach(function (change) {
+                            var pref = change.pref;
+                            if (pref === PREFS.compare && (root.dataset.compare === 'on') !== (change.value === 'on')) {
+                                compareChanged = true;
+                            }
+                            apply(pref, change.value);
+                            store(pref, change.value);
+                            try {
+                                if (localStorage.getItem(pref.key) !== change.value) persisted = false;
+                            } catch (e) {
+                                persisted = false;
+                            }
+                            if (pref.select) document.getElementById(pref.select).value = change.value;
+                        });
+                        readerModeBtn.setAttribute('aria-pressed', String(isReaderMode()));
+                        compareBtn.setAttribute('aria-pressed', String(root.dataset.compare === 'on'));
+                        if (compareChanged) document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
+                        return { persisted: persisted };
+                    },
+                };
+
                 settingsToggle.addEventListener('click', function () {
                     setMenuOpen(settingsMenu.hidden);
                 });
 
                 // Clicking anywhere outside the menu (and its toggle)
-                // closes it.
+                // closes it. The import preview, opened from the menu,
+                // returns to it when it closes, so a click there doesn't.
                 document.addEventListener('click', function (event) {
-                    if (!event.target.closest('#settings-menu, #settings-toggle')) {
+                    if (!event.target.closest('#settings-menu, #settings-toggle, #import-overlay')) {
                         setMenuOpen(false);
                     }
                 });
@@ -1280,6 +1509,26 @@
         <p id="search-status" class="search-status" role="status" aria-live="polite"></p>
         <ul id="search-results" class="search-results"></ul>
         <button type="button" id="search-more" class="search-more" hidden>Show more</button>
+    </div>
+    <div id="import-overlay" class="import-overlay" hidden>
+        <div id="import-panel" class="import-panel" role="dialog" aria-modal="true" aria-labelledby="import-title" aria-describedby="import-summary">
+            <h2 id="import-title" class="import-title">Import bookmarks and settings</h2>
+            <p id="import-file" class="import-file"></p>
+            <ul id="import-summary" class="import-summary"></ul>
+            <fieldset id="import-bookmark-choice" class="import-choices">
+                <legend>Bookmarks</legend>
+                <label><input type="radio" name="import-mode" value="merge" checked> <span id="import-merge-label">Add them to my bookmarks</span></label>
+                <label><input type="radio" name="import-mode" value="replace"> <span id="import-replace-label">Replace all my bookmarks with these</span></label>
+            </fieldset>
+            <p id="import-replace-warning" class="import-warning" hidden></p>
+            <label id="import-position-option" class="import-option"><input type="checkbox" id="import-position" checked> <span id="import-position-label"></span></label>
+            <label id="import-prefs-option" class="import-option"><input type="checkbox" id="import-prefs" checked> <span id="import-prefs-label"></span></label>
+            <p id="import-error" class="import-error" role="alert"></p>
+            <div class="import-buttons">
+                <button type="button" id="import-confirm" class="import-confirm">Import</button>
+                <button type="button" id="import-cancel" class="reader-mode-btn">Cancel</button>
+            </div>
+        </div>
     </div>
     <div id="settings-menu" class="settings-menu" hidden>
         <div class="settings-field">
@@ -1323,6 +1572,16 @@
         <div class="settings-field">
             <span class="settings-label" id="bookmark-list-label">Bookmarks</span>
             <ul id="bookmark-list" class="bookmark-list" aria-labelledby="bookmark-list-label"></ul>
+        </div>
+        <div class="settings-field">
+            <span class="settings-label" id="reader-data-label">Back up or move your data</span>
+            <p class="settings-note" id="reader-data-note">Your bookmarks, reading position and display settings, saved as a file you can import on another computer. Bible text isn’t included.</p>
+            <div class="data-actions" role="group" aria-labelledby="reader-data-label" aria-describedby="reader-data-note">
+                <button type="button" id="export-data-btn" class="reader-mode-btn">Export data...</button>
+                <button type="button" id="import-data-btn" class="reader-mode-btn">Import data...</button>
+            </div>
+            <p id="data-status" class="data-status" role="status" aria-live="polite"></p>
+            <ul id="data-problems" class="data-problems"></ul>
         </div>
     </div>
 
@@ -1721,6 +1980,259 @@
                 const buttons = bookmarkList.querySelectorAll('.bookmark-remove');
                 const next = buttons[Math.min(index, buttons.length - 1)];
                 (next || settingsToggle).focus();
+            });
+
+            // ---- Back up or move your data: export and import bookmarks,
+            // reading position and display settings. The native file
+            // dialogs, file access and validation are all in the backend;
+            // this only shows what's happening and asks for confirmation.
+
+            const exportDataBtn = document.getElementById('export-data-btn');
+            const importDataBtn = document.getElementById('import-data-btn');
+            const dataStatus = document.getElementById('data-status');
+            const dataProblems = document.getElementById('data-problems');
+            const importOverlay = document.getElementById('import-overlay');
+            const importPanel = document.getElementById('import-panel');
+            const importConfirm = document.getElementById('import-confirm');
+            const importCancel = document.getElementById('import-cancel');
+            const importError = document.getElementById('import-error');
+            const importPositionOption = document.getElementById('import-position-option');
+            const importPosition = document.getElementById('import-position');
+            const importPrefsOption = document.getElementById('import-prefs-option');
+            const importPrefs = document.getElementById('import-prefs');
+            const importBookmarkChoice = document.getElementById('import-bookmark-choice');
+            const importReplaceWarning = document.getElementById('import-replace-warning');
+            let importPreview = null;
+
+            const plural = (n, one, many = `${one}s`) => `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
+            const errorText = (e) => (e && e.message) || String(e);
+
+            function setDataStatus(message, isError = false, problems = []) {
+                dataStatus.textContent = message;
+                dataStatus.classList.toggle('is-error', isError);
+                dataProblems.innerHTML = problems.map((p) => `<li>${escapeHtml(p)}</li>`).join('');
+            }
+
+            function setDataBusy(busy) {
+                exportDataBtn.disabled = busy;
+                importDataBtn.disabled = busy;
+            }
+
+            function openSettingsMenu(focus) {
+                settingsMenu.hidden = false;
+                settingsToggle.setAttribute('aria-expanded', 'true');
+                if (focus) focus.focus();
+            }
+
+            exportDataBtn.addEventListener('click', async function () {
+                const prefs = window.gospelGetterPreferences ? window.gospelGetterPreferences.current() : {};
+                setDataBusy(true);
+                setDataStatus('Choose where to save the file…');
+                try {
+                    const outcome = await invoke('export_reader_data', { preferences: prefs });
+                    if (outcome.status === 'cancelled') {
+                        setDataStatus('Export cancelled. No file was saved.');
+                    } else {
+                        const parts = [plural(outcome.bookmarks, 'bookmark')];
+                        if (outcome.hasPosition) parts.push('your reading position');
+                        if (outcome.preferences) parts.push('your display settings');
+                        setDataStatus(`Saved ${parts.join(', ')} to ${outcome.path}.`);
+                    }
+                } catch (e) {
+                    console.error('Export failed', e);
+                    setDataStatus(`Export failed: ${errorText(e)}`, true);
+                } finally {
+                    setDataBusy(false);
+                }
+            });
+
+            // Readable names for display settings, taken from the settings
+            // menu itself.
+            function describePreferences(prefs) {
+                const optionText = (selectId, value) => {
+                    const option = [...document.getElementById(selectId).options].find((o) => o.value === value);
+                    return option ? option.textContent : value;
+                };
+                const parts = [];
+                if (prefs.theme) parts.push(`${optionText('theme-select', prefs.theme)} theme`);
+                if (prefs.text_size) parts.push(`${optionText('text-size-select', prefs.text_size).toLowerCase()} text`);
+                if (prefs.line_spacing) parts.push(`${optionText('line-spacing-select', prefs.line_spacing).toLowerCase()} line spacing`);
+                if (prefs.compare != null) parts.push(`compare ${prefs.compare ? 'on' : 'off'}`);
+                if (prefs.reading_mode != null) parts.push(`reading mode ${prefs.reading_mode ? 'on' : 'off'}`);
+                return parts;
+            }
+
+            function updateImportMode() {
+                const replace = importPanel.querySelector('input[name="import-mode"][value="replace"]').checked;
+                const current = importPreview ? importPreview.currentBookmarks : 0;
+                importReplaceWarning.hidden = !replace;
+                importReplaceWarning.textContent = `This deletes your ${plural(current, 'current bookmark')} and keeps only the file’s. If you might want yours back, cancel and export them first.`;
+                importConfirm.textContent = replace ? 'Replace bookmarks and import' : 'Import';
+            }
+
+            function openImportPreview(preview) {
+                importPreview = preview;
+                const exported = (preview.exportedAt || '').slice(0, 10);
+                document.getElementById('import-file').textContent =
+                    `${preview.fileName} — exported ${exported || 'at an unknown time'} by Gospel Getter ${preview.appVersion}`;
+
+                const summary = [];
+                if (preview.bookmarksInFile) {
+                    let line = `${plural(preview.bookmarksInFile, 'bookmark')}: ${preview.newBookmarks} new, ${preview.alreadyPresent} you already have.`;
+                    if (preview.duplicatesInFile) line += ` (${plural(preview.duplicatesInFile, 'repeated entry', 'repeated entries')} in the file will be skipped.)`;
+                    summary.push(line);
+                    const more = preview.bookmarksInFile > preview.sample.length ? ', …' : '';
+                    summary.push(`Including ${preview.sample.join(', ')}${more}`);
+                } else {
+                    summary.push('No bookmarks.');
+                }
+                if (!preview.position) summary.push('No reading position.');
+                if (!describePreferences(preview.preferences).length) summary.push('No display settings.');
+                document.getElementById('import-summary').innerHTML = summary.map((s) => `<li>${escapeHtml(s)}</li>`).join('');
+
+                importBookmarkChoice.hidden = !preview.bookmarksInFile;
+                importPanel.querySelector('input[name="import-mode"][value="merge"]').checked = true;
+                document.getElementById('import-merge-label').textContent =
+                    `Add them to my bookmarks (${preview.newBookmarks} new; any I already have stay as they are)`;
+                document.getElementById('import-replace-label').textContent =
+                    `Replace all my bookmarks with the file’s (removes my ${plural(preview.currentBookmarks, 'current bookmark')})`;
+
+                importPositionOption.hidden = !preview.position;
+                importPosition.checked = !!preview.position;
+                document.getElementById('import-position-label').textContent = preview.position
+                    ? `Go to the file’s reading position: ${preview.position.reference}`
+                    : '';
+
+                const prefs = describePreferences(preview.preferences);
+                importPrefsOption.hidden = !prefs.length;
+                importPrefs.checked = prefs.length > 0;
+                document.getElementById('import-prefs-label').textContent = prefs.length
+                    ? `Use the file’s display settings: ${prefs.join(', ')}`
+                    : '';
+
+                importError.textContent = '';
+                importConfirm.disabled = false;
+                updateImportMode();
+                closeSettingsMenu();
+                importOverlay.hidden = false;
+                importConfirm.focus();
+            }
+
+            function closeImportPreview() {
+                importOverlay.hidden = true;
+                importPreview = null;
+            }
+
+            function cancelImportPreview() {
+                if (!importPreview) return;
+                invoke('cancel_import', { token: importPreview.token }).catch((e) => console.error('Failed to discard import', e));
+                closeImportPreview();
+                setDataStatus('Import cancelled. Nothing was changed.');
+                openSettingsMenu(importDataBtn);
+            }
+
+            importDataBtn.addEventListener('click', async function () {
+                setDataBusy(true);
+                setDataStatus('Choose a file to import…');
+                try {
+                    const choice = await invoke('choose_import_file');
+                    if (choice.status === 'cancelled') {
+                        setDataStatus('Import cancelled. Nothing was changed.');
+                    } else if (choice.status === 'invalid') {
+                        setDataStatus(`${choice.fileName}: ${choice.message} Nothing was changed.`, true, choice.problems);
+                    } else {
+                        setDataStatus('');
+                        openImportPreview(choice.preview);
+                    }
+                } catch (e) {
+                    console.error('Import failed', e);
+                    setDataStatus(`Import failed: ${errorText(e)} Nothing was changed.`, true);
+                } finally {
+                    setDataBusy(false);
+                }
+            });
+
+            importPanel.addEventListener('change', function (event) {
+                if (event.target.name === 'import-mode') updateImportMode();
+            });
+
+            importCancel.addEventListener('click', cancelImportPreview);
+
+            importConfirm.addEventListener('click', async function () {
+                const preview = importPreview;
+                if (!preview) return;
+                const replace = !importBookmarkChoice.hidden
+                    && importPanel.querySelector('input[name="import-mode"][value="replace"]').checked;
+                const restorePosition = !!preview.position && importPosition.checked;
+                const usePrefs = !importPrefsOption.hidden && importPrefs.checked;
+                importConfirm.disabled = true;
+                importError.textContent = '';
+                let result;
+                try {
+                    result = await invoke('apply_import', { token: preview.token, replace, restorePosition });
+                } catch (e) {
+                    // The database import is all-or-nothing, so nothing
+                    // changed; the preview stays open to retry or cancel.
+                    console.error('Import failed', e);
+                    importError.textContent = `${errorText(e)} You can try again, or cancel.`;
+                    importConfirm.disabled = false;
+                    return;
+                }
+                closeImportPreview();
+
+                const parts = [];
+                if (preview.bookmarksInFile) {
+                    parts.push(replace
+                        ? `Replaced ${plural(result.removed, 'bookmark')} with the file’s ${plural(result.added, 'bookmark')}.`
+                        : `Added ${plural(result.added, 'bookmark')}${result.alreadyPresent ? ` (${result.alreadyPresent} you already had)` : ''}.`);
+                }
+                if (result.position) parts.push(`Went to ${result.position.reference}.`);
+
+                // Display settings live in the webview's own storage, not
+                // the database, so they're applied after the database part
+                // has succeeded; a failure here is reported, not hidden.
+                if (usePrefs) {
+                    try {
+                        const applied = window.gospelGetterPreferences.apply(preview.preferences);
+                        parts.push(applied.persisted
+                            ? 'Display settings applied.'
+                            : 'Display settings applied, but they couldn’t be saved here, so they’ll reset when the app restarts.');
+                    } catch (e) {
+                        console.error('Failed to apply display settings', e);
+                        parts.push(`Display settings weren’t applied: ${errorText(e)}`);
+                    }
+                }
+
+                if (result.position) {
+                    translationSelect.value = result.position.translationCode;
+                    await loadReading(result.position.bookId, result.position.chapter);
+                }
+                await refreshBookmarks();
+                const message = `Import complete. ${parts.join(' ')}`;
+                showNotice(message);
+                setDataStatus(message);
+            });
+
+            // While the preview is open it has the keyboard: Escape
+            // cancels, and Tab stays inside it.
+            importOverlay.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cancelImportPreview();
+                    return;
+                }
+                if (event.key !== 'Tab') return;
+                const focusable = [...importPanel.querySelectorAll('input, button')].filter((el) => !el.disabled && !el.closest('[hidden]'));
+                if (!focusable.length) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault();
+                    last.focus();
+                } else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault();
+                    first.focus();
+                }
             });
 
             // ---- Rendering: builds the same markup the old server-rendered
@@ -2215,7 +2727,7 @@
                 // <head> (and the bookmark list's own handler above);
                 // they're never navigation or a "click away" from a verse
                 // selection. Nor is the search panel.
-                if (event.target.closest('#settings-menu, #settings-toggle, #reader-exit, #search-panel, #search-toggle')) {
+                if (event.target.closest('#settings-menu, #settings-toggle, #reader-exit, #search-panel, #search-toggle, #import-overlay')) {
                     return;
                 }
 
@@ -2362,6 +2874,11 @@
                 }
                 // So do keys pressed on the search results.
                 if (event.target && event.target.closest && event.target.closest('#search-panel')) {
+                    return;
+                }
+                // And while the import preview is open, nothing else
+                // responds to the keyboard (it handles its own keys).
+                if (!importOverlay.hidden) {
                     return;
                 }
 
