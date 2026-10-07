@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gospel Getter — a free, offline Bible reader for Windows and Linux</title>
+    <meta name="description" content="Gospel Getter is a free Bible reader for Windows and Linux computers. Read the KJV or WEB offline, search the whole Bible, compare translations and bookmark passages. No account needed.">
+    <meta name="theme-color" content="#14082c">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Gospel Getter">
+    <meta property="og:title" content="Gospel Getter — Read Scripture without the noise">
+    <meta property="og:description" content="A free, offline Bible reader for Windows and Linux. KJV and WEB built in, search, side-by-side comparison and bookmarks. No account needed.">
+    <!-- Open Graph needs an absolute image URL; update it when the site
+         moves to its own domain (see site/README.md). -->
+    <meta property="og:image" content="https://tossbaws.github.io/gospel-getter/assets/og-image.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Gospel Getter showing John 3 in the World English Bible, with John 2 and John 4 faded on either side">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+    <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon.png">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+
+    <header class="site-header">
+        <div class="wrap">
+            <a class="brand" href="#top">
+                <img src="assets/icon.svg" alt="" width="40" height="40">
+                <span>
+                    <span class="brand-name">Gospel Getter</span>
+                    <span class="brand-byline">by Chi Rho Code LLC</span>
+                </span>
+            </a>
+            <nav class="site-nav" aria-label="Main">
+                <ul>
+                    <li><a href="#features">Features</a></li>
+                    <li><a href="#download">Download</a></li>
+                    <li><a class="nav-about" href="#about">About the maker</a></li>
+                    <li><a class="button button-primary" href="#download">Download free</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main id="main" tabindex="-1">
+        <section class="hero" id="top" aria-labelledby="hero-title">
+            <div class="wrap hero-grid">
+                <div class="hero-copy">
+                    <p class="eyebrow">Gospel Getter · Free Bible reader for Windows &amp; Linux</p>
+                    <h1 id="hero-title">Read Scripture without the noise.</h1>
+                    <p class="lede">Read the KJV or WEB on your computer, even offline. Find a passage, compare translations, and come back to what matters—no account needed.</p>
+
+                    <div class="hero-actions">
+                        <a class="button button-primary" href="#download-windows">Download for Windows</a>
+                        <a class="button button-secondary" href="#download-linux">Download for Linux</a>
+                    </div>
+                    <p class="hero-note">Version 2.3.0, for 64-bit Windows and Linux computers. The Windows installer isn’t code-signed yet, so Windows will probably warn you before it runs. <a href="#faq-smartscreen">What to expect</a>.</p>
+                    <p class="touch-only touch-note">Gospel Getter is a desktop app for <strong>Windows and Linux computers</strong>. There’s no phone, tablet or Mac version. To install it, open this page on your computer.</p>
+
+                    <ul class="facts">
+                        <li><strong>Free</strong> <span>— no price, no ads, no subscription</span></li>
+                        <li><strong>Reads offline</strong> <span>— both translations are built in</span></li>
+                        <li><strong>No account</strong> <span>— nothing to sign up for</span></li>
+                        <li><strong>Open source</strong> <span>— <a href="https://github.com/tossbaws/gospel-getter">MIT-licensed code on GitHub</a></span></li>
+                    </ul>
+
+                    <p><a class="see-how" href="#features">See how it works</a></p>
+                </div>
+                <figure class="shot hero-shot">
+                    <img src="assets/hero-1400.webp"
+                         srcset="assets/hero-700.webp 700w, assets/hero-1400.webp 1400w"
+                         sizes="(min-width: 60rem) 38rem, calc(100vw - 2rem)"
+                         width="1400" height="1074" fetchpriority="high"
+                         alt="Gospel Getter in the Classic Light theme, showing John 3 in the World English Bible, from “Now there was a man of the Pharisees named Nicodemus” onwards. The chapter is in the centre, with the edges of John 2 and John 4 faded on either side.">
+                </figure>
+            </div>
+        </section>
+
+        <section class="section" id="features" aria-labelledby="features-title">
+            <div class="wrap">
+                <h2 id="features-title">A quiet place to read</h2>
+                <p class="section-intro">Gospel Getter does a few things and stays out of the way. Every screenshot on this page is the real app.</p>
+
+                <div class="feature text-only" id="context">
+                    <div class="feature-text">
+                        <h3>Read in context</h3>
+                        <p>The chapter you’re reading sits in the middle, with the chapters before and after it faded on either side, as in the picture above. Press <kbd>←</kbd> and <kbd>→</kbd> to turn chapters across the whole Bible, from Genesis 50 straight into Exodus 1. Or pick a book and chapter, or try a random chapter.</p>
+                        <p>Click a verse to see related passages, and click one of them to read it in place. The cross-references come from OpenBible.info.</p>
+                    </div>
+                </div>
+
+                <div class="feature" id="search">
+                    <div class="feature-text">
+                        <h3>Find a passage quickly</h3>
+                        <p>Press <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> and type a reference such as <code>John 3:16</code>, <code>1 Cor 13</code> or <code>Psalm 23</code> to go straight there.</p>
+                        <p>Type anything else to search the words of the text. You get every verse that contains all your words, in Bible order, with the words highlighted. Search works offline too.</p>
+                    </div>
+                    <figure class="shot">
+                        <img src="assets/search-1440.webp"
+                             srcset="assets/search-720.webp 720w, assets/search-1440.webp 1440w"
+                             sizes="(min-width: 56rem) 42rem, calc(100vw - 2rem)"
+                             width="1440" height="1300" loading="lazy" decoding="async"
+                             alt="The search panel in the Classic Light theme. The search “love one another” found 20 verses in the WEB, starting with John 13:34, John 13:35 and John 15:12, each with the matching words highlighted.">
+                    </figure>
+                </div>
+
+                <div class="feature feature-flip" id="keep">
+                    <div class="feature-text">
+                        <h3>Keep what matters</h3>
+                        <ul>
+                            <li><strong>Copy with the reference.</strong> Click a verse, Shift-click another to select a range, then Copy. You get the text followed by its reference, such as “— 1 Corinthians 13:4–7 (WEB)”.</li>
+                            <li><strong>Bookmark passages.</strong> Bookmarked verses get a star, and your bookmarks list opens any of them again.</li>
+                            <li><strong>Back up or move your bookmarks.</strong> Export your bookmarks, reading position and display settings to a file, and import them on another computer. You see what a file contains before anything changes. Bible text isn’t included.</li>
+                            <li><strong>Pick up where you left off.</strong> Your chapter, translation and settings are remembered.</li>
+                        </ul>
+                    </div>
+                    <figure class="shot">
+                        <img src="assets/select-1600.webp"
+                             srcset="assets/select-800.webp 800w, assets/select-1600.webp 1600w"
+                             sizes="(min-width: 56rem) 42rem, calc(100vw - 2rem)"
+                             width="1600" height="1000" loading="lazy" decoding="async"
+                             alt="1 Corinthians 13 in the WEB in the Classic Light theme. Verses 1 to 3 have bookmark stars, and verses 4 to 7 are selected, with Copy and Bookmark buttons and the reference “1 Corinthians 13:4–7 (WEB)” beneath them.">
+                    </figure>
+                </div>
+
+                <div class="feature" id="compare">
+                    <div class="feature-text">
+                        <h3>Compare KJV and WEB</h3>
+                        <p>Press <kbd>C</kbd> to read the King James Version and the World English Bible side by side, one row per verse. Where only one translation numbers a verse, the other column says so instead of shifting anything.</p>
+                        <p>Both texts are stored exactly as their public-domain sources provide them. In the KJV that includes the source’s own bracketed notes, such as <code>{is}</code>.</p>
+                    </div>
+                    <figure class="shot">
+                        <img src="assets/compare-1600.webp"
+                             srcset="assets/compare-800.webp 800w, assets/compare-1600.webp 1600w"
+                             sizes="(min-width: 56rem) 42rem, calc(100vw - 2rem)"
+                             width="1600" height="1000" loading="lazy" decoding="async"
+                             alt="Psalms 23 in compare mode in the Classic Light theme: the King James Version and the World English Bible in two columns, one row per verse. The KJV column shows its source’s bracketed notes, such as “{is}”.">
+                    </figure>
+                </div>
+            </div>
+        </section>
+
+        <section class="section section-alt" id="computer" aria-labelledby="computer-title">
+            <div class="wrap">
+                <h2 id="computer-title">Made for your computer</h2>
+                <p class="section-intro">Gospel Getter is a desktop app, not a website. Once it’s installed, you don’t need the internet to read.</p>
+                <div class="two-col">
+                    <ul>
+                        <li><strong>Windows and Linux.</strong> Installers for 64-bit Windows, and an AppImage or <code>.deb</code> for Linux.</li>
+                        <li><strong>Works offline.</strong> The King James Version and the World English Bible are built in, along with the cross-references and search.</li>
+                        <li><strong>No account.</strong> There’s nothing to sign up for or log in to.</li>
+                    </ul>
+                    <ul>
+                        <li><strong>Your reading stays on your computer.</strong> Bookmarks, reading position and settings are kept on your computer, in the app’s own data folder.</li>
+                        <li><strong>A native app.</strong> No browser to open and no background server.</li>
+                        <li><strong>Free and open source.</strong> <a href="https://github.com/tossbaws/gospel-getter">The code is on GitHub</a> under the MIT license.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="themes" aria-labelledby="themes-title">
+            <div class="wrap">
+                <h2 id="themes-title">Make it yours</h2>
+                <p class="section-intro">Choose from six themes, four text sizes and three line spacings, or switch on reading mode to hide everything but the text. Printing is always black on white.</p>
+                <ul class="themes">
+                    <li>
+                        <figure>
+                            <img class="shot" src="assets/theme-classic-light.webp" width="720" height="435" loading="lazy" decoding="async"
+                                 alt="Psalms 23, verses 1 to 4, in the Classic Light theme: dark text on an off-white background with blue headings.">
+                            <figcaption>Classic Light</figcaption>
+                        </figure>
+                    </li>
+                    <li>
+                        <figure>
+                            <img class="shot" src="assets/theme-classic-dark.webp" width="720" height="435" loading="lazy" decoding="async"
+                                 alt="Psalms 23, verses 1 to 4, in the Classic Dark theme: light grey text on a near-black background with blue headings.">
+                            <figcaption>Classic Dark</figcaption>
+                        </figure>
+                    </li>
+                    <li>
+                        <figure>
+                            <img class="shot" src="assets/theme-vaporwave.webp" width="720" height="435" loading="lazy" decoding="async"
+                                 alt="Psalms 23, verses 1 to 4, in the Vaporwave theme: pale lavender text on a deep purple gradient with teal headings.">
+                            <figcaption>Vaporwave</figcaption>
+                        </figure>
+                    </li>
+                    <li>
+                        <figure>
+                            <img class="shot" src="assets/theme-matrix.webp" width="720" height="435" loading="lazy" decoding="async"
+                                 alt="Psalms 23, verses 1 to 4, in the Matrix theme: pale green text on a black background with bright green headings.">
+                            <figcaption>Matrix</figcaption>
+                        </figure>
+                    </li>
+                    <li>
+                        <figure>
+                            <img class="shot" src="assets/theme-beast-slayer.webp" width="720" height="435" loading="lazy" decoding="async"
+                                 alt="Psalms 23, verses 1 to 4, in the Beast Slayer theme: cream text on a dark brown background with gold headings.">
+                            <figcaption>Beast Slayer</figcaption>
+                        </figure>
+                    </li>
+                    <li>
+                        <figure>
+                            <img class="shot" src="assets/theme-hot-pink.webp" width="720" height="435" loading="lazy" decoding="async"
+                                 alt="Psalms 23, verses 1 to 4, in the Hot Pink theme: pale pink text on a near-black plum background with hot pink headings.">
+                            <figcaption>Hot Pink</figcaption>
+                        </figure>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="section section-alt download" id="download" aria-labelledby="download-title">
+            <div class="wrap">
+                <h2 id="download-title">Download Gospel Getter</h2>
+                <p class="release-line"><strong>Version 2.3.0.</strong> Free, for 64-bit Windows and Linux. <a href="https://github.com/tossbaws/gospel-getter/releases/tag/v2.3.0">What’s new in 2.3.0</a></p>
+                <p class="touch-only touch-note">You seem to be on a phone or tablet. Gospel Getter runs on <strong>Windows and Linux computers</strong> only, so open this page on your computer to install it.</p>
+
+                <div class="platforms">
+                    <section class="platform" id="download-windows" aria-labelledby="windows-title">
+                        <h3 id="windows-title">Windows</h3>
+                        <div class="caution">
+                            <p><strong>Before you download:</strong> the Windows installers aren’t code-signed yet. Windows SmartScreen will probably say it “protected your PC” from an “unknown publisher”. If you trust this download, choose <strong>More info</strong>, then <strong>Run anyway</strong>. <a href="#faq-smartscreen">More about this</a>.</p>
+                        </div>
+                        <ul class="files">
+                            <li>
+                                <a class="button button-primary" href="https://github.com/tossbaws/gospel-getter/releases/download/v2.3.0/Gospel-Getter_2.3.0_x64-setup.exe">Windows installer (.exe) <span class="file-size">9.5 MB</span></a>
+                                <p class="file-note">Recommended for most people.</p>
+                            </li>
+                            <li>
+                                <a class="button button-secondary" href="https://github.com/tossbaws/gospel-getter/releases/download/v2.3.0/Gospel-Getter_2.3.0_x64_en-US.msi">Windows MSI package <span class="file-size">13.7 MB</span></a>
+                                <p class="file-note">For people who prefer or manage MSI installs.</p>
+                            </li>
+                        </ul>
+                    </section>
+
+                    <section class="platform" id="download-linux" aria-labelledby="linux-title">
+                        <h3 id="linux-title">Linux</h3>
+                        <p>Choose one:</p>
+                        <ul class="files">
+                            <li>
+                                <a class="button button-primary" href="https://github.com/tossbaws/gospel-getter/releases/download/v2.3.0/Gospel-Getter_2.3.0_amd64.AppImage">AppImage <span class="file-size">88 MB</span></a>
+                                <p class="file-note">Works on most distributions. Nothing to install: make it executable and run it.</p>
+                            </li>
+                            <li>
+                                <a class="button button-secondary" href="https://github.com/tossbaws/gospel-getter/releases/download/v2.3.0/Gospel-Getter_2.3.0_amd64.deb">.deb package <span class="file-size">14.2 MB</span></a>
+                                <p class="file-note">For Debian, Ubuntu and distributions based on them.</p>
+                            </li>
+                        </ul>
+                    </section>
+                </div>
+
+                <ul class="more-links">
+                    <li><a href="https://github.com/tossbaws/gospel-getter/releases/download/v2.3.0/SHA256SUMS">SHA256SUMS (checksums)</a></li>
+                    <li><a href="https://github.com/tossbaws/gospel-getter/releases/tag/v2.3.0">Release notes for 2.3.0</a></li>
+                    <li><a href="https://github.com/tossbaws/gospel-getter/releases">All releases on GitHub</a></li>
+                    <li><a href="https://github.com/tossbaws/gospel-getter">Source code</a></li>
+                </ul>
+                <p class="not-here">There’s no Mac, phone or tablet version, and no web version to read in a browser.</p>
+            </div>
+        </section>
+
+        <section class="section" id="faq" aria-labelledby="faq-title">
+            <div class="wrap faq">
+                <h2 id="faq-title">Installing: common questions</h2>
+
+                <details id="faq-smartscreen">
+                    <summary>Why does Windows warn about an “unknown publisher”?</summary>
+                    <div>
+                        <p>Windows shows that warning for programs that aren’t code-signed, and Gospel Getter’s installers aren’t signed yet. The warning is about that missing signature; it doesn’t mean Windows found a problem in the file.</p>
+                        <p>If you downloaded the installer from this page or from the <a href="https://github.com/tossbaws/gospel-getter/releases">GitHub releases page</a>, choose <strong>More info</strong>, then <strong>Run anyway</strong>. If you’d like to check the file first, compare its checksum (next question). If you’d rather not run unsigned software, that’s a reasonable choice, and you can wait for a signed release.</p>
+                    </div>
+                </details>
+
+                <details id="faq-checksums">
+                    <summary>How do I check my download?</summary>
+                    <div>
+                        <p>Each release lists the SHA-256 checksum of every file in <a href="https://github.com/tossbaws/gospel-getter/releases/download/v2.3.0/SHA256SUMS">SHA256SUMS</a>. The installers are built by GitHub Actions from the tagged source, as the <a href="https://github.com/tossbaws/gospel-getter/releases/tag/v2.3.0">release notes</a> explain.</p>
+                        <p>On Linux, put SHA256SUMS in the same folder as your download and run:</p>
+                        <pre><code>sha256sum -c --ignore-missing SHA256SUMS</code></pre>
+                        <p>On Windows, in PowerShell, run this and compare the result with the matching line in SHA256SUMS:</p>
+                        <pre><code>Get-FileHash .\Gospel-Getter_2.3.0_x64-setup.exe</code></pre>
+                    </div>
+                </details>
+
+                <details id="faq-linux">
+                    <summary>AppImage or .deb?</summary>
+                    <div>
+                        <p>The <strong>AppImage</strong> runs on most distributions without installing anything. Make it executable (in your file manager’s properties, or with <code>chmod +x</code>), then open it.</p>
+                        <p>The <strong>.deb</strong> installs Gospel Getter like any other package on Debian, Ubuntu and their relatives, for example with <code>sudo apt install ./Gospel-Getter_2.3.0_amd64.deb</code>.</p>
+                    </div>
+                </details>
+
+                <details id="faq-update">
+                    <summary>Does it update itself? Will I lose my bookmarks?</summary>
+                    <div>
+                        <p>It doesn’t update itself. To get a new version, download it from this page or the releases page and install it over the old one.</p>
+                        <p>Upgrading keeps your bookmarks, reading position and settings. To be safe, or to move to another computer, use <strong>Export data…</strong> in Settings first.</p>
+                    </div>
+                </details>
+
+                <details id="faq-translations">
+                    <summary>Which translations are included?</summary>
+                    <div>
+                        <p>The King James Version (KJV) and the World English Bible (WEB). Both are public domain, which is what lets them ship offline inside the app. Copyrighted translations such as the NIV and ESV aren’t included.</p>
+                        <p>Cross-references are from <a href="https://www.openbible.info/labs/cross-references/">OpenBible.info</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
+                    </div>
+                </details>
+
+                <details id="faq-platforms">
+                    <summary>Is there a Mac, phone or web version?</summary>
+                    <div>
+                        <p>No. Gospel Getter is available for Windows and Linux computers only.</p>
+                    </div>
+                </details>
+            </div>
+        </section>
+
+        <section class="section section-alt" id="about" aria-labelledby="about-title">
+            <div class="wrap about">
+                <h2 id="about-title">About the maker</h2>
+                <p>Gospel Getter is made by Chi Rho Code LLC, a small software company. The app is free, and its source code is open on GitHub under the MIT license.</p>
+                <p>Found a problem, or have a question or an idea? <a href="https://github.com/tossbaws/gospel-getter/issues/new/choose">Open an issue on GitHub</a> (you’ll need a free GitHub account).</p>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="wrap">
+            <ul class="footer-links">
+                <li><a href="#download">Download</a></li>
+                <li><a href="https://github.com/tossbaws/gospel-getter">Source code</a></li>
+                <li><a href="https://github.com/tossbaws/gospel-getter/releases">Releases</a></li>
+                <li><a href="https://github.com/tossbaws/gospel-getter/issues/new/choose">Report a problem</a></li>
+            </ul>
+            <p>Gospel Getter is made by Chi Rho Code LLC and released under the MIT license.</p>
+            <p>This website uses no analytics, cookies or tracking scripts.</p>
+        </div>
+    </footer>
+</body>
+</html>
