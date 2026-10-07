@@ -90,12 +90,22 @@ in the text, and the list in settings shows each one with a preview.
 ## Installing
 
 **Download** an installer from the
-[Releases page](https://github.com/tossbaws/gospel-getter/releases). Each
-release lists a `SHA256SUMS` file to check them with.
+[latest release](https://github.com/tossbaws/gospel-getter/releases/latest)
+(older versions are on the
+[Releases page](https://github.com/tossbaws/gospel-getter/releases)). Each
+release lists a `SHA256SUMS` file to check them with. From v2.4.0 on, the
+files have the same names in every release, so these links always get the
+newest one:
 
-- **Linux:** an AppImage (most distros, nothing to install) or a `.deb`
+- **Linux:** the
+  [AppImage](https://github.com/tossbaws/gospel-getter/releases/latest/download/Gospel-Getter_amd64.AppImage)
+  (most distros, nothing to install) or the
+  [`.deb`](https://github.com/tossbaws/gospel-getter/releases/latest/download/Gospel-Getter_amd64.deb)
   (Debian/Ubuntu).
-- **Windows:** the NSIS `setup.exe` (recommended) or an MSI. **The Windows
+- **Windows:** the NSIS
+  [`setup.exe`](https://github.com/tossbaws/gospel-getter/releases/latest/download/Gospel-Getter_x64-setup.exe)
+  (recommended) or the
+  [MSI](https://github.com/tossbaws/gospel-getter/releases/latest/download/Gospel-Getter_x64_en-US.msi). **The Windows
   installers aren't code-signed**, so SmartScreen will probably warn about
   an "unknown publisher". Choose "More info → Run anyway".
 

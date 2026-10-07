@@ -509,13 +509,6 @@ main:focus {
 
 .files .button {
     width: 100%;
-    justify-content: space-between;
-}
-
-.file-size {
-    font-weight: 400;
-    font-size: 0.88rem;
-    opacity: 0.85;
 }
 
 .file-note {
@@ -578,11 +571,6 @@ main:focus {
         color: var(--link);
         font-weight: 600;
         text-decoration: underline;
-    }
-
-    .files .file-size {
-        opacity: 1;
-        color: var(--ink-soft);
     }
 }
 

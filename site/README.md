@@ -18,26 +18,36 @@ python3 -m http.server --directory site 8000
 
 Opening `site/index.html` straight from disk works too.
 
-## On each release
+## Downloads and releases
 
-The download links go straight to one release's files, because GitHub's
-`releases/latest/download/` links need file names without the version in
-them. After bumping the version:
+The download links never change. They use GitHub's
+`https://github.com/tossbaws/gospel-getter/releases/latest/download/<name>`
+links, which always serve the newest release's file of that name, and
+"What's new" / "Release notes" link to `releases/latest`. That works
+because, from v2.4.0 on, every release's assets have the same names:
 
-1. In `index.html`, replace the old version everywhere it appears (the
-   links, the file names and the version text) with the new one.
-2. Update the file sizes next to the download buttons, from the release's
-   assets.
-3. Run `npm test` in `tests/frontend/`.
+| File | What it is |
+|---|---|
+| `Gospel-Getter_x64-setup.exe` | Windows installer (NSIS, recommended) |
+| `Gospel-Getter_x64_en-US.msi` | Windows MSI package |
+| `Gospel-Getter_amd64.AppImage` | Linux AppImage |
+| `Gospel-Getter_amd64.deb` | Debian/Ubuntu package |
+| `SHA256SUMS` | Checksums of the four files above, by these names |
 
-`tests/frontend/site.test.mjs` reads the version from
-`src-tauri/tauri.conf.json` and fails until every download link and every
-version shown on the page match it, and all five files (the `.exe`, `.msi`,
-`.AppImage`, `.deb` and `SHA256SUMS`) are linked. CI runs it on every pull
-request, so a version bump can't merge with a stale site.
+The Distribution Artifacts workflow builds versioned file names; they're
+renamed to these when the release is published, without changing the
+bytes. Releases before v2.4.0 keep their versioned names.
 
-Publish the release before merging the site update, or the links will
-404 until you do.
+**On each release, only the displayed version changes:** replace
+`Version X.Y.Z` in `index.html` with the new version, and run `npm test` in
+`tests/frontend/`. `tests/frontend/site.test.mjs` enforces it: it reads the
+version from `src-tauri/tauri.conf.json` and fails until every version the
+page shows matches. It also fails if any of the five stable links is
+missing, or if any download or release link names a version. CI runs it on
+every pull request.
+
+Publish the release (with the stable asset names) when you merge the
+version bump: until a release has those names, the links 404.
 
 ## Where the assets come from
 
