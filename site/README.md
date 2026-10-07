@@ -46,17 +46,18 @@ Publish the release before merging the site update, or the links will
   `ui/favicon.png`. When the icon changes, copy them again.
 - The screenshots are the real app (`ui/index.html`) showing the real
   bundled KJV and WEB text, in WebKitGTK, the engine the Linux app uses.
-  `tools/capture_screenshots.py` loads the page offscreen and answers its
-  Tauri calls with the app's real command code, through the frontend tests'
-  bridge (`src-tauri/examples/frontend_bridge.rs`) and a throwaway
+  `tools/site/capture_screenshots.py` loads the page offscreen and answers
+  its Tauri calls with the app's real command code, through the frontend
+  tests' bridge (`src-tauri/examples/frontend_bridge.rs`) and a throwaway
   database. It then uses the page's own controls, as the frontend tests do.
-  Nothing is drawn over or added. `tools/build_images.sh` resizes and crops
-  the captures into WebP, plus `og-image.jpg` for link previews.
+  Nothing is drawn over or added. `tools/site/build_images.sh` resizes and
+  crops the captures into WebP, plus `og-image.jpg` for link previews. The
+  scripts live outside `site/` so GitHub Pages doesn't publish them.
 
   ```bash
   cargo build --manifest-path src-tauri/Cargo.toml --example frontend_bridge
-  python3 site/tools/capture_screenshots.py /tmp/gg-raw
-  site/tools/build_images.sh /tmp/gg-raw
+  python3 tools/site/capture_screenshots.py /tmp/gg-raw
+  tools/site/build_images.sh /tmp/gg-raw
   ```
 
   You'll need PyGObject with WebKit2 4.1, a display (no window is shown)

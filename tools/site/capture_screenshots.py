@@ -11,7 +11,7 @@ the frontend tests do. Nothing is drawn over or composited in.
 
 Usage, from the repository root:
     cargo build --manifest-path src-tauri/Cargo.toml --example frontend_bridge
-    python3 site/tools/capture_screenshots.py OUT_DIR
+    python3 tools/site/capture_screenshots.py OUT_DIR
 
 Writes raw PNGs (at 2x) to OUT_DIR; cropping and WebP conversion are
 separate (see site/README.md). Needs PyGObject with WebKit2 4.1 and a

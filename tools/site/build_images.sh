@@ -4,11 +4,11 @@
 # Needs ImageMagick 7 (`magick`) with WebP support.
 #
 # Usage, from the repository root:
-#     site/tools/build_images.sh RAW_DIR
+#     tools/site/build_images.sh RAW_DIR
 set -euo pipefail
 
 raw=${1:?usage: build_images.sh RAW_DIR}
-out=$(dirname "$0")/../assets
+out=$(dirname "$0")/../../site/assets
 mkdir -p "$out"
 
 webp() { magick "$1" "${@:3}" -strip -quality 82 -define webp:method=6 "$2"; }
