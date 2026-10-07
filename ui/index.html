@@ -531,6 +531,20 @@
             font-weight: bold;
         }
 
+        /* The version line at the foot of Settings. --text-dim on the
+           menu's --option-bg meets AA in every theme (see the palette
+           tests). The line keeps its height while empty, so filling it in
+           never moves anything. */
+        .app-version {
+            font-size: 0.75rem;
+            line-height: 1.4;
+            min-height: 1.4em;
+            color: var(--text-dim);
+            margin: 0.9rem 0 0;
+            padding-top: 0.6rem;
+            border-top: 1px solid var(--accent-dim);
+        }
+
         /* Opaque (--option-bg), like the search panel: the menu now holds
            bookmark previews, read over the chapter text underneath. */
         .settings-menu {
@@ -1586,6 +1600,7 @@
             <p id="data-status" class="data-status" role="status" aria-live="polite"></p>
             <ul id="data-problems" class="data-problems"></ul>
         </div>
+        <p id="app-version" class="app-version"></p>
     </div>
 
     <div class="container">
@@ -2974,6 +2989,16 @@
                     console.error('Failed to load Gospel Getter', e);
                 }
             }
+
+            // The version line in Settings. It's only informational, so if
+            // the version can't be read the line just stays empty.
+            invoke('get_app_version')
+                .then((version) => {
+                    if (typeof version === 'string' && version) {
+                        document.getElementById('app-version').textContent = `Gospel Getter ${version}`;
+                    }
+                })
+                .catch(() => {});
 
             boot();
         })();

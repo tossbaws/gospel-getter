@@ -1,6 +1,6 @@
 [package]
 name = "gospel_getter"
-version = "2.3.0"
+version = "2.4.0"
 description = "Read the Bible, book by book, chapter by chapter"
 license = "MIT"
 repository = "https://github.com/tossbaws/gospel-getter"

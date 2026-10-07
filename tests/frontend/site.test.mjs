@@ -1,10 +1,13 @@
-// The website in site/ links straight to one release's installers, so it
-// has to change with every version bump. These tests read the app version
-// from src-tauri/tauri.conf.json and fail until every download link and
-// every version the site shows match it. They also check that the site's
-// own links stay relative (it's served from /gospel-getter/ on github.io
-// and later from a domain's root), that in-page anchors and local files
-// exist, and that images keep their dimensions and alt text.
+// The website in site/ downloads through GitHub's
+// releases/latest/download/<name> links, which always resolve to the newest
+// release because the release assets have the same names every time. These
+// tests require exactly those five stable links, refuse any versioned
+// download link (it would go stale with the next release), and fail until
+// the version the site shows matches src-tauri/tauri.conf.json, so a
+// version bump can't merge without updating it. They also check that the
+// site's own links stay relative (it's served from /gospel-getter/ on
+// github.io and later from a domain's root), that in-page anchors and local
+// files exist, and that images keep their dimensions and alt text.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,13 +18,14 @@ const root = new URL('../../', import.meta.url);
 const site = new URL('site/', root);
 const VERSION = JSON.parse(readFileSync(new URL('src-tauri/tauri.conf.json', root), 'utf8')).version;
 const REPO = 'https://github.com/tossbaws/gospel-getter';
-const DOWNLOAD = `${REPO}/releases/download/v${VERSION}/`;
+const DOWNLOAD = `${REPO}/releases/latest/download/`;
 
+// The release assets' names, the same in every release from v2.4.0 on.
 const ASSETS = [
-    `Gospel-Getter_${VERSION}_x64-setup.exe`,
-    `Gospel-Getter_${VERSION}_x64_en-US.msi`,
-    `Gospel-Getter_${VERSION}_amd64.AppImage`,
-    `Gospel-Getter_${VERSION}_amd64.deb`,
+    'Gospel-Getter_x64-setup.exe',
+    'Gospel-Getter_x64_en-US.msi',
+    'Gospel-Getter_amd64.AppImage',
+    'Gospel-Getter_amd64.deb',
     'SHA256SUMS',
 ];
 
@@ -39,24 +43,21 @@ test('the site has a homepage', () => {
     assert.ok(pages.some((p) => p.name === 'index.html'), 'site/index.html is missing');
 });
 
-test(`the homepage links to all five v${VERSION} release files`, () => {
+test('the homepage links to all five release files by their stable latest-release links', () => {
     const index = pages.find((p) => p.name === 'index.html');
     const hrefs = new Set(links(index));
     const missing = ASSETS.filter((file) => !hrefs.has(DOWNLOAD + file));
     assert.deepEqual(missing, [], `site/index.html has no link to ${missing.map((f) => DOWNLOAD + f).join(', ')}`);
 });
 
-test(`every release link points at v${VERSION}`, () => {
-    const wrong = allLinks().filter(({ href }) => {
-        const download = href.match(/\/releases\/download\/([^/]+)\/(.*)$/);
-        if (download) {
-            const fileVersion = download[2].match(/_(\d+\.\d+\.\d+)_/);
-            return download[1] !== `v${VERSION}` || (fileVersion && fileVersion[1] !== VERSION);
-        }
-        const tag = href.match(/\/releases\/tag\/([^/?#]+)/);
-        return tag ? tag[1] !== `v${VERSION}` : false;
-    });
-    assert.deepEqual(wrong, [], `links to another version (the app is ${VERSION}); update site/ for this release`);
+test('no download or release link names a version', () => {
+    const versioned = allLinks().filter(({ href }) =>
+        /\/releases\/(download|tag)\//.test(href)
+        || (href.includes('/releases/latest/download/') && /\d+\.\d+\.\d+/.test(href)));
+    assert.deepEqual(versioned, [], 'use releases/latest/download/<stable name> and releases/latest instead');
+    const unknown = allLinks().filter(({ href }) =>
+        href.startsWith(DOWNLOAD) && !ASSETS.includes(href.slice(DOWNLOAD.length)));
+    assert.deepEqual(unknown, [], 'links to a release file the release doesn\'t have');
 });
 
 test(`every version number the site shows is ${VERSION}`, () => {

@@ -130,7 +130,8 @@ export async function closeBridge() {
 /**
  * Boots the page at `book` `chapter` in `translation` (as a saved reading
  * position) and waits for the reading pane. `clipboard` is 'ok', 'reject'
- * or 'missing'; `compare` and `readerMode` preset those display settings.
+ * or 'missing'; `compare` and `readerMode` preset those display settings;
+ * `failing` maps commands to the error they reject with from the start.
  */
 export async function openApp({
     book = 'John',
@@ -140,13 +141,14 @@ export async function openApp({
     readerMode = false,
     compare = false,
     keepBookmarks = false,
+    failing = {},
     alterReading = (dto) => dto,
 } = {}) {
     await backend('__reset', { bookId: bookId(book), chapter, translationCode: translation, keepBookmarks });
 
     const calls = [];
     const clipboardWrites = [];
-    const state = { failReading: false, clipboard, failing: new Map(), held: new Map() };
+    const state = { failReading: false, clipboard, failing: new Map(Object.entries(failing)), held: new Map() };
 
     const invoke = async (cmd, args = {}) => {
         const call = { cmd, args, done: false };

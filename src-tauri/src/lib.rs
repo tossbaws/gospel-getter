@@ -41,6 +41,7 @@ pub fn run() {
 fn invoke_handler<R: tauri::Runtime>()
 -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        commands::get_app_version,
         commands::get_home,
         commands::get_chapters,
         commands::get_reading,
@@ -201,6 +202,11 @@ mod ipc_tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("build webview");
+
+        assert_eq!(
+            invoke(&webview, "get_app_version", json!({})).unwrap(),
+            env!("CARGO_PKG_VERSION")
+        );
 
         let home = invoke(&webview, "get_home", json!({})).unwrap();
         assert_eq!(home["currentTranslationCode"], "kjv");

@@ -360,6 +360,17 @@ async fn build_reading_pane_dto(
     })
 }
 
+/// This build's version (the crate's, which `tauri.conf.json` tracks), shown
+/// at the foot of the Settings menu.
+pub fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+#[tauri::command]
+pub fn get_app_version() -> &'static str {
+    app_version()
+}
+
 /// Initial state for the home screen: the full book list, the translation
 /// picker, and whichever chapter the reader was last on — falling back to
 /// Genesis 1 in the default translation if nothing has ever been read yet.
@@ -1024,7 +1035,7 @@ pub async fn build_reader_data(
         format: reader_data::FORMAT.to_string(),
         format_version: reader_data::FORMAT_VERSION,
         exported_at: state.store.now().await?,
-        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        app_version: app_version().to_string(),
         reading_position,
         bookmarks: bookmarks
             .into_iter()
