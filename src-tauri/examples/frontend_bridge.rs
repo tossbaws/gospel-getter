@@ -54,6 +54,7 @@ async fn dispatch(
     let code: Option<String> = arg(args, "translationCode")?;
     let code = code.as_deref();
     Ok(match cmd {
+        "get_app_version" => Ok(Value::from(commands::app_version())),
         "get_home" => Ok(to_value(commands::home(state).await)?),
         "get_chapters" => Ok(to_value(commands::build_chapters_dto(
             state,
