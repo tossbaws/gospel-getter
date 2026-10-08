@@ -247,6 +247,7 @@ test('the import preview counts a format 2 file\'s highlights, and merging keeps
         ])));
         await clickData(app, 'import-data-btn', path);
         assert.equal(app.document.getElementById('import-overlay').hidden, false);
+        assert.equal(app.document.getElementById('import-title').textContent, 'Import bookmarks, highlights and settings');
         const summary = [...app.document.querySelectorAll('#import-summary li')].map((li) => li.textContent);
         assert.ok(summary.includes('No bookmarks.'), summary.join(' | '));
         assert.ok(
