@@ -106,7 +106,7 @@ test('images have alt text and dimensions', () => {
     }
 });
 
-test('the Chi Rho Code LLC mark is the favicon and the header and hero icon', () => {
+test('the Chi Rho Code LLC mark is the favicon and the header icon, and only there and in About', () => {
     const { document } = pages.find((p) => p.name === 'index.html');
     // Favicons: the flat mark at every size, an .ico holding 16–64, and a
     // 180px Apple touch icon. The small sizes use the bolder flat-small mark.
@@ -120,32 +120,39 @@ test('the Chi Rho Code LLC mark is the favicon and the header and hero icon', ()
         ['icon', '64x64', 'assets/brand/chirho-code-flat-64.png'],
         ['apple-touch-icon', '180x180', 'assets/brand/chirho-code-flat-180.png'],
     ]);
-    // The header brand icon and the hero's small icon, crisp at 2x.
+    // The header brand icon, crisp at 2x.
     const brand = document.querySelector('.brand > img');
     assert.equal(brand.getAttribute('src'), 'assets/brand/chirho-code-flat-48.png');
     assert.match(brand.getAttribute('srcset'), /chirho-code-flat-180\.png 2x/);
-    const eyebrow = document.querySelector('.eyebrow img');
-    assert.equal(eyebrow.getAttribute('src'), 'assets/brand/chirho-code-flat-small-32.png');
-    assert.match(eyebrow.getAttribute('srcset'), /chirho-code-flat-64\.png 2x/);
+    assert.equal(brand.getAttribute('alt'), '');
+    // The hero's line above the headline is text only.
+    const eyebrow = document.querySelector('.eyebrow');
+    assert.equal(eyebrow.querySelectorAll('img').length, 0);
+    assert.equal(eyebrow.textContent, 'Gospel Getter · Free Bible reader for Windows & Linux');
+    // So is the footer: no mark, no Alpha and Omega, just the credit.
+    const footer = document.querySelector('.site-footer');
+    assert.equal(footer.querySelectorAll('img, .ornament').length, 0);
+    assert.ok(
+        [...footer.querySelectorAll('p')].some((p) => p.textContent === 'Gospel Getter is made by Chi Rho Code LLC and released under the MIT license.'),
+    );
     // The Gospel Getter app icon is no longer used anywhere on the page.
     assert.equal(document.querySelectorAll('[src*="icon.svg"], [href*="icon.svg"], [href*="favicon.svg"]').length, 0);
     // One mark in the header: the byline is text only.
     assert.equal(document.querySelector('.brand-byline').textContent, 'by Chi Rho Code LLC');
     assert.equal(document.querySelectorAll('.brand-byline img').length, 0);
-    // Decorative where the text beside them names the company.
-    for (const img of [brand, eyebrow, document.querySelector('.footer-maker img')]) {
-        assert.equal(img.getAttribute('alt'), '');
-    }
-    assert.match(document.querySelector('.footer-maker img').getAttribute('src'), /^assets\/brand\/chirho-code-flat/);
     // The detailed mark, large and described, in About the maker.
     const mark = document.querySelector('#about .maker-mark img');
     assert.match(mark.getAttribute('src'), /^assets\/brand\/chirho-code-mark-240\.webp$/);
     assert.match(mark.getAttribute('srcset'), /chirho-code-mark-480\.webp 2x/);
     assert.match(mark.getAttribute('alt'), /^Chi Rho Code LLC logo: a gold Chi-Rho in a round stained-glass window/);
-    // Alpha and Omega are ornaments, hidden from assistive technology.
+    // Alpha and Omega flank the About heading only, hidden from assistive
+    // technology.
     const ornaments = [...document.querySelectorAll('.ornament')];
-    assert.ok(ornaments.length >= 3);
-    for (const o of ornaments) assert.equal(o.getAttribute('aria-hidden'), 'true');
+    assert.deepEqual(ornaments.map((o) => o.textContent), ['Α', 'Ω']);
+    for (const o of ornaments) {
+        assert.equal(o.getAttribute('aria-hidden'), 'true');
+        assert.ok(o.closest('#about-title'));
+    }
     assert.equal(
         document.getElementById('about-title').textContent.replace(/[ΑΩ]/g, ''),
         'About the maker',
