@@ -210,6 +210,8 @@ mod ipc_tests {
 
         let home = invoke(&webview, "get_home", json!({})).unwrap();
         assert_eq!(home["currentTranslationCode"], "kjv");
+        // A fresh database: nothing has been read yet.
+        assert_eq!(home["hasSavedPosition"], false);
 
         let chapters = invoke(
             &webview,
@@ -228,6 +230,14 @@ mod ipc_tests {
         assert_eq!(
             reading["currentVerses"][15]["text"],
             bundled("web")[42].chapters[2][15].as_str()
+        );
+        // Reading a chapter saves the position, so the next launch isn't a
+        // first run.
+        let home = invoke(&webview, "get_home", json!({})).unwrap();
+        assert_eq!(home["hasSavedPosition"], true);
+        assert_eq!(
+            (&home["currentBookId"], &home["currentChapter"]),
+            (&json!(43), &json!(3))
         );
 
         let xref = invoke(
