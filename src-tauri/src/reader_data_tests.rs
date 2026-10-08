@@ -316,7 +316,11 @@ async fn invalid_files_are_rejected_whole_and_change_nothing() {
     let ok = r#"{"book": 43, "chapter": 3, "verse_start": 1, "verse_end": 1}"#;
     let cases: Vec<(&str, String, &str)> = vec![
         ("not json", "{bookmarks".into(), "isn't valid JSON (line 1"),
-        ("other json", "[1, 2, 3]".into(), "isn't a Gospel Getter"),
+        (
+            "other json",
+            "[1, 2, 3]".into(),
+            "This isn't a Gospel Getter file of bookmarks, highlights and settings.",
+        ),
         (
             "newer",
             r#"{"format": "gospel-getter-reader-data", "format_version": 7}"#.into(),

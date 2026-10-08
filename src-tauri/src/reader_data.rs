@@ -209,7 +209,10 @@ impl fmt::Display for ImportError {
             ),
             Self::NotJson(detail) => write!(f, "The file isn't valid JSON ({detail})."),
             Self::NotReaderData => {
-                write!(f, "This isn't a Gospel Getter bookmarks-and-settings file.")
+                write!(
+                    f,
+                    "This isn't a Gospel Getter file of bookmarks, highlights and settings."
+                )
             }
             Self::UnsupportedVersion(message) | Self::Malformed(message) => f.write_str(message),
             Self::Invalid(problems) => write!(

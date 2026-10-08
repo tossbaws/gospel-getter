@@ -1491,9 +1491,10 @@ fn reader_data_dialog<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> tauri_plugin_dialog::FileDialogBuilder<R> {
     use tauri_plugin_dialog::DialogExt;
-    app.dialog()
-        .file()
-        .add_filter("Gospel Getter bookmarks and settings", &["json"])
+    app.dialog().file().add_filter(
+        "Gospel Getter bookmarks, highlights and settings",
+        &["json"],
+    )
 }
 
 /// Runs a blocking native file dialog off the async runtime's worker
@@ -1532,7 +1533,7 @@ pub async fn export_reader_data<R: tauri::Runtime>(
         reader_data::FILE_SUFFIX
     );
     let dialog = reader_data_dialog(&app)
-        .set_title("Export bookmarks and settings")
+        .set_title("Export bookmarks, highlights and settings")
         .set_file_name(suggested);
     let Some(path) = run_dialog(move || dialog.blocking_save_file()).await? else {
         return Ok(ExportOutcome::Cancelled);
@@ -1550,7 +1551,7 @@ pub async fn choose_import_file<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
 ) -> Result<ImportChoice, String> {
-    let dialog = reader_data_dialog(&app).set_title("Import bookmarks and settings");
+    let dialog = reader_data_dialog(&app).set_title("Import bookmarks, highlights and settings");
     let Some(path) = run_dialog(move || dialog.blocking_pick_file()).await? else {
         return Ok(ImportChoice::Cancelled);
     };
