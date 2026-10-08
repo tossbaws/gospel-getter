@@ -31,6 +31,10 @@ bookmark passages. No account and no network needed.
 - **Bookmarks.** Save a verse or range with **★ Bookmark**. Bookmarked
   verses get a ★, and the list in settings reopens any of them in
   whichever translation you're reading.
+- **Highlights.** Select a verse or range and pick yellow, green, blue or
+  pink to highlight it, like a highlighter pen; **Remove highlight** clears
+  it. Each theme has its own shades, highlights show in both columns of
+  compare mode, and they aren't printed.
 - **Compare translations.** Press `C` to see KJV and WEB side by side, one
   row per verse number. Where only one translation numbers a verse, the
   other column says so instead of shifting anything.
@@ -40,13 +44,16 @@ bookmark passages. No account and no network needed.
   Light, Matrix, Beast Slayer, Hot Pink), four text sizes, three line
   spacings, and a distraction-free reading mode. Printing is always black
   on white.
-- **Picks up where you left off.** Your chapter, translation, bookmarks and
-  display settings are remembered between sessions.
+- **Picks up where you left off.** Your chapter, translation, bookmarks,
+  highlights and display settings are remembered between sessions.
 - **Back up or move your data.** In Settings, **Export data...** saves your
-  bookmarks, reading position and display settings to a JSON file, and
-  **Import data...** shows what a file contains before adding it (or, if you
-  choose, replacing your bookmarks). Only that personal data is exported,
-  not Bible text or the app's database.
+  bookmarks, highlights, reading position and display settings to a JSON
+  file, and **Import data...** shows what a file contains before adding it
+  (or, if you choose, replacing your bookmarks and highlights). Only that
+  personal data is exported, not Bible text or the app's database.
+- **A short welcome.** On a new install, a four-page overview of the
+  features opens the first time. **Skip** (or Esc) closes it, and
+  **Show welcome** in Settings opens it again. Upgrading doesn't show it.
 - **A native desktop app.** Built with Tauri: no browser, no background
   server, nothing listening on a port.
 
@@ -128,8 +135,8 @@ These expire after a while, so use a release unless you want a specific
 
 ## Your data
 
-- Everything (translations, cross-references, reading position, bookmarks
-  and the search index) lives in one SQLite database in the per-app data
+- Everything (translations, cross-references, reading position, bookmarks,
+  highlights and the search index) lives in one SQLite database in the per-app data
   folder. On Linux that's
   `~/.local/share/com.tossbaws.gospel-getter/gospel_getter.db`; on Windows
   it's under `%APPDATA%\com.tossbaws.gospel-getter\`.
