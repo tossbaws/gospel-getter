@@ -51,11 +51,13 @@ version bump: until a release has those names, the links 404.
 
 ## Where the assets come from
 
-- `assets/icon.svg` and `assets/favicon.svg` are copies of
-  `packaging/icon.svg`, and `assets/favicon.png` is a copy of
-  `ui/favicon.png`. When the icon changes, copy them again.
+- The icons (favicon, header, hero) are the Chi Rho Code LLC mark; see
+  "Brand" below.
 - The screenshots are the real app (`ui/index.html`) showing the real
   bundled KJV and WEB text, in WebKitGTK, the engine the Linux app uses.
+  The feature screenshots (hero, search, copy and bookmark, compare, and
+  `og-image.jpg`) are in the Matrix theme; the "Make it yours" strip shows
+  all six themes.
   `tools/site/capture_screenshots.py` loads the page offscreen and answers
   its Tauri calls with the app's real command code, through the frontend
   tests' bridge (`src-tauri/examples/frontend_bridge.rs`) and a throwaway
@@ -66,9 +68,16 @@ version bump: until a release has those names, the links 404.
 
   ```bash
   cargo build --manifest-path src-tauri/Cargo.toml --example frontend_bridge
-  python3 tools/site/capture_screenshots.py /tmp/gg-raw
+  python3 tools/site/capture_screenshots.py /tmp/gg-raw            # everything
+  python3 tools/site/capture_screenshots.py /tmp/gg-raw reading search compare select
   tools/site/build_images.sh /tmp/gg-raw
   ```
+
+  `--theme NAME` sets the feature screenshots' theme (default `matrix`);
+  naming scenes captures only those, and `build_images.sh` leaves any
+  theme tile it has no capture for as it is. Every capture marks the
+  first-run welcome as seen and sets no highlights, and fails if either
+  would be on screen.
 
   You'll need PyGObject with WebKit2 4.1, a display (no window is shown)
   and ImageMagick 7 with WebP support. Check the alt text in `index.html`
@@ -76,11 +85,14 @@ version bump: until a release has those names, the links 404.
 
 ## Brand: Chi Rho Code LLC
 
-Gospel Getter is the product, so its own icon (`assets/icon.svg`, the white
-Chi-Rho on `#14082c`) marks it in the header, the hero and the favicon. The
-Chi Rho Code LLC mark marks the maker: beside the "by Chi Rho Code LLC"
-byline, in "About the maker", and in the footer. The site's look follows
-that mark, a round stained-glass window with circuit-trace lead lines.
+The Chi Rho Code LLC mark is the site's icon: the favicon (and Apple touch
+icon), the header beside "Gospel Getter", and the small icon above the
+headline, all as the flat mark. It also appears in the footer (flat) and,
+large, in "About the maker" (the detailed mark). The byline under "Gospel
+Getter" is text only, since the header's icon is already the mark. The
+site's look follows the mark, a round stained-glass window with
+circuit-trace lead lines. (The Gospel Getter app keeps its own icon, the
+white Chi-Rho on `#14082c`, in `packaging/`; the website no longer uses it.)
 
 The Chi-Rho, Alpha (Α) and Omega (Ω) are public-domain symbols. The Alpha
 and Omega ornaments in About and the footer are text, hidden from
@@ -92,8 +104,10 @@ assistive technology.
 | File | Size | Source and derivation |
 |---|---|---|
 | `chirho-code-mark-240.webp`, `chirho-code-mark-480.webp` | 240 and 480 px (1x/2x), 22 KB and 60 KB | `/home/m4sk/Generated_Art/Brand_Attempts/2026-10-05_brand_chi-rho_C2_circuit-reliquary_polish.png` (2048×2048, the final mark). Cropped to the window (1940×1940 at +54+64), the black corners made transparent with a circular mask (radius 967, blurred 2px), resized and saved as WebP with alpha (quality 86). Used large in About. |
-| `chirho-code-flat-small-16.png`, `chirho-code-flat-small-32.png` | 16 and 32 px | `/home/m4sk/Generated_Art/Brand_Attempts/favicon/2026-10-05_chi-rho_circuit_flat-small_{16,32}.png`, re-saved without metadata. The flat small-size mark (an emboldened glyph, no rim); the byline uses 16 (32 at 2x), the footer 32. |
-| `chirho-code-flat-64.png` | 64 px | `/home/m4sk/Generated_Art/Brand_Attempts/favicon/2026-10-05_chi-rho_circuit_flat_64.png`, re-saved without metadata. The footer's 2x image. |
+| `chirho-code-flat-small-16.png`, `chirho-code-flat-small-32.png` | 16 and 32 px | `/home/m4sk/Generated_Art/Brand_Attempts/favicon/2026-10-05_chi-rho_circuit_flat-small_{16,32}.png`, re-saved without metadata. The flat small-size mark (an emboldened glyph, no rim): the 16 and 32 favicons, the hero icon (32, 28 px shown) and the footer (32). |
+| `chirho-code-flat-48.png`, `chirho-code-flat-64.png` | 48 and 64 px | `/home/m4sk/Generated_Art/Brand_Attempts/favicon/2026-10-05_chi-rho_circuit_flat_{48,64}.png`, re-saved without metadata. The 48 and 64 favicons, the header icon (48, 40 px shown), and the 2x of the hero icon and the footer. |
+| `chirho-code-flat-180.png` | 180 px | `/home/m4sk/Generated_Art/Brand_Attempts/favicon/2026-10-05_chi-rho_circuit_flat_180.png`, re-saved without metadata. The Apple touch icon, and the header icon's 2x. |
+| `favicon.ico` | 16, 32, 48, 64 | `/home/m4sk/Generated_Art/Brand_Attempts/favicon/favicon.ico`, copied unchanged (16 and 32 from the flat-small mark, 48 and 64 from the flat mark). |
 
 The flat set was drawn from an earlier version of the same mark (see
 `favicon/2026-10-05_chi-rho_circuit_flat.json` beside it). The detailed
