@@ -11,7 +11,13 @@ the frontend tests do. Nothing is drawn over or composited in.
 
 Usage, from the repository root:
     cargo build --manifest-path src-tauri/Cargo.toml --example frontend_bridge
-    python3 tools/site/capture_screenshots.py OUT_DIR
+    python3 tools/site/capture_screenshots.py OUT_DIR [--theme NAME] [SCENE ...]
+
+--theme sets the theme of the feature screenshots (reading, search, compare,
+select); it defaults to matrix, the site's. The theme-* scenes are always in
+their own themes. Naming scenes captures only those. The first-run welcome is
+marked as seen and no highlights are set, and a capture fails if either is on
+screen.
 
 Writes raw PNGs (at 2x) to OUT_DIR; cropping and WebP conversion are
 separate (see site/README.md). Needs PyGObject with WebKit2 4.1 and a
@@ -191,7 +197,7 @@ class Capturer:
             if event != WebKit2.LoadEvent.FINISHED:
                 return
             view.disconnect(handler)
-            body = "await __gg.booted();\n" + steps + "\nawait __gg.sleep(400);"
+            body = "await __gg.booted();\n" + steps + "\nawait __gg.sleep(400);\n" + CLEAN_CHECK
             view.call_async_javascript_function(body, -1, None, None, None, None, ran)
 
         def ran(view, res):
@@ -215,45 +221,59 @@ class Capturer:
         self.wait()
 
 
-LIGHT = {"gospel-getter-theme": "classic-light"}
+# Every scene: the first-run welcome already seen (so it never opens).
+SEEN = {"gospel-getter-welcome": "seen"}
+
+# Run after each scene's steps: nothing that isn't meant to be in a shot.
+CLEAN_CHECK = """
+const welcome = document.getElementById('welcome-overlay');
+if (welcome && !welcome.hidden) throw new Error('the welcome is on screen');
+if (document.querySelector('[data-highlight]')) throw new Error('a highlight is on screen');
+"""
 
 # Scroll so `el` sits `top` CSS pixels below the top of the window.
 SCROLL_TO = "window.scrollTo(0, window.scrollY + %s.getBoundingClientRect().top - %d);"
 
-SCENES = [
-    # Reading in context: the chapter with its neighbours on either side.
-    dict(name="reading", size=(1280, 800), prefs=LIGHT, position=("John", 3, "web"),
-         steps=SCROLL_TO % ("document.getElementById('chapter-list')", 24)),
-    # Searching the words of the text.
-    dict(name="search", size=(1280, 800), prefs=LIGHT, position=("John", 15, "web"),
-         steps="""
-            __gg.click(document.getElementById('search-toggle'));
-            __gg.type(document.getElementById('search-input'), 'love one another');
-            await __gg.until(() => document.querySelector('#search-results .search-result'), 'results');
-            window.scrollTo(0, 0);
-         """),
-    # KJV and WEB side by side.
-    dict(name="compare", size=(1280, 800),
-         prefs={**LIGHT, "gospel-getter-compare": "on"}, position=("Psalms", 23, "web"),
-         steps="""
-            await __gg.until(() => document.querySelector('.compare-grid'), 'compare grid');
-         """ + SCROLL_TO % ("document.querySelector('.chapter-heading')", 40)),
-    # A selected range with Copy and Bookmark, earlier bookmarks starred.
-    dict(name="select", size=(1280, 800), prefs=LIGHT, position=("1 Corinthians", 13, "web"),
-         bookmarks=[("1 Corinthians", 13, 1, 3)],
-         steps="""
-            __gg.click(__gg.verse(4));
-            __gg.click(__gg.verse(7), { shiftKey: true });
-            await __gg.until(() => document.querySelector('.verse-actions'), 'verse actions');
-         """ + SCROLL_TO % ("document.querySelector('.chapter-heading')", 40)),
-]
+def feature_scenes(theme):
+    """The site's feature screenshots, in `theme`."""
+    look = {**SEEN, "gospel-getter-theme": theme}
+    return [
+        # Reading in context: the chapter with its neighbours on either side.
+        dict(name="reading", size=(1280, 800), prefs=look, position=("John", 3, "web"),
+             steps=SCROLL_TO % ("document.getElementById('chapter-list')", 24)),
+        # Searching the words of the text.
+        dict(name="search", size=(1280, 800), prefs=look, position=("John", 15, "web"),
+             steps="""
+                __gg.click(document.getElementById('search-toggle'));
+                __gg.type(document.getElementById('search-input'), 'love one another');
+                await __gg.until(() => document.querySelector('#search-results .search-result'), 'results');
+                window.scrollTo(0, 0);
+             """),
+        # KJV and WEB side by side.
+        dict(name="compare", size=(1280, 800),
+             prefs={**look, "gospel-getter-compare": "on"}, position=("Psalms", 23, "web"),
+             steps="""
+                await __gg.until(() => document.querySelector('.compare-grid'), 'compare grid');
+             """ + SCROLL_TO % ("document.querySelector('.chapter-heading')", 40)),
+        # A selected range with Copy and Bookmark, earlier bookmarks starred.
+        dict(name="select", size=(1280, 800), prefs=look, position=("1 Corinthians", 13, "web"),
+             bookmarks=[("1 Corinthians", 13, 1, 3)],
+             steps="""
+                __gg.click(__gg.verse(4));
+                __gg.click(__gg.verse(7), { shiftKey: true });
+                await __gg.until(() => document.querySelector('.verse-actions'), 'verse actions');
+             """ + SCROLL_TO % ("document.querySelector('.chapter-heading')", 40)),
+    ]
+
 
 THEMES = ["vaporwave", "classic-dark", "classic-light", "matrix", "beast-slayer", "hot-pink"]
-for theme in THEMES:
-    SCENES.append(dict(
-        name=f"theme-{theme}", size=(1280, 800), prefs={"gospel-getter-theme": theme},
-        position=("Psalms", 23, "web"),
-        steps=SCROLL_TO % ("document.querySelector('.chapter-heading')", 40)))
+# The "Make it yours" strip: the same passage in each theme.
+THEME_SCENES = [
+    dict(name=f"theme-{theme}", size=(1280, 800), prefs={**SEEN, "gospel-getter-theme": theme},
+         position=("Psalms", 23, "web"),
+         steps=SCROLL_TO % ("document.querySelector('.chapter-heading')", 40))
+    for theme in THEMES
+]
 
 
 def serve(directory):
@@ -268,14 +288,22 @@ def serve(directory):
 
 
 def main():
-    out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "screenshots-raw")
+    args = sys.argv[1:]
+    theme = "matrix"
+    if "--theme" in args:
+        i = args.index("--theme")
+        theme = args[i + 1]
+        del args[i:i + 2]
+    if theme not in THEMES:
+        sys.exit(f"unknown theme {theme!r}; one of {', '.join(THEMES)}")
+    out_dir = Path(args[0] if args else "screenshots-raw")
     out_dir.mkdir(parents=True, exist_ok=True)
-    only = set(sys.argv[2:])
+    only = set(args[1:])
     server = serve(str(ROOT / "ui"))
     with tempfile.TemporaryDirectory() as tmp:
         bridge = Bridge(Path(tmp) / "gospel_getter.db")
         capturer = Capturer(out_dir, f"http://127.0.0.1:{server.server_port}/index.html", bridge)
-        for scene in SCENES:
+        for scene in feature_scenes(theme) + THEME_SCENES:
             if not only or scene["name"] in only:
                 capturer.scene(**scene)
         bridge.proc.stdin.close()

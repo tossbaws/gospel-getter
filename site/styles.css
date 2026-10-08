@@ -195,8 +195,6 @@ main:focus {
 .brand > img {
     width: 40px;
     height: 40px;
-    border-radius: 9px;
-    box-shadow: 0 0 0 1px var(--gold-line);
 }
 
 .brand-name {
@@ -209,17 +207,10 @@ main:focus {
 }
 
 .brand-byline {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
+    display: block;
     margin-top: 0.15rem;
     font-size: 0.8rem;
     color: var(--text-muted);
-}
-
-.brand-byline img {
-    width: 16px;
-    height: 16px;
 }
 
 .site-nav ul {
@@ -323,8 +314,6 @@ main:focus {
 .eyebrow img {
     width: 28px;
     height: 28px;
-    border-radius: 6px;
-    box-shadow: 0 0 0 1px var(--gold-line);
 }
 
 .hero h1 {
@@ -387,7 +376,7 @@ main:focus {
 
 /* App screenshots, framed like panes in a leaded window: a gold lead
    line, a dark gap, then an emerald edge. The screenshots themselves are
-   unchanged (Classic Light). */
+   unchanged (Matrix). */
 .shot {
     margin: 0;
     border: 1px solid var(--gold-line);

@@ -106,25 +106,38 @@ test('images have alt text and dimensions', () => {
     }
 });
 
-test('Chi Rho Code LLC\'s mark marks the maker; Gospel Getter keeps its own icon', () => {
+test('the Chi Rho Code LLC mark is the favicon and the header and hero icon', () => {
     const { document } = pages.find((p) => p.name === 'index.html');
-    // The product: the app icon in the header brand and the hero, and as
-    // the page's favicon.
-    assert.equal(document.querySelector('.brand > img').getAttribute('src'), 'assets/icon.svg');
-    assert.equal(document.querySelector('.eyebrow img').getAttribute('src'), 'assets/icon.svg');
-    assert.deepEqual(
-        [...document.querySelectorAll('link[rel="icon"]')].map((l) => l.getAttribute('href')),
-        ['assets/favicon.svg', 'assets/favicon.png'],
-    );
-    // The maker: a small flat mark beside the byline and in the footer
-    // (decorative: the text beside it names the company), and the detailed
-    // mark, large and described, in About the maker.
-    for (const selector of ['.brand-byline img', '.footer-maker img']) {
-        const img = document.querySelector(selector);
-        assert.match(img.getAttribute('src'), /^assets\/brand\/chirho-code-flat/);
+    // Favicons: the flat mark at every size, an .ico holding 16–64, and a
+    // 180px Apple touch icon. The small sizes use the bolder flat-small mark.
+    const icons = [...document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]')]
+        .map((l) => [l.getAttribute('rel'), l.getAttribute('sizes'), l.getAttribute('href')]);
+    assert.deepEqual(icons, [
+        ['icon', '16x16 32x32 48x48 64x64', 'assets/brand/favicon.ico'],
+        ['icon', '16x16', 'assets/brand/chirho-code-flat-small-16.png'],
+        ['icon', '32x32', 'assets/brand/chirho-code-flat-small-32.png'],
+        ['icon', '48x48', 'assets/brand/chirho-code-flat-48.png'],
+        ['icon', '64x64', 'assets/brand/chirho-code-flat-64.png'],
+        ['apple-touch-icon', '180x180', 'assets/brand/chirho-code-flat-180.png'],
+    ]);
+    // The header brand icon and the hero's small icon, crisp at 2x.
+    const brand = document.querySelector('.brand > img');
+    assert.equal(brand.getAttribute('src'), 'assets/brand/chirho-code-flat-48.png');
+    assert.match(brand.getAttribute('srcset'), /chirho-code-flat-180\.png 2x/);
+    const eyebrow = document.querySelector('.eyebrow img');
+    assert.equal(eyebrow.getAttribute('src'), 'assets/brand/chirho-code-flat-small-32.png');
+    assert.match(eyebrow.getAttribute('srcset'), /chirho-code-flat-64\.png 2x/);
+    // The Gospel Getter app icon is no longer used anywhere on the page.
+    assert.equal(document.querySelectorAll('[src*="icon.svg"], [href*="icon.svg"], [href*="favicon.svg"]').length, 0);
+    // One mark in the header: the byline is text only.
+    assert.equal(document.querySelector('.brand-byline').textContent, 'by Chi Rho Code LLC');
+    assert.equal(document.querySelectorAll('.brand-byline img').length, 0);
+    // Decorative where the text beside them names the company.
+    for (const img of [brand, eyebrow, document.querySelector('.footer-maker img')]) {
         assert.equal(img.getAttribute('alt'), '');
-        assert.match(img.closest('.brand-byline, .footer-maker').textContent, /Chi Rho Code LLC/);
     }
+    assert.match(document.querySelector('.footer-maker img').getAttribute('src'), /^assets\/brand\/chirho-code-flat/);
+    // The detailed mark, large and described, in About the maker.
     const mark = document.querySelector('#about .maker-mark img');
     assert.match(mark.getAttribute('src'), /^assets\/brand\/chirho-code-mark-240\.webp$/);
     assert.match(mark.getAttribute('srcset'), /chirho-code-mark-480\.webp 2x/);
@@ -136,5 +149,17 @@ test('Chi Rho Code LLC\'s mark marks the maker; Gospel Getter keeps its own icon
     assert.equal(
         document.getElementById('about-title').textContent.replace(/[ΑΩ]/g, ''),
         'About the maker',
+    );
+});
+
+test('the feature screenshots are in the Matrix theme; the theme strip keeps all six', () => {
+    const { document } = pages.find((p) => p.name === 'index.html');
+    for (const img of document.querySelectorAll('.hero-shot img, .feature .shot img')) {
+        assert.match(img.getAttribute('alt'), /in the Matrix theme/, img.getAttribute('src'));
+        assert.doesNotMatch(img.getAttribute('alt'), /Classic Light/);
+    }
+    assert.deepEqual(
+        [...document.querySelectorAll('.themes figcaption')].map((f) => f.textContent),
+        ['Classic Light', 'Classic Dark', 'Vaporwave', 'Matrix', 'Beast Slayer', 'Hot Pink'],
     );
 });
