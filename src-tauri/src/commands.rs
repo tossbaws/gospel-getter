@@ -134,6 +134,11 @@ pub struct HomeDto {
     pub current_translation_code: String,
     pub current_book_id: i64,
     pub current_chapter: i64,
+    /// Whether a reading position was saved before this call, i.e. the
+    /// app has been used to read before. The first-run welcome shows only
+    /// when it hasn't. If the position couldn't be read, this is `true`,
+    /// so an existing reader never gets the welcome by mistake.
+    pub has_saved_position: bool,
 }
 
 #[derive(Serialize)]
@@ -403,14 +408,15 @@ pub async fn home(state: &AppState) -> HomeDto {
         .collect();
 
     let default_translation_id = resolve_translation(state, None);
-    let (translation_id, book_id, chapter) = match state.store.reading_position().await {
-        Ok(Some(position)) => position,
-        Ok(None) => (default_translation_id, 1, 1),
-        Err(e) => {
-            tracing::error!("Failed to load reading position: {e}");
-            (default_translation_id, 1, 1)
-        }
-    };
+    let ((translation_id, book_id, chapter), has_saved_position) =
+        match state.store.reading_position().await {
+            Ok(Some(position)) => (position, true),
+            Ok(None) => ((default_translation_id, 1, 1), false),
+            Err(e) => {
+                tracing::error!("Failed to load reading position: {e}");
+                ((default_translation_id, 1, 1), true)
+            }
+        };
     let current_translation_code = state
         .translations
         .iter()
@@ -425,6 +431,7 @@ pub async fn home(state: &AppState) -> HomeDto {
         current_translation_code,
         current_book_id: book_id,
         current_chapter: chapter,
+        has_saved_position,
     }
 }
 
