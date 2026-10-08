@@ -105,3 +105,36 @@ test('images have alt text and dimensions', () => {
         }
     }
 });
+
+test('Chi Rho Code LLC\'s mark marks the maker; Gospel Getter keeps its own icon', () => {
+    const { document } = pages.find((p) => p.name === 'index.html');
+    // The product: the app icon in the header brand and the hero, and as
+    // the page's favicon.
+    assert.equal(document.querySelector('.brand > img').getAttribute('src'), 'assets/icon.svg');
+    assert.equal(document.querySelector('.eyebrow img').getAttribute('src'), 'assets/icon.svg');
+    assert.deepEqual(
+        [...document.querySelectorAll('link[rel="icon"]')].map((l) => l.getAttribute('href')),
+        ['assets/favicon.svg', 'assets/favicon.png'],
+    );
+    // The maker: a small flat mark beside the byline and in the footer
+    // (decorative: the text beside it names the company), and the detailed
+    // mark, large and described, in About the maker.
+    for (const selector of ['.brand-byline img', '.footer-maker img']) {
+        const img = document.querySelector(selector);
+        assert.match(img.getAttribute('src'), /^assets\/brand\/chirho-code-flat/);
+        assert.equal(img.getAttribute('alt'), '');
+        assert.match(img.closest('.brand-byline, .footer-maker').textContent, /Chi Rho Code LLC/);
+    }
+    const mark = document.querySelector('#about .maker-mark img');
+    assert.match(mark.getAttribute('src'), /^assets\/brand\/chirho-code-mark-240\.webp$/);
+    assert.match(mark.getAttribute('srcset'), /chirho-code-mark-480\.webp 2x/);
+    assert.match(mark.getAttribute('alt'), /^Chi Rho Code LLC logo: a gold Chi-Rho in a round stained-glass window/);
+    // Alpha and Omega are ornaments, hidden from assistive technology.
+    const ornaments = [...document.querySelectorAll('.ornament')];
+    assert.ok(ornaments.length >= 3);
+    for (const o of ornaments) assert.equal(o.getAttribute('aria-hidden'), 'true');
+    assert.equal(
+        document.getElementById('about-title').textContent.replace(/[ΑΩ]/g, ''),
+        'About the maker',
+    );
+});
