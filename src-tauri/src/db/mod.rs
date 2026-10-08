@@ -1,5 +1,6 @@
 pub mod bookmarks;
 pub mod connect;
+pub mod highlights;
 pub mod legacy;
 pub mod migrate;
 pub mod models;
@@ -10,6 +11,7 @@ pub mod seed;
 
 pub use bookmarks::{Bookmark, BookmarkError, BookmarkInTranslation};
 pub use connect::create_pool;
+pub use highlights::{Highlight, HighlightColor};
 pub use legacy::migrate_legacy_db_if_needed;
 pub use migrate::migrate;
 pub use models::*;

@@ -1,16 +1,17 @@
 //! Database tests against real files: fresh installs, upgrades from
-//! v2.1.0, bookmarks and the search index. Each test gets its own
+//! v2.1.0, bookmarks, highlights and the search index. Each test gets its own
 //! disposable database (see `test_support`).
 
 use std::time::Instant;
 
 use super::bookmarks::{add_bookmark, list_bookmarks, remove_bookmark};
+use super::highlights::{list_highlights, remove_highlights, set_highlights};
 use super::search::search_verses;
 use super::test_support::{
     TempDb, bundled, fresh_database, other_tables_snapshot, table_names, verses_snapshot,
     write_v2_1_0_database,
 };
-use super::{BookmarkError, ensure_search_index, prepare};
+use super::{BookmarkError, HighlightColor, ensure_search_index, prepare};
 
 const KJV: i64 = 1;
 const WEB: i64 = 2;
@@ -54,6 +55,7 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
         "reading_position",
         "cross_references",
         "bookmarks",
+        "highlights",
         "verse_search",
         "search_index_state",
     ] {
@@ -107,7 +109,12 @@ async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_searc
     assert_eq!(other_tables_snapshot(&pool).await, others_before);
     assert_verses_match_bundled(&verses_before);
     let tables = table_names(&pool).await;
-    for table in ["bookmarks", "verse_search", "search_index_state"] {
+    for table in [
+        "bookmarks",
+        "highlights",
+        "verse_search",
+        "search_index_state",
+    ] {
         assert!(
             tables.iter().any(|t| t == table),
             "upgrade should add {table}"
@@ -433,4 +440,132 @@ async fn search_timing() {
     }
     println!("slowest: {worst:?}");
     assert!(worst.as_millis() < 100, "slowest search took {worst:?}");
+}
+
+/// (book, chapter, verse, color) of every highlight, in Bible order.
+async fn highlight_colors(pool: &sqlx::SqlitePool) -> Vec<(i64, i64, i64, HighlightColor)> {
+    list_highlights(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|h| (h.book_id, h.chapter, h.verse, h.color))
+        .collect()
+}
+
+#[tokio::test]
+async fn highlights_are_set_recolored_and_removed_over_ranges() {
+    use HighlightColor::{Blue, Green, Pink, Yellow};
+    let db = TempDb::new("highlights");
+    let pool = db.connect().await;
+    prepare(&pool).await.unwrap();
+
+    // A range: every verse in it gets the color.
+    set_highlights(&pool, 43, 3, 16, 18, Yellow).await.unwrap();
+    assert_eq!(
+        highlight_colors(&pool).await,
+        vec![
+            (43, 3, 16, Yellow),
+            (43, 3, 17, Yellow),
+            (43, 3, 18, Yellow)
+        ]
+    );
+
+    // Recoloring part of it replaces those verses' color and their
+    // updated_at, and leaves the rest alone.
+    let before = list_highlights(&pool).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    set_highlights(&pool, 43, 3, 17, 18, Green).await.unwrap();
+    let after = list_highlights(&pool).await.unwrap();
+    assert_eq!(after[0], before[0]);
+    assert_eq!((after[1].color, after[2].color), (Green, Green));
+    assert_eq!(after[1].created_at, before[1].created_at);
+    assert!(after[1].updated_at > before[1].updated_at);
+
+    // Setting the color a verse already has changes nothing at all.
+    set_highlights(&pool, 43, 3, 17, 17, Green).await.unwrap();
+    assert_eq!(list_highlights(&pool).await.unwrap(), after);
+
+    // Every color, and a verse only one translation numbers (Matthew 2:23
+    // is WEB-only, like bookmarks).
+    set_highlights(&pool, 19, 23, 1, 1, Blue).await.unwrap();
+    set_highlights(&pool, 40, 2, 23, 23, Pink).await.unwrap();
+
+    // Removing a range removes only highlighted verses in it.
+    assert_eq!(remove_highlights(&pool, 43, 3, 15, 17).await.unwrap(), 2);
+    assert_eq!(remove_highlights(&pool, 43, 3, 15, 17).await.unwrap(), 0);
+    assert_eq!(
+        highlight_colors(&pool).await,
+        vec![(19, 23, 1, Blue), (40, 2, 23, Pink), (43, 3, 18, Green)]
+    );
+
+    // Invalid passages are refused, and change nothing.
+    let kept = highlight_colors(&pool).await;
+    for (book, chapter, start, end) in [
+        (43, 3, 0, 1),
+        (43, 3, 5, 4),
+        (43, 22, 1, 1),
+        (99, 1, 1, 1),
+        (43, 3, 36, 37),
+    ] {
+        let error = set_highlights(&pool, book, chapter, start, end, Yellow)
+            .await
+            .unwrap_err();
+        assert!(
+            !matches!(error, BookmarkError::Database(_)),
+            "{book} {chapter}:{start}-{end}: {error}"
+        );
+    }
+    assert!(matches!(
+        set_highlights(&pool, 43, 3, 36, 37, Yellow).await,
+        Err(BookmarkError::NoSuchVerse { last_verse: 36, .. })
+    ));
+    assert_eq!(highlight_colors(&pool).await, kept);
+
+    // The table itself refuses a color that isn't one of the four.
+    let bad = sqlx::query(
+        "INSERT INTO highlights (book_id, chapter, verse, color) VALUES (1, 1, 1, 'purple')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(bad.is_err(), "the CHECK should refuse purple");
+
+    // And highlights survive a restart.
+    pool.close().await;
+    let pool = db.connect().await;
+    prepare(&pool).await.unwrap();
+    assert_eq!(highlight_colors(&pool).await, kept);
+}
+
+#[tokio::test]
+async fn the_highlights_table_is_added_to_an_existing_database() {
+    // A database from before highlights: everything else, with a reader's
+    // bookmark and position, but no highlights table.
+    let (db, pool) = fresh_database("add_highlights").await;
+    add_bookmark(&pool, 43, 3, 16, 16).await.unwrap();
+    super::save_reading_position(&pool, 2, 45, 8).await.unwrap();
+    sqlx::query("DROP TABLE highlights")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let pool = db.connect().await;
+    let others_before = other_tables_snapshot(&pool).await;
+    assert!(!table_names(&pool).await.iter().any(|t| t == "highlights"));
+
+    // Exactly what startup does.
+    prepare(&pool).await.unwrap();
+    assert!(table_names(&pool).await.iter().any(|t| t == "highlights"));
+    assert_eq!(other_tables_snapshot(&pool).await, others_before);
+    assert_eq!(list_bookmarks(&pool, KJV).await.unwrap().len(), 1);
+    set_highlights(&pool, 43, 3, 16, 16, HighlightColor::Yellow)
+        .await
+        .unwrap();
+
+    // Running it again (the next launch) keeps the highlight.
+    prepare(&pool).await.unwrap();
+    assert_eq!(
+        highlight_colors(&pool).await,
+        vec![(43, 3, 16, HighlightColor::Yellow)]
+    );
 }

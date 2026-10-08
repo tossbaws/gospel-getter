@@ -6,13 +6,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::db::{self, Book, BookmarkError, BookmarkInTranslation, Translation};
+use crate::db::{self, Book, BookmarkError, BookmarkInTranslation, HighlightColor, Translation};
 use crate::domain::Store;
 use crate::domain::bible::{self, ChapterRef};
 use crate::domain::query::{self, Interpretation};
 use crate::reader_data::{
-    self, BookmarkRecord, NewBookmark, NewPosition, PositionRecord, Preferences, ReaderData,
-    ValidatedImport,
+    self, BookmarkRecord, HighlightRecord, NewBookmark, NewPosition, PositionRecord, Preferences,
+    ReaderData, ValidatedImport,
 };
 
 /// How many text-search results one `search` call returns.
@@ -622,6 +622,40 @@ pub async fn bookmarks_in(
         .collect())
 }
 
+/// A passage that couldn't be bookmarked or highlighted, in words for the
+/// reader. `action` is "bookmarked" or "highlighted"; `failed` is the
+/// message for a database failure.
+fn passage_error_message(
+    state: &AppState,
+    error: BookmarkError,
+    action: &str,
+    failed: &str,
+) -> String {
+    match error {
+        BookmarkError::InvalidRange {
+            verse_start,
+            verse_end,
+        } => format!("{verse_start}\u{2013}{verse_end} isn't a verse range that can be {action}."),
+        BookmarkError::NoSuchChapter { book_id, chapter } => {
+            let name = book_name(state, book_id).unwrap_or("that book");
+            format!("There's no {name} {chapter}.")
+        }
+        BookmarkError::NoSuchVerse {
+            book_id,
+            chapter,
+            verse,
+            last_verse,
+        } => {
+            let name = book_name(state, book_id).unwrap_or("that book");
+            format!("There's no {name} {chapter}:{verse}; the chapter ends at verse {last_verse}.")
+        }
+        BookmarkError::Database(e) => {
+            tracing::error!("{failed} {e:#}");
+            failed.to_string()
+        }
+    }
+}
+
 /// Bookmark a passage, returning its id (the existing one if it was
 /// already bookmarked), or a message for the reader.
 pub async fn bookmark_passage(
@@ -631,27 +665,14 @@ pub async fn bookmark_passage(
     verse_start: i64,
     verse_end: i64,
 ) -> Result<i64, String> {
-    let name = book_name(state, book_id).unwrap_or("that book");
-    match state
+    state
         .store
         .add_bookmark(book_id, chapter, verse_start, verse_end)
         .await
-    {
-        Ok(bookmark) => Ok(bookmark.id),
-        Err(BookmarkError::InvalidRange { .. }) => Err(format!(
-            "{verse_start}\u{2013}{verse_end} isn't a verse range that can be bookmarked."
-        )),
-        Err(BookmarkError::NoSuchChapter { .. }) => Err(format!("There's no {name} {chapter}.")),
-        Err(BookmarkError::NoSuchVerse {
-            verse, last_verse, ..
-        }) => Err(format!(
-            "There's no {name} {chapter}:{verse}; the chapter ends at verse {last_verse}."
-        )),
-        Err(BookmarkError::Database(e)) => {
-            tracing::error!("Failed to add bookmark: {e:#}");
-            Err("The bookmark couldn't be saved.".to_string())
-        }
-    }
+        .map(|bookmark| bookmark.id)
+        .map_err(|e| {
+            passage_error_message(state, e, "bookmarked", "The bookmark couldn't be saved.")
+        })
 }
 
 #[tauri::command]
@@ -685,6 +706,106 @@ pub async fn remove_bookmark(state: tauri::State<'_, AppState>, id: i64) -> Resu
         tracing::error!("Failed to remove bookmark {id}: {e:#}");
         "The bookmark couldn't be removed.".to_string()
     })
+}
+
+// ---- Highlights
+
+/// One highlighted verse.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HighlightDto {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse: i64,
+    pub color: HighlightColor,
+}
+
+/// Every highlight, in Bible order.
+pub async fn highlights_list(state: &AppState) -> anyhow::Result<Vec<HighlightDto>> {
+    Ok(state
+        .store
+        .highlights()
+        .await?
+        .into_iter()
+        .map(|h| HighlightDto {
+            book_id: h.book_id,
+            chapter: h.chapter,
+            verse: h.verse,
+            color: h.color,
+        })
+        .collect())
+}
+
+/// Highlight every verse of a passage in `color` (by name), replacing any
+/// color they had, or say why not.
+pub async fn highlight_passage(
+    state: &AppState,
+    book_id: i64,
+    chapter: i64,
+    verse_start: i64,
+    verse_end: i64,
+    color: &str,
+) -> Result<(), String> {
+    let color: HighlightColor = color.parse().map_err(|e| format!("{e}."))?;
+    state
+        .store
+        .set_highlights(book_id, chapter, verse_start, verse_end, color)
+        .await
+        .map_err(|e| {
+            passage_error_message(state, e, "highlighted", "The highlight couldn't be saved.")
+        })
+}
+
+/// Remove the highlight from every verse of a passage; returns how many
+/// verses had one.
+pub async fn unhighlight_passage(
+    state: &AppState,
+    book_id: i64,
+    chapter: i64,
+    verse_start: i64,
+    verse_end: i64,
+) -> Result<usize, String> {
+    state
+        .store
+        .remove_highlights(book_id, chapter, verse_start, verse_end)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to remove highlights: {e:#}");
+            "The highlight couldn't be removed.".to_string()
+        })
+}
+
+#[tauri::command]
+pub async fn list_highlights(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<HighlightDto>, String> {
+    highlights_list(&state).await.map_err(|e| {
+        tracing::error!("Failed to list highlights: {e:#}");
+        "Highlights couldn't be loaded.".to_string()
+    })
+}
+
+#[tauri::command]
+pub async fn set_highlight(
+    state: tauri::State<'_, AppState>,
+    book_id: i64,
+    chapter: i64,
+    verse_start: i64,
+    verse_end: i64,
+    color: String,
+) -> Result<(), String> {
+    highlight_passage(&state, book_id, chapter, verse_start, verse_end, &color).await
+}
+
+#[tauri::command]
+pub async fn remove_highlight(
+    state: tauri::State<'_, AppState>,
+    book_id: i64,
+    chapter: i64,
+    verse_start: i64,
+    verse_end: i64,
+) -> Result<usize, String> {
+    unhighlight_passage(&state, book_id, chapter, verse_start, verse_end).await
 }
 
 // ---- Search and go-to-reference (GH-12)
@@ -952,6 +1073,7 @@ pub enum ExportOutcome {
     Saved {
         path: String,
         bookmarks: usize,
+        highlights: usize,
         has_position: bool,
         preferences: usize,
     },
@@ -977,6 +1099,21 @@ pub struct ImportPreviewDto {
     pub current_bookmarks: usize,
     /// The first few of the file's bookmarks, e.g. "John 3:16–18".
     pub sample: Vec<String>,
+    /// Whether the file's format can hold highlights (format 2 on). A
+    /// format 1 file never touches the reader's highlights, even when
+    /// replacing.
+    pub has_highlights: bool,
+    /// Distinct highlighted verses in the file.
+    pub highlights_in_file: usize,
+    /// Highlight entries that repeated a verse already in the file (ignored).
+    pub highlight_duplicates_in_file: usize,
+    /// How many of them are for verses not highlighted here yet.
+    pub new_highlights: usize,
+    /// How many are for verses already highlighted here (merge keeps the
+    /// reader's own color on those).
+    pub already_highlighted: usize,
+    /// How many verses are highlighted here now (what replacing removes).
+    pub current_highlights: usize,
     pub position: Option<PositionPreviewDto>,
     pub preferences: Preferences,
 }
@@ -998,7 +1135,7 @@ pub enum ImportChoice {
         problems: Vec<String>,
     },
     /// Valid; here's what it would do. Nothing has been changed yet.
-    Ready { preview: ImportPreviewDto },
+    Ready { preview: Box<ImportPreviewDto> },
 }
 
 /// What a confirmed import did.
@@ -1008,6 +1145,9 @@ pub struct ImportResultDto {
     pub added: usize,
     pub already_present: usize,
     pub removed: usize,
+    pub highlights_added: usize,
+    pub highlights_already_present: usize,
+    pub highlights_removed: usize,
     /// The reading position saved, if the reader chose to restore it.
     pub position: Option<PositionPreviewDto>,
 }
@@ -1020,14 +1160,15 @@ fn passage_reference_for(state: &AppState, b: &NewBookmark) -> String {
     )
 }
 
-/// The reader's data as an export file: bookmarks (oldest first), the
-/// saved reading position, and the display `preferences` the frontend
+/// The reader's data as an export file: bookmarks (oldest first),
+/// highlights (in Bible order), the saved reading position, and the display `preferences` the frontend
 /// passed in.
 pub async fn build_reader_data(
     state: &AppState,
     preferences: Preferences,
 ) -> anyhow::Result<ReaderData> {
     let bookmarks = state.store.all_bookmarks().await?;
+    let highlights = state.store.highlights().await?;
     let position = state.store.reading_position().await?;
     let reading_position = position.and_then(|(translation_id, book_id, chapter)| {
         let translation = state.translations.iter().find(|t| t.id == translation_id)?;
@@ -1055,6 +1196,18 @@ pub async fn build_reader_data(
                 created_at: Some(b.created_at),
             })
             .collect(),
+        highlights: highlights
+            .into_iter()
+            .map(|h| HighlightRecord {
+                book_name: book_name(state, h.book_id).map(str::to_string),
+                book: h.book_id,
+                chapter: h.chapter,
+                verse: h.verse,
+                color: h.color,
+                created_at: Some(h.created_at),
+                updated_at: Some(h.updated_at),
+            })
+            .collect(),
         preferences,
     })
 }
@@ -1073,6 +1226,7 @@ pub async fn save_reader_data(data: &ReaderData, path: &Path) -> anyhow::Result<
     Ok(ExportOutcome::Saved {
         path: path.display().to_string(),
         bookmarks: data.bookmarks.len(),
+        highlights: data.highlights.len(),
         has_position: data.reading_position.is_some(),
         preferences: data.preferences.count(),
     })
@@ -1231,6 +1385,12 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
         .iter()
         .filter(|b| !existing.contains(&b.coordinates()))
         .count();
+    let highlighted = state.store.highlight_coordinates().await?;
+    let file_highlights = import.highlights.as_deref().unwrap_or_default();
+    let new_highlights = file_highlights
+        .iter()
+        .filter(|h| !highlighted.contains(&h.coordinates()))
+        .count();
     let preview = ImportPreviewDto {
         token: state.next_import_token.fetch_add(1, Ordering::Relaxed),
         file_name,
@@ -1247,6 +1407,12 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
             .take(5)
             .map(|b| passage_reference_for(state, b))
             .collect(),
+        has_highlights: import.highlights.is_some(),
+        highlights_in_file: file_highlights.len(),
+        highlight_duplicates_in_file: import.highlight_duplicates_in_file,
+        new_highlights,
+        already_highlighted: file_highlights.len() - new_highlights,
+        current_highlights: highlighted.len(),
         position: import.position.as_ref().map(PositionPreviewDto::from),
         preferences: import.preferences,
     };
@@ -1254,7 +1420,9 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
         token: preview.token,
         import,
     });
-    Ok(ImportChoice::Ready { preview })
+    Ok(ImportChoice::Ready {
+        preview: Box::new(preview),
+    })
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -1264,8 +1432,9 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// Apply the pending import the reader previewed (`token`), in one
-/// database transaction. `replace` swaps every current bookmark for the
-/// file's; otherwise they're merged. `restore_position` also saves the
+/// database transaction. `replace` swaps every current bookmark (and, for
+/// a file that can hold them, every highlight) for the file's; otherwise
+/// they're merged. `restore_position` also saves the
 /// file's reading position. Display preferences live in the webview and
 /// are applied there, after this succeeds.
 pub async fn apply_pending_import(
@@ -1287,7 +1456,12 @@ pub async fn apply_pending_import(
     let position = import.position.as_ref().filter(|_| restore_position);
     let counts = state
         .store
-        .apply_import(&import.bookmarks, replace, position)
+        .apply_import(
+            &import.bookmarks,
+            import.highlights.as_deref(),
+            replace,
+            position,
+        )
         .await
         .map_err(|e| {
             tracing::error!("Import failed: {e:#}");
@@ -1298,6 +1472,9 @@ pub async fn apply_pending_import(
         added: counts.added,
         already_present: counts.already_present,
         removed: counts.removed,
+        highlights_added: counts.highlights_added,
+        highlights_already_present: counts.highlights_already_present,
+        highlights_removed: counts.highlights_removed,
         position: position.map(PositionPreviewDto::from),
     })
 }

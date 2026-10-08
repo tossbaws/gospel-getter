@@ -118,6 +118,28 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .await
     .context("Failed to create bookmarks table")?;
 
+    // The reader's highlights: one color per verse, like a highlighter
+    // pen in a paper Bible. Keyed by translation-independent coordinates,
+    // like bookmarks, so a highlight shows in whichever translation numbers
+    // that verse. The CHECKs back up the validation in `db::highlights`;
+    // `updated_at` changes when a verse's color does.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS highlights (
+            book_id INTEGER NOT NULL REFERENCES books(id),
+            chapter INTEGER NOT NULL CHECK (chapter >= 1),
+            verse INTEGER NOT NULL CHECK (verse >= 1),
+            color TEXT NOT NULL CHECK (color IN ('yellow', 'green', 'blue', 'pink')),
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            PRIMARY KEY (book_id, chapter, verse)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create highlights table")?;
+
     // Full-text search index over `verses`. It's derived data only: built
     // from `verses` by `db::search`, never written back, and contentless —
     // it stores no copy of the text, only the tokens and a rowid encoding

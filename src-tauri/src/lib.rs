@@ -49,6 +49,9 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::list_bookmarks,
         commands::add_bookmark,
         commands::remove_bookmark,
+        commands::list_highlights,
+        commands::set_highlight,
+        commands::remove_highlight,
         commands::search,
         commands::get_compare,
         commands::export_reader_data,
@@ -274,6 +277,61 @@ mod ipc_tests {
                 json!({ "bookId": 43, "chapter": 22, "verseStart": 1, "verseEnd": 1 }),
             ),
             Err(json!("There's no John 22."))
+        );
+
+        // Highlights: set over a range, recolor, list, remove.
+        assert_eq!(
+            invoke(
+                &webview,
+                "set_highlight",
+                json!({ "bookId": 43, "chapter": 3, "verseStart": 16, "verseEnd": 17, "color": "yellow" }),
+            )
+            .unwrap(),
+            Value::Null
+        );
+        invoke(
+            &webview,
+            "set_highlight",
+            json!({ "bookId": 43, "chapter": 3, "verseStart": 17, "verseEnd": 17, "color": "pink" }),
+        )
+        .unwrap();
+        assert_eq!(
+            invoke(&webview, "list_highlights", json!({})).unwrap(),
+            json!([
+                { "bookId": 43, "chapter": 3, "verse": 16, "color": "yellow" },
+                { "bookId": 43, "chapter": 3, "verse": 17, "color": "pink" },
+            ])
+        );
+        assert_eq!(
+            invoke(
+                &webview,
+                "set_highlight",
+                json!({ "bookId": 43, "chapter": 3, "verseStart": 16, "verseEnd": 16, "color": "purple" }),
+            ),
+            Err(json!(
+                "\u{201c}purple\u{201d} isn't a highlight color (yellow, green, blue or pink)."
+            ))
+        );
+        assert_eq!(
+            invoke(
+                &webview,
+                "set_highlight",
+                json!({ "bookId": 43, "chapter": 22, "verseStart": 1, "verseEnd": 1, "color": "blue" }),
+            ),
+            Err(json!("There's no John 22."))
+        );
+        assert_eq!(
+            invoke(
+                &webview,
+                "remove_highlight",
+                json!({ "bookId": 43, "chapter": 3, "verseStart": 16, "verseEnd": 18 }),
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            invoke(&webview, "list_highlights", json!({})).unwrap(),
+            json!([])
         );
 
         let found = invoke(
