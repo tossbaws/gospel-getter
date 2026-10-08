@@ -132,6 +132,8 @@ export async function closeBridge() {
  * position) and waits for the reading pane. `clipboard` is 'ok', 'reject'
  * or 'missing'; `compare` and `readerMode` preset those display settings;
  * `failing` maps commands to the error they reject with from the start.
+ * `fresh` starts with no saved reading position, as a new install does;
+ * `storage` presets the page's local storage (see `app.storage()`).
  */
 export async function openApp({
     book = 'John',
@@ -142,9 +144,13 @@ export async function openApp({
     compare = false,
     keepBookmarks = false,
     failing = {},
+    fresh = false,
+    storage = {},
     alterReading = (dto) => dto,
 } = {}) {
-    await backend('__reset', { bookId: bookId(book), chapter, translationCode: translation, keepBookmarks });
+    await backend('__reset', fresh
+        ? { translationCode: translation, keepBookmarks }
+        : { bookId: bookId(book), chapter, translationCode: translation, keepBookmarks });
 
     const calls = [];
     const clipboardWrites = [];
@@ -179,6 +185,7 @@ export async function openApp({
         runScripts: 'dangerously',
         pretendToBeVisual: true,
         beforeParse(window) {
+            for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, value);
             if (readerMode) window.localStorage.setItem('gospel-getter-reader-mode', 'on');
             if (compare) window.localStorage.setItem('gospel-getter-compare', 'on');
             window.__TAURI__ = { core: { invoke } };
@@ -210,6 +217,15 @@ export async function openApp({
         calls,
         clipboardWrites,
         consoleErrors: errors,
+        /** The page's local storage, to carry into the next openApp (a restart). */
+        storage() {
+            const out = {};
+            for (let i = 0; i < window.localStorage.length; i++) {
+                const key = window.localStorage.key(i);
+                out[key] = window.localStorage.getItem(key);
+            }
+            return out;
+        },
         setClipboard(mode) {
             state.clipboard = mode;
         },
