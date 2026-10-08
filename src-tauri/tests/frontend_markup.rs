@@ -737,3 +737,77 @@ fn print_ignores_saved_reader_preferences() {
         );
     }
 }
+
+// ---- Highlights
+
+const HIGHLIGHT_COLORS: [&str; 4] = ["yellow", "green", "blue", "pink"];
+
+/// Highlighted verse text must stay readable: `--text` on each of a
+/// theme's highlighter colors meets WCAG AA (4.5:1), in every theme, and
+/// the four colors are distinct.
+#[test]
+fn highlight_colors_keep_verse_text_at_wcag_aa_in_every_theme() {
+    let rules = rules();
+    for (theme, props) in theme_palettes(&rules) {
+        let text = property(&props, "--text");
+        let mut seen = Vec::new();
+        for color in HIGHLIGHT_COLORS {
+            let highlight = property(&props, &format!("--hl-{color}"));
+            let ratio = contrast_ratio(text, highlight);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: --text on --hl-{color} is {ratio:.2}:1, below 4.5:1"
+            );
+            assert!(
+                !seen.contains(&highlight),
+                "theme `{theme}`: --hl-{color} repeats another color"
+            );
+            seen.push(highlight);
+        }
+    }
+}
+
+/// Each color has a verse style and a swatch style, and the highlight sits
+/// on the verse text (a band behind the words), not the whole verse block
+/// the selection tints.
+#[test]
+fn every_highlight_color_is_styled_on_the_verse_text() {
+    let rules = rules();
+    for color in HIGHLIGHT_COLORS {
+        let verse = screen_rule(
+            &rules,
+            &format!(r#".verse[data-highlight="{color}"] .verse-text"#),
+        );
+        assert!(
+            verse.body.contains(&format!("var(--hl-{color})")),
+            "{color} verses should use --hl-{color}"
+        );
+        let swatch = screen_rule(
+            &rules,
+            &format!(r#".highlight-swatch[data-color="{color}"]"#),
+        );
+        assert!(swatch.body.contains(&format!("var(--hl-{color})")));
+    }
+    // The pressed swatch is marked by more than its color.
+    let pressed = screen_rule(&rules, r#".highlight-swatch[aria-pressed="true"]::after"#);
+    assert!(pressed.body.contains("content:"));
+}
+
+/// Printing stays black on white: the print stylesheet clears every
+/// highlighter color.
+#[test]
+fn highlights_are_not_printed() {
+    let rules = rules();
+    let print_root = rules
+        .iter()
+        .find(|r| r.at_rule.as_deref() == Some("@media print") && r.selector == ":root")
+        .expect("print stylesheet should reset :root custom properties");
+    let props = custom_properties(&print_root.body);
+    for color in HIGHLIGHT_COLORS {
+        assert_eq!(
+            property(&props, &format!("--hl-{color}")),
+            "transparent !important",
+            "print should clear --hl-{color}"
+        );
+    }
+}

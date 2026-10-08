@@ -4,12 +4,13 @@ use std::collections::{HashMap, HashSet};
 
 use crate::db::reader_data::ImportCounts;
 use crate::db::{
-    self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, SearchHit, Verse,
+    self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Highlight,
+    HighlightColor, SearchHit, Verse,
 };
-use crate::reader_data::{NewBookmark, NewPosition};
+use crate::reader_data::{NewBookmark, NewHighlight, NewPosition};
 
 /// The store handles all database access after startup: verses, the
-/// reading position, bookmarks and search. The book and translation lists
+/// reading position, bookmarks, highlights and search. The book and translation lists
 /// are loaded once at startup directly via
 /// `db::get_all_books`/`db::get_all_translations` (see `AppState::load`)
 /// and cached in `AppState`, so `Store` itself doesn't need methods for
@@ -103,6 +104,43 @@ impl Store {
         db::bookmarks::remove_bookmark(&self.pool, id).await
     }
 
+    /// Highlight every verse of a passage in `color` (see
+    /// `db::highlights::set_highlights`).
+    pub async fn set_highlights(
+        &self,
+        book_id: i64,
+        chapter: i64,
+        verse_start: i64,
+        verse_end: i64,
+        color: HighlightColor,
+    ) -> Result<(), BookmarkError> {
+        db::highlights::set_highlights(&self.pool, book_id, chapter, verse_start, verse_end, color)
+            .await
+    }
+
+    /// Remove the highlight from every verse of a passage; returns how
+    /// many verses had one.
+    pub async fn remove_highlights(
+        &self,
+        book_id: i64,
+        chapter: i64,
+        verse_start: i64,
+        verse_end: i64,
+    ) -> anyhow::Result<usize> {
+        db::highlights::remove_highlights(&self.pool, book_id, chapter, verse_start, verse_end)
+            .await
+    }
+
+    /// Every highlight, in Bible order.
+    pub async fn highlights(&self) -> anyhow::Result<Vec<Highlight>> {
+        db::highlights::list_highlights(&self.pool).await
+    }
+
+    /// The coordinates of every highlighted verse.
+    pub async fn highlight_coordinates(&self) -> anyhow::Result<HashSet<(i64, i64, i64)>> {
+        db::reader_data::highlight_coordinates(&self.pool).await
+    }
+
     /// Build whatever part of the search index is missing or stale.
     pub async fn ensure_search_index(&self) -> anyhow::Result<Vec<i64>> {
         db::ensure_search_index(&self.pool).await
@@ -144,9 +182,10 @@ impl Store {
     pub async fn apply_import(
         &self,
         bookmarks: &[NewBookmark],
+        highlights: Option<&[NewHighlight]>,
         replace: bool,
         position: Option<&NewPosition>,
     ) -> anyhow::Result<ImportCounts> {
-        db::reader_data::apply_import(&self.pool, bookmarks, replace, position).await
+        db::reader_data::apply_import(&self.pool, bookmarks, highlights, replace, position).await
     }
 }

@@ -376,8 +376,10 @@ export async function openApp({
     };
 
     await until(() => document.getElementById('reading-pane-inner'), 'reading pane');
-    // Boot finishes by loading the bookmark list.
+    // Boot loads the bookmark list, then the highlights; wait for all of
+    // it to finish.
     await until(() => document.querySelector('#bookmark-list li'), 'bookmark list');
+    await app.idle();
     return app;
 }
 

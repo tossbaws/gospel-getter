@@ -91,6 +91,32 @@ async fn dispatch(
         "remove_bookmark" => Ok(Value::from(
             state.store.remove_bookmark(arg(args, "id")?).await?,
         )),
+        "list_highlights" => match commands::highlights_list(state).await {
+            Ok(list) => Ok(to_value(list)?),
+            Err(e) => Err(format!("Highlights couldn't be loaded: {e:#}")),
+        },
+        "set_highlight" => {
+            let color: String = arg(args, "color")?;
+            commands::highlight_passage(
+                state,
+                arg(args, "bookId")?,
+                arg(args, "chapter")?,
+                arg(args, "verseStart")?,
+                arg(args, "verseEnd")?,
+                &color,
+            )
+            .await
+            .map(|()| Value::Null)
+        }
+        "remove_highlight" => commands::unhighlight_passage(
+            state,
+            arg(args, "bookId")?,
+            arg(args, "chapter")?,
+            arg(args, "verseStart")?,
+            arg(args, "verseEnd")?,
+        )
+        .await
+        .map(Value::from),
         "search" => {
             let query: String = arg(args, "query")?;
             let offset: Option<i64> = arg(args, "offset")?;
@@ -141,8 +167,8 @@ async fn dispatch(
             commands::compare_chapter(state, arg(args, "bookId")?, arg(args, "chapter")?).await?,
         )?),
         // Test setup, not an app command: forget the reading position
-        // (and bookmarks, unless `keepBookmarks` — a restart rather than
-        // a new test), then optionally save a reading position (what the
+        // (and bookmarks and highlights, unless `keepBookmarks` — a restart
+        // rather than a new test), then optionally save a reading position (what the
         // app would reopen at).
         "__reset" => {
             *state
@@ -154,6 +180,7 @@ async fn dispatch(
                 .map_err(|_| anyhow::anyhow!("picker lock poisoned"))? = None;
             if !arg::<Option<bool>>(args, "keepBookmarks")?.unwrap_or(false) {
                 sqlx::query("DELETE FROM bookmarks").execute(pool).await?;
+                sqlx::query("DELETE FROM highlights").execute(pool).await?;
             }
             sqlx::query("DELETE FROM reading_position")
                 .execute(pool)

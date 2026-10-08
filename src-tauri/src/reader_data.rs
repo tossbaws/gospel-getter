@@ -1,12 +1,16 @@
-//! The reader's own data — bookmarks, last reading position and display
-//! preferences — as a portable, human-readable JSON file, for moving
-//! between installs or keeping a backup.
+//! The reader's own data — bookmarks, highlights, last reading position
+//! and display preferences — as a portable, human-readable JSON file, for
+//! moving between installs or keeping a backup.
 //!
 //! The file never contains Bible text, cross-references, the search index,
 //! database ids or anything else the app can rebuild from its bundled data.
 //! Passages are canonical coordinates (book number 1–66, chapter, inclusive
-//! verse range) and the reading position names its translation by code, so
-//! a file imports into any install that has those books and translations.
+//! verse range, or one verse for a highlight) and the reading position
+//! names its translation by code, so a file imports into any install that
+//! has those books and translations.
+//!
+//! Format 2 (from v2.5.0) adds `highlights`; format 1 files, which can't
+//! have them, still import exactly as before.
 //!
 //! This module is the format and its validation; reading and writing the
 //! database is `db::reader_data`, and the commands (with the native file
@@ -14,24 +18,29 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use crate::db::{Book, Translation};
+use crate::db::{Book, HighlightColor, Translation};
 
 /// The `format` every reader-data file declares.
 pub const FORMAT: &str = "gospel-getter-reader-data";
-/// The current `format_version`. Files with any other version are refused:
-/// an older one can't exist yet, and a newer one may mean things this
-/// version would misread.
-pub const FORMAT_VERSION: u64 = 1;
+/// The `format_version` this version writes. It reads this and
+/// `FORMAT_VERSION_1`; anything newer is refused, since it may mean things
+/// this version would misread.
+pub const FORMAT_VERSION: u64 = 2;
+/// The first format: bookmarks, reading position and preferences, but no
+/// highlights.
+pub const FORMAT_VERSION_1: u64 = 1;
 /// The suggested file-name suffix.
 pub const FILE_SUFFIX: &str = ".gospel-getter.json";
 /// The largest file import will read. A file with the maximum number of
-/// bookmarks is well under this.
-pub const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+/// bookmarks and highlights is under this.
+pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 /// The most bookmarks one file may hold.
 pub const MAX_BOOKMARKS: usize = 10_000;
+/// The most highlights one file may hold: more than there are verses.
+pub const MAX_HIGHLIGHTS: usize = 40_000;
 /// How many problems an invalid file reports before summarizing the rest.
 const MAX_REPORTED_PROBLEMS: usize = 12;
 
@@ -48,6 +57,10 @@ pub struct ReaderData {
     pub reading_position: Option<PositionRecord>,
     #[serde(default)]
     pub bookmarks: Vec<BookmarkRecord>,
+    /// Format 2 only. Left out when there are none, so a format 1 file
+    /// written back out stays a valid format 1 file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub highlights: Vec<HighlightRecord>,
     #[serde(default)]
     pub preferences: Preferences,
 }
@@ -84,6 +97,27 @@ pub struct BookmarkRecord {
     /// without one is dated when it's imported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
+}
+
+/// One highlighted verse.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HighlightRecord {
+    /// Canonical book number, Genesis = 1 … Revelation = 66.
+    pub book: i64,
+    /// The book's name, for people reading the file. If present on import,
+    /// it must match `book`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub book_name: Option<String>,
+    pub chapter: i64,
+    pub verse: i64,
+    pub color: HighlightColor,
+    /// When the verse was first highlighted, and when its color was last
+    /// set (UTC, ISO 8601). Kept on import; missing ones are "now".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
 }
 
 /// Display preferences. Each is optional: a file only changes the ones it
@@ -175,7 +209,10 @@ impl fmt::Display for ImportError {
             ),
             Self::NotJson(detail) => write!(f, "The file isn't valid JSON ({detail})."),
             Self::NotReaderData => {
-                write!(f, "This isn't a Gospel Getter bookmarks-and-settings file.")
+                write!(
+                    f,
+                    "This isn't a Gospel Getter file of bookmarks, highlights and settings."
+                )
             }
             Self::UnsupportedVersion(message) | Self::Malformed(message) => f.write_str(message),
             Self::Invalid(problems) => write!(
@@ -220,6 +257,17 @@ pub fn parse(bytes: &[u8]) -> Result<ReaderData, ImportError> {
     }
     match value.get("format_version").and_then(Value::as_u64) {
         Some(FORMAT_VERSION) => {}
+        // A format 1 file is read exactly as format 1 always was: one that
+        // names highlights has a field format 1 doesn't define.
+        Some(FORMAT_VERSION_1) => {
+            if value.get("highlights").is_some() {
+                return Err(ImportError::Malformed(
+                    "The file doesn't have the expected layout: unknown field `highlights` \
+                     (data format 1 has no highlights)."
+                        .to_string(),
+                ));
+            }
+        }
         Some(newer) if newer > FORMAT_VERSION => {
             return Err(ImportError::UnsupportedVersion(format!(
                 "This file was made by a newer version of Gospel Getter (data format \
@@ -230,7 +278,7 @@ pub fn parse(bytes: &[u8]) -> Result<ReaderData, ImportError> {
         _ => {
             return Err(ImportError::UnsupportedVersion(format!(
                 "This file's data format version isn't one this version of Gospel Getter \
-                 reads (it reads format {FORMAT_VERSION})."
+                 reads (it reads formats {FORMAT_VERSION_1} and {FORMAT_VERSION})."
             )));
         }
     }
@@ -268,6 +316,24 @@ impl NewBookmark {
     }
 }
 
+/// A highlight ready to save, after validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewHighlight {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse: i64,
+    pub color: HighlightColor,
+    /// Normalized to the database's own format; `None` means "now".
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl NewHighlight {
+    pub fn coordinates(&self) -> (i64, i64, i64) {
+        (self.book_id, self.chapter, self.verse)
+    }
+}
+
 /// A reading position ready to save, after validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewPosition {
@@ -288,6 +354,11 @@ pub struct ValidatedImport {
     pub bookmarks: Vec<NewBookmark>,
     /// How many bookmarks in the file repeated another one in it.
     pub duplicates_in_file: usize,
+    /// De-duplicated, in the file's order. `None` for a format 1 file,
+    /// which can't hold highlights, so importing it leaves them alone.
+    pub highlights: Option<Vec<NewHighlight>>,
+    /// How many highlights in the file repeated a verse already in it.
+    pub highlight_duplicates_in_file: usize,
     pub position: Option<NewPosition>,
     pub preferences: Preferences,
 }
@@ -315,6 +386,12 @@ pub fn validate(
         return Err(ImportError::Invalid(vec![format!(
             "It has {} bookmarks; the most one file can hold is {MAX_BOOKMARKS}.",
             data.bookmarks.len()
+        )]));
+    }
+    if data.highlights.len() > MAX_HIGHLIGHTS {
+        return Err(ImportError::Invalid(vec![format!(
+            "It has {} highlights; the most one file can hold is {MAX_HIGHLIGHTS}.",
+            data.highlights.len()
         )]));
     }
 
@@ -405,6 +482,72 @@ pub fn validate(
         }
     }
 
+    let mut highlights: Vec<NewHighlight> = Vec::new();
+    let mut highlighted: HashSet<(i64, i64, i64)> = HashSet::new();
+    let mut highlight_duplicates_in_file = 0;
+    for (i, h) in data.highlights.into_iter().enumerate() {
+        let label = format!("Highlight {}", i + 1);
+        let Some(found) = book(h.book) else {
+            problems.push(format!("{label}: there's no book number {}.", h.book));
+            continue;
+        };
+        if !name_matches(found, &h.book_name) {
+            problems.push(format!(
+                "{label}: book {} is {}, not {}.",
+                h.book,
+                found.name,
+                h.book_name.as_deref().unwrap_or_default()
+            ));
+            continue;
+        }
+        if !(1..=found.chapter_count).contains(&h.chapter) {
+            problems.push(format!(
+                "{label}: there's no {} {} ({} has {} chapters).",
+                found.name, h.chapter, found.name, found.chapter_count
+            ));
+            continue;
+        }
+        let reference = format!("{} {}:{}", found.name, h.chapter, h.verse);
+        let last = last_verses
+            .get(&(found.id, h.chapter))
+            .copied()
+            .unwrap_or(0);
+        if h.verse < 1 {
+            problems.push(format!("{label}: {reference} isn't a valid verse."));
+            continue;
+        }
+        if h.verse > last {
+            problems.push(format!(
+                "{label}: there's no {reference}; {} {} ends at verse {last}.",
+                found.name, h.chapter
+            ));
+            continue;
+        }
+        let created_at = h.created_at.as_deref().map(normalize_timestamp);
+        let updated_at = h.updated_at.as_deref().map(normalize_timestamp);
+        if matches!(created_at, Some(None)) || matches!(updated_at, Some(None)) {
+            problems.push(format!(
+                "{label} ({reference}): its date isn't a valid UTC time like \
+                 2026-10-04T12:30:00Z."
+            ));
+            continue;
+        }
+        let new = NewHighlight {
+            book_id: found.id,
+            chapter: h.chapter,
+            verse: h.verse,
+            color: h.color,
+            created_at: created_at.flatten(),
+            updated_at: updated_at.flatten(),
+        };
+        // The same verse twice: the first one counts.
+        if highlighted.insert(new.coordinates()) {
+            highlights.push(new);
+        } else {
+            highlight_duplicates_in_file += 1;
+        }
+    }
+
     let position = match data.reading_position {
         None => None,
         Some(p) => {
@@ -473,6 +616,8 @@ pub fn validate(
         app_version: data.app_version,
         bookmarks,
         duplicates_in_file,
+        highlights: (data.format_version != FORMAT_VERSION_1).then_some(highlights),
+        highlight_duplicates_in_file,
         position,
         preferences: data.preferences,
     })
@@ -617,15 +762,38 @@ mod tests {
             Err(ImportError::NotReaderData)
         );
         let newer = parse(
-            br#"{"format": "gospel-getter-reader-data", "format_version": 2, "brand_new": true}"#,
+            br#"{"format": "gospel-getter-reader-data", "format_version": 3, "brand_new": true}"#,
         )
         .unwrap_err();
         assert!(
             newer
                 .to_string()
-                .contains("newer version of Gospel Getter (data format 2)")
+                .contains("newer version of Gospel Getter (data format 3)"),
+            "{newer}"
         );
-        for version in ["0", "\"1\"", "1.5", "-1", "null"] {
+        // Format 1 never had highlights: a format 1 file naming them is
+        // refused, as format 1 always refused fields it doesn't define.
+        let v1_with_highlights = parse(
+            br#"{"format": "gospel-getter-reader-data", "format_version": 1, "exported_at": "x",
+                 "app_version": "2.4.0", "reading_position": null, "highlights": []}"#,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(v1_with_highlights, ImportError::Malformed(_)),
+            "{v1_with_highlights:?}"
+        );
+        let bad_color = parse(
+            br#"{"format": "gospel-getter-reader-data", "format_version": 2, "exported_at": "x",
+                 "app_version": "2.5.0", "reading_position": null,
+                 "highlights": [{"book": 43, "chapter": 3, "verse": 16, "color": "purple"}]}"#,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(bad_color, ImportError::Malformed(_))
+                && bad_color.to_string().contains("purple"),
+            "{bad_color}"
+        );
+        for version in ["0", "\"1\"", "\"2\"", "1.5", "-1", "null"] {
             let file = format!(
                 r#"{{"format": "gospel-getter-reader-data", "format_version": {version}}}"#
             );

@@ -94,17 +94,16 @@ impl From<sqlx::Error> for BookmarkError {
     }
 }
 
-/// Bookmark a passage, after checking it exists: the chapter in the book,
-/// and the verses in at least one bundled translation (so a verse only one
-/// translation numbers can still be bookmarked). Bookmarking a passage
-/// that's already bookmarked returns the existing bookmark unchanged.
-pub async fn add_bookmark(
-    pool: &SqlitePool,
+/// Check that a passage exists: the chapter in the book, and the verses
+/// in at least one bundled translation (so a verse only one translation
+/// numbers still counts). Shared by bookmarks and highlights.
+pub(crate) async fn check_passage(
+    conn: &mut sqlx::SqliteConnection,
     book_id: i64,
     chapter: i64,
     verse_start: i64,
     verse_end: i64,
-) -> Result<Bookmark, BookmarkError> {
+) -> Result<(), BookmarkError> {
     if verse_start < 1 || verse_end < verse_start {
         return Err(BookmarkError::InvalidRange {
             verse_start,
@@ -112,15 +111,10 @@ pub async fn add_bookmark(
         });
     }
 
-    let mut tx = pool
-        .begin()
-        .await
-        .context("Failed to start bookmark transaction")?;
-
     let chapter_count: Option<i64> =
         sqlx::query_scalar("SELECT chapter_count FROM books WHERE id = $1")
             .bind(book_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut *conn)
             .await
             .context("Failed to look up book")?;
     if !chapter_count.is_some_and(|count| (1..=count).contains(&chapter)) {
@@ -131,7 +125,7 @@ pub async fn add_bookmark(
         sqlx::query_scalar("SELECT MAX(verse) FROM verses WHERE book_id = $1 AND chapter = $2")
             .bind(book_id)
             .bind(chapter)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *conn)
             .await
             .context("Failed to look up chapter length")?;
     let last_verse = last_verse.unwrap_or(0);
@@ -143,6 +137,25 @@ pub async fn add_bookmark(
             last_verse,
         });
     }
+    Ok(())
+}
+
+/// Bookmark a passage, after checking it exists: the chapter in the book,
+/// and the verses in at least one bundled translation (so a verse only one
+/// translation numbers can still be bookmarked). Bookmarking a passage
+/// that's already bookmarked returns the existing bookmark unchanged.
+pub async fn add_bookmark(
+    pool: &SqlitePool,
+    book_id: i64,
+    chapter: i64,
+    verse_start: i64,
+    verse_end: i64,
+) -> Result<Bookmark, BookmarkError> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Failed to start bookmark transaction")?;
+    check_passage(&mut tx, book_id, chapter, verse_start, verse_end).await?;
 
     sqlx::query(
         "INSERT INTO bookmarks (book_id, chapter, verse_start, verse_end) \

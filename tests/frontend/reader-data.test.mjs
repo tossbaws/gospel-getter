@@ -90,7 +90,7 @@ test('Export saves bookmarks, reading position and display settings to the chose
         const text = readFileSync(path, 'utf8');
         const json = JSON.parse(text);
         assert.equal(json.format, 'gospel-getter-reader-data');
-        assert.equal(json.format_version, 1);
+        assert.equal(json.format_version, 2);
         assert.deepEqual(
             { ...json.bookmarks[0], created_at: typeof json.bookmarks[0].created_at },
             { book: 43, book_name: 'John', chapter: 3, verse_start: 16, verse_end: 16, created_at: 'string' },
@@ -151,9 +151,9 @@ test('an invalid file is explained and changes nothing', () =>
 
 test('a file from a newer version is refused clearly', () =>
     withApp({}, async (app) => {
-        const path = writeFile({ format: 'gospel-getter-reader-data', format_version: 2, exported_at: 'x', app_version: '9.0.0' });
+        const path = writeFile({ format: 'gospel-getter-reader-data', format_version: 3, exported_at: 'x', app_version: '9.0.0' });
         await clickData(app, 'import-data-btn', path);
-        assert.match(dataStatus(app), /made by a newer version of Gospel Getter \(data format 2\)\. This version reads format 1; update Gospel Getter to import it\. Nothing was changed\.$/);
+        assert.match(dataStatus(app), /made by a newer version of Gospel Getter \(data format 3\)\. This version reads format 2; update Gospel Getter to import it\. Nothing was changed\.$/);
         const garbage = writeFile('this is not json');
         await clickData(app, 'import-data-btn', garbage);
         assert.match(dataStatus(app), /isn't valid JSON \(line 1, column 2\)/);
