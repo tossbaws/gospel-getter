@@ -301,19 +301,11 @@ main:focus {
 }
 
 .eyebrow {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
     margin: 0 0 0.9rem;
     font-size: 0.95rem;
     font-weight: 600;
     letter-spacing: 0.02em;
     color: var(--gold);
-}
-
-.eyebrow img {
-    width: 28px;
-    height: 28px;
 }
 
 .hero h1 {
@@ -779,17 +771,6 @@ main:focus {
 
 .site-footer p {
     margin: 0;
-}
-
-.footer-maker {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-}
-
-.footer-maker img {
-    width: 32px;
-    height: 32px;
 }
 
 @media (prefers-reduced-motion: reduce) {
