@@ -1,18 +1,32 @@
 /* Gospel Getter website. Plain CSS, no build step, no web fonts: system
-   serif for headings and reading-like text, system sans for the rest. */
+   serif for headings and reading-like text, system sans for the rest.
+
+   The look follows the Chi Rho Code LLC mark, a round stained-glass
+   window: a near-black ground, gold as the main accent (headings, lead
+   lines, primary buttons, focus), emerald and teal as the glass (panel
+   edges, secondary buttons, links). Panels read as panes of glass: dark,
+   with a faint green-to-teal wash and a thin edge. Every text colour meets
+   WCAG AA on every background it's used on, the washes included (see
+   site/README.md). */
 
 :root {
-    color-scheme: light;
-    --paper: #fbf8f3;
-    --paper-deep: #f3ede3;
-    --ink: #1d1724;
-    --ink-soft: #4a4253;
-    --plum: #14082c;
-    --plum-soft: #2a1a4d;
-    --link: #4a2a80;
-    --gold: #8a5a14;
-    --rule: #e2d9cb;
-    --focus: #b45309;
+    color-scheme: dark;
+    --bg: #0b0d0c;
+    --bg-raised: #101613;
+    --pane: #131c18;
+    --footer-bg: #070908;
+    --text: #ede7d8;
+    --text-muted: #bdb6a5;
+    --gold: #f2c14e;
+    --gold-pale: #f8e59f;
+    --on-gold: #1a140e;
+    --gold-line: rgb(242 193 78 / 0.5);
+    --emerald: #16785a;
+    --teal: #42b8a5;
+    --link: #86dccd;
+    --caution-bg: #2a210b;
+    --pane-edge: rgb(66 184 165 / 0.35);
+    --pane-wash: linear-gradient(155deg, rgb(22 120 90 / 0.16), rgb(66 184 165 / 0.06) 55%, transparent);
     --radius: 10px;
     --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
@@ -38,8 +52,8 @@ html {
 
 body {
     margin: 0;
-    background: var(--paper);
-    color: var(--ink);
+    background: var(--bg);
+    color: var(--text);
     font-family: var(--sans);
     font-size: 1.0625rem;
     line-height: 1.65;
@@ -62,7 +76,7 @@ a:hover {
 }
 
 :focus-visible {
-    outline: 3px solid var(--focus);
+    outline: 3px solid var(--gold);
     outline-offset: 3px;
     border-radius: 4px;
 }
@@ -73,7 +87,7 @@ h3 {
     font-family: var(--serif);
     font-weight: 600;
     line-height: 1.2;
-    color: var(--plum);
+    color: var(--gold-pale);
     text-wrap: balance;
 }
 
@@ -91,18 +105,23 @@ p {
     margin: 0 0 1rem;
 }
 
+strong {
+    color: var(--text);
+}
+
 code,
 kbd {
     font-family: var(--mono);
     font-size: 0.88em;
+    color: var(--text);
 }
 
 kbd {
     padding: 0.05em 0.4em;
-    border: 1px solid var(--rule);
+    border: 1px solid var(--pane-edge);
     border-bottom-width: 2px;
     border-radius: 4px;
-    background: #fff;
+    background: var(--pane);
 }
 
 .wrap {
@@ -116,8 +135,9 @@ kbd {
     top: -4rem;
     z-index: 10;
     padding: 0.6rem 1rem;
-    background: var(--plum);
-    color: #fff;
+    background: var(--gold);
+    color: var(--on-gold);
+    font-weight: 600;
     border-radius: 0 0 var(--radius) var(--radius);
 }
 
@@ -129,10 +149,30 @@ main:focus {
     outline: none;
 }
 
+/* A lead line: a thin gold rule ending in round "solder" nodes, with a
+   teal node in the middle, like the traces in the mark. Decorative only
+   (a pseudo-element, so screen readers never meet it). */
+.section > .wrap::before,
+.site-footer::before {
+    content: "";
+    display: block;
+    height: 12px;
+    background:
+        radial-gradient(circle, var(--gold) 0 3px, transparent 3.5px) 0 50% / 12px 12px no-repeat,
+        radial-gradient(circle, var(--gold) 0 3px, transparent 3.5px) 100% 50% / 12px 12px no-repeat,
+        radial-gradient(circle, var(--teal) 0 3px, transparent 3.5px) 50% 50% / 12px 12px no-repeat,
+        linear-gradient(var(--gold-line), var(--gold-line)) 50% 50% / calc(100% - 12px) 1px no-repeat;
+}
+
+.section > .wrap::before {
+    margin-bottom: clamp(2rem, 1.5rem + 2vw, 3rem);
+}
+
 /* ---- Header */
 
 .site-header {
-    border-bottom: 1px solid var(--rule);
+    border-bottom: 1px solid var(--gold-line);
+    background: linear-gradient(180deg, var(--bg-raised), var(--bg));
 }
 
 .site-header .wrap {
@@ -148,13 +188,15 @@ main:focus {
     display: flex;
     align-items: center;
     gap: 0.7rem;
-    color: var(--ink);
+    color: var(--text);
     text-decoration: none;
 }
 
-.brand img {
+.brand > img {
     width: 40px;
     height: 40px;
+    border-radius: 9px;
+    box-shadow: 0 0 0 1px var(--gold-line);
 }
 
 .brand-name {
@@ -163,13 +205,21 @@ main:focus {
     font-size: 1.3rem;
     font-weight: 600;
     line-height: 1.1;
-    color: var(--plum);
+    color: var(--gold-pale);
 }
 
 .brand-byline {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.15rem;
     font-size: 0.8rem;
-    color: var(--ink-soft);
+    color: var(--text-muted);
+}
+
+.brand-byline img {
+    width: 16px;
+    height: 16px;
 }
 
 .site-nav ul {
@@ -183,7 +233,7 @@ main:focus {
 }
 
 .site-nav a {
-    color: var(--ink);
+    color: var(--text);
     text-decoration: none;
     font-size: 0.95rem;
 }
@@ -194,7 +244,7 @@ main:focus {
 
 .site-nav .nav-about {
     font-size: 0.85rem;
-    color: var(--ink-soft);
+    color: var(--text-muted);
 }
 
 /* ---- Buttons */
@@ -206,7 +256,7 @@ main:focus {
     gap: 0.5rem;
     min-height: 2.9rem;
     padding: 0.6rem 1.25rem;
-    border: 2px solid var(--plum);
+    border: 2px solid var(--gold);
     border-radius: 999px;
     font-weight: 600;
     font-size: 1rem;
@@ -215,30 +265,34 @@ main:focus {
     text-decoration: none;
 }
 
+/* Gold glass with dark lettering. */
 .button-primary {
-    background: var(--plum);
-    color: #fff;
+    background: linear-gradient(180deg, var(--gold-pale), var(--gold) 55%);
+    background-color: var(--gold);
+    color: var(--on-gold);
 }
 
 .button-primary:hover {
-    background: var(--plum-soft);
-    border-color: var(--plum-soft);
+    background: var(--gold-pale);
+    border-color: var(--gold-pale);
 }
 
+/* Teal glass edge. */
 .button-secondary {
     background: transparent;
-    color: var(--plum);
+    border-color: var(--teal);
+    color: var(--link);
 }
 
 .button-secondary:hover {
-    background: #fff;
+    background: rgb(66 184 165 / 0.14);
 }
 
 .site-nav .button {
     min-height: 2.4rem;
     padding: 0.4rem 1rem;
     font-size: 0.92rem;
-    color: #fff;
+    color: var(--on-gold);
 }
 
 .site-nav .button:hover {
@@ -249,14 +303,28 @@ main:focus {
 
 .hero {
     padding-top: clamp(2rem, 1.5rem + 2.5vw, 4rem);
+    padding-bottom: clamp(2.5rem, 2rem + 3vw, 4.5rem);
+    background:
+        radial-gradient(60rem 30rem at 85% 0%, rgb(66 184 165 / 0.08), transparent 70%),
+        radial-gradient(50rem 30rem at 0% 100%, rgb(22 120 90 / 0.1), transparent 70%);
 }
 
 .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
     margin: 0 0 0.9rem;
     font-size: 0.95rem;
     font-weight: 600;
     letter-spacing: 0.02em;
     color: var(--gold);
+}
+
+.eyebrow img {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    box-shadow: 0 0 0 1px var(--gold-line);
 }
 
 .hero h1 {
@@ -269,7 +337,7 @@ main:focus {
 .lede {
     max-width: 38rem;
     font-size: clamp(1.1rem, 1rem + 0.4vw, 1.3rem);
-    color: var(--ink-soft);
+    color: var(--text-muted);
 }
 
 .hero-actions {
@@ -282,7 +350,7 @@ main:focus {
 .hero-note {
     max-width: 40rem;
     font-size: 0.95rem;
-    color: var(--ink-soft);
+    color: var(--text-muted);
 }
 
 .facts {
@@ -300,36 +368,36 @@ main:focus {
     padding-left: 1.1rem;
 }
 
+/* Solder-pad bullets. */
 .facts li::before {
     content: "";
     position: absolute;
     left: 0;
-    top: 0.62em;
-    width: 0.45rem;
-    height: 0.45rem;
+    top: 0.55em;
+    width: 0.55rem;
+    height: 0.55rem;
     border-radius: 50%;
     background: var(--gold);
-}
-
-.facts strong {
-    color: var(--ink);
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--gold-line);
 }
 
 .facts span {
-    color: var(--ink-soft);
+    color: var(--text-muted);
 }
 
+/* App screenshots, framed like panes in a leaded window: a gold lead
+   line, a dark gap, then an emerald edge. The screenshots themselves are
+   unchanged (Classic Light). */
 .shot {
     margin: 0;
-    border: 1px solid var(--rule);
+    border: 1px solid var(--gold-line);
     border-radius: var(--radius);
     overflow: hidden;
     background: #f7f7f5;
-    box-shadow: 0 1px 2px rgb(20 8 44 / 0.06), 0 12px 32px -12px rgb(20 8 44 / 0.25);
-}
-
-.hero {
-    padding-bottom: clamp(2.5rem, 2rem + 3vw, 4.5rem);
+    box-shadow:
+        0 0 0 4px var(--bg),
+        0 0 0 5px rgb(22 120 90 / 0.7),
+        0 18px 40px -16px rgb(0 0 0 / 0.8);
 }
 
 .hero-shot {
@@ -366,14 +434,13 @@ main:focus {
 }
 
 .section-alt {
-    background: var(--paper-deep);
-    border-block: 1px solid var(--rule);
+    background: var(--bg-raised);
 }
 
 .section-intro {
     max-width: 42rem;
     margin-bottom: clamp(2rem, 1.5rem + 2vw, 3.25rem);
-    color: var(--ink-soft);
+    color: var(--text-muted);
     font-size: 1.1rem;
 }
 
@@ -398,6 +465,11 @@ main:focus {
 
 .feature-text li + li {
     margin-top: 0.35rem;
+}
+
+.feature-text li::marker,
+.two-col li::marker {
+    color: var(--gold);
 }
 
 @media (min-width: 56rem) {
@@ -429,9 +501,13 @@ main:focus {
     }
 }
 
+/* Each column is a pane. */
 .two-col ul {
     margin: 0;
-    padding-left: 1.2rem;
+    padding: 1.25rem 1.25rem 1.25rem 2.4rem;
+    background: var(--pane-wash), var(--pane);
+    border: 1px solid var(--pane-edge);
+    border-radius: var(--radius);
 }
 
 .two-col li + li {
@@ -443,7 +519,7 @@ main:focus {
 .themes {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
-    gap: 1.25rem;
+    gap: 1.5rem;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -453,25 +529,18 @@ main:focus {
     margin: 0;
 }
 
-.themes .shot {
-    box-shadow: 0 1px 2px rgb(20 8 44 / 0.08);
-}
-
 .themes figcaption {
-    margin-top: 0.5rem;
+    margin-top: 0.75rem;
     font-size: 0.95rem;
     font-weight: 600;
+    color: var(--text);
 }
 
 /* ---- Download */
 
 .release-line {
     margin-bottom: 2rem;
-    color: var(--ink-soft);
-}
-
-.release-line strong {
-    color: var(--ink);
+    color: var(--text-muted);
 }
 
 .platforms {
@@ -487,8 +556,9 @@ main:focus {
 
 .platform {
     padding: clamp(1.25rem, 1rem + 1vw, 2rem);
-    background: #fff;
-    border: 1px solid var(--rule);
+    background: var(--pane-wash), var(--pane);
+    border: 1px solid var(--pane-edge);
+    border-top: 2px solid var(--gold-line);
     border-radius: var(--radius);
     scroll-margin-top: 1rem;
 }
@@ -514,16 +584,28 @@ main:focus {
 .file-note {
     margin: 0.35rem 0 0;
     font-size: 0.92rem;
-    color: var(--ink-soft);
+    color: var(--text-muted);
 }
 
+/* The unsigned-installer warning: an amber pane with a full gold edge
+   and a heavier gold bar, so it stands out from everything around it. */
 .caution {
     margin: 0 0 1.25rem;
-    padding: 0.9rem 1rem;
-    border-left: 4px solid var(--gold);
-    background: #fbf3e4;
-    border-radius: 0 6px 6px 0;
+    padding: 0.9rem 1rem 0.9rem 1.1rem;
+    background: linear-gradient(155deg, rgb(242 193 78 / 0.1), transparent 70%), var(--caution-bg);
+    border: 1px solid var(--gold);
+    border-left-width: 6px;
+    border-radius: 6px;
     font-size: 0.97rem;
+    color: var(--text);
+}
+
+.caution strong {
+    color: var(--gold-pale);
+}
+
+.caution a {
+    color: var(--gold-pale);
 }
 
 .caution p:last-child {
@@ -541,7 +623,7 @@ main:focus {
 
 .not-here {
     margin-top: 1.5rem;
-    color: var(--ink-soft);
+    color: var(--text-muted);
 }
 
 /* Phones and tablets: the app is for Windows and Linux computers, so
@@ -577,8 +659,8 @@ main:focus {
 .touch-note {
     margin: 1.25rem 0 0;
     padding: 0.9rem 1rem;
-    background: #fff;
-    border: 1px solid var(--rule);
+    background: var(--pane-wash), var(--pane);
+    border: 1px solid var(--pane-edge);
     border-radius: var(--radius);
 }
 
@@ -593,11 +675,11 @@ main:focus {
 }
 
 .faq details {
-    border-bottom: 1px solid var(--rule);
+    border-bottom: 1px solid var(--pane-edge);
 }
 
 .faq details:first-of-type {
-    border-top: 1px solid var(--rule);
+    border-top: 1px solid var(--pane-edge);
 }
 
 .faq summary {
@@ -606,7 +688,11 @@ main:focus {
     font-family: var(--serif);
     font-size: 1.2rem;
     font-weight: 600;
-    color: var(--plum);
+    color: var(--gold-pale);
+}
+
+.faq summary::marker {
+    color: var(--gold);
 }
 
 .faq details > div {
@@ -617,30 +703,75 @@ main:focus {
     overflow-x: auto;
     margin: 0 0 1rem;
     padding: 0.75rem 1rem;
-    background: #fff;
-    border: 1px solid var(--rule);
+    background: var(--pane);
+    border: 1px solid var(--pane-edge);
     border-radius: 6px;
 }
 
-/* ---- About and footer */
+/* ---- About the maker: the Chi Rho Code LLC mark, shown large */
 
 .about {
-    max-width: 42rem;
+    display: grid;
+    gap: 1.75rem 3rem;
+    align-items: center;
+}
+
+.about::before {
+    grid-column: 1 / -1;
+}
+
+@media (min-width: 48rem) {
+    .about {
+        grid-template-columns: 240px minmax(0, 1fr);
+    }
+}
+
+.about p {
+    max-width: 40rem;
+}
+
+.maker-mark {
+    width: min(240px, 60vw);
+    margin: 0;
+    justify-self: center;
+}
+
+.maker-mark img {
+    width: 100%;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px var(--gold-line), 0 0 48px -8px rgb(242 193 78 / 0.35);
 }
 
 .about h2 {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
     font-size: clamp(1.4rem, 1.2rem + 0.8vw, 1.8rem);
 }
 
+/* Alpha and Omega, as in the mark's side panes. Decorative. */
+.ornament {
+    font-family: var(--serif);
+    font-weight: 400;
+    color: var(--teal);
+}
+
+/* ---- Footer */
+
 .site-footer {
-    padding-block: 2rem 2.5rem;
-    background: var(--plum);
-    color: #e9e3f4;
+    padding-block: 0 2.5rem;
+    background: var(--footer-bg);
+    color: var(--text-muted);
     font-size: 0.93rem;
 }
 
+.site-footer::before {
+    width: min(72rem, 100% - 2rem);
+    margin: 0 auto 2rem;
+}
+
 .site-footer a {
-    color: #fff;
+    color: var(--gold-pale);
 }
 
 .site-footer .wrap {
@@ -661,8 +792,15 @@ main:focus {
     margin: 0;
 }
 
-.site-footer :focus-visible {
-    outline-color: #f6c26b;
+.footer-maker {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.footer-maker img {
+    width: 32px;
+    height: 32px;
 }
 
 @media (prefers-reduced-motion: reduce) {
