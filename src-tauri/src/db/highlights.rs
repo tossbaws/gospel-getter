@@ -179,3 +179,43 @@ pub async fn list_highlights(pool: &SqlitePool) -> anyhow::Result<Vec<Highlight>
     .context("Failed to read highlights")?;
     rows.into_iter().map(Highlight::try_from).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The four colors are the same everywhere: here, the table's CHECK and
+    /// the frontend's swatches.
+    #[test]
+    fn colors_match_the_table_and_the_frontend() {
+        let names: Vec<&str> = HighlightColor::ALL.iter().map(|c| c.as_str()).collect();
+        assert_eq!(names, ["yellow", "green", "blue", "pink"]);
+
+        let quoted: Vec<String> = names.iter().map(|n| format!("'{n}'")).collect();
+        let migrate = include_str!("migrate.rs");
+        assert!(
+            migrate.contains(&format!("color IN ({})", quoted.join(", "))),
+            "the highlights table's CHECK should list exactly these colors"
+        );
+        let html = include_str!("../../../ui/index.html");
+        assert!(
+            html.contains(&format!(
+                "const HIGHLIGHT_COLORS = [{}];",
+                quoted.join(", ")
+            )),
+            "the frontend's swatches should offer exactly these colors"
+        );
+
+        for color in HighlightColor::ALL {
+            assert_eq!(color.as_str().parse::<HighlightColor>(), Ok(color));
+            assert_eq!(
+                serde_json::to_value(color).unwrap(),
+                serde_json::Value::from(color.as_str())
+            );
+        }
+        assert_eq!(
+            "Yellow".parse::<HighlightColor>(),
+            Err(UnknownColor("Yellow".to_string()))
+        );
+    }
+}

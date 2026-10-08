@@ -41,6 +41,13 @@
             --panel-bg: rgba(20, 8, 44, 0.55);
             --option-bg: #1e0f3a;
             --on-accent: #14082c;
+            /* Highlighter colors (behind highlighted verse text), one set
+               per theme: muted on the dark themes, pastel on the light one,
+               every one keeping --text at AA contrast. */
+            --hl-yellow: #6a5310;
+            --hl-green: #1e5541;
+            --hl-blue: #23437a;
+            --hl-pink: #74245c;
             /* Reading-comfort presets (see the text-size/line-spacing
                blocks below). These only scale the reading content —
                chapter headings and verses — never the rest of the UI, and
@@ -61,6 +68,10 @@
             --panel-bg: rgba(255, 255, 255, 0.05);
             --option-bg: #1a1c1f;
             --on-accent: #06141f;
+            --hl-yellow: #5a4d12;
+            --hl-green: #224f2f;
+            --hl-blue: #1f3f6b;
+            --hl-pink: #5c2747;
         }
 
         :root[data-theme="classic-light"] {
@@ -74,6 +85,10 @@
             --panel-bg: rgba(0, 0, 0, 0.035);
             --option-bg: #ffffff;
             --on-accent: #ffffff;
+            --hl-yellow: #fbe78a;
+            --hl-green: #c6ecbd;
+            --hl-blue: #c9defc;
+            --hl-pink: #f8cfe2;
         }
 
         :root[data-theme="matrix"] {
@@ -87,6 +102,10 @@
             --panel-bg: rgba(0, 255, 65, 0.06);
             --option-bg: #041404;
             --on-accent: #001a00;
+            --hl-yellow: #4a4708;
+            --hl-green: #11521f;
+            --hl-blue: #0f3a5c;
+            --hl-pink: #57173e;
         }
 
         :root[data-theme="beast-slayer"] {
@@ -106,6 +125,10 @@
             --panel-bg: rgba(26, 20, 16, 0.55);
             --option-bg: #241a12;
             --on-accent: #1a1410;
+            --hl-yellow: #6b5310;
+            --hl-green: #31512a;
+            --hl-blue: #22415f;
+            --hl-pink: #682a47;
         }
 
         /* Hot pink as the accent on a near-black plum ground, rather than
@@ -128,6 +151,10 @@
             --panel-bg: rgba(255, 63, 164, 0.07);
             --option-bg: #2a0a1d;
             --on-accent: #1a0411;
+            --hl-yellow: #614c0f;
+            --hl-green: #1f5038;
+            --hl-blue: #263d6b;
+            --hl-pink: #84205a;
         }
 
         :root[data-text-size="small"] { --reading-scale: 0.9; }
@@ -1091,7 +1118,8 @@
         }
 
         .verse-copy-btn,
-        .verse-bookmark-btn {
+        .verse-bookmark-btn,
+        .highlight-remove {
             font-family: inherit;
             font-size: 0.85rem;
             color: var(--accent);
@@ -1103,7 +1131,8 @@
         }
 
         .verse-copy-btn:hover,
-        .verse-bookmark-btn:hover {
+        .verse-bookmark-btn:hover,
+        .highlight-remove:hover {
             border-color: var(--accent);
         }
 
@@ -1118,6 +1147,91 @@
             content: '\2605';
             margin-left: 0.15rem;
             color: var(--accent);
+        }
+
+        /* Highlights: the verse's text marked in the reader's color, like a
+           highlighter pen, in bands behind each line of text. That's a
+           different shape from the selection (a tint behind the whole
+           verse) and from the bookmark star, so the three never look
+           alike. In the faded neighboring chapters a highlight fades with
+           the text. */
+        .verse[data-highlight] .verse-text {
+            border-radius: 3px;
+            padding: 0.08em 0.12em;
+            -webkit-box-decoration-break: clone;
+            box-decoration-break: clone;
+        }
+
+        .verse[data-highlight="yellow"] .verse-text {
+            background: var(--hl-yellow);
+        }
+
+        .verse[data-highlight="green"] .verse-text {
+            background: var(--hl-green);
+        }
+
+        .verse[data-highlight="blue"] .verse-text {
+            background: var(--hl-blue);
+        }
+
+        .verse[data-highlight="pink"] .verse-text {
+            background: var(--hl-pink);
+        }
+
+        /* The four color swatches in the selection's actions. The color
+           a whole selection already has is pressed: a heavier ring and a
+           check mark, so it doesn't rely on color alone. */
+        .verse-highlight {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .highlight-swatch {
+            width: 1.6rem;
+            height: 1.6rem;
+            padding: 0;
+            border: 1px solid var(--accent-dim);
+            border-radius: 50%;
+            font-family: inherit;
+            font-size: 0.85rem;
+            line-height: 1;
+            color: var(--text);
+            cursor: pointer;
+        }
+
+        .highlight-swatch[data-color="yellow"] {
+            background: var(--hl-yellow);
+        }
+
+        .highlight-swatch[data-color="green"] {
+            background: var(--hl-green);
+        }
+
+        .highlight-swatch[data-color="blue"] {
+            background: var(--hl-blue);
+        }
+
+        .highlight-swatch[data-color="pink"] {
+            background: var(--hl-pink);
+        }
+
+        .highlight-swatch:hover {
+            border-color: var(--accent);
+        }
+
+        .highlight-swatch[aria-pressed="true"] {
+            border: 2px solid var(--accent);
+        }
+
+        .highlight-swatch[aria-pressed="true"]::after {
+            content: '\2713';
+        }
+
+        .highlight-swatch:focus-visible,
+        .highlight-remove:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
         }
 
         .reader-notice:not([hidden]) {
@@ -1344,6 +1458,11 @@
                 --panel-bg: transparent !important;
                 --option-bg: #ffffff !important;
                 --on-accent: #ffffff !important;
+                /* Highlights aren't printed. */
+                --hl-yellow: transparent !important;
+                --hl-green: transparent !important;
+                --hl-blue: transparent !important;
+                --hl-pink: transparent !important;
                 /* Printed type is always the default size and spacing,
                    whatever reading-comfort presets are saved on screen. */
                 --reading-scale: 1 !important;
@@ -1655,7 +1774,7 @@
             <p id="import-file" class="import-file"></p>
             <ul id="import-summary" class="import-summary"></ul>
             <fieldset id="import-bookmark-choice" class="import-choices">
-                <legend>Bookmarks</legend>
+                <legend id="import-choice-legend">Bookmarks</legend>
                 <label><input type="radio" name="import-mode" value="merge" checked> <span id="import-merge-label">Add them to my bookmarks</span></label>
                 <label><input type="radio" name="import-mode" value="replace"> <span id="import-replace-label">Replace all my bookmarks with these</span></label>
             </fieldset>
@@ -1694,6 +1813,7 @@
                     <ul id="welcome-text-3">
                         <li>Press <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> to search the text, or type a reference like John 3:16 to go straight there.</li>
                         <li>Click a verse, and Shift-click another to select a range. Copy (or <kbd>Ctrl</kbd>+<kbd>C</kbd>) copies it with its reference, and ★ Bookmark saves it.</li>
+                        <li>Selected verses can also be highlighted in yellow, green, blue or pink.</li>
                         <li>To back up or move your bookmarks, use Export data... and Import data... in Settings.</li>
                     </ul>
                 </section>
@@ -1759,7 +1879,7 @@
         </div>
         <div class="settings-field">
             <span class="settings-label" id="reader-data-label">Back up or move your data</span>
-            <p class="settings-note" id="reader-data-note">Your bookmarks, reading position and display settings, saved as a file you can import on another computer. Bible text isn’t included.</p>
+            <p class="settings-note" id="reader-data-note">Your bookmarks, highlights, reading position and display settings, saved as a file you can import on another computer. Bible text isn’t included.</p>
             <div class="data-actions" role="group" aria-labelledby="reader-data-label" aria-describedby="reader-data-note">
                 <button type="button" id="export-data-btn" class="reader-mode-btn">Export data...</button>
                 <button type="button" id="import-data-btn" class="reader-mode-btn">Import data...</button>
@@ -1854,20 +1974,35 @@
             // bookmarks" can be told apart from "couldn't load them".
             let bookmarksLoaded = false;
 
+            // Every highlight, as "book:chapter:verse" → color. Highlights
+            // belong to no one translation, like bookmarks.
+            let highlights = new Map();
+            let highlightsLoaded = false;
+
             // The last get_reading and get_compare results, so switching
             // compare on or off re-renders without re-reading the chapter.
             let lastDto = null;
             let lastCompare = null;
             let loadToken = 0;
 
+            // The highlighter colors, in the order the swatches show them.
+            // The backend accepts exactly these.
+            const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue', 'pink'];
+
             const verseActions = document.createElement('span');
             verseActions.className = 'verse-actions';
             verseActions.innerHTML = `<button type="button" class="verse-copy-btn">Copy</button>
                 <button type="button" class="verse-bookmark-btn">&#9733; Bookmark</button>
+                <span class="verse-highlight" role="group" aria-label="Highlight">
+                    ${HIGHLIGHT_COLORS.map((c) => `<button type="button" class="highlight-swatch" data-color="${c}" aria-label="Highlight ${c}" title="Highlight ${c}" aria-pressed="false"></button>`).join('')}
+                    <button type="button" class="highlight-remove" hidden>Remove highlight</button>
+                </span>
                 <span class="verse-actions-ref"></span>
                 <span class="verse-actions-status" role="status" aria-live="polite"></span>`;
             const actionStatus = verseActions.querySelector('.verse-actions-status');
             const bookmarkBtn = verseActions.querySelector('.verse-bookmark-btn');
+            const highlightSwatches = [...verseActions.querySelectorAll('.highlight-swatch')];
+            const highlightRemoveBtn = verseActions.querySelector('.highlight-remove');
             let actionAttempt = 0;
             let actionStatusTimer = null;
 
@@ -1979,6 +2114,7 @@
                 }
                 verseActions.querySelector('.verse-actions-ref').textContent = selectionCitation();
                 updateBookmarkButton();
+                updateHighlightControls();
             }
 
             function selectVerses(translationCode, anchor, focus) {
@@ -2050,6 +2186,89 @@
                         && b.chapter === reading.chapter && number >= b.verseStart && number <= b.verseEnd);
                     el.classList.toggle('is-bookmarked', marked);
                 });
+            }
+
+            // ---- Highlights
+
+            function highlightKey(bookId, chapter, verse) {
+                return `${bookId}:${chapter}:${verse}`;
+            }
+
+            async function refreshHighlights() {
+                try {
+                    const list = await invoke('list_highlights');
+                    highlights = new Map(list.map((h) => [highlightKey(h.bookId, h.chapter, h.verse), h.color]));
+                    highlightsLoaded = true;
+                } catch (e) {
+                    console.error('Failed to load highlights', e);
+                }
+                applyHighlightMarkers();
+                if (selection) updateHighlightControls();
+            }
+
+            function setHighlightMarker(el, color) {
+                if (color) el.dataset.highlight = color;
+                else delete el.dataset.highlight;
+            }
+
+            // Shows every highlight on screen: in the chapter being read
+            // (every column, while comparing) and the faded neighbors.
+            function applyHighlightMarkers() {
+                document.querySelectorAll(SELECTABLE).forEach((el) => {
+                    setHighlightMarker(el, reading
+                        && highlights.get(highlightKey(reading.bookId, reading.chapter, Number(el.dataset.verse))));
+                });
+                document.querySelectorAll('.chapter-side .verse[data-verse]').forEach((el) => {
+                    setHighlightMarker(el, highlights.get(highlightKey(el.dataset.book, el.dataset.chapter, el.dataset.verse)));
+                });
+            }
+
+            // The selected verses' colors (undefined where there's none).
+            function selectedHighlightColors() {
+                if (!selection || !reading) return [];
+                return selectionVerses().map((v) => highlights.get(highlightKey(reading.bookId, reading.chapter, v.number)));
+            }
+
+            // A swatch is pressed when the whole selection has its color;
+            // Remove highlight shows when any selected verse has one.
+            function updateHighlightControls() {
+                const colors = selectedHighlightColors();
+                highlightSwatches.forEach((btn) => {
+                    const all = colors.length > 0 && colors.every((c) => c === btn.dataset.color);
+                    btn.setAttribute('aria-pressed', String(all));
+                });
+                const hadFocus = document.activeElement === highlightRemoveBtn;
+                highlightRemoveBtn.hidden = !colors.some(Boolean);
+                if (hadFocus && highlightRemoveBtn.hidden) highlightSwatches[0].focus();
+            }
+
+            // Highlights every selected verse in `color`, replacing any
+            // color they had, or (with null) removes their highlights.
+            async function highlightSelection(color) {
+                if (!selection || !reading) return;
+                const attempt = ++actionAttempt;
+                const { bookId, chapter } = reading;
+                const { start, end } = selection;
+                try {
+                    if (color) {
+                        await invoke('set_highlight', { bookId, chapter, verseStart: start, verseEnd: end, color });
+                    } else {
+                        await invoke('remove_highlight', { bookId, chapter, verseStart: start, verseEnd: end });
+                    }
+                    for (let verse = start; verse <= end; verse++) {
+                        const key = highlightKey(bookId, chapter, verse);
+                        if (color) highlights.set(key, color);
+                        else highlights.delete(key);
+                    }
+                    applyHighlightMarkers();
+                    if (selection) updateHighlightControls();
+                    if (attempt === actionAttempt) setActionStatus(color ? `Highlighted ${color}` : 'Highlight removed', false);
+                } catch (e) {
+                    console.error('Failed to change the highlight', e);
+                    if (attempt === actionAttempt) {
+                        setActionStatus(`Couldn't ${color ? 'highlight' : 'remove the highlight'}: ${(e && e.message) || e}`, true);
+                    }
+                }
             }
 
             function renderBookmarkList(error) {
@@ -2226,6 +2445,7 @@
                         setDataStatus('Export cancelled. No file was saved.');
                     } else {
                         const parts = [plural(outcome.bookmarks, 'bookmark')];
+                        if (outcome.highlights) parts.push(plural(outcome.highlights, 'highlighted verse'));
                         if (outcome.hasPosition) parts.push('your reading position');
                         if (outcome.preferences) parts.push('your display settings');
                         setDataStatus(`Saved ${parts.join(', ')} to ${outcome.path}.`);
@@ -2258,8 +2478,13 @@
                 const replace = importPanel.querySelector('input[name="import-mode"][value="replace"]').checked;
                 const current = importPreview ? importPreview.currentBookmarks : 0;
                 importReplaceWarning.hidden = !replace;
-                importReplaceWarning.textContent = `This deletes your ${plural(current, 'current bookmark')} and keeps only the file’s. If you might want yours back, cancel and export them first.`;
-                importConfirm.textContent = replace ? 'Replace bookmarks and import' : 'Import';
+                if (importPreview && importPreview.hasHighlights) {
+                    importReplaceWarning.textContent = `This deletes your ${plural(current, 'current bookmark')} and ${plural(importPreview.currentHighlights, 'highlighted verse')} and keeps only the file’s. If you might want yours back, cancel and export them first.`;
+                    importConfirm.textContent = replace ? 'Replace bookmarks and highlights and import' : 'Import';
+                } else {
+                    importReplaceWarning.textContent = `This deletes your ${plural(current, 'current bookmark')} and keeps only the file’s. If you might want yours back, cancel and export them first.`;
+                    importConfirm.textContent = replace ? 'Replace bookmarks and import' : 'Import';
+                }
             }
 
             function openImportPreview(preview) {
@@ -2278,16 +2503,36 @@
                 } else {
                     summary.push('No bookmarks.');
                 }
+                // Format 2 files can carry highlights; format 1 files can't,
+                // and leave the reader's highlights alone.
+                if (preview.hasHighlights) {
+                    if (preview.highlightsInFile) {
+                        let line = `${plural(preview.highlightsInFile, 'highlighted verse')}: ${preview.newHighlights} new, ${preview.alreadyHighlighted} you’ve already highlighted (those keep your colors).`;
+                        if (preview.highlightDuplicatesInFile) line += ` (${plural(preview.highlightDuplicatesInFile, 'repeated entry', 'repeated entries')} in the file will be skipped.)`;
+                        summary.push(line);
+                    } else {
+                        summary.push('No highlights.');
+                    }
+                }
                 if (!preview.position) summary.push('No reading position.');
                 if (!describePreferences(preview.preferences).length) summary.push('No display settings.');
                 document.getElementById('import-summary').innerHTML = summary.map((s) => `<li>${escapeHtml(s)}</li>`).join('');
 
-                importBookmarkChoice.hidden = !preview.bookmarksInFile;
+                importBookmarkChoice.hidden = !(preview.bookmarksInFile || preview.highlightsInFile);
                 importPanel.querySelector('input[name="import-mode"][value="merge"]').checked = true;
-                document.getElementById('import-merge-label').textContent =
-                    `Add them to my bookmarks (${preview.newBookmarks} new; any I already have stay as they are)`;
-                document.getElementById('import-replace-label').textContent =
-                    `Replace all my bookmarks with the file’s (removes my ${plural(preview.currentBookmarks, 'current bookmark')})`;
+                if (preview.hasHighlights) {
+                    document.getElementById('import-choice-legend').textContent = 'Bookmarks and highlights';
+                    document.getElementById('import-merge-label').textContent =
+                        `Add them to mine (${plural(preview.newBookmarks, 'new bookmark')}, ${plural(preview.newHighlights, 'new highlighted verse')}; anything I already have stays as it is)`;
+                    document.getElementById('import-replace-label').textContent =
+                        `Replace all my bookmarks and highlights with the file’s (removes my ${plural(preview.currentBookmarks, 'current bookmark')} and ${plural(preview.currentHighlights, 'highlighted verse')})`;
+                } else {
+                    document.getElementById('import-choice-legend').textContent = 'Bookmarks';
+                    document.getElementById('import-merge-label').textContent =
+                        `Add them to my bookmarks (${preview.newBookmarks} new; any I already have stay as they are)`;
+                    document.getElementById('import-replace-label').textContent =
+                        `Replace all my bookmarks with the file’s (removes my ${plural(preview.currentBookmarks, 'current bookmark')})`;
+                }
 
                 importPositionOption.hidden = !preview.position;
                 importPosition.checked = !!preview.position;
@@ -2378,6 +2623,11 @@
                         ? `Replaced ${plural(result.removed, 'bookmark')} with the file’s ${plural(result.added, 'bookmark')}.`
                         : `Added ${plural(result.added, 'bookmark')}${result.alreadyPresent ? ` (${result.alreadyPresent} you already had)` : ''}.`);
                 }
+                if (preview.hasHighlights && (preview.highlightsInFile || (replace && result.highlightsRemoved))) {
+                    parts.push(replace
+                        ? `Replaced ${plural(result.highlightsRemoved, 'highlighted verse')} with the file’s ${plural(result.highlightsAdded, 'highlighted verse')}.`
+                        : `Added ${plural(result.highlightsAdded, 'highlighted verse')}${result.highlightsAlreadyPresent ? ` (${result.highlightsAlreadyPresent} you’d already highlighted kept your colors)` : ''}.`);
+                }
                 if (result.position) parts.push(`Went to ${result.position.reference}.`);
 
                 // Display settings live in the webview's own storage, not
@@ -2400,6 +2650,7 @@
                     await loadReading(result.position.bookId, result.position.chapter);
                 }
                 await refreshBookmarks();
+                await refreshHighlights();
                 const message = `Import complete. ${parts.join(' ')}`;
                 showNotice(message);
                 setDataStatus(message);
@@ -2484,13 +2735,15 @@
                 }
             }
 
-            // A fresh install: nothing read, bookmarked or customised yet,
+            // A fresh install: nothing read, bookmarked, highlighted or
+            // customised yet,
             // and the welcome never closed before. An upgrade always has a
             // saved reading position (reading any chapter saves one), so it
             // never qualifies. Anything that can't be checked counts as
             // existing data, so the welcome errs towards not appearing.
             function isFreshInstall(home) {
                 if (home.hasSavedPosition || !bookmarksLoaded || bookmarks.length) return false;
+                if (!highlightsLoaded || highlights.size) return false;
                 try {
                     for (let i = 0; i < localStorage.length; i++) {
                         const key = localStorage.key(i);
@@ -2617,7 +2870,7 @@
             function renderSideChapter(side) {
                 if (!side) return '';
                 const verses = side.verses
-                    .map((v) => `<p class="verse"><span class="verse-num">${v.number}</span>${escapeHtml(v.text)}</p>`)
+                    .map((v) => `<p class="verse" data-book="${side.bookId}" data-chapter="${side.chapter}" data-verse="${v.number}"><span class="verse-num">${v.number}</span><span class="verse-text">${escapeHtml(v.text)}</span></p>`)
                     .join('');
                 return `<section>
                     <button type="button" class="chapter-heading-link" data-book="${side.bookId}" data-chapter="${side.chapter}">${escapeHtml(side.bookName)} ${side.chapter}</button>
@@ -2647,7 +2900,7 @@
             function renderVerse(v, bookId, chapter, code, xrefs) {
                 const hasXref = xrefs.length > 0;
                 return `<p class="verse${hasXref ? ' has-xref' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}" data-translation="${escapeHtml(code)}" data-code="${escapeHtml(code.toUpperCase())}">
-                    <span class="verse-num">${v.number}</span>${escapeHtml(v.text)}
+                    <span class="verse-num">${v.number}</span><span class="verse-text">${escapeHtml(v.text)}</span>
                     ${hasXref ? renderXrefPopup(xrefs) : ''}
                 </p>`;
             }
@@ -2743,6 +2996,7 @@
                 selection = null;
                 renderSelection();
                 applyBookmarkMarkers();
+                applyHighlightMarkers();
             }
 
             // Resolves to the comparison, or null after logging why not.
@@ -3050,6 +3304,15 @@
                     toggleSelectionBookmark();
                     return;
                 }
+                const swatch = event.target.closest('.highlight-swatch');
+                if (swatch) {
+                    highlightSelection(swatch.dataset.color);
+                    return;
+                }
+                if (event.target.closest('.highlight-remove')) {
+                    highlightSelection(null);
+                    return;
+                }
                 if (event.target.closest('.verse-actions')) {
                     return;
                 }
@@ -3278,6 +3541,7 @@
                     await loadChapters(home.currentBookId, home.currentChapter);
                     await loadReading(home.currentBookId, home.currentChapter, { syncChapters: false });
                     await refreshBookmarks();
+                    await refreshHighlights();
                     if (isFreshInstall(home)) openWelcome();
                 } catch (e) {
                     console.error('Failed to load Gospel Getter', e);
