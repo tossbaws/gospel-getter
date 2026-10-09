@@ -793,6 +793,71 @@ fn every_highlight_color_is_styled_on_the_verse_text() {
     assert!(pressed.body.contains("content:"));
 }
 
+/// The Highlights list in Settings adds no colors of its own: each
+/// passage's swatch is its highlighter color, outlined in `--text-dim` (AA
+/// on `--option-bg` in every theme, see the palette tests) so it shows
+/// even where the highlighter color is close to the menu's background,
+/// and its name is shown in `--text-dim` too. The pressed filter is
+/// `--on-accent` on `--accent`, also AA in every theme; the unpressed one
+/// is checked here.
+#[test]
+fn highlight_list_swatches_and_filter_use_tested_theme_colors() {
+    let rules = rules();
+    for color in HIGHLIGHT_COLORS {
+        let dot = screen_rule(&rules, &format!(r#".highlight-dot[data-color="{color}"]"#));
+        assert!(dot.body.contains(&format!("var(--hl-{color})")));
+    }
+    let dot = screen_rule(&rules, ".highlight-dot");
+    assert!(dot.body.contains("border: 1px solid var(--text-dim)"));
+    let name = screen_rule(&rules, ".highlight-color");
+    assert!(name.body.contains("color: var(--text-dim)"));
+    let pressed = screen_rule(&rules, r#".highlight-filter-btn[aria-pressed="true"]"#);
+    assert!(pressed.body.contains("background: var(--accent)"));
+    assert!(pressed.body.contains("color: var(--on-accent)"));
+    let filter = screen_rule(&rules, ".highlight-filter-btn");
+    assert!(filter.body.contains("color: var(--accent)"));
+
+    // Unpressed, a filter is --accent on --panel-bg, a translucent tint
+    // over the menu's opaque --option-bg.
+    for (theme, props) in theme_palettes(&rules) {
+        let behind = composite(
+            property(&props, "--panel-bg"),
+            property(&props, "--option-bg"),
+        );
+        let ratio = contrast_ratio(property(&props, "--accent"), &behind);
+        assert!(
+            ratio >= 4.5,
+            "theme `{theme}`: an unpressed highlight filter is {ratio:.2}:1, below 4.5:1"
+        );
+    }
+}
+
+/// An `rgba(r, g, b, a)` color laid over an opaque `#rrggbb`, as `#rrggbb`.
+fn composite(rgba: &str, under: &str) -> String {
+    let inner = rgba
+        .strip_prefix("rgba(")
+        .and_then(|s| s.strip_suffix(')'))
+        .unwrap_or_else(|| panic!("expected rgba(...), got `{rgba}`"));
+    let parts: Vec<f64> = inner
+        .split(',')
+        .map(|p| p.trim().parse().unwrap())
+        .collect();
+    let [r, g, b, a] = parts[..] else {
+        panic!("expected four rgba components in `{rgba}`")
+    };
+    let under = under.trim_start_matches('#');
+    let channel = |top: f64, i: usize| {
+        let bottom = f64::from(u8::from_str_radix(&under[i..i + 2], 16).unwrap());
+        (top * a + bottom * (1.0 - a)).round() as u8
+    };
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        channel(r, 0),
+        channel(g, 2),
+        channel(b, 4)
+    )
+}
+
 /// Printing stays black on white: the print stylesheet clears every
 /// highlighter color.
 #[test]

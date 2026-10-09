@@ -131,7 +131,8 @@ test('highlights survive a restart, and highlighting doesn\'t reload the chapter
         const before = app.calls.length;
         await choose(app, swatch(app, 'yellow'));
         const calls = app.calls.slice(before).map((c) => c.cmd);
-        assert.deepEqual(calls, ['set_highlight']);
+        // Only the save, then the Highlights list in Settings catching up.
+        assert.deepEqual(calls, ['set_highlight', 'list_highlight_passages']);
     });
     await withApp({ book: 'Psalms', chapter: 23, translation: 'kjv', keepBookmarks: true }, async (app) => {
         assert.deepEqual(shown(app, 1, 3), ['yellow', 'yellow', null]);

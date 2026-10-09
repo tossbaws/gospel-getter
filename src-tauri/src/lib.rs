@@ -50,6 +50,7 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::add_bookmark,
         commands::remove_bookmark,
         commands::list_highlights,
+        commands::list_highlight_passages,
         commands::set_highlight,
         commands::remove_highlight,
         commands::search,
@@ -301,6 +302,20 @@ mod ipc_tests {
                 { "bookId": 43, "chapter": 3, "verse": 16, "color": "yellow" },
                 { "bookId": 43, "chapter": 3, "verse": 17, "color": "pink" },
             ])
+        );
+        let passages = invoke(
+            &webview,
+            "list_highlight_passages",
+            json!({ "translationCode": "kjv" }),
+        )
+        .unwrap();
+        assert_eq!(
+            (&passages[0]["reference"], &passages[0]["color"]),
+            (&json!("John 3:16"), &json!("yellow"))
+        );
+        assert_eq!(
+            (&passages[1]["reference"], &passages[1]["color"]),
+            (&json!("John 3:17"), &json!("pink"))
         );
         assert_eq!(
             invoke(

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::db::reader_data::ImportCounts;
 use crate::db::{
     self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Highlight,
-    HighlightColor, SearchHit, Verse,
+    HighlightColor, HighlightPassageInTranslation, SearchHit, Verse,
 };
 use crate::reader_data::{NewBookmark, NewHighlight, NewPosition};
 
@@ -134,6 +134,15 @@ impl Store {
     /// Every highlight, in Bible order.
     pub async fn highlights(&self) -> anyhow::Result<Vec<Highlight>> {
         db::highlights::list_highlights(&self.pool).await
+    }
+
+    /// Every highlighted passage (consecutive verses in one color), in
+    /// Bible order, as it reads in one translation.
+    pub async fn highlight_passages(
+        &self,
+        translation_id: i64,
+    ) -> anyhow::Result<Vec<HighlightPassageInTranslation>> {
+        db::highlights::list_highlight_passages(&self.pool, translation_id).await
     }
 
     /// The coordinates of every highlighted verse.
