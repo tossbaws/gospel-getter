@@ -25,6 +25,12 @@ impl Store {
         Self { pool }
     }
 
+    /// Close every connection, waiting for any in use to be returned. Run
+    /// before the app exits to install an update or restarts.
+    pub async fn close(&self) {
+        self.pool.close().await;
+    }
+
     /// Get every verse in one chapter of one translation, in verse order.
     pub async fn chapter_verses(
         &self,

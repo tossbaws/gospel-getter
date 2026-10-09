@@ -11,6 +11,15 @@
 //! scripts the next one's answer with `__set_picker` (a path, or `null` for
 //! the reader cancelling); the export and import logic behind them is the
 //! app's own, reading and writing real files.
+//!
+//! Updates can't be checked or installed here either (they need the real
+//! app and GitHub), so a test scripts them with `__set_update`: what
+//! `check_for_update` answers (no update, an update, or a problem) and what
+//! `install_update` does (the progress events it sends, then a restart,
+//! which never answers, or a problem). Problems answer with the app's own
+//! messages (`updater::check_message` and `install_message`). Progress
+//! events are written as their own lines, `{"id": 1, "channel": "onEvent",
+//! "message": ...}`, before the answer, as a Tauri `Channel` delivers them.
 
 use anyhow::{Context, bail};
 use serde_json::{Value, json};
@@ -21,10 +30,54 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use gospel_getter_lib::commands::{self, AppState};
 use gospel_getter_lib::db;
+use gospel_getter_lib::updater::{self, Problem, UpdateInfo};
 
 /// The scripted answer for the next file dialog: `Some(None)` is a
 /// cancel. Taken (and cleared) by the dialog it answers.
 static PICKER: Mutex<Option<Option<PathBuf>>> = Mutex::new(None);
+
+/// The scripted update behavior (see `__set_update`); `None` is the
+/// default: no update available.
+static UPDATE: Mutex<Option<Value>> = Mutex::new(None);
+
+fn update_script() -> anyhow::Result<Value> {
+    Ok(UPDATE
+        .lock()
+        .map_err(|_| anyhow::anyhow!("update lock poisoned"))?
+        .clone()
+        .unwrap_or_else(|| json!({ "check": null })))
+}
+
+fn problem(name: &str) -> anyhow::Result<Problem> {
+    Ok(match name {
+        "offline" => Problem::Offline,
+        "noReleaseInfo" => Problem::NoReleaseInfo,
+        "notForThisInstall" => Problem::NotForThisInstall,
+        "notVerified" => Problem::NotVerified,
+        "notAuthorized" => Problem::NotAuthorized,
+        "other" => Problem::Other,
+        _ => bail!("unknown update problem {name}"),
+    })
+}
+
+/// The lines `install_update` writes: its progress events, then its
+/// answer, unless it "restarts" (the real command never returns then).
+fn install_lines(id: &Value) -> anyhow::Result<Vec<Value>> {
+    let script = update_script()?;
+    let install = script.get("install").cloned().unwrap_or(Value::Null);
+    let mut lines: Vec<Value> = install
+        .get("events")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|message| json!({ "id": id, "channel": "onEvent", "message": message }))
+        .collect();
+    if let Some(name) = install.get("problem").and_then(Value::as_str) {
+        lines.push(json!({ "id": id, "err": updater::install_message(problem(name)?) }));
+    }
+    Ok(lines)
+}
 
 fn pick() -> anyhow::Result<Option<PathBuf>> {
     PICKER
@@ -167,6 +220,34 @@ async fn dispatch(
                 .map_err(|_| anyhow::anyhow!("picker lock poisoned"))? = Some(path);
             Ok(Value::Null)
         }
+        "check_for_update" => {
+            let script = update_script()?;
+            match script.get("check") {
+                None | Some(Value::Null) => Ok(Value::Null),
+                Some(check) => match check.get("problem").and_then(Value::as_str) {
+                    Some(name) => Err(updater::check_message(problem(name)?).to_string()),
+                    None => {
+                        let info: UpdateInfo = UpdateInfo {
+                            version: arg(check, "version")?,
+                            notes: arg(check, "notes")?,
+                            date: arg(check, "date")?,
+                            can_self_update: arg(check, "canSelfUpdate")?,
+                        };
+                        Ok(to_value(info)?)
+                    }
+                },
+            }
+        }
+        // Opening a browser is the system's job; the call itself is what
+        // the tests check.
+        "open_download_page" => Ok(Value::Null),
+        // Test setup: how updates behave from now on (see the module docs).
+        "__set_update" => {
+            *UPDATE
+                .lock()
+                .map_err(|_| anyhow::anyhow!("update lock poisoned"))? = Some(args.clone());
+            Ok(Value::Null)
+        }
         "get_compare" => Ok(to_value(
             commands::compare_chapter(state, arg(args, "bookId")?, arg(args, "chapter")?).await?,
         )?),
@@ -182,6 +263,9 @@ async fn dispatch(
             *PICKER
                 .lock()
                 .map_err(|_| anyhow::anyhow!("picker lock poisoned"))? = None;
+            *UPDATE
+                .lock()
+                .map_err(|_| anyhow::anyhow!("update lock poisoned"))? = None;
             if !arg::<Option<bool>>(args, "keepBookmarks")?.unwrap_or(false) {
                 sqlx::query("DELETE FROM bookmarks").execute(pool).await?;
                 sqlx::query("DELETE FROM highlights").execute(pool).await?;
@@ -227,6 +311,16 @@ async fn main() -> anyhow::Result<()> {
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let cmd = request.get("cmd").and_then(Value::as_str).unwrap_or("");
         let args = request.get("args").cloned().unwrap_or_else(|| json!({}));
+        if cmd == "install_update" {
+            let lines = install_lines(&id).unwrap_or_else(|e| {
+                vec![json!({ "id": id, "err": format!("bridge error: {e:#}") })]
+            });
+            for line in lines {
+                stdout.write_all(format!("{line}\n").as_bytes()).await?;
+            }
+            stdout.flush().await?;
+            continue;
+        }
         let response = match dispatch(&state, &pool, cmd, &args).await {
             Ok(Ok(value)) => json!({ "id": id, "ok": value }),
             Ok(Err(message)) => json!({ "id": id, "err": message }),

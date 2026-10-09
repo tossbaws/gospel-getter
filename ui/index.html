@@ -773,6 +773,118 @@
             border-top: 1px solid var(--accent-dim);
         }
 
+        /* Updates, in Settings: the launch-check checkbox, Check now and
+           its status line. */
+        /* An option, not a heading: undo .settings-field label's caps. */
+        .settings-field .update-check-option {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.4rem;
+            font-size: 0.85rem;
+            line-height: 1.35;
+            text-transform: none;
+            letter-spacing: normal;
+            color: var(--text);
+            margin-bottom: 0.4rem;
+            cursor: pointer;
+        }
+
+        .update-check-option input {
+            margin-top: 0.15rem;
+            accent-color: var(--accent);
+        }
+
+        .update-check-option input:focus-visible,
+        .update-banner summary:focus-visible,
+        .update-banner:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        /* "A new version is available": a notice, not a dialog. It sits at
+           the foot of the window over the page, which stays usable, until
+           the reader acts on it or chooses Later. Its text is --text,
+           --text-dim and --accent on the opaque --option-bg, which meet AA
+           in every theme (see the palette tests). The notes scroll inside
+           it, so the buttons stay in view in a small window. */
+        .update-banner:not([hidden]) {
+            position: fixed;
+            left: 50%;
+            bottom: 1rem;
+            transform: translateX(-50%);
+            z-index: 35;
+            display: block;
+            width: min(30rem, calc(100vw - 2rem));
+            max-height: calc(100vh - 2rem);
+            overflow-y: auto;
+            background: var(--option-bg);
+            color: var(--text);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 0.8rem 1rem;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+        }
+
+        .update-title {
+            font-size: 0.95rem;
+            font-weight: bold;
+            margin-bottom: 0.4rem;
+        }
+
+        .update-banner details {
+            font-size: 0.8rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .update-banner summary {
+            color: var(--accent);
+            cursor: pointer;
+        }
+
+        .update-notes-text {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            line-height: 1.4;
+            color: var(--text);
+            max-height: 10rem;
+            overflow-y: auto;
+            margin-top: 0.3rem;
+        }
+
+        .update-progress:not([hidden]) {
+            display: block;
+            width: 100%;
+            height: 0.6rem;
+            margin: 0.2rem 0 0.4rem;
+            accent-color: var(--accent);
+        }
+
+        .update-status {
+            font-size: 0.8rem;
+            line-height: 1.4;
+            color: var(--text-dim);
+            margin-bottom: 0.5rem;
+        }
+
+        .update-status:empty {
+            display: none;
+        }
+
+        .update-status.is-error {
+            color: var(--text);
+            font-weight: bold;
+        }
+
+        .update-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .update-actions .reader-mode-btn {
+            width: auto;
+        }
+
         /* Opaque (--option-bg), like the search panel: the menu now holds
            bookmark previews, read over the chapter text underneath. */
         .settings-menu {
@@ -1565,7 +1677,8 @@
             .search-panel,
             .reader-notice,
             .import-overlay,
-            .welcome-overlay {
+            .welcome-overlay,
+            .update-banner {
                 display: none !important;
             }
 
@@ -1652,6 +1765,16 @@
                     values: ['off', 'on'],
                     renamed: {},
                 },
+                // Check for updates when the app starts. A setting for this
+                // computer, not a display one, so it isn't exported.
+                updateCheck: {
+                    key: 'gospel-getter-update-check',
+                    attr: 'updateCheck',
+                    select: null,
+                    fallback: 'on',
+                    values: ['on', 'off'],
+                    renamed: {},
+                },
             };
 
             function store(pref, value) {
@@ -1732,6 +1855,14 @@
                 });
                 readerExit.addEventListener('click', function () {
                     setReaderMode(false);
+                });
+
+                var updateCheckToggle = document.getElementById('update-check-toggle');
+                updateCheckToggle.checked = load(PREFS.updateCheck) === 'on';
+                updateCheckToggle.addEventListener('change', function () {
+                    var value = updateCheckToggle.checked ? 'on' : 'off';
+                    apply(PREFS.updateCheck, value);
+                    store(PREFS.updateCheck, value);
                 });
 
                 compareBtn.setAttribute('aria-pressed', String(root.dataset.compare === 'on'));
@@ -1976,8 +2107,30 @@
         <div class="settings-field">
             <button type="button" id="welcome-btn" class="reader-mode-btn">Show welcome</button>
         </div>
+        <div class="settings-field">
+            <span class="settings-label" id="updates-label">Updates</span>
+            <label class="update-check-option"><input type="checkbox" id="update-check-toggle" checked> <span>Check for updates when Gospel Getter starts</span></label>
+            <p class="settings-note" id="update-note">Checking asks GitHub for the latest version, so GitHub sees your IP address; nothing else is sent.</p>
+            <button type="button" id="update-check-btn" class="reader-mode-btn" aria-describedby="update-note">Check now</button>
+            <p id="update-check-status" class="data-status" role="status" aria-live="polite"></p>
+        </div>
         <p id="app-version" class="app-version"></p>
     </div>
+
+    <section id="update-banner" class="update-banner" aria-labelledby="update-title" tabindex="-1" hidden>
+        <p id="update-title" class="update-title" role="status" aria-live="polite"></p>
+        <details id="update-notes" hidden>
+            <summary>What’s new</summary>
+            <div id="update-notes-text" class="update-notes-text"></div>
+        </details>
+        <progress id="update-progress" class="update-progress" aria-labelledby="update-status" hidden></progress>
+        <p id="update-status" class="update-status" role="status" aria-live="polite"></p>
+        <div class="update-actions">
+            <button type="button" id="update-install" class="import-confirm">Update and restart</button>
+            <button type="button" id="update-download" class="import-confirm" hidden>Download page</button>
+            <button type="button" id="update-later" class="reader-mode-btn">Later</button>
+        </div>
+    </section>
 
     <div class="container">
         <header>
@@ -3757,15 +3910,157 @@
 
             // The version line in Settings. It's only informational, so if
             // the version can't be read the line just stays empty.
-            invoke('get_app_version')
+            let appVersion = '';
+            const versionRead = invoke('get_app_version')
                 .then((version) => {
                     if (typeof version === 'string' && version) {
+                        appVersion = version;
                         document.getElementById('app-version').textContent = `Gospel Getter ${version}`;
                     }
                 })
                 .catch(() => {});
 
-            boot();
+            // ---- Updates. The backend decides what this copy can do: a
+            // release installer downloads, verifies and installs the update
+            // (then restarts); any other build links to the releases page.
+            // Nothing is installed until the reader chooses Update and
+            // restart. A failed check at startup says nothing (the app works
+            // the same offline); Check now says what went wrong.
+            const updateBanner = document.getElementById('update-banner');
+            const updateTitle = document.getElementById('update-title');
+            const updateNotes = document.getElementById('update-notes');
+            const updateNotesText = document.getElementById('update-notes-text');
+            const updateProgress = document.getElementById('update-progress');
+            const updateStatus = document.getElementById('update-status');
+            const updateInstallBtn = document.getElementById('update-install');
+            const updateDownloadBtn = document.getElementById('update-download');
+            const updateLaterBtn = document.getElementById('update-later');
+            const updateCheckBtn = document.getElementById('update-check-btn');
+            const updateCheckStatus = document.getElementById('update-check-status');
+            let installing = false;
+
+            function setUpdateStatus(message, isError) {
+                updateStatus.textContent = message;
+                updateStatus.classList.toggle('is-error', !!isError);
+            }
+
+            function setCheckStatus(message, isError) {
+                updateCheckStatus.textContent = message;
+                updateCheckStatus.classList.toggle('is-error', !!isError);
+            }
+
+            function showUpdate(update) {
+                if (installing) return;
+                updateTitle.textContent = `Gospel Getter ${update.version} is available`;
+                updateNotes.hidden = !update.notes;
+                updateNotes.open = false;
+                updateNotesText.textContent = update.notes || '';
+                updateInstallBtn.hidden = !update.canSelfUpdate;
+                updateInstallBtn.disabled = false;
+                updateDownloadBtn.hidden = update.canSelfUpdate;
+                updateLaterBtn.hidden = false;
+                updateProgress.hidden = true;
+                setUpdateStatus('', false);
+                updateBanner.hidden = false;
+            }
+
+            // Later: out of the way until the next launch (or Check now).
+            function hideUpdate() {
+                const hadFocus = updateBanner.contains(document.activeElement);
+                updateBanner.hidden = true;
+                if (hadFocus) settingsToggle.focus();
+            }
+
+            async function checkForUpdate({ quiet }) {
+                if (!quiet) {
+                    updateCheckBtn.disabled = true;
+                    setCheckStatus('Checking for updates…', false);
+                }
+                try {
+                    const update = await invoke('check_for_update');
+                    if (update) {
+                        showUpdate(update);
+                        if (!quiet) setCheckStatus(`Gospel Getter ${update.version} is available.`, false);
+                    } else if (!quiet) {
+                        await versionRead;
+                        setCheckStatus(appVersion ? `Gospel Getter ${appVersion} is the latest version.` : 'You have the latest version.', false);
+                    }
+                } catch (e) {
+                    if (!quiet) setCheckStatus(errorText(e), true);
+                } finally {
+                    updateCheckBtn.disabled = false;
+                }
+            }
+
+            function megabytes(bytes) {
+                return `${(bytes / 1048576).toFixed(1)} MB`;
+            }
+
+            updateInstallBtn.addEventListener('click', async function () {
+                if (installing) return;
+                installing = true;
+                // The reader can go on reading while it downloads; only the
+                // banner changes. The button goes, so focus moves to the
+                // banner itself rather than being lost.
+                const hadFocus = document.activeElement === updateInstallBtn;
+                updateInstallBtn.hidden = true;
+                updateLaterBtn.hidden = true;
+                updateProgress.hidden = false;
+                updateProgress.removeAttribute('value');
+                setUpdateStatus('Downloading the update…', false);
+                if (hadFocus) updateBanner.focus();
+                let total = null;
+                let received = 0;
+                const channel = new window.__TAURI__.core.Channel();
+                channel.onmessage = (message) => {
+                    if (message.event === 'started') {
+                        total = message.data.contentLength || null;
+                        if (total) updateProgress.max = total;
+                    } else if (message.event === 'progress') {
+                        received += message.data.chunkLength;
+                        if (total) {
+                            updateProgress.value = Math.min(received, total);
+                            setUpdateStatus(`Downloading the update… ${Math.floor((Math.min(received, total) / total) * 100)}%`, false);
+                        } else {
+                            setUpdateStatus(`Downloading the update… ${megabytes(received)}`, false);
+                        }
+                    } else if (message.event === 'finished') {
+                        if (total) updateProgress.value = total;
+                        setUpdateStatus('Installing the update. Gospel Getter will restart when it’s done.', false);
+                    }
+                };
+                try {
+                    // Only returns if something went wrong: on success the
+                    // app restarts into the new version.
+                    await invoke('install_update', { onEvent: channel });
+                } catch (e) {
+                    installing = false;
+                    updateProgress.hidden = true;
+                    setUpdateStatus(errorText(e), true);
+                    updateInstallBtn.hidden = false;
+                    updateLaterBtn.hidden = false;
+                    updateInstallBtn.focus();
+                }
+            });
+
+            updateDownloadBtn.addEventListener('click', async function () {
+                try {
+                    await invoke('open_download_page');
+                    setUpdateStatus('The releases page is open in your browser.', false);
+                } catch (e) {
+                    setUpdateStatus(errorText(e), true);
+                }
+            });
+
+            updateLaterBtn.addEventListener('click', hideUpdate);
+
+            updateCheckBtn.addEventListener('click', function () {
+                checkForUpdate({ quiet: false });
+            });
+
+            boot().then(() => {
+                if (root.dataset.updateCheck !== 'off') checkForUpdate({ quiet: true });
+            });
         })();
     </script>
 </body>

@@ -858,6 +858,31 @@ fn composite(rgba: &str, under: &str) -> String {
     )
 }
 
+/// The update banner and the Updates section add no colors of their own:
+/// the banner is --text on the opaque --option-bg, its secondary text
+/// --text-dim, and its controls the existing button styles, all AA in
+/// every theme (see the palette tests). It isn't printed.
+#[test]
+fn update_banner_uses_tested_theme_colors_and_is_not_printed() {
+    let rules = rules();
+    let banner = screen_rule(&rules, ".update-banner:not([hidden])");
+    assert!(banner.body.contains("background: var(--option-bg)"));
+    assert!(banner.body.contains("color: var(--text)"));
+    assert!(banner.body.contains("position: fixed"));
+    let status = screen_rule(&rules, ".update-status");
+    assert!(status.body.contains("color: var(--text-dim)"));
+    let summary = screen_rule(&rules, ".update-banner summary");
+    assert!(summary.body.contains("color: var(--accent)"));
+    let print_hidden = rules
+        .iter()
+        .find(|r| {
+            r.at_rule.as_deref() == Some("@media print")
+                && r.selector.split(',').any(|s| s.trim() == ".update-banner")
+        })
+        .expect("print stylesheet should hide the update banner");
+    assert!(print_hidden.body.contains("display: none !important"));
+}
+
 /// Printing stays black on white: the print stylesheet clears every
 /// highlighter color.
 #[test]

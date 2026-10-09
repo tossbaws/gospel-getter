@@ -5,7 +5,9 @@
 // process and its own disposable database; each test resets the bookmarks
 // and reading position first. The clipboard is a stub that can succeed,
 // fail, or be missing; get_reading can be made to fail, or (for escaping
-// tests only) have a clearly synthetic DTO swapped in.
+// tests only) have a clearly synthetic DTO swapped in. Update checks and
+// installs are scripted in the bridge (`setUpdate`), and progress reaches
+// the page through a minimal Tauri `Channel`, as in the app.
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -74,6 +76,12 @@ function startBridge() {
             markReady();
             return;
         }
+        if (message.channel) {
+            // A Channel message for a call still in progress.
+            const channel = pending.get(message.id)?.channels[message.channel];
+            if (channel) channel.onmessage(message.message);
+            return;
+        }
         const request = pending.get(message.id);
         pending.delete(message.id);
         if (!request) return;
@@ -94,10 +102,10 @@ function startBridge() {
     });
     return {
         ready,
-        call(cmd, args) {
+        call(cmd, args, channels = {}) {
             const id = nextId++;
             return new Promise((resolve, reject) => {
-                pending.set(id, { resolve, reject });
+                pending.set(id, { resolve, reject, channels });
                 child.stdin.write(`${JSON.stringify({ id, cmd, args })}\n`);
             });
         },
@@ -110,10 +118,35 @@ function startBridge() {
 }
 
 /** Calls a command on the real backend. */
-export async function backend(cmd, args = {}) {
+export async function backend(cmd, args = {}, channels = {}) {
     if (!bridge) bridge = startBridge();
     await bridge.ready;
-    return bridge.call(cmd, args);
+    return bridge.call(cmd, args, channels);
+}
+
+/**
+ * Scripts updates for the next calls (until the next openApp): `check` is
+ * null (no update), an update ({ version, notes, date, canSelfUpdate }) or
+ * { problem }; `install` is { events, problem } (no problem: it restarts,
+ * and never answers). Problems are the app's: offline, noReleaseInfo,
+ * notForThisInstall, notVerified, notAuthorized, other.
+ */
+export function setUpdate(script) {
+    return backend('__set_update', script);
+}
+
+// Tauri's Channel, as much of it as the page uses: a message handler, and
+// the id it's passed to a command as.
+let channelCount = 0;
+class Channel {
+    constructor(onmessage) {
+        this.id = ++channelCount;
+        this.onmessage = onmessage || (() => {});
+    }
+
+    toJSON() {
+        return `__CHANNEL__:${this.id}`;
+    }
 }
 
 /** Stops this test file's bridge and deletes its database. */
@@ -133,7 +166,8 @@ export async function closeBridge() {
  * or 'missing'; `compare` and `readerMode` preset those display settings;
  * `failing` maps commands to the error they reject with from the start.
  * `fresh` starts with no saved reading position, as a new install does;
- * `storage` presets the page's local storage (see `app.storage()`).
+ * `storage` presets the page's local storage (see `app.storage()`);
+ * `update` scripts updates from the start (see `setUpdate`).
  */
 export async function openApp({
     book = 'John',
@@ -146,11 +180,13 @@ export async function openApp({
     failing = {},
     fresh = false,
     storage = {},
+    update = null,
     alterReading = (dto) => dto,
 } = {}) {
     await backend('__reset', fresh
         ? { translationCode: translation, keepBookmarks }
         : { bookId: bookId(book), chapter, translationCode: translation, keepBookmarks });
+    if (update) await setUpdate(update);
 
     const calls = [];
     const clipboardWrites = [];
@@ -175,7 +211,8 @@ export async function openApp({
         if (state.held.has(cmd)) {
             await state.held.get(cmd);
         }
-        const result = await backend(cmd, JSON.parse(JSON.stringify(args)));
+        const channels = Object.fromEntries(Object.entries(args).filter(([, v]) => v instanceof Channel));
+        const result = await backend(cmd, JSON.parse(JSON.stringify(args)), channels);
         return cmd === 'get_reading' && result ? alterReading(result) : result;
     };
 
@@ -188,7 +225,7 @@ export async function openApp({
             for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, value);
             if (readerMode) window.localStorage.setItem('gospel-getter-reader-mode', 'on');
             if (compare) window.localStorage.setItem('gospel-getter-compare', 'on');
-            window.__TAURI__ = { core: { invoke } };
+            window.__TAURI__ = { core: { invoke, Channel } };
             const stub = {
                 writeText(text) {
                     if (state.clipboard === 'reject') {
