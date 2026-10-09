@@ -188,23 +188,42 @@ pub async fn add_bookmark(
     Ok(bookmark)
 }
 
+/// How a passage reads in translation `$1`, as SQL shared by bookmarks
+/// and highlighted passages so both preview a passage the same way. For
+/// a passage row `p` (with `book_id`, `chapter`, `verse_start` and
+/// `verse_end`), `passage_preview_sql!(columns)` selects
+/// `first_verse_text` (the first verse's stored text, or NULL if the
+/// translation doesn't number it) and `complete` (whether it numbers the
+/// whole range; verse numbers within a chapter are contiguous, so the
+/// first and last are enough), from the verses `passage_preview_sql!(joins)`
+/// joins in.
+macro_rules! passage_preview_sql {
+    (columns) => {
+        "first.text AS first_verse_text, \
+         (first.verse IS NOT NULL AND last.verse IS NOT NULL) AS complete"
+    };
+    (joins) => {
+        "LEFT JOIN verses first ON first.translation_id = $1 AND first.book_id = p.book_id \
+             AND first.chapter = p.chapter AND first.verse = p.verse_start \
+         LEFT JOIN verses last ON last.translation_id = $1 AND last.book_id = p.book_id \
+             AND last.chapter = p.chapter AND last.verse = p.verse_end"
+    };
+}
+pub(crate) use passage_preview_sql;
+
 /// Every bookmark, newest first, with its first verse's text in one
 /// translation.
 pub async fn list_bookmarks(
     pool: &SqlitePool,
     translation_id: i64,
 ) -> anyhow::Result<Vec<BookmarkInTranslation>> {
-    sqlx::query_as::<_, BookmarkInTranslation>(
-        "SELECT b.id, b.book_id, b.chapter, b.verse_start, b.verse_end, b.created_at, \
-             first.text AS first_verse_text, \
-             (first.verse IS NOT NULL AND last.verse IS NOT NULL) AS complete \
-         FROM bookmarks b \
-         LEFT JOIN verses first ON first.translation_id = $1 AND first.book_id = b.book_id \
-             AND first.chapter = b.chapter AND first.verse = b.verse_start \
-         LEFT JOIN verses last ON last.translation_id = $1 AND last.book_id = b.book_id \
-             AND last.chapter = b.chapter AND last.verse = b.verse_end \
-         ORDER BY b.created_at DESC, b.id DESC",
-    )
+    sqlx::query_as::<_, BookmarkInTranslation>(concat!(
+        "SELECT p.id, p.book_id, p.chapter, p.verse_start, p.verse_end, p.created_at, ",
+        passage_preview_sql!(columns),
+        " FROM bookmarks p ",
+        passage_preview_sql!(joins),
+        " ORDER BY p.created_at DESC, p.id DESC",
+    ))
     .bind(translation_id)
     .fetch_all(pool)
     .await

@@ -5,7 +5,9 @@
 use std::time::Instant;
 
 use super::bookmarks::{add_bookmark, list_bookmarks, remove_bookmark};
-use super::highlights::{list_highlights, remove_highlights, set_highlights};
+use super::highlights::{
+    list_highlight_passages, list_highlights, remove_highlights, set_highlights,
+};
 use super::search::search_verses;
 use super::test_support::{
     TempDb, bundled, fresh_database, other_tables_snapshot, table_names, verses_snapshot,
@@ -567,5 +569,79 @@ async fn the_highlights_table_is_added_to_an_existing_database() {
     assert_eq!(
         highlight_colors(&pool).await,
         vec![(43, 3, 16, HighlightColor::Yellow)]
+    );
+}
+
+#[tokio::test]
+async fn highlighted_passages_preview_each_translations_own_verses() {
+    let db = TempDb::new("highlight_passages");
+    let pool = db.connect().await;
+    prepare(&pool).await.unwrap();
+    assert_eq!(list_highlight_passages(&pool, KJV).await.unwrap(), []);
+
+    // John 3:16-18 green with 3:17 recolored pink; Matthew 2:22-23 (2:23
+    // is numbered in the WEB only); 3 John 1:15 (the KJV only).
+    set_highlights(&pool, 43, 3, 16, 18, HighlightColor::Green)
+        .await
+        .unwrap();
+    set_highlights(&pool, 43, 3, 17, 17, HighlightColor::Pink)
+        .await
+        .unwrap();
+    set_highlights(&pool, 40, 2, 22, 23, HighlightColor::Yellow)
+        .await
+        .unwrap();
+    set_highlights(&pool, 64, 1, 15, 15, HighlightColor::Blue)
+        .await
+        .unwrap();
+
+    let summary = |list: &[super::HighlightPassageInTranslation]| -> Vec<_> {
+        list.iter()
+            .map(|h| {
+                let p = h.passage;
+                (
+                    p.book_id,
+                    p.chapter,
+                    p.verse_start,
+                    p.verse_end,
+                    p.color,
+                    h.complete,
+                )
+            })
+            .collect()
+    };
+    let in_kjv = list_highlight_passages(&pool, KJV).await.unwrap();
+    assert_eq!(
+        summary(&in_kjv),
+        [
+            (40, 2, 22, 23, HighlightColor::Yellow, false),
+            (43, 3, 16, 16, HighlightColor::Green, true),
+            (43, 3, 17, 17, HighlightColor::Pink, true),
+            (43, 3, 18, 18, HighlightColor::Green, true),
+            (64, 1, 15, 15, HighlightColor::Blue, true),
+        ]
+    );
+    let texts: Vec<Option<&str>> = in_kjv
+        .iter()
+        .map(|h| h.first_verse_text.as_deref())
+        .collect();
+    assert_eq!(
+        texts,
+        [
+            Some(bundled("kjv")[39].chapters[1][21].as_str()),
+            Some(bundled("kjv")[42].chapters[2][15].as_str()),
+            Some(bundled("kjv")[42].chapters[2][16].as_str()),
+            Some(bundled("kjv")[42].chapters[2][17].as_str()),
+            Some(bundled("kjv")[63].chapters[0][14].as_str()),
+        ],
+        "previews are the stored text, unaltered"
+    );
+
+    let in_web = list_highlight_passages(&pool, WEB).await.unwrap();
+    assert!(in_web[0].complete, "the WEB numbers Matthew 2:23");
+    let third_john = &in_web[4];
+    assert!(!third_john.complete, "the WEB has no 3 John 1:15");
+    assert_eq!(
+        third_john.first_verse_text, None,
+        "never another verse's text"
     );
 }

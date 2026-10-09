@@ -11,7 +11,7 @@ pub mod seed;
 
 pub use bookmarks::{Bookmark, BookmarkError, BookmarkInTranslation};
 pub use connect::create_pool;
-pub use highlights::{Highlight, HighlightColor};
+pub use highlights::{Highlight, HighlightColor, HighlightPassage, HighlightPassageInTranslation};
 pub use legacy::migrate_legacy_db_if_needed;
 pub use migrate::migrate;
 pub use models::*;

@@ -10,7 +10,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use super::BookmarkError;
-use super::bookmarks::check_passage;
+use super::bookmarks::{check_passage, passage_preview_sql};
 
 /// The highlighter colors. The database's CHECK and the frontend's
 /// swatches list the same four.
@@ -180,9 +180,220 @@ pub async fn list_highlights(pool: &SqlitePool) -> anyhow::Result<Vec<Highlight>
     rows.into_iter().map(Highlight::try_from).collect()
 }
 
+/// A run of highlighted verses: consecutive verses of one chapter, all in
+/// one color.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HighlightPassage {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    pub color: HighlightColor,
+}
+
+/// A highlighted passage as it reads in one particular translation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HighlightPassageInTranslation {
+    pub passage: HighlightPassage,
+    /// The first verse's stored text, or `None` if that translation
+    /// doesn't number this verse.
+    pub first_verse_text: Option<String>,
+    /// Whether the translation numbers every verse in the passage.
+    pub complete: bool,
+}
+
+/// Group highlights, in Bible order, into passages: a verse joins the
+/// passage before it when it's the next verse of the same chapter in the
+/// same color. A different color, a gap, or a new chapter or book starts
+/// a new passage. The passages stay in Bible order.
+pub fn group_into_passages(highlights: &[Highlight]) -> Vec<HighlightPassage> {
+    let mut passages: Vec<HighlightPassage> = Vec::new();
+    for h in highlights {
+        match passages.last_mut() {
+            Some(p)
+                if p.book_id == h.book_id
+                    && p.chapter == h.chapter
+                    && p.color == h.color
+                    && p.verse_end + 1 == h.verse =>
+            {
+                p.verse_end = h.verse;
+            }
+            _ => passages.push(HighlightPassage {
+                book_id: h.book_id,
+                chapter: h.chapter,
+                verse_start: h.verse,
+                verse_end: h.verse,
+                color: h.color,
+            }),
+        }
+    }
+    passages
+}
+
+/// Every highlighted passage, in Bible order, with its first verse's text
+/// in one translation (previewed exactly as bookmarks are).
+pub async fn list_highlight_passages(
+    pool: &SqlitePool,
+    translation_id: i64,
+) -> anyhow::Result<Vec<HighlightPassageInTranslation>> {
+    let passages = group_into_passages(&list_highlights(pool).await?);
+    if passages.is_empty() {
+        return Ok(Vec::new());
+    }
+    // The passages go to SQLite as one JSON array of
+    // [book, chapter, first verse, last verse], so one query previews
+    // them all, in order.
+    let coordinates: Vec<[i64; 4]> = passages
+        .iter()
+        .map(|p| [p.book_id, p.chapter, p.verse_start, p.verse_end])
+        .collect();
+    let previews: Vec<(Option<String>, bool)> = sqlx::query_as(concat!(
+        "WITH p AS (SELECT key AS position, \
+             json_extract(value, '$[0]') AS book_id, json_extract(value, '$[1]') AS chapter, \
+             json_extract(value, '$[2]') AS verse_start, json_extract(value, '$[3]') AS verse_end \
+             FROM json_each($2)) \
+         SELECT ",
+        passage_preview_sql!(columns),
+        " FROM p ",
+        passage_preview_sql!(joins),
+        " ORDER BY p.position",
+    ))
+    .bind(translation_id)
+    .bind(serde_json::to_string(&coordinates).context("Failed to encode passages")?)
+    .fetch_all(pool)
+    .await
+    .context("Failed to preview highlighted passages")?;
+    anyhow::ensure!(
+        previews.len() == passages.len(),
+        "Previewed {} highlighted passages, expected {}",
+        previews.len(),
+        passages.len()
+    );
+    Ok(passages
+        .into_iter()
+        .zip(previews)
+        .map(
+            |(passage, (first_verse_text, complete))| HighlightPassageInTranslation {
+                passage,
+                first_verse_text,
+                complete,
+            },
+        )
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use HighlightColor::{Blue, Green, Pink, Yellow};
+
+    fn verse(book_id: i64, chapter: i64, verse: i64, color: HighlightColor) -> Highlight {
+        Highlight {
+            book_id,
+            chapter,
+            verse,
+            color,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
+
+    fn passage(
+        book_id: i64,
+        chapter: i64,
+        (verse_start, verse_end): (i64, i64),
+        color: HighlightColor,
+    ) -> HighlightPassage {
+        HighlightPassage {
+            book_id,
+            chapter,
+            verse_start,
+            verse_end,
+            color,
+        }
+    }
+
+    #[test]
+    fn no_highlights_make_no_passages() {
+        assert_eq!(group_into_passages(&[]), []);
+    }
+
+    #[test]
+    fn a_single_verse_is_a_passage_of_one() {
+        assert_eq!(
+            group_into_passages(&[verse(43, 3, 16, Yellow)]),
+            [passage(43, 3, (16, 16), Yellow)]
+        );
+    }
+
+    #[test]
+    fn consecutive_verses_in_one_color_merge() {
+        let run = [
+            verse(43, 3, 16, Green),
+            verse(43, 3, 17, Green),
+            verse(43, 3, 18, Green),
+        ];
+        assert_eq!(group_into_passages(&run), [passage(43, 3, (16, 18), Green)]);
+    }
+
+    #[test]
+    fn a_color_change_starts_a_new_passage() {
+        let mixed = [
+            verse(43, 3, 16, Yellow),
+            verse(43, 3, 17, Pink),
+            verse(43, 3, 18, Pink),
+            verse(43, 3, 19, Yellow),
+        ];
+        assert_eq!(
+            group_into_passages(&mixed),
+            [
+                passage(43, 3, (16, 16), Yellow),
+                passage(43, 3, (17, 18), Pink),
+                passage(43, 3, (19, 19), Yellow),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_gap_starts_a_new_passage() {
+        let gapped = [
+            verse(19, 23, 1, Blue),
+            verse(19, 23, 2, Blue),
+            verse(19, 23, 4, Blue),
+        ];
+        assert_eq!(
+            group_into_passages(&gapped),
+            [passage(19, 23, (1, 2), Blue), passage(19, 23, (4, 4), Blue)]
+        );
+    }
+
+    #[test]
+    fn a_new_chapter_starts_a_new_passage() {
+        // John 3:36 then John 4:1: adjacent in reading, but two chapters.
+        let across = [verse(43, 3, 36, Green), verse(43, 4, 1, Green)];
+        assert_eq!(
+            group_into_passages(&across),
+            [
+                passage(43, 3, (36, 36), Green),
+                passage(43, 4, (1, 1), Green)
+            ]
+        );
+        // Verse numbers that would line up still don't merge chapters.
+        let lined_up = [verse(43, 3, 1, Green), verse(43, 4, 2, Green)];
+        assert_eq!(group_into_passages(&lined_up).len(), 2);
+    }
+
+    #[test]
+    fn a_new_book_starts_a_new_passage() {
+        let across = [verse(42, 1, 1, Yellow), verse(43, 1, 2, Yellow)];
+        assert_eq!(
+            group_into_passages(&across),
+            [
+                passage(42, 1, (1, 1), Yellow),
+                passage(43, 1, (2, 2), Yellow)
+            ]
+        );
+    }
 
     /// The four colors are the same everywhere: here, the table's CHECK and
     /// the frontend's swatches.

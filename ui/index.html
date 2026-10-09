@@ -679,6 +679,86 @@
             font-weight: bold;
         }
 
+        /* My highlights: the Bookmarks list's look, with each passage's
+           color shown as a swatch and named in words, so color is never
+           the only cue. The swatch is outlined in --text-dim, so it shows
+           on --option-bg even where a highlighter color is close to it. */
+        .highlight-filter {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .highlight-filter-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-family: inherit;
+            font-size: 0.75rem;
+            color: var(--accent);
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            padding: 0.2rem 0.45rem;
+            cursor: pointer;
+        }
+
+        .highlight-filter-btn:hover {
+            border-color: var(--accent);
+        }
+
+        .highlight-filter-btn[aria-pressed="true"] {
+            background: var(--accent);
+            color: var(--on-accent);
+        }
+
+        .highlight-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 0.4rem;
+        }
+
+        .highlight-color {
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-size: 0.7rem;
+            color: var(--text-dim);
+        }
+
+        .highlight-dot {
+            flex: 0 0 auto;
+            width: 0.7rem;
+            height: 0.7rem;
+            border: 1px solid var(--text-dim);
+            border-radius: 50%;
+        }
+
+        .highlight-dot[data-color="yellow"] {
+            background: var(--hl-yellow);
+        }
+
+        .highlight-dot[data-color="green"] {
+            background: var(--hl-green);
+        }
+
+        .highlight-dot[data-color="blue"] {
+            background: var(--hl-blue);
+        }
+
+        .highlight-dot[data-color="pink"] {
+            background: var(--hl-pink);
+        }
+
+        /* One line of the stored text, clipped visually, never shortened. */
+        #highlight-list .bookmark-preview {
+            -webkit-line-clamp: 1;
+            line-clamp: 1;
+        }
+
         /* The version line at the foot of Settings. --text-dim on the
            menu's --option-bg meets AA in every theme (see the palette
            tests). The line keeps its height while empty, so filling it in
@@ -761,6 +841,7 @@
         .search-more:focus-visible,
         .bookmark-open:focus-visible,
         .bookmark-remove:focus-visible,
+        .highlight-filter-btn:focus-visible,
         .verse-bookmark-btn:focus-visible,
         .settings-field select:focus-visible,
         .reader-mode-btn:focus-visible,
@@ -1878,6 +1959,11 @@
             <ul id="bookmark-list" class="bookmark-list" aria-labelledby="bookmark-list-label"></ul>
         </div>
         <div class="settings-field">
+            <span class="settings-label" id="highlight-list-label">Highlights</span>
+            <div id="highlight-filter" class="highlight-filter" role="group" aria-label="Show highlights"></div>
+            <ul id="highlight-list" class="bookmark-list" aria-labelledby="highlight-list-label"></ul>
+        </div>
+        <div class="settings-field">
             <span class="settings-label" id="reader-data-label">Back up or move your data</span>
             <p class="settings-note" id="reader-data-note">Your bookmarks, highlights, reading position and display settings, saved as a file you can import on another computer. Bible text isn’t included.</p>
             <div class="data-actions" role="group" aria-labelledby="reader-data-label" aria-describedby="reader-data-note">
@@ -1938,6 +2024,8 @@
             const settingsMenu = document.getElementById('settings-menu');
             const settingsToggle = document.getElementById('settings-toggle');
             const bookmarkList = document.getElementById('bookmark-list');
+            const highlightFilter = document.getElementById('highlight-filter');
+            const highlightList = document.getElementById('highlight-list');
             const searchToggle = document.getElementById('search-toggle');
             const searchPanel = document.getElementById('search-panel');
             const searchInput = document.getElementById('search-input');
@@ -1978,6 +2066,14 @@
             // belong to no one translation, like bookmarks.
             let highlights = new Map();
             let highlightsLoaded = false;
+
+            // Every highlighted passage (consecutive verses in one color),
+            // in Bible order, as list_highlight_passages returned it for the
+            // selected translation; and the color the list shows ('all' or
+            // one color), for this session only.
+            let highlightPassages = [];
+            let highlightListFilter = 'all';
+            let highlightListToken = 0;
 
             // The last get_reading and get_compare results, so switching
             // compare on or off re-renders without re-reading the chapter.
@@ -2204,6 +2300,7 @@
                 }
                 applyHighlightMarkers();
                 if (selection) updateHighlightControls();
+                await refreshHighlightList();
             }
 
             function setHighlightMarker(el, color) {
@@ -2263,6 +2360,7 @@
                     applyHighlightMarkers();
                     if (selection) updateHighlightControls();
                     if (attempt === actionAttempt) setActionStatus(color ? `Highlighted ${color}` : 'Highlight removed', false);
+                    refreshHighlightList();
                 } catch (e) {
                     console.error('Failed to change the highlight', e);
                     if (attempt === actionAttempt) {
@@ -2270,6 +2368,83 @@
                     }
                 }
             }
+
+            // ---- My highlights: every highlighted passage, in Settings
+
+            const colorName = (color) => color.charAt(0).toUpperCase() + color.slice(1);
+
+            highlightFilter.innerHTML = ['all', ...HIGHLIGHT_COLORS]
+                .map((f) => {
+                    const dot = f === 'all' ? '' : `<span class="highlight-dot" data-color="${f}" aria-hidden="true"></span>`;
+                    return `<button type="button" class="highlight-filter-btn" data-filter="${f}" aria-pressed="${f === highlightListFilter}">${dot}${f === 'all' ? 'All' : colorName(f)}</button>`;
+                })
+                .join('');
+
+            function renderHighlightList(error) {
+                highlightFilter.querySelectorAll('.highlight-filter-btn').forEach((btn) => {
+                    btn.setAttribute('aria-pressed', String(btn.dataset.filter === highlightListFilter));
+                });
+                if (error) {
+                    highlightList.innerHTML = `<li class="bookmark-empty is-error">${escapeHtml(error)}</li>`;
+                    return;
+                }
+                if (!highlightPassages.length) {
+                    highlightList.innerHTML = '<li class="bookmark-empty">No highlights yet. Click a verse, then pick a color.</li>';
+                    return;
+                }
+                const shown = highlightPassages
+                    .map((h, index) => ({ h, index }))
+                    .filter(({ h }) => highlightListFilter === 'all' || h.color === highlightListFilter);
+                if (!shown.length) {
+                    highlightList.innerHTML = `<li class="bookmark-empty">No ${highlightListFilter} highlights.</li>`;
+                    return;
+                }
+                const code = currentTranslation().toUpperCase();
+                highlightList.innerHTML = shown
+                    .map(({ h, index }) => {
+                        let preview;
+                        if (h.preview == null) {
+                            preview = `<span class="bookmark-preview is-missing">Not numbered in the ${escapeHtml(code)}</span>`;
+                        } else {
+                            const partial = h.complete ? '' : `<span class="bookmark-partial">Not all of it is numbered in the ${escapeHtml(code)}.</span>`;
+                            preview = `<span class="bookmark-preview">${escapeHtml(h.preview)}</span>${partial}`;
+                        }
+                        return `<li class="bookmark-item" data-color="${h.color}">
+                            <button type="button" class="bookmark-open" data-index="${index}">
+                                <span class="highlight-head">
+                                    <span class="bookmark-ref">${escapeHtml(h.reference)}</span>
+                                    <span class="highlight-color"><span class="highlight-dot" data-color="${h.color}" aria-hidden="true"></span>${colorName(h.color)}</span>
+                                </span>
+                                ${preview}
+                            </button>
+                            <button type="button" class="bookmark-remove" data-index="${index}" aria-label="Remove highlight ${escapeHtml(h.reference)}" title="Remove highlight">&times;</button>
+                        </li>`;
+                    })
+                    .join('');
+            }
+
+            // Reloads the list. Only the latest of overlapping reloads (a
+            // highlight, then a translation switch) gets to render.
+            async function refreshHighlightList() {
+                const token = ++highlightListToken;
+                try {
+                    const list = await invoke('list_highlight_passages', { translationCode: currentTranslation() });
+                    if (token !== highlightListToken) return;
+                    highlightPassages = list;
+                    renderHighlightList();
+                } catch (e) {
+                    if (token !== highlightListToken) return;
+                    console.error('Failed to load highlighted passages', e);
+                    renderHighlightList(`Highlights couldn't be loaded: ${(e && e.message) || e}`);
+                }
+            }
+
+            highlightFilter.addEventListener('click', function (event) {
+                const btn = event.target.closest('.highlight-filter-btn');
+                if (!btn) return;
+                highlightListFilter = btn.dataset.filter;
+                renderHighlightList();
+            });
 
             function renderBookmarkList(error) {
                 if (error) {
@@ -2391,6 +2566,37 @@
                 const buttons = bookmarkList.querySelectorAll('.bookmark-remove');
                 const next = buttons[Math.min(index, buttons.length - 1)];
                 (next || settingsToggle).focus();
+            });
+
+            // Opening a highlighted passage works as opening a bookmark;
+            // removing one unhighlights exactly its verses.
+            highlightList.addEventListener('click', async function (event) {
+                const remove = event.target.closest('.bookmark-remove');
+                const open = event.target.closest('.bookmark-open');
+                const target = remove || open;
+                if (!target) return;
+                const passage = highlightPassages[Number(target.dataset.index)];
+                if (!passage) return;
+                const { bookId, chapter, verseStart, verseEnd } = passage;
+                if (open) {
+                    closeSettingsMenu();
+                    await openPassage(bookId, chapter, verseStart, verseEnd);
+                    return;
+                }
+                const position = [...highlightList.querySelectorAll('.bookmark-remove')].indexOf(target);
+                try {
+                    await invoke('remove_highlight', { bookId, chapter, verseStart, verseEnd });
+                } catch (e) {
+                    console.error('Failed to remove highlight', e);
+                    renderHighlightList(`Couldn't remove ${passage.reference}: ${(e && e.message) || e}`);
+                    return;
+                }
+                await refreshHighlights();
+                // Keep keyboard focus in the list, on the next passage, or
+                // on the filter once the list is empty.
+                const buttons = highlightList.querySelectorAll('.bookmark-remove');
+                const next = buttons[Math.min(position, buttons.length - 1)];
+                (next || highlightFilter.querySelector('[aria-pressed="true"]')).focus();
             });
 
             // ---- Back up or move your data: export and import bookmarks,
@@ -3517,7 +3723,7 @@
 
             // Switching translations re-reads whatever chapter is currently
             // on screen, in the newly selected translation, refreshes the
-            // bookmark previews, and reruns any search. The backend
+            // bookmark and highlight previews, and reruns any search. The backend
             // remembers this as the reader's position too (see
             // get_reading), so reopening the app comes back to it.
             translationSelect.addEventListener('change', function () {
@@ -3526,6 +3732,7 @@
                 const chapter = inner ? inner.dataset.currentChapter : 1;
                 loadReading(bookId, chapter);
                 refreshBookmarks();
+                refreshHighlightList();
                 if (searchInput.value.trim()) runSearch(0);
             });
 

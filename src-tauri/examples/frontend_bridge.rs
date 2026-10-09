@@ -95,6 +95,10 @@ async fn dispatch(
             Ok(list) => Ok(to_value(list)?),
             Err(e) => Err(format!("Highlights couldn't be loaded: {e:#}")),
         },
+        "list_highlight_passages" => match commands::highlight_passages_in(state, code).await {
+            Ok(list) => Ok(to_value(list)?),
+            Err(e) => Err(format!("Highlights couldn't be loaded: {e:#}")),
+        },
         "set_highlight" => {
             let color: String = arg(args, "color")?;
             commands::highlight_passage(
