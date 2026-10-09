@@ -17,6 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The release manifest generator (stdlib-only Python).
+      - name: Test make_latest_json.py
+        working-directory: .
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s tools/release -v
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:

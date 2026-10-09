@@ -10,6 +10,15 @@ name: Distribution Artifacts
 # This workflow never creates a GitHub release, tag, or otherwise publishes
 # anything — it only produces downloadable workflow-run artifacts, so a
 # human can review real installers before anything goes out the door.
+#
+# These are the installers that update themselves: they're built with
+# GOSPEL_GETTER_SELF_UPDATE=1 (read at compile time, see src-tauri/src/
+# updater.rs), which no other build of the app has, and signed for the
+# updater with the TAURI_SIGNING_PRIVATE_KEY secret through the
+# tauri.updater.conf.json overlay. Each installer's artifact carries its
+# .sig beside it, for tools/release/make_latest_json.py. Pushes to main must
+# be signed; a pull request without access to the secret (from a fork)
+# builds unsigned installers, with a warning, which can't be released.
 
 on:
   push:
@@ -62,11 +71,37 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Decide on updater signing
+        id: signing
+        shell: bash
+        env:
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$HAS_KEY" = "true" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = "pull_request" ]; then
+            echo "::warning::No updater signing key (pull requests from forks get no secrets): building unsigned installers without .sig files. They can't be released."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret isn't available, so the updater artifacts can't be signed. Builds on $EVENT must be signed; set the secret (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD) in the repository's Actions secrets."
+            exit 1
+          fi
+
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
 
       - name: Build AppImage and deb bundles
-        run: cargo tauri build --bundles appimage,deb
+        env:
+          GOSPEL_GETTER_SELF_UPDATE: "1"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+            cargo tauri build --bundles appimage,deb --config tauri.updater.conf.json
+          else
+            cargo tauri build --bundles appimage,deb
+          fi
 
       - name: Locate built artifacts
         id: artifacts
@@ -92,6 +127,16 @@ jobs:
           deb="$(realpath "$deb")"
           echo "appimage=$appimage" >> "$GITHUB_OUTPUT"
           echo "deb=$deb" >> "$GITHUB_OUTPUT"
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+            for file in "$appimage" "$deb"; do
+              if [ ! -s "$file.sig" ]; then
+                echo "::error::the signed build produced no updater signature $file.sig"
+                exit 1
+              fi
+            done
+            echo "appimage_sig=$appimage.sig" >> "$GITHUB_OUTPUT"
+            echo "deb_sig=$deb.sig" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: "Smoke test: AppImage extracts and launches without crashing"
         run: |
@@ -139,14 +184,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gospel-getter-linux-appimage
-          path: ${{ steps.artifacts.outputs.appimage }}
+          path: |
+            ${{ steps.artifacts.outputs.appimage }}
+            ${{ steps.artifacts.outputs.appimage_sig }}
           if-no-files-found: error
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v4
         with:
           name: gospel-getter-linux-deb
-          path: ${{ steps.artifacts.outputs.deb }}
+          path: |
+            ${{ steps.artifacts.outputs.deb }}
+            ${{ steps.artifacts.outputs.deb_sig }}
           if-no-files-found: error
 
   windows:
@@ -166,13 +215,41 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Decide on updater signing
+        id: signing
+        shell: bash
+        env:
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$HAS_KEY" = "true" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = "pull_request" ]; then
+            echo "::warning::No updater signing key (pull requests from forks get no secrets): building unsigned installers without .sig files. They can't be released."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret isn't available, so the updater artifacts can't be signed. Builds on $EVENT must be signed; set the secret (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD) in the repository's Actions secrets."
+            exit 1
+          fi
+
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
 
       # bundle.targets is "all" in tauri.conf.json, so this produces both
       # an NSIS setup.exe and an MSI on Windows.
       - name: Build Windows installers
-        run: cargo tauri build
+        shell: pwsh
+        env:
+          GOSPEL_GETTER_SELF_UPDATE: "1"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ("${{ steps.signing.outputs.signed }}" -eq "true") {
+            cargo tauri build --config tauri.updater.conf.json
+          } else {
+            cargo tauri build
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Locate built artifacts
         id: artifacts
@@ -184,11 +261,28 @@ jobs:
             exit 1
           }
           "nsis=$($nsis.FullName)" >> $env:GITHUB_OUTPUT
+          $signed = "${{ steps.signing.outputs.signed }}" -eq "true"
+          if ($signed) {
+            $sig = "$($nsis.FullName).sig"
+            if (-not (Test-Path $sig) -or (Get-Item $sig).Length -eq 0) {
+              Write-Error "the signed build produced no updater signature $sig"
+              exit 1
+            }
+            "nsis_sig=$sig" >> $env:GITHUB_OUTPUT
+          }
 
           $msi = Get-ChildItem -Path "target/release/bundle/msi" -Filter *.msi -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($msi) {
             "msi=$($msi.FullName)" >> $env:GITHUB_OUTPUT
             "msi_built=true" >> $env:GITHUB_OUTPUT
+            if ($signed) {
+              $sig = "$($msi.FullName).sig"
+              if (-not (Test-Path $sig) -or (Get-Item $sig).Length -eq 0) {
+                Write-Error "the signed build produced no updater signature $sig"
+                exit 1
+              }
+              "msi_sig=$sig" >> $env:GITHUB_OUTPUT
+            }
           } else {
             Write-Warning "No MSI installer was produced; only the NSIS setup.exe is available this run."
             "msi_built=false" >> $env:GITHUB_OUTPUT
@@ -243,7 +337,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gospel-getter-windows-nsis-installer
-          path: ${{ steps.artifacts.outputs.nsis }}
+          path: |
+            ${{ steps.artifacts.outputs.nsis }}
+            ${{ steps.artifacts.outputs.nsis_sig }}
           if-no-files-found: error
 
       - name: Upload MSI installer artifact (when built)
@@ -251,5 +347,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gospel-getter-windows-msi-installer
-          path: ${{ steps.artifacts.outputs.msi }}
+          path: |
+            ${{ steps.artifacts.outputs.msi }}
+            ${{ steps.artifacts.outputs.msi_sig }}
           if-no-files-found: error
