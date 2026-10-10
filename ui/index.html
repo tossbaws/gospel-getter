@@ -1442,7 +1442,7 @@
         /* Screen-only, so a page printed from reading mode is laid out
            exactly like one printed normally. */
         /* On screen the page starts below the top bar, and anything
-           scrolled into view or stuck to the top stops below it too. */
+           scrolled into view stops below it too. */
         @media screen {
             html {
                 scroll-padding-top: var(--bar-height);
@@ -1450,10 +1450,6 @@
 
             .container {
                 padding-top: calc(var(--bar-height) + 1.5rem);
-            }
-
-            .compare-head {
-                top: var(--bar-height);
             }
 
             :root[data-reader-mode="on"] .top-bar {
@@ -1905,9 +1901,10 @@
             align-items: start;
         }
 
+        /* Stuck just below the top bar (which would hide it at top: 0). */
         .compare-head {
             position: sticky;
-            top: 0;
+            top: var(--bar-height);
             z-index: 1;
             background: var(--option-bg);
             color: var(--accent);

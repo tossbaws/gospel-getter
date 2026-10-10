@@ -1072,3 +1072,22 @@ fn highlights_are_not_printed() {
         );
     }
 }
+
+/// Compare mode's column headers stick just below the top bar while the
+/// columns scroll. Every rule that places them must agree, since a later
+/// `top: 0` would win the cascade and slide them under the opaque bar.
+#[test]
+fn compare_headers_stick_below_the_top_bar() {
+    let rules = rules();
+    let tops: Vec<&str> = rules
+        .iter()
+        .filter(|r| r.at_rule.as_deref() != Some("@media print"))
+        .filter(|r| selectors(r).any(|s| s == ".compare-head"))
+        .flat_map(|r| r.body.split(';'))
+        .filter_map(|decl| decl.trim().strip_prefix("top:"))
+        .map(str::trim)
+        .collect();
+    assert_eq!(tops, ["var(--bar-height)"]);
+    let head = screen_rule(&rules, ".compare-head");
+    assert!(head.body.contains("position: sticky"));
+}
