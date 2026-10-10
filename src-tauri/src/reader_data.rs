@@ -121,7 +121,7 @@ pub struct HighlightRecord {
 }
 
 /// Display preferences. Each is optional: a file only changes the ones it
-/// names. The values are the ones the settings menu offers (and the
+/// names. The values are the ones Aa offers (and the
 /// `<head>` preferences script in `ui/index.html` accepts — a test keeps
 /// the two lists in step).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -674,10 +674,11 @@ mod tests {
 
     const HTML: &str = include_str!("../../ui/index.html");
 
-    /// The `<option value>`s of one settings `<select>`.
+    /// The `<option value>`s of one preference `<select>` (Aa's record of
+    /// that choice).
     fn select_options(id: &str) -> Vec<String> {
         let start = HTML
-            .find(&format!(r#"<select id="{id}">"#))
+            .find(&format!(r#"<select id="{id}""#))
             .expect("select exists");
         let end = start + HTML[start..].find("</select>").expect("select closes");
         HTML[start..end]
@@ -701,7 +702,7 @@ mod tests {
     }
 
     #[test]
-    fn preference_values_match_the_settings_menu() {
+    fn preference_values_match_what_aa_offers() {
         use LineSpacing as L;
         use TextSize as S;
         use Theme as T;

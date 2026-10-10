@@ -72,6 +72,7 @@ fn invoke_handler<R: tauri::Runtime>()
         updater::check_for_update,
         updater::install_update,
         updater::open_download_page,
+        updater::open_release_notes,
     ]
 }
 

@@ -1,5 +1,5 @@
 // Behavior tests for GH-11: bookmarking the selected verse or range, the
-// markers in the reading pane, and the Bookmarks list in settings — against
+// markers in the reading pane, and the Bookmarks list in the Library — against
 // the real backend and database.
 
 import { after, test } from 'node:test';
@@ -105,7 +105,7 @@ test('bookmarks can be removed from the list, keeping focus in it', () =>
             app.click(app.verse(n));
             await bookmarkSelection(app);
         }
-        app.openSettings();
+        app.openLibrary();
         const before = app.calls.length;
         const [, middle] = app.bookmarkItems();
         assert.equal(middle.remove.getAttribute('aria-label'), 'Remove bookmark John 3:2');
@@ -114,7 +114,7 @@ test('bookmarks can be removed from the list, keeping focus in it', () =>
 
         assert.deepEqual(app.bookmarkItems().map((i) => i.reference), ['John 3:3', 'John 3:1']);
         assert.deepEqual(app.bookmarkedVerseNumbers(), [1, 3]);
-        assert.equal(app.settingsMenu().hidden, false, 'removing keeps the menu open');
+        assert.equal(app.surface('library').hidden, false, 'removing keeps the Library open');
         assert.ok(app.document.activeElement.classList.contains('bookmark-remove'));
     }));
 
@@ -126,13 +126,13 @@ test('opening a bookmark goes to its chapter and selects the passage', () =>
 
         app.key('ArrowLeft');
         await app.waitForHeading('John 2');
-        app.openSettings();
+        app.openLibrary();
         const before = app.calls.length;
         app.click(app.bookmarkItems()[0].open);
         await app.idle(before, 'get_reading');
 
         assert.equal(app.heading(), 'John 3');
-        assert.equal(app.settingsMenu().hidden, true, 'the menu gets out of the way');
+        assert.equal(app.surface('library').hidden, true, 'the Library gets out of the way');
         assert.deepEqual(app.selectedVerseNumbers(), [16, 17, 18]);
         assert.equal(app.notice(), '');
         await app.copyButton();
@@ -177,7 +177,7 @@ test('a bookmark whose verse the translation does not number opens its chapter w
 
         app.key('ArrowRight');
         await app.waitForHeading('Matthew 3');
-        app.openSettings();
+        app.openLibrary();
         before = app.calls.length;
         app.click(item.open);
         await app.idle(before, 'get_reading');
@@ -211,7 +211,7 @@ test('a bookmark only partly numbered in the translation says so and selects not
         assert.ok(item.partial);
         assert.deepEqual(app.bookmarkedVerseNumbers(), [24, 25], 'only the verses the WEB numbers are marked');
 
-        app.openSettings();
+        app.openLibrary();
         app.click(item.open);
         await app.idle(0, 'get_reading');
         assert.deepEqual(app.selectedVerseNumbers(), []);

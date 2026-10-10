@@ -1,7 +1,7 @@
 // The first-run welcome: a four-page tour that opens by itself only on a
 // fresh install, closes for good by any route (Skip, Start reading,
 // Escape), keeps the keyboard to itself while open, and can be reopened
-// from Settings — against the real backend and database.
+// from the ☰ menu — against the real backend and database.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -211,29 +211,44 @@ test('the reader\'s shortcuts don\'t run while the welcome is open', () =>
         assert.equal(app.searchPanel().hidden, false);
     }));
 
-test('Show welcome in Settings reopens it on page 1, and focus returns to Settings', () =>
+test('Show welcome in the ☰ menu reopens it on page 1, and focus returns to ☰', () =>
     withApp({ storage: { 'gospel-getter-welcome': 'seen' } }, async (app) => {
         await booted(app);
         assert.equal(isOpen(app), false);
-        app.openSettings();
+        app.open('menu');
         const show = app.document.getElementById('welcome-btn');
         assert.equal(show.textContent, 'Show welcome');
         app.click(show);
         assert.equal(isOpen(app), true);
-        assert.equal(app.settingsMenu().hidden, true);
+        assert.equal(app.surface('menu').hidden, true);
         assert.equal(progress(app), '1 of 4');
         assert.equal(app.document.activeElement, button(app, 'next'));
 
         app.click(button(app, 'next'));
         app.click(button(app, 'skip'));
         assert.equal(isOpen(app), false);
-        assert.equal(app.document.activeElement, app.document.getElementById('settings-toggle'));
+        assert.equal(app.document.activeElement, app.document.getElementById('menu-toggle'));
 
         // Opening it again starts from the first page.
-        app.openSettings();
+        app.open('menu');
         app.click(show);
         assert.equal(progress(app), '1 of 4');
         app.key('Escape', {}, app.document.activeElement);
         assert.equal(isOpen(app), false);
-        assert.equal(app.settingsMenu().hidden, true);
+        assert.equal(app.surface('menu').hidden, true);
+    }));
+
+test('the tour points to Aa, the Library and the ☰ menu, with no Settings drawer left', () =>
+    withApp({ storage: { 'gospel-getter-welcome': 'seen' } }, async (app) => {
+        await booted(app);
+        const items = [...app.document.querySelectorAll('#welcome-text-4 li')].map((li) => li.textContent);
+        assert.deepEqual(items, [
+            'Aa, top right, has six themes, four text sizes, three line spacings, the translation and a distraction-free reading mode.',
+            'Your bookmarks and highlights are in the Library, the bookmark button beside Aa (or press Ctrl+B).',
+            'Press C to compare the KJV and WEB side by side.',
+            'Your chapter, bookmarks, highlights and settings are remembered. To see this tour again, choose Show welcome in the ☰ menu.',
+        ]);
+        assert.match(app.document.getElementById('welcome-text-3').textContent, /Export data… and Import data… in the ☰ menu/);
+        const tour = app.document.getElementById('welcome-panel').textContent;
+        assert.ok(!/Settings/.test(tour), 'nothing refers to the old Settings drawer');
     }));

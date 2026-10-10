@@ -58,8 +58,9 @@ fn mobile_breakpoint_hides_chapter_side_neighbors() {
 }
 
 /// Regression guard for GH-6: printing a chapter should hide all page
-/// chrome (settings, header, book list, chapter chooser, neighboring
-/// chapter panes, nav hint, footer, cross-reference popups) but must
+/// chrome (the top bar and its popovers, the Library, the dialogs and the
+/// toast, header, book list, chapter chooser, neighboring chapter panes,
+/// nav hint, footer, cross-reference popups) but must
 /// never target the reading content itself — the chapter heading and
 /// verses are the whole point of printing the page.
 #[test]
@@ -71,8 +72,12 @@ fn print_stylesheet_hides_chrome_but_not_reading_content() {
         "print stylesheet should actually hide the page chrome it targets"
     );
     for chrome_selector in [
-        ".settings-toggle",
-        ".settings-menu",
+        ".top-bar",
+        ".popover",
+        ".library-panel",
+        ".import-overlay",
+        ".welcome-overlay",
+        ".toast",
         "header",
         ".book-list",
         "#chapter-list",
@@ -267,6 +272,27 @@ fn screen_rule<'a>(rules: &'a [Rule], selector: &str) -> &'a Rule {
         .unwrap_or_else(|| panic!("expected a `{selector}` rule"))
 }
 
+/// A theme's block: the default theme's on bare `:root`, every other one's
+/// on `:root[data-theme="..."]`. Each also styles that theme's swatch in
+/// Aa (`[data-theme-preview="..."]`), so the block's selector list is
+/// exactly the two.
+fn theme_rule<'a>(rules: &'a [Rule], theme: &str, default_theme: &str) -> &'a Rule {
+    let page = if theme == default_theme {
+        ":root".to_owned()
+    } else {
+        format!(r#":root[data-theme="{theme}"]"#)
+    };
+    let preview = format!(r#"[data-theme-preview="{theme}"]"#);
+    rules
+        .iter()
+        .find(|r| r.at_rule.is_none() && selectors(r).eq([page.as_str(), preview.as_str()]))
+        .unwrap_or_else(|| panic!("expected a `{page}, {preview}` rule"))
+}
+
+fn default_theme() -> String {
+    script_preset("theme-select").1
+}
+
 fn selectors(rule: &Rule) -> impl Iterator<Item = &str> {
     rule.selector.split(',').map(str::trim)
 }
@@ -291,7 +317,7 @@ fn property<'a>(props: &'a [(String, String)], name: &str) -> &'a str {
 /// The `value` attributes of a `<select id="...">`'s options, in order.
 fn select_options(id: &str) -> Vec<(String, String)> {
     let start = HTML
-        .find(&format!(r#"<select id="{id}">"#))
+        .find(&format!(r#"<select id="{id}""#))
         .unwrap_or_else(|| panic!("expected a <select id=\"{id}\">"));
     let end = HTML[start..].find("</select>").unwrap() + start;
     HTML[start..end]
@@ -346,19 +372,13 @@ fn contrast_ratio(a: &str, b: &str) -> f64 {
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 
-/// Palette for each theme the picker offers: the default theme lives on
-/// bare `:root`, every other one on `:root[data-theme="..."]`.
+/// Palette for each theme the picker offers (see `theme_rule`).
 fn theme_palettes(rules: &[Rule]) -> Vec<(String, Vec<(String, String)>)> {
-    let (_, default_theme) = script_preset("theme-select");
+    let default_theme = default_theme();
     select_options("theme-select")
         .into_iter()
         .map(|(value, _)| {
-            let selector = if value == default_theme {
-                ":root".to_owned()
-            } else {
-                format!(r#":root[data-theme="{value}"]"#)
-            };
-            let props = custom_properties(&screen_rule(rules, &selector).body);
+            let props = custom_properties(&theme_rule(rules, &value, &default_theme).body);
             (value, props)
         })
         .collect()
@@ -371,7 +391,7 @@ fn theme_palettes(rules: &[Rule]) -> Vec<(String, Vec<(String, String)>)> {
 #[test]
 fn every_theme_option_defines_a_complete_palette() {
     let rules = rules();
-    let default_rule = screen_rule(&rules, ":root");
+    let default_rule = theme_rule(&rules, &default_theme(), &default_theme());
     let color_props: Vec<String> = custom_properties(&default_rule.body)
         .into_iter()
         .map(|(name, _)| name)
@@ -387,14 +407,12 @@ fn every_theme_option_defines_a_complete_palette() {
         }
     }
     for (theme, _) in theme_palettes(&rules) {
-        let selector = format!(r#":root[data-theme="{theme}"]"#);
-        if let Some(rule) = rules.iter().find(|r| r.selector == selector) {
-            assert!(
-                rule.body.contains("color-scheme:"),
-                "theme `{theme}` should set color-scheme so native <select> \
-                 popups use a matching light/dark palette"
-            );
-        }
+        let rule = theme_rule(&rules, &theme, &default_theme());
+        assert!(
+            rule.body.contains("color-scheme:"),
+            "theme `{theme}` should set color-scheme so native controls use \
+             a matching light/dark palette"
+        );
     }
 }
 
@@ -477,7 +495,7 @@ fn beast_slayer_replaces_monster_hunter_and_migrates_saved_choice() {
     );
 
     let rules = rules();
-    let props = custom_properties(&screen_rule(&rules, r#":root[data-theme="beast-slayer"]"#).body);
+    let props = custom_properties(&theme_rule(&rules, "beast-slayer", &default_theme()).body);
     for (name, value) in [
         ("--text", "#f0e4d0"),
         ("--text-dim", "#c2a583"),
@@ -506,7 +524,9 @@ fn beast_slayer_replaces_monster_hunter_and_migrates_saved_choice() {
 /// Each preference `<select>` must offer exactly the values the script
 /// accepts from storage (otherwise a saved choice could be un-selectable,
 /// or a selectable one silently reset on restart), and its default must be
-/// one of them.
+/// one of them. The `<select>`s are hidden records of each choice; Aa's
+/// buttons, labelled groups built from their options, are what the reader
+/// uses.
 #[test]
 fn preference_selects_match_the_values_the_script_persists() {
     for id in ["theme-select", "text-size-select", "line-spacing-select"] {
@@ -520,8 +540,10 @@ fn preference_selects_match_the_values_the_script_persists() {
             accepted.contains(&fallback),
             "#{id}'s default `{fallback}` should be offered"
         );
-        let label_at = HTML.find(&format!(r#"<label for="{id}">"#));
-        assert!(label_at.is_some(), "#{id} should have a visible <label>");
+        assert!(
+            HTML.contains(&format!(r#"<select id="{id}" hidden>"#)),
+            "#{id} should be a hidden record behind Aa's buttons"
+        );
     }
 }
 
@@ -531,7 +553,7 @@ fn preference_selects_match_the_values_the_script_persists() {
 #[test]
 fn reading_presets_default_to_the_original_typography() {
     let rules = rules();
-    let root = custom_properties(&screen_rule(&rules, ":root").body);
+    let root = custom_properties(&theme_rule(&rules, &default_theme(), &default_theme()).body);
     assert_eq!(property(&root, "--reading-scale"), "1");
     assert_eq!(property(&root, "--reading-leading"), "1.7");
 
@@ -579,8 +601,9 @@ fn reading_presets_scale_only_reading_content() {
     }
 }
 
-/// Reading mode hides navigation and chrome but must keep the chapter
-/// being read, the settings toggle, and its own exit control on screen.
+/// Reading mode hides navigation and chrome (the Library and ☰ buttons
+/// among it) but must keep the chapter being read, Aa, search, and its own
+/// exit control on screen.
 #[test]
 fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
     let rules = rules();
@@ -600,6 +623,8 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
         ".chapter-side",
         ".nav-hint",
         "footer",
+        "#library-toggle",
+        "#menu-toggle",
     ] {
         assert!(
             hidden.contains(&chrome),
@@ -612,7 +637,9 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
         ".chapter-main",
         ".chapter-heading",
         ".verse",
-        ".settings-toggle",
+        ".top-bar",
+        "#aa-toggle",
+        ".search-toggle",
         ".reader-exit",
     ] {
         assert!(
@@ -653,7 +680,7 @@ fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
 
     let toggle = HTML
         .find(r#"id="reader-mode-btn""#)
-        .expect("the settings menu should have a reading-mode toggle");
+        .expect("Aa should have a reading-mode toggle");
     let toggle_tag = &HTML[HTML[..toggle].rfind("<button").unwrap()..toggle + 80];
     assert!(toggle_tag.contains(r#"type="button""#));
     assert!(
@@ -668,8 +695,8 @@ fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
         "the preferences script must not depend on the Tauri bridge"
     );
     for wiring in [
-        "getElementById('reader-exit')",
-        "getElementById('settings-toggle')",
+        "byId('reader-exit')",
+        "byId('aa-toggle')",
         "event.key !== 'Escape'",
         "gospel-getter-reader-mode",
     ] {
@@ -680,13 +707,157 @@ fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
     }
 }
 
+/// The opening tag of the element with `id`.
+fn tag_of(id: &str) -> &'static str {
+    let at = HTML
+        .find(&format!(r#"id="{id}""#))
+        .unwrap_or_else(|| panic!("expected an element #{id}"));
+    let tag = &HTML[HTML[..at].rfind('<').unwrap()..];
+    &tag[..tag.find('>').unwrap()]
+}
+
+/// Each header button announces what it opens and whether it's open, and
+/// what it opens says what it is.
 #[test]
-fn settings_toggle_announces_its_menu() {
-    let at = HTML.find(r#"id="settings-toggle""#).unwrap();
-    let tag = &HTML[HTML[..at].rfind("<button").unwrap()..];
-    let tag = &tag[..tag.find('>').unwrap()];
-    assert!(tag.contains(r#"aria-controls="settings-menu""#));
-    assert!(tag.contains("aria-expanded="));
+fn header_buttons_announce_what_they_open() {
+    for (toggle, surface, role, label) in [
+        (
+            "aa-toggle",
+            "aa-popover",
+            r#"role="dialog""#,
+            "Text and display",
+        ),
+        ("menu-toggle", "app-menu", r#"role="menu""#, "Menu"),
+    ] {
+        let tag = tag_of(toggle);
+        assert!(tag.contains(&format!(r#"aria-controls="{surface}""#)));
+        assert!(tag.contains(r#"aria-expanded="false""#));
+        assert!(tag.contains(&format!(r#"aria-label="{label}""#)));
+        let surface_tag = tag_of(surface);
+        assert!(surface_tag.contains(role), "#{surface} should be {role}");
+        assert!(surface_tag.contains(&format!(r#"aria-label="{label}""#)));
+    }
+    let library = tag_of("library-toggle");
+    assert!(library.contains(r#"aria-controls="library-panel""#));
+    assert!(library.contains(r#"aria-expanded="false""#));
+    assert!(library.contains(r#"aria-label="Library: bookmarks and highlights""#));
+    assert!(tag_of("search-toggle").contains(r#"aria-controls="search-panel""#));
+    let about = tag_of("about-panel");
+    assert!(about.contains(r#"role="dialog""#) && about.contains(r#"aria-modal="true""#));
+    let toast = tag_of("data-status");
+    assert!(toast.contains(r#"role="status""#) && toast.contains(r#"aria-live="polite""#));
+    for item in [
+        "export-data-btn",
+        "import-data-btn",
+        "welcome-btn",
+        "about-btn",
+    ] {
+        assert!(tag_of(item).contains(r#"role="menuitem""#), "#{item}");
+    }
+}
+
+/// The top bar, the popovers, the Library and the toast add only these
+/// colors to the theme palettes: the bar's opaque `--bar-bg`, with the bar
+/// buttons' text and their open state AA on it in every theme; and they
+/// otherwise reuse the AA-tested pairs (`--accent` on `--panel-bg` over
+/// `--option-bg`, `--on-accent` on `--accent`, `--text`/`--text-dim` on
+/// `--option-bg`). The chosen theme swatch's ring is `--accent`, at least
+/// 3:1 (a non-text contrast) on `--option-bg`.
+#[test]
+fn header_surfaces_use_tested_theme_colors() {
+    let rules = rules();
+    let bar = screen_rule(&rules, ".top-bar");
+    assert!(bar.body.contains("background: var(--bar-bg)"));
+    let open_alpha: f64 = screen_rule(&rules, r#".bar-btn[aria-expanded="true"]"#)
+        .body
+        .split_once("rgba(var(--accent-rgb), ")
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(alpha, _)| alpha.trim().parse().unwrap())
+        .expect("an open bar button is tinted with --accent");
+    for (theme, props) in theme_palettes(&rules) {
+        let bar_bg = property(&props, "--bar-bg");
+        let accent = property(&props, "--accent");
+        let accent_rgb = property(&props, "--accent-rgb");
+        let option_bg = property(&props, "--option-bg");
+        for (what, fg, bg) in [
+            (
+                "--text on --bar-bg",
+                property(&props, "--text").to_owned(),
+                bar_bg.to_owned(),
+            ),
+            ("--accent on --bar-bg", accent.to_owned(), bar_bg.to_owned()),
+            (
+                "a bar button",
+                accent.to_owned(),
+                composite(property(&props, "--panel-bg"), bar_bg),
+            ),
+            (
+                "an open bar button",
+                accent.to_owned(),
+                composite(&format!("rgba({accent_rgb}, {open_alpha})"), bar_bg),
+            ),
+            (
+                "a menu item under the pointer",
+                property(&props, "--text").to_owned(),
+                composite(&format!("rgba({accent_rgb}, 0.15)"), option_bg),
+            ),
+        ] {
+            let ratio = contrast_ratio(&fg, &bg);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: {what} is {ratio:.2}:1, below 4.5:1"
+            );
+        }
+        let ring = contrast_ratio(accent, option_bg);
+        assert!(
+            ring >= 3.0,
+            "theme `{theme}`: the chosen swatch's ring is {ring:.2}:1, below 3:1"
+        );
+    }
+
+    let segment = screen_rule(&rules, ".segment");
+    assert!(segment.body.contains("color: var(--accent)"));
+    assert!(segment.body.contains("background: var(--panel-bg)"));
+    let chosen = screen_rule(&rules, r#".segment[aria-pressed="true"]"#);
+    assert!(chosen.body.contains("background: var(--accent)"));
+    assert!(chosen.body.contains("color: var(--on-accent)"));
+    let swatch = screen_rule(&rules, ".theme-swatch");
+    assert!(swatch.body.contains("border: 1px solid var(--text-dim)"));
+    let ring = screen_rule(&rules, r#".theme-swatch[aria-pressed="true"]"#);
+    assert!(ring.body.contains("var(--accent)"));
+    for selector in [".popover", ".library-panel:not([hidden])", ".toast"] {
+        let rule = screen_rule(&rules, selector);
+        assert!(
+            rule.body.contains("background: var(--option-bg)"),
+            "{selector}"
+        );
+        assert!(rule.body.contains("color: var(--text)"), "{selector}");
+    }
+    let tab = screen_rule(&rules, ".library-tab");
+    assert!(tab.body.contains("color: var(--text-dim)"));
+    let menu_hover = screen_rule(&rules, ".menu-item:hover,\n        .menu-item:focus");
+    assert!(menu_hover.body.contains("rgba(var(--accent-rgb), 0.15)"));
+}
+
+/// The theme swatches in Aa are drawn from the theme definitions
+/// themselves, not from copied colors: one per theme, each previewing its
+/// theme through `[data-theme-preview]`.
+#[test]
+fn theme_swatches_come_from_the_theme_definitions() {
+    let rules = rules();
+    let preview = screen_rule(&rules, ".theme-swatch-preview");
+    assert!(preview.body.contains("background: var(--bg)"));
+    assert!(preview.body.contains("color: var(--accent)"));
+    assert!(HTML.contains("preview.dataset.themePreview = option.value;"));
+    assert!(HTML.contains("optionsOf(themeSelect).forEach("));
+}
+
+/// About's Release notes link shows the same URL the backend opens.
+#[test]
+fn release_notes_link_matches_the_backend() {
+    let prefix = gospel_getter_lib::updater::RELEASE_NOTES_PREFIX;
+    assert!(HTML.contains(&format!("`{prefix}${{version}}`")));
+    assert!(HTML.contains("invoke('open_release_notes')"));
 }
 
 /// Arrow keys pressed on a focused settings `<select>` change that

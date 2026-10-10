@@ -240,7 +240,7 @@ async fn dispatch(
         }
         // Opening a browser is the system's job; the call itself is what
         // the tests check.
-        "open_download_page" => Ok(Value::Null),
+        "open_download_page" | "open_release_notes" => Ok(Value::Null),
         // Test setup: how updates behave from now on (see the module docs).
         "__set_update" => {
             *UPDATE

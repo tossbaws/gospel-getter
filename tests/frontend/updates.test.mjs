@@ -1,4 +1,4 @@
-// Behavior tests for updates: the Updates section in Settings, the check at
+// Behavior tests for updates: the Updates section in About, the check at
 // startup (and the setting that turns it off), Check now, the "new version"
 // banner with Later, installing with download progress, and the
 // download-page variant for builds that can't update themselves. The check
@@ -47,7 +47,7 @@ async function click(app, el, cmd) {
     await app.idle(before, cmd);
 }
 
-test('Settings has an Updates section: a launch check that is on, Check now, and what it sends', () =>
+test('About has an Updates section: a launch check that is on, Check now, and what it sends', () =>
     withApp({}, async (app) => {
         const toggle = $(app, 'update-check-toggle');
         assert.equal(toggle.type, 'checkbox');
@@ -62,8 +62,11 @@ test('Settings has an Updates section: a launch check that is on, Check now, and
         assert.equal(button.textContent, 'Check now');
         assert.equal(button.getAttribute('aria-describedby'), 'update-note');
         assert.equal(checkStatus(app).getAttribute('role'), 'status');
-        // Next to the version line, at the foot of the menu.
-        assert.equal(button.closest('.settings-field').nextElementSibling, $(app, 'app-version'));
+        // In About, under the name and version.
+        const section = button.closest('section');
+        assert.ok(section.closest('#about-panel'));
+        assert.equal($(app, section.getAttribute('aria-labelledby')).textContent, 'Updates');
+        assert.ok(toggle.closest('section') === section && checkStatus(app).closest('section') === section);
 
         // Checked once at startup; no update, so no banner and nothing said.
         assert.equal(checks(app), 1);
@@ -95,7 +98,7 @@ test('a newer version shows a banner, without taking focus, with its notes and U
         assert.equal($(app, 'update-download').hidden, true);
         // Nothing is installed until the reader asks.
         assert.equal(app.calls.filter((c) => c.cmd === 'install_update').length, 0);
-        assert.equal(checkStatus(app).textContent, '', 'a launch check says nothing in Settings');
+        assert.equal(checkStatus(app).textContent, '', 'a launch check says nothing in About');
     }));
 
 test('release notes are never treated as markup', () =>
@@ -118,7 +121,7 @@ test('Later hides the banner until the next launch', async () => {
         $(app, 'update-later').focus();
         app.click($(app, 'update-later'));
         assert.equal(banner(app).hidden, true);
-        assert.equal(app.document.activeElement, $(app, 'settings-toggle'), 'focus isn’t lost with the banner');
+        assert.equal(app.document.activeElement, $(app, 'menu-toggle'), 'focus isn’t lost with the banner');
         storage = app.storage();
         assert.equal(Object.keys(storage).filter((k) => k.includes('update')).length, 0, 'Later isn’t remembered');
     });
@@ -147,7 +150,7 @@ test('with the setting off there is no check at startup; it is kept, but not exp
         assert.equal(banner(app).hidden, true);
 
         // Check now still works.
-        app.openSettings();
+        app.open('about');
         await click(app, $(app, 'update-check-btn'), 'check_for_update');
         assert.equal(checks(app), 1);
         assert.equal(banner(app).hidden, false);
@@ -157,7 +160,7 @@ test('with the setting off there is no check at startup; it is kept, but not exp
 
 test('Check now says when the app is up to date', () =>
     withApp({}, async (app) => {
-        app.openSettings();
+        app.open('about');
         await click(app, $(app, 'update-check-btn'), 'check_for_update');
         assert.equal(checkStatus(app).textContent, `Gospel Getter ${VERSION} is the latest version.`);
         assert.ok(!checkStatus(app).classList.contains('is-error'));
@@ -168,7 +171,7 @@ test('Check now says when the app is up to date', () =>
 test('Check now finds an update after Later, and shows the banner again', () =>
     withApp({ update: { check: UPDATE } }, async (app) => {
         app.click($(app, 'update-later'));
-        app.openSettings();
+        app.open('about');
         await click(app, $(app, 'update-check-btn'), 'check_for_update');
         assert.equal(banner(app).hidden, false);
         assert.equal(checkStatus(app).textContent, 'Gospel Getter 2.6.0 is available.');
@@ -183,7 +186,7 @@ test('offline: the check at startup is silent, Check now says what went wrong', 
         // The reader is unaffected.
         assert.equal(app.heading(), 'John 3');
 
-        app.openSettings();
+        app.open('about');
         const button = $(app, 'update-check-btn');
         app.click(button);
         assert.equal(checkStatus(app).textContent, 'Checking for updates…');

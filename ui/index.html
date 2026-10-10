@@ -13,8 +13,11 @@
            theme defines this same set of custom properties — see the
            `[data-theme="..."]` blocks below for the others. `--accent-rgb`
            is a bare "r, g, b" triplet so glow/tint effects can composite it
-           at whatever alpha they need via rgba(var(--accent-rgb), X). */
-        :root {
+           at whatever alpha they need via rgba(var(--accent-rgb), X).
+           Each block also matches [data-theme-preview="..."], so the Aa
+           popover's theme swatches are drawn from these same definitions. */
+        :root,
+        [data-theme-preview="vaporwave"] {
             /* `color-scheme` and `--option-bg` exist for one reason: native
                <select> popup lists don't reliably composite our translucent
                --panel-bg the way the rest of the page does, and without a
@@ -41,6 +44,10 @@
             --panel-bg: rgba(20, 8, 44, 0.55);
             --option-bg: #1e0f3a;
             --on-accent: #14082c;
+            /* The top bar behind the header buttons: opaque, so the page
+               scrolling beneath it never shows through, and --text and
+               --accent stay AA on it (see the palette tests). */
+            --bar-bg: #14082c;
             /* Highlighter colors (behind highlighted verse text), one set
                per theme: muted on the dark themes, pastel on the light one,
                every one keeping --text at AA contrast. */
@@ -57,7 +64,8 @@
             --reading-leading: 1.7;
         }
 
-        :root[data-theme="classic-dark"] {
+        :root[data-theme="classic-dark"],
+        [data-theme-preview="classic-dark"] {
             color-scheme: dark;
             --bg: #121417;
             --text: #e8e8ea;
@@ -68,13 +76,15 @@
             --panel-bg: rgba(255, 255, 255, 0.05);
             --option-bg: #1a1c1f;
             --on-accent: #06141f;
+            --bar-bg: #16181c;
             --hl-yellow: #5a4d12;
             --hl-green: #224f2f;
             --hl-blue: #1f3f6b;
             --hl-pink: #5c2747;
         }
 
-        :root[data-theme="classic-light"] {
+        :root[data-theme="classic-light"],
+        [data-theme-preview="classic-light"] {
             color-scheme: light;
             --bg: #f7f7f5;
             --text: #1c1c1e;
@@ -85,13 +95,15 @@
             --panel-bg: rgba(0, 0, 0, 0.035);
             --option-bg: #ffffff;
             --on-accent: #ffffff;
+            --bar-bg: #ffffff;
             --hl-yellow: #fbe78a;
             --hl-green: #c6ecbd;
             --hl-blue: #c9defc;
             --hl-pink: #f8cfe2;
         }
 
-        :root[data-theme="matrix"] {
+        :root[data-theme="matrix"],
+        [data-theme-preview="matrix"] {
             color-scheme: dark;
             --bg: #020a02;
             --text: #ccffcc;
@@ -102,13 +114,15 @@
             --panel-bg: rgba(0, 255, 65, 0.06);
             --option-bg: #041404;
             --on-accent: #001a00;
+            --bar-bg: #031003;
             --hl-yellow: #4a4708;
             --hl-green: #11521f;
             --hl-blue: #0f3a5c;
             --hl-pink: #57173e;
         }
 
-        :root[data-theme="beast-slayer"] {
+        :root[data-theme="beast-slayer"],
+        [data-theme-preview="beast-slayer"] {
             color-scheme: dark;
             --bg: linear-gradient(
                 180deg,
@@ -125,6 +139,7 @@
             --panel-bg: rgba(26, 20, 16, 0.55);
             --option-bg: #241a12;
             --on-accent: #1a1410;
+            --bar-bg: #1a1410;
             --hl-yellow: #6b5310;
             --hl-green: #31512a;
             --hl-blue: #22415f;
@@ -135,7 +150,8 @@
            pink text on a pink background: the pink carries headings,
            verse numbers and highlights, while body text stays a pale,
            high-contrast blush. */
-        :root[data-theme="hot-pink"] {
+        :root[data-theme="hot-pink"],
+        [data-theme-preview="hot-pink"] {
             color-scheme: dark;
             --bg: linear-gradient(
                 180deg,
@@ -151,6 +167,7 @@
             --panel-bg: rgba(255, 63, 164, 0.07);
             --option-bg: #2a0a1d;
             --on-accent: #1a0411;
+            --bar-bg: #12030c;
             --hl-yellow: #614c0f;
             --hl-green: #1f5038;
             --hl-blue: #263d6b;
@@ -163,6 +180,12 @@
 
         :root[data-line-spacing="compact"] { --reading-leading: 1.45; }
         :root[data-line-spacing="relaxed"] { --reading-leading: 2.05; }
+
+        /* The top bar's height: the page content starts below it, and
+           the Library panel hangs from it. */
+        html {
+            --bar-height: 3.4rem;
+        }
 
         * {
             margin: 0;
@@ -184,44 +207,528 @@
             padding: 2.5rem 1.5rem 6rem;
         }
 
-        .settings-toggle {
+        /* The top bar: Aa, Library, search and the ☰ menu on the right,
+           over an opaque --bar-bg the page scrolls beneath (the content
+           is offset below it, on screen only). In reading mode only
+           Aa, search and the exit button stay, and the bar itself goes. */
+        .top-bar {
             position: fixed;
-            top: 1rem;
-            right: 1.5rem;
+            top: 0;
+            left: 0;
+            right: 0;
             z-index: 20;
+            height: var(--bar-height);
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 0.45rem;
+            padding: 0 1rem;
+            background: var(--bar-bg);
+            border-bottom: 1px solid var(--accent-dim);
+        }
+
+        /* A bar button with the popover it opens, which hangs below it. */
+        .bar-item {
+            position: relative;
+        }
+
+        .bar-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 2.6rem;
+            height: 2.35rem;
+            padding: 0;
             background: var(--panel-bg);
             border: 1px solid var(--accent-dim);
             border-radius: 6px;
             color: var(--accent);
+            font-family: inherit;
             font-size: 1.4rem;
             line-height: 1;
-            padding: 0.4rem 0.6rem;
             cursor: pointer;
         }
 
-        .settings-toggle:hover {
+        .bar-btn:hover,
+        .bar-btn[aria-expanded="true"] {
             border-color: var(--accent);
         }
 
-        /* Search sits beside the settings toggle and, like it, stays
-           available in reading mode. */
-        .search-toggle {
-            position: fixed;
-            top: 1rem;
-            right: 4.6rem;
-            z-index: 20;
+        .bar-btn[aria-expanded="true"] {
+            background: rgba(var(--accent-rgb), 0.08);
+        }
+
+        .aa-toggle {
+            width: 3rem;
+            font-size: 1.15rem;
+            letter-spacing: 0.02em;
+        }
+
+        .bar-btn svg {
+            width: 1.2rem;
+            height: 1.2rem;
+        }
+
+        /* Popovers (Aa and the ☰ menu): opaque --option-bg, like the search
+           panel, hanging below their button with a small pointer to it.
+           Only one popover or panel is open at a time. */
+        .popover {
+            position: absolute;
+            top: calc(100% + 0.55rem);
+            right: 0;
+            background: var(--option-bg);
+            color: var(--text);
+            border: 1px solid var(--accent-dim);
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+            font-size: 0.85rem;
+        }
+
+        .popover::before {
+            content: "";
+            position: absolute;
+            top: -7px;
+            width: 12px;
+            height: 12px;
+            background: var(--option-bg);
+            border-left: 1px solid var(--accent-dim);
+            border-top: 1px solid var(--accent-dim);
+            transform: rotate(45deg);
+        }
+
+        /* Aa: translation and compare, text size, line spacing, theme and
+           reading mode. Every control is --accent on --panel-bg, or
+           --on-accent on --accent when chosen, both AA in every theme. */
+        .aa-popover {
+            width: 20rem;
+            padding: 0.9rem 1rem 1rem;
+        }
+
+        .aa-popover::before {
+            right: calc(1.5rem - 7px);
+        }
+
+        .aa-section {
+            margin-bottom: 0.85rem;
+        }
+
+        .aa-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .section-label {
+            display: block;
+            font-size: 0.7rem;
+            font-weight: normal;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-dim);
+            margin-bottom: 0.35rem;
+        }
+
+        .aa-row {
+            display: flex;
+            gap: 0.4rem;
+        }
+
+        .segmented {
+            display: flex;
+            flex: 1 1 auto;
+            min-width: 0;
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .segment {
+            flex: 1 1 0;
+            min-width: 0;
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--accent);
+            background: var(--panel-bg);
+            border: none;
+            border-left: 1px solid var(--accent-dim);
+            padding: 0.4rem 0.3rem;
+            cursor: pointer;
+        }
+
+        .segment:first-child {
+            border-left: none;
+        }
+
+        .segment:hover {
+            text-decoration: underline;
+        }
+
+        .segment[aria-pressed="true"] {
+            background: var(--accent);
+            color: var(--on-accent);
+        }
+
+        .segment:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -4px;
+        }
+
+        .segment[aria-pressed="true"]:focus-visible {
+            outline-color: var(--on-accent);
+        }
+
+        .aa-row .compare-btn {
+            flex: 0 0 auto;
+            width: auto;
+            white-space: nowrap;
+        }
+
+        .size-stepper {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .stepper-btn {
+            width: 2.6rem;
+            height: 2.1rem;
+            font-family: inherit;
+            line-height: 1;
+            color: var(--accent);
             background: var(--panel-bg);
             border: 1px solid var(--accent-dim);
             border-radius: 6px;
-            color: var(--accent);
-            font-size: 1.4rem;
-            line-height: 1;
-            padding: 0.4rem 0.6rem;
             cursor: pointer;
         }
 
-        .search-toggle:hover {
+        .stepper-btn:hover:not(:disabled) {
             border-color: var(--accent);
+        }
+
+        .stepper-btn:disabled {
+            opacity: 0.35;
+            cursor: default;
+        }
+
+        .stepper-smaller {
+            font-size: 0.8rem;
+        }
+
+        .stepper-larger {
+            font-size: 1.2rem;
+        }
+
+        .size-stepper output {
+            flex: 1 1 auto;
+            text-align: center;
+            color: var(--text);
+        }
+
+        /* Six swatches, each drawn by its own theme's definition (see the
+           theme blocks at the top), ringed in this theme's --text-dim and,
+           when chosen, in --accent: both AA on --option-bg. */
+        .theme-swatches {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 0.45rem;
+        }
+
+        .theme-swatch {
+            display: flex;
+            aspect-ratio: 1;
+            padding: 0;
+            background: none;
+            border: 1px solid var(--text-dim);
+            border-radius: 50%;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .theme-swatch-preview {
+            flex: 1 1 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+            color: var(--accent);
+            font-family: Georgia, 'Times New Roman', serif;
+            font-size: 0.85rem;
+        }
+
+        .theme-swatch[aria-pressed="true"] {
+            box-shadow: 0 0 0 2px var(--option-bg), 0 0 0 4px var(--accent);
+        }
+
+        .theme-swatch:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 5px;
+        }
+
+        .theme-name {
+            margin-top: 0.4rem;
+            text-align: center;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        /* The ☰ menu: Export, Import, Show welcome and About. */
+        .app-menu {
+            width: 14rem;
+            padding: 0.35rem 0;
+        }
+
+        .app-menu::before {
+            right: calc(1.3rem - 7px);
+        }
+
+        .menu-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            font-family: inherit;
+            font-size: 0.9rem;
+            color: var(--text);
+            background: none;
+            border: none;
+            padding: 0.5rem 0.9rem;
+            cursor: pointer;
+        }
+
+        .menu-item:hover,
+        .menu-item:focus {
+            background: rgba(var(--accent-rgb), 0.15);
+        }
+
+        .menu-item:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+        }
+
+        .menu-item:disabled {
+            opacity: 0.6;
+            cursor: progress;
+        }
+
+        .menu-separator {
+            border-top: 1px solid var(--accent-dim);
+            margin: 0.3rem 0;
+        }
+
+        /* Library: bookmarks and highlights in a panel down the right,
+           hanging from the top bar so Aa, search and ☰ stay in reach.
+           Opaque --option-bg, like the popovers. */
+        .library-panel:not([hidden]) {
+            position: fixed;
+            top: var(--bar-height);
+            right: 0;
+            bottom: 0;
+            z-index: 25;
+            display: flex;
+            flex-direction: column;
+            width: min(22.5rem, 100%);
+            background: var(--option-bg);
+            color: var(--text);
+            border-left: 1px solid var(--accent-dim);
+            box-shadow: -10px 0 30px rgba(0, 0, 0, 0.35);
+            font-size: 0.9rem;
+        }
+
+        .library-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.7rem 1rem 0.4rem;
+        }
+
+        .library-title {
+            font-size: 1.1rem;
+            font-weight: normal;
+            color: var(--accent);
+        }
+
+        .panel-close {
+            width: 2rem;
+            height: 2rem;
+            font-family: inherit;
+            font-size: 1.2rem;
+            line-height: 1;
+            color: var(--accent);
+            background: none;
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .panel-close:hover {
+            border-color: var(--accent);
+        }
+
+        .library-tabs {
+            display: flex;
+            margin: 0 1rem;
+            border-bottom: 1px solid var(--accent-dim);
+        }
+
+        .library-tab {
+            flex: 1 1 0;
+            font-family: inherit;
+            font-size: 0.9rem;
+            color: var(--text-dim);
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            padding: 0.5rem;
+            cursor: pointer;
+        }
+
+        .library-tab[aria-selected="true"] {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .tab-count {
+            font-size: 0.75rem;
+        }
+
+        .library-tabpanel {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 0.7rem 1rem 1rem;
+        }
+
+        .library-panel .bookmark-list {
+            max-height: none;
+            overflow: visible;
+        }
+
+        .library-hint {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            padding: 0.5rem 1rem;
+            border-top: 1px solid var(--accent-dim);
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            .library-panel:not([hidden]) {
+                animation: library-in 0.15s ease-out;
+            }
+        }
+
+        @keyframes library-in {
+            from {
+                transform: translateX(1.5rem);
+                opacity: 0;
+            }
+        }
+
+        /* Narrow windows: Aa becomes a sheet along the bottom (scrolling
+           if it must), and the Library takes the full width. */
+        @media (max-width: 560px) {
+            .aa-popover {
+                position: fixed;
+                top: auto;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                width: auto;
+                max-height: min(75vh, calc(100vh - var(--bar-height) - 0.5rem));
+                overflow-y: auto;
+                border-radius: 12px 12px 0 0;
+                border-bottom: none;
+            }
+
+            .aa-popover::before {
+                display: none;
+            }
+
+            .library-panel:not([hidden]) {
+                width: 100%;
+                border-left: none;
+            }
+        }
+
+        /* About: the app, its version and updates, in a modal like the
+           import preview (it shares that panel's look). */
+        .about-panel {
+            position: relative;
+            width: min(28rem, 100%);
+        }
+
+        .about-close {
+            position: absolute;
+            top: 0.8rem;
+            right: 0.8rem;
+        }
+
+        .about-head {
+            display: flex;
+            align-items: center;
+            gap: 0.9rem;
+            margin-bottom: 1rem;
+            padding-right: 2.5rem;
+        }
+
+        .about-icon {
+            flex: 0 0 auto;
+            width: 56px;
+            height: 56px;
+        }
+
+        .about-head .import-title {
+            margin-bottom: 0.1rem;
+        }
+
+        .about-updates .reader-mode-btn {
+            width: auto;
+        }
+
+        .about-links {
+            margin-top: 1rem;
+            padding-top: 0.8rem;
+            border-top: 1px solid var(--accent-dim);
+            font-size: 0.8rem;
+            color: var(--text-dim);
+        }
+
+        .about-links a {
+            color: var(--accent);
+        }
+
+        /* Export and import results: a small notice at the foot of the
+           window that fades away. --text on the opaque --option-bg, AA in
+           every theme. It stays in the page, empty or faded, so screen
+           readers hear each new message. */
+        .toast {
+            position: fixed;
+            left: 50%;
+            bottom: 1rem;
+            transform: translateX(-50%);
+            z-index: 36;
+            width: max-content;
+            max-width: min(30rem, calc(100vw - 2rem));
+            background: var(--option-bg);
+            color: var(--text);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 0.6rem 0.9rem;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+        }
+
+        .toast.is-error {
+            font-weight: bold;
+        }
+
+        .toast.is-hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            .toast {
+                transition: opacity 0.4s ease, visibility 0.4s;
+            }
         }
 
         /* Opaque (--option-bg), unlike the other panels: results are read
@@ -306,26 +813,11 @@
             margin-top: 0.6rem;
         }
 
-        .settings-note {
-            font-size: 0.75rem;
+        .section-note {
+            font-size: 0.78rem;
             line-height: 1.4;
             color: var(--text-dim);
-            margin-bottom: 0.5rem;
-        }
-
-        .data-actions {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.4rem;
-        }
-
-        .data-actions .reader-mode-btn {
-            width: 100%;
-        }
-
-        .data-actions .reader-mode-btn:disabled {
-            opacity: 0.6;
-            cursor: progress;
+            margin: 0.35rem 0 0.6rem;
         }
 
         .data-status {
@@ -342,10 +834,14 @@
         }
 
         .data-problems {
-            font-size: 0.72rem;
+            font-size: 0.8rem;
             line-height: 1.4;
             color: var(--text);
-            margin: 0.2rem 0 0 1rem;
+            margin: 0.2rem 0 0.6rem 1.1rem;
+        }
+
+        .import-invalid {
+            margin-bottom: 0.4rem;
         }
 
         /* Import preview: a modal panel over a dimmed page, so nothing
@@ -759,33 +1255,27 @@
             line-clamp: 1;
         }
 
-        /* The version line at the foot of Settings. --text-dim on the
-           menu's --option-bg meets AA in every theme (see the palette
+        /* The version line under the name in About. --text-dim on the
+           dialog's --option-bg meets AA in every theme (see the palette
            tests). The line keeps its height while empty, so filling it in
            never moves anything. */
         .app-version {
-            font-size: 0.75rem;
+            font-size: 0.85rem;
             line-height: 1.4;
             min-height: 1.4em;
             color: var(--text-dim);
-            margin: 0.9rem 0 0;
-            padding-top: 0.6rem;
-            border-top: 1px solid var(--accent-dim);
         }
 
-        /* Updates, in Settings: the launch-check checkbox, Check now and
-           its status line. */
-        /* An option, not a heading: undo .settings-field label's caps. */
-        .settings-field .update-check-option {
+        /* Updates, in About: the launch-check checkbox, Check now and its
+           status line. */
+        .update-check-option {
             display: flex;
             align-items: flex-start;
             gap: 0.4rem;
-            font-size: 0.85rem;
+            font-size: 0.9rem;
             line-height: 1.35;
-            text-transform: none;
-            letter-spacing: normal;
             color: var(--text);
-            margin-bottom: 0.4rem;
+            margin-bottom: 0.2rem;
             cursor: pointer;
         }
 
@@ -885,77 +1375,17 @@
             width: auto;
         }
 
-        /* Opaque (--option-bg), like the search panel: the menu now holds
-           bookmark previews, read over the chapter text underneath. */
-        .settings-menu {
-            position: fixed;
-            top: 3.4rem;
-            right: 1.5rem;
-            z-index: 20;
-            background: var(--option-bg);
-            border: 1px solid var(--accent-dim);
-            border-radius: 8px;
-            padding: 1rem;
-            width: 300px;
-            max-width: calc(100vw - 2rem);
-            max-height: calc(100vh - 4.4rem);
-            overflow-y: auto;
-            backdrop-filter: blur(6px);
-        }
-
-        .settings-menu:not([hidden]) {
-            display: block;
-        }
-
-        .settings-field {
-            display: block;
-            margin-bottom: 0.9rem;
-        }
-
-        .settings-field:last-child {
-            margin-bottom: 0;
-        }
-
-        .settings-field label,
-        .settings-label {
-            display: block;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--text-dim);
-            margin-bottom: 0.3rem;
-        }
-
-        .settings-field select {
-            width: 100%;
-            font-family: inherit;
-            font-size: 0.85rem;
-            color: var(--text);
-            background: var(--panel-bg);
-            border: 1px solid var(--accent-dim);
-            border-radius: 6px;
-            padding: 0.35rem 0.5rem;
-            cursor: pointer;
-        }
-
-        /* The open option list is a native popup, not part of the page's
-           own rendering — style it explicitly with an opaque background
-           rather than relying on it picking up --panel-bg's translucency
-           (see the note on color-scheme/--option-bg up in :root). */
-        .settings-field select option {
-            background-color: var(--option-bg);
-            color: var(--text);
-        }
-
-        .settings-toggle:focus-visible,
-        .search-toggle:focus-visible,
+        .bar-btn:focus-visible,
+        .stepper-btn:focus-visible,
+        .panel-close:focus-visible,
+        .library-tab:focus-visible,
+        .about-links a:focus-visible,
         .search-input:focus-visible,
         .search-more:focus-visible,
         .bookmark-open:focus-visible,
         .bookmark-remove:focus-visible,
         .highlight-filter-btn:focus-visible,
         .verse-bookmark-btn:focus-visible,
-        .settings-field select:focus-visible,
         .reader-mode-btn:focus-visible,
         .reader-exit:focus-visible {
             outline: 2px solid var(--accent);
@@ -990,17 +1420,19 @@
         }
 
         /* Distraction-free reading mode: everything but the chapter being
-           read is hidden, except the settings toggle (so text size and
-           spacing stay adjustable) and an always-visible exit button — the
-           reader can never get stuck in this mode. The mode is purely
-           presentational: #reading-pane-inner and its prev/next data are
-           untouched, so arrow-key navigation keeps working. */
+           read is hidden, except Aa (so text size and spacing stay
+           adjustable), search, and an always-visible exit button — the
+           reader can never get stuck in this mode. The exit button sits in
+           the top bar, before Aa. The mode is purely presentational:
+           #reading-pane-inner and its prev/next data are untouched, so
+           arrow-key navigation keeps working. */
         .reader-exit {
-            position: fixed;
-            top: 1rem;
-            right: 7.7rem;
-            z-index: 20;
-            padding: 0.45rem 0.8rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3em;
+            height: 2.35rem;
+            padding: 0 0.8rem;
+            white-space: nowrap;
         }
 
         :root:not([data-reader-mode="on"]) .reader-exit {
@@ -1009,7 +1441,33 @@
 
         /* Screen-only, so a page printed from reading mode is laid out
            exactly like one printed normally. */
+        /* On screen the page starts below the top bar, and anything
+           scrolled into view or stuck to the top stops below it too. */
         @media screen {
+            html {
+                scroll-padding-top: var(--bar-height);
+            }
+
+            .container {
+                padding-top: calc(var(--bar-height) + 1.5rem);
+            }
+
+            .compare-head {
+                top: var(--bar-height);
+            }
+
+            :root[data-reader-mode="on"] .top-bar {
+                background: transparent;
+                border-bottom-color: transparent;
+                pointer-events: none;
+            }
+
+            :root[data-reader-mode="on"] .top-bar > * {
+                pointer-events: auto;
+            }
+
+            :root[data-reader-mode="on"] #library-toggle,
+            :root[data-reader-mode="on"] #menu-toggle,
             :root[data-reader-mode="on"] header,
             :root[data-reader-mode="on"] .book-list,
             :root[data-reader-mode="on"] #chapter-list,
@@ -1662,8 +2120,10 @@
                 --reading-leading: 1.7 !important;
             }
 
-            .settings-toggle,
-            .settings-menu,
+            .top-bar,
+            .popover,
+            .library-panel,
+            .toast,
             .reader-exit,
             header,
             .book-list,
@@ -1810,22 +2270,349 @@
                 apply(PREFS[name], load(PREFS[name]));
             });
 
+            // The header's popovers and panels: Aa, the Library, the ☰ menu
+            // and the About dialog. Only one is open at a time; Escape
+            // closes it, and so does a click outside a popover (the Aa
+            // popover or the menu). Opening one moves focus into it, and
+            // closing it gives focus back to the button that opened it.
+            // They live here, with the preferences, so Aa (and with it
+            // reading mode) keeps working even if the main script fails.
+            // The main script reaches them through this, once the page has
+            // loaded.
+            window.gospelGetterSurfaces = null;
+
             document.addEventListener('DOMContentLoaded', function () {
                 var root = document.documentElement;
-                var settingsToggle = document.getElementById('settings-toggle');
-                var settingsMenu = document.getElementById('settings-menu');
-                var readerModeBtn = document.getElementById('reader-mode-btn');
-                var readerExit = document.getElementById('reader-exit');
-                var compareBtn = document.getElementById('compare-btn');
-
-                function setMenuOpen(open) {
-                    settingsMenu.hidden = !open;
-                    settingsToggle.setAttribute('aria-expanded', String(open));
-                }
+                var byId = function (id) { return document.getElementById(id); };
+                var aaToggle = byId('aa-toggle');
+                var aaPopover = byId('aa-popover');
+                var libraryToggle = byId('library-toggle');
+                var libraryPanel = byId('library-panel');
+                var menuToggle = byId('menu-toggle');
+                var appMenu = byId('app-menu');
+                var aboutOverlay = byId('about-overlay');
+                var aboutPanel = byId('about-panel');
+                var readerModeBtn = byId('reader-mode-btn');
+                var readerExit = byId('reader-exit');
+                var compareBtn = byId('compare-btn');
 
                 function isReaderMode() {
                     return root.dataset.readerMode === 'on';
                 }
+
+                // ---- Surfaces
+
+                var SURFACES = {
+                    aa: { el: aaPopover, toggle: aaToggle, popover: true },
+                    library: { el: libraryPanel, toggle: libraryToggle, popover: false },
+                    menu: { el: appMenu, toggle: menuToggle, popover: true },
+                    about: { el: aboutOverlay, toggle: null, popover: false },
+                };
+                var current = null;
+                var returnFocus = null;
+
+                function shown(el) {
+                    return !!el && el.isConnected && !el.closest('[hidden]') && getComputedStyle(el).display !== 'none';
+                }
+
+                function setShown(name, open) {
+                    var surface = SURFACES[name];
+                    surface.el.hidden = !open;
+                    if (surface.toggle) surface.toggle.setAttribute('aria-expanded', String(open));
+                }
+
+                // Closes whatever is open. Focus goes back to the button
+                // that opened it, unless it has already moved on to
+                // something else (a dialog the surface opened, say), or
+                // `restoreFocus` is false.
+                function closeSurface(restoreFocus) {
+                    if (!current) return;
+                    var el = SURFACES[current].el;
+                    var target = returnFocus;
+                    var active = document.activeElement;
+                    var focusWasInside = !active || active === document.body || el.contains(active);
+                    setShown(current, false);
+                    current = null;
+                    returnFocus = null;
+                    if (restoreFocus !== false && focusWasInside && target && shown(target)) target.focus();
+                }
+
+                function focusInto(name) {
+                    var first;
+                    if (name === 'aa') {
+                        first = aaPopover.querySelector('.segment[aria-pressed="true"]') || aaPopover.querySelector('button');
+                    } else if (name === 'library') {
+                        first = libraryPanel.querySelector('[role="tab"][aria-selected="true"]');
+                    } else if (name === 'menu') {
+                        first = menuItems()[0];
+                    } else {
+                        first = byId('about-close');
+                    }
+                    if (first) first.focus();
+                }
+
+                // `opener` is the control focus returns to on closing: the
+                // surface's own button unless given (About, opened from
+                // the ☰ menu, returns to ☰).
+                function openSurface(name, opener) {
+                    // The Library's button is hidden in reading mode.
+                    if (name === 'library' && isReaderMode()) return;
+                    if (current) closeSurface(false);
+                    current = name;
+                    returnFocus = opener || SURFACES[name].toggle;
+                    if (name === 'aa') renderAa();
+                    setShown(name, true);
+                    // The main script closes the search panel.
+                    document.dispatchEvent(new CustomEvent('gospel-getter:surface-open', { detail: { name: name } }));
+                    focusInto(name);
+                }
+
+                function toggleSurface(name, opener) {
+                    if (current === name) closeSurface();
+                    else openSurface(name, opener);
+                }
+
+                window.gospelGetterSurfaces = {
+                    current: function () { return current; },
+                    open: openSurface,
+                    close: closeSurface,
+                    toggle: toggleSurface,
+                };
+
+                aaToggle.addEventListener('click', function () { toggleSurface('aa'); });
+                libraryToggle.addEventListener('click', function () { toggleSurface('library'); });
+                menuToggle.addEventListener('click', function () { toggleSurface('menu'); });
+                byId('library-close').addEventListener('click', function () { closeSurface(); });
+                byId('about-close').addEventListener('click', function () { closeSurface(); });
+                byId('about-btn').addEventListener('click', function () { openSurface('about', menuToggle); });
+
+                // A click outside the open popover (and its button) closes
+                // it. The Library stays open while the reader reads, and
+                // About is modal.
+                document.addEventListener('click', function (event) {
+                    if (!current || !SURFACES[current].popover) return;
+                    var surface = SURFACES[current];
+                    if (surface.el.contains(event.target) || surface.toggle.contains(event.target)) return;
+                    closeSurface();
+                });
+
+                // ---- The ☰ menu: a menu, so ↑ and ↓ (and Home and End)
+                // move between its items, Enter or Space chooses one,
+                // and Escape or Tab closes it. Choosing an item closes it
+                // too.
+                function menuItems() {
+                    return [].slice.call(appMenu.querySelectorAll('[role="menuitem"]')).filter(function (item) {
+                        return !item.disabled;
+                    });
+                }
+
+                appMenu.addEventListener('keydown', function (event) {
+                    var items = menuItems();
+                    var index = items.indexOf(document.activeElement);
+                    var next = null;
+                    if (event.key === 'ArrowDown') next = items[(index + 1) % items.length];
+                    else if (event.key === 'ArrowUp') next = items[(index - 1 + items.length) % items.length];
+                    else if (event.key === 'Home') next = items[0];
+                    else if (event.key === 'End') next = items[items.length - 1];
+                    else if (event.key === 'Tab') {
+                        event.preventDefault();
+                        closeSurface();
+                        return;
+                    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                        // Not a chapter turn while in the menu.
+                        event.stopPropagation();
+                        return;
+                    } else {
+                        return;
+                    }
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (next) next.focus();
+                });
+
+                menuToggle.addEventListener('keydown', function (event) {
+                    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                    event.preventDefault();
+                    if (current !== 'menu') openSurface('menu');
+                    var items = menuItems();
+                    if (items.length) items[event.key === 'ArrowDown' ? 0 : items.length - 1].focus();
+                });
+
+                // Runs after the item's own action (that listener is on the
+                // item itself), so an item that opened something else has
+                // already closed the menu.
+                appMenu.addEventListener('click', function (event) {
+                    if (event.target.closest('[role="menuitem"]') && current === 'menu') closeSurface();
+                });
+
+                // ---- About is modal, like the import preview: Tab stays
+                // inside it, Escape closes it, and the reader's shortcuts
+                // wait (the main script checks for it).
+                aboutOverlay.addEventListener('keydown', function (event) {
+                    if (event.key === 'Escape') {
+                        event.preventDefault();
+                        closeSurface();
+                        return;
+                    }
+                    if (event.key !== 'Tab') return;
+                    var focusable = [].slice.call(aboutPanel.querySelectorAll('input, button, a[href]')).filter(function (el) {
+                        return !el.disabled && !el.closest('[hidden]');
+                    });
+                    if (!focusable.length) return;
+                    var first = focusable[0];
+                    var last = focusable[focusable.length - 1];
+                    if (event.shiftKey && document.activeElement === first) {
+                        event.preventDefault();
+                        last.focus();
+                    } else if (!event.shiftKey && document.activeElement === last) {
+                        event.preventDefault();
+                        first.focus();
+                    }
+                });
+
+                // ---- The Library's tabs. The one last shown is kept for
+                // this session only (it isn't stored).
+                var libraryTabs = [].slice.call(libraryPanel.querySelectorAll('[role="tab"]'));
+
+                function selectLibraryTab(tab, focus) {
+                    libraryTabs.forEach(function (t) {
+                        var selected = t === tab;
+                        t.setAttribute('aria-selected', String(selected));
+                        t.tabIndex = selected ? 0 : -1;
+                        byId(t.getAttribute('aria-controls')).hidden = !selected;
+                    });
+                    if (focus) tab.focus();
+                }
+
+                libraryPanel.querySelector('[role="tablist"]').addEventListener('click', function (event) {
+                    var tab = event.target.closest('[role="tab"]');
+                    if (tab) selectLibraryTab(tab, false);
+                });
+
+                libraryPanel.querySelector('[role="tablist"]').addEventListener('keydown', function (event) {
+                    var index = libraryTabs.indexOf(event.target.closest('[role="tab"]'));
+                    if (index === -1) return;
+                    var next = null;
+                    if (event.key === 'ArrowRight') next = libraryTabs[(index + 1) % libraryTabs.length];
+                    else if (event.key === 'ArrowLeft') next = libraryTabs[(index - 1 + libraryTabs.length) % libraryTabs.length];
+                    else if (event.key === 'Home') next = libraryTabs[0];
+                    else if (event.key === 'End') next = libraryTabs[libraryTabs.length - 1];
+                    if (!next) return;
+                    // Not a chapter turn.
+                    event.preventDefault();
+                    event.stopPropagation();
+                    selectLibraryTab(next, true);
+                });
+
+                // ---- Aa: views of the translation, text size, line
+                // spacing and theme <select>s, which stay the record of
+                // each choice (hidden). Choosing changes the <select> and
+                // fires its change event, so a choice goes through exactly
+                // the code a <select> change always has.
+                var translationSelect = byId('translation-select');
+                var textSizeSelect = byId('text-size-select');
+                var lineSpacingSelect = byId('line-spacing-select');
+                var themeSelect = byId('theme-select');
+                var translationChoices = byId('translation-choices');
+                var lineSpacingChoices = byId('line-spacing-choices');
+                var themeChoices = byId('theme-choices');
+                var textSizeDown = byId('text-size-down');
+                var textSizeUp = byId('text-size-up');
+
+                function choose(select, value) {
+                    if (select.value !== value) {
+                        select.value = value;
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    syncAa();
+                }
+
+                function optionsOf(select) {
+                    return [].slice.call(select.options);
+                }
+
+                function segmentButton(option, label) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'segment';
+                    btn.dataset.value = option.value;
+                    btn.textContent = label;
+                    return btn;
+                }
+
+                optionsOf(lineSpacingSelect).forEach(function (option) {
+                    lineSpacingChoices.appendChild(segmentButton(option, option.textContent));
+                });
+
+                optionsOf(themeSelect).forEach(function (option) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'theme-swatch';
+                    btn.dataset.value = option.value;
+                    btn.title = option.textContent;
+                    btn.setAttribute('aria-label', option.textContent);
+                    var preview = document.createElement('span');
+                    preview.className = 'theme-swatch-preview';
+                    preview.dataset.themePreview = option.value;
+                    preview.setAttribute('aria-hidden', 'true');
+                    preview.textContent = 'A';
+                    btn.appendChild(preview);
+                    themeChoices.appendChild(btn);
+                });
+
+                // The translations come from the backend (the main script
+                // fills the <select>), so their buttons are rebuilt each
+                // time Aa opens.
+                function renderAa() {
+                    translationChoices.textContent = '';
+                    optionsOf(translationSelect).forEach(function (option) {
+                        var btn = segmentButton(option, option.value.toUpperCase());
+                        btn.title = option.textContent;
+                        translationChoices.appendChild(btn);
+                    });
+                    syncAa();
+                }
+
+                function setPressed(group, value) {
+                    [].slice.call(group.querySelectorAll('button')).forEach(function (btn) {
+                        btn.setAttribute('aria-pressed', String(btn.dataset.value === value));
+                    });
+                }
+
+                function syncAa() {
+                    setPressed(translationChoices, translationSelect.value);
+                    setPressed(lineSpacingChoices, lineSpacingSelect.value);
+                    setPressed(themeChoices, themeSelect.value);
+                    var theme = themeSelect.options[themeSelect.selectedIndex];
+                    byId('theme-name').textContent = theme ? theme.textContent : '';
+                    var sizes = textSizeSelect.options;
+                    var index = textSizeSelect.selectedIndex;
+                    byId('text-size-value').textContent = sizes[index] ? sizes[index].textContent : '';
+                    var focused = document.activeElement;
+                    textSizeDown.disabled = index <= 0;
+                    textSizeUp.disabled = index >= sizes.length - 1;
+                    // A button that just reached the end of the range
+                    // can't keep focus; hand it to the other one.
+                    if (focused === textSizeDown && textSizeDown.disabled) textSizeUp.focus();
+                    if (focused === textSizeUp && textSizeUp.disabled) textSizeDown.focus();
+                }
+
+                function stepTextSize(by) {
+                    var option = textSizeSelect.options[textSizeSelect.selectedIndex + by];
+                    if (option) choose(textSizeSelect, option.value);
+                }
+
+                [translationChoices, lineSpacingChoices, themeChoices].forEach(function (group) {
+                    var select = { 'translation-choices': translationSelect, 'line-spacing-choices': lineSpacingSelect, 'theme-choices': themeSelect }[group.id];
+                    group.addEventListener('click', function (event) {
+                        var btn = event.target.closest('button');
+                        if (btn) choose(select, btn.dataset.value);
+                    });
+                });
+                textSizeDown.addEventListener('click', function () { stepTextSize(-1); });
+                textSizeUp.addEventListener('click', function () { stepTextSize(1); });
+
+                // ---- Preferences
 
                 function setReaderMode(on) {
                     var value = on ? 'on' : 'off';
@@ -1833,9 +2620,11 @@
                     store(PREFS.readerMode, value);
                     readerModeBtn.setAttribute('aria-pressed', String(on));
                     // Move focus to whichever control undoes this, so a
-                    // keyboard user always lands somewhere sensible.
-                    setMenuOpen(false);
-                    (on ? readerExit : settingsToggle).focus();
+                    // keyboard user always lands somewhere sensible: the
+                    // exit button, or Aa, which holds the reading-mode
+                    // toggle.
+                    closeSurface(false);
+                    (on ? readerExit : aaToggle).focus();
                 }
 
                 Object.keys(PREFS).forEach(function (name) {
@@ -1875,9 +2664,9 @@
                 });
 
                 // All display preferences at once, for exporting and
-                // importing them (the main script's "Back up or move your
-                // data"). Names and values are the export file's: theme,
-                // text_size and line_spacing as the menu's option values,
+                // importing them (Export data… and Import data… in the ☰
+                // menu). Names and values are the export file's: theme,
+                // text_size and line_spacing as Aa's option values,
                 // reading_mode and compare as true/false.
                 var FILE_NAMES = {
                     theme: 'theme',
@@ -1938,30 +2727,18 @@
                     },
                 };
 
-                settingsToggle.addEventListener('click', function () {
-                    setMenuOpen(settingsMenu.hidden);
-                });
-
-                // Clicking anywhere outside the menu (and its toggle)
-                // closes it. The import preview, opened from the menu,
-                // returns to it when it closes, so a click there doesn't.
-                document.addEventListener('click', function (event) {
-                    if (!event.target.closest('#settings-menu, #settings-toggle, #import-overlay')) {
-                        setMenuOpen(false);
-                    }
-                });
-
-                // Escape backs out one step at a time: first an open
-                // settings menu, then a verse selection, then reading
-                // mode. The main script's handler runs first (it's
-                // registered before DOMContentLoaded) and marks an Escape
-                // that cleared a verse selection as handled.
+                // Escape backs out one step at a time: first the search
+                // panel, then whichever popover or panel is open, then a
+                // verse selection, then reading mode. The main script's
+                // handler runs first (it's registered before
+                // DOMContentLoaded) and marks an Escape that closed search
+                // or cleared a verse selection as handled.
                 document.addEventListener('keydown', function (event) {
                     if (event.key !== 'Escape') return;
                     if (event.defaultPrevented) return;
-                    if (!settingsMenu.hidden) {
-                        setMenuOpen(false);
-                        settingsToggle.focus();
+                    if (current) {
+                        event.preventDefault();
+                        closeSurface();
                     } else if (isReaderMode()) {
                         setReaderMode(false);
                     }
@@ -1971,9 +2748,91 @@
     </script>
 </head>
 <body>
-    <button type="button" id="settings-toggle" class="settings-toggle" aria-label="Settings" aria-controls="settings-menu" aria-expanded="false">&#9776;</button>
-    <button type="button" id="search-toggle" class="search-toggle" aria-label="Search or go to a reference" aria-controls="search-panel" aria-expanded="false" title="Search or go to a reference (/ or Ctrl+K)">&#8981;</button>
-    <button type="button" id="reader-exit" class="reader-exit">Exit reading mode <span aria-hidden="true">(Esc)</span></button>
+    <div id="top-bar" class="top-bar">
+        <button type="button" id="reader-exit" class="reader-exit">Exit reading mode <span aria-hidden="true">(Esc)</span></button>
+        <div class="bar-item">
+            <button type="button" id="aa-toggle" class="bar-btn aa-toggle" aria-label="Text and display" title="Text and display" aria-haspopup="dialog" aria-controls="aa-popover" aria-expanded="false">Aa</button>
+            <div id="aa-popover" class="popover aa-popover" role="dialog" aria-label="Text and display" hidden>
+                <div class="aa-section">
+                    <span class="section-label" id="translation-label">Translation</span>
+                    <div class="aa-row">
+                        <div id="translation-choices" class="segmented" role="group" aria-labelledby="translation-label"></div>
+                        <button type="button" id="compare-btn" class="reader-mode-btn compare-btn" aria-pressed="false" title="Compare the translations side by side (C)">Compare <span aria-hidden="true">(C)</span></button>
+                    </div>
+                    <select id="translation-select" hidden></select>
+                </div>
+                <div class="aa-section">
+                    <span class="section-label" id="text-size-label">Text size</span>
+                    <div class="size-stepper" role="group" aria-labelledby="text-size-label">
+                        <button type="button" id="text-size-down" class="stepper-btn stepper-smaller" aria-label="Smaller text" title="Smaller text">A&minus;</button>
+                        <output id="text-size-value" aria-live="polite"></output>
+                        <button type="button" id="text-size-up" class="stepper-btn stepper-larger" aria-label="Larger text" title="Larger text">A+</button>
+                    </div>
+                    <select id="text-size-select" hidden>
+                        <option value="small">Small</option>
+                        <option value="medium">Medium</option>
+                        <option value="large">Large</option>
+                        <option value="x-large">Extra large</option>
+                    </select>
+                </div>
+                <div class="aa-section">
+                    <span class="section-label" id="line-spacing-label">Line spacing</span>
+                    <div id="line-spacing-choices" class="segmented" role="group" aria-labelledby="line-spacing-label"></div>
+                    <select id="line-spacing-select" hidden>
+                        <option value="compact">Compact</option>
+                        <option value="normal">Normal</option>
+                        <option value="relaxed">Relaxed</option>
+                    </select>
+                </div>
+                <div class="aa-section">
+                    <span class="section-label" id="theme-label">Theme</span>
+                    <div id="theme-choices" class="theme-swatches" role="group" aria-labelledby="theme-label"></div>
+                    <p id="theme-name" class="theme-name" aria-hidden="true"></p>
+                    <select id="theme-select" hidden>
+                        <option value="vaporwave">Vaporwave</option>
+                        <option value="classic-dark">Classic Dark</option>
+                        <option value="classic-light">Classic Light</option>
+                        <option value="matrix">Matrix</option>
+                        <option value="beast-slayer">Beast Slayer</option>
+                        <option value="hot-pink">Hot Pink</option>
+                    </select>
+                </div>
+                <div class="aa-section">
+                    <button type="button" id="reader-mode-btn" class="reader-mode-btn" aria-pressed="false">Reading mode</button>
+                </div>
+            </div>
+        </div>
+        <button type="button" id="library-toggle" class="bar-btn" aria-label="Library: bookmarks and highlights" title="Library: bookmarks and highlights (Ctrl+B)" aria-controls="library-panel" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg></button>
+        <button type="button" id="search-toggle" class="bar-btn search-toggle" aria-label="Search or go to a reference" aria-controls="search-panel" aria-expanded="false" title="Search or go to a reference (/ or Ctrl+K)">&#8981;</button>
+        <div class="bar-item">
+            <button type="button" id="menu-toggle" class="bar-btn" aria-label="Menu" title="Menu" aria-haspopup="menu" aria-controls="app-menu" aria-expanded="false">&#9776;</button>
+            <div id="app-menu" class="popover app-menu" role="menu" aria-label="Menu" hidden>
+                <button type="button" id="export-data-btn" class="menu-item" role="menuitem" tabindex="-1">Export data…</button>
+                <button type="button" id="import-data-btn" class="menu-item" role="menuitem" tabindex="-1">Import data…</button>
+                <div class="menu-separator" role="separator"></div>
+                <button type="button" id="welcome-btn" class="menu-item" role="menuitem" tabindex="-1">Show welcome</button>
+                <button type="button" id="about-btn" class="menu-item" role="menuitem" tabindex="-1">About Gospel Getter</button>
+            </div>
+        </div>
+    </div>
+    <aside id="library-panel" class="library-panel" aria-labelledby="library-title" hidden>
+        <div class="library-head">
+            <h2 id="library-title" class="library-title">Library</h2>
+            <button type="button" id="library-close" class="panel-close" aria-label="Close the library" title="Close (Esc)">&times;</button>
+        </div>
+        <div class="library-tabs" role="tablist" aria-labelledby="library-title">
+            <button type="button" id="library-tab-bookmarks" class="library-tab" role="tab" aria-controls="library-bookmarks" aria-selected="true">Bookmarks <span id="bookmark-count" class="tab-count"></span></button>
+            <button type="button" id="library-tab-highlights" class="library-tab" role="tab" aria-controls="library-highlights" aria-selected="false" tabindex="-1">Highlights <span id="highlight-count" class="tab-count"></span></button>
+        </div>
+        <div id="library-bookmarks" class="library-tabpanel" role="tabpanel" aria-labelledby="library-tab-bookmarks">
+            <ul id="bookmark-list" class="bookmark-list" aria-labelledby="library-tab-bookmarks"></ul>
+        </div>
+        <div id="library-highlights" class="library-tabpanel" role="tabpanel" aria-labelledby="library-tab-highlights" hidden>
+            <div id="highlight-filter" class="highlight-filter" role="group" aria-label="Show highlights"></div>
+            <ul id="highlight-list" class="bookmark-list" aria-labelledby="library-tab-highlights"></ul>
+        </div>
+        <p class="library-hint">Ctrl+B opens and closes the library &middot; Esc closes it</p>
+    </aside>
     <div id="search-panel" class="search-panel" role="dialog" aria-label="Search" hidden>
         <input type="search" id="search-input" class="search-input" placeholder="Words, or a reference like John 3:16" aria-label="Search the text, or go to a reference" aria-describedby="search-status" autocomplete="off" spellcheck="false">
         <p id="search-status" class="search-status" role="status" aria-live="polite"></p>
@@ -1984,6 +2843,8 @@
         <div id="import-panel" class="import-panel" role="dialog" aria-modal="true" aria-labelledby="import-title" aria-describedby="import-summary">
             <h2 id="import-title" class="import-title">Import bookmarks, highlights and settings</h2>
             <p id="import-file" class="import-file"></p>
+            <p id="import-invalid" class="import-invalid" hidden></p>
+            <ul id="data-problems" class="data-problems"></ul>
             <ul id="import-summary" class="import-summary"></ul>
             <fieldset id="import-bookmark-choice" class="import-choices">
                 <legend id="import-choice-legend">Bookmarks</legend>
@@ -1998,6 +2859,26 @@
                 <button type="button" id="import-confirm" class="import-confirm">Import</button>
                 <button type="button" id="import-cancel" class="reader-mode-btn">Cancel</button>
             </div>
+        </div>
+    </div>
+    <div id="about-overlay" class="import-overlay" hidden>
+        <div id="about-panel" class="import-panel about-panel" role="dialog" aria-modal="true" aria-labelledby="about-title" aria-describedby="app-version">
+            <button type="button" id="about-close" class="panel-close about-close" aria-label="Close" title="Close (Esc)">&times;</button>
+            <div class="about-head">
+                <img class="about-icon" src="favicon.svg" alt="" width="56" height="56">
+                <div>
+                    <h2 id="about-title" class="import-title">Gospel Getter</h2>
+                    <p id="app-version" class="app-version"></p>
+                </div>
+            </div>
+            <section class="about-updates" aria-labelledby="updates-label">
+                <h3 class="section-label" id="updates-label">Updates</h3>
+                <label class="update-check-option"><input type="checkbox" id="update-check-toggle" checked> <span>Check for updates when Gospel Getter starts</span></label>
+                <p class="section-note" id="update-note">Checking downloads a small file from GitHub that names the latest version, so GitHub sees your IP address, as with any download. Nothing about your reading or your data is sent.</p>
+                <button type="button" id="update-check-btn" class="reader-mode-btn" aria-describedby="update-note">Check now</button>
+                <p id="update-check-status" class="data-status" role="status" aria-live="polite"></p>
+            </section>
+            <p class="about-links"><a id="release-notes-link" href="https://github.com/tossbaws/gospel-getter/releases" hidden>Release notes</a> <span id="release-notes-status" class="data-status" role="status" aria-live="polite"></span></p>
         </div>
     </div>
     <div id="welcome-overlay" class="welcome-overlay" hidden>
@@ -2026,15 +2907,16 @@
                         <li>Press <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> to search the text, or type a reference like John 3:16 to go straight there.</li>
                         <li>Click a verse, and Shift-click another to select a range. Copy (or <kbd>Ctrl</kbd>+<kbd>C</kbd>) copies it with its reference, and ★ Bookmark saves it.</li>
                         <li>Selected verses can also be highlighted in yellow, green, blue or pink.</li>
-                        <li>To back up or move your bookmarks and highlights, use Export data... and Import data... in Settings.</li>
+                        <li>To back up or move your bookmarks and highlights, use Export data… and Import data… in the ☰ menu, top right.</li>
                     </ul>
                 </section>
                 <section class="welcome-page" hidden>
                     <h2 id="welcome-title-4">Make it yours</h2>
                     <ul id="welcome-text-4">
-                        <li>Settings (the ☰ button, top right) has six themes, four text sizes, three line spacings and a distraction-free reading mode.</li>
+                        <li>Aa, top right, has six themes, four text sizes, three line spacings, the translation and a distraction-free reading mode.</li>
+                        <li>Your bookmarks and highlights are in the Library, the bookmark button beside Aa (or press <kbd>Ctrl</kbd>+<kbd>B</kbd>).</li>
                         <li>Press <kbd>C</kbd> to compare the KJV and WEB side by side.</li>
-                        <li>Your chapter, bookmarks, highlights and settings are remembered. To see this tour again, choose Show welcome in Settings.</li>
+                        <li>Your chapter, bookmarks, highlights and settings are remembered. To see this tour again, choose Show welcome in the ☰ menu.</li>
                     </ul>
                 </section>
             </div>
@@ -2046,76 +2928,7 @@
             </div>
         </div>
     </div>
-    <div id="settings-menu" class="settings-menu" hidden>
-        <div class="settings-field">
-            <label for="theme-select">Theme</label>
-            <select id="theme-select">
-                <option value="vaporwave">Vaporwave</option>
-                <option value="classic-dark">Classic Dark</option>
-                <option value="classic-light">Classic Light</option>
-                <option value="matrix">Matrix</option>
-                <option value="beast-slayer">Beast Slayer</option>
-                <option value="hot-pink">Hot Pink</option>
-            </select>
-        </div>
-        <div class="settings-field">
-            <label for="translation-select">Translation</label>
-            <select id="translation-select"></select>
-        </div>
-        <div class="settings-field">
-            <label for="text-size-select">Text size</label>
-            <select id="text-size-select">
-                <option value="small">Small</option>
-                <option value="medium">Medium</option>
-                <option value="large">Large</option>
-                <option value="x-large">Extra large</option>
-            </select>
-        </div>
-        <div class="settings-field">
-            <label for="line-spacing-select">Line spacing</label>
-            <select id="line-spacing-select">
-                <option value="compact">Compact</option>
-                <option value="normal">Normal</option>
-                <option value="relaxed">Relaxed</option>
-            </select>
-        </div>
-        <div class="settings-field">
-            <button type="button" id="compare-btn" class="reader-mode-btn" aria-pressed="false">Compare translations <span aria-hidden="true">(C)</span></button>
-        </div>
-        <div class="settings-field">
-            <button type="button" id="reader-mode-btn" class="reader-mode-btn" aria-pressed="false">Reading mode</button>
-        </div>
-        <div class="settings-field">
-            <span class="settings-label" id="bookmark-list-label">Bookmarks</span>
-            <ul id="bookmark-list" class="bookmark-list" aria-labelledby="bookmark-list-label"></ul>
-        </div>
-        <div class="settings-field">
-            <span class="settings-label" id="highlight-list-label">Highlights</span>
-            <div id="highlight-filter" class="highlight-filter" role="group" aria-label="Show highlights"></div>
-            <ul id="highlight-list" class="bookmark-list" aria-labelledby="highlight-list-label"></ul>
-        </div>
-        <div class="settings-field">
-            <span class="settings-label" id="reader-data-label">Back up or move your data</span>
-            <p class="settings-note" id="reader-data-note">Your bookmarks, highlights, reading position and display settings, saved as a file you can import on another computer. Bible text isn’t included.</p>
-            <div class="data-actions" role="group" aria-labelledby="reader-data-label" aria-describedby="reader-data-note">
-                <button type="button" id="export-data-btn" class="reader-mode-btn">Export data...</button>
-                <button type="button" id="import-data-btn" class="reader-mode-btn">Import data...</button>
-            </div>
-            <p id="data-status" class="data-status" role="status" aria-live="polite"></p>
-            <ul id="data-problems" class="data-problems"></ul>
-        </div>
-        <div class="settings-field">
-            <button type="button" id="welcome-btn" class="reader-mode-btn">Show welcome</button>
-        </div>
-        <div class="settings-field">
-            <span class="settings-label" id="updates-label">Updates</span>
-            <label class="update-check-option"><input type="checkbox" id="update-check-toggle" checked> <span>Check for updates when Gospel Getter starts</span></label>
-            <p class="settings-note" id="update-note">Checking downloads a small file from GitHub that names the latest version, so GitHub sees your IP address, as with any download. Nothing about your reading or your data is sent.</p>
-            <button type="button" id="update-check-btn" class="reader-mode-btn" aria-describedby="update-note">Check now</button>
-            <p id="update-check-status" class="data-status" role="status" aria-live="polite"></p>
-        </div>
-        <p id="app-version" class="app-version"></p>
-    </div>
+    <p id="data-status" class="toast is-hidden" role="status" aria-live="polite"></p>
 
     <section id="update-banner" class="update-banner" aria-labelledby="update-title" tabindex="-1" hidden>
         <p id="update-title" class="update-title" role="status" aria-live="polite"></p>
@@ -2174,8 +2987,12 @@
             const readingPane = document.getElementById('reading-pane');
             const readerNotice = document.getElementById('reader-notice');
             const translationSelect = document.getElementById('translation-select');
-            const settingsMenu = document.getElementById('settings-menu');
-            const settingsToggle = document.getElementById('settings-toggle');
+            const aaToggle = document.getElementById('aa-toggle');
+            const menuToggle = document.getElementById('menu-toggle');
+            const bookmarkTab = document.getElementById('library-tab-bookmarks');
+            const bookmarkCount = document.getElementById('bookmark-count');
+            const highlightCount = document.getElementById('highlight-count');
+            const aboutOverlay = document.getElementById('about-overlay');
             const bookmarkList = document.getElementById('bookmark-list');
             const highlightFilter = document.getElementById('highlight-filter');
             const highlightList = document.getElementById('highlight-list');
@@ -2522,7 +3339,29 @@
                 }
             }
 
-            // ---- My highlights: every highlighted passage, in Settings
+            // ---- The header's popovers and panels (Aa, Library, the ☰ menu
+            // and About) are opened and closed by the preferences script in
+            // <head>; these reach them from here.
+
+            const surfaces = () => window.gospelGetterSurfaces;
+
+            function surfaceOpen() {
+                return !!(surfaces() && surfaces().current());
+            }
+
+            // Closes whichever is open. Focus goes back to the button that
+            // opened it unless `restoreFocus` is false.
+            function closeSurfaces(restoreFocus = true) {
+                if (surfaces()) surfaces().close(restoreFocus);
+            }
+
+            // Where focus goes when what had it goes away: ☰, or Aa in
+            // reading mode, which hides ☰.
+            function focusHome() {
+                (root.dataset.readerMode === 'on' ? aaToggle : menuToggle).focus();
+            }
+
+            // ---- My highlights: every highlighted passage, in the Library
 
             const colorName = (color) => color.charAt(0).toUpperCase() + color.slice(1);
 
@@ -2534,6 +3373,7 @@
                 .join('');
 
             function renderHighlightList(error) {
+                highlightCount.textContent = error ? '' : String(highlightPassages.length);
                 highlightFilter.querySelectorAll('.highlight-filter-btn').forEach((btn) => {
                     btn.setAttribute('aria-pressed', String(btn.dataset.filter === highlightListFilter));
                 });
@@ -2600,6 +3440,7 @@
             });
 
             function renderBookmarkList(error) {
+                bookmarkCount.textContent = error ? '' : String(bookmarks.length);
                 if (error) {
                     bookmarkList.innerHTML = `<li class="bookmark-empty is-error">${escapeHtml(error)}</li>`;
                     return;
@@ -2669,11 +3510,6 @@
                 }
             }
 
-            function closeSettingsMenu() {
-                settingsMenu.hidden = true;
-                settingsToggle.setAttribute('aria-expanded', 'false');
-            }
-
             // Opens a chapter and selects a verse range in it, in the
             // selected translation — for bookmarks and search results.
             // If that translation doesn't number the verses, it opens the
@@ -2702,7 +3538,7 @@
                 const bookmark = bookmarks.find((b) => String(b.id) === target.dataset.bookmarkId);
                 if (!bookmark) return;
                 if (open) {
-                    closeSettingsMenu();
+                    closeSurfaces();
                     await openPassage(bookmark.bookId, bookmark.chapter, bookmark.verseStart, bookmark.verseEnd);
                     return;
                 }
@@ -2718,7 +3554,7 @@
                 // Keep keyboard focus in the list, on the next bookmark.
                 const buttons = bookmarkList.querySelectorAll('.bookmark-remove');
                 const next = buttons[Math.min(index, buttons.length - 1)];
-                (next || settingsToggle).focus();
+                (next || bookmarkTab).focus();
             });
 
             // Opening a highlighted passage works as opening a bookmark;
@@ -2732,7 +3568,7 @@
                 if (!passage) return;
                 const { bookId, chapter, verseStart, verseEnd } = passage;
                 if (open) {
-                    closeSettingsMenu();
+                    closeSurfaces();
                     await openPassage(bookId, chapter, verseStart, verseEnd);
                     return;
                 }
@@ -2761,6 +3597,10 @@
             const importDataBtn = document.getElementById('import-data-btn');
             const dataStatus = document.getElementById('data-status');
             const dataProblems = document.getElementById('data-problems');
+            const importTitle = document.getElementById('import-title');
+            const importInvalid = document.getElementById('import-invalid');
+            const importSummary = document.getElementById('import-summary');
+            const IMPORT_TITLE = importTitle.textContent;
             const importOverlay = document.getElementById('import-overlay');
             const importPanel = document.getElementById('import-panel');
             const importConfirm = document.getElementById('import-confirm');
@@ -2777,21 +3617,28 @@
             const plural = (n, one, many = `${one}s`) => `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
             const errorText = (e) => (e && e.message) || String(e);
 
-            function setDataStatus(message, isError = false, problems = []) {
+            // Export and import say how it went in a toast at the foot of
+            // the window, which fades after a while (errors stay longer).
+            // It sits above the update banner when that's showing.
+            let toastTimer = null;
+
+            function setDataStatus(message, isError = false) {
+                clearTimeout(toastTimer);
                 dataStatus.textContent = message;
                 dataStatus.classList.toggle('is-error', isError);
-                dataProblems.innerHTML = problems.map((p) => `<li>${escapeHtml(p)}</li>`).join('');
+                if (!message) {
+                    dataStatus.classList.add('is-hidden');
+                    return;
+                }
+                const banner = document.getElementById('update-banner');
+                dataStatus.style.bottom = banner.hidden ? '' : `calc(${banner.offsetHeight}px + 1.5rem)`;
+                dataStatus.classList.remove('is-hidden');
+                toastTimer = setTimeout(() => dataStatus.classList.add('is-hidden'), isError ? 12000 : 6000);
             }
 
             function setDataBusy(busy) {
                 exportDataBtn.disabled = busy;
                 importDataBtn.disabled = busy;
-            }
-
-            function openSettingsMenu(focus) {
-                settingsMenu.hidden = false;
-                settingsToggle.setAttribute('aria-expanded', 'true');
-                if (focus) focus.focus();
             }
 
             exportDataBtn.addEventListener('click', async function () {
@@ -2817,8 +3664,8 @@
                 }
             });
 
-            // Readable names for display settings, taken from the settings
-            // menu itself.
+            // Readable names for display settings, taken from Aa's own
+            // options.
             function describePreferences(prefs) {
                 const optionText = (selectId, value) => {
                     const option = [...document.getElementById(selectId).options].find((o) => o.value === value);
@@ -2846,8 +3693,41 @@
                 }
             }
 
+            // Shows the import dialog in one of its two forms: a preview
+            // to confirm (`invalid` false), or why a file can't be
+            // imported, with each problem found in it.
+            function setImportMode(invalid) {
+                importTitle.textContent = invalid ? 'This file can’t be imported' : IMPORT_TITLE;
+                importInvalid.hidden = !invalid;
+                importSummary.hidden = invalid;
+                importConfirm.hidden = invalid;
+                importCancel.textContent = invalid ? 'Close' : 'Cancel';
+                importPanel.setAttribute('aria-describedby', invalid ? 'import-invalid data-problems' : 'import-summary');
+                if (invalid) {
+                    importBookmarkChoice.hidden = true;
+                    importReplaceWarning.hidden = true;
+                    importPositionOption.hidden = true;
+                    importPrefsOption.hidden = true;
+                    importError.textContent = '';
+                } else {
+                    dataProblems.innerHTML = '';
+                }
+            }
+
+            function showImportProblems(choice) {
+                importPreview = null;
+                setImportMode(true);
+                document.getElementById('import-file').textContent = choice.fileName;
+                importInvalid.textContent = `${choice.message} Nothing was changed.`;
+                dataProblems.innerHTML = (choice.problems || []).map((p) => `<li>${escapeHtml(p)}</li>`).join('');
+                closeSurfaces(false);
+                importOverlay.hidden = false;
+                importCancel.focus();
+            }
+
             function openImportPreview(preview) {
                 importPreview = preview;
+                setImportMode(false);
                 const exported = (preview.exportedAt || '').slice(0, 10);
                 document.getElementById('import-file').textContent =
                     `${preview.fileName} — exported ${exported || 'at an unknown time'} by Gospel Getter ${preview.appVersion}`;
@@ -2909,7 +3789,7 @@
                 importError.textContent = '';
                 importConfirm.disabled = false;
                 updateImportMode();
-                closeSettingsMenu();
+                closeSurfaces(false);
                 importOverlay.hidden = false;
                 importConfirm.focus();
             }
@@ -2919,12 +3799,16 @@
                 importPreview = null;
             }
 
+            // Cancel (or Close, for a file that can't be imported). Focus
+            // goes back to ☰, where Import data… was chosen.
             function cancelImportPreview() {
-                if (!importPreview) return;
-                invoke('cancel_import', { token: importPreview.token }).catch((e) => console.error('Failed to discard import', e));
+                if (importOverlay.hidden) return;
+                if (importPreview) {
+                    invoke('cancel_import', { token: importPreview.token }).catch((e) => console.error('Failed to discard import', e));
+                    setDataStatus('Import cancelled. Nothing was changed.');
+                }
                 closeImportPreview();
-                setDataStatus('Import cancelled. Nothing was changed.');
-                openSettingsMenu(importDataBtn);
+                focusHome();
             }
 
             importDataBtn.addEventListener('click', async function () {
@@ -2935,7 +3819,8 @@
                     if (choice.status === 'cancelled') {
                         setDataStatus('Import cancelled. Nothing was changed.');
                     } else if (choice.status === 'invalid') {
-                        setDataStatus(`${choice.fileName}: ${choice.message} Nothing was changed.`, true, choice.problems);
+                        setDataStatus('');
+                        showImportProblems(choice);
                     } else {
                         setDataStatus('');
                         openImportPreview(choice.preview);
@@ -2975,6 +3860,7 @@
                     return;
                 }
                 closeImportPreview();
+                focusHome();
 
                 const parts = [];
                 if (preview.bookmarksInFile) {
@@ -3039,8 +3925,8 @@
 
             // ---- First-run welcome: a four-page tour in a modal over the
             // reader. It opens by itself only on a fresh install (see
-            // isFreshInstall), and whenever Show welcome is chosen in
-            // Settings. Closing it any way (Skip, Start reading, Escape)
+            // isFreshInstall), and whenever Show welcome is chosen in the
+            // ☰ menu. Closing it any way (Skip, Start reading, Escape)
             // records that it's been seen, in local storage beside the
             // display preferences.
             const WELCOME_KEY = 'gospel-getter-welcome';
@@ -3070,7 +3956,7 @@
             }
 
             function openWelcome(returnFocus) {
-                closeSettingsMenu();
+                closeSurfaces(false);
                 if (!searchPanel.hidden) setSearchOpen(false);
                 welcomeReturnFocus = returnFocus || null;
                 showWelcomePage(0);
@@ -3120,7 +4006,7 @@
                 else showWelcomePage(welcomePage + 1);
             });
             welcomeSkip.addEventListener('click', closeWelcome);
-            document.getElementById('welcome-btn').addEventListener('click', () => openWelcome(settingsToggle));
+            document.getElementById('welcome-btn').addEventListener('click', () => openWelcome(menuToggle));
 
             // Clicking the dimmed page behind the welcome does nothing, and
             // leaves focus where it was.
@@ -3439,7 +4325,7 @@
                 }
             }
 
-            // Compare switched on or off (from the settings menu or its
+            // Compare switched on or off (from Aa or its
             // shortcut — the preferences script in <head> owns the setting):
             // re-render the chapter on screen in the new layout.
             document.addEventListener('gospel-getter:compare-change', async function () {
@@ -3470,7 +4356,7 @@
                 searchPanel.hidden = !open;
                 searchToggle.setAttribute('aria-expanded', String(open));
                 if (open) {
-                    closeSettingsMenu();
+                    closeSurfaces(false);
                     searchInput.focus();
                     searchInput.select();
                 }
@@ -3617,6 +4503,11 @@
                 setSearchOpen(searchPanel.hidden);
             });
 
+            // One popover or panel at a time: opening one closes search.
+            document.addEventListener('gospel-getter:surface-open', function () {
+                if (!searchPanel.hidden) setSearchOpen(false);
+            });
+
             // Up/Down move between the input and the results; Escape
             // closes the panel from anywhere in it.
             searchPanel.addEventListener('keydown', function (event) {
@@ -3646,12 +4537,12 @@
                     setSearchOpen(false);
                 }
 
-                // The settings menu, its toggle and the reading-mode exit
-                // are handled by the presentation-preferences script in
-                // <head> (and the bookmark list's own handler above);
-                // they're never navigation or a "click away" from a verse
-                // selection. Nor is the search panel.
-                if (event.target.closest('#settings-menu, #settings-toggle, #reader-exit, #search-panel, #search-toggle, #import-overlay, #welcome-overlay')) {
+                // The top bar (Aa, the ☰ menu, the reading-mode exit), the
+                // Library and About are handled by the presentation-
+                // preferences script in <head> (and the lists' own
+                // handlers above); they're never navigation or a "click
+                // away" from a verse selection. Nor is the search panel.
+                if (event.target.closest('#top-bar, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #data-status')) {
                     return;
                 }
 
@@ -3800,8 +4691,8 @@
             // Exodus — are handled without the client needing to know the
             // Bible's structure). Plus Escape, copying, search and compare.
             document.addEventListener('keydown', function (event) {
-                // Keys typed into a form control (e.g. a settings <select>,
-                // or the search box, which handles its own) belong to it.
+                // Keys typed into a form control (e.g. About's checkbox, or
+                // the search box, which handles its own) belong to it.
                 if (event.target && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) {
                     return;
                 }
@@ -3809,14 +4700,14 @@
                 if (event.target && event.target.closest && event.target.closest('#search-panel')) {
                     return;
                 }
-                // And while the import preview is open, nothing else
-                // responds to the keyboard (it handles its own keys).
-                if (!importOverlay.hidden) {
+                // And while the import preview or About is open, nothing
+                // else responds to the keyboard (they handle their own keys).
+                if (!importOverlay.hidden || !aboutOverlay.hidden) {
                     return;
                 }
 
                 // Escape backs out one step at a time: the search panel,
-                // then the settings menu (closed by the preferences
+                // then an open popover or panel (closed by the preferences
                 // script), then a verse selection, then reading mode (also
                 // the preferences script, which skips an Escape already
                 // handled here).
@@ -3824,7 +4715,7 @@
                     if (!searchPanel.hidden) {
                         setSearchOpen(false);
                         event.preventDefault();
-                    } else if (selection && settingsMenu.hidden) {
+                    } else if (selection && !surfaceOpen()) {
                         clearSelection();
                         event.preventDefault();
                     }
@@ -3852,7 +4743,14 @@
                     return;
                 }
 
-                // C toggles compare, through the settings menu's own toggle.
+                // Ctrl+B (Cmd+B) opens or closes the Library.
+                if (ctrl && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'b') {
+                    event.preventDefault();
+                    if (surfaces()) surfaces().toggle('library');
+                    return;
+                }
+
+                // C toggles compare, through Aa's own toggle.
                 if (plain && !event.shiftKey && (event.key === 'c' || event.key === 'C')) {
                     document.getElementById('compare-btn').click();
                     return;
@@ -3908,17 +4806,35 @@
                 }
             }
 
-            // The version line in Settings. It's only informational, so if
-            // the version can't be read the line just stays empty.
+            // The version line in About, and its Release notes link (this
+            // version's release page). It's only informational, so if the
+            // version can't be read the line stays empty and the link
+            // hidden.
+            const releaseNotesLink = document.getElementById('release-notes-link');
+            const releaseNotesStatus = document.getElementById('release-notes-status');
             let appVersion = '';
             const versionRead = invoke('get_app_version')
                 .then((version) => {
                     if (typeof version === 'string' && version) {
                         appVersion = version;
-                        document.getElementById('app-version').textContent = `Gospel Getter ${version}`;
+                        document.getElementById('app-version').textContent = `Version ${version}`;
+                        releaseNotesLink.href = `https://github.com/tossbaws/gospel-getter/releases/tag/v${version}`;
+                        releaseNotesLink.hidden = false;
                     }
                 })
                 .catch(() => {});
+
+            // The page itself never opens a browser: the backend opens this
+            // version's release page (the URL above, built the same way).
+            releaseNotesLink.addEventListener('click', async function (event) {
+                event.preventDefault();
+                releaseNotesStatus.textContent = '';
+                try {
+                    await invoke('open_release_notes');
+                } catch (e) {
+                    releaseNotesStatus.textContent = errorText(e);
+                }
+            });
 
             // ---- Updates. The backend decides what this copy can do: a
             // release installer downloads, verifies and installs the update
@@ -3968,7 +4884,7 @@
             function hideUpdate() {
                 const hadFocus = updateBanner.contains(document.activeElement);
                 updateBanner.hidden = true;
-                if (hadFocus) settingsToggle.focus();
+                if (hadFocus) focusHome();
             }
 
             async function checkForUpdate({ quiet }) {

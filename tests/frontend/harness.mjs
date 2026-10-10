@@ -287,11 +287,28 @@ export async function openApp({
         async pick(path) {
             await backend('__set_picker', { path });
         },
-        settingsMenu() {
-            return document.getElementById('settings-menu');
+        /** The element of a header surface: 'aa', 'library', 'menu' or 'about'. */
+        surface(name) {
+            return document.getElementById({ aa: 'aa-popover', library: 'library-panel', menu: 'app-menu', about: 'about-overlay' }[name]);
         },
-        openSettings() {
-            if (app.settingsMenu().hidden) app.click(document.getElementById('settings-toggle'));
+        /** Opens a header surface the way a reader would (About through the ☰ menu). */
+        open(name) {
+            if (!app.surface(name).hidden) return;
+            if (name === 'about') {
+                app.open('menu');
+                app.click(document.getElementById('about-btn'));
+                return;
+            }
+            app.click(document.getElementById({ aa: 'aa-toggle', library: 'library-toggle', menu: 'menu-toggle' }[name]));
+        },
+        /** Opens the Library on its 'bookmarks' or 'highlights' tab. */
+        openLibrary(tab = 'bookmarks') {
+            app.open('library');
+            app.click(document.getElementById(`library-tab-${tab}`));
+        },
+        /** The toast export and import report in (its text stays after it fades). */
+        toast() {
+            return document.getElementById('data-status');
         },
         bookmarkItems() {
             return [...document.querySelectorAll('#bookmark-list .bookmark-item')].map((li) => ({

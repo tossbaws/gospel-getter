@@ -174,7 +174,7 @@ test('bookmarks stay translation-independent while comparing', () =>
         // Opening a bookmark selects it in the selected translation's column.
         app.key('ArrowRight');
         await app.waitForHeading('Romans 15');
-        app.openSettings();
+        app.openLibrary();
         before = app.calls.length;
         app.click(app.bookmarkItems().find((i) => i.reference === 'Romans 14:8').open);
         await app.idle(before, 'get_reading');

@@ -1,4 +1,4 @@
-// Behavior tests for the Highlights list in Settings: every highlighted
+// Behavior tests for the Highlights list in the Library: every highlighted
 // passage, grouped and in Bible order, with its color in words, a color
 // filter, opening and removing a passage, and the list keeping up with
 // highlighting, translation switches and imports — against the real
@@ -79,13 +79,16 @@ async function switchTranslation(app, code) {
     await app.idle(before, 'list_highlight_passages');
 }
 
-test('the Highlights section sits under Bookmarks, with a labelled filter and an empty state', () =>
+test('the Highlights tab sits beside Bookmarks in the Library, with a labelled filter and an empty state', () =>
     withApp({}, async (app) => {
-        const bookmarksField = app.document.getElementById('bookmark-list').closest('.settings-field');
-        const field = list(app).closest('.settings-field');
-        assert.equal(bookmarksField.nextElementSibling, field, 'directly under Bookmarks');
-        assert.equal(field.querySelector('.settings-label').textContent, 'Highlights');
-        assert.equal(list(app).getAttribute('aria-labelledby'), 'highlight-list-label');
+        const bookmarksPanel = app.document.getElementById('bookmark-list').closest('[role="tabpanel"]');
+        const panel = list(app).closest('[role="tabpanel"]');
+        assert.equal(bookmarksPanel.nextElementSibling, panel, 'the tab after Bookmarks');
+        assert.ok(panel.closest('#library-panel'));
+        const tab = app.document.getElementById(panel.getAttribute('aria-labelledby'));
+        assert.equal(tab.getAttribute('role'), 'tab');
+        assert.match(tab.textContent, /^Highlights /);
+        assert.equal(list(app).getAttribute('aria-labelledby'), tab.id);
         // The Bookmarks list's look and scrolling.
         assert.ok(list(app).classList.contains('bookmark-list'));
 
@@ -143,7 +146,7 @@ test('the color filter shows one color at a time, says when it has none, and is 
     ]);
     let storage;
     await withApp({ book: 'John', chapter: 3, translation: 'kjv', keepBookmarks: true }, async (app) => {
-        app.openSettings();
+        app.openLibrary('highlights');
         const before = app.calls.length;
         app.click(filterButton(app, 'Green'));
         assert.equal(app.calls.length, before, 'filtering needs no backend call');
@@ -180,10 +183,10 @@ test('the color filter shows one color at a time, says when it has none, and is 
 test('opening a passage goes to its chapter and selects it, as a bookmark does', async () => {
     await seed([['John', 3, 16, 18, 'yellow']]);
     await withApp({ book: 'Genesis', chapter: 1, translation: 'kjv', keepBookmarks: true }, async (app) => {
-        app.openSettings();
+        app.openLibrary('highlights');
         await clickAndWait(app, items(app)[0].open, 'get_reading');
         assert.equal(app.heading(), 'John 3');
-        assert.equal(app.settingsMenu().hidden, true, 'the menu gets out of the way');
+        assert.equal(app.surface('library').hidden, true, 'the Library gets out of the way');
         assert.deepEqual(app.selectedVerseNumbers(), [16, 17, 18]);
         assert.equal(app.notice(), '');
     });
@@ -195,7 +198,7 @@ test('Remove takes the highlight off exactly that passage and keeps focus in the
         ['John', 3, 17, 17, 'pink'],
     ]);
     await withApp({ book: 'John', chapter: 3, translation: 'kjv', keepBookmarks: true }, async (app) => {
-        app.openSettings();
+        app.openLibrary('highlights');
         assert.deepEqual(summary(app), [`John 3:15${EN}16 Green`, 'John 3:17 Pink', 'John 3:18 Green']);
         const pink = items(app)[1];
         assert.equal(pink.remove.getAttribute('aria-label'), 'Remove highlight John 3:17');
@@ -206,7 +209,7 @@ test('Remove takes the highlight off exactly that passage and keeps focus in the
         // Only verse 17 lost its highlight, in the list and on the page.
         assert.deepEqual(summary(app), [`John 3:15${EN}16 Green`, 'John 3:18 Green']);
         assert.deepEqual([15, 16, 17, 18].map((n) => app.verse(n).dataset.highlight || null), ['green', 'green', null, 'green']);
-        assert.equal(app.settingsMenu().hidden, false, 'removing keeps the menu open');
+        assert.equal(app.surface('library').hidden, false, 'removing keeps the Library open');
         assert.equal(app.document.activeElement, items(app)[1].remove, 'focus moves to the next passage');
 
         await clickAndWait(app, items(app)[1].remove, 'list_highlight_passages');
@@ -259,7 +262,7 @@ test('previews follow the translation, and a verse it does not number says so', 
         assert.ok(!romans.partial);
 
         // Opening it shows the chapter with the bookmarks' notice.
-        app.openSettings();
+        app.openLibrary('highlights');
         await clickAndWait(app, matthew.open, 'get_reading');
         assert.equal(app.heading(), 'Matthew 2');
         assert.deepEqual(app.selectedVerseNumbers(), []);
@@ -279,7 +282,7 @@ const v2File = (highlights) => ({
 
 async function importFile(app, path, mode) {
     await app.pick(path);
-    app.openSettings();
+    app.open('menu');
     await clickAndWait(app, app.document.getElementById('import-data-btn'), 'choose_import_file');
     const radio = app.document.querySelector(`input[name="import-mode"][value="${mode}"]`);
     radio.checked = true;
