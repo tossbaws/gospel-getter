@@ -231,16 +231,19 @@ if (welcome && !welcome.hidden) throw new Error('the welcome is on screen');
 if (document.querySelector('[data-highlight]')) throw new Error('a highlight is on screen');
 """
 
-# Scroll so `el` sits `top` CSS pixels below the top of the window.
-SCROLL_TO = "window.scrollTo(0, window.scrollY + %s.getBoundingClientRect().top - %d);"
+# Scroll so `el` sits `top` CSS pixels below the app's top bar, which the
+# page scrolls beneath (so nothing a scene shows starts hidden under it).
+SCROLL_TO = ("window.scrollTo(0, window.scrollY + %s.getBoundingClientRect().top"
+             " - document.getElementById('top-bar').getBoundingClientRect().bottom - %d);")
 
 def feature_scenes(theme):
     """The site's feature screenshots, in `theme`."""
     look = {**SEEN, "gospel-getter-theme": theme}
     return [
         # Reading in context: the chapter with its neighbours on either side.
+        # The headings sit where build_images.sh's hero and og crops expect.
         dict(name="reading", size=(1280, 800), prefs=look, position=("John", 3, "web"),
-             steps=SCROLL_TO % ("document.getElementById('chapter-list')", 24)),
+             steps=SCROLL_TO % ("document.querySelector('.chapter-heading')", 86)),
         # Searching the words of the text.
         dict(name="search", size=(1280, 800), prefs=look, position=("John", 15, "web"),
              steps="""

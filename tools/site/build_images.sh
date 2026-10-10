@@ -28,11 +28,12 @@ webp "$raw/search.png" "$out/search-720.webp" -crop 1440x1300+560+0 +repage -res
 webp "$raw/reading.png" "$out/hero-1400.webp" -crop 1760x1350+400+250 +repage -resize 1400x
 webp "$raw/reading.png" "$out/hero-700.webp" -crop 1760x1350+400+250 +repage -resize 700x
 
-# Themes: the centre column's heading and first verses of Psalm 23. A
-# theme that wasn't captured this time keeps its existing tile.
+# Themes: the centre column's heading and first verses of Psalm 23, below
+# the app's top bar. A theme that wasn't captured this time keeps its
+# existing tile.
 for theme in vaporwave classic-dark classic-light matrix beast-slayer hot-pink; do
     [ -f "$raw/theme-$theme.png" ] || continue
-    webp "$raw/theme-$theme.png" "$out/theme-$theme.webp" -crop 1060x640+750+40 +repage -resize 720x
+    webp "$raw/theme-$theme.png" "$out/theme-$theme.webp" -crop 1060x640+750+148 +repage -resize 720x
 done
 
 # Open Graph / social preview: 1200x630 from the reading view.
