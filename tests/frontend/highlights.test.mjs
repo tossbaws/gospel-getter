@@ -131,7 +131,7 @@ test('highlights survive a restart, and highlighting doesn\'t reload the chapter
         const before = app.calls.length;
         await choose(app, swatch(app, 'yellow'));
         const calls = app.calls.slice(before).map((c) => c.cmd);
-        // Only the save, then the Highlights list in Settings catching up.
+        // Only the save, then the Highlights list in the Library catching up.
         assert.deepEqual(calls, ['set_highlight', 'list_highlight_passages']);
     });
     await withApp({ book: 'Psalms', chapter: 23, translation: 'kjv', keepBookmarks: true }, async (app) => {
@@ -201,7 +201,7 @@ test('existing highlights mean no first-run welcome', async () => {
 
 async function clickData(app, id, path) {
     await app.pick(path);
-    app.openSettings();
+    app.open('menu');
     const before = app.calls.length;
     app.click(app.document.getElementById(id));
     await app.idle(before);
@@ -216,7 +216,7 @@ test('export saves highlights, and says so', () =>
         app.key('Escape');
         const path = newPath('export');
         await clickData(app, 'export-data-btn', path);
-        assert.equal(dataStatus(app), `Saved 0 bookmarks, 2 highlighted verses, your reading position, your display settings to ${path}.`);
+        assert.equal(dataStatus(app), `Saved 0 bookmarks, 2 highlighted verses, your reading position, your display settings to ${path}. Bible text isn’t included.`);
         const json = JSON.parse(readFileSync(path, 'utf8'));
         assert.equal(json.format_version, 2);
         assert.deepEqual(

@@ -16,13 +16,25 @@
 //! that a new version exists and links to the releases page.
 //!
 //! The webview gets no updater, process or opener permission: it calls the
-//! three commands here, and only `open_download_page` opens a URL, always
-//! [`RELEASES_PAGE`].
+//! commands here, and only two of them open a URL: `open_download_page`,
+//! always [`RELEASES_PAGE`], and `open_release_notes`, always this
+//! version's page ([`release_notes_page`]). Neither takes a URL from the
+//! page.
 
 use serde::Serialize;
 
 /// Where a build that can't update itself sends the reader.
 pub const RELEASES_PAGE: &str = "https://github.com/tossbaws/gospel-getter/releases/latest";
+
+/// Every release's page is this, then its version (`v2.6.0`'s for 2.6.0).
+/// About's Release notes link builds the same URL in the page, to show it.
+pub const RELEASE_NOTES_PREFIX: &str = "https://github.com/tossbaws/gospel-getter/releases/tag/v";
+
+/// The release page for `version`: its notes and downloads.
+#[must_use]
+pub fn release_notes_page(version: &str) -> String {
+    format!("{RELEASE_NOTES_PREFIX}{version}")
+}
 
 /// Set (to "1") at compile time by dist.yml, for the release installers only.
 const SELF_UPDATE_MARKER: Option<&str> = option_env!("GOSPEL_GETTER_SELF_UPDATE");
@@ -122,6 +134,7 @@ pub mod messages {
         "There\u{2019}s no update to install. Check for updates first.";
     pub const LINK_ONLY: &str = "This copy of Gospel Getter can\u{2019}t update itself. Download the new version from the releases page.";
     pub const OPEN_FAILED: &str = "Couldn\u{2019}t open the releases page in your browser.";
+    pub const NOTES_OPEN_FAILED: &str = "Couldn\u{2019}t open the release notes in your browser.";
 }
 
 /// What went wrong, in the terms the reader needs.
@@ -175,7 +188,8 @@ mod desktop {
 
     use super::{
         Bundle, DownloadEvent, Problem, RELEASES_PAGE, SELF_UPDATE_MARKER, UpdateInfo, UpdateMode,
-        check_message, install_message, is_offered, link_only_target, messages, update_mode,
+        check_message, install_message, is_offered, link_only_target, messages, release_notes_page,
+        update_mode,
     };
     use crate::commands::AppState;
 
@@ -352,6 +366,17 @@ mod desktop {
                 messages::OPEN_FAILED.to_string()
             })
     }
+
+    /// Open this version's release page in the system browser (About's
+    /// Release notes link). The version is the app's own, never the page's.
+    #[tauri::command]
+    pub fn open_release_notes<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+        let url = release_notes_page(crate::commands::app_version());
+        app.opener().open_url(&url, None::<&str>).map_err(|e| {
+            tracing::error!("Failed to open {url}: {e}");
+            messages::NOTES_OPEN_FAILED.to_string()
+        })
+    }
 }
 
 #[cfg(test)]
@@ -473,6 +498,23 @@ mod tests {
         assert_eq!(
             RELEASES_PAGE,
             "https://github.com/tossbaws/gospel-getter/releases/latest"
+        );
+    }
+
+    /// About's Release notes link opens the release page of the version
+    /// that's running.
+    #[test]
+    fn release_notes_page_is_this_versions_release() {
+        assert_eq!(
+            release_notes_page("2.6.0"),
+            "https://github.com/tossbaws/gospel-getter/releases/tag/v2.6.0"
+        );
+        assert_eq!(
+            release_notes_page(crate::commands::app_version()),
+            format!(
+                "https://github.com/tossbaws/gospel-getter/releases/tag/v{}",
+                env!("CARGO_PKG_VERSION")
+            )
         );
     }
 

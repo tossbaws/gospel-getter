@@ -260,18 +260,19 @@ test('Escape clears the selection before leaving reading mode', () =>
         assert.equal(root.dataset.readerMode, undefined, 'next Escape leaves reading mode as before');
     }));
 
-test('Escape closes an open settings menu before clearing the selection', () =>
+test('Escape closes an open popover or panel before clearing the selection', () =>
     withApp({ book: 'John', chapter: 3 }, async (app) => {
-        const menu = app.document.getElementById('settings-menu');
-        app.click(app.verse(16));
-        app.click(app.document.getElementById('settings-toggle'));
-        assert.equal(menu.hidden, false);
-        assert.deepEqual(app.selectedVerseNumbers(), [16], 'opening settings is not a click away');
-        app.key('Escape');
-        assert.equal(menu.hidden, true);
-        assert.deepEqual(app.selectedVerseNumbers(), [16]);
-        app.key('Escape');
-        assert.deepEqual(app.selectedVerseNumbers(), []);
+        for (const [name, toggle] of [['aa', 'aa-toggle'], ['library', 'library-toggle'], ['menu', 'menu-toggle']]) {
+            app.click(app.verse(16));
+            app.click(app.document.getElementById(toggle));
+            assert.equal(app.surface(name).hidden, false, name);
+            assert.deepEqual(app.selectedVerseNumbers(), [16], `opening ${name} is not a click away`);
+            app.key('Escape');
+            assert.equal(app.surface(name).hidden, true, name);
+            assert.deepEqual(app.selectedVerseNumbers(), [16]);
+            app.key('Escape');
+            assert.deepEqual(app.selectedVerseNumbers(), []);
+        }
     }));
 
 test('clicking elsewhere or the selected verse again clears the selection', () =>

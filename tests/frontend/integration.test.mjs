@@ -70,7 +70,7 @@ test('search, select, copy, bookmark, switch, compare, reopen and read on', asyn
         app.key('ArrowRight');
         await app.waitForHeading('Genesis 5');
         assert.ok(app.isComparing());
-        app.openSettings();
+        app.openLibrary();
         before = app.calls.length;
         app.click(app.bookmarkItems()[0].open);
         await app.idle(before, 'get_reading');

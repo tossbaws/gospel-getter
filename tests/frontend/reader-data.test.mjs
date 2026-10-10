@@ -2,6 +2,8 @@
 // reading position, display settings), against the real backend and real
 // files. The native file dialogs are the one thing scripted: each test
 // says what the next dialog answers (a path, or cancel) via the bridge.
+// Export and Import are in the ☰ menu; how they went is said in a toast,
+// and a file that can't be imported is explained in the import dialog.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,6 +32,7 @@ async function withApp(options, body) {
 
 const el = (app, id) => app.document.getElementById(id);
 const dataStatus = (app) => el(app, 'data-status').textContent;
+const toastShown = (app) => !el(app, 'data-status').classList.contains('is-hidden');
 const overlayOpen = (app) => !el(app, 'import-overlay').hidden;
 
 async function bookmarkVerse(app, n) {
@@ -48,7 +51,7 @@ async function setTheme(app, value) {
 
 async function clickData(app, id, path) {
     await app.pick(path);
-    app.openSettings();
+    app.open('menu');
     const before = app.calls.length;
     app.click(el(app, id));
     await app.idle(before);
@@ -85,8 +88,11 @@ test('Export saves bookmarks, reading position and display settings to the chose
         const path = newPath('export');
         await clickData(app, 'export-data-btn', path);
 
-        assert.equal(dataStatus(app), `Saved 1 bookmark, your reading position, your display settings to ${path}.`);
+        assert.equal(dataStatus(app), `Saved 1 bookmark, your reading position, your display settings to ${path}. Bible text isn’t included.`);
+        assert.ok(toastShown(app));
         assert.ok(!el(app, 'data-status').classList.contains('is-error'));
+        assert.ok(app.surface('menu').hidden, 'choosing Export closed the menu');
+        assert.equal(app.document.activeElement, el(app, 'menu-toggle'), 'focus is back on ☰');
         const text = readFileSync(path, 'utf8');
         const json = JSON.parse(text);
         assert.equal(json.format, 'gospel-getter-reader-data');
@@ -102,15 +108,16 @@ test('Export saves bookmarks, reading position and display settings to the chose
         assert.ok(!text.includes(storedVerse('kjv', 'John', 3, 16)), 'no Bible text');
     }));
 
-test('the Settings buttons read exactly "Export data..." and "Import data..."', () =>
+test('the ☰ menu items read exactly "Export data…" and "Import data…"', () =>
     withApp({}, async (app) => {
         const exportBtn = el(app, 'export-data-btn');
         const importBtn = el(app, 'import-data-btn');
-        assert.equal(exportBtn.textContent, 'Export data...');
-        assert.equal(importBtn.textContent, 'Import data...');
+        assert.equal(exportBtn.textContent, 'Export data…');
+        assert.equal(importBtn.textContent, 'Import data…');
         for (const btn of [exportBtn, importBtn]) {
             assert.equal(btn.getAttribute('type'), 'button');
-            assert.ok(btn.closest('#settings-menu'), 'in the Settings menu');
+            assert.equal(btn.getAttribute('role'), 'menuitem');
+            assert.ok(btn.closest('#app-menu'), 'in the ☰ menu');
         }
     }));
 
@@ -142,21 +149,53 @@ test('an invalid file is explained and changes nothing', () =>
             ],
         }));
         await clickData(app, 'import-data-btn', path);
-        assert.ok(!overlayOpen(app), 'no preview for an invalid file');
-        assert.match(dataStatus(app), /: The file can't be imported: 1 problem was found\. Nothing was changed\.$/);
-        assert.ok(el(app, 'data-status').classList.contains('is-error'));
+        // The import dialog explains it, with each problem; nothing to confirm.
+        assert.ok(overlayOpen(app));
+        assert.equal(el(app, 'import-title').textContent, 'This file can’t be imported');
+        assert.equal(el(app, 'import-file').textContent, path.split('/').pop());
+        assert.equal(el(app, 'import-invalid').textContent, "The file can't be imported: 1 problem was found. Nothing was changed.");
         assert.deepEqual([...el(app, 'data-problems').children].map((li) => li.textContent), ['Bookmark 2: there’s no book number 99.'.replace('’', "'")]);
+        assert.ok(el(app, 'data-problems').closest('#import-panel'), 'the problems are in the dialog');
+        assert.ok(el(app, 'import-confirm').hidden);
+        assert.ok(el(app, 'import-bookmark-choice').hidden);
+        assert.ok(el(app, 'import-summary').hidden);
+        assert.equal(el(app, 'import-cancel').textContent, 'Close');
+        assert.equal(app.document.activeElement, el(app, 'import-cancel'));
+        assert.match(el(app, 'import-panel').getAttribute('aria-describedby'), /data-problems/);
+        // None of it goes to the toast.
+        assert.equal(dataStatus(app), '');
+        assert.ok(!toastShown(app));
+
+        const before = app.calls.length;
+        app.click(el(app, 'import-cancel'));
+        await app.idle(before);
+        assert.ok(!overlayOpen(app));
+        assert.ok(!app.calls.slice(before).some((c) => c.cmd === 'cancel_import'), 'nothing to discard');
+        assert.equal(app.document.activeElement, el(app, 'menu-toggle'));
+        assert.ok(!toastShown(app));
         assert.deepEqual(await bookmarksIn(), ['John 3:16']);
+
+        // A good file afterwards gets the full preview back.
+        await clickData(app, 'import-data-btn', writeFile(fileData()));
+        assert.equal(el(app, 'import-title').textContent, 'Import bookmarks, highlights and settings');
+        assert.ok(el(app, 'import-invalid').hidden);
+        assert.deepEqual([...el(app, 'data-problems').children], []);
+        assert.ok(!el(app, 'import-confirm').hidden);
+        assert.equal(el(app, 'import-cancel').textContent, 'Cancel');
     }));
 
 test('a file from a newer version is refused clearly', () =>
     withApp({}, async (app) => {
         const path = writeFile({ format: 'gospel-getter-reader-data', format_version: 3, exported_at: 'x', app_version: '9.0.0' });
         await clickData(app, 'import-data-btn', path);
-        assert.match(dataStatus(app), /made by a newer version of Gospel Getter \(data format 3\)\. This version reads format 2; update Gospel Getter to import it\. Nothing was changed\.$/);
+        const invalid = () => el(app, 'import-invalid').textContent;
+        assert.match(invalid(), /made by a newer version of Gospel Getter \(data format 3\)\. This version reads format 2; update Gospel Getter to import it\. Nothing was changed\.$/);
+        app.key('Escape', {}, el(app, 'import-cancel'));
+        assert.ok(!overlayOpen(app), 'Escape closes it');
         const garbage = writeFile('this is not json');
         await clickData(app, 'import-data-btn', garbage);
-        assert.match(dataStatus(app), /isn't valid JSON \(line 1, column 2\)/);
+        assert.match(invalid(), /isn't valid JSON \(line 1, column 2\)/);
+        assert.equal(dataStatus(app), '');
     }));
 
 test('the preview shows what will happen before anything changes, and Cancel keeps it that way', () =>
@@ -193,8 +232,8 @@ test('the preview shows what will happen before anything changes, and Cancel kee
         await app.idle(before, 'cancel_import');
         assert.ok(!overlayOpen(app));
         assert.equal(dataStatus(app), 'Import cancelled. Nothing was changed.');
-        assert.equal(app.settingsMenu().hidden, false);
-        assert.equal(app.document.activeElement, el(app, 'import-data-btn'));
+        assert.ok(toastShown(app));
+        assert.equal(app.document.activeElement, el(app, 'menu-toggle'), 'focus goes back to ☰');
         assert.deepEqual(await bookmarksIn(), ['John 3:16']);
         assert.equal(app.document.documentElement.dataset.theme, undefined);
 
@@ -361,7 +400,7 @@ test('data moves to a fresh install through a real file', async () => {
         await bookmarkVerse(app, 6);
         await setTheme(app, 'hot-pink');
         await clickData(app, 'export-data-btn', path);
-        assert.match(dataStatus(app), /^Saved 2 bookmarks, your reading position, your display settings to /);
+        assert.match(dataStatus(app), /^Saved 2 bookmarks, your reading position, your display settings to .+\. Bible text isn’t included\.$/);
     });
 
     // A different install: new database, empty storage.
