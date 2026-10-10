@@ -29,36 +29,42 @@ bookmark passages. No account and no network needed.
   to select a range, then **Copy** or Ctrl+C. You get the text exactly as
   stored, followed by e.g. `— John 3:16–18 (WEB)`.
 - **Bookmarks.** Save a verse or range with **★ Bookmark**. Bookmarked
-  verses get a ★, and the list in settings reopens any of them in
-  whichever translation you're reading.
+  verses get a ★, and the Bookmarks list in the Library (the bookmark
+  button at the top, or Ctrl+B) reopens any of them in whichever
+  translation you're reading.
 - **Highlights.** Select a verse or range and pick yellow, green, blue or
   pink to highlight it, like a highlighter pen; **Remove highlight** clears
   it. Each theme has its own shades, highlights show in both columns of
   compare mode, and they aren't printed.
-- **My highlights list.** The Highlights list in settings shows every
+- **My highlights list.** The Highlights list in the Library shows every
   highlighted passage in Bible order, with its color, reference and a
   preview in the current translation. Neighboring verses highlighted in
   the same color are one entry (`John 3:16–18`). Filter by color, click a
   passage to open it, or remove its highlight with ×.
-- **Compare translations.** Press `C` to see KJV and WEB side by side, one
-  row per verse number. Where only one translation numbers a verse, the
-  other column says so instead of shifting anything.
+- **Compare translations.** Press `C` (or **Compare** under **Aa**) to see
+  KJV and WEB side by side, one row per verse number. Where only one
+  translation numbers a verse, the other column says so instead of
+  shifting anything.
 - **Cross-references.** Click a verse to see related passages, and click a
   citation to read it in place.
 - **Comfortable reading.** Six themes (Vaporwave, Classic Dark, Classic
   Light, Matrix, Beast Slayer, Hot Pink), four text sizes, three line
-  spacings, and a distraction-free reading mode. Printing is always black
-  on white.
+  spacings, and a distraction-free reading mode, all under **Aa** with the
+  translation. Printing is always black on white.
+- **Everything in reach, out of the way.** A slim bar at the top holds
+  **Aa** (text and display), the **Library** (bookmarks and highlights),
+  search and the **☰** menu (export, import, the welcome and **About
+  Gospel Getter**). Only one opens at a time, and Esc closes it.
 - **Picks up where you left off.** Your chapter, translation, bookmarks,
   highlights and display settings are remembered between sessions.
-- **Back up or move your data.** In Settings, **Export data...** saves your
+- **Back up or move your data.** In the ☰ menu, **Export data…** saves your
   bookmarks, highlights, reading position and display settings to a JSON
-  file, and **Import data...** shows what a file contains before adding it
+  file, and **Import data…** shows what a file contains before adding it
   (or, if you choose, replacing your bookmarks and highlights). Only that
   personal data is exported, not Bible text or the app's database.
 - **A short welcome.** On a new install, a four-page overview of the
   features opens the first time. **Skip** (or Esc) closes it, and
-  **Show welcome** in Settings opens it again. Upgrading doesn't show it.
+  **Show welcome** in the ☰ menu opens it again. Upgrading doesn't show it.
 - **Updates from inside the app, always asked first.** When it starts,
   Gospel Getter checks GitHub Releases for a newer version and, if there
   is one, shows a banner with the release notes, **Update and restart**
@@ -71,7 +77,7 @@ bookmark passages. No account and no network needed.
 ## A quick tour
 
 All five screenshots in this README, including the one at the top, use the
-Matrix theme. The other five themes are in Settings.
+Matrix theme. The other five themes are under **Aa**.
 
 **Search the text, or jump straight to a reference.** Matching words are
 highlighted, and clicking a result opens and selects that verse.
@@ -90,9 +96,9 @@ shows exactly what will be copied.
 ![John 3:16 to 18 selected in the WEB in the Matrix theme, with Copy and Bookmark buttons and the citation "John 3:16–18 (WEB)"](screenshots/copy-verse-range.png)
 
 **Bookmark passages and come back to them.** Bookmarked verses are starred
-in the text, and the list in settings shows each one with a preview.
+in the text, and the Library (Ctrl+B) lists each one with a preview.
 
-![Psalm 23 with verses 1 to 4 starred, and the settings menu open with Theme set to Matrix and a Bookmarks list of Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
+![Psalm 23 with verses 1 to 4 starred in the Matrix theme, and the Library panel open on its Bookmarks tab listing Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
 
 ## Keyboard
 
@@ -102,8 +108,9 @@ in the text, and the list in settings shows each one with a preview.
 | `/` or Ctrl+K | Open search. Enter goes to a reference; ↓ / ↑ move through results |
 | Ctrl+C | Copy the selected verses with their reference. If you've highlighted text yourself, that's copied instead, as usual |
 | `C` | Compare translations on/off |
+| Ctrl+B | Open or close the Library (bookmarks and highlights) |
 | Shift-click | Extend the selection to a range within the chapter |
-| Esc | Close search or settings, then clear the selection, then leave reading mode |
+| Esc | Close search or the open panel or popover, then clear the selection, then leave reading mode |
 
 ## Installing
 
@@ -157,8 +164,8 @@ page** button instead, which opens the releases page in your browser.
 
 **The check, and how to turn it off.** The check runs once each time the
 app starts. To stop it, turn off **Check for updates when Gospel Getter
-starts** in the Updates section of Settings; **Check now** still checks
-when you ask. It's a setting for this computer and isn't exported. If the
+starts** in **About Gospel Getter**, from the ☰ menu; **Check now** there
+still checks when you ask. About also shows which version you have. It's a setting for this computer and isn't exported. If the
 check fails, for example because you're offline, the app says nothing and
 works as usual. **Later** hides the notice until the next start.
 
@@ -169,8 +176,12 @@ without you choosing **Update and restart**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
+**Coming from 2.6.0?** It updates itself to 2.7.0: it offers the update
+when it starts (or from **Check now**, in the Updates section of its
+Settings), if it's one of the installs above that update themselves.
+
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.6.0 by hand once, from the
+Install 2.7.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
