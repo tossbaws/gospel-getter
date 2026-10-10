@@ -14,8 +14,8 @@ bookmark passages. No account and no network needed.
 ## Features
 
 - **Two complete translations, fully offline.** The King James Version and
-  World English Bible are built into the app, so there are no downloads,
-  API keys or network access.
+  World English Bible are built into the app, so reading needs no
+  downloads, API keys or network access.
 - **Read in context.** The chapter you're reading sits in the middle with
   the previous and next chapters faded on either side, scrolling with it.
   ← and → turn chapters across the whole Bible, from Genesis 50 into
@@ -35,6 +35,11 @@ bookmark passages. No account and no network needed.
   pink to highlight it, like a highlighter pen; **Remove highlight** clears
   it. Each theme has its own shades, highlights show in both columns of
   compare mode, and they aren't printed.
+- **My highlights list.** The Highlights list in settings shows every
+  highlighted passage in Bible order, with its color, reference and a
+  preview in the current translation. Neighboring verses highlighted in
+  the same color are one entry (`John 3:16–18`). Filter by color, click a
+  passage to open it, or remove its highlight with ×.
 - **Compare translations.** Press `C` to see KJV and WEB side by side, one
   row per verse number. Where only one translation numbers a verse, the
   other column says so instead of shifting anything.
@@ -54,6 +59,12 @@ bookmark passages. No account and no network needed.
 - **A short welcome.** On a new install, a four-page overview of the
   features opens the first time. **Skip** (or Esc) closes it, and
   **Show welcome** in Settings opens it again. Upgrading doesn't show it.
+- **Updates from inside the app, always asked first.** When it starts,
+  Gospel Getter checks GitHub Releases for a newer version and, if there
+  is one, shows a banner with the release notes, **Update and restart**
+  and **Later**. Nothing is downloaded or installed until you choose
+  **Update and restart**. See [Updates](#updates) for which installs
+  update themselves and how to turn the check off.
 - **A native desktop app.** Built with Tauri: no browser, no background
   server, nothing listening on a port.
 
@@ -133,6 +144,37 @@ Every push to `main` also builds untagged installers as
 These expire after a while, so use a release unless you want a specific
 `main` build.
 
+## Updates
+
+**Which installs update themselves.** The Windows `setup.exe` and MSI, the
+AppImage and the `.deb` from the
+[releases page](https://github.com/tossbaws/gospel-getter/releases) install
+an update themselves when you choose **Update and restart**. The download
+is checked against the release's signature before anything is installed.
+Copies built with `packaging/install.sh`, the AUR recipe or from source
+can't update themselves: they show the same notice with a **Download
+page** button instead, which opens the releases page in your browser.
+
+**The check, and how to turn it off.** The check runs once each time the
+app starts. To stop it, turn off **Check for updates when Gospel Getter
+starts** in the Updates section of Settings; **Check now** still checks
+when you ask. It's a setting for this computer and isn't exported. If the
+check fails, for example because you're offline, the app says nothing and
+works as usual. **Later** hides the notice until the next start.
+
+**It always asks first.** An update is never downloaded or installed
+without you choosing **Update and restart**.
+
+**Privacy.** Checking downloads a small file from GitHub that names the
+latest version, so GitHub sees your IP address, as with any download.
+Nothing about your reading or your data is sent.
+
+**Coming from 2.5.0 or older?** Those versions can't update themselves.
+Install 2.6.0 by hand once, from the
+[latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
+over your current version; updates after that can come from inside the app.
+Upgrading keeps your data.
+
 ## Your data
 
 - Everything (translations, cross-references, reading position, bookmarks,
@@ -142,7 +184,7 @@ These expire after a while, so use a release unless you want a specific
   it's under `%APPDATA%\com.tossbaws.gospel-getter\`.
 - **Upgrades keep your data.** A new version adds any new tables and builds
   the search index once, in the background, without changing scripture
-  text, your reading position or your bookmarks. Moving back to an older
+  text, your reading position, bookmarks or highlights. Moving back to an older
   version after upgrading hasn't been tested.
 - Theme, text size, line spacing, compare and reading mode are display
   settings stored in the app's web storage, not the database.
