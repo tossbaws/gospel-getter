@@ -26,6 +26,13 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri-plugin-dialog = "~2.7"
+semver = "1"
+
+# Desktop only: the in-app updater, and opening the releases page in the
+# system browser for builds that can't update themselves. See `updater.rs`.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "~2.13"
+tauri-plugin-opener = "~2.7"
 
 # Only for `examples/frontend_bridge.rs` (the frontend tests' stdio bridge);
 # the app itself doesn't read stdin.
@@ -33,3 +40,8 @@ tauri-plugin-dialog = "~2.7"
 tokio = { version = "1", features = ["io-std", "io-util"] }
 # Tauri's mock runtime, for driving the commands through real IPC in tests.
 tauri = { version = "2", features = ["test"] }
+# A real connection error, for the updater's "offline" message (`updater.rs`);
+# already a dependency of tauri-plugin-updater.
+reqwest = { version = "0.13", default-features = false }
+# The TLS provider the updater installs before its own requests.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }

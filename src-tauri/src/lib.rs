@@ -8,6 +8,7 @@ pub mod domain;
 pub mod reader_data;
 #[cfg(test)]
 mod reader_data_tests;
+pub mod updater;
 
 use anyhow::Context;
 use tauri::Manager;
@@ -29,6 +30,15 @@ pub fn run() {
         // `commands::export_reader_data`); the webview gets no dialog or
         // file-system permission.
         .plugin(tauri_plugin_dialog::init())
+        // Updates and the releases page, likewise used only from Rust (see
+        // `updater`). The opener doesn't take over link clicks in the page.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
+        .manage(updater::PendingUpdate::default())
         .setup(|app| {
             setup_app(app).map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })
         })
@@ -59,6 +69,9 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::choose_import_file,
         commands::apply_import,
         commands::cancel_import,
+        updater::check_for_update,
+        updater::install_update,
+        updater::open_download_page,
     ]
 }
 

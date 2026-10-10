@@ -22,6 +22,18 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/tossbaws/gospel-getter/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJDRUVEMTFGRDVERDBGNzcKUldSM0Q5M1ZIOUh1TE1SeFZZQXlpbnFUbkcvc1BtaFB1ck1NQ0c3dlVWOGJvVGZyVzl1Rk5BTU0K",
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
