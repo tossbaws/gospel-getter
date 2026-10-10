@@ -5,12 +5,12 @@ use std::collections::{HashMap, HashSet};
 use crate::db::reader_data::ImportCounts;
 use crate::db::{
     self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Highlight,
-    HighlightColor, HighlightPassageInTranslation, SearchHit, Verse,
+    HighlightColor, HighlightPassageInTranslation, Note, NoteError, Passage, SearchHit, Verse,
 };
-use crate::reader_data::{NewBookmark, NewHighlight, NewPosition};
+use crate::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
 
 /// The store handles all database access after startup: verses, the
-/// reading position, bookmarks, highlights and search. The book and translation lists
+/// reading position, bookmarks, highlights, notes and search. The book and translation lists
 /// are loaded once at startup directly via
 /// `db::get_all_books`/`db::get_all_translations` (see `AppState::load`)
 /// and cached in `AppState`, so `Store` itself doesn't need methods for
@@ -156,6 +156,37 @@ impl Store {
         db::reader_data::highlight_coordinates(&self.pool).await
     }
 
+    /// Save a new note on a passage (see `db::notes::add_note`); `dates`
+    /// keeps a restored note's own `created_at` and `updated_at`.
+    pub async fn add_note(
+        &self,
+        passage: &Passage,
+        body: &str,
+        dates: Option<(&str, &str)>,
+    ) -> Result<Note, NoteError> {
+        db::notes::add_note(&self.pool, passage, body, dates).await
+    }
+
+    /// Change a note's text.
+    pub async fn update_note(&self, id: i64, body: &str) -> Result<Note, NoteError> {
+        db::notes::update_note(&self.pool, id, body).await
+    }
+
+    /// Delete a note, returning it as it was, if it existed.
+    pub async fn delete_note(&self, id: i64) -> anyhow::Result<Option<Note>> {
+        db::notes::delete_note(&self.pool, id).await
+    }
+
+    /// Every note overlapping a passage, in the order they're shown.
+    pub async fn notes_overlapping(&self, passage: &Passage) -> anyhow::Result<Vec<Note>> {
+        db::notes::notes_overlapping(&self.pool, passage).await
+    }
+
+    /// Every note, in Bible order.
+    pub async fn notes(&self) -> anyhow::Result<Vec<Note>> {
+        db::notes::list_notes(&self.pool).await
+    }
+
     /// Build whatever part of the search index is missing or stale.
     pub async fn ensure_search_index(&self) -> anyhow::Result<Vec<i64>> {
         db::ensure_search_index(&self.pool).await
@@ -183,6 +214,11 @@ impl Store {
         db::reader_data::bookmark_coordinates(&self.pool).await
     }
 
+    /// The passage and text of every note.
+    pub async fn note_keys(&self) -> anyhow::Result<HashSet<db::reader_data::NoteKey>> {
+        db::reader_data::note_keys(&self.pool).await
+    }
+
     /// The highest verse number any translation has, per (book, chapter).
     pub async fn last_verses(&self) -> anyhow::Result<HashMap<(i64, i64), i64>> {
         db::reader_data::last_verses(&self.pool).await
@@ -198,9 +234,11 @@ impl Store {
         &self,
         bookmarks: &[NewBookmark],
         highlights: Option<&[NewHighlight]>,
+        notes: Option<&[NewNote]>,
         replace: bool,
         position: Option<&NewPosition>,
     ) -> anyhow::Result<ImportCounts> {
-        db::reader_data::apply_import(&self.pool, bookmarks, highlights, replace, position).await
+        db::reader_data::apply_import(&self.pool, bookmarks, highlights, notes, replace, position)
+            .await
     }
 }

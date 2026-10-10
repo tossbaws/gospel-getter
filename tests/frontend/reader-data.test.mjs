@@ -96,7 +96,7 @@ test('Export saves bookmarks, reading position and display settings to the chose
         const text = readFileSync(path, 'utf8');
         const json = JSON.parse(text);
         assert.equal(json.format, 'gospel-getter-reader-data');
-        assert.equal(json.format_version, 2);
+        assert.equal(json.format_version, 3);
         assert.deepEqual(
             { ...json.bookmarks[0], created_at: typeof json.bookmarks[0].created_at },
             { book: 43, book_name: 'John', chapter: 3, verse_start: 16, verse_end: 16, created_at: 'string' },
@@ -177,7 +177,7 @@ test('an invalid file is explained and changes nothing', () =>
 
         // A good file afterwards gets the full preview back.
         await clickData(app, 'import-data-btn', writeFile(fileData()));
-        assert.equal(el(app, 'import-title').textContent, 'Import bookmarks, highlights and settings');
+        assert.equal(el(app, 'import-title').textContent, 'Import bookmarks, highlights, notes and settings');
         assert.ok(el(app, 'import-invalid').hidden);
         assert.deepEqual([...el(app, 'data-problems').children], []);
         assert.ok(!el(app, 'import-confirm').hidden);
@@ -186,10 +186,10 @@ test('an invalid file is explained and changes nothing', () =>
 
 test('a file from a newer version is refused clearly', () =>
     withApp({}, async (app) => {
-        const path = writeFile({ format: 'gospel-getter-reader-data', format_version: 3, exported_at: 'x', app_version: '9.0.0' });
+        const path = writeFile({ format: 'gospel-getter-reader-data', format_version: 4, exported_at: 'x', app_version: '9.0.0' });
         await clickData(app, 'import-data-btn', path);
         const invalid = () => el(app, 'import-invalid').textContent;
-        assert.match(invalid(), /made by a newer version of Gospel Getter \(data format 3\)\. This version reads format 2; update Gospel Getter to import it\. Nothing was changed\.$/);
+        assert.match(invalid(), /made by a newer version of Gospel Getter \(data format 4\)\. This version reads format 3; update Gospel Getter to import it\. Nothing was changed\.$/);
         app.key('Escape', {}, el(app, 'import-cancel'));
         assert.ok(!overlayOpen(app), 'Escape closes it');
         const garbage = writeFile('this is not json');

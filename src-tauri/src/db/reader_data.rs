@@ -1,5 +1,5 @@
-//! Reading and writing the reader's own data (bookmarks, highlights and
-//! reading position) for export and import. See `crate::reader_data` for the file
+//! Reading and writing the reader's own data (bookmarks, highlights, notes
+//! and reading position) for export and import. See `crate::reader_data` for the file
 //! format. Bundled data — verses, books, translations, cross-references,
 //! the search index — is never written here.
 
@@ -8,7 +8,9 @@ use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 
 use crate::db::Bookmark;
-use crate::reader_data::{NewBookmark, NewHighlight, NewPosition};
+use crate::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
+
+pub use crate::reader_data::NoteKey;
 
 /// Every bookmark, oldest first (the order they were made).
 pub async fn all_bookmarks(pool: &SqlitePool) -> anyhow::Result<Vec<Bookmark>> {
@@ -44,6 +46,17 @@ pub async fn highlight_coordinates(pool: &SqlitePool) -> anyhow::Result<HashSet<
     Ok(rows.into_iter().collect())
 }
 
+/// The passage and text of every note, for telling new from
+/// already-present.
+pub async fn note_keys(pool: &SqlitePool) -> anyhow::Result<HashSet<NoteKey>> {
+    let rows: Vec<NoteKey> =
+        sqlx::query_as("SELECT book_id, chapter, verse_start, verse_end, body FROM notes")
+            .fetch_all(pool)
+            .await
+            .context("Failed to read notes")?;
+    Ok(rows.into_iter().collect())
+}
+
 /// The highest verse number any installed translation has, per
 /// `(book, chapter)` — the limit a bookmark's range is checked against.
 pub async fn last_verses(pool: &SqlitePool) -> anyhow::Result<HashMap<(i64, i64), i64>> {
@@ -72,6 +85,9 @@ pub struct ImportCounts {
     pub highlights_added: usize,
     pub highlights_already_present: usize,
     pub highlights_removed: usize,
+    pub notes_added: usize,
+    pub notes_already_present: usize,
+    pub notes_removed: usize,
 }
 
 /// Apply a validated import in one transaction: either every change
@@ -88,10 +104,16 @@ pub struct ImportCounts {
 /// color on any that do; `replace` deletes every highlight first. `None`
 /// (a format 1 file, which can't hold highlights) leaves them untouched,
 /// even with `replace`.
+///
+/// `notes` likewise: merging adds each of the file's notes unless one with
+/// the same passage and text is already here, so importing the same file
+/// again changes nothing; `replace` deletes every note first. `None` (a
+/// format 1 or 2 file, which can't hold notes) leaves them untouched.
 pub async fn apply_import(
     pool: &SqlitePool,
     bookmarks: &[NewBookmark],
     highlights: Option<&[NewHighlight]>,
+    notes: Option<&[NewNote]>,
     replace: bool,
     position: Option<&NewPosition>,
 ) -> anyhow::Result<ImportCounts> {
@@ -158,6 +180,41 @@ pub async fn apply_import(
         }
     }
 
+    let mut notes_added = 0;
+    let mut notes_removed = 0;
+    if let Some(notes) = notes {
+        if replace {
+            notes_removed = sqlx::query("DELETE FROM notes")
+                .execute(&mut *tx)
+                .await
+                .context("Failed to clear notes")?
+                .rows_affected() as usize;
+        }
+        for n in notes {
+            let inserted = sqlx::query(
+                "INSERT INTO notes \
+                     (book_id, chapter, verse_start, verse_end, body, created_at, updated_at) \
+                 SELECT $1, $2, $3, $4, $5, \
+                     COALESCE($6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), \
+                     COALESCE($7, $6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+                 WHERE NOT EXISTS (SELECT 1 FROM notes WHERE book_id = $1 AND chapter = $2 \
+                     AND verse_start = $3 AND verse_end = $4 AND body = $5)",
+            )
+            .bind(n.book_id)
+            .bind(n.chapter)
+            .bind(n.verse_start)
+            .bind(n.verse_end)
+            .bind(&n.body)
+            .bind(n.created_at.as_deref())
+            .bind(n.updated_at.as_deref())
+            .execute(&mut *tx)
+            .await
+            .context("Failed to add a note")?
+            .rows_affected();
+            notes_added += inserted as usize;
+        }
+    }
+
     if let Some(p) = position {
         sqlx::query(
             "INSERT INTO reading_position (id, translation_id, book_id, chapter) \
@@ -183,5 +240,8 @@ pub async fn apply_import(
         highlights_added,
         highlights_already_present: highlights.map_or(0, <[_]>::len) - highlights_added,
         highlights_removed,
+        notes_added,
+        notes_already_present: notes.map_or(0, <[_]>::len) - notes_added,
+        notes_removed,
     })
 }

@@ -4,6 +4,7 @@ pub mod highlights;
 pub mod legacy;
 pub mod migrate;
 pub mod models;
+pub mod notes;
 pub mod queries;
 pub mod reader_data;
 pub mod search;
@@ -15,6 +16,7 @@ pub use highlights::{Highlight, HighlightColor, HighlightPassage, HighlightPassa
 pub use legacy::migrate_legacy_db_if_needed;
 pub use migrate::migrate;
 pub use models::*;
+pub use notes::{Note, NoteBodyError, NoteError, Passage};
 pub use queries::*;
 pub use search::{SearchHit, ensure_search_index};
 pub use seed::{seed_cross_references_if_empty, seed_missing};

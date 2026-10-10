@@ -1,5 +1,5 @@
 // Behavior tests for the top bar and what it opens: Aa (text and display),
-// the Library (bookmarks and highlights), the ☰ menu and About. One opens
+// the Library (bookmarks, highlights and notes), the ☰ menu and About. One opens
 // at a time; its button, Escape, or (for Aa and the menu) a click outside
 // closes it; focus moves in on opening and back to the button on closing.
 // Aa's controls are views of the same preferences and translation the
@@ -320,7 +320,7 @@ test('Later on the update banner hands focus to ☰, or to Aa in reading mode', 
 
 // ---- Library
 
-test('the Library has Bookmarks and Highlights tabs with live counts', () =>
+test('the Library has Bookmarks, Highlights and Notes tabs with live counts', () =>
     withApp({ book: 'John', chapter: 3 }, async (app) => {
         const count = (id) => $(app, id).textContent;
         assert.equal(count('bookmark-count'), '0');
@@ -340,8 +340,8 @@ test('the Library has Bookmarks and Highlights tabs with live counts', () =>
         assert.equal(panel.tagName, 'ASIDE');
         assert.equal($(app, panel.getAttribute('aria-labelledby')).textContent, 'Library');
         const tabs = [...panel.querySelectorAll('[role="tab"]')];
-        assert.deepEqual(tabs.map((t) => t.textContent.trim()), ['Bookmarks 1', 'Highlights 2']);
-        assert.equal(panel.querySelector('[role="tablist"]').children.length, 2);
+        assert.deepEqual(tabs.map((t) => t.textContent.trim()), ['Bookmarks 1', 'Highlights 2', 'Notes 0']);
+        assert.equal(panel.querySelector('[role="tablist"]').children.length, 3);
         assert.equal($(app, 'library-bookmarks').hidden, false);
         assert.equal($(app, 'library-highlights').hidden, true);
 

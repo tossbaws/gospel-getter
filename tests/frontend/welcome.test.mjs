@@ -244,9 +244,9 @@ test('the tour points to Aa, the Library and the ☰ menu, with no Settings draw
         const items = [...app.document.querySelectorAll('#welcome-text-4 li')].map((li) => li.textContent);
         assert.deepEqual(items, [
             'Aa, top right, has six themes, four text sizes, three line spacings, the translation and a distraction-free reading mode.',
-            'Your bookmarks and highlights are in the Library, the bookmark button beside Aa (or press Ctrl+B).',
+            'Your bookmarks, highlights and notes are in the Library, the bookmark button beside Aa (or press Ctrl+B).',
             'Press C to compare the KJV and WEB side by side.',
-            'Your chapter, bookmarks, highlights and settings are remembered. To see this tour again, choose Show welcome in the ☰ menu.',
+            'Your chapter, bookmarks, highlights, notes and settings are remembered. To see this tour again, choose Show welcome in the ☰ menu.',
         ]);
         assert.match(app.document.getElementById('welcome-text-3').textContent, /Export data… and Import data… in the ☰ menu/);
         const tour = app.document.getElementById('welcome-panel').textContent;
