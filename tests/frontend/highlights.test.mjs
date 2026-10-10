@@ -216,7 +216,7 @@ test('export saves highlights, and says so', () =>
         app.key('Escape');
         const path = newPath('export');
         await clickData(app, 'export-data-btn', path);
-        assert.equal(dataStatus(app), `Saved 0 bookmarks, 2 highlighted verses, your reading position, your display settings to ${path}.`);
+        assert.equal(dataStatus(app), `Saved 0 bookmarks, 2 highlighted verses, your reading position, your display settings to ${path}. Bible text isn’t included.`);
         const json = JSON.parse(readFileSync(path, 'utf8'));
         assert.equal(json.format_version, 2);
         assert.deepEqual(

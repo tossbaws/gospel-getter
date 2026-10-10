@@ -88,7 +88,7 @@ test('Export saves bookmarks, reading position and display settings to the chose
         const path = newPath('export');
         await clickData(app, 'export-data-btn', path);
 
-        assert.equal(dataStatus(app), `Saved 1 bookmark, your reading position, your display settings to ${path}.`);
+        assert.equal(dataStatus(app), `Saved 1 bookmark, your reading position, your display settings to ${path}. Bible text isn’t included.`);
         assert.ok(toastShown(app));
         assert.ok(!el(app, 'data-status').classList.contains('is-error'));
         assert.ok(app.surface('menu').hidden, 'choosing Export closed the menu');
@@ -400,7 +400,7 @@ test('data moves to a fresh install through a real file', async () => {
         await bookmarkVerse(app, 6);
         await setTheme(app, 'hot-pink');
         await clickData(app, 'export-data-btn', path);
-        assert.match(dataStatus(app), /^Saved 2 bookmarks, your reading position, your display settings to /);
+        assert.match(dataStatus(app), /^Saved 2 bookmarks, your reading position, your display settings to .+\. Bible text isn’t included\.$/);
     });
 
     // A different install: new database, empty storage.

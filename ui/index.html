@@ -3654,7 +3654,7 @@
                         if (outcome.highlights) parts.push(plural(outcome.highlights, 'highlighted verse'));
                         if (outcome.hasPosition) parts.push('your reading position');
                         if (outcome.preferences) parts.push('your display settings');
-                        setDataStatus(`Saved ${parts.join(', ')} to ${outcome.path}.`);
+                        setDataStatus(`Saved ${parts.join(', ')} to ${outcome.path}. Bible text isn’t included.`);
                     }
                 } catch (e) {
                     console.error('Export failed', e);
