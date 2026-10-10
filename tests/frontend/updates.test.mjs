@@ -7,9 +7,15 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { closeBridge, openApp, setUpdate } from './harness.mjs';
 
 after(closeBridge);
+
+// The version the app reports about itself, as tauri.conf.json declares it.
+const VERSION = JSON.parse(
+    readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
+).version;
 
 const OFFLINE = 'Couldn’t reach GitHub to check for updates. Check your internet connection and try again.';
 const NOT_VERIFIED = 'The update couldn’t be verified as a genuine Gospel Getter release, so it wasn’t installed.';
@@ -153,7 +159,7 @@ test('Check now says when the app is up to date', () =>
     withApp({}, async (app) => {
         app.openSettings();
         await click(app, $(app, 'update-check-btn'), 'check_for_update');
-        assert.equal(checkStatus(app).textContent, 'Gospel Getter 2.5.0 is the latest version.');
+        assert.equal(checkStatus(app).textContent, `Gospel Getter ${VERSION} is the latest version.`);
         assert.ok(!checkStatus(app).classList.contains('is-error'));
         assert.equal(banner(app).hidden, true);
         assert.equal($(app, 'update-check-btn').disabled, false);

@@ -33,7 +33,7 @@
 # normal windowed app that only runs while it's open.
 
 pkgname=gospel-getter
-pkgver=2.5.0
+pkgver=2.6.0
 pkgrel=1
 pkgdesc="A Bible reader with KJV and WEB translations, faded surrounding chapters, and quick keyboard navigation"
 arch=('x86_64' 'aarch64')
