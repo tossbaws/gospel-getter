@@ -10,7 +10,11 @@
 //!
 //! Note bodies and verse text are plain text: everything Markdown or HTML
 //! could read as structure is escaped, so the file shows exactly the
-//! characters written (and stored), never markup.
+//! characters written (and stored), never markup. The one exception is the
+//! KJV's own `{…}` markup, which the file shows as a printed KJV would
+//! (see `kjv_markup`).
+
+mod kjv_markup;
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -125,7 +129,13 @@ impl NotesExport<'_> {
         if !quoted.is_empty() {
             let text = quoted
                 .iter()
-                .map(|v| format!("**{}** {}", v.verse, escape_block(&v.text)))
+                .map(|v| {
+                    format!(
+                        "**{}** {}",
+                        v.verse,
+                        verse_markdown(self.translation_code, &v.text)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(" ");
             out.push('\n');
@@ -157,6 +167,17 @@ impl NotesExport<'_> {
         }
         out.push_str("*\n");
     }
+}
+
+/// One verse's stored text as Markdown. The KJV's `{…}` markup becomes
+/// italics for supplied words, and its margin notes are left out (see
+/// `kjv_markup`); any other translation's text, and a KJV verse whose
+/// markup isn't well formed, is quoted exactly, escaped.
+fn verse_markdown(translation_code: &str, text: &str) -> String {
+    (translation_code == "kjv")
+        .then(|| kjv_markup::to_markdown(text))
+        .flatten()
+        .unwrap_or_else(|| escape_block(text))
 }
 
 /// "John 3:16" or "John 3:16–18", as the app writes a passage.
@@ -352,14 +373,28 @@ mod tests {
 
     /// The file for `notes`, quoting `chapters`, in KJV, at -06:00.
     fn render(notes: &[Note], chapters: &[((i64, i64), Vec<Verse>)], book: Option<i64>) -> String {
+        render_in("kjv", notes, chapters, book)
+    }
+
+    /// The same, quoting translation `code`.
+    fn render_in(
+        code: &str,
+        notes: &[Note],
+        chapters: &[((i64, i64), Vec<Verse>)],
+        book: Option<i64>,
+    ) -> String {
         let books = books();
         let verses: HashMap<_, _> = chapters.iter().cloned().collect();
         NotesExport {
             notes,
             books: &books,
             verses: &verses,
-            translation_code: "kjv",
-            translation_name: "King James Version",
+            translation_code: code,
+            translation_name: if code == "kjv" {
+                "King James Version"
+            } else {
+                "World English Bible"
+            },
             book,
             exported_at: at("2026-10-10T18:00:00.000Z"),
         }
@@ -486,10 +521,55 @@ mod tests {
                 text: "The same*was <in>\u{a0}the beginning.".to_string(),
             },
         ];
-        let file = render(&notes, &[((JOHN, 1), chapter)], Some(JOHN));
+        // Braces too: only the KJV's are markup.
+        let file = render_in("web", &notes, &[((JOHN, 1), chapter.clone())], Some(JOHN));
         assert!(file.contains(
             "> **1** In the beginning \\[was\\] the {Word}. \
              **2** The same\\*was \\<in\\>\u{a0}the beginning.\n"
+        ));
+        let file = render(&notes, &[((JOHN, 1), chapter)], Some(JOHN));
+        assert!(file.contains("> **1** In the beginning \\[was\\] the *Word*. **2** The same"));
+    }
+
+    /// Only the KJV's braces are markup: every WEB verse is quoted exactly
+    /// as before (escaped), as is a KJV verse with malformed markup.
+    #[test]
+    fn other_translations_are_quoted_exactly() {
+        for book in crate::db::test_support::bundled("web") {
+            for text in book.chapters.iter().flatten() {
+                assert_eq!(verse_markdown("web", text), escape_block(text));
+            }
+        }
+        let hebrews = "substance. {in yourselves...: or, that ye have in or, for} yourselves}";
+        assert_eq!(verse_markdown("kjv", hebrews), escape_block(hebrews));
+        assert_eq!(verse_markdown("web", "the {Word}"), "the {Word}");
+    }
+
+    #[test]
+    fn kjv_markup_is_shown_as_a_printed_kjv_would() {
+        let notes = [note(1, 19, 23, (1, 3), "Shepherd.")];
+        let chapter = vec![
+            Verse {
+                verse: 1,
+                text: "[A Psalm of David.] The LORD {is} my shepherd; I shall not want."
+                    .to_string(),
+            },
+            Verse {
+                verse: 2,
+                text: "He leadeth me beside the still waters. {green...: Heb. pastures of tender \
+                       grass} {still...: Heb. waters of quietness}"
+                    .to_string(),
+            },
+            Verse {
+                verse: 3,
+                text: "He restoreth my soul.".to_string(),
+            },
+        ];
+        let file = render(&notes, &[((19, 23), chapter)], Some(19));
+        // Notes go with their space: no space before the next number.
+        assert!(file.contains(
+            "> **1** \\[A Psalm of David.\\] The LORD *is* my shepherd; I shall not want. \
+             **2** He leadeth me beside the still waters. **3** He restoreth my soul.\n"
         ));
     }
 
