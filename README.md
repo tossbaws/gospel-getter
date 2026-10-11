@@ -46,7 +46,9 @@ bookmark or write notes on passages. No account and no network needed.
   have several notes, and they show in every translation. A small ✎ marks
   verses with notes, selecting verses shows every note on them, and the
   Notes tab in the Library lists them all in Bible order. Deleting a note
-  offers **Undo**.
+  offers **Undo**. **Export notes…** (in the Library's Notes tab) saves
+  them as a Markdown file, all of them or one book's, with each note's
+  verses quoted in the translation you're reading.
 
   ![John 3:16 to 21 selected in the WEB in the Matrix theme, with ✎ marks after verses 16, 17, 18 and 21 and, under the Copy, Bookmark and + Add note buttons, a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and an Edit link](screenshots/notes.png)
 - **Compare translations.** Press `C` (or **Compare** under **Aa**) to see
@@ -71,9 +73,12 @@ bookmark or write notes on passages. No account and no network needed.
   JSON file, and **Import data…** shows what a file contains before adding
   it (or, if you choose, replacing your bookmarks, highlights and notes).
   Only that personal data is exported, not Bible text or the app's
-  database. Files exported by 2.8.0 (data format 3, which adds notes) can't
-  be imported by 2.7.0 or older, which say the file is from a newer
-  version; files from older versions still import into 2.8.0.
+  database. Files exported by 2.8.0 or newer (data format 3, which adds
+  notes) can't be imported by 2.7.0 or older, which say the file is from a
+  newer version; files from older versions still import into 2.8.0 and
+  newer. **Export data…** is the backup, and its file imports again;
+  **Export notes…** makes a readable copy of your notes, which isn't
+  imported.
 - **A short welcome.** On a new install, a four-page overview of the
   features opens the first time. **Skip** (or Esc) closes it, and
   **Show welcome** in the ☰ menu opens it again. Upgrading doesn't show it.
@@ -189,13 +194,14 @@ without you choosing **Update and restart**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 or 2.7.0?** Each updates itself to 2.8.0: it offers
-the update when it starts (or from **Check now**, in **About Gospel
-Getter** from the ☰ menu in 2.7.0, or in the Updates section of Settings
-in 2.6.0), if it's one of the installs above that update themselves.
+**Coming from 2.6.0, 2.7.0 or 2.8.0?** Each updates itself to 2.9.0: it
+offers the update when it starts (or from **Check now**, in **About Gospel
+Getter** from the ☰ menu in 2.7.0 and 2.8.0, or in the Updates section of
+Settings in 2.6.0), if it's one of the installs above that update
+themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.8.0 by hand once, from the
+Install 2.9.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
