@@ -99,15 +99,16 @@ assistive technology.
 
 **Assets in `assets/brand/`**, all derived locally: the WebP marks with
 ImageMagick 7, the flat PNGs and `favicon.ico` with
-`tools/site/build_brand_icons.py` (the 2048px original isn't committed):
+`tools/site/build_brand_icons.py`. The brand source art isn't committed; the
+sources below are paths in its `Brand_Attempts/` folder:
 
 | File | Size | Source and derivation |
 |---|---|---|
-| `chirho-code-mark-240.webp`, `chirho-code-mark-480.webp` | 240 and 480 px (1x/2x), 22 KB and 60 KB | `/home/m4sk/Generated_Art/Brand_Attempts/2026-10-05_brand_chi-rho_C2_circuit-reliquary_polish.png` (2048×2048, the final mark). Cropped to the window (1940×1940 at +54+64), the black corners made transparent with a circular mask (radius 967, blurred 2px), resized and saved as WebP with alpha (quality 86). Used large in About. |
-| `chirho-code-flat-small-16.png`, `chirho-code-flat-small-32.png` | 16 and 32 px | `/home/m4sk/Generated_Art/Brand_Attempts/favicon/2026-10-09_c2/2026-10-05_chi-rho_circuit_flat-small_{16,32}.png`. The flat small-size mark (an emboldened glyph, no rim): the 16 and 32 favicons. |
-| `chirho-code-flat-48.png`, `chirho-code-flat-64.png` | 48 and 64 px | `/home/m4sk/Generated_Art/Brand_Attempts/favicon/2026-10-09_c2/2026-10-05_chi-rho_circuit_flat_{48,64}.png`. The 48 and 64 favicons, and the header icon (48, 40 px shown). |
-| `chirho-code-flat-180.png` | 180 px | `/home/m4sk/Generated_Art/Brand_Attempts/favicon/2026-10-09_c2/2026-10-05_chi-rho_circuit_flat_180.png`. The Apple touch icon, and the header icon's 2x. |
-| `favicon.ico` | 16, 32, 48, 64 | `/home/m4sk/Generated_Art/Brand_Attempts/favicon/2026-10-09_c2/favicon.ico` (16 and 32 from the flat-small mark, 48 and 64 from the flat mark). |
+| `chirho-code-mark-240.webp`, `chirho-code-mark-480.webp` | 240 and 480 px (1x/2x), 22 KB and 60 KB | `Brand_Attempts/2026-10-05_brand_chi-rho_C2_circuit-reliquary_polish.png` (2048×2048, the final mark). Cropped to the window (1940×1940 at +54+64), the black corners made transparent with a circular mask (radius 967, blurred 2px), resized and saved as WebP with alpha (quality 86). Used large in About. |
+| `chirho-code-flat-small-16.png`, `chirho-code-flat-small-32.png` | 16 and 32 px | `Brand_Attempts/favicon/2026-10-09_c2/2026-10-05_chi-rho_circuit_flat-small_{16,32}.png`. The flat small-size mark (an emboldened glyph, no rim): the 16 and 32 favicons. |
+| `chirho-code-flat-48.png`, `chirho-code-flat-64.png` | 48 and 64 px | `Brand_Attempts/favicon/2026-10-09_c2/2026-10-05_chi-rho_circuit_flat_{48,64}.png`. The 48 and 64 favicons, and the header icon (48, 40 px shown). |
+| `chirho-code-flat-180.png` | 180 px | `Brand_Attempts/favicon/2026-10-09_c2/2026-10-05_chi-rho_circuit_flat_180.png`. The Apple touch icon, and the header icon's 2x. |
+| `favicon.ico` | 16, 32, 48, 64 | `Brand_Attempts/favicon/2026-10-09_c2/favicon.ico` (16 and 32 from the flat-small mark, 48 and 64 from the flat mark). |
 
 The flat set is redrawn from the final mark (C2) by
 `tools/site/build_brand_icons.py`, which writes the whole set and, with
