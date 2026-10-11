@@ -140,6 +140,34 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .await
     .context("Failed to create highlights table")?;
 
+    // The reader's notes: their own words on a passage within one
+    // chapter. Like bookmarks they have no translation, but a passage can
+    // have any number of them. The CHECKs back up the validation in
+    // `db::notes` (`MAX_NOTE_CHARS`); `updated_at` changes when the text
+    // does. Notes are looked up a chapter at a time, hence the index.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS notes (
+            id INTEGER PRIMARY KEY,
+            book_id INTEGER NOT NULL REFERENCES books(id),
+            chapter INTEGER NOT NULL CHECK (chapter >= 1),
+            verse_start INTEGER NOT NULL CHECK (verse_start >= 1),
+            verse_end INTEGER NOT NULL CHECK (verse_end >= verse_start),
+            body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 10000),
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create notes table")?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_notes_chapter ON notes (book_id, chapter)")
+        .execute(pool)
+        .await
+        .context("Failed to create notes index")?;
+
     // Full-text search index over `verses`. It's derived data only: built
     // from `verses` by `db::search`, never written back, and contentless —
     // it stores no copy of the text, only the tokens and a rowid encoding

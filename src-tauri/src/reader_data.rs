@@ -1,6 +1,6 @@
-//! The reader's own data — bookmarks, highlights, last reading position
-//! and display preferences — as a portable, human-readable JSON file, for
-//! moving between installs or keeping a backup.
+//! The reader's own data — bookmarks, highlights, notes, last reading
+//! position and display preferences — as a portable, human-readable JSON
+//! file, for moving between installs or keeping a backup.
 //!
 //! The file never contains Bible text, cross-references, the search index,
 //! database ids or anything else the app can rebuild from its bundled data.
@@ -12,6 +12,11 @@
 //! Format 2 (from v2.5.0) adds `highlights`; format 1 files, which can't
 //! have them, still import exactly as before.
 //!
+//! Format 3 (from v2.8.0) adds notes: `notes`, each a passage and the
+//! reader's plain text about it. Format 1 and 2 files, which can't have
+//! them, still import exactly as before and leave the reader's notes
+//! alone.
+//!
 //! This module is the format and its validation; reading and writing the
 //! database is `db::reader_data`, and the commands (with the native file
 //! pickers) are in `commands`.
@@ -21,26 +26,60 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
+use crate::db::notes::normalize_body;
 use crate::db::{Book, HighlightColor, Translation};
 
 /// The `format` every reader-data file declares.
 pub const FORMAT: &str = "gospel-getter-reader-data";
-/// The `format_version` this version writes. It reads this and
-/// `FORMAT_VERSION_1`; anything newer is refused, since it may mean things
-/// this version would misread.
-pub const FORMAT_VERSION: u64 = 2;
+/// The `format_version` this version writes. It reads this,
+/// `FORMAT_VERSION_2` and `FORMAT_VERSION_1`; anything newer is refused,
+/// since it may mean things this version would misread.
+pub const FORMAT_VERSION: u64 = 3;
+/// The second format: format 1 and highlights, but no notes.
+pub const FORMAT_VERSION_2: u64 = 2;
 /// The first format: bookmarks, reading position and preferences, but no
-/// highlights.
+/// highlights or notes.
 pub const FORMAT_VERSION_1: u64 = 1;
 /// The suggested file-name suffix.
 pub const FILE_SUFFIX: &str = ".gospel-getter.json";
-/// The largest file import will read. A file with the maximum number of
-/// bookmarks and highlights is under this.
-pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+/// The largest file import will read: 128 MiB, the smallest of 64, 96
+/// and 128 MiB that always holds a file at every limit below, as this app
+/// writes it, however its notes are written. Worst cases, pretty-printed as
+/// `to_file_contents` writes them, with the longest book name, the largest
+/// book, chapter and verse numbers and every optional field present
+/// (`a_maximal_file_fits_the_size_limit` builds one and checks every
+/// figure here):
+///
+/// - a bookmark takes 188 bytes: 10,000 of them, 1,880,000 bytes;
+/// - a highlight takes 231 bytes: 40,000 of them, 9,240,000 bytes;
+/// - a note takes 254 bytes besides its text: 10,000 of them (`MAX_NOTES`),
+///   2,540,000 bytes;
+/// - the notes' text is at most `MAX_TOTAL_NOTE_CHARS` (25,000,000)
+///   characters in all, of plain text (see `db::notes::normalize_body`),
+///   and none of those takes more than 4 bytes in the file — 4 bytes of
+///   UTF-8 unescaped, or 2 for `\n`, `\t`, `\"` and `\\`; the control
+///   characters JSON would escape in 6, like `\u0001`, are refused — so
+///   100,000,000 bytes;
+/// - the rest of the file (its header, reading position and every
+///   preference) takes 487 bytes.
+///
+/// That's 113,660,487 bytes in all, 108.4 MiB: over 96 MiB, under 128.
+/// Format 2's limit was 16 MiB; it rose because the reader's notes can
+/// hold far more text than every other record together, and a backup of
+/// them must always import. The limit is still there to refuse a file
+/// that can't be an export without reading all of it; checking one of
+/// 128 MiB briefly holds a few times that in memory, which a desktop has
+/// to spare.
+pub const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
 /// The most bookmarks one file may hold.
 pub const MAX_BOOKMARKS: usize = 10_000;
 /// The most highlights one file may hold: more than there are verses.
 pub const MAX_HIGHLIGHTS: usize = 40_000;
+/// The most notes one file may hold: as many as the reader can keep.
+pub const MAX_NOTES: usize = crate::db::notes::MAX_NOTES;
+/// The most characters the notes in one file may hold together: as many
+/// as the reader's notes can.
+pub const MAX_TOTAL_NOTE_CHARS: usize = crate::db::notes::MAX_TOTAL_NOTE_CHARS;
 /// How many problems an invalid file reports before summarizing the rest.
 const MAX_REPORTED_PROBLEMS: usize = 12;
 
@@ -61,6 +100,9 @@ pub struct ReaderData {
     /// written back out stays a valid format 1 file.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub highlights: Vec<HighlightRecord>,
+    /// Format 3 only, and likewise left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<NoteRecord>,
     #[serde(default)]
     pub preferences: Preferences,
 }
@@ -114,6 +156,29 @@ pub struct HighlightRecord {
     pub color: HighlightColor,
     /// When the verse was first highlighted, and when its color was last
     /// set (UTC, ISO 8601). Kept on import; missing ones are "now".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+/// One note: a passage and the reader's text about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NoteRecord {
+    /// Canonical book number, Genesis = 1 … Revelation = 66.
+    pub book: i64,
+    /// The book's name, for people reading the file. If present on import,
+    /// it must match `book`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub book_name: Option<String>,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    /// Plain text (see `db::notes::normalize_body`).
+    pub body: String,
+    /// When the note was written, and when its text was last changed (UTC,
+    /// ISO 8601). Kept on import; missing ones are "now".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -211,7 +276,7 @@ impl fmt::Display for ImportError {
             Self::NotReaderData => {
                 write!(
                     f,
-                    "This isn't a Gospel Getter file of bookmarks, highlights and settings."
+                    "This isn't a Gospel Getter file of bookmarks, highlights, notes and settings."
                 )
             }
             Self::UnsupportedVersion(message) | Self::Malformed(message) => f.write_str(message),
@@ -257,15 +322,17 @@ pub fn parse(bytes: &[u8]) -> Result<ReaderData, ImportError> {
     }
     match value.get("format_version").and_then(Value::as_u64) {
         Some(FORMAT_VERSION) => {}
-        // A format 1 file is read exactly as format 1 always was: one that
-        // names highlights has a field format 1 doesn't define.
-        Some(FORMAT_VERSION_1) => {
-            if value.get("highlights").is_some() {
-                return Err(ImportError::Malformed(
-                    "The file doesn't have the expected layout: unknown field `highlights` \
-                     (data format 1 has no highlights)."
-                        .to_string(),
-                ));
+        // A format 1 or 2 file is read exactly as it always was: one that
+        // names highlights (format 1) or notes has a field its format
+        // doesn't define.
+        Some(old @ (FORMAT_VERSION_1 | FORMAT_VERSION_2)) => {
+            for (field, since) in [("highlights", FORMAT_VERSION_2), ("notes", FORMAT_VERSION)] {
+                if old < since && value.get(field).is_some() {
+                    return Err(ImportError::Malformed(format!(
+                        "The file doesn't have the expected layout: unknown field `{field}` \
+                         (data format {old} has no {field})."
+                    )));
+                }
             }
         }
         Some(newer) if newer > FORMAT_VERSION => {
@@ -278,7 +345,7 @@ pub fn parse(bytes: &[u8]) -> Result<ReaderData, ImportError> {
         _ => {
             return Err(ImportError::UnsupportedVersion(format!(
                 "This file's data format version isn't one this version of Gospel Getter \
-                 reads (it reads formats {FORMAT_VERSION_1} and {FORMAT_VERSION})."
+                 reads (it reads formats {FORMAT_VERSION_1} to {FORMAT_VERSION})."
             )));
         }
     }
@@ -334,6 +401,36 @@ impl NewHighlight {
     }
 }
 
+/// The passage and text of a note: two notes with the same key are the
+/// same note, for importing.
+pub type NoteKey = (i64, i64, i64, i64, String);
+
+/// A note ready to save, after validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewNote {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    /// Normalized, as it's stored.
+    pub body: String,
+    /// Normalized to the database's own format; `None` means "now".
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl NewNote {
+    pub fn key(&self) -> NoteKey {
+        (
+            self.book_id,
+            self.chapter,
+            self.verse_start,
+            self.verse_end,
+            self.body.clone(),
+        )
+    }
+}
+
 /// A reading position ready to save, after validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewPosition {
@@ -359,8 +456,73 @@ pub struct ValidatedImport {
     pub highlights: Option<Vec<NewHighlight>>,
     /// How many highlights in the file repeated a verse already in it.
     pub highlight_duplicates_in_file: usize,
+    /// De-duplicated, in the file's order. `None` for a format 1 or 2 file,
+    /// which can't hold notes, so importing it leaves them alone.
+    pub notes: Option<Vec<NewNote>>,
+    /// How many notes in the file repeated another one in it (the same
+    /// passage and text).
+    pub note_duplicates_in_file: usize,
     pub position: Option<NewPosition>,
     pub preferences: Preferences,
+}
+
+/// Check one passage in a file (a bookmark's or a note's, labelled
+/// `label`) against this install's books and verse numbering. Returns the
+/// book and the passage's reference, e.g. "John 3:16–18", or the problem.
+fn check_passage_record<'a>(
+    label: &str,
+    (book_number, book_name, chapter, verse_start, verse_end): (
+        i64,
+        &Option<String>,
+        i64,
+        i64,
+        i64,
+    ),
+    books: &'a [Book],
+    last_verses: &HashMap<(i64, i64), i64>,
+) -> Result<(&'a Book, String), String> {
+    let Some(found) = books.iter().find(|b| b.id == book_number) else {
+        return Err(format!("{label}: there's no book number {book_number}."));
+    };
+    if !name_matches(found, book_name) {
+        return Err(format!(
+            "{label}: book {book_number} is {}, not {}.",
+            found.name,
+            book_name.as_deref().unwrap_or_default()
+        ));
+    }
+    if !(1..=found.chapter_count).contains(&chapter) {
+        return Err(format!(
+            "{label}: there's no {} {chapter} ({} has {} chapters).",
+            found.name, found.name, found.chapter_count
+        ));
+    }
+    let reference = format!(
+        "{} {chapter}:{verse_start}{}",
+        found.name,
+        if verse_end == verse_start {
+            String::new()
+        } else {
+            format!("\u{2013}{verse_end}")
+        }
+    );
+    let last = last_verses.get(&(found.id, chapter)).copied().unwrap_or(0);
+    if verse_start < 1 || verse_end < verse_start {
+        return Err(format!("{label}: {reference} isn't a valid verse range."));
+    }
+    if verse_end > last {
+        return Err(format!(
+            "{label}: there's no {reference}; {} {chapter} ends at verse {last}.",
+            found.name
+        ));
+    }
+    Ok((found, reference))
+}
+
+/// Whether a file's optional book name (if any) names `book`.
+fn name_matches(book: &Book, name: &Option<String>) -> bool {
+    name.as_deref()
+        .is_none_or(|n| n.trim().eq_ignore_ascii_case(&book.name))
 }
 
 /// Check every passage and the reading position against this install's
@@ -377,10 +539,6 @@ pub fn validate(
 ) -> Result<ValidatedImport, ImportError> {
     let mut problems = Vec::new();
     let book = |id: i64| books.iter().find(|b| b.id == id);
-    let name_matches = |book: &Book, name: &Option<String>| {
-        name.as_deref()
-            .is_none_or(|n| n.trim().eq_ignore_ascii_case(&book.name))
-    };
 
     if data.bookmarks.len() > MAX_BOOKMARKS {
         return Err(ImportError::Invalid(vec![format!(
@@ -394,58 +552,30 @@ pub fn validate(
             data.highlights.len()
         )]));
     }
+    if data.notes.len() > MAX_NOTES {
+        return Err(ImportError::Invalid(vec![format!(
+            "It has {} notes; the most one file can hold is {MAX_NOTES}.",
+            data.notes.len()
+        )]));
+    }
 
     let mut bookmarks: Vec<NewBookmark> = Vec::new();
     let mut index_of: HashMap<(i64, i64, i64, i64), usize> = HashMap::new();
     let mut duplicates_in_file = 0;
     for (i, b) in data.bookmarks.into_iter().enumerate() {
         let label = format!("Bookmark {}", i + 1);
-        let Some(found) = book(b.book) else {
-            problems.push(format!("{label}: there's no book number {}.", b.book));
-            continue;
-        };
-        if !name_matches(found, &b.book_name) {
-            problems.push(format!(
-                "{label}: book {} is {}, not {}.",
-                b.book,
-                found.name,
-                b.book_name.as_deref().unwrap_or_default()
-            ));
-            continue;
-        }
-        if !(1..=found.chapter_count).contains(&b.chapter) {
-            problems.push(format!(
-                "{label}: there's no {} {} ({} has {} chapters).",
-                found.name, b.chapter, found.name, found.chapter_count
-            ));
-            continue;
-        }
-        let reference = format!(
-            "{} {}:{}{}",
-            found.name,
-            b.chapter,
-            b.verse_start,
-            if b.verse_end == b.verse_start {
-                String::new()
-            } else {
-                format!("\u{2013}{}", b.verse_end)
+        let (found, reference) = match check_passage_record(
+            &label,
+            (b.book, &b.book_name, b.chapter, b.verse_start, b.verse_end),
+            books,
+            last_verses,
+        ) {
+            Ok(checked) => checked,
+            Err(problem) => {
+                problems.push(problem);
+                continue;
             }
-        );
-        let last = last_verses
-            .get(&(found.id, b.chapter))
-            .copied()
-            .unwrap_or(0);
-        if b.verse_start < 1 || b.verse_end < b.verse_start {
-            problems.push(format!("{label}: {reference} isn't a valid verse range."));
-            continue;
-        }
-        if b.verse_end > last {
-            problems.push(format!(
-                "{label}: there's no {reference}; {} {} ends at verse {last}.",
-                found.name, b.chapter
-            ));
-            continue;
-        }
+        };
         let created_at = match b.created_at.as_deref().map(normalize_timestamp) {
             None => None,
             Some(Some(t)) => Some(t),
@@ -548,6 +678,64 @@ pub fn validate(
         }
     }
 
+    let mut notes: Vec<NewNote> = Vec::new();
+    let mut noted: HashSet<NoteKey> = HashSet::new();
+    let mut note_duplicates_in_file = 0;
+    for (i, n) in data.notes.into_iter().enumerate() {
+        let label = format!("Note {}", i + 1);
+        let (found, reference) = match check_passage_record(
+            &label,
+            (n.book, &n.book_name, n.chapter, n.verse_start, n.verse_end),
+            books,
+            last_verses,
+        ) {
+            Ok(checked) => checked,
+            Err(problem) => {
+                problems.push(problem);
+                continue;
+            }
+        };
+        let body = match normalize_body(&n.body) {
+            Ok(body) => body,
+            Err(e) => {
+                problems.push(format!("{label} ({reference}): {e}"));
+                continue;
+            }
+        };
+        let created_at = n.created_at.as_deref().map(normalize_timestamp);
+        let updated_at = n.updated_at.as_deref().map(normalize_timestamp);
+        if matches!(created_at, Some(None)) || matches!(updated_at, Some(None)) {
+            problems.push(format!(
+                "{label} ({reference}): its date isn't a valid UTC time like \
+                 2026-10-04T12:30:00Z."
+            ));
+            continue;
+        }
+        let new = NewNote {
+            book_id: found.id,
+            chapter: n.chapter,
+            verse_start: n.verse_start,
+            verse_end: n.verse_end,
+            body,
+            created_at: created_at.flatten(),
+            updated_at: updated_at.flatten(),
+        };
+        // The same note (passage and text) twice: the first one counts.
+        if noted.insert(new.key()) {
+            notes.push(new);
+        } else {
+            note_duplicates_in_file += 1;
+        }
+    }
+
+    let note_chars: usize = notes.iter().map(|n| n.body.chars().count()).sum();
+    if note_chars > MAX_TOTAL_NOTE_CHARS {
+        problems.push(format!(
+            "Its notes hold {note_chars} characters in all; the most one file can hold is \
+             {MAX_TOTAL_NOTE_CHARS}."
+        ));
+    }
+
     let position = match data.reading_position {
         None => None,
         Some(p) => {
@@ -618,6 +806,8 @@ pub fn validate(
         duplicates_in_file,
         highlights: (data.format_version != FORMAT_VERSION_1).then_some(highlights),
         highlight_duplicates_in_file,
+        notes: (data.format_version >= FORMAT_VERSION).then_some(notes),
+        note_duplicates_in_file,
         position,
         preferences: data.preferences,
     })
@@ -763,14 +953,16 @@ mod tests {
             Err(ImportError::NotReaderData)
         );
         let newer = parse(
-            br#"{"format": "gospel-getter-reader-data", "format_version": 3, "brand_new": true}"#,
+            br#"{"format": "gospel-getter-reader-data", "format_version": 4, "brand_new": true}"#,
         )
         .unwrap_err();
-        assert!(
-            newer
-                .to_string()
-                .contains("newer version of Gospel Getter (data format 3)"),
-            "{newer}"
+        assert_eq!(
+            newer,
+            ImportError::UnsupportedVersion(
+                "This file was made by a newer version of Gospel Getter (data format 4). This \
+                 version reads format 3; update Gospel Getter to import it."
+                    .to_string()
+            )
         );
         // Format 1 never had highlights: a format 1 file naming them is
         // refused, as format 1 always refused fields it doesn't define.
@@ -783,6 +975,25 @@ mod tests {
             matches!(v1_with_highlights, ImportError::Malformed(_)),
             "{v1_with_highlights:?}"
         );
+        // Nor did format 1 or 2 have notes.
+        for version in [1, 2] {
+            let with_notes = parse(
+                format!(
+                    r#"{{"format": "gospel-getter-reader-data", "format_version": {version},
+                         "exported_at": "x", "app_version": "2.7.0", "reading_position": null,
+                         "notes": []}}"#
+                )
+                .as_bytes(),
+            )
+            .unwrap_err();
+            assert_eq!(
+                with_notes,
+                ImportError::Malformed(format!(
+                    "The file doesn't have the expected layout: unknown field `notes` (data \
+                     format {version} has no notes)."
+                ))
+            );
+        }
         let bad_color = parse(
             br#"{"format": "gospel-getter-reader-data", "format_version": 2, "exported_at": "x",
                  "app_version": "2.5.0", "reading_position": null,
@@ -840,6 +1051,208 @@ mod tests {
         let contents = to_file_contents(&data).unwrap();
         assert!(contents.starts_with('{') && contents.ends_with("}\n"));
         assert_eq!(parse(contents.as_bytes()).unwrap(), data);
+    }
+
+    /// A file with `bookmarks`, `highlights` and `notes` copies of the
+    /// largest record of each kind, and every other field at its largest,
+    /// as `to_file_contents` writes it: its size in bytes.
+    fn maximal_file_size(bookmarks: usize, highlights: usize, notes: usize) -> usize {
+        let kjv = crate::db::test_support::bundled("kjv");
+        let longest_name = kjv.iter().map(|b| b.name.as_str()).max_by_key(|n| n.len());
+        let book_name = longest_name.map(str::to_string);
+        let book = kjv.len() as i64;
+        let chapter = kjv.iter().map(|b| b.chapters.len()).max().unwrap() as i64;
+        let verse = kjv
+            .iter()
+            .flat_map(|b| b.chapters.iter().map(Vec::len))
+            .max()
+            .unwrap() as i64;
+        let at = Some("2026-10-04T12:30:05.123Z".to_string());
+        // The character that takes the most bytes in the file, of those a
+        // note may hold (see `worst_case_note_characters_take_4_bytes`).
+        let body = "\u{10ffff}".repeat(crate::db::notes::MAX_NOTE_CHARS);
+        assert_eq!(normalize_body(&body).as_deref(), Ok(body.as_str()));
+        let data = ReaderData {
+            format: FORMAT.to_string(),
+            format_version: FORMAT_VERSION,
+            exported_at: at.clone().unwrap(),
+            app_version: "10.10.10".to_string(),
+            reading_position: Some(PositionRecord {
+                translation: "kjv".to_string(),
+                book,
+                book_name: book_name.clone(),
+                chapter,
+            }),
+            bookmarks: vec![
+                BookmarkRecord {
+                    book,
+                    book_name: book_name.clone(),
+                    chapter,
+                    verse_start: verse,
+                    verse_end: verse,
+                    created_at: at.clone(),
+                };
+                bookmarks
+            ],
+            highlights: vec![
+                HighlightRecord {
+                    book,
+                    book_name: book_name.clone(),
+                    chapter,
+                    verse,
+                    color: HighlightColor::Yellow,
+                    created_at: at.clone(),
+                    updated_at: at.clone(),
+                };
+                highlights
+            ],
+            notes: vec![
+                NoteRecord {
+                    book,
+                    book_name,
+                    chapter,
+                    verse_start: verse,
+                    verse_end: verse,
+                    body,
+                    created_at: at.clone(),
+                    updated_at: at,
+                };
+                notes
+            ],
+            preferences: Preferences {
+                theme: Some(Theme::ClassicLight),
+                text_size: Some(TextSize::Medium),
+                line_spacing: Some(LineSpacing::Compact),
+                reading_mode: Some(false),
+                compare: Some(false),
+            },
+        };
+        to_file_contents(&data).unwrap().len()
+    }
+
+    /// Of every character a note may hold, none takes more than 4 bytes in
+    /// a file: the control characters JSON would escape as 6 (`\u0001`)
+    /// are refused.
+    #[test]
+    fn worst_case_note_characters_take_4_bytes() {
+        let mut widest = 0;
+        for c in (0..=0x10_ffff).filter_map(char::from_u32) {
+            // Inside the text, so trimming can't drop it.
+            if let Ok(text) = normalize_body(&format!("a{c}b")) {
+                let encoded = serde_json::to_string(&text).unwrap().len() - 4;
+                widest = widest.max(encoded);
+            }
+        }
+        assert_eq!(widest, 4);
+    }
+
+    /// The arithmetic in `MAX_FILE_BYTES`'s documentation: a file at every
+    /// limit, with every record as large as it can be and the notes' text
+    /// at its total limit, fits — and wouldn't in 96 MiB.
+    #[test]
+    fn a_maximal_file_fits_the_size_limit() {
+        use crate::db::notes::MAX_NOTE_CHARS;
+        let base = maximal_file_size(1, 1, 1);
+        let bookmark = maximal_file_size(2, 1, 1) - base;
+        let highlight = maximal_file_size(1, 2, 1) - base;
+        let note = maximal_file_size(1, 1, 2) - base;
+        // Each record adds the same bytes, so the size is linear in each count.
+        assert_eq!(maximal_file_size(3, 1, 1) - base, 2 * bookmark);
+        assert_eq!(maximal_file_size(1, 3, 1) - base, 2 * highlight);
+        assert_eq!(maximal_file_size(1, 1, 3) - base, 2 * note);
+        let rest = base - bookmark - highlight - note;
+        // A maximal note's text is 4 bytes a character; the rest is the record.
+        let note_record = note - 4 * MAX_NOTE_CHARS;
+        // As documented on `MAX_FILE_BYTES`.
+        assert_eq!(
+            (bookmark, highlight, note_record, rest),
+            (188, 231, 254, 487)
+        );
+        let total = rest
+            + MAX_BOOKMARKS * bookmark
+            + MAX_HIGHLIGHTS * highlight
+            + MAX_NOTES * note_record
+            + 4 * MAX_TOTAL_NOTE_CHARS;
+        assert_eq!(total, 113_660_487);
+        assert!(
+            total as u64 <= MAX_FILE_BYTES,
+            "a maximal file is {total} bytes, over the {MAX_FILE_BYTES}-byte limit"
+        );
+        assert!(total as u64 > 96 * 1024 * 1024, "a smaller limit would do");
+    }
+
+    /// One more than each limit is refused, before anything else is checked.
+    #[test]
+    fn files_over_a_limit_are_refused() {
+        let empty = || ReaderData {
+            format: FORMAT.to_string(),
+            format_version: FORMAT_VERSION,
+            exported_at: "x".to_string(),
+            app_version: "2.8.0".to_string(),
+            reading_position: None,
+            bookmarks: Vec::new(),
+            highlights: Vec::new(),
+            notes: Vec::new(),
+            preferences: Preferences::default(),
+        };
+        let bookmark = BookmarkRecord {
+            book: 43,
+            book_name: None,
+            chapter: 3,
+            verse_start: 16,
+            verse_end: 16,
+            created_at: None,
+        };
+        let highlight = HighlightRecord {
+            book: 43,
+            book_name: None,
+            chapter: 3,
+            verse: 16,
+            color: HighlightColor::Blue,
+            created_at: None,
+            updated_at: None,
+        };
+        let note = NoteRecord {
+            book: 43,
+            book_name: None,
+            chapter: 3,
+            verse_start: 16,
+            verse_end: 16,
+            body: "x".to_string(),
+            created_at: None,
+            updated_at: None,
+        };
+        let refused = |data: ReaderData| validate(data, &[], &[], &HashMap::new()).unwrap_err();
+        assert_eq!(
+            refused(ReaderData {
+                bookmarks: vec![bookmark; MAX_BOOKMARKS + 1],
+                ..empty()
+            })
+            .problems(),
+            ["It has 10001 bookmarks; the most one file can hold is 10000."]
+        );
+        assert_eq!(
+            refused(ReaderData {
+                highlights: vec![highlight; MAX_HIGHLIGHTS + 1],
+                ..empty()
+            })
+            .problems(),
+            ["It has 40001 highlights; the most one file can hold is 40000."]
+        );
+        assert_eq!(
+            refused(ReaderData {
+                notes: vec![note.clone(); MAX_NOTES + 1],
+                ..empty()
+            })
+            .problems(),
+            ["It has 10001 notes; the most one file can hold is 10000."]
+        );
+        // At the limit, the count is fine (here the book is what's wrong).
+        let at_limit = refused(ReaderData {
+            notes: vec![note; MAX_NOTES],
+            ..empty()
+        });
+        assert_eq!(at_limit.problems()[0], "Note 1: there's no book number 43.");
     }
 
     #[test]

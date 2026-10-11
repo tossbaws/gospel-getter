@@ -29,7 +29,7 @@ use std::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use gospel_getter_lib::commands::{self, AppState};
-use gospel_getter_lib::db;
+use gospel_getter_lib::db::{self, Passage};
 use gospel_getter_lib::updater::{self, Problem, UpdateInfo};
 
 /// The scripted answer for the next file dialog: `Some(None)` is a
@@ -94,6 +94,24 @@ fn arg<T: serde::de::DeserializeOwned>(args: &Value, name: &str) -> anyhow::Resu
 
 fn to_value(value: impl serde::Serialize) -> anyhow::Result<Value> {
     Ok(serde_json::to_value(value)?)
+}
+
+/// A command's answer: its value, or the message it fails with.
+fn answer(result: Result<impl serde::Serialize, String>) -> anyhow::Result<Result<Value, String>> {
+    Ok(match result {
+        Ok(value) => Ok(to_value(value)?),
+        Err(message) => Err(message),
+    })
+}
+
+/// The passage named by `bookId`, `chapter`, `verseStart` and `verseEnd`.
+fn passage(args: &Value) -> anyhow::Result<Passage> {
+    Ok(Passage {
+        book_id: arg(args, "bookId")?,
+        chapter: arg(args, "chapter")?,
+        verse_start: arg(args, "verseStart")?,
+        verse_end: arg(args, "verseEnd")?,
+    })
 }
 
 /// One command, as the Tauri command of the same name would answer it.
@@ -174,6 +192,29 @@ async fn dispatch(
         )
         .await
         .map(Value::from),
+        "list_notes" => answer(commands::notes_overlapping(state, passage(args)?).await)?,
+        "list_all_notes" => match commands::notes_list(state).await {
+            Ok(list) => Ok(to_value(list)?),
+            Err(e) => Err(format!("Notes couldn't be loaded: {e:#}")),
+        },
+        "add_note" => {
+            let body: String = arg(args, "body")?;
+            answer(commands::note_add(state, passage(args)?, &body).await)?
+        }
+        "update_note" => {
+            let body: String = arg(args, "body")?;
+            answer(commands::note_update(state, arg(args, "id")?, &body).await)?
+        }
+        "delete_note" => answer(commands::note_delete(state, arg(args, "id")?).await)?,
+        "restore_note" => {
+            let body: String = arg(args, "body")?;
+            let created_at: String = arg(args, "createdAt")?;
+            let updated_at: String = arg(args, "updatedAt")?;
+            answer(
+                commands::note_restore(state, passage(args)?, &body, &created_at, &updated_at)
+                    .await,
+            )?
+        }
         "search" => {
             let query: String = arg(args, "query")?;
             let offset: Option<i64> = arg(args, "offset")?;
@@ -252,7 +293,7 @@ async fn dispatch(
             commands::compare_chapter(state, arg(args, "bookId")?, arg(args, "chapter")?).await?,
         )?),
         // Test setup, not an app command: forget the reading position
-        // (and bookmarks and highlights, unless `keepBookmarks` — a restart
+        // (and bookmarks, highlights and notes, unless `keepBookmarks` — a restart
         // rather than a new test), then optionally save a reading position (what the
         // app would reopen at).
         "__reset" => {
@@ -269,6 +310,7 @@ async fn dispatch(
             if !arg::<Option<bool>>(args, "keepBookmarks")?.unwrap_or(false) {
                 sqlx::query("DELETE FROM bookmarks").execute(pool).await?;
                 sqlx::query("DELETE FROM highlights").execute(pool).await?;
+                sqlx::query("DELETE FROM notes").execute(pool).await?;
             }
             sqlx::query("DELETE FROM reading_position")
                 .execute(pool)

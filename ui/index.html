@@ -512,7 +512,7 @@
             margin: 0.3rem 0;
         }
 
-        /* Library: bookmarks and highlights in a panel down the right,
+        /* Library: bookmarks, highlights and notes in a panel down the right,
            hanging from the top bar so Aa, search and ☰ stay in reach.
            Opaque --option-bg, like the popovers. */
         .library-panel:not([hidden]) {
@@ -958,13 +958,12 @@
             cursor: progress;
         }
 
-        /* First-run welcome: a short tour in a modal over the reader, like
-           the import preview. Its text is --text, --text-dim and --accent
-           on the opaque --option-bg, which meet AA in every theme (see the
-           palette tests). Like the rest of the UI it doesn't grow with the
-           reading text size, and the pages scroll inside the panel so the
-           buttons stay in view at any window size. */
-        .welcome-overlay:not([hidden]) {
+        /* Modals over a dimmed page: the first-run welcome and the note
+           panel, like the import preview. Their text is --text, --text-dim
+           and --accent on the opaque --option-bg, which meet AA in every
+           theme (see the palette tests). The body scrolls inside the panel
+           so the buttons stay in view at any window size. */
+        .modal-overlay:not([hidden]) {
             position: fixed;
             inset: 0;
             z-index: 45;
@@ -975,7 +974,7 @@
             background: rgba(0, 0, 0, 0.6);
         }
 
-        .welcome-panel {
+        .modal-panel {
             display: flex;
             flex-direction: column;
             width: min(32rem, 100%);
@@ -987,12 +986,50 @@
             line-height: 1.55;
         }
 
-        .welcome-pages {
+        .modal-body {
             flex: 1 1 auto;
             min-height: 0;
             overflow-y: auto;
             padding: 1.3rem 1.4rem 0.4rem;
         }
+
+        .modal-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.8rem 1.4rem 1rem;
+            border-top: 1px solid var(--accent-dim);
+        }
+
+        .modal-buttons[hidden] {
+            display: none;
+        }
+
+        .modal-buttons .reader-mode-btn {
+            width: auto;
+        }
+
+        .modal-panel button:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            .modal-overlay:not([hidden]) .modal-panel {
+                animation: modal-in 0.15s ease-out;
+            }
+        }
+
+        @keyframes modal-in {
+            from {
+                opacity: 0;
+                transform: translateY(6px);
+            }
+        }
+
+        /* First-run welcome: a short tour, in a modal. Like the rest of the
+           UI it doesn't grow with the reading text size. */
 
         .welcome-icon {
             display: block;
@@ -1030,23 +1067,10 @@
             border-radius: 4px;
         }
 
-        .welcome-buttons {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.8rem 1.4rem 1rem;
-            border-top: 1px solid var(--accent-dim);
-        }
-
         .welcome-progress {
             margin-right: auto;
             font-size: 0.8rem;
             color: var(--text-dim);
-        }
-
-        .welcome-buttons .reader-mode-btn {
-            width: auto;
         }
 
         /* Back keeps its place on the first page, so the buttons don't
@@ -1055,27 +1079,162 @@
             visibility: hidden;
         }
 
-        .welcome-panel button:focus-visible {
-            outline: 2px solid var(--accent);
-            outline-offset: 2px;
-        }
-
         @media (max-height: 520px) {
             .welcome-icon {
                 display: none;
             }
         }
 
-        @media (prefers-reduced-motion: no-preference) {
-            .welcome-overlay:not([hidden]) .welcome-panel {
-                animation: welcome-in 0.15s ease-out;
-            }
+        /* The note panel: one passage's text, quoted in the translation on
+           screen, and a note about it. The passage and the note are in the
+           reading text size, so they stay as legible as the chapter; the
+           passage scrolls inside a few lines, and the note always has room
+           for at least four. */
+        .note-title {
+            font-size: 1.35rem;
+            font-weight: normal;
+            color: var(--accent);
+            margin-bottom: 0.5rem;
         }
 
-        @keyframes welcome-in {
-            from {
-                opacity: 0;
-                transform: translateY(6px);
+        .note-passage {
+            max-height: calc(4 * 1.55em);
+            overflow-y: auto;
+            font-size: calc(0.95rem * var(--reading-scale));
+            line-height: 1.55;
+            padding: 0.1rem 0.7rem;
+            border-left: 3px solid var(--accent-dim);
+        }
+
+        .note-passage-num {
+            font-size: 0.7em;
+            font-weight: bold;
+            color: var(--accent);
+            vertical-align: super;
+            margin-right: 0.2rem;
+        }
+
+        .note-text-shown {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin: 0.3rem 0 0.7rem;
+        }
+
+        .note-others {
+            font-size: 0.85rem;
+            margin-bottom: 0.7rem;
+        }
+
+        .note-others summary {
+            color: var(--accent);
+            cursor: pointer;
+        }
+
+        .note-others summary:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .note-others li {
+            list-style: none;
+            margin-top: 0.5rem;
+            padding-left: 0.7rem;
+            border-left: 2px solid var(--accent-dim);
+        }
+
+        .note-others-ref {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        .note-others-body {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .note-label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            margin-bottom: 0.25rem;
+        }
+
+        .note-input {
+            display: block;
+            width: 100%;
+            min-height: calc(4 * 1.5em + 0.9rem);
+            resize: vertical;
+            font-family: inherit;
+            font-size: calc(0.95rem * var(--reading-scale));
+            line-height: 1.5;
+            color: var(--text);
+            background: var(--option-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            padding: 0.4rem 0.5rem;
+        }
+
+        .note-input:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+        }
+
+        .note-error {
+            font-size: 0.85rem;
+            font-weight: bold;
+            margin: 0.4rem 0 0;
+        }
+
+        .note-error:empty {
+            display: none;
+        }
+
+        .note-length {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-top: 0.25rem;
+        }
+
+        .note-length:empty {
+            display: none;
+        }
+
+        .note-buttons .note-delete {
+            margin-left: auto;
+        }
+
+        .note-discard-question {
+            margin-right: auto;
+            font-weight: bold;
+        }
+
+        .import-confirm:disabled.note-save {
+            cursor: not-allowed;
+        }
+
+        /* A short window: the passage gets two lines, and the rest
+           tightens up, so the note keeps its four. */
+        @media (max-height: 520px) {
+            .note-panel .modal-body {
+                padding-top: 0.8rem;
+            }
+
+            .note-title {
+                font-size: 1.1rem;
+                margin-bottom: 0.3rem;
+            }
+
+            .note-passage {
+                max-height: calc(2 * 1.55em);
+            }
+
+            .note-text-shown {
+                margin-bottom: 0.4rem;
+            }
+
+            .note-others {
+                margin-bottom: 0.4rem;
             }
         }
 
@@ -1159,6 +1318,35 @@
         }
 
         .bookmark-remove:hover {
+            color: var(--accent);
+            border-color: var(--accent-dim);
+        }
+
+        /* My notes: the Bookmarks list's look, with the first line of each
+           note in place of the verse text, and Edit beside it. */
+        .note-preview {
+            display: block;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            font-size: 0.75rem;
+            line-height: 1.35;
+            color: var(--text-dim);
+        }
+
+        .note-list-edit {
+            flex: 0 0 auto;
+            font-family: inherit;
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            background: none;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            padding: 0.35rem 0.45rem;
+            cursor: pointer;
+        }
+
+        .note-list-edit:hover {
             color: var(--accent);
             border-color: var(--accent-dim);
         }
@@ -1766,6 +1954,7 @@
 
         .verse-copy-btn,
         .verse-bookmark-btn,
+        .verse-note-btn,
         .highlight-remove {
             font-family: inherit;
             font-size: 0.85rem;
@@ -1779,6 +1968,7 @@
 
         .verse-copy-btn:hover,
         .verse-bookmark-btn:hover,
+        .verse-note-btn:hover,
         .highlight-remove:hover {
             border-color: var(--accent);
         }
@@ -1794,6 +1984,144 @@
             content: '\2605';
             margin-left: 0.15rem;
             color: var(--accent);
+        }
+
+        /* A small pencil, the same way, after the number of every verse
+           with a note (however many), and after the star when it's
+           bookmarked too. Its shape differs from the star, the highlight
+           band and the selection tint. Screen readers get the verse's
+           .note-cue instead, once per verse. */
+        .chapter-main .verse.has-notes .verse-num::after {
+            content: '\270E';
+            margin-left: 0.15rem;
+            color: var(--accent);
+        }
+
+        .chapter-main .verse.is-bookmarked.has-notes .verse-num::after {
+            content: '\2605\2009\270E';
+        }
+
+        /* A verse's "has notes" is for screen readers only: it's never
+           copied with the verse's text. */
+        .note-cue {
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* Read by screen readers, never shown. */
+        .visually-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            margin: -1px;
+            padding: 0;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* The notes on the selected verses, under their actions: each
+           note's passage, date and text (three lines of it until "more"),
+           read-only, with Edit. The text keeps the reader's line breaks. */
+        .verse-notes {
+            display: block;
+            margin-top: 0.4rem;
+            padding: 0.5rem 0.8rem;
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            line-height: 1.45;
+            cursor: default;
+        }
+
+        .xref-popup .verse-notes {
+            margin: 0 0 0.5rem;
+            padding: 0 0 0.5rem;
+            background: none;
+            border: none;
+            border-bottom: 1px solid var(--accent-dim);
+            border-radius: 0;
+        }
+
+        .verse-notes-title {
+            font-size: 0.75rem;
+            font-weight: normal;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+        }
+
+        .note-card {
+            padding: 0.4rem 0;
+            border-bottom: 1px solid var(--accent-dim);
+        }
+
+        .note-card:last-of-type {
+            border-bottom: none;
+        }
+
+        .note-card-head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 0.2rem 0.6rem;
+        }
+
+        .note-card-ref {
+            color: var(--accent);
+        }
+
+        .note-card-date {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        .note-card-body {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 3;
+            line-clamp: 3;
+            overflow: hidden;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            color: var(--text);
+            margin: 0.15rem 0;
+        }
+
+        .note-card-body.is-expanded {
+            display: block;
+            -webkit-line-clamp: none;
+            line-clamp: none;
+        }
+
+        .note-card-actions {
+            display: flex;
+            gap: 0.8rem;
+        }
+
+        .note-link {
+            font-family: inherit;
+            font-size: 0.8rem;
+            color: var(--accent);
+            background: none;
+            border: none;
+            padding: 0;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            cursor: pointer;
+        }
+
+        .note-link:focus-visible,
+        .verse-note-btn:focus-visible,
+        .note-list-edit:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .note-show-all {
+            margin-top: 0.3rem;
         }
 
         /* Highlights: the verse's text marked in the reader's color, like a
@@ -2130,16 +2458,22 @@
             footer,
             .xref-popup,
             .verse-actions,
+            .verse-notes,
             .search-toggle,
             .search-panel,
             .reader-notice,
             .import-overlay,
             .welcome-overlay,
+            .modal-overlay,
             .update-banner {
                 display: none !important;
             }
 
             .chapter-main .verse.is-bookmarked .verse-num::after {
+                content: none !important;
+            }
+
+            .chapter-main .verse.has-notes .verse-num::after {
                 content: none !important;
             }
 
@@ -2799,7 +3133,7 @@
                 </div>
             </div>
         </div>
-        <button type="button" id="library-toggle" class="bar-btn" aria-label="Library: bookmarks and highlights" title="Library: bookmarks and highlights (Ctrl+B)" aria-controls="library-panel" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg></button>
+        <button type="button" id="library-toggle" class="bar-btn" aria-label="Library: bookmarks, highlights and notes" title="Library: bookmarks, highlights and notes (Ctrl+B)" aria-controls="library-panel" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg></button>
         <button type="button" id="search-toggle" class="bar-btn search-toggle" aria-label="Search or go to a reference" aria-controls="search-panel" aria-expanded="false" title="Search or go to a reference (/ or Ctrl+K)">&#8981;</button>
         <div class="bar-item">
             <button type="button" id="menu-toggle" class="bar-btn" aria-label="Menu" title="Menu" aria-haspopup="menu" aria-controls="app-menu" aria-expanded="false">&#9776;</button>
@@ -2820,6 +3154,7 @@
         <div class="library-tabs" role="tablist" aria-labelledby="library-title">
             <button type="button" id="library-tab-bookmarks" class="library-tab" role="tab" aria-controls="library-bookmarks" aria-selected="true">Bookmarks <span id="bookmark-count" class="tab-count"></span></button>
             <button type="button" id="library-tab-highlights" class="library-tab" role="tab" aria-controls="library-highlights" aria-selected="false" tabindex="-1">Highlights <span id="highlight-count" class="tab-count"></span></button>
+            <button type="button" id="library-tab-notes" class="library-tab" role="tab" aria-controls="library-notes" aria-selected="false" tabindex="-1">Notes <span id="note-count" class="tab-count"></span></button>
         </div>
         <div id="library-bookmarks" class="library-tabpanel" role="tabpanel" aria-labelledby="library-tab-bookmarks">
             <ul id="bookmark-list" class="bookmark-list" aria-labelledby="library-tab-bookmarks"></ul>
@@ -2827,6 +3162,9 @@
         <div id="library-highlights" class="library-tabpanel" role="tabpanel" aria-labelledby="library-tab-highlights" hidden>
             <div id="highlight-filter" class="highlight-filter" role="group" aria-label="Show highlights"></div>
             <ul id="highlight-list" class="bookmark-list" aria-labelledby="library-tab-highlights"></ul>
+        </div>
+        <div id="library-notes" class="library-tabpanel" role="tabpanel" aria-labelledby="library-tab-notes" hidden>
+            <ul id="note-list" class="bookmark-list" aria-labelledby="library-tab-notes"></ul>
         </div>
         <p class="library-hint">Ctrl+B opens and closes the library &middot; Esc closes it</p>
     </aside>
@@ -2838,7 +3176,7 @@
     </div>
     <div id="import-overlay" class="import-overlay" hidden>
         <div id="import-panel" class="import-panel" role="dialog" aria-modal="true" aria-labelledby="import-title" aria-describedby="import-summary">
-            <h2 id="import-title" class="import-title">Import bookmarks, highlights and settings</h2>
+            <h2 id="import-title" class="import-title">Import bookmarks, highlights, notes and settings</h2>
             <p id="import-file" class="import-file"></p>
             <p id="import-invalid" class="import-invalid" hidden></p>
             <ul id="data-problems" class="data-problems"></ul>
@@ -2878,9 +3216,9 @@
             <p class="about-links"><a id="release-notes-link" href="https://github.com/tossbaws/gospel-getter/releases" hidden>Release notes</a> <span id="release-notes-status" class="data-status" role="status" aria-live="polite"></span></p>
         </div>
     </div>
-    <div id="welcome-overlay" class="welcome-overlay" hidden>
-        <div id="welcome-panel" class="welcome-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title-1" aria-describedby="welcome-text-1">
-            <div class="welcome-pages" aria-live="polite">
+    <div id="welcome-overlay" class="welcome-overlay modal-overlay" hidden>
+        <div id="welcome-panel" class="welcome-panel modal-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title-1" aria-describedby="welcome-text-1">
+            <div class="welcome-pages modal-body" aria-live="polite">
                 <section class="welcome-page">
                     <img class="welcome-icon" src="favicon.svg" alt="" width="48" height="48">
                     <h2 id="welcome-title-1">Welcome to Gospel Getter</h2>
@@ -2904,24 +3242,52 @@
                         <li>Press <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> to search the text, or type a reference like John 3:16 to go straight there.</li>
                         <li>Click a verse, and Shift-click another to select a range. Copy (or <kbd>Ctrl</kbd>+<kbd>C</kbd>) copies it with its reference, and ★ Bookmark saves it.</li>
                         <li>Selected verses can also be highlighted in yellow, green, blue or pink.</li>
-                        <li>To back up or move your bookmarks and highlights, use Export data… and Import data… in the ☰ menu, top right.</li>
+                        <li>Press <kbd>N</kbd> or + Add note to write a note on them, which shows in every translation.</li>
+                        <li>To back up or move your bookmarks, highlights and notes, use Export data… and Import data… in the ☰ menu, top right.</li>
                     </ul>
                 </section>
                 <section class="welcome-page" hidden>
                     <h2 id="welcome-title-4">Make it yours</h2>
                     <ul id="welcome-text-4">
                         <li>Aa, top right, has six themes, four text sizes, three line spacings, the translation and a distraction-free reading mode.</li>
-                        <li>Your bookmarks and highlights are in the Library, the bookmark button beside Aa (or press <kbd>Ctrl</kbd>+<kbd>B</kbd>).</li>
+                        <li>Your bookmarks, highlights and notes are in the Library, the bookmark button beside Aa (or press <kbd>Ctrl</kbd>+<kbd>B</kbd>).</li>
                         <li>Press <kbd>C</kbd> to compare the KJV and WEB side by side.</li>
-                        <li>Your chapter, bookmarks, highlights and settings are remembered. To see this tour again, choose Show welcome in the ☰ menu.</li>
+                        <li>Your chapter, bookmarks, highlights, notes and settings are remembered. To see this tour again, choose Show welcome in the ☰ menu.</li>
                     </ul>
                 </section>
             </div>
-            <div class="welcome-buttons">
+            <div class="welcome-buttons modal-buttons">
                 <button type="button" id="welcome-back" class="reader-mode-btn welcome-back" disabled>Back</button>
                 <p id="welcome-progress" class="welcome-progress">1 of 4</p>
                 <button type="button" id="welcome-next" class="import-confirm">Next</button>
                 <button type="button" id="welcome-skip" class="reader-mode-btn">Skip</button>
+            </div>
+        </div>
+    </div>
+    <div id="note-overlay" class="modal-overlay" hidden>
+        <div id="note-panel" class="modal-panel note-panel" role="dialog" aria-modal="true" aria-labelledby="note-title" aria-describedby="note-passage">
+            <div class="modal-body">
+                <h2 id="note-title" class="note-title"></h2>
+                <blockquote id="note-passage" class="note-passage"></blockquote>
+                <p id="note-text-shown" class="note-text-shown"></p>
+                <details id="note-others" class="note-others" hidden>
+                    <summary id="note-others-summary"></summary>
+                    <ul id="note-others-list"></ul>
+                </details>
+                <label id="note-label" class="note-label" for="note-input"></label>
+                <textarea id="note-input" class="note-input" rows="5" aria-describedby="note-length note-error" spellcheck="true"></textarea>
+                <p id="note-length" class="note-length" aria-live="polite"></p>
+                <p id="note-error" class="note-error" role="alert"></p>
+            </div>
+            <div id="note-buttons" class="modal-buttons note-buttons">
+                <button type="button" id="note-save" class="import-confirm note-save" disabled>Save</button>
+                <button type="button" id="note-cancel" class="reader-mode-btn">Cancel</button>
+                <button type="button" id="note-delete" class="reader-mode-btn note-delete" hidden>Delete</button>
+            </div>
+            <div id="note-discard" class="modal-buttons note-buttons" hidden>
+                <p id="note-discard-question" class="note-discard-question" role="alert">Discard this note?</p>
+                <button type="button" id="note-discard-yes" class="import-confirm">Discard</button>
+                <button type="button" id="note-keep" class="reader-mode-btn" aria-describedby="note-discard-question">Keep editing</button>
             </div>
         </div>
     </div>
@@ -3056,6 +3422,7 @@
             verseActions.className = 'verse-actions';
             verseActions.innerHTML = `<button type="button" class="verse-copy-btn">Copy</button>
                 <button type="button" class="verse-bookmark-btn">&#9733; Bookmark</button>
+                <button type="button" class="verse-note-btn" title="Add a note (N)" aria-keyshortcuts="N"><span aria-hidden="true">+</span> Add note</button>
                 <span class="verse-highlight" role="group" aria-label="Highlight">
                     ${HIGHLIGHT_COLORS.map((c) => `<button type="button" class="highlight-swatch" data-color="${c}" aria-label="Highlight ${c}" title="Highlight ${c}" aria-pressed="false"></button>`).join('')}
                     <button type="button" class="highlight-remove" hidden>Remove highlight</button>
@@ -3068,6 +3435,8 @@
             const highlightRemoveBtn = verseActions.querySelector('.highlight-remove');
             let actionAttempt = 0;
             let actionStatusTimer = null;
+            // What the status line's Undo does, while it shows one.
+            let actionUndo = null;
 
             function escapeHtml(value) {
                 return String(value).replace(/[&<>"']/g, (c) => ({
@@ -3136,12 +3505,27 @@
                 return `${text} — ${selectionCitation()}`;
             }
 
-            function setActionStatus(message, isError) {
+            // A message stays 2.5 s unless `duration` says otherwise (an
+            // error stays). With `undo`, the message ends with an Undo
+            // button that calls it.
+            function setActionStatus(message, isError, { undo = null, duration = 2500 } = {}) {
                 clearTimeout(actionStatusTimer);
                 actionStatus.textContent = message;
                 actionStatus.classList.toggle('is-error', isError);
+                actionUndo = undo;
+                if (undo) {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'note-link status-undo';
+                    button.textContent = 'Undo';
+                    actionStatus.append(button);
+                }
                 if (message && !isError) {
-                    actionStatusTimer = setTimeout(() => setActionStatus('', false), 2500);
+                    actionStatusTimer = setTimeout(() => {
+                        const hadFocus = actionStatus.contains(document.activeElement);
+                        setActionStatus('', false);
+                        if (hadFocus && noteAddBtn.isConnected) noteAddBtn.focus({ preventScroll: true });
+                    }, duration);
                 }
             }
 
@@ -3165,6 +3549,11 @@
                     if (popup) popup.hidden = !(selected && single);
                     if (selected && number === selection.end) last = el;
                 });
+                selectionNotesToken += 1;
+                selectionNotes = [];
+                selectionNotesError = '';
+                showAllNotes = false;
+                notesSection.remove();
                 if (!last) {
                     verseActions.remove();
                     return;
@@ -3178,6 +3567,7 @@
                 verseActions.querySelector('.verse-actions-ref').textContent = selectionCitation();
                 updateBookmarkButton();
                 updateHighlightControls();
+                refreshSelectionNotes();
             }
 
             function selectVerses(translationCode, anchor, focus) {
@@ -3585,8 +3975,493 @@
                 (next || highlightFilter.querySelector('[aria-pressed="true"]')).focus();
             });
 
+            // ---- Notes: the reader's own words on a passage. Like
+            // bookmarks they belong to no translation, and a passage can
+            // have any number of them. Which notes overlap a passage, and
+            // their order, is the backend's (list_notes); this shows them
+            // and edits them. Every change reloads all three views — the
+            // markers, the selection's Notes section and the Library — so
+            // none of them goes stale.
+
+            const NOTE_MAX_CHARS = 10000;
+            const NOTES_SHOWN = 3;
+            const UNDO_MS = 8000;
+            const noteList = document.getElementById('note-list');
+            const noteTabCount = document.getElementById('note-count');
+            const noteAddBtn = verseActions.querySelector('.verse-note-btn');
+            const notesSection = document.createElement('div');
+            notesSection.className = 'verse-notes';
+            notesSection.setAttribute('role', 'region');
+
+            // Notes on the chapter being read (for the markers), on the
+            // selection (for its section), and all of them (the Library).
+            let chapterNotes = [];
+            let chapterNotesToken = 0;
+            let selectionNotes = [];
+            let selectionNotesError = '';
+            let selectionNotesToken = 0;
+            let showAllNotes = false;
+            let allNotes = [];
+            let notesLoaded = false;
+            let noteListToken = 0;
+
+            function passageReference(bookName, chapter, start, end) {
+                return `${bookName} ${chapter}:${verseRange(start, end)}`;
+            }
+
+            function notePassage(note) {
+                return { bookId: note.bookId, bookName: note.bookName, chapter: note.chapter, start: note.verseStart, end: note.verseEnd };
+            }
+
+            // "Oct 9, 2026", in the reader's time zone.
+            function noteDate(iso) {
+                const date = new Date(iso);
+                return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('en', { year: 'numeric', month: 'short', day: 'numeric' });
+            }
+
+            // Marks every verse of the chapter on screen that a note covers,
+            // in every column, with the pencil (CSS) and, for screen
+            // readers, one hidden "has notes" per verse.
+            function applyNoteMarkers() {
+                document.querySelectorAll(SELECTABLE).forEach((el) => {
+                    const number = Number(el.dataset.verse);
+                    const noted = !!reading && chapterNotes.some((n) => n.bookId === reading.bookId
+                        && n.chapter === reading.chapter && number >= n.verseStart && number <= n.verseEnd);
+                    el.classList.toggle('has-notes', noted);
+                    const cue = el.querySelector(':scope > .note-cue');
+                    if (noted && !cue) {
+                        const added = document.createElement('span');
+                        added.className = 'note-cue visually-hidden';
+                        added.textContent = '(has notes) ';
+                        el.querySelector('.verse-num').after(added);
+                    } else if (!noted && cue) {
+                        cue.remove();
+                    }
+                });
+            }
+
+            async function refreshChapterNotes() {
+                const token = ++chapterNotesToken;
+                if (!reading) return;
+                const { bookId, chapter } = reading;
+                const numbers = Object.values(reading.columns).flatMap((c) => c.verses.map((v) => v.number));
+                try {
+                    const list = await invoke('list_notes', { bookId, chapter, verseStart: 1, verseEnd: Math.max(1, ...numbers) });
+                    if (token !== chapterNotesToken) return;
+                    chapterNotes = list;
+                } catch (e) {
+                    if (token !== chapterNotesToken) return;
+                    console.error('Failed to load the chapter’s notes', e);
+                    chapterNotes = [];
+                }
+                applyNoteMarkers();
+            }
+
+            async function refreshSelectionNotes() {
+                const token = ++selectionNotesToken;
+                if (!selection || !reading) return;
+                try {
+                    const list = await invoke('list_notes', {
+                        bookId: reading.bookId,
+                        chapter: reading.chapter,
+                        verseStart: selection.start,
+                        verseEnd: selection.end,
+                    });
+                    if (token !== selectionNotesToken) return;
+                    selectionNotes = list;
+                    selectionNotesError = '';
+                } catch (e) {
+                    if (token !== selectionNotesToken) return;
+                    console.error('Failed to load notes', e);
+                    selectionNotes = [];
+                    selectionNotesError = `Notes couldn’t be loaded: ${errorText(e)}`;
+                }
+                renderNotesSection();
+                if (noteSession && noteSession.mode === 'add') renderNoteOthers();
+            }
+
+            // The selection's Notes section, under its actions: shown only
+            // when notes overlap it (or they couldn't be loaded).
+            function renderNotesSection() {
+                if (!selection || !reading || !verseActions.isConnected || (!selectionNotes.length && !selectionNotesError)) {
+                    notesSection.remove();
+                    return;
+                }
+                const hadFocus = notesSection.contains(document.activeElement) ? document.activeElement : null;
+                const citation = passageReference(reading.bookName, reading.chapter, selection.start, selection.end);
+                notesSection.setAttribute('aria-label', `Notes for ${citation}`);
+                if (selectionNotesError) {
+                    notesSection.innerHTML = `<p class="verse-notes-title">Notes</p><p class="note-card-body is-expanded">${escapeHtml(selectionNotesError)}</p>`;
+                } else {
+                    const shown = showAllNotes ? selectionNotes : selectionNotes.slice(0, NOTES_SHOWN);
+                    const cards = shown
+                        .map((n) => `<article class="note-card" data-note-id="${n.id}">
+                            <p class="note-card-head"><span class="note-card-ref">${escapeHtml(n.reference)}</span> <time class="note-card-date" datetime="${escapeHtml(n.createdAt)}">${escapeHtml(noteDate(n.createdAt))}</time></p>
+                            <p class="note-card-body" id="note-card-body-${n.id}">${escapeHtml(n.body)}</p>
+                            <span class="note-card-actions">
+                                <button type="button" class="note-link note-more" aria-expanded="false" aria-controls="note-card-body-${n.id}" hidden>more</button>
+                                <button type="button" class="note-link note-edit" data-note-id="${n.id}" aria-label="Edit note on ${escapeHtml(n.reference)}">Edit</button>
+                            </span>
+                        </article>`)
+                        .join('');
+                    const all = shown.length < selectionNotes.length
+                        ? `<button type="button" class="note-link note-show-all">Show all ${selectionNotes.length} notes</button>`
+                        : '';
+                    notesSection.innerHTML = `<p class="verse-notes-title">Notes (${selectionNotes.length})</p>${cards}${all}`;
+                }
+                verseActions.after(notesSection);
+                // "more" only where the text is cut short.
+                notesSection.querySelectorAll('.note-card-body[id]').forEach((body) => {
+                    const more = body.parentElement.querySelector('.note-more');
+                    if (more) more.hidden = !(body.scrollHeight > body.clientHeight + 1);
+                });
+                if (hadFocus && !hadFocus.isConnected) {
+                    const same = hadFocus.dataset.noteId
+                        && notesSection.querySelector(`.note-edit[data-note-id="${hadFocus.dataset.noteId}"]`);
+                    (same || noteAddBtn).focus({ preventScroll: true });
+                }
+            }
+
+            function renderNoteList(error) {
+                noteTabCount.textContent = error ? '' : String(allNotes.length);
+                if (error) {
+                    noteList.innerHTML = `<li class="bookmark-empty is-error">${escapeHtml(error)}</li>`;
+                    return;
+                }
+                if (!allNotes.length) {
+                    noteList.innerHTML = '<li class="bookmark-empty">No notes yet. Click a verse, then + Add note (or press N).</li>';
+                    return;
+                }
+                noteList.innerHTML = allNotes
+                    .map((n) => `<li class="bookmark-item">
+                        <button type="button" class="bookmark-open" data-note-id="${n.id}">
+                            <span class="bookmark-ref">${escapeHtml(n.reference)}</span>
+                            <span class="note-preview">${escapeHtml(n.body.replace(/\s+/g, ' '))}</span>
+                        </button>
+                        <button type="button" class="note-list-edit" data-note-id="${n.id}" aria-label="Edit note on ${escapeHtml(n.reference)}" title="Edit note">Edit</button>
+                    </li>`)
+                    .join('');
+            }
+
+            // Reloads the Library's list. Only the latest of overlapping
+            // reloads gets to render.
+            async function refreshNoteList() {
+                const token = ++noteListToken;
+                try {
+                    const list = await invoke('list_all_notes');
+                    if (token !== noteListToken) return;
+                    allNotes = list;
+                    notesLoaded = true;
+                    renderNoteList();
+                } catch (e) {
+                    if (token !== noteListToken) return;
+                    console.error('Failed to load notes', e);
+                    renderNoteList(`Notes couldn’t be loaded: ${errorText(e)}`);
+                }
+            }
+
+            // After any change to notes, wherever it came from.
+            async function refreshNotes() {
+                await Promise.all([refreshChapterNotes(), refreshSelectionNotes(), refreshNoteList()]);
+            }
+
+            // Opening a note's row works as opening a bookmark: its chapter,
+            // with its passage selected, so its Notes section shows. Edit
+            // does the same, then opens the note.
+            noteList.addEventListener('click', async function (event) {
+                const edit = event.target.closest('.note-list-edit');
+                const target = edit || event.target.closest('.bookmark-open');
+                if (!target) return;
+                const note = allNotes.find((n) => String(n.id) === target.dataset.noteId);
+                if (!note) return;
+                closeSurfaces(!edit);
+                await openPassage(note.bookId, note.chapter, note.verseStart, note.verseEnd);
+                if (edit && reading) {
+                    openNotePanel({ mode: 'edit', note, code: selection ? selection.translationCode : reading.translationCode });
+                }
+            });
+
+            // ---- The note panel: a modal, like the welcome. It has the
+            // keyboard while open; closing it returns focus to whatever
+            // opened it (or, if that's gone, to the selection's actions).
+
+            const noteOverlay = document.getElementById('note-overlay');
+            const notePanel = document.getElementById('note-panel');
+            const noteTitle = document.getElementById('note-title');
+            const notePassageEl = document.getElementById('note-passage');
+            const noteTextShown = document.getElementById('note-text-shown');
+            const noteOthers = document.getElementById('note-others');
+            const noteOthersSummary = document.getElementById('note-others-summary');
+            const noteOthersList = document.getElementById('note-others-list');
+            const noteLabel = document.getElementById('note-label');
+            const noteInput = document.getElementById('note-input');
+            const noteLength = document.getElementById('note-length');
+            const noteError = document.getElementById('note-error');
+            const noteButtons = document.getElementById('note-buttons');
+            const noteSave = document.getElementById('note-save');
+            const noteCancel = document.getElementById('note-cancel');
+            const noteDelete = document.getElementById('note-delete');
+            const noteDiscard = document.getElementById('note-discard');
+            const noteKeep = document.getElementById('note-keep');
+
+            // { mode: 'add' or 'edit', note (when editing), passage, code,
+            // initial text } while the panel is open.
+            let noteSession = null;
+            let noteReturn = null;
+            let noteBusy = false;
+
+            const charCount = (text) => [...text].length;
+
+            function noteChanged() {
+                return !!noteSession && noteInput.value.trim() !== noteSession.initial.trim();
+            }
+
+            function updateNoteControls() {
+                const text = noteInput.value.trim();
+                const length = charCount(text);
+                noteSave.disabled = noteBusy || !text || length > NOTE_MAX_CHARS;
+                noteDelete.disabled = noteBusy;
+                if (length > NOTE_MAX_CHARS) {
+                    noteLength.textContent = `${length.toLocaleString('en')} characters: a note can hold up to ${NOTE_MAX_CHARS.toLocaleString('en')}.`;
+                } else if (length > NOTE_MAX_CHARS - 500) {
+                    noteLength.textContent = `${length.toLocaleString('en')} of ${NOTE_MAX_CHARS.toLocaleString('en')} characters`;
+                } else {
+                    noteLength.textContent = '';
+                }
+            }
+
+            // When adding, the other notes on the passage, read-only.
+            function renderNoteOthers() {
+                const others = noteSession && noteSession.mode === 'add' ? selectionNotes : [];
+                noteOthers.hidden = !others.length;
+                noteOthersSummary.textContent = `Other notes on these verses (${others.length})`;
+                noteOthersList.innerHTML = others
+                    .map((n) => `<li><span class="note-others-ref">${escapeHtml(n.reference)} · ${escapeHtml(noteDate(n.createdAt))}</span><span class="note-others-body">${escapeHtml(n.body)}</span></li>`)
+                    .join('');
+            }
+
+            function showDiscardPrompt(show) {
+                noteButtons.hidden = show;
+                noteDiscard.hidden = !show;
+                if (show) noteKeep.focus({ preventScroll: true });
+            }
+
+            // `passage` defaults to the note's own; `code` is the
+            // translation whose text is quoted.
+            function openNotePanel({ mode, note = null, passage = note && notePassage(note), code, opener = null }) {
+                if (!passage || !reading) return;
+                closeSurfaces(false);
+                if (!searchPanel.hidden) setSearchOpen(false);
+                const reference = passageReference(passage.bookName, passage.chapter, passage.start, passage.end);
+                noteSession = { mode, note, passage, code, initial: note ? note.body : '' };
+                noteReturn = { el: opener, noteId: note ? note.id : null };
+                noteTitle.textContent = reference;
+                // The verses exactly as this translation stores and numbers
+                // them; any it doesn't number are said to be missing.
+                const verses = reading.bookId === passage.bookId && reading.chapter === passage.chapter
+                    ? columnVerses(code).filter((v) => v.number >= passage.start && v.number <= passage.end).sort((a, b) => a.number - b.number)
+                    : [];
+                const missing = passage.end - passage.start + 1 - verses.length;
+                notePassageEl.innerHTML = verses
+                    .map((v) => `<span class="note-passage-num">${v.number}</span>${escapeHtml(v.text)}`)
+                    .join(' ')
+                    + (missing > 0 ? ` <em>${verses.length ? 'Not all of it is' : 'It isn’t'} numbered in the ${escapeHtml(code.toUpperCase())}.</em>` : '');
+                noteTextShown.textContent = `Text shown: ${code.toUpperCase()}`;
+                noteOthers.open = false;
+                renderNoteOthers();
+                noteLabel.textContent = `Your note on ${reference}`;
+                noteInput.value = noteSession.initial;
+                noteError.textContent = '';
+                noteDelete.hidden = mode !== 'edit';
+                noteBusy = false;
+                showDiscardPrompt(false);
+                updateNoteControls();
+                noteOverlay.hidden = false;
+                notePanel.querySelector('.modal-body').scrollTop = 0;
+                // Focus never scrolls the page behind; in a short window the
+                // panel's own body scrolls to show the whole of the note.
+                noteInput.focus({ preventScroll: true });
+                noteInput.setSelectionRange(noteInput.value.length, noteInput.value.length);
+                const body = notePanel.querySelector('.modal-body');
+                const below = noteInput.getBoundingClientRect().bottom - body.getBoundingClientRect().bottom;
+                if (below > 0) body.scrollTop += below + 8;
+            }
+
+            function openAddNote(opener) {
+                if (!selection || !reading) return;
+                openNotePanel({
+                    mode: 'add',
+                    passage: { bookId: reading.bookId, bookName: reading.bookName, chapter: reading.chapter, start: selection.start, end: selection.end },
+                    code: selection.translationCode,
+                    opener,
+                });
+            }
+
+            function closeNotePanel() {
+                noteOverlay.hidden = true;
+                showDiscardPrompt(false);
+                const back = noteReturn;
+                noteSession = null;
+                noteReturn = null;
+                const usable = (el) => el && el.isConnected && !el.closest('[hidden]');
+                let target = back && usable(back.el) ? back.el : null;
+                if (!target && back && back.noteId != null) {
+                    const edit = notesSection.querySelector(`.note-edit[data-note-id="${back.noteId}"]`);
+                    if (usable(edit)) target = edit;
+                }
+                if (!target && usable(noteAddBtn)) target = noteAddBtn;
+                if (!target) {
+                    target = document.querySelector('.chapter-main .chapter-heading');
+                    if (target) target.tabIndex = -1;
+                }
+                if (target) target.focus({ preventScroll: true });
+            }
+
+            // Cancel, or Escape: closes at once if nothing changed, and
+            // otherwise asks first.
+            function requestCloseNote() {
+                if (noteBusy) return;
+                if (noteChanged()) showDiscardPrompt(true);
+                else closeNotePanel();
+            }
+
+            // A note that can't be saved stays in the panel, with why.
+            async function saveNote() {
+                const session = noteSession;
+                if (!session || noteSave.disabled) return;
+                const body = noteInput.value;
+                noteBusy = true;
+                noteError.textContent = '';
+                updateNoteControls();
+                try {
+                    if (session.mode === 'edit') {
+                        await invoke('update_note', { id: session.note.id, body });
+                    } else {
+                        const { bookId, chapter, start, end } = session.passage;
+                        await invoke('add_note', { bookId, chapter, verseStart: start, verseEnd: end, body });
+                    }
+                } catch (e) {
+                    console.error('Failed to save the note', e);
+                    noteBusy = false;
+                    if (noteSession === session) {
+                        noteError.textContent = `The note wasn’t saved: ${errorText(e)} Your text is still here.`;
+                        updateNoteControls();
+                        noteInput.focus({ preventScroll: true });
+                    }
+                    return;
+                }
+                noteBusy = false;
+                await refreshNotes();
+                if (noteSession === session) closeNotePanel();
+                if (verseActions.isConnected) setActionStatus(session.mode === 'edit' ? 'Note saved' : 'Note added', false);
+            }
+
+            async function deleteNote() {
+                const session = noteSession;
+                if (!session || session.mode !== 'edit' || noteBusy) return;
+                noteBusy = true;
+                noteError.textContent = '';
+                updateNoteControls();
+                let deleted;
+                try {
+                    deleted = await invoke('delete_note', { id: session.note.id });
+                } catch (e) {
+                    console.error('Failed to delete the note', e);
+                    noteBusy = false;
+                    if (noteSession === session) {
+                        noteError.textContent = `The note wasn’t deleted: ${errorText(e)}`;
+                        updateNoteControls();
+                    }
+                    return;
+                }
+                noteBusy = false;
+                await refreshNotes();
+                if (noteSession === session) closeNotePanel();
+                const gone = deleted || session.note;
+                if (verseActions.isConnected) {
+                    setActionStatus('Note deleted · ', false, { undo: () => restoreNote(gone), duration: UNDO_MS });
+                } else {
+                    setDataStatus(`Deleted the note on ${gone.reference}.`);
+                }
+            }
+
+            // Undo: the same passage, text and dates.
+            async function restoreNote(note) {
+                const attempt = ++actionAttempt;
+                try {
+                    await invoke('restore_note', {
+                        bookId: note.bookId,
+                        chapter: note.chapter,
+                        verseStart: note.verseStart,
+                        verseEnd: note.verseEnd,
+                        body: note.body,
+                        createdAt: note.createdAt,
+                        updatedAt: note.updatedAt,
+                    });
+                } catch (e) {
+                    console.error('Failed to restore the note', e);
+                    if (attempt === actionAttempt) setActionStatus(`Couldn’t restore the note: ${errorText(e)}`, true);
+                    return;
+                }
+                await refreshNotes();
+                if (attempt === actionAttempt) setActionStatus('Note restored', false);
+            }
+
+            noteInput.addEventListener('input', updateNoteControls);
+            noteSave.addEventListener('click', saveNote);
+            noteCancel.addEventListener('click', requestCloseNote);
+            noteDelete.addEventListener('click', deleteNote);
+            document.getElementById('note-discard-yes').addEventListener('click', closeNotePanel);
+            noteKeep.addEventListener('click', function () {
+                showDiscardPrompt(false);
+                noteInput.focus({ preventScroll: true });
+            });
+
+            // Clicking the dimmed page behind the panel does nothing, and
+            // leaves focus where it was.
+            noteOverlay.addEventListener('mousedown', function (event) {
+                if (event.target === noteOverlay) event.preventDefault();
+            });
+
+            // While the panel is open it has the keyboard, before any other
+            // handler sees a key (this listens on window, capturing): none
+            // of the reader's shortcuts run. Escape closes (or asks first,
+            // or, while asking, keeps editing); Ctrl+Enter (Cmd+Enter)
+            // saves; Tab stays inside.
+            window.addEventListener('keydown', function (event) {
+                if (noteOverlay.hidden) return;
+                event.stopPropagation();
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    if (!noteDiscard.hidden) {
+                        showDiscardPrompt(false);
+                        noteInput.focus({ preventScroll: true });
+                    } else {
+                        requestCloseNote();
+                    }
+                } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && noteDiscard.hidden) {
+                    event.preventDefault();
+                    saveNote();
+                } else if (event.key === 'Tab') {
+                    const focusable = [...notePanel.querySelectorAll('textarea, button, summary')]
+                        .filter((el) => !el.disabled && !el.closest('[hidden]'));
+                    const first = focusable[0];
+                    const last = focusable[focusable.length - 1];
+                    if (!notePanel.contains(document.activeElement)) {
+                        event.preventDefault();
+                        (event.shiftKey ? last : first).focus();
+                    } else if (event.shiftKey && document.activeElement === first) {
+                        event.preventDefault();
+                        last.focus();
+                    } else if (!event.shiftKey && document.activeElement === last) {
+                        event.preventDefault();
+                        first.focus();
+                    }
+                }
+            }, true);
+
             // ---- Back up or move your data: export and import bookmarks,
-            // reading position and display settings. The native file
+            // highlights, notes, reading position and display settings. The native file
             // dialogs, file access and validation are all in the backend;
             // this only shows what's happening and asks for confirmation.
 
@@ -3649,6 +4524,7 @@
                     } else {
                         const parts = [plural(outcome.bookmarks, 'bookmark')];
                         if (outcome.highlights) parts.push(plural(outcome.highlights, 'highlighted verse'));
+                        if (outcome.notes) parts.push(plural(outcome.notes, 'note'));
                         if (outcome.hasPosition) parts.push('your reading position');
                         if (outcome.preferences) parts.push('your display settings');
                         setDataStatus(`Saved ${parts.join(', ')} to ${outcome.path}. Bible text isn’t included.`);
@@ -3681,7 +4557,10 @@
                 const replace = importPanel.querySelector('input[name="import-mode"][value="replace"]').checked;
                 const current = importPreview ? importPreview.currentBookmarks : 0;
                 importReplaceWarning.hidden = !replace;
-                if (importPreview && importPreview.hasHighlights) {
+                if (importPreview && importPreview.hasNotes) {
+                    importReplaceWarning.textContent = `This deletes your ${plural(current, 'current bookmark')}, ${plural(importPreview.currentHighlights, 'highlighted verse')} and ${plural(importPreview.currentNotes, 'note')} and keeps only the file’s. If you might want yours back, cancel and export them first.`;
+                    importConfirm.textContent = replace ? 'Replace bookmarks, highlights and notes and import' : 'Import';
+                } else if (importPreview && importPreview.hasHighlights) {
                     importReplaceWarning.textContent = `This deletes your ${plural(current, 'current bookmark')} and ${plural(importPreview.currentHighlights, 'highlighted verse')} and keeps only the file’s. If you might want yours back, cancel and export them first.`;
                     importConfirm.textContent = replace ? 'Replace bookmarks and highlights and import' : 'Import';
                 } else {
@@ -3750,13 +4629,30 @@
                         summary.push('No highlights.');
                     }
                 }
+                // Format 3 files can carry notes; older ones can't, and
+                // leave the reader's notes alone.
+                if (preview.hasNotes) {
+                    if (preview.notesInFile) {
+                        let line = `${plural(preview.notesInFile, 'note')}: ${preview.newNotes} new, ${preview.notesAlreadyPresent} you already have.`;
+                        if (preview.noteDuplicatesInFile) line += ` (${plural(preview.noteDuplicatesInFile, 'repeated entry', 'repeated entries')} in the file will be skipped.)`;
+                        summary.push(line);
+                    } else {
+                        summary.push('No notes.');
+                    }
+                }
                 if (!preview.position) summary.push('No reading position.');
                 if (!describePreferences(preview.preferences).length) summary.push('No display settings.');
                 document.getElementById('import-summary').innerHTML = summary.map((s) => `<li>${escapeHtml(s)}</li>`).join('');
 
-                importBookmarkChoice.hidden = !(preview.bookmarksInFile || preview.highlightsInFile);
+                importBookmarkChoice.hidden = !(preview.bookmarksInFile || preview.highlightsInFile || preview.notesInFile);
                 importPanel.querySelector('input[name="import-mode"][value="merge"]').checked = true;
-                if (preview.hasHighlights) {
+                if (preview.hasNotes) {
+                    document.getElementById('import-choice-legend').textContent = 'Bookmarks, highlights and notes';
+                    document.getElementById('import-merge-label').textContent =
+                        `Add them to mine (${plural(preview.newBookmarks, 'new bookmark')}, ${plural(preview.newHighlights, 'new highlighted verse')}, ${plural(preview.newNotes, 'new note')}; anything I already have stays as it is)`;
+                    document.getElementById('import-replace-label').textContent =
+                        `Replace all my bookmarks, highlights and notes with the file’s (removes my ${plural(preview.currentBookmarks, 'current bookmark')}, ${plural(preview.currentHighlights, 'highlighted verse')} and ${plural(preview.currentNotes, 'note')})`;
+                } else if (preview.hasHighlights) {
                     document.getElementById('import-choice-legend').textContent = 'Bookmarks and highlights';
                     document.getElementById('import-merge-label').textContent =
                         `Add them to mine (${plural(preview.newBookmarks, 'new bookmark')}, ${plural(preview.newHighlights, 'new highlighted verse')}; anything I already have stays as it is)`;
@@ -3870,6 +4766,11 @@
                         ? `Replaced ${plural(result.highlightsRemoved, 'highlighted verse')} with the file’s ${plural(result.highlightsAdded, 'highlighted verse')}.`
                         : `Added ${plural(result.highlightsAdded, 'highlighted verse')}${result.highlightsAlreadyPresent ? ` (${result.highlightsAlreadyPresent} you’d already highlighted kept your colors)` : ''}.`);
                 }
+                if (preview.hasNotes && (preview.notesInFile || (replace && result.notesRemoved))) {
+                    parts.push(replace
+                        ? `Replaced ${plural(result.notesRemoved, 'note')} with the file’s ${plural(result.notesAdded, 'note')}.`
+                        : `Added ${plural(result.notesAdded, 'note')}${result.notesAlreadyPresent ? ` (${result.notesAlreadyPresent} you already had)` : ''}.`);
+                }
                 if (result.position) parts.push(`Went to ${result.position.reference}.`);
 
                 // Display settings live in the webview's own storage, not
@@ -3893,6 +4794,7 @@
                 }
                 await refreshBookmarks();
                 await refreshHighlights();
+                await refreshNotes();
                 const message = `Import complete. ${parts.join(' ')}`;
                 showNotice(message);
                 setDataStatus(message);
@@ -3977,8 +4879,8 @@
                 }
             }
 
-            // A fresh install: nothing read, bookmarked, highlighted or
-            // customised yet,
+            // A fresh install: nothing read, bookmarked, highlighted, noted
+            // or customised yet,
             // and the welcome never closed before. An upgrade always has a
             // saved reading position (reading any chapter saves one), so it
             // never qualifies. Anything that can't be checked counts as
@@ -3986,6 +4888,7 @@
             function isFreshInstall(home) {
                 if (home.hasSavedPosition || !bookmarksLoaded || bookmarks.length) return false;
                 if (!highlightsLoaded || highlights.size) return false;
+                if (!notesLoaded || allNotes.length) return false;
                 try {
                     for (let i = 0; i < localStorage.length; i++) {
                         const key = localStorage.key(i);
@@ -4239,6 +5142,8 @@
                 renderSelection();
                 applyBookmarkMarkers();
                 applyHighlightMarkers();
+                applyNoteMarkers();
+                refreshChapterNotes();
             }
 
             // Resolves to the comparison, or null after logging why not.
@@ -4539,7 +5444,7 @@
                 // preferences script in <head> (and the lists' own
                 // handlers above); they're never navigation or a "click
                 // away" from a verse selection. Nor is the search panel.
-                if (event.target.closest('#top-bar, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #data-status')) {
+                if (event.target.closest('#top-bar, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #data-status')) {
                     return;
                 }
 
@@ -4560,7 +5465,47 @@
                     highlightSelection(null);
                     return;
                 }
+                const noteAdd = event.target.closest('.verse-note-btn');
+                if (noteAdd) {
+                    openAddNote(noteAdd);
+                    return;
+                }
+                if (event.target.closest('.status-undo')) {
+                    const undo = actionUndo;
+                    setActionStatus('', false);
+                    noteAddBtn.focus({ preventScroll: true });
+                    if (undo) undo();
+                    return;
+                }
                 if (event.target.closest('.verse-actions')) {
+                    return;
+                }
+
+                // The selection's notes: Edit opens one; "more" shows all
+                // of one's text; "Show all" shows every one.
+                const noteEdit = event.target.closest('.note-edit');
+                if (noteEdit) {
+                    const note = selectionNotes.find((n) => String(n.id) === noteEdit.dataset.noteId);
+                    if (note && selection) openNotePanel({ mode: 'edit', note, code: selection.translationCode, opener: noteEdit });
+                    return;
+                }
+                const noteMore = event.target.closest('.note-more');
+                if (noteMore) {
+                    const body = document.getElementById(noteMore.getAttribute('aria-controls'));
+                    const expanded = noteMore.getAttribute('aria-expanded') !== 'true';
+                    body.classList.toggle('is-expanded', expanded);
+                    noteMore.setAttribute('aria-expanded', String(expanded));
+                    noteMore.textContent = expanded ? 'less' : 'more';
+                    return;
+                }
+                if (event.target.closest('.note-show-all')) {
+                    showAllNotes = true;
+                    renderNotesSection();
+                    const next = notesSection.querySelectorAll('.note-edit')[NOTES_SHOWN];
+                    if (next) next.focus();
+                    return;
+                }
+                if (event.target.closest('.verse-notes')) {
                     return;
                 }
 
@@ -4697,9 +5642,10 @@
                 if (event.target && event.target.closest && event.target.closest('#search-panel')) {
                     return;
                 }
-                // And while the import preview or About is open, nothing
-                // else responds to the keyboard (they handle their own keys).
-                if (!importOverlay.hidden || !aboutOverlay.hidden) {
+                // And while the import preview, About or the note panel is
+                // open, nothing else responds to the keyboard (they handle
+                // their own keys).
+                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden) {
                     return;
                 }
 
@@ -4744,6 +5690,14 @@
                 if (ctrl && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'b') {
                     event.preventDefault();
                     if (surfaces()) surfaces().toggle('library');
+                    return;
+                }
+
+                // N writes a note on the selected verses.
+                if (plain && !event.shiftKey && (event.key === 'n' || event.key === 'N') && selection) {
+                    event.preventDefault();
+                    const active = document.activeElement;
+                    openAddNote(active && active !== document.body ? active : null);
                     return;
                 }
 
@@ -4797,6 +5751,7 @@
                     await loadReading(home.currentBookId, home.currentChapter, { syncChapters: false });
                     await refreshBookmarks();
                     await refreshHighlights();
+                    await refreshNoteList();
                     if (isFreshInstall(home)) openWelcome();
                 } catch (e) {
                     console.error('Failed to load Gospel Getter', e);

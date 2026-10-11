@@ -6,16 +6,18 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::db::notes::grouped;
+use crate::db::reader_data::ApplyImportError;
 use crate::db::{
     self, Book, BookmarkError, BookmarkInTranslation, HighlightColor,
-    HighlightPassageInTranslation, Translation,
+    HighlightPassageInTranslation, Note, NoteError, NoteLimit, Passage, Translation,
 };
 use crate::domain::Store;
 use crate::domain::bible::{self, ChapterRef};
 use crate::domain::query::{self, Interpretation};
 use crate::reader_data::{
-    self, BookmarkRecord, HighlightRecord, NewBookmark, NewPosition, PositionRecord, Preferences,
-    ReaderData, ValidatedImport,
+    self, BookmarkRecord, HighlightRecord, NewBookmark, NewPosition, NoteRecord, PositionRecord,
+    Preferences, ReaderData, ValidatedImport,
 };
 
 /// How many text-search results one `search` call returns.
@@ -886,6 +888,233 @@ pub async fn remove_highlight(
     unhighlight_passage(&state, book_id, chapter, verse_start, verse_end).await
 }
 
+// ---- Notes
+
+/// One note.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteDto {
+    pub id: i64,
+    pub book_id: i64,
+    pub book_name: String,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    /// e.g. "John 3:16–18", with no translation: a note belongs to none.
+    pub reference: String,
+    /// Plain text, as the reader wrote it (trimmed).
+    pub body: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+fn note_dto(state: &AppState, note: Note) -> NoteDto {
+    let book_name = book_name(state, note.book_id).unwrap_or("?").to_string();
+    NoteDto {
+        reference: passage_reference(
+            &book_name,
+            note.chapter,
+            Some((note.verse_start, note.verse_end)),
+        ),
+        id: note.id,
+        book_id: note.book_id,
+        book_name,
+        chapter: note.chapter,
+        verse_start: note.verse_start,
+        verse_end: note.verse_end,
+        body: note.body,
+        created_at: note.created_at,
+        updated_at: note.updated_at,
+    }
+}
+
+/// A note that couldn't be saved, in words for the reader.
+fn note_error_message(state: &AppState, error: NoteError) -> String {
+    const FAILED: &str = "The note couldn't be saved.";
+    match error {
+        NoteError::Passage(e) => passage_error_message(state, e, "noted", FAILED),
+        NoteError::Body(e) => e.to_string(),
+        NoteError::Limit(limit) => limit.to_string(),
+        NoteError::NotFound { .. } => {
+            "That note no longer exists; it may have been deleted.".to_string()
+        }
+        NoteError::Database(e) => {
+            tracing::error!("{FAILED} {e:#}");
+            FAILED.to_string()
+        }
+    }
+}
+
+/// Every note overlapping a passage, in the order they're shown: by first
+/// verse, then last verse, then oldest first.
+pub async fn notes_overlapping(state: &AppState, passage: Passage) -> Result<Vec<NoteDto>, String> {
+    if passage.verse_start < 1 || passage.verse_end < passage.verse_start {
+        return Err(format!(
+            "{}\u{2013}{} isn't a verse range.",
+            passage.verse_start, passage.verse_end
+        ));
+    }
+    let notes = state.store.notes_overlapping(&passage).await.map_err(|e| {
+        tracing::error!("Failed to list notes: {e:#}");
+        "Notes couldn't be loaded.".to_string()
+    })?;
+    Ok(notes.into_iter().map(|n| note_dto(state, n)).collect())
+}
+
+/// Every note, in Bible order.
+pub async fn notes_list(state: &AppState) -> anyhow::Result<Vec<NoteDto>> {
+    Ok(state
+        .store
+        .notes()
+        .await?
+        .into_iter()
+        .map(|n| note_dto(state, n))
+        .collect())
+}
+
+/// Write a new note on a passage, or say why not.
+pub async fn note_add(state: &AppState, passage: Passage, body: &str) -> Result<NoteDto, String> {
+    state
+        .store
+        .add_note(&passage, body, None)
+        .await
+        .map(|n| note_dto(state, n))
+        .map_err(|e| note_error_message(state, e))
+}
+
+/// Change a note's text, or say why not.
+pub async fn note_update(state: &AppState, id: i64, body: &str) -> Result<NoteDto, String> {
+    state
+        .store
+        .update_note(id, body)
+        .await
+        .map(|n| note_dto(state, n))
+        .map_err(|e| note_error_message(state, e))
+}
+
+/// Delete a note, returning it as it was (to undo with `note_restore`), or
+/// `None` if it was already gone.
+pub async fn note_delete(state: &AppState, id: i64) -> Result<Option<NoteDto>, String> {
+    state
+        .store
+        .delete_note(id)
+        .await
+        .map(|n| n.map(|n| note_dto(state, n)))
+        .map_err(|e| {
+            tracing::error!("Failed to delete note {id}: {e:#}");
+            "The note couldn't be deleted.".to_string()
+        })
+}
+
+/// Bring back a deleted note: the same passage, text and dates (a new id).
+pub async fn note_restore(
+    state: &AppState,
+    passage: Passage,
+    body: &str,
+    created_at: &str,
+    updated_at: &str,
+) -> Result<NoteDto, String> {
+    let (Some(created_at), Some(updated_at)) = (
+        reader_data::normalize_timestamp(created_at),
+        reader_data::normalize_timestamp(updated_at),
+    ) else {
+        return Err("That note's date isn't valid, so it couldn't be restored.".to_string());
+    };
+    state
+        .store
+        .add_note(&passage, body, Some((&created_at, &updated_at)))
+        .await
+        .map(|n| note_dto(state, n))
+        .map_err(|e| note_error_message(state, e))
+}
+
+fn passage(book_id: i64, chapter: i64, verse_start: i64, verse_end: i64) -> Passage {
+    Passage {
+        book_id,
+        chapter,
+        verse_start,
+        verse_end,
+    }
+}
+
+#[tauri::command]
+pub async fn list_notes(
+    state: tauri::State<'_, AppState>,
+    book_id: i64,
+    chapter: i64,
+    verse_start: i64,
+    verse_end: i64,
+) -> Result<Vec<NoteDto>, String> {
+    notes_overlapping(&state, passage(book_id, chapter, verse_start, verse_end)).await
+}
+
+#[tauri::command]
+pub async fn list_all_notes(state: tauri::State<'_, AppState>) -> Result<Vec<NoteDto>, String> {
+    notes_list(&state).await.map_err(|e| {
+        tracing::error!("Failed to list notes: {e:#}");
+        "Notes couldn't be loaded.".to_string()
+    })
+}
+
+#[tauri::command]
+pub async fn add_note(
+    state: tauri::State<'_, AppState>,
+    book_id: i64,
+    chapter: i64,
+    verse_start: i64,
+    verse_end: i64,
+    body: String,
+) -> Result<NoteDto, String> {
+    note_add(
+        &state,
+        passage(book_id, chapter, verse_start, verse_end),
+        &body,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn update_note(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+    body: String,
+) -> Result<NoteDto, String> {
+    note_update(&state, id, &body).await
+}
+
+#[tauri::command]
+pub async fn delete_note(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+) -> Result<Option<NoteDto>, String> {
+    note_delete(&state, id).await
+}
+
+#[tauri::command]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Tauri command's arguments are the fields the frontend passes"
+)]
+pub async fn restore_note(
+    state: tauri::State<'_, AppState>,
+    book_id: i64,
+    chapter: i64,
+    verse_start: i64,
+    verse_end: i64,
+    body: String,
+    created_at: String,
+    updated_at: String,
+) -> Result<NoteDto, String> {
+    note_restore(
+        &state,
+        passage(book_id, chapter, verse_start, verse_end),
+        &body,
+        &created_at,
+        &updated_at,
+    )
+    .await
+}
+
 // ---- Search and go-to-reference (GH-12)
 
 #[derive(Serialize)]
@@ -1152,6 +1381,7 @@ pub enum ExportOutcome {
         path: String,
         bookmarks: usize,
         highlights: usize,
+        notes: usize,
         has_position: bool,
         preferences: usize,
     },
@@ -1192,6 +1422,20 @@ pub struct ImportPreviewDto {
     pub already_highlighted: usize,
     /// How many verses are highlighted here now (what replacing removes).
     pub current_highlights: usize,
+    /// Whether the file's format can hold notes (format 3 on). An older
+    /// file never touches the reader's notes, even when replacing.
+    pub has_notes: bool,
+    /// Distinct notes in the file.
+    pub notes_in_file: usize,
+    /// Note entries that repeated another one in the file (ignored).
+    pub note_duplicates_in_file: usize,
+    /// How many of them aren't here yet.
+    pub new_notes: usize,
+    /// How many are here already (the same passage and text; merge skips
+    /// those).
+    pub notes_already_present: usize,
+    /// How many notes there are here now (what replacing removes).
+    pub current_notes: usize,
     pub position: Option<PositionPreviewDto>,
     pub preferences: Preferences,
 }
@@ -1226,6 +1470,9 @@ pub struct ImportResultDto {
     pub highlights_added: usize,
     pub highlights_already_present: usize,
     pub highlights_removed: usize,
+    pub notes_added: usize,
+    pub notes_already_present: usize,
+    pub notes_removed: usize,
     /// The reading position saved, if the reader chose to restore it.
     pub position: Option<PositionPreviewDto>,
 }
@@ -1239,14 +1486,15 @@ fn passage_reference_for(state: &AppState, b: &NewBookmark) -> String {
 }
 
 /// The reader's data as an export file: bookmarks (oldest first),
-/// highlights (in Bible order), the saved reading position, and the display `preferences` the frontend
-/// passed in.
+/// highlights and notes (in Bible order), the saved reading position, and
+/// the display `preferences` the frontend passed in.
 pub async fn build_reader_data(
     state: &AppState,
     preferences: Preferences,
 ) -> anyhow::Result<ReaderData> {
     let bookmarks = state.store.all_bookmarks().await?;
     let highlights = state.store.highlights().await?;
+    let notes = state.store.notes().await?;
     let position = state.store.reading_position().await?;
     let reading_position = position.and_then(|(translation_id, book_id, chapter)| {
         let translation = state.translations.iter().find(|t| t.id == translation_id)?;
@@ -1286,6 +1534,19 @@ pub async fn build_reader_data(
                 updated_at: Some(h.updated_at),
             })
             .collect(),
+        notes: notes
+            .into_iter()
+            .map(|n| NoteRecord {
+                book_name: book_name(state, n.book_id).map(str::to_string),
+                book: n.book_id,
+                chapter: n.chapter,
+                verse_start: n.verse_start,
+                verse_end: n.verse_end,
+                body: n.body,
+                created_at: Some(n.created_at),
+                updated_at: Some(n.updated_at),
+            })
+            .collect(),
         preferences,
     })
 }
@@ -1305,6 +1566,7 @@ pub async fn save_reader_data(data: &ReaderData, path: &Path) -> anyhow::Result<
         path: path.display().to_string(),
         bookmarks: data.bookmarks.len(),
         highlights: data.highlights.len(),
+        notes: data.notes.len(),
         has_position: data.reading_position.is_some(),
         preferences: data.preferences.count(),
     })
@@ -1469,6 +1731,12 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
         .iter()
         .filter(|h| !highlighted.contains(&h.coordinates()))
         .count();
+    let noted = state.store.note_keys().await?;
+    let file_notes = import.notes.as_deref().unwrap_or_default();
+    let new_notes = file_notes
+        .iter()
+        .filter(|n| !noted.contains(&n.key()))
+        .count();
     let preview = ImportPreviewDto {
         token: state.next_import_token.fetch_add(1, Ordering::Relaxed),
         file_name,
@@ -1491,6 +1759,12 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
         new_highlights,
         already_highlighted: file_highlights.len() - new_highlights,
         current_highlights: highlighted.len(),
+        has_notes: import.notes.is_some(),
+        notes_in_file: file_notes.len(),
+        note_duplicates_in_file: import.note_duplicates_in_file,
+        new_notes,
+        notes_already_present: file_notes.len() - new_notes,
+        current_notes: noted.len(),
         position: import.position.as_ref().map(PositionPreviewDto::from),
         preferences: import.preferences,
     };
@@ -1511,7 +1785,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Apply the pending import the reader previewed (`token`), in one
 /// database transaction. `replace` swaps every current bookmark (and, for
-/// a file that can hold them, every highlight) for the file's; otherwise
+/// a file that can hold them, every highlight and note) for the file's; otherwise
 /// they're merged. `restore_position` also saves the
 /// file's reading position. Display preferences live in the webview and
 /// are applied there, after this succeeds.
@@ -1537,13 +1811,17 @@ pub async fn apply_pending_import(
         .apply_import(
             &import.bookmarks,
             import.highlights.as_deref(),
+            import.notes.as_deref(),
             replace,
             position,
         )
         .await
-        .map_err(|e| {
-            tracing::error!("Import failed: {e:#}");
-            "The import failed, so nothing was changed.".to_string()
+        .map_err(|e| match e {
+            ApplyImportError::NoteLimit(limit) => import_limit_message(limit),
+            ApplyImportError::Database(e) => {
+                tracing::error!("Import failed: {e:#}");
+                "The import failed, so nothing was changed.".to_string()
+            }
         })?;
     discard_pending_import(state, token);
     Ok(ImportResultDto {
@@ -1553,8 +1831,27 @@ pub async fn apply_pending_import(
         highlights_added: counts.highlights_added,
         highlights_already_present: counts.highlights_already_present,
         highlights_removed: counts.highlights_removed,
+        notes_added: counts.notes_added,
+        notes_already_present: counts.notes_already_present,
+        notes_removed: counts.notes_removed,
         position: position.map(PositionPreviewDto::from),
     })
+}
+
+/// Why an import that would go past a limit on notes was refused.
+fn import_limit_message(limit: NoteLimit) -> String {
+    match limit {
+        NoteLimit::Count => format!(
+            "Importing this file would give you more than {} notes, the most Gospel Getter \
+             keeps, so nothing was changed.",
+            grouped(db::notes::MAX_NOTES)
+        ),
+        NoteLimit::TotalText => format!(
+            "Importing this file would take your notes past their total size limit ({} \
+             characters), so nothing was changed.",
+            grouped(db::notes::MAX_TOTAL_NOTE_CHARS)
+        ),
+    }
 }
 
 /// Forget the pending import, if it's still `token`.
@@ -1570,7 +1867,7 @@ fn reader_data_dialog<R: tauri::Runtime>(
 ) -> tauri_plugin_dialog::FileDialogBuilder<R> {
     use tauri_plugin_dialog::DialogExt;
     app.dialog().file().add_filter(
-        "Gospel Getter bookmarks, highlights and settings",
+        "Gospel Getter bookmarks, highlights, notes and settings",
         &["json"],
     )
 }
@@ -1591,8 +1888,8 @@ async fn run_dialog(
         .transpose()
 }
 
-/// Export the reader's bookmarks, reading position and display
-/// preferences to a file they choose with the native save dialog.
+/// Export the reader's bookmarks, highlights, notes, reading position and
+/// display preferences to a file they choose with the native save dialog.
 #[tauri::command]
 pub async fn export_reader_data<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -1611,7 +1908,7 @@ pub async fn export_reader_data<R: tauri::Runtime>(
         reader_data::FILE_SUFFIX
     );
     let dialog = reader_data_dialog(&app)
-        .set_title("Export bookmarks, highlights and settings")
+        .set_title("Export bookmarks, highlights, notes and settings")
         .set_file_name(suggested);
     let Some(path) = run_dialog(move || dialog.blocking_save_file()).await? else {
         return Ok(ExportOutcome::Cancelled);
@@ -1629,7 +1926,8 @@ pub async fn choose_import_file<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
 ) -> Result<ImportChoice, String> {
-    let dialog = reader_data_dialog(&app).set_title("Import bookmarks, highlights and settings");
+    let dialog =
+        reader_data_dialog(&app).set_title("Import bookmarks, highlights, notes and settings");
     let Some(path) = run_dialog(move || dialog.blocking_pick_file()).await? else {
         return Ok(ImportChoice::Cancelled);
     };
@@ -1847,6 +2145,108 @@ mod tests {
         let left = highlight_passages_in(&state, None).await.unwrap();
         let references: Vec<&str> = left.iter().map(|h| h.reference.as_str()).collect();
         assert_eq!(references, ["Psalms 23:1\u{2013}2", "John 3:20"]);
+    }
+
+    #[tokio::test]
+    async fn note_commands_save_list_and_explain_failures() {
+        let (_db, state) = app_state("cmd_notes").await;
+        let at = |verse_start, verse_end| Passage {
+            book_id: 43,
+            chapter: 3,
+            verse_start,
+            verse_end,
+        };
+
+        let note = note_add(&state, at(16, 18), " <i>Not</i> markup.\n")
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                note.reference.as_str(),
+                note.book_name.as_str(),
+                note.body.as_str()
+            ),
+            ("John 3:16\u{2013}18", "John", "<i>Not</i> markup.")
+        );
+        let listed = notes_overlapping(&state, at(17, 17)).await.unwrap();
+        assert_eq!(listed[0].id, note.id);
+        assert_eq!(
+            notes_list(&state).await.unwrap()[0].reference,
+            "John 3:16\u{2013}18"
+        );
+
+        for (passage, body, expected) in [
+            (at(16, 16), " ", "A note can't be empty."),
+            (
+                Passage {
+                    chapter: 22,
+                    ..at(1, 1)
+                },
+                "x",
+                "There's no John 22.",
+            ),
+            (
+                at(36, 40),
+                "x",
+                "There's no John 3:40; the chapter ends at verse 36.",
+            ),
+            (
+                at(4, 2),
+                "x",
+                "4\u{2013}2 isn't a verse range that can be noted.",
+            ),
+        ] {
+            assert_eq!(
+                note_add(&state, passage, body).await.unwrap_err(),
+                expected,
+                "{passage:?}"
+            );
+        }
+        assert_eq!(
+            notes_overlapping(&state, at(4, 2)).await.unwrap_err(),
+            "4\u{2013}2 isn't a verse range."
+        );
+
+        let edited = note_update(&state, note.id, "Edited.").await.unwrap();
+        assert_eq!(edited.body, "Edited.");
+        let deleted = note_delete(&state, note.id).await.unwrap().unwrap();
+        assert_eq!(
+            note_delete(&state, note.id).await.unwrap().map(|n| n.id),
+            None
+        );
+        assert_eq!(
+            note_update(&state, note.id, "Too late.").await.unwrap_err(),
+            "That note no longer exists; it may have been deleted."
+        );
+        let restored = note_restore(
+            &state,
+            at(deleted.verse_start, deleted.verse_end),
+            &deleted.body,
+            &deleted.created_at,
+            &deleted.updated_at,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (
+                &restored.reference,
+                &restored.body,
+                &restored.created_at,
+                &restored.updated_at
+            ),
+            (
+                &deleted.reference,
+                &deleted.body,
+                &deleted.created_at,
+                &deleted.updated_at
+            )
+        );
+        assert_eq!(
+            note_restore(&state, at(16, 16), "x", "yesterday", "today")
+                .await
+                .unwrap_err(),
+            "That note's date isn't valid, so it couldn't be restored."
+        );
     }
 
     #[tokio::test]

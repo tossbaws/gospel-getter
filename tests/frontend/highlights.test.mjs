@@ -218,7 +218,7 @@ test('export saves highlights, and says so', () =>
         await clickData(app, 'export-data-btn', path);
         assert.equal(dataStatus(app), `Saved 0 bookmarks, 2 highlighted verses, your reading position, your display settings to ${path}. Bible text isn’t included.`);
         const json = JSON.parse(readFileSync(path, 'utf8'));
-        assert.equal(json.format_version, 2);
+        assert.equal(json.format_version, 3);
         assert.deepEqual(
             json.highlights.map((h) => [h.book, h.book_name, h.chapter, h.verse, h.color]),
             [[43, 'John', 3, 16, 'yellow'], [43, 'John', 3, 17, 'yellow']],
@@ -248,7 +248,7 @@ test('the import preview counts a format 2 file\'s highlights, and merging keeps
         ])));
         await clickData(app, 'import-data-btn', path);
         assert.equal(app.document.getElementById('import-overlay').hidden, false);
-        assert.equal(app.document.getElementById('import-title').textContent, 'Import bookmarks, highlights and settings');
+        assert.equal(app.document.getElementById('import-title').textContent, 'Import bookmarks, highlights, notes and settings');
         const summary = [...app.document.querySelectorAll('#import-summary li')].map((li) => li.textContent);
         assert.ok(summary.includes('No bookmarks.'), summary.join(' | '));
         assert.ok(

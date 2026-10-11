@@ -576,9 +576,10 @@ fn reading_presets_default_to_the_original_typography() {
 }
 
 /// Text size/spacing apply to the reading content only — verses, verse
-/// numbers, chapter headings and compare mode's "not numbered" cells
-/// (which sit in a row beside a verse) — never to the rest of the UI (so
-/// the settings menu, book list etc. don't grow with it).
+/// numbers, chapter headings, compare mode's "not numbered" cells (which
+/// sit in a row beside a verse), and in the note panel the verses quoted
+/// and the note being written about them — never to the rest of the UI
+/// (so the settings menu, book list etc. don't grow with it).
 #[test]
 fn reading_presets_scale_only_reading_content() {
     for rule in rules() {
@@ -592,7 +593,9 @@ fn reading_presets_scale_only_reading_content() {
                     ".chapter-side .verse",
                     ".verse-num",
                     ".chapter-heading",
-                    ".compare-gap"
+                    ".compare-gap",
+                    ".note-passage",
+                    ".note-input"
                 ]
                 .contains(&selector),
                 "`{selector}` uses a reading preset, but only reading content should"
@@ -740,7 +743,7 @@ fn header_buttons_announce_what_they_open() {
     let library = tag_of("library-toggle");
     assert!(library.contains(r#"aria-controls="library-panel""#));
     assert!(library.contains(r#"aria-expanded="false""#));
-    assert!(library.contains(r#"aria-label="Library: bookmarks and highlights""#));
+    assert!(library.contains(r#"aria-label="Library: bookmarks, highlights and notes""#));
     assert!(tag_of("search-toggle").contains(r#"aria-controls="search-panel""#));
     let about = tag_of("about-panel");
     assert!(about.contains(r#"role="dialog""#) && about.contains(r#"aria-modal="true""#));
@@ -1090,4 +1093,139 @@ fn compare_headers_stick_below_the_top_bar() {
     assert_eq!(tops, ["var(--bar-height)"]);
     let head = screen_rule(&rules, ".compare-head");
     assert!(head.body.contains("position: sticky"));
+}
+
+/// The note marker is the bookmark star's kind of mark — a pseudo-element
+/// after the verse number, never part of the text — but a different
+/// glyph, beside the star when a verse has both. It's `--accent`, AA on
+/// `--option-bg` in every theme (see the palette tests), and at least 3:1
+/// (a non-text contrast) on a selected verse's tint too. Like the star, it
+/// isn't printed.
+#[test]
+fn note_marker_is_distinct_tested_and_not_printed() {
+    let rules = rules();
+    let star = screen_rule(
+        &rules,
+        ".chapter-main .verse.is-bookmarked .verse-num::after",
+    );
+    let marker = screen_rule(&rules, ".chapter-main .verse.has-notes .verse-num::after");
+    assert!(star.body.contains(r"content: '\2605'"));
+    assert!(marker.body.contains(r"content: '\270E'"));
+    assert!(marker.body.contains("color: var(--accent)"));
+    let both = screen_rule(
+        &rules,
+        ".chapter-main .verse.is-bookmarked.has-notes .verse-num::after",
+    );
+    assert!(both.body.contains(r"'\2605\2009\270E'"));
+
+    let tint_alpha: f64 = screen_rule(&rules, ".chapter-main .verse.verse-selected")
+        .body
+        .split_once("background: rgba(var(--accent-rgb), ")
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(alpha, _)| alpha.trim().parse().unwrap())
+        .expect("a selected verse is tinted with --accent");
+    for (theme, props) in theme_palettes(&rules) {
+        let accent = property(&props, "--accent");
+        let tint = composite(
+            &format!("rgba({}, {tint_alpha})", property(&props, "--accent-rgb")),
+            property(&props, "--option-bg"),
+        );
+        let ratio = contrast_ratio(accent, &tint);
+        assert!(
+            ratio >= 3.0,
+            "theme `{theme}`: the note marker on a selected verse is {ratio:.2}:1, below 3:1"
+        );
+    }
+
+    for selector in [
+        ".chapter-main .verse.is-bookmarked .verse-num::after",
+        ".chapter-main .verse.has-notes .verse-num::after",
+    ] {
+        let print = rules
+            .iter()
+            .find(|r| r.at_rule.as_deref() == Some("@media print") && r.selector == selector)
+            .unwrap_or_else(|| panic!("print should clear `{selector}`"));
+        assert!(print.body.contains("content: none !important"));
+    }
+}
+
+/// The Notes section and the note panel add no colors of their own: the
+/// section is the actions' `--panel-bg` tint, with `--text` notes,
+/// `--text-dim` dates and `--accent` citations and links, all AA on it in
+/// every theme; the panel is the welcome's modal, on `--option-bg`.
+#[test]
+fn notes_use_tested_theme_colors() {
+    let rules = rules();
+    let section = screen_rule(&rules, ".verse-notes");
+    assert!(section.body.contains("background: var(--panel-bg)"));
+    for (selector, color) in [
+        (".note-card-body", "--text"),
+        (".note-card-date", "--text-dim"),
+        (".verse-notes-title", "--text-dim"),
+        (".note-card-ref", "--accent"),
+        (".note-link", "--accent"),
+    ] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains(&format!("color: var({color})")),
+            "{selector} should be {color}"
+        );
+    }
+    for (theme, props) in theme_palettes(&rules) {
+        let behind = composite(
+            property(&props, "--panel-bg"),
+            property(&props, "--option-bg"),
+        );
+        for fg in ["--text", "--text-dim", "--accent"] {
+            let ratio = contrast_ratio(property(&props, fg), &behind);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: {fg} in the Notes section is {ratio:.2}:1, below 4.5:1"
+            );
+        }
+    }
+
+    let panel = screen_rule(&rules, ".modal-panel");
+    assert!(panel.body.contains("background: var(--option-bg)"));
+    assert!(panel.body.contains("color: var(--text)"));
+    let input = screen_rule(&rules, ".note-input");
+    assert!(input.body.contains("background: var(--option-bg)"));
+    assert!(input.body.contains("color: var(--text)"));
+    for selector in [".note-text-shown", ".note-label", ".note-preview"] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains("color: var(--text-dim)"),
+            "{selector}"
+        );
+    }
+    // The welcome and the note panel share one modal style; the welcome
+    // keeps its own ids and classes.
+    for class in ["welcome-overlay modal-overlay", "welcome-panel modal-panel"] {
+        assert!(HTML.contains(&format!(r#"class="{class}""#)), "{class}");
+    }
+    assert!(HTML.contains(r#"<div id="note-overlay" class="modal-overlay" hidden>"#));
+    assert_eq!(
+        rules
+            .iter()
+            .filter(|r| r.at_rule.is_none() && r.body.contains("background: rgba(0, 0, 0, 0.6)"))
+            .count(),
+        2,
+        "one dimmed overlay style for the import preview and About, one for the modals"
+    );
+}
+
+/// A verse's hidden "has notes" cue is for screen readers only: it can't
+/// be selected, so copying a verse's text never copies it (checked in
+/// WebKitGTK: without this, a native selection and copy of a verse with
+/// notes put "(has notes)" on the clipboard).
+#[test]
+fn the_has_notes_cue_is_never_copied() {
+    let rules = rules();
+    let cue = screen_rule(&rules, ".note-cue");
+    assert!(cue.body.contains("-webkit-user-select: none"));
+    assert!(cue.body.contains("user-select: none"));
+    let hidden = screen_rule(&rules, ".visually-hidden");
+    assert!(hidden.body.contains("clip: rect(0 0 0 0)"));
 }

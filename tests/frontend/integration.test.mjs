@@ -123,6 +123,9 @@ test('the print stylesheet hides every new control but keeps the reading content
             assert.ok(hidden.includes(selector), `print should hide ${selector}`);
         }
         assert.match(print, /\.is-bookmarked \.verse-num::after \{\s*content: none !important;/);
+        assert.match(print, /\.has-notes \.verse-num::after \{\s*content: none !important;/);
+        assert.ok(hidden.includes('.verse-notes'), 'print should hide the notes on a selection');
+        assert.ok(hidden.includes('.modal-overlay'), 'print should hide the note panel');
         for (const kept of ['.compare-grid', '.chapter-main {', '.verse {']) {
             assert.ok(!hidden.includes(kept), `print must keep ${kept}`);
         }

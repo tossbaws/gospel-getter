@@ -9,8 +9,9 @@ use crate::commands::{
     self, AppState, ExportOutcome, ImportChoice, ImportResultDto, build_reader_data,
     prepare_import, save_reader_data,
 };
+use crate::db::Passage;
 use crate::db::test_support::{
-    TempDb, bundled, fresh_database, other_tables_snapshot, verses_snapshot,
+    TempDb, bundled, fill_notes, fresh_database, other_tables_snapshot, verses_snapshot,
 };
 use crate::reader_data::{LineSpacing, Preferences, TextSize, Theme};
 
@@ -130,7 +131,7 @@ async fn export_round_trips_into_a_fresh_install() {
     let text = std::fs::read_to_string(&path).unwrap();
     let json: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(json["format"], "gospel-getter-reader-data");
-    assert_eq!(json["format_version"], 2);
+    assert_eq!(json["format_version"], 3);
     assert_eq!(json["app_version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(
         json["reading_position"],
@@ -319,7 +320,7 @@ async fn invalid_files_are_rejected_whole_and_change_nothing() {
         (
             "other json",
             "[1, 2, 3]".into(),
-            "This isn't a Gospel Getter file of bookmarks, highlights and settings.",
+            "This isn't a Gospel Getter file of bookmarks, highlights, notes and settings.",
         ),
         (
             "newer",
@@ -863,7 +864,7 @@ async fn highlights_round_trip_in_a_format_2_export() {
     assert_eq!(highlights, 5);
 
     let json: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(json["format_version"], 2);
+    assert_eq!(json["format_version"], 3);
     let first = &json["highlights"][0];
     assert_eq!(
         (
@@ -1120,8 +1121,8 @@ async fn invalid_highlights_reject_the_whole_file_and_change_nothing() {
         ),
         (
             "newer format",
-            v2_file_with("", "").replace("\"format_version\": 2", "\"format_version\": 3"),
-            "newer version of Gospel Getter (data format 3)",
+            v2_file_with("", "").replace("\"format_version\": 2", "\"format_version\": 4"),
+            "newer version of Gospel Getter (data format 4). This version reads format 3;",
         ),
     ];
     for (label, contents, expected) in &cases {
@@ -1180,4 +1181,626 @@ async fn a_failed_highlight_import_rolls_back_bookmarks_too() {
         (personal(&state).await, highlight_rows(&state).await),
         before
     );
+}
+
+// ---- Notes (format 3)
+
+/// (book, chapter, verse_start, verse_end, body, created_at, updated_at) of
+/// every note, in Bible order.
+type NoteRow = (i64, i64, i64, i64, String, String, String);
+
+async fn note_rows(state: &AppState) -> Vec<NoteRow> {
+    state
+        .store
+        .notes()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|n| {
+            (
+                n.book_id,
+                n.chapter,
+                n.verse_start,
+                n.verse_end,
+                n.body,
+                n.created_at,
+                n.updated_at,
+            )
+        })
+        .collect()
+}
+
+/// (book, chapter, verse_start, verse_end, body) of every note.
+async fn note_texts(state: &AppState) -> Vec<(i64, i64, i64, i64, String)> {
+    note_rows(state)
+        .await
+        .into_iter()
+        .map(|(b, c, s, e, body, ..)| (b, c, s, e, body))
+        .collect()
+}
+
+fn john_3(verse_start: i64, verse_end: i64) -> Passage {
+    Passage {
+        book_id: 43,
+        chapter: 3,
+        verse_start,
+        verse_end,
+    }
+}
+
+/// A minimal valid format 3 file with the given notes.
+fn v3_file_with(notes: &str) -> String {
+    format!(
+        r#"{{"format": "gospel-getter-reader-data", "format_version": 3,
+            "exported_at": "2026-10-10T00:00:00.000Z", "app_version": "2.8.0",
+            "reading_position": null, "bookmarks": [], "notes": [{notes}]}}"#
+    )
+}
+
+/// Everything an import may change.
+async fn everything(state: &AppState) -> impl PartialEq + std::fmt::Debug {
+    (
+        personal(state).await,
+        highlight_rows(state).await,
+        note_rows(state).await,
+    )
+}
+
+#[tokio::test]
+async fn notes_round_trip_in_a_format_3_export() {
+    let (db, a) = app("rd_notes_export").await;
+    commands::note_add(
+        &a,
+        john_3(16, 18),
+        "Line one.\n\n\tIndented \u{201c}quoted\u{201d} line — with \"marks\" and \\.",
+    )
+    .await
+    .unwrap();
+    commands::note_add(&a, john_3(16, 16), "<b>not bold</b> \u{1f54a}")
+        .await
+        .unwrap();
+    commands::note_add(&a, john_3(16, 16), "<b>not bold</b> \u{1f54a}")
+        .await
+        .unwrap();
+    // Matthew 2:23 is numbered only in the WEB; its note still travels.
+    let web_only = Passage {
+        book_id: 40,
+        chapter: 2,
+        verse_start: 23,
+        verse_end: 23,
+    };
+    commands::note_add(&a, web_only, "Nazarene.").await.unwrap();
+    commands::highlight_passage(&a, 43, 3, 16, 16, "yellow")
+        .await
+        .unwrap();
+    let before = note_rows(&a).await;
+
+    let path = file(&db, "notes.gospel-getter.json");
+    let ExportOutcome::Saved {
+        notes, highlights, ..
+    } = export_to(&a, &path, Preferences::default()).await
+    else {
+        panic!("expected saved")
+    };
+    assert_eq!((notes, highlights), (4, 1));
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    let json: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(json["format_version"], 3);
+    let first = &json["notes"][0];
+    assert_eq!(
+        first,
+        &serde_json::json!({
+            "book": 40, "book_name": "Matthew", "chapter": 2, "verse_start": 23,
+            "verse_end": 23, "body": "Nazarene.",
+            "created_at": before[0].5, "updated_at": before[0].6,
+        })
+    );
+    assert!(
+        !text.contains(bundled("kjv")[42].chapters[2][15].as_str()),
+        "no verse text in the file"
+    );
+    assert!(!text.contains("\"id\""));
+
+    // Into a fresh install: the same passages, text and dates.
+    let (_db_b, b) = app("rd_notes_export_b").await;
+    let p = preview(&b, &path).await;
+    assert!(p.has_notes);
+    assert_eq!(
+        (
+            p.notes_in_file,
+            p.note_duplicates_in_file,
+            p.new_notes,
+            p.notes_already_present,
+            p.current_notes
+        ),
+        // The two identical notes on 3:16 are one note to an import.
+        (3, 1, 3, 0, 0)
+    );
+    let result = commands::apply_pending_import(&b, p.token, false, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            result.notes_added,
+            result.notes_already_present,
+            result.notes_removed
+        ),
+        (3, 0, 0)
+    );
+    let mut expected = before.clone();
+    expected.remove(2);
+    assert_eq!(note_rows(&b).await, expected);
+}
+
+#[tokio::test]
+async fn merging_notes_skips_ones_already_here_and_reimporting_changes_nothing() {
+    let (db, state) = app("rd_notes_merge").await;
+    commands::note_add(&state, john_3(16, 16), "Already mine.")
+        .await
+        .unwrap();
+    let path = file(&db, "notes-merge.gospel-getter.json");
+    std::fs::write(
+        &path,
+        v3_file_with(
+            r#"{"book": 43, "book_name": "John", "chapter": 3, "verse_start": 16, "verse_end": 16,
+                "body": "  Already mine.\r\n", "created_at": "2001-01-01T00:00:00Z"},
+               {"book": 43, "chapter": 3, "verse_start": 16, "verse_end": 16, "body": "Another on 3:16."},
+               {"book": 43, "chapter": 3, "verse_start": 16, "verse_end": 18, "body": "Already mine.",
+                "created_at": "2001-02-03T04:05:06Z"},
+               {"book": 43, "chapter": 3, "verse_start": 16, "verse_end": 18, "body": "Already mine."},
+               {"book": 1, "chapter": 1, "verse_start": 1, "verse_end": 1, "body": "In the beginning."}"#,
+        ),
+    )
+    .unwrap();
+
+    let p = preview(&state, &path).await;
+    assert_eq!(
+        (
+            p.notes_in_file,
+            p.note_duplicates_in_file,
+            p.new_notes,
+            p.notes_already_present,
+            p.current_notes
+        ),
+        (4, 1, 3, 1, 1)
+    );
+    let first = commands::apply_pending_import(&state, p.token, false, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            first.notes_added,
+            first.notes_already_present,
+            first.notes_removed
+        ),
+        (3, 1, 0)
+    );
+    assert_eq!(
+        note_texts(&state).await,
+        vec![
+            (1, 1, 1, 1, "In the beginning.".to_string()),
+            // The reader's own note stays as it was, and isn't doubled.
+            (43, 3, 16, 16, "Already mine.".to_string()),
+            (43, 3, 16, 16, "Another on 3:16.".to_string()),
+            // The same text on another passage is another note.
+            (43, 3, 16, 18, "Already mine.".to_string()),
+        ]
+    );
+    // Dates are kept (normalized); a missing updated_at follows created_at.
+    let rows = note_rows(&state).await;
+    assert_eq!(
+        (rows[3].5.as_str(), rows[3].6.as_str()),
+        ("2001-02-03T04:05:06.000Z", "2001-02-03T04:05:06.000Z")
+    );
+    assert_ne!(rows[1].5, "2001-01-01T00:00:00.000Z");
+
+    let after_first = note_rows(&state).await;
+    let again = import(&state, &path, false).await;
+    assert_eq!((again.notes_added, again.notes_already_present), (0, 4));
+    assert_eq!(note_rows(&state).await, after_first);
+}
+
+#[tokio::test]
+async fn replace_swaps_notes_for_format_3_but_formats_1_and_2_leave_them_alone() {
+    let (db, state) = app("rd_notes_replace").await;
+    commands::note_add(&state, john_3(16, 16), "Mine.")
+        .await
+        .unwrap();
+    commands::note_add(&state, john_3(17, 18), "Also mine.")
+        .await
+        .unwrap();
+    commands::bookmark_passage(&state, 43, 3, 16, 16)
+        .await
+        .unwrap();
+    commands::highlight_passage(&state, 43, 3, 16, 16, "pink")
+        .await
+        .unwrap();
+    let original = note_rows(&state).await;
+
+    // Formats 1 and 2 can't hold notes: replacing swaps what they can hold,
+    // exactly as it always did, and leaves the notes alone.
+    let v1 = file(&db, "v1.gospel-getter.json");
+    std::fs::write(
+        &v1,
+        file_with(
+            r#"{"book": 1, "chapter": 1, "verse_start": 1, "verse_end": 1}"#,
+            "null",
+        ),
+    )
+    .unwrap();
+    let v2 = file(&db, "v2.gospel-getter.json");
+    std::fs::write(
+        &v2,
+        v2_file_with(
+            r#"{"book": 1, "chapter": 1, "verse_start": 2, "verse_end": 2}"#,
+            r#"{"book": 19, "chapter": 23, "verse": 4, "color": "green"}"#,
+        ),
+    )
+    .unwrap();
+    for (path, highlights_removed) in [(&v1, 0), (&v2, 1)] {
+        let p = preview(&state, path).await;
+        assert!(!p.has_notes);
+        assert_eq!((p.notes_in_file, p.new_notes, p.current_notes), (0, 0, 2));
+        let result = commands::apply_pending_import(&state, p.token, true, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                result.added,
+                result.removed,
+                result.highlights_removed,
+                result.notes_added,
+                result.notes_removed
+            ),
+            (1, 1, highlights_removed, 0, 0),
+            "{}",
+            path.display()
+        );
+        assert_eq!(note_rows(&state).await, original, "{}", path.display());
+    }
+    // Merging one leaves them alone too.
+    import(&state, &v2, false).await;
+    assert_eq!(note_rows(&state).await, original);
+
+    // A format 3 file replaces them all.
+    let v3 = file(&db, "v3.gospel-getter.json");
+    std::fs::write(
+        &v3,
+        v3_file_with(
+            r#"{"book": 19, "chapter": 23, "verse_start": 1, "verse_end": 6, "body": "The file's."}"#,
+        ),
+    )
+    .unwrap();
+    let p = preview(&state, &v3).await;
+    assert_eq!(
+        p.current_notes, 2,
+        "the preview says what replacing removes"
+    );
+    let result = commands::apply_pending_import(&state, p.token, true, true)
+        .await
+        .unwrap();
+    assert_eq!((result.notes_added, result.notes_removed), (1, 2));
+    assert_eq!(
+        note_texts(&state).await,
+        vec![(19, 23, 1, 6, "The file's.".to_string())]
+    );
+
+    // And a format 3 file with no notes replaces them with none.
+    let empty = file(&db, "v3-empty.gospel-getter.json");
+    std::fs::write(&empty, v3_file_with("")).unwrap();
+    let result = import(&state, &empty, true).await;
+    assert_eq!(result.notes_removed, 1);
+    assert_eq!(note_rows(&state).await, vec![]);
+}
+
+#[tokio::test]
+async fn invalid_notes_reject_the_whole_file_and_change_nothing() {
+    let (db, state) = app("rd_notes_invalid").await;
+    commands::note_add(&state, john_3(16, 16), "Mine.")
+        .await
+        .unwrap();
+    commands::bookmark_passage(&state, 43, 3, 16, 16)
+        .await
+        .unwrap();
+    let before = everything(&state).await;
+    let ok = r#"{"book": 43, "chapter": 3, "verse_start": 17, "verse_end": 17, "body": "fine"}"#;
+    let note = |fields: &str| {
+        v3_file_with(&format!(
+            r#"{ok}, {{"book": 43, "chapter": 3, "verse_start": 1, "verse_end": 1, {fields}}}"#
+        ))
+    };
+    let too_long = "x".repeat(crate::db::notes::MAX_NOTE_CHARS + 1);
+    let cases = [
+        (
+            "bad book",
+            v3_file_with(&format!(
+                r#"{ok}, {{"book": 99, "chapter": 1, "verse_start": 1, "verse_end": 1, "body": "x"}}"#
+            )),
+            "Note 2: there's no book number 99.".to_string(),
+        ),
+        (
+            "wrong name",
+            v3_file_with(
+                r#"{"book": 43, "book_name": "Mark", "chapter": 3, "verse_start": 1, "verse_end": 1, "body": "x"}"#,
+            ),
+            "Note 1: book 43 is John, not Mark.".to_string(),
+        ),
+        (
+            "bad chapter",
+            v3_file_with(
+                r#"{"book": 43, "chapter": 22, "verse_start": 1, "verse_end": 1, "body": "x"}"#,
+            ),
+            "Note 1: there's no John 22 (John has 21 chapters).".to_string(),
+        ),
+        (
+            "past the end",
+            v3_file_with(
+                r#"{"book": 43, "chapter": 3, "verse_start": 36, "verse_end": 37, "body": "x"}"#,
+            ),
+            "Note 1: there's no John 3:36\u{2013}37; John 3 ends at verse 36.".to_string(),
+        ),
+        (
+            "backwards",
+            v3_file_with(
+                r#"{"book": 43, "chapter": 3, "verse_start": 5, "verse_end": 4, "body": "x"}"#,
+            ),
+            "Note 1: John 3:5\u{2013}4 isn't a valid verse range.".to_string(),
+        ),
+        (
+            "empty",
+            note(r#""body": " \n ""#),
+            "Note 2 (John 3:1): A note can't be empty.".to_string(),
+        ),
+        (
+            "too long",
+            note(&format!(r#""body": "{too_long}""#)),
+            "Note 2 (John 3:1): A note can hold up to 10,000 characters; this one has 10,001."
+                .to_string(),
+        ),
+        (
+            "control character",
+            note(r#""body": "bell\u0007""#),
+            "Note 2 (John 3:1): A note can only hold plain text".to_string(),
+        ),
+        (
+            "bad date",
+            note(r#""body": "x", "created_at": "tomorrow""#),
+            "Note 2 (John 3:1): its date isn't a valid UTC time".to_string(),
+        ),
+        (
+            "missing body",
+            v3_file_with(r#"{"book": 43, "chapter": 3, "verse_start": 1, "verse_end": 1}"#),
+            "missing field `body`".to_string(),
+        ),
+        (
+            "unknown field",
+            note(r#""body": "x", "color": "blue""#),
+            "unknown field `color`".to_string(),
+        ),
+        (
+            "format 2 with notes",
+            v2_file_with("", "").replace("\"bookmarks\"", "\"notes\": [], \"bookmarks\""),
+            "unknown field `notes` (data format 2 has no notes)".to_string(),
+        ),
+        (
+            "newer format",
+            v3_file_with("").replace("\"format_version\": 3", "\"format_version\": 4"),
+            "This file was made by a newer version of Gospel Getter (data format 4). This \
+             version reads format 3; update Gospel Getter to import it."
+                .to_string(),
+        ),
+    ];
+    for (label, contents, expected) in &cases {
+        let path = file(
+            &db,
+            &format!("{}.gospel-getter.json", label.replace(' ', "-")),
+        );
+        std::fs::write(&path, contents).unwrap();
+        let (message, problems) = invalid(&state, &path).await;
+        let all = format!("{message} {}", problems.join(" "));
+        assert!(all.contains(expected.as_str()), "{label}: {all}");
+        assert_eq!(
+            everything(&state).await,
+            before,
+            "{label} changed something"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_failed_note_import_rolls_back_everything() {
+    let (db, pool) = fresh_database("rd_notes_rollback").await;
+    let state = AppState::load(pool.clone()).await.unwrap();
+    commands::bookmark_passage(&state, 43, 3, 16, 16)
+        .await
+        .unwrap();
+    commands::highlight_passage(&state, 43, 3, 16, 16, "pink")
+        .await
+        .unwrap();
+    commands::note_add(&state, john_3(16, 16), "Mine.")
+        .await
+        .unwrap();
+    let before = everything(&state).await;
+
+    let path = file(&db, "notes-fail.gospel-getter.json");
+    std::fs::write(
+        &path,
+        r#"{"format": "gospel-getter-reader-data", "format_version": 3,
+            "exported_at": "2026-10-10T00:00:00.000Z", "app_version": "2.8.0",
+            "reading_position": {"translation": "web", "book": 19, "chapter": 23},
+            "bookmarks": [{"book": 1, "chapter": 1, "verse_start": 1, "verse_end": 1}],
+            "highlights": [{"book": 1, "chapter": 1, "verse": 1, "color": "blue"}],
+            "notes": [{"book": 1, "chapter": 1, "verse_start": 1, "verse_end": 1, "body": "ok"},
+                      {"book": 1, "chapter": 2, "verse_start": 1, "verse_end": 1, "body": "fails"}]}"#,
+    )
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER fail_note BEFORE INSERT ON notes \
+         WHEN NEW.chapter = 2 BEGIN SELECT RAISE(ABORT, 'simulated failure'); END",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let p = preview(&state, &path).await;
+    let error = commands::apply_pending_import(&state, p.token, true, true)
+        .await
+        .unwrap_err();
+    assert_eq!(error, "The import failed, so nothing was changed.");
+    assert_eq!(everything(&state).await, before);
+}
+
+// ---- The limits on notes
+
+use crate::db::notes::{MAX_NOTE_CHARS, MAX_NOTES, MAX_TOTAL_NOTE_CHARS};
+
+/// A database (and app) with `count` notes of `chars` characters each.
+async fn app_with_notes(label: &str, count: usize, chars: usize) -> (TempDb, AppState) {
+    let (db, pool) = fresh_database(label).await;
+    fill_notes(&pool, count, chars).await;
+    let state = AppState::load(pool).await.expect("load state");
+    (db, state)
+}
+
+#[tokio::test]
+async fn an_import_that_would_pass_a_note_limit_changes_nothing() {
+    // One note short of the count limit; the file has two new ones.
+    let (db, state) = app_with_notes("rd_notes_count_limit", MAX_NOTES - 1, 10).await;
+    commands::bookmark_passage(&state, 43, 3, 16, 16)
+        .await
+        .unwrap();
+    let before = everything(&state).await;
+    let path = file(&db, "two-more.gospel-getter.json");
+    std::fs::write(
+        &path,
+        v3_file_with(
+            r#"{"book": 43, "chapter": 3, "verse_start": 1, "verse_end": 1, "body": "One."},
+               {"book": 43, "chapter": 3, "verse_start": 2, "verse_end": 2, "body": "Two."}"#,
+        )
+        .replace(
+            "\"bookmarks\": []",
+            r#""bookmarks": [{"book": 1, "chapter": 1, "verse_start": 1, "verse_end": 1}]"#,
+        ),
+    )
+    .unwrap();
+    let p = preview(&state, &path).await;
+    let error = commands::apply_pending_import(&state, p.token, false, true)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        "Importing this file would give you more than 10,000 notes, the most Gospel Getter \
+         keeps, so nothing was changed."
+    );
+    assert_eq!(everything(&state).await, before, "not even the bookmark");
+    // Replacing leaves just the file's two, which is fine.
+    let result = import(&state, &path, true).await;
+    assert_eq!(
+        (result.notes_added, result.notes_removed),
+        (2, MAX_NOTES - 1)
+    );
+
+    // At the total size limit, less a little; the file has more than that.
+    let (db, state) = app_with_notes(
+        "rd_notes_text_limit",
+        MAX_TOTAL_NOTE_CHARS / MAX_NOTE_CHARS,
+        MAX_NOTE_CHARS,
+    )
+    .await;
+    let first = state.store.notes().await.unwrap()[0].clone();
+    commands::note_update(&state, first.id, "Short now.")
+        .await
+        .unwrap();
+    let before = everything(&state).await;
+    let path = file(&db, "too-much.gospel-getter.json");
+    let long = "w".repeat(MAX_NOTE_CHARS);
+    std::fs::write(
+        &path,
+        v3_file_with(&format!(
+            r#"{{"book": 43, "chapter": 3, "verse_start": 1, "verse_end": 1, "body": "{long}"}},
+               {{"book": 43, "chapter": 3, "verse_start": 2, "verse_end": 2, "body": "w"}}"#
+        )),
+    )
+    .unwrap();
+    let p = preview(&state, &path).await;
+    let error = commands::apply_pending_import(&state, p.token, false, true)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        "Importing this file would take your notes past their total size limit (25,000,000 \
+         characters), so nothing was changed."
+    );
+    assert_eq!(everything(&state).await, before);
+    // Notes already here count once: a file holding only the reader's own
+    // notes merges at the limit without complaint.
+    let own = file(&db, "own.gospel-getter.json");
+    export_to(&state, &own, Preferences::default()).await;
+    let result = import(&state, &own, false).await;
+    assert_eq!(
+        (result.notes_added, result.notes_already_present),
+        (0, MAX_TOTAL_NOTE_CHARS / MAX_NOTE_CHARS)
+    );
+}
+
+#[tokio::test]
+async fn a_file_whose_notes_hold_too_much_text_is_refused() {
+    let (db, state) = app("rd_notes_file_total").await;
+    let count = MAX_TOTAL_NOTE_CHARS / MAX_NOTE_CHARS + 1;
+    let notes: Vec<String> = (0..count)
+        .map(|i| {
+            format!(
+                r#"{{"book": 43, "chapter": 3, "verse_start": 1, "verse_end": 1, "body": "{i:06}{}"}}"#,
+                "v".repeat(MAX_NOTE_CHARS - 6)
+            )
+        })
+        .collect();
+    let path = file(&db, "file-total.gospel-getter.json");
+    std::fs::write(&path, v3_file_with(&notes.join(","))).unwrap();
+    let (_, problems) = invalid(&state, &path).await;
+    assert_eq!(
+        problems,
+        ["Its notes hold 25010000 characters in all; the most one file can hold is 25000000."]
+    );
+    assert_eq!(note_rows(&state).await, vec![]);
+}
+
+/// The point of the limits: whatever the reader can keep, their export
+/// holds and imports again.
+#[tokio::test]
+async fn an_export_at_both_note_limits_imports_again() {
+    let (db, a) = app_with_notes(
+        "rd_notes_limits_export",
+        MAX_NOTES,
+        MAX_TOTAL_NOTE_CHARS / MAX_NOTES,
+    )
+    .await;
+    // At both limits: no room for one more note.
+    assert!(
+        commands::note_add(&a, john_3(16, 16), "x").await.is_err(),
+        "the database is at its limits"
+    );
+    let before = note_rows(&a).await;
+    assert_eq!(before.len(), MAX_NOTES);
+    assert_eq!(
+        before.iter().map(|n| n.4.chars().count()).sum::<usize>(),
+        MAX_TOTAL_NOTE_CHARS
+    );
+    let path = file(&db, "at-limits.gospel-getter.json");
+    let ExportOutcome::Saved { notes, .. } = export_to(&a, &path, Preferences::default()).await
+    else {
+        panic!("expected saved")
+    };
+    assert_eq!(notes, MAX_NOTES);
+    assert!(std::fs::metadata(&path).unwrap().len() <= crate::reader_data::MAX_FILE_BYTES);
+
+    let (_db_b, b) = app("rd_notes_limits_import").await;
+    let p = preview(&b, &path).await;
+    assert_eq!((p.notes_in_file, p.new_notes), (MAX_NOTES, MAX_NOTES));
+    let result = commands::apply_pending_import(&b, p.token, true, true)
+        .await
+        .unwrap();
+    assert_eq!(result.notes_added, MAX_NOTES);
+    assert_eq!(note_rows(&b).await, before);
 }

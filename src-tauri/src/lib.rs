@@ -63,6 +63,12 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::list_highlight_passages,
         commands::set_highlight,
         commands::remove_highlight,
+        commands::list_notes,
+        commands::list_all_notes,
+        commands::add_note,
+        commands::update_note,
+        commands::delete_note,
+        commands::restore_note,
         commands::search,
         commands::get_compare,
         commands::export_reader_data,
@@ -361,6 +367,62 @@ mod ipc_tests {
         assert_eq!(
             invoke(&webview, "list_highlights", json!({})).unwrap(),
             json!([])
+        );
+
+        // Notes: add, list (for a passage, and all), edit, delete, restore.
+        let note = invoke(
+            &webview,
+            "add_note",
+            json!({ "bookId": 43, "chapter": 3, "verseStart": 16, "verseEnd": 18, "body": " First. " }),
+        )
+        .unwrap();
+        assert_eq!(
+            (&note["reference"], &note["body"]),
+            (&json!("John 3:16\u{2013}18"), &json!("First."))
+        );
+        let overlapping = invoke(
+            &webview,
+            "list_notes",
+            json!({ "bookId": 43, "chapter": 3, "verseStart": 17, "verseEnd": 17 }),
+        )
+        .unwrap();
+        assert_eq!(overlapping[0]["id"], note["id"]);
+        assert_eq!(
+            invoke(&webview, "list_all_notes", json!({})).unwrap()[0]["id"],
+            note["id"]
+        );
+        let edited = invoke(
+            &webview,
+            "update_note",
+            json!({ "id": note["id"], "body": "Edited." }),
+        )
+        .unwrap();
+        assert_eq!(edited["body"], "Edited.");
+        assert_eq!(
+            invoke(
+                &webview,
+                "update_note",
+                json!({ "id": note["id"], "body": "  " }),
+            ),
+            Err(json!("A note can't be empty."))
+        );
+        let deleted = invoke(&webview, "delete_note", json!({ "id": note["id"] })).unwrap();
+        assert_eq!(deleted["body"], "Edited.");
+        let restored = invoke(
+            &webview,
+            "restore_note",
+            json!({
+                "bookId": deleted["bookId"], "chapter": deleted["chapter"],
+                "verseStart": deleted["verseStart"], "verseEnd": deleted["verseEnd"],
+                "body": deleted["body"], "createdAt": deleted["createdAt"],
+                "updatedAt": deleted["updatedAt"],
+            }),
+        )
+        .unwrap();
+        assert_eq!(restored["createdAt"], deleted["createdAt"]);
+        assert_eq!(
+            invoke(&webview, "delete_note", json!({ "id": 999_999 })).unwrap(),
+            Value::Null
         );
 
         let found = invoke(

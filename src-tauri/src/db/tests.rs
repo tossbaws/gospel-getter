@@ -1,5 +1,5 @@
 //! Database tests against real files: fresh installs, upgrades from
-//! v2.1.0, bookmarks, highlights and the search index. Each test gets its own
+//! v2.1.0, bookmarks, highlights, notes and the search index. Each test gets its own
 //! disposable database (see `test_support`).
 
 use std::time::Instant;
@@ -8,12 +8,18 @@ use super::bookmarks::{add_bookmark, list_bookmarks, remove_bookmark};
 use super::highlights::{
     list_highlight_passages, list_highlights, remove_highlights, set_highlights,
 };
+use super::notes::{
+    MAX_NOTE_CHARS, MAX_NOTES, MAX_TOTAL_NOTE_CHARS, NoteLimit, Passage, add_note, delete_note,
+    list_notes, notes_overlapping, update_note,
+};
 use super::search::search_verses;
 use super::test_support::{
-    TempDb, bundled, fresh_database, other_tables_snapshot, table_names, verses_snapshot,
-    write_v2_1_0_database,
+    TempDb, bundled, fill_notes, fresh_database, other_tables_snapshot, table_names,
+    verses_snapshot, write_v2_1_0_database,
 };
-use super::{BookmarkError, HighlightColor, ensure_search_index, prepare};
+use super::{
+    BookmarkError, HighlightColor, NoteBodyError, NoteError, ensure_search_index, prepare,
+};
 
 const KJV: i64 = 1;
 const WEB: i64 = 2;
@@ -58,6 +64,7 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
         "cross_references",
         "bookmarks",
         "highlights",
+        "notes",
         "verse_search",
         "search_index_state",
     ] {
@@ -114,6 +121,7 @@ async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_searc
     for table in [
         "bookmarks",
         "highlights",
+        "notes",
         "verse_search",
         "search_index_state",
     ] {
@@ -643,5 +651,407 @@ async fn highlighted_passages_preview_each_translations_own_verses() {
     assert_eq!(
         third_john.first_verse_text, None,
         "never another verse's text"
+    );
+}
+
+fn john_3(verse_start: i64, verse_end: i64) -> Passage {
+    Passage {
+        book_id: 43,
+        chapter: 3,
+        verse_start,
+        verse_end,
+    }
+}
+
+/// (passage, body) of every note, in Bible order.
+async fn note_rows(pool: &sqlx::SqlitePool) -> Vec<(i64, i64, i64, i64, String)> {
+    list_notes(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|n| (n.book_id, n.chapter, n.verse_start, n.verse_end, n.body))
+        .collect()
+}
+
+#[tokio::test]
+async fn notes_are_added_edited_listed_and_deleted() {
+    let (_db, pool) = fresh_database("notes").await;
+    assert_eq!(notes_overlapping(&pool, &john_3(1, 36)).await.unwrap(), []);
+
+    let first = add_note(
+        &pool,
+        &john_3(16, 16),
+        "  God so loved\r\nthe world. \n",
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.body, "God so loved\nthe world.");
+    assert_eq!(first.created_at, first.updated_at);
+    // Any number of notes on one passage, even with the same text.
+    let second = add_note(&pool, &john_3(16, 16), "God so loved\nthe world.", None)
+        .await
+        .unwrap();
+    assert_ne!(first.id, second.id);
+    let range = add_note(&pool, &john_3(16, 18), "Belief and judgment.", None)
+        .await
+        .unwrap();
+    let later = add_note(&pool, &john_3(21, 21), "Come to the light.", None)
+        .await
+        .unwrap();
+    // Matthew 2:23 is numbered only in the WEB; it can still have a note.
+    let web_only = Passage {
+        book_id: 40,
+        chapter: 2,
+        verse_start: 23,
+        verse_end: 23,
+    };
+    add_note(&pool, &web_only, "Nazarene.", None).await.unwrap();
+
+    let ids = |notes: Vec<super::Note>| notes.into_iter().map(|n| n.id).collect::<Vec<_>>();
+    assert_eq!(
+        ids(notes_overlapping(&pool, &john_3(16, 21)).await.unwrap()),
+        [first.id, second.id, range.id, later.id]
+    );
+    assert_eq!(
+        ids(notes_overlapping(&pool, &john_3(17, 17)).await.unwrap()),
+        [range.id]
+    );
+    assert_eq!(
+        ids(notes_overlapping(&pool, &john_3(19, 20)).await.unwrap()),
+        Vec::<i64>::new()
+    );
+    let everything = note_rows(&pool).await;
+    assert_eq!(everything[0].0, 40, "Bible order: Matthew before John");
+    assert_eq!(everything.len(), 5);
+
+    // Editing changes the text and updated_at only.
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    let edited = update_note(&pool, range.id, "Belief, judgment, light.")
+        .await
+        .unwrap();
+    assert_eq!(edited.body, "Belief, judgment, light.");
+    assert_eq!(
+        (
+            edited.created_at.as_str(),
+            edited.verse_start,
+            edited.verse_end
+        ),
+        (range.created_at.as_str(), 16, 18)
+    );
+    assert!(edited.updated_at > range.updated_at);
+    // Saving the same text again leaves it as it was.
+    assert_eq!(
+        update_note(&pool, range.id, " Belief, judgment, light. ")
+            .await
+            .unwrap(),
+        edited
+    );
+
+    let everything = note_rows(&pool).await;
+
+    // Deleting returns the note as it was; adding it back with its dates
+    // restores the same passage, text and created_at.
+    let deleted = delete_note(&pool, edited.id).await.unwrap().unwrap();
+    assert_eq!(deleted, edited);
+    assert_eq!(delete_note(&pool, edited.id).await.unwrap(), None);
+    assert!(matches!(
+        update_note(&pool, edited.id, "gone").await,
+        Err(NoteError::NotFound { .. })
+    ));
+    let restored = add_note(
+        &pool,
+        &deleted.passage(),
+        &deleted.body,
+        Some((&deleted.created_at, &deleted.updated_at)),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        (
+            restored.passage(),
+            &restored.body,
+            &restored.created_at,
+            &restored.updated_at
+        ),
+        (
+            deleted.passage(),
+            &deleted.body,
+            &deleted.created_at,
+            &deleted.updated_at
+        )
+    );
+    assert_eq!(note_rows(&pool).await, everything);
+
+    // Notes survive a restart.
+    pool.close().await;
+    let pool = _db.connect().await;
+    prepare(&pool).await.unwrap();
+    assert_eq!(note_rows(&pool).await, everything);
+}
+
+#[tokio::test]
+async fn invalid_notes_are_refused_and_change_nothing() {
+    let (_db, pool) = fresh_database("notes_invalid").await;
+    add_note(&pool, &john_3(16, 16), "Kept.", None)
+        .await
+        .unwrap();
+    let before = note_rows(&pool).await;
+
+    for (passage, body, expected) in [
+        (john_3(16, 16), "   \n ", "A note can't be empty."),
+        (
+            john_3(16, 16),
+            "ring\u{7}",
+            "A note can only hold plain text",
+        ),
+        (
+            john_3(16, 16),
+            &"x".repeat(MAX_NOTE_CHARS + 1),
+            "A note can hold up to 10,000 characters; this one has 10,001.",
+        ),
+        (john_3(18, 16), "backwards", "invalid verse range 18-16"),
+        (john_3(0, 1), "verse zero", "invalid verse range 0-1"),
+        (
+            john_3(36, 37),
+            "past the end",
+            "has no verse 37 (last is 36)",
+        ),
+        (
+            Passage {
+                book_id: 43,
+                chapter: 22,
+                verse_start: 1,
+                verse_end: 1,
+            },
+            "no chapter",
+            "book 43 has no chapter 22",
+        ),
+        (
+            Passage {
+                book_id: 67,
+                chapter: 1,
+                verse_start: 1,
+                verse_end: 1,
+            },
+            "no book",
+            "book 67 has no chapter 1",
+        ),
+    ] {
+        let error = add_note(&pool, &passage, body, None).await.unwrap_err();
+        assert!(
+            error.to_string().contains(expected),
+            "{passage:?} {body:?}: {error}"
+        );
+    }
+    assert!(matches!(
+        add_note(&pool, &john_3(16, 16), "", None).await,
+        Err(NoteError::Body(NoteBodyError::Empty))
+    ));
+    assert!(matches!(
+        add_note(&pool, &john_3(16, 40), "x", None).await,
+        Err(NoteError::Passage(BookmarkError::NoSuchVerse { .. }))
+    ));
+    let id = list_notes(&pool).await.unwrap()[0].id;
+    assert!(matches!(
+        update_note(&pool, id, " ").await,
+        Err(NoteError::Body(NoteBodyError::Empty))
+    ));
+    assert_eq!(note_rows(&pool).await, before);
+
+    // The longest note fits, counted in characters, not bytes.
+    let longest = "\u{e9}".repeat(MAX_NOTE_CHARS);
+    add_note(&pool, &john_3(1, 1), &longest, None)
+        .await
+        .unwrap();
+
+    // The table enforces the same rules if anything gets past them.
+    for (body, verse_start, verse_end) in [
+        (String::new(), 1, 1),
+        ("x".repeat(MAX_NOTE_CHARS + 1), 1, 1),
+        ("x".to_string(), 2, 1),
+        ("x".to_string(), 0, 0),
+    ] {
+        let inserted = sqlx::query(
+            "INSERT INTO notes (book_id, chapter, verse_start, verse_end, body) \
+             VALUES (43, 3, $1, $2, $3)",
+        )
+        .bind(verse_start)
+        .bind(verse_end)
+        .bind(&body)
+        .execute(&pool)
+        .await;
+        assert!(
+            inserted.is_err(),
+            "{verse_start}-{verse_end} {}",
+            body.len()
+        );
+    }
+}
+
+/// Every row of the reader's bookmarks and highlights, as text.
+async fn reader_rows(pool: &sqlx::SqlitePool) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT 'bookmark: ' || book_id || '|' || chapter || '|' || verse_start || '|' || \
+             verse_end || '|' || created_at FROM bookmarks \
+         UNION ALL \
+         SELECT 'highlight: ' || book_id || '|' || chapter || '|' || verse || '|' || color || \
+             '|' || created_at || '|' || updated_at FROM highlights \
+         ORDER BY 1",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn the_notes_table_is_added_to_an_existing_database() {
+    // A database as v2.7.0 left it: the current schema without notes, with
+    // a reader's bookmarks, highlights and position in it.
+    let (db, pool) = fresh_database("add_notes").await;
+    add_bookmark(&pool, 43, 3, 16, 18).await.unwrap();
+    add_bookmark(&pool, 19, 23, 1, 1).await.unwrap();
+    set_highlights(&pool, 43, 3, 16, 17, HighlightColor::Yellow)
+        .await
+        .unwrap();
+    set_highlights(&pool, 1, 1, 1, 1, HighlightColor::Pink)
+        .await
+        .unwrap();
+    super::save_reading_position(&pool, 2, 45, 8).await.unwrap();
+    sqlx::query("DROP TABLE notes")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let pool = db.connect().await;
+    let others_before = other_tables_snapshot(&pool).await;
+    let readers_before = reader_rows(&pool).await;
+    let verses_before = verses_snapshot(&pool).await;
+    assert_eq!(readers_before.len(), 2 + 3);
+    assert!(!table_names(&pool).await.iter().any(|t| t == "notes"));
+
+    // Exactly what startup does.
+    prepare(&pool).await.unwrap();
+    assert!(table_names(&pool).await.iter().any(|t| t == "notes"));
+    let index: Option<String> = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_notes_chapter'",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert!(
+        index.is_some_and(|sql| sql.contains("notes (book_id, chapter)")),
+        "notes are indexed by chapter"
+    );
+    assert_eq!(other_tables_snapshot(&pool).await, others_before);
+    assert_eq!(reader_rows(&pool).await, readers_before);
+    assert_eq!(verses_snapshot(&pool).await, verses_before);
+    add_note(&pool, &john_3(16, 16), "A first note.", None)
+        .await
+        .unwrap();
+
+    // Running it again (the next launch) keeps everything, the note too.
+    pool.close().await;
+    let pool = db.connect().await;
+    prepare(&pool).await.unwrap();
+    assert_eq!(reader_rows(&pool).await, readers_before);
+    assert_eq!(
+        note_rows(&pool).await,
+        vec![(43, 3, 16, 16, "A first note.".to_string())]
+    );
+}
+
+/// (count, total characters) of the notes, as the limits count them.
+async fn note_totals(pool: &sqlx::SqlitePool) -> (i64, i64) {
+    sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(length(body)), 0) FROM notes")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn no_note_is_added_past_the_count_limit() {
+    let (_db, pool) = fresh_database("notes_count_limit").await;
+    fill_notes(&pool, MAX_NOTES - 1, 10).await;
+    // The last one fits…
+    let last = add_note(&pool, &john_3(16, 16), "The last.", None)
+        .await
+        .unwrap();
+    assert_eq!(note_totals(&pool).await.0, MAX_NOTES as i64);
+    // …and then nothing more, not even a restored one.
+    for dates in [
+        None,
+        Some((last.created_at.as_str(), last.updated_at.as_str())),
+    ] {
+        let error = add_note(&pool, &john_3(17, 17), "One too many.", dates)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, NoteError::Limit(NoteLimit::Count)),
+            "{error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "You've reached the limit of 10,000 notes."
+        );
+    }
+    assert_eq!(note_totals(&pool).await.0, MAX_NOTES as i64);
+    // Room again once one goes.
+    delete_note(&pool, last.id).await.unwrap();
+    add_note(&pool, &john_3(17, 17), "Fits again.", None)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn notes_stay_within_their_total_size() {
+    let (_db, pool) = fresh_database("notes_text_limit").await;
+    let full = MAX_TOTAL_NOTE_CHARS / MAX_NOTE_CHARS;
+    fill_notes(&pool, full, MAX_NOTE_CHARS).await;
+    assert_eq!(
+        note_totals(&pool).await,
+        (full as i64, MAX_TOTAL_NOTE_CHARS as i64)
+    );
+    let error = add_note(&pool, &john_3(16, 16), "x", None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, NoteError::Limit(NoteLimit::TotalText)),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "Your notes have reached the total size limit (25,000,000 characters)."
+    );
+
+    // Shortening is always allowed, even at the limit; the room it makes
+    // can be used again.
+    let first = list_notes(&pool).await.unwrap()[0].clone();
+    update_note(&pool, first.id, &"s".repeat(9_000))
+        .await
+        .unwrap();
+    let used = add_note(&pool, &john_3(16, 16), &"y".repeat(1_000), None)
+        .await
+        .unwrap();
+    assert_eq!(note_totals(&pool).await.1, MAX_TOTAL_NOTE_CHARS as i64);
+    // Growing a note past the total isn't, and changes nothing.
+    let before = note_rows(&pool).await;
+    let error = update_note(&pool, first.id, &"s".repeat(9_001))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, NoteError::Limit(NoteLimit::TotalText)),
+        "{error:?}"
+    );
+    assert_eq!(note_rows(&pool).await, before);
+    // The same length, or shorter, is fine.
+    update_note(&pool, first.id, &"t".repeat(9_000))
+        .await
+        .unwrap();
+    update_note(&pool, used.id, "z").await.unwrap();
+    assert_eq!(
+        note_totals(&pool).await.1,
+        (MAX_TOTAL_NOTE_CHARS - 999) as i64
     );
 }
