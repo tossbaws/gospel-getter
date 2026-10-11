@@ -234,6 +234,27 @@ async fn dispatch(
                 },
             }
         }
+        "export_notes" => {
+            let code: String = arg(args, "translationCode")?;
+            match commands::build_notes_export(
+                state,
+                &code,
+                arg(args, "bookId")?,
+                chrono::Utc::now(),
+                &chrono::Local,
+            )
+            .await
+            {
+                Err(message) => Err(message),
+                Ok(file) => match pick()? {
+                    None => Ok(to_value(commands::NotesExportOutcome::Cancelled)?),
+                    Some(path) => match commands::save_notes_export(&file, &path).await {
+                        Ok(outcome) => Ok(to_value(outcome)?),
+                        Err(e) => Err(format!("The file couldn't be saved: {e:#}")),
+                    },
+                },
+            }
+        }
         "choose_import_file" => match pick()? {
             None => Ok(to_value(commands::ImportChoice::Cancelled)?),
             Some(path) => Ok(to_value(commands::prepare_import(state, &path).await?)?),

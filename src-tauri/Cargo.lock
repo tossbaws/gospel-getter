@@ -1551,6 +1551,7 @@ name = "gospel_getter"
 version = "2.8.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "reqwest",
  "rustls",
  "semver",

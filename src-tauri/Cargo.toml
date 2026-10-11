@@ -27,6 +27,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri-plugin-dialog = "~2.7"
 semver = "1"
+# Dates in the reader's own time zone, for the notes export (`notes_export`).
+# Only `clock` (which brings `Local`); the rest of chrono's defaults aren't
+# needed.
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 
 # Desktop only: the in-app updater, and opening the releases page in the
 # system browser for builds that can't update themselves. See `updater.rs`.

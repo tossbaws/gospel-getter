@@ -1238,6 +1238,71 @@
             }
         }
 
+        /* Export notes: a button at the top of the Library's Notes tab,
+           and a small modal (the note panel's look) to choose every note
+           or one book's. Like the rest of the UI it doesn't grow with the
+           reading text size. */
+        .export-notes-btn {
+            margin-bottom: 0.6rem;
+        }
+
+        .export-notes-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .export-notes-panel {
+            width: min(26rem, 100%);
+        }
+
+        .export-notes-text {
+            font-size: 0.9rem;
+            margin-bottom: 0.6rem;
+        }
+
+        .export-notes-scope {
+            border: none;
+            padding: 0;
+            margin: 0 0 0.6rem;
+        }
+
+        .export-notes-scope label {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.9rem;
+            margin: 0.3rem 0;
+            cursor: pointer;
+        }
+
+        .export-notes-scope input {
+            accent-color: var(--accent);
+        }
+
+        .export-notes-book-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            column-gap: 0.5rem;
+        }
+
+        .export-notes-book {
+            max-width: 100%;
+            font-family: inherit;
+            font-size: 0.9rem;
+            color: var(--text);
+            background: var(--option-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            padding: 0.25rem 0.4rem;
+        }
+
+        .export-notes-scope input:focus-visible,
+        .export-notes-book:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
         .import-confirm:focus-visible,
         .import-panel input:focus-visible,
         .import-panel .reader-mode-btn:focus-visible {
@@ -3164,6 +3229,7 @@
             <ul id="highlight-list" class="bookmark-list" aria-labelledby="library-tab-highlights"></ul>
         </div>
         <div id="library-notes" class="library-tabpanel" role="tabpanel" aria-labelledby="library-tab-notes" hidden>
+            <button type="button" id="export-notes-btn" class="reader-mode-btn export-notes-btn" aria-haspopup="dialog" disabled>Export notes…</button>
             <ul id="note-list" class="bookmark-list" aria-labelledby="library-tab-notes"></ul>
         </div>
         <p class="library-hint">Ctrl+B opens and closes the library &middot; Esc closes it</p>
@@ -3288,6 +3354,26 @@
                 <p id="note-discard-question" class="note-discard-question" role="alert">Discard this note?</p>
                 <button type="button" id="note-discard-yes" class="import-confirm">Discard</button>
                 <button type="button" id="note-keep" class="reader-mode-btn" aria-describedby="note-discard-question">Keep editing</button>
+            </div>
+        </div>
+    </div>
+    <div id="export-notes-overlay" class="modal-overlay" hidden>
+        <div id="export-notes-panel" class="modal-panel export-notes-panel" role="dialog" aria-modal="true" aria-labelledby="export-notes-title" aria-describedby="export-notes-text">
+            <div class="modal-body">
+                <h2 id="export-notes-title" class="note-title">Export notes</h2>
+                <p id="export-notes-text" class="export-notes-text">A Markdown file of your notes, each with its verses quoted in the <span id="export-notes-translation"></span>.</p>
+                <fieldset class="export-notes-scope">
+                    <legend class="visually-hidden">Notes to export</legend>
+                    <label><input type="radio" id="export-notes-all" name="export-notes-scope" value="all"> <span id="export-notes-all-label">All notes</span></label>
+                    <div class="export-notes-book-row">
+                        <label><input type="radio" id="export-notes-one" name="export-notes-scope" value="book"> One book:</label>
+                        <select id="export-notes-book" class="export-notes-book" aria-label="Book"></select>
+                    </div>
+                </fieldset>
+            </div>
+            <div class="modal-buttons">
+                <button type="button" id="export-notes-confirm" class="import-confirm">Export…</button>
+                <button type="button" id="export-notes-cancel" class="reader-mode-btn">Cancel</button>
             </div>
         </div>
     </div>
@@ -3988,6 +4074,7 @@
             const UNDO_MS = 8000;
             const noteList = document.getElementById('note-list');
             const noteTabCount = document.getElementById('note-count');
+            const exportNotesBtn = document.getElementById('export-notes-btn');
             const noteAddBtn = verseActions.querySelector('.verse-note-btn');
             const notesSection = document.createElement('div');
             notesSection.className = 'verse-notes';
@@ -4124,6 +4211,8 @@
 
             function renderNoteList(error) {
                 noteTabCount.textContent = error ? '' : String(allNotes.length);
+                // Export notes… needs notes to export.
+                exportNotesBtn.disabled = !!error || !allNotes.length;
                 if (error) {
                     noteList.innerHTML = `<li class="bookmark-empty is-error">${escapeHtml(error)}</li>`;
                     return;
@@ -4536,6 +4625,126 @@
                     setDataBusy(false);
                 }
             });
+
+            // ---- Export notes: every note, or one book's, as a readable
+            // Markdown file with each note's verses quoted in the
+            // translation being read: the one chosen in Aa, in compare mode
+            // too (whichever column that is). The backend builds the file,
+            // asks where to save it and writes it; the choice of books
+            // comes from the notes the Library has already loaded. A small modal, like the note
+            // panel: it has the keyboard while open, and closing it gives
+            // focus back to the button.
+
+            const exportNotesOverlay = document.getElementById('export-notes-overlay');
+            const exportNotesPanel = document.getElementById('export-notes-panel');
+            const exportNotesAll = document.getElementById('export-notes-all');
+            const exportNotesAllLabel = document.getElementById('export-notes-all-label');
+            const exportNotesOne = document.getElementById('export-notes-one');
+            const exportNotesBook = document.getElementById('export-notes-book');
+            const exportNotesTranslation = document.getElementById('export-notes-translation');
+            let exportingNotes = false;
+
+            // The books that have notes, in Bible order, with how many.
+            function notedBooks() {
+                const books = new Map();
+                for (const n of allNotes) {
+                    const book = books.get(n.bookId) || { id: n.bookId, name: n.bookName, count: 0 };
+                    book.count += 1;
+                    books.set(n.bookId, book);
+                }
+                return [...books.values()].sort((a, b) => a.id - b.id);
+            }
+
+            // Starts on the book being read if it has notes, otherwise on
+            // all of them.
+            function openExportNotes() {
+                if (exportNotesBtn.disabled || exportingNotes || !allNotes.length) return;
+                const books = notedBooks();
+                exportNotesAllLabel.textContent = `All notes (${allNotes.length.toLocaleString('en')})`;
+                exportNotesBook.innerHTML = books
+                    .map((b) => `<option value="${b.id}">${escapeHtml(b.name)} (${b.count.toLocaleString('en')})</option>`)
+                    .join('');
+                const current = reading ? books.find((b) => b.id === reading.bookId) : null;
+                exportNotesBook.value = String((current || books[0]).id);
+                exportNotesOne.checked = !!current;
+                exportNotesAll.checked = !current;
+                exportNotesTranslation.textContent = translationName(currentTranslation());
+                exportNotesOverlay.hidden = false;
+                (current ? exportNotesOne : exportNotesAll).focus({ preventScroll: true });
+            }
+
+            function closeExportNotes() {
+                exportNotesOverlay.hidden = true;
+                if (exportNotesBtn.isConnected && !exportNotesBtn.closest('[hidden]') && !exportNotesBtn.disabled) {
+                    exportNotesBtn.focus({ preventScroll: true });
+                } else {
+                    focusHome();
+                }
+            }
+
+            // Cancelling the save dialog says nothing; nothing was saved.
+            async function exportNotes() {
+                if (exportNotesOverlay.hidden || exportingNotes) return;
+                const bookId = exportNotesOne.checked ? Number(exportNotesBook.value) : null;
+                const book = bookId == null ? null : notedBooks().find((b) => b.id === bookId);
+                const translationCode = currentTranslation();
+                closeExportNotes();
+                exportingNotes = true;
+                try {
+                    const outcome = await invoke('export_notes', { translationCode, bookId });
+                    if (outcome.status === 'saved') {
+                        setDataStatus(`Exported ${plural(outcome.notes, 'note')}${book ? ` on ${book.name}` : ''} to ${outcome.path}.`);
+                    }
+                } catch (e) {
+                    console.error('Notes export failed', e);
+                    setDataStatus(`Export failed: ${errorText(e)}`, true);
+                } finally {
+                    exportingNotes = false;
+                }
+            }
+
+            exportNotesBtn.addEventListener('click', openExportNotes);
+            document.getElementById('export-notes-confirm').addEventListener('click', exportNotes);
+            document.getElementById('export-notes-cancel').addEventListener('click', closeExportNotes);
+            // Choosing a book chooses One book.
+            exportNotesBook.addEventListener('change', function () {
+                exportNotesOne.checked = true;
+            });
+
+            // Clicking the dimmed page behind does nothing, and leaves focus
+            // where it was.
+            exportNotesOverlay.addEventListener('mousedown', function (event) {
+                if (event.target === exportNotesOverlay) event.preventDefault();
+            });
+
+            // While it's open it has the keyboard, before any other handler
+            // sees a key (this listens on window, capturing): none of the
+            // reader's shortcuts run, Escape closes it (and only it, not
+            // the Library), and Tab stays inside.
+            window.addEventListener('keydown', function (event) {
+                if (exportNotesOverlay.hidden) return;
+                event.stopPropagation();
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeExportNotes();
+                } else if (event.key === 'Tab') {
+                    // A radio group is one stop: its checked radio.
+                    const focusable = [...exportNotesPanel.querySelectorAll('input, select, button')]
+                        .filter((el) => !el.disabled && !el.closest('[hidden]') && (el.type !== 'radio' || el.checked));
+                    const first = focusable[0];
+                    const last = focusable[focusable.length - 1];
+                    if (!exportNotesPanel.contains(document.activeElement)) {
+                        event.preventDefault();
+                        (event.shiftKey ? last : first).focus({ preventScroll: true });
+                    } else if (event.shiftKey && document.activeElement === first) {
+                        event.preventDefault();
+                        last.focus({ preventScroll: true });
+                    } else if (!event.shiftKey && document.activeElement === last) {
+                        event.preventDefault();
+                        first.focus({ preventScroll: true });
+                    }
+                }
+            }, true);
 
             // Readable names for display settings, taken from Aa's own
             // options.
@@ -5444,7 +5653,7 @@
                 // preferences script in <head> (and the lists' own
                 // handlers above); they're never navigation or a "click
                 // away" from a verse selection. Nor is the search panel.
-                if (event.target.closest('#top-bar, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #data-status')) {
+                if (event.target.closest('#top-bar, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-notes-overlay, #data-status')) {
                     return;
                 }
 
@@ -5642,10 +5851,10 @@
                 if (event.target && event.target.closest && event.target.closest('#search-panel')) {
                     return;
                 }
-                // And while the import preview, About or the note panel is
-                // open, nothing else responds to the keyboard (they handle
-                // their own keys).
-                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden) {
+                // And while the import preview, About, the note panel or
+                // Export notes is open, nothing else responds to the
+                // keyboard (they handle their own keys).
+                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden || !exportNotesOverlay.hidden) {
                     return;
                 }
 
