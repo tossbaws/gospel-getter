@@ -2,7 +2,7 @@
 """Build the flat small-size Chi Rho Code LLC icon set from the detailed mark.
 
 The method follows the 2026-10-05 flat set
-(/home/m4sk/Generated_Art/Brand_Attempts/favicon/2026-10-05_chi-rho_circuit_flat.json):
+(Brand_Attempts/favicon/2026-10-05_chi-rho_circuit_flat.json):
 the gold Chi-Rho is color-segmented from the 2048px stained-glass mark
 (r > 150, g > 130, b <= r + 5; a 5px close; flood-filled from the glyph;
 a 9px close to remove the lead-line slivers). It is then redrawn as a solid
