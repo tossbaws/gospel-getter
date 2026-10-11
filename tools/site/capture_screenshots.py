@@ -177,14 +177,18 @@ class Capturer:
         self.error = error
         self.loop.quit()
 
-    def scene(self, name, *, size, prefs, position, steps, bookmarks=(), full=False):
-        """Load the app fresh and run `steps` (an async JS function body)."""
+    def scene(self, name, *, size, prefs, position, steps, bookmarks=(), notes=(), full=False):
+        """Load the app fresh and run `steps` (an async JS function body).
+        `bookmarks` and `notes` (each with its text last) are saved first."""
         book, chapter, translation = position
         self.bridge.call("__reset", {"bookId": book_id(book), "chapter": chapter,
                                      "translationCode": translation})
         for b, c, v1, v2 in bookmarks:
             self.bridge.call("add_bookmark", {"bookId": book_id(b), "chapter": c,
                                               "verseStart": v1, "verseEnd": v2})
+        for b, c, v1, v2, body in notes:
+            self.bridge.call("add_note", {"bookId": book_id(b), "chapter": c,
+                                          "verseStart": v1, "verseEnd": v2, "body": body})
         self.ucm.remove_all_scripts()
         self.ucm.add_script(WebKit2.UserScript.new(
             INIT_JS % {"prefs": json.dumps(prefs)},
@@ -258,13 +262,17 @@ def feature_scenes(theme):
              steps="""
                 await __gg.until(() => document.querySelector('.compare-grid'), 'compare grid');
              """ + SCROLL_TO % ("document.querySelector('.chapter-heading')", 40)),
-        # A selected range with Copy and Bookmark, earlier bookmarks starred.
+        # A selected range with Copy, Bookmark and + Add note, earlier
+        # bookmarks starred, and the range's note under its actions.
         dict(name="select", size=(1280, 800), prefs=look, position=("1 Corinthians", 13, "web"),
              bookmarks=[("1 Corinthians", 13, 1, 3)],
+             notes=[("1 Corinthians", 13, 4, 7,
+                     "Paul describes love by what it does. Read verses 4\u20137 again with "
+                     "\u201cChrist\u201d in place of \u201clove\u201d.")],
              steps="""
                 __gg.click(__gg.verse(4));
                 __gg.click(__gg.verse(7), { shiftKey: true });
-                await __gg.until(() => document.querySelector('.verse-actions'), 'verse actions');
+                await __gg.until(() => document.querySelector('.verse-notes'), 'the notes on it');
              """ + SCROLL_TO % ("document.querySelector('.chapter-heading')", 40)),
     ]
 

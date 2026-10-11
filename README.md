@@ -6,8 +6,8 @@
 
 An offline Bible reader for Linux and Windows. Read the KJV or WEB a chapter
 at a time with the chapters before and after shown alongside, search the
-whole Bible, compare the two translations verse by verse, and copy or
-bookmark passages. No account and no network needed.
+whole Bible, compare the two translations verse by verse, and copy,
+bookmark or write notes on passages. No account and no network needed.
 
 ![The reading view in the Matrix theme: John 3 in the centre, with John 2 and John 4 faded on either side, under the chapter picker](screenshots/reading-neighboring-chapters.png)
 
@@ -41,6 +41,14 @@ bookmark passages. No account and no network needed.
   preview in the current translation. Neighboring verses highlighted in
   the same color are one entry (`John 3:16–18`). Filter by color, click a
   passage to open it, or remove its highlight with ×.
+- **Notes.** Select a verse or range and choose **+ Add note** (or press
+  N) to write about it, in a panel that shows the verses. A passage can
+  have several notes, and they show in every translation. A small ✎ marks
+  verses with notes, selecting verses shows every note on them, and the
+  Notes tab in the Library lists them all in Bible order. Deleting a note
+  offers **Undo**.
+
+  ![John 3:16 to 21 selected in the WEB in the Matrix theme, with ✎ marks after verses 16, 17, 18 and 21 and, under the Copy, Bookmark and + Add note buttons, a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and an Edit link](screenshots/notes.png)
 - **Compare translations.** Press `C` (or **Compare** under **Aa**) to see
   KJV and WEB side by side, one row per verse number. Where only one
   translation numbers a verse, the other column says so instead of
@@ -52,16 +60,20 @@ bookmark passages. No account and no network needed.
   spacings, and a distraction-free reading mode, all under **Aa** with the
   translation. Printing is always black on white.
 - **Everything in reach, out of the way.** A slim bar at the top holds
-  **Aa** (text and display), the **Library** (bookmarks and highlights),
+  **Aa** (text and display), the **Library** (bookmarks, highlights and
+  notes),
   search and the **☰** menu (export, import, the welcome and **About
   Gospel Getter**). Only one opens at a time, and Esc closes it.
 - **Picks up where you left off.** Your chapter, translation, bookmarks,
-  highlights and display settings are remembered between sessions.
+  highlights, notes and display settings are remembered between sessions.
 - **Back up or move your data.** In the ☰ menu, **Export data…** saves your
-  bookmarks, highlights, reading position and display settings to a JSON
-  file, and **Import data…** shows what a file contains before adding it
-  (or, if you choose, replacing your bookmarks and highlights). Only that
-  personal data is exported, not Bible text or the app's database.
+  bookmarks, highlights, notes, reading position and display settings to a
+  JSON file, and **Import data…** shows what a file contains before adding
+  it (or, if you choose, replacing your bookmarks, highlights and notes).
+  Only that personal data is exported, not Bible text or the app's
+  database. Files exported by 2.8.0 (data format 3, which adds notes) can't
+  be imported by 2.7.0 or older, which say the file is from a newer
+  version; files from older versions still import into 2.8.0.
 - **A short welcome.** On a new install, a four-page overview of the
   features opens the first time. **Skip** (or Esc) closes it, and
   **Show welcome** in the ☰ menu opens it again. Upgrading doesn't show it.
@@ -76,7 +88,7 @@ bookmark passages. No account and no network needed.
 
 ## A quick tour
 
-All five screenshots in this README, including the one at the top, use the
+All six screenshots in this README, including the one at the top, use the
 Matrix theme. The other five themes are under **Aa**.
 
 **Search the text, or jump straight to a reference.** Matching words are
@@ -93,12 +105,12 @@ shifting anything.
 **Select a range and copy it with its reference.** The citation underneath
 shows exactly what will be copied.
 
-![John 3:16 to 18 selected in the WEB in the Matrix theme, with Copy and Bookmark buttons and the citation "John 3:16–18 (WEB)"](screenshots/copy-verse-range.png)
+![John 3:16 to 18 selected in the WEB in the Matrix theme, with Copy, Bookmark and + Add note buttons, four highlight color swatches and the citation "John 3:16–18 (WEB)"](screenshots/copy-verse-range.png)
 
 **Bookmark passages and come back to them.** Bookmarked verses are starred
 in the text, and the Library (Ctrl+B) lists each one with a preview.
 
-![Psalm 23 with verses 1 to 4 starred in the Matrix theme, and the Library panel open on its Bookmarks tab listing Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
+![Psalm 23 with verses 1 to 4 starred in the Matrix theme, and the Library panel open on its Bookmarks tab, beside the Highlights and Notes tabs, listing Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
 
 ## Keyboard
 
@@ -108,7 +120,8 @@ in the text, and the Library (Ctrl+B) lists each one with a preview.
 | `/` or Ctrl+K | Open search. Enter goes to a reference; ↓ / ↑ move through results |
 | Ctrl+C | Copy the selected verses with their reference. If you've highlighted text yourself, that's copied instead, as usual |
 | `C` | Compare translations on/off |
-| Ctrl+B | Open or close the Library (bookmarks and highlights) |
+| Ctrl+B | Open or close the Library (bookmarks, highlights and notes) |
+| `N` | Write a note on the selected verses |
 | Shift-click | Extend the selection to a range within the chapter |
 | Esc | Close search or the open panel or popover, then clear the selection, then leave reading mode |
 
@@ -176,12 +189,13 @@ without you choosing **Update and restart**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0?** It updates itself to 2.7.0: it offers the update
-when it starts (or from **Check now**, in the Updates section of its
-Settings), if it's one of the installs above that update themselves.
+**Coming from 2.6.0 or 2.7.0?** Each updates itself to 2.8.0: it offers
+the update when it starts (or from **Check now**, in **About Gospel
+Getter** from the ☰ menu in 2.7.0, or in the Updates section of Settings
+in 2.6.0), if it's one of the installs above that update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.7.0 by hand once, from the
+Install 2.8.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -189,13 +203,13 @@ Upgrading keeps your data.
 ## Your data
 
 - Everything (translations, cross-references, reading position, bookmarks,
-  highlights and the search index) lives in one SQLite database in the per-app data
+  highlights, notes and the search index) lives in one SQLite database in the per-app data
   folder. On Linux that's
   `~/.local/share/com.tossbaws.gospel-getter/gospel_getter.db`; on Windows
   it's under `%APPDATA%\com.tossbaws.gospel-getter\`.
 - **Upgrades keep your data.** A new version adds any new tables and builds
   the search index once, in the background, without changing scripture
-  text, your reading position, bookmarks or highlights. Moving back to an older
+  text, your reading position, bookmarks, highlights or notes. Moving back to an older
   version after upgrading hasn't been tested.
 - Theme, text size, line spacing, compare and reading mode are display
   settings stored in the app's web storage, not the database.
