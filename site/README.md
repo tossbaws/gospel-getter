@@ -55,7 +55,7 @@ version bump: until a release has those names, the links 404.
   "Brand" below.
 - The screenshots are the real app (`ui/index.html`) showing the real
   bundled KJV and WEB text, in WebKitGTK, the engine the Linux app uses.
-  The feature screenshots (hero, search, copy and bookmark, compare, and
+  The feature screenshots (hero, search, copy, bookmark and note, compare, and
   `og-image.jpg`) are in the Matrix theme; the "Make it yours" strip shows
   all six themes.
   `tools/site/capture_screenshots.py` loads the page offscreen and answers
