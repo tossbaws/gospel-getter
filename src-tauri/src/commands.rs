@@ -1954,6 +1954,159 @@ pub fn cancel_import(state: tauri::State<'_, AppState>, token: u64) {
     discard_pending_import(&state, token);
 }
 
+// ---- Export notes as Markdown: readable, for a notes app or printing,
+// never imported back (see `notes_export`).
+
+/// How exporting notes ended.
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum NotesExportOutcome {
+    /// The reader closed the save dialog; no file was written.
+    Cancelled,
+    /// The file was completely written.
+    Saved { path: String, notes: usize },
+}
+
+/// A notes export, ready to save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotesFile {
+    /// The name the save dialog suggests.
+    pub file_name: String,
+    /// The Markdown.
+    pub contents: String,
+    /// How many notes it holds.
+    pub notes: usize,
+}
+
+/// The reader's notes as Markdown, with each note's verses quoted in the
+/// translation `translation_code`: every note, or only `book_id`'s. Dates
+/// (the notes', the export's and the file name's) are in `tz`. Each chapter
+/// a note is on is read once, however many notes it has.
+pub async fn build_notes_export<Tz: chrono::TimeZone>(
+    state: &AppState,
+    translation_code: &str,
+    book_id: Option<i64>,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+) -> Result<NotesFile, String> {
+    let translation = state
+        .translations
+        .iter()
+        .find(|t| t.code == translation_code)
+        .ok_or_else(|| format!("There's no translation \u{201c}{translation_code}\u{201d}."))?;
+    let book = book_id
+        .map(|id| {
+            state
+                .books
+                .iter()
+                .find(|b| b.id == id && (1..=66).contains(&id))
+                .ok_or_else(|| format!("There's no book {id}."))
+        })
+        .transpose()?;
+    const FAILED: &str = "Your notes couldn't be read for export.";
+    let all = state.store.notes().await.map_err(|e| {
+        tracing::error!("Failed to read notes to export: {e:#}");
+        FAILED.to_string()
+    })?;
+    let notes: Vec<Note> = all
+        .into_iter()
+        .filter(|n| book_id.is_none_or(|b| n.book_id == b))
+        .collect();
+    if notes.is_empty() {
+        return Err("There are no notes to export.".to_string());
+    }
+    let mut verses: HashMap<(i64, i64), Vec<db::Verse>> = HashMap::new();
+    for note in &notes {
+        let key = (note.book_id, note.chapter);
+        if verses.contains_key(&key) {
+            continue;
+        }
+        let chapter = state
+            .store
+            .chapter_verses(translation.id, note.book_id, note.chapter)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to read verses to export: {e:#}");
+                FAILED.to_string()
+            })?;
+        verses.insert(key, chapter);
+    }
+    let export = crate::notes_export::NotesExport {
+        notes: &notes,
+        books: &state.books,
+        verses: &verses,
+        translation_code: &translation.code,
+        translation_name: &translation.name,
+        book: book_id,
+        exported_at: now,
+    };
+    Ok(NotesFile {
+        file_name: crate::notes_export::file_name(
+            book.map(|b| b.name.as_str()),
+            crate::notes_export::local_date(now, tz),
+        ),
+        contents: export.render(tz),
+        notes: notes.len(),
+    })
+}
+
+/// Write a notes export to `path`, completely or not at all (as
+/// `save_reader_data` does).
+pub async fn save_notes_export(
+    file: &NotesFile,
+    path: &Path,
+) -> anyhow::Result<NotesExportOutcome> {
+    let target = path.to_path_buf();
+    let contents = file.contents.clone();
+    tokio::task::spawn_blocking(move || write_atomically(&target, contents.as_bytes()))
+        .await
+        .context("The save was interrupted")??;
+    Ok(NotesExportOutcome::Saved {
+        path: path.display().to_string(),
+        notes: file.notes,
+    })
+}
+
+/// Export the reader's notes (all of them, or one book's) as Markdown, with
+/// their verses quoted in `translation_code`, to a file they choose with
+/// the native save dialog. Dates are in the computer's time zone.
+#[tauri::command]
+pub async fn export_notes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    translation_code: String,
+    book_id: Option<i64>,
+) -> Result<NotesExportOutcome, String> {
+    use tauri_plugin_dialog::DialogExt;
+    // Built before the dialog opens, so a problem is reported without
+    // asking for a file name first.
+    let file = build_notes_export(
+        &state,
+        &translation_code,
+        book_id,
+        chrono::Utc::now(),
+        &chrono::Local,
+    )
+    .await?;
+    let dialog = app
+        .dialog()
+        .file()
+        .add_filter("Markdown", &["md"])
+        .set_title("Export notes")
+        .set_file_name(&file.file_name);
+    let Some(path) = run_dialog(move || dialog.blocking_save_file()).await? else {
+        return Ok(NotesExportOutcome::Cancelled);
+    };
+    save_notes_export(&file, &path).await.map_err(|e| {
+        tracing::error!("Notes export failed: {e:#}");
+        format!("The file couldn't be saved: {e:#}")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2246,6 +2399,123 @@ mod tests {
                 .await
                 .unwrap_err(),
             "That note's date isn't valid, so it couldn't be restored."
+        );
+    }
+
+    #[tokio::test]
+    async fn notes_export_quotes_each_note_in_the_chosen_translation() {
+        use crate::notes_export::escape_block;
+        let (db, state) = app_state("cmd_notes_export").await;
+        // 05:00 UTC on Oct 10 is still Oct 9 at -06:00.
+        let tz = chrono::FixedOffset::west_opt(6 * 3600).unwrap();
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-10T05:00:00Z")
+            .unwrap()
+            .to_utc();
+        let export = |code: &'static str, book: Option<i64>| {
+            let state = &state;
+            async move { build_notes_export(state, code, book, now, &tz).await }
+        };
+        assert_eq!(
+            export("kjv", None).await.unwrap_err(),
+            "There are no notes to export."
+        );
+
+        let at = |book_id, chapter, verse_start, verse_end| Passage {
+            book_id,
+            chapter,
+            verse_start,
+            verse_end,
+        };
+        for (passage, body) in [
+            (at(62, 1, 9, 9), "Confess."),
+            (
+                at(43, 3, 16, 18),
+                "<b>Typed</b> HTML.\n\nA second paragraph.",
+            ),
+            (at(43, 3, 16, 16), "# Not a heading\n- not a list"),
+            (at(40, 2, 23, 23), "Nazareth."),
+        ] {
+            note_add(&state, passage, body).await.unwrap();
+        }
+        let verse = |code: &str, book: usize, chapter: usize, verse: usize| {
+            escape_block(&bundled(code)[book - 1].chapters[chapter - 1][verse - 1])
+        };
+
+        // One book: only John's notes, in Bible order, quoting the KJV.
+        let john = export("kjv", Some(43)).await.unwrap();
+        assert_eq!(john.file_name, "gospel-getter-notes-john-2026-10-09.md");
+        assert_eq!(john.notes, 2);
+        assert!(john.contents.starts_with(
+            "# Notes on John\n\n\
+             Exported Oct 9, 2026 \u{b7} Verse text: King James Version \u{b7} 2 notes\n\n\
+             ## John 3:16\n"
+        ));
+        assert!(john.contents.contains(&format!(
+            "## John 3:16\n\n> **16** {}\n\n\\# Not a heading\\\n\\- not a list\n",
+            verse("kjv", 43, 3, 16)
+        )));
+        assert!(john.contents.contains(&format!(
+            "## John 3:16\u{2013}18\n\n> **16** {} **17** {} **18** {}\n\n\
+             \\<b\\>Typed\\</b\\> HTML.\n\nA second paragraph.\n",
+            verse("kjv", 43, 3, 16),
+            verse("kjv", 43, 3, 17),
+            verse("kjv", 43, 3, 18),
+        )));
+        assert!(!john.contents.contains("Confess") && !john.contents.contains("Nazareth"));
+
+        // Every note: Matthew 2:23 is numbered in the WEB, not the KJV, and
+        // is kept either way.
+        let kjv = export("kjv", None).await.unwrap();
+        assert_eq!(kjv.file_name, "gospel-getter-notes-2026-10-09.md");
+        assert_eq!(kjv.notes, 4);
+        assert!(kjv.contents.contains(
+            "## Matthew\n\n### Matthew 2:23\n\n\
+             *It isn\u{2019}t numbered in the KJV.*\n\nNazareth.\n"
+        ));
+        let web = export("web", None).await.unwrap();
+        assert!(
+            web.contents
+                .contains("Verse text: World English Bible \u{b7} 4 notes\n")
+        );
+        assert!(web.contents.contains(&format!(
+            "### Matthew 2:23\n\n> **23** {}\n\nNazareth.\n",
+            verse("web", 40, 2, 23)
+        )));
+        assert!(!web.contents.contains("numbered in the"));
+        let books: Vec<&str> = web
+            .contents
+            .lines()
+            .filter(|l| l.starts_with("## "))
+            .collect();
+        assert_eq!(books, ["## Matthew", "## John", "## 1 John"]);
+
+        // What's asked for is checked, even though the UI never asks for it.
+        assert_eq!(
+            export("niv", None).await.unwrap_err(),
+            "There's no translation \u{201c}niv\u{201d}."
+        );
+        for book in [0, 67, -1] {
+            assert_eq!(
+                export("kjv", Some(book)).await.unwrap_err(),
+                format!("There's no book {book}.")
+            );
+        }
+        assert_eq!(
+            export("kjv", Some(1)).await.unwrap_err(),
+            "There are no notes to export."
+        );
+
+        // Saved as is: UTF-8, LF, no byte-order mark.
+        let path = db.path().with_file_name(&kjv.file_name);
+        let outcome = save_notes_export(&kjv, &path).await.unwrap();
+        assert!(matches!(
+            outcome,
+            NotesExportOutcome::Saved { notes: 4, .. }
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), kjv.contents.as_bytes());
+        assert_eq!(
+            serde_json::to_value(&outcome).unwrap()["status"],
+            serde_json::json!("saved")
         );
     }
 

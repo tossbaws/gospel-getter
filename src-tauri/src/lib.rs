@@ -5,6 +5,7 @@
 pub mod commands;
 pub mod db;
 pub mod domain;
+pub mod notes_export;
 pub mod reader_data;
 #[cfg(test)]
 mod reader_data_tests;
@@ -72,6 +73,7 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::search,
         commands::get_compare,
         commands::export_reader_data,
+        commands::export_notes,
         commands::choose_import_file,
         commands::apply_import,
         commands::cancel_import,
