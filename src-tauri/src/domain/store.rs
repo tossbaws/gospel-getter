@@ -2,7 +2,7 @@ use sqlx::SqlitePool;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::db::reader_data::ImportCounts;
+use crate::db::reader_data::{ApplyImportError, ImportCounts};
 use crate::db::{
     self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Highlight,
     HighlightColor, HighlightPassageInTranslation, Note, NoteError, Passage, SearchHit, Verse,
@@ -237,7 +237,7 @@ impl Store {
         notes: Option<&[NewNote]>,
         replace: bool,
         position: Option<&NewPosition>,
-    ) -> anyhow::Result<ImportCounts> {
+    ) -> Result<ImportCounts, ApplyImportError> {
         db::reader_data::apply_import(&self.pool, bookmarks, highlights, notes, replace, position)
             .await
     }

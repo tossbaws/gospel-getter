@@ -1215,3 +1215,17 @@ fn notes_use_tested_theme_colors() {
         "one dimmed overlay style for the import preview and About, one for the modals"
     );
 }
+
+/// A verse's hidden "has notes" cue is for screen readers only: it can't
+/// be selected, so copying a verse's text never copies it (checked in
+/// WebKitGTK: without this, a native selection and copy of a verse with
+/// notes put "(has notes)" on the clipboard).
+#[test]
+fn the_has_notes_cue_is_never_copied() {
+    let rules = rules();
+    let cue = screen_rule(&rules, ".note-cue");
+    assert!(cue.body.contains("-webkit-user-select: none"));
+    assert!(cue.body.contains("user-select: none"));
+    let hidden = screen_rule(&rules, ".visually-hidden");
+    assert!(hidden.body.contains("clip: rect(0 0 0 0)"));
+}

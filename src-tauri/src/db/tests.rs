@@ -9,12 +9,13 @@ use super::highlights::{
     list_highlight_passages, list_highlights, remove_highlights, set_highlights,
 };
 use super::notes::{
-    MAX_NOTE_CHARS, Passage, add_note, delete_note, list_notes, notes_overlapping, update_note,
+    MAX_NOTE_CHARS, MAX_NOTES, MAX_TOTAL_NOTE_CHARS, NoteLimit, Passage, add_note, delete_note,
+    list_notes, notes_overlapping, update_note,
 };
 use super::search::search_verses;
 use super::test_support::{
-    TempDb, bundled, fresh_database, other_tables_snapshot, table_names, verses_snapshot,
-    write_v2_1_0_database,
+    TempDb, bundled, fill_notes, fresh_database, other_tables_snapshot, table_names,
+    verses_snapshot, write_v2_1_0_database,
 };
 use super::{
     BookmarkError, HighlightColor, NoteBodyError, NoteError, ensure_search_index, prepare,
@@ -958,5 +959,99 @@ async fn the_notes_table_is_added_to_an_existing_database() {
     assert_eq!(
         note_rows(&pool).await,
         vec![(43, 3, 16, 16, "A first note.".to_string())]
+    );
+}
+
+/// (count, total characters) of the notes, as the limits count them.
+async fn note_totals(pool: &sqlx::SqlitePool) -> (i64, i64) {
+    sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(length(body)), 0) FROM notes")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn no_note_is_added_past_the_count_limit() {
+    let (_db, pool) = fresh_database("notes_count_limit").await;
+    fill_notes(&pool, MAX_NOTES - 1, 10).await;
+    // The last one fits…
+    let last = add_note(&pool, &john_3(16, 16), "The last.", None)
+        .await
+        .unwrap();
+    assert_eq!(note_totals(&pool).await.0, MAX_NOTES as i64);
+    // …and then nothing more, not even a restored one.
+    for dates in [
+        None,
+        Some((last.created_at.as_str(), last.updated_at.as_str())),
+    ] {
+        let error = add_note(&pool, &john_3(17, 17), "One too many.", dates)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, NoteError::Limit(NoteLimit::Count)),
+            "{error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "You've reached the limit of 10,000 notes."
+        );
+    }
+    assert_eq!(note_totals(&pool).await.0, MAX_NOTES as i64);
+    // Room again once one goes.
+    delete_note(&pool, last.id).await.unwrap();
+    add_note(&pool, &john_3(17, 17), "Fits again.", None)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn notes_stay_within_their_total_size() {
+    let (_db, pool) = fresh_database("notes_text_limit").await;
+    let full = MAX_TOTAL_NOTE_CHARS / MAX_NOTE_CHARS;
+    fill_notes(&pool, full, MAX_NOTE_CHARS).await;
+    assert_eq!(
+        note_totals(&pool).await,
+        (full as i64, MAX_TOTAL_NOTE_CHARS as i64)
+    );
+    let error = add_note(&pool, &john_3(16, 16), "x", None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, NoteError::Limit(NoteLimit::TotalText)),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "Your notes have reached the total size limit (25,000,000 characters)."
+    );
+
+    // Shortening is always allowed, even at the limit; the room it makes
+    // can be used again.
+    let first = list_notes(&pool).await.unwrap()[0].clone();
+    update_note(&pool, first.id, &"s".repeat(9_000))
+        .await
+        .unwrap();
+    let used = add_note(&pool, &john_3(16, 16), &"y".repeat(1_000), None)
+        .await
+        .unwrap();
+    assert_eq!(note_totals(&pool).await.1, MAX_TOTAL_NOTE_CHARS as i64);
+    // Growing a note past the total isn't, and changes nothing.
+    let before = note_rows(&pool).await;
+    let error = update_note(&pool, first.id, &"s".repeat(9_001))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, NoteError::Limit(NoteLimit::TotalText)),
+        "{error:?}"
+    );
+    assert_eq!(note_rows(&pool).await, before);
+    // The same length, or shorter, is fine.
+    update_note(&pool, first.id, &"t".repeat(9_000))
+        .await
+        .unwrap();
+    update_note(&pool, used.id, "z").await.unwrap();
+    assert_eq!(
+        note_totals(&pool).await.1,
+        (MAX_TOTAL_NOTE_CHARS - 999) as i64
     );
 }

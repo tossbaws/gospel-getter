@@ -2001,6 +2001,13 @@
             content: '\2605\2009\270E';
         }
 
+        /* A verse's "has notes" is for screen readers only: it's never
+           copied with the verse's text. */
+        .note-cue {
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
         /* Read by screen readers, never shown. */
         .visually-hidden {
             position: absolute;
@@ -3517,7 +3524,7 @@
                     actionStatusTimer = setTimeout(() => {
                         const hadFocus = actionStatus.contains(document.activeElement);
                         setActionStatus('', false);
-                        if (hadFocus && noteAddBtn.isConnected) noteAddBtn.focus();
+                        if (hadFocus && noteAddBtn.isConnected) noteAddBtn.focus({ preventScroll: true });
                     }, duration);
                 }
             }
@@ -4111,7 +4118,7 @@
                 if (hadFocus && !hadFocus.isConnected) {
                     const same = hadFocus.dataset.noteId
                         && notesSection.querySelector(`.note-edit[data-note-id="${hadFocus.dataset.noteId}"]`);
-                    (same || noteAddBtn).focus();
+                    (same || noteAddBtn).focus({ preventScroll: true });
                 }
             }
 
@@ -4236,7 +4243,7 @@
             function showDiscardPrompt(show) {
                 noteButtons.hidden = show;
                 noteDiscard.hidden = !show;
-                if (show) noteKeep.focus();
+                if (show) noteKeep.focus({ preventScroll: true });
             }
 
             // `passage` defaults to the note's own; `code` is the
@@ -4271,10 +4278,13 @@
                 updateNoteControls();
                 noteOverlay.hidden = false;
                 notePanel.querySelector('.modal-body').scrollTop = 0;
-                noteInput.focus();
+                // Focus never scrolls the page behind; in a short window the
+                // panel's own body scrolls to show the whole of the note.
+                noteInput.focus({ preventScroll: true });
                 noteInput.setSelectionRange(noteInput.value.length, noteInput.value.length);
-                // In a short window, the whole of the note in view.
-                if (noteInput.scrollIntoView) noteInput.scrollIntoView({ block: 'nearest' });
+                const body = notePanel.querySelector('.modal-body');
+                const below = noteInput.getBoundingClientRect().bottom - body.getBoundingClientRect().bottom;
+                if (below > 0) body.scrollTop += below + 8;
             }
 
             function openAddNote(opener) {
@@ -4304,7 +4314,7 @@
                     target = document.querySelector('.chapter-main .chapter-heading');
                     if (target) target.tabIndex = -1;
                 }
-                if (target) target.focus();
+                if (target) target.focus({ preventScroll: true });
             }
 
             // Cancel, or Escape: closes at once if nothing changed, and
@@ -4336,7 +4346,7 @@
                     if (noteSession === session) {
                         noteError.textContent = `The note wasn’t saved: ${errorText(e)} Your text is still here.`;
                         updateNoteControls();
-                        noteInput.focus();
+                        noteInput.focus({ preventScroll: true });
                     }
                     return;
                 }
@@ -4404,7 +4414,7 @@
             document.getElementById('note-discard-yes').addEventListener('click', closeNotePanel);
             noteKeep.addEventListener('click', function () {
                 showDiscardPrompt(false);
-                noteInput.focus();
+                noteInput.focus({ preventScroll: true });
             });
 
             // Clicking the dimmed page behind the panel does nothing, and
@@ -4425,7 +4435,7 @@
                     event.preventDefault();
                     if (!noteDiscard.hidden) {
                         showDiscardPrompt(false);
-                        noteInput.focus();
+                        noteInput.focus({ preventScroll: true });
                     } else {
                         requestCloseNote();
                     }
@@ -5463,7 +5473,7 @@
                 if (event.target.closest('.status-undo')) {
                     const undo = actionUndo;
                     setActionStatus('', false);
-                    noteAddBtn.focus();
+                    noteAddBtn.focus({ preventScroll: true });
                     if (undo) undo();
                     return;
                 }

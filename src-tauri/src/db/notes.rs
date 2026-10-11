@@ -18,6 +18,15 @@ use super::bookmarks::check_passage;
 /// CHECK says the same.
 pub const MAX_NOTE_CHARS: usize = 10_000;
 
+/// The most notes the reader can keep. An export holds them all, and an
+/// import accepts no more, so every export imports again.
+pub const MAX_NOTES: usize = 10_000;
+
+/// The most characters all the notes together may hold (as SQLite's
+/// `length()` counts them), for the same reason: it bounds the size of an
+/// export (see `reader_data::MAX_FILE_BYTES`).
+pub const MAX_TOTAL_NOTE_CHARS: usize = 25_000_000;
+
 /// A passage within one chapter: book, chapter and an inclusive verse
 /// range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -110,7 +119,7 @@ pub enum NoteBodyError {
 }
 
 /// `n` with thousands separators, e.g. "10,000".
-fn grouped(n: usize) -> String {
+pub fn grouped(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
@@ -165,6 +174,74 @@ pub fn normalize_body(raw: &str) -> Result<String, NoteBodyError> {
     Ok(body.to_string())
 }
 
+/// Which limit on the reader's notes a change would go past.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteLimit {
+    /// `MAX_NOTES` notes.
+    Count,
+    /// `MAX_TOTAL_NOTE_CHARS` characters in all.
+    TotalText,
+}
+
+impl fmt::Display for NoteLimit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Count => write!(
+                f,
+                "You've reached the limit of {} notes.",
+                grouped(MAX_NOTES)
+            ),
+            Self::TotalText => write!(
+                f,
+                "Your notes have reached the total size limit ({} characters).",
+                grouped(MAX_TOTAL_NOTE_CHARS)
+            ),
+        }
+    }
+}
+
+impl std::error::Error for NoteLimit {}
+
+/// How many notes there are and the characters they hold, the ones the
+/// limits count.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NoteTotals {
+    pub count: usize,
+    pub chars: usize,
+}
+
+impl NoteTotals {
+    /// Which limit, if any, these totals are past.
+    pub fn exceeded(self) -> Option<NoteLimit> {
+        if self.count > MAX_NOTES {
+            Some(NoteLimit::Count)
+        } else if self.chars > MAX_TOTAL_NOTE_CHARS {
+            Some(NoteLimit::TotalText)
+        } else {
+            None
+        }
+    }
+}
+
+/// The notes' totals, leaving out note `except` (one being rewritten).
+pub(crate) async fn note_totals(
+    conn: &mut sqlx::SqliteConnection,
+    except: Option<i64>,
+) -> anyhow::Result<NoteTotals> {
+    let (count, chars): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(length(body)), 0) FROM notes \
+         WHERE $1 IS NULL OR id <> $1",
+    )
+    .bind(except)
+    .fetch_one(&mut *conn)
+    .await
+    .context("Failed to count notes")?;
+    Ok(NoteTotals {
+        count: usize::try_from(count).context("negative note count")?,
+        chars: usize::try_from(chars).context("negative note length")?,
+    })
+}
+
 /// Why a note couldn't be saved.
 #[derive(Debug)]
 pub enum NoteError {
@@ -175,6 +252,8 @@ pub enum NoteError {
     NotFound {
         id: i64,
     },
+    /// Saving it would go past a limit on all the reader's notes.
+    Limit(NoteLimit),
     Database(anyhow::Error),
 }
 
@@ -184,6 +263,7 @@ impl fmt::Display for NoteError {
             Self::Passage(e) => write!(f, "{e}"),
             Self::Body(e) => write!(f, "{e}"),
             Self::NotFound { id } => write!(f, "there's no note {id}"),
+            Self::Limit(limit) => write!(f, "{limit}"),
             Self::Database(e) => write!(f, "{e:#}"),
         }
     }
@@ -197,6 +277,12 @@ impl From<BookmarkError> for NoteError {
             BookmarkError::Database(e) => Self::Database(e),
             other => Self::Passage(other),
         }
+    }
+}
+
+impl From<NoteLimit> for NoteError {
+    fn from(e: NoteLimit) -> Self {
+        Self::Limit(e)
     }
 }
 
@@ -227,7 +313,8 @@ macro_rules! note_columns {
 
 /// Save a new note on `passage`, after checking the passage exists (the
 /// same rule as bookmarks) and normalizing its text (see
-/// `normalize_body`). `dates` are the `created_at` and `updated_at` to
+/// `normalize_body`) and that one more note, with this text, stays within
+/// `MAX_NOTES` and `MAX_TOTAL_NOTE_CHARS`. `dates` are the `created_at` and `updated_at` to
 /// keep, already in the database's format — for restoring a deleted note
 /// — or `None` for "now".
 pub async fn add_note(
@@ -249,6 +336,14 @@ pub async fn add_note(
         passage.verse_end,
     )
     .await?;
+    let totals = note_totals(&mut tx, None).await?;
+    let after = NoteTotals {
+        count: totals.count + 1,
+        chars: totals.chars + body.chars().count(),
+    };
+    if let Some(limit) = after.exceeded() {
+        return Err(limit.into());
+    }
     let (created_at, updated_at) = dates.unzip();
     let note = sqlx::query_as::<_, Note>(concat!(
         "INSERT INTO notes (book_id, chapter, verse_start, verse_end, body, created_at, updated_at) \
@@ -275,10 +370,29 @@ pub async fn add_note(
 }
 
 /// Change a note's text. Only its text and `updated_at` change, and
-/// `updated_at` only if the text did.
+/// `updated_at` only if the text did. Text that grows must keep all the
+/// notes within `MAX_TOTAL_NOTE_CHARS`; text that doesn't grow is always
+/// allowed, so a note can be shortened even past the limit.
 pub async fn update_note(pool: &SqlitePool, id: i64, body: &str) -> Result<Note, NoteError> {
     let body = normalize_body(body)?;
-    sqlx::query_as::<_, Note>(concat!(
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Failed to start note transaction")?;
+    let old_chars: Option<i64> = sqlx::query_scalar("SELECT length(body) FROM notes WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .context("Failed to read note")?;
+    let old_chars = old_chars.ok_or(NoteError::NotFound { id })?;
+    let chars = body.chars().count();
+    if i64::try_from(chars).is_ok_and(|c| c > old_chars) {
+        let others = note_totals(&mut tx, Some(id)).await?;
+        if others.chars + chars > MAX_TOTAL_NOTE_CHARS {
+            return Err(NoteLimit::TotalText.into());
+        }
+    }
+    let note = sqlx::query_as::<_, Note>(concat!(
         "UPDATE notes SET \
              updated_at = CASE WHEN body = $2 THEN updated_at \
                  ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END, \
@@ -288,10 +402,14 @@ pub async fn update_note(pool: &SqlitePool, id: i64, body: &str) -> Result<Note,
     ))
     .bind(id)
     .bind(&body)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .context("Failed to update note")?
-    .ok_or(NoteError::NotFound { id })
+    .ok_or(NoteError::NotFound { id })?;
+    tx.commit()
+        .await
+        .context("Failed to commit note transaction")?;
+    Ok(note)
 }
 
 /// Delete a note, returning it as it was (so it can be restored with
@@ -454,6 +572,22 @@ mod tests {
             note(4, passage(JOHN, 3, (1, 2)), at),
         ];
         assert_eq!(ids(&in_bible_order(notes)), [2, 3, 4, 1]);
+    }
+
+    #[test]
+    fn totals_say_which_limit_they_pass() {
+        let at = |count, chars| NoteTotals { count, chars }.exceeded();
+        assert_eq!(at(MAX_NOTES, MAX_TOTAL_NOTE_CHARS), None);
+        assert_eq!(at(MAX_NOTES + 1, 0), Some(NoteLimit::Count));
+        assert_eq!(at(1, MAX_TOTAL_NOTE_CHARS + 1), Some(NoteLimit::TotalText));
+        assert_eq!(
+            NoteLimit::Count.to_string(),
+            "You've reached the limit of 10,000 notes."
+        );
+        assert_eq!(
+            NoteLimit::TotalText.to_string(),
+            "Your notes have reached the total size limit (25,000,000 characters)."
+        );
     }
 
     #[test]

@@ -11,7 +11,7 @@ use crate::commands::{
 };
 use crate::db::Passage;
 use crate::db::test_support::{
-    TempDb, bundled, fresh_database, other_tables_snapshot, verses_snapshot,
+    TempDb, bundled, fill_notes, fresh_database, other_tables_snapshot, verses_snapshot,
 };
 use crate::reader_data::{LineSpacing, Preferences, TextSize, Theme};
 
@@ -1649,4 +1649,158 @@ async fn a_failed_note_import_rolls_back_everything() {
         .unwrap_err();
     assert_eq!(error, "The import failed, so nothing was changed.");
     assert_eq!(everything(&state).await, before);
+}
+
+// ---- The limits on notes
+
+use crate::db::notes::{MAX_NOTE_CHARS, MAX_NOTES, MAX_TOTAL_NOTE_CHARS};
+
+/// A database (and app) with `count` notes of `chars` characters each.
+async fn app_with_notes(label: &str, count: usize, chars: usize) -> (TempDb, AppState) {
+    let (db, pool) = fresh_database(label).await;
+    fill_notes(&pool, count, chars).await;
+    let state = AppState::load(pool).await.expect("load state");
+    (db, state)
+}
+
+#[tokio::test]
+async fn an_import_that_would_pass_a_note_limit_changes_nothing() {
+    // One note short of the count limit; the file has two new ones.
+    let (db, state) = app_with_notes("rd_notes_count_limit", MAX_NOTES - 1, 10).await;
+    commands::bookmark_passage(&state, 43, 3, 16, 16)
+        .await
+        .unwrap();
+    let before = everything(&state).await;
+    let path = file(&db, "two-more.gospel-getter.json");
+    std::fs::write(
+        &path,
+        v3_file_with(
+            r#"{"book": 43, "chapter": 3, "verse_start": 1, "verse_end": 1, "body": "One."},
+               {"book": 43, "chapter": 3, "verse_start": 2, "verse_end": 2, "body": "Two."}"#,
+        )
+        .replace(
+            "\"bookmarks\": []",
+            r#""bookmarks": [{"book": 1, "chapter": 1, "verse_start": 1, "verse_end": 1}]"#,
+        ),
+    )
+    .unwrap();
+    let p = preview(&state, &path).await;
+    let error = commands::apply_pending_import(&state, p.token, false, true)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        "Importing this file would give you more than 10,000 notes, the most Gospel Getter \
+         keeps, so nothing was changed."
+    );
+    assert_eq!(everything(&state).await, before, "not even the bookmark");
+    // Replacing leaves just the file's two, which is fine.
+    let result = import(&state, &path, true).await;
+    assert_eq!(
+        (result.notes_added, result.notes_removed),
+        (2, MAX_NOTES - 1)
+    );
+
+    // At the total size limit, less a little; the file has more than that.
+    let (db, state) = app_with_notes(
+        "rd_notes_text_limit",
+        MAX_TOTAL_NOTE_CHARS / MAX_NOTE_CHARS,
+        MAX_NOTE_CHARS,
+    )
+    .await;
+    let first = state.store.notes().await.unwrap()[0].clone();
+    commands::note_update(&state, first.id, "Short now.")
+        .await
+        .unwrap();
+    let before = everything(&state).await;
+    let path = file(&db, "too-much.gospel-getter.json");
+    let long = "w".repeat(MAX_NOTE_CHARS);
+    std::fs::write(
+        &path,
+        v3_file_with(&format!(
+            r#"{{"book": 43, "chapter": 3, "verse_start": 1, "verse_end": 1, "body": "{long}"}},
+               {{"book": 43, "chapter": 3, "verse_start": 2, "verse_end": 2, "body": "w"}}"#
+        )),
+    )
+    .unwrap();
+    let p = preview(&state, &path).await;
+    let error = commands::apply_pending_import(&state, p.token, false, true)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        "Importing this file would take your notes past their total size limit (25,000,000 \
+         characters), so nothing was changed."
+    );
+    assert_eq!(everything(&state).await, before);
+    // Notes already here count once: a file holding only the reader's own
+    // notes merges at the limit without complaint.
+    let own = file(&db, "own.gospel-getter.json");
+    export_to(&state, &own, Preferences::default()).await;
+    let result = import(&state, &own, false).await;
+    assert_eq!(
+        (result.notes_added, result.notes_already_present),
+        (0, MAX_TOTAL_NOTE_CHARS / MAX_NOTE_CHARS)
+    );
+}
+
+#[tokio::test]
+async fn a_file_whose_notes_hold_too_much_text_is_refused() {
+    let (db, state) = app("rd_notes_file_total").await;
+    let count = MAX_TOTAL_NOTE_CHARS / MAX_NOTE_CHARS + 1;
+    let notes: Vec<String> = (0..count)
+        .map(|i| {
+            format!(
+                r#"{{"book": 43, "chapter": 3, "verse_start": 1, "verse_end": 1, "body": "{i:06}{}"}}"#,
+                "v".repeat(MAX_NOTE_CHARS - 6)
+            )
+        })
+        .collect();
+    let path = file(&db, "file-total.gospel-getter.json");
+    std::fs::write(&path, v3_file_with(&notes.join(","))).unwrap();
+    let (_, problems) = invalid(&state, &path).await;
+    assert_eq!(
+        problems,
+        ["Its notes hold 25010000 characters in all; the most one file can hold is 25000000."]
+    );
+    assert_eq!(note_rows(&state).await, vec![]);
+}
+
+/// The point of the limits: whatever the reader can keep, their export
+/// holds and imports again.
+#[tokio::test]
+async fn an_export_at_both_note_limits_imports_again() {
+    let (db, a) = app_with_notes(
+        "rd_notes_limits_export",
+        MAX_NOTES,
+        MAX_TOTAL_NOTE_CHARS / MAX_NOTES,
+    )
+    .await;
+    // At both limits: no room for one more note.
+    assert!(
+        commands::note_add(&a, john_3(16, 16), "x").await.is_err(),
+        "the database is at its limits"
+    );
+    let before = note_rows(&a).await;
+    assert_eq!(before.len(), MAX_NOTES);
+    assert_eq!(
+        before.iter().map(|n| n.4.chars().count()).sum::<usize>(),
+        MAX_TOTAL_NOTE_CHARS
+    );
+    let path = file(&db, "at-limits.gospel-getter.json");
+    let ExportOutcome::Saved { notes, .. } = export_to(&a, &path, Preferences::default()).await
+    else {
+        panic!("expected saved")
+    };
+    assert_eq!(notes, MAX_NOTES);
+    assert!(std::fs::metadata(&path).unwrap().len() <= crate::reader_data::MAX_FILE_BYTES);
+
+    let (_db_b, b) = app("rd_notes_limits_import").await;
+    let p = preview(&b, &path).await;
+    assert_eq!((p.notes_in_file, p.new_notes), (MAX_NOTES, MAX_NOTES));
+    let result = commands::apply_pending_import(&b, p.token, true, true)
+        .await
+        .unwrap();
+    assert_eq!(result.notes_added, MAX_NOTES);
+    assert_eq!(note_rows(&b).await, before);
 }

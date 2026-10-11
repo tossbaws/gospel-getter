@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::db::notes::grouped;
+use crate::db::reader_data::ApplyImportError;
 use crate::db::{
     self, Book, BookmarkError, BookmarkInTranslation, HighlightColor,
-    HighlightPassageInTranslation, Note, NoteError, Passage, Translation,
+    HighlightPassageInTranslation, Note, NoteError, NoteLimit, Passage, Translation,
 };
 use crate::domain::Store;
 use crate::domain::bible::{self, ChapterRef};
@@ -932,6 +934,7 @@ fn note_error_message(state: &AppState, error: NoteError) -> String {
     match error {
         NoteError::Passage(e) => passage_error_message(state, e, "noted", FAILED),
         NoteError::Body(e) => e.to_string(),
+        NoteError::Limit(limit) => limit.to_string(),
         NoteError::NotFound { .. } => {
             "That note no longer exists; it may have been deleted.".to_string()
         }
@@ -1813,9 +1816,12 @@ pub async fn apply_pending_import(
             position,
         )
         .await
-        .map_err(|e| {
-            tracing::error!("Import failed: {e:#}");
-            "The import failed, so nothing was changed.".to_string()
+        .map_err(|e| match e {
+            ApplyImportError::NoteLimit(limit) => import_limit_message(limit),
+            ApplyImportError::Database(e) => {
+                tracing::error!("Import failed: {e:#}");
+                "The import failed, so nothing was changed.".to_string()
+            }
         })?;
     discard_pending_import(state, token);
     Ok(ImportResultDto {
@@ -1830,6 +1836,22 @@ pub async fn apply_pending_import(
         notes_removed: counts.notes_removed,
         position: position.map(PositionPreviewDto::from),
     })
+}
+
+/// Why an import that would go past a limit on notes was refused.
+fn import_limit_message(limit: NoteLimit) -> String {
+    match limit {
+        NoteLimit::Count => format!(
+            "Importing this file would give you more than {} notes, the most Gospel Getter \
+             keeps, so nothing was changed.",
+            grouped(db::notes::MAX_NOTES)
+        ),
+        NoteLimit::TotalText => format!(
+            "Importing this file would take your notes past their total size limit ({} \
+             characters), so nothing was changed.",
+            grouped(db::notes::MAX_TOTAL_NOTE_CHARS)
+        ),
+    }
 }
 
 /// Forget the pending import, if it's still `token`.

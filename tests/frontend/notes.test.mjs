@@ -539,3 +539,37 @@ test('export counts notes in its toast, and the file holds them', () =>
         assert.equal(json.format_version, 3);
         assert.deepEqual(json.notes.map((n) => [n.book, n.chapter, n.verse_start, n.verse_end, n.body]), [[43, 3, 16, 16, 'Exported.']]);
     }));
+
+test('the note panel never scrolls the page: every focus it moves is preventScroll', () =>
+    withNotes([[16, 16, 'First.']], {}, async (app) => {
+        const calls = [];
+        const focus = app.window.HTMLElement.prototype.focus;
+        app.window.HTMLElement.prototype.focus = function (options) {
+            calls.push({ el: this, options });
+            return focus.call(this, options);
+        };
+        await select(app, 16);
+        // Open, save.
+        app.click(addNoteButton(app));
+        await typeNote(app, 'Second.');
+        await clickAndWait(app, el(app, 'note-save'), 'list_all_notes');
+        // Edit, cancel; edit, change, cancel, keep editing, discard.
+        app.click(section(app).querySelector('.note-edit'));
+        app.click(el(app, 'note-cancel'));
+        app.click(section(app).querySelector('.note-edit'));
+        await typeNote(app, 'Changed.');
+        app.click(el(app, 'note-cancel'));
+        app.click(el(app, 'note-keep'));
+        app.click(el(app, 'note-cancel'));
+        app.click(el(app, 'note-discard-yes'));
+        // Delete, undo.
+        app.click(section(app).querySelector('.note-edit'));
+        await clickAndWait(app, el(app, 'note-delete'), 'list_all_notes');
+        await clickAndWait(app, app.status().querySelector('.status-undo'), 'list_all_notes');
+        // N, Escape.
+        app.key('n');
+        app.key('Escape', {}, el(app, 'note-input'));
+        assert.ok(calls.length >= 12, `${calls.length} focus calls`);
+        const scrolling = calls.filter((c) => !(c.options && c.options.preventScroll));
+        assert.deepEqual(scrolling.map((c) => c.el.id || c.el.className), []);
+    }));

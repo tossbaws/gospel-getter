@@ -8,6 +8,7 @@ use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 
 use crate::db::Bookmark;
+use crate::db::notes::{NoteLimit, NoteTotals, note_totals};
 use crate::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
 
 pub use crate::reader_data::NoteKey;
@@ -76,6 +77,56 @@ pub async fn now(pool: &SqlitePool) -> anyhow::Result<String> {
         .context("Failed to read the time")
 }
 
+/// Why an import couldn't be applied. Either way, nothing was changed.
+#[derive(Debug)]
+pub enum ApplyImportError {
+    /// The notes it would leave would go past a limit.
+    NoteLimit(NoteLimit),
+    Database(anyhow::Error),
+}
+
+impl std::fmt::Display for ApplyImportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoteLimit(limit) => write!(f, "the import would go past a limit: {limit}"),
+            Self::Database(e) => write!(f, "{e:#}"),
+        }
+    }
+}
+
+impl std::error::Error for ApplyImportError {}
+
+impl From<anyhow::Error> for ApplyImportError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Database(e)
+    }
+}
+
+/// The notes there would be after importing `notes`: with `replace`, just
+/// the file's; otherwise the reader's, plus the file's that aren't already
+/// here.
+async fn notes_after_import(
+    conn: &mut sqlx::SqliteConnection,
+    notes: &[NewNote],
+    replace: bool,
+) -> anyhow::Result<NoteTotals> {
+    let (mut totals, existing) = if replace {
+        (NoteTotals::default(), HashSet::new())
+    } else {
+        let keys: Vec<NoteKey> =
+            sqlx::query_as("SELECT book_id, chapter, verse_start, verse_end, body FROM notes")
+                .fetch_all(&mut *conn)
+                .await
+                .context("Failed to read notes")?;
+        (note_totals(conn, None).await?, keys.into_iter().collect())
+    };
+    for n in notes.iter().filter(|n| !existing.contains(&n.key())) {
+        totals.count += 1;
+        totals.chars += n.body.chars().count();
+    }
+    Ok(totals)
+}
+
 /// What an import changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImportCounts {
@@ -109,6 +160,9 @@ pub struct ImportCounts {
 /// the same passage and text is already here, so importing the same file
 /// again changes nothing; `replace` deletes every note first. `None` (a
 /// format 1 or 2 file, which can't hold notes) leaves them untouched.
+/// Before anything is written, the notes there would be afterwards are
+/// checked against `MAX_NOTES` and `MAX_TOTAL_NOTE_CHARS`; an import that
+/// would go past either changes nothing.
 pub async fn apply_import(
     pool: &SqlitePool,
     bookmarks: &[NewBookmark],
@@ -116,8 +170,16 @@ pub async fn apply_import(
     notes: Option<&[NewNote]>,
     replace: bool,
     position: Option<&NewPosition>,
-) -> anyhow::Result<ImportCounts> {
+) -> Result<ImportCounts, ApplyImportError> {
     let mut tx = pool.begin().await.context("Failed to start the import")?;
+
+    if let Some(notes) = notes
+        && let Some(limit) = notes_after_import(&mut tx, notes, replace)
+            .await?
+            .exceeded()
+    {
+        return Err(ApplyImportError::NoteLimit(limit));
+    }
 
     let removed = if replace {
         sqlx::query("DELETE FROM bookmarks")

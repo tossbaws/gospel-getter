@@ -257,3 +257,22 @@ pub async fn table_names(pool: &SqlitePool) -> Vec<String> {
         .await
         .expect("list tables")
 }
+
+/// Add `count` distinct notes of exactly `chars` characters each (at least
+/// 7), spread over chapter 1, verse 1 of every book, in one statement —
+/// for filling a database up to the notes' limits quickly.
+pub async fn fill_notes(pool: &SqlitePool, count: usize, chars: usize) {
+    assert!(chars >= 7, "each note starts with a 6-digit number");
+    sqlx::query(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < $1) \
+         INSERT INTO notes (book_id, chapter, verse_start, verse_end, body) \
+         SELECT 1 + i % 66, 1, 1, 1, \
+             printf('%06d', i) || substr(replace(hex(zeroblob($2)), '0', 'x'), 1, $2 - 6) \
+         FROM n",
+    )
+    .bind(count as i64)
+    .bind(chars as i64)
+    .execute(pool)
+    .await
+    .expect("fill notes");
+}

@@ -42,38 +42,44 @@ pub const FORMAT_VERSION_2: u64 = 2;
 pub const FORMAT_VERSION_1: u64 = 1;
 /// The suggested file-name suffix.
 pub const FILE_SUFFIX: &str = ".gospel-getter.json";
-/// The largest file import will read: 128 MiB, so that a file at every
-/// limit below, as this app writes it, always fits, however its notes are
-/// written. Worst cases, pretty-printed as `to_file_contents` writes them,
-/// with the longest book name, the largest book, chapter and verse numbers
-/// and every optional field present (`a_maximal_file_fits_the_size_limit`
-/// builds one and checks every figure here):
+/// The largest file import will read: 128 MiB, the smallest of 64, 96
+/// and 128 MiB that always holds a file at every limit below, as this app
+/// writes it, however its notes are written. Worst cases, pretty-printed as
+/// `to_file_contents` writes them, with the longest book name, the largest
+/// book, chapter and verse numbers and every optional field present
+/// (`a_maximal_file_fits_the_size_limit` builds one and checks every
+/// figure here):
 ///
 /// - a bookmark takes 188 bytes: 10,000 of them, 1,880,000 bytes;
 /// - a highlight takes 231 bytes: 40,000 of them, 9,240,000 bytes;
-/// - a note takes 40,254 bytes: its text is at most `MAX_NOTE_CHARS`
-///   (10,000) characters of plain text (see `db::notes::normalize_body`),
+/// - a note takes 254 bytes besides its text: 10,000 of them (`MAX_NOTES`),
+///   2,540,000 bytes;
+/// - the notes' text is at most `MAX_TOTAL_NOTE_CHARS` (25,000,000)
+///   characters in all, of plain text (see `db::notes::normalize_body`),
 ///   and none of those takes more than 4 bytes in the file — 4 bytes of
 ///   UTF-8 unescaped, or 2 for `\n`, `\t`, `\"` and `\\`; the control
 ///   characters JSON would escape in 6, like `\u0001`, are refused — so
-///   40,000 bytes, and 254 for the rest of the record. 3,000 of them,
-///   120,762,000 bytes;
+///   100,000,000 bytes;
 /// - the rest of the file (its header, reading position and every
 ///   preference) takes 487 bytes.
 ///
-/// That's 131,882,487 bytes in all, 125.8 MiB. Format 2's limit was
-/// 16 MiB; it rose because one note can be larger than 150 bookmarks and
-/// highlights together, and a backup of a reader's notes should always
-/// import. The limit is still there to refuse a file that can't be an
-/// export without reading all of it; checking one of 128 MiB briefly
-/// holds a few times that in memory, which a desktop has to spare.
+/// That's 113,660,487 bytes in all, 108.4 MiB: over 96 MiB, under 128.
+/// Format 2's limit was 16 MiB; it rose because the reader's notes can
+/// hold far more text than every other record together, and a backup of
+/// them must always import. The limit is still there to refuse a file
+/// that can't be an export without reading all of it; checking one of
+/// 128 MiB briefly holds a few times that in memory, which a desktop has
+/// to spare.
 pub const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
 /// The most bookmarks one file may hold.
 pub const MAX_BOOKMARKS: usize = 10_000;
 /// The most highlights one file may hold: more than there are verses.
 pub const MAX_HIGHLIGHTS: usize = 40_000;
-/// The most notes one file may hold (see `MAX_FILE_BYTES` for why).
-pub const MAX_NOTES: usize = 3_000;
+/// The most notes one file may hold: as many as the reader can keep.
+pub const MAX_NOTES: usize = crate::db::notes::MAX_NOTES;
+/// The most characters the notes in one file may hold together: as many
+/// as the reader's notes can.
+pub const MAX_TOTAL_NOTE_CHARS: usize = crate::db::notes::MAX_TOTAL_NOTE_CHARS;
 /// How many problems an invalid file reports before summarizing the rest.
 const MAX_REPORTED_PROBLEMS: usize = 12;
 
@@ -722,6 +728,14 @@ pub fn validate(
         }
     }
 
+    let note_chars: usize = notes.iter().map(|n| n.body.chars().count()).sum();
+    if note_chars > MAX_TOTAL_NOTE_CHARS {
+        problems.push(format!(
+            "Its notes hold {note_chars} characters in all; the most one file can hold is \
+             {MAX_TOTAL_NOTE_CHARS}."
+        ));
+    }
+
     let position = match data.reading_position {
         None => None,
         Some(p) => {
@@ -1133,9 +1147,11 @@ mod tests {
     }
 
     /// The arithmetic in `MAX_FILE_BYTES`'s documentation: a file at every
-    /// limit, with every record as large as it can be, fits.
+    /// limit, with every record as large as it can be and the notes' text
+    /// at its total limit, fits — and wouldn't in 96 MiB.
     #[test]
     fn a_maximal_file_fits_the_size_limit() {
+        use crate::db::notes::MAX_NOTE_CHARS;
         let base = maximal_file_size(1, 1, 1);
         let bookmark = maximal_file_size(2, 1, 1) - base;
         let highlight = maximal_file_size(1, 2, 1) - base;
@@ -1145,14 +1161,24 @@ mod tests {
         assert_eq!(maximal_file_size(1, 3, 1) - base, 2 * highlight);
         assert_eq!(maximal_file_size(1, 1, 3) - base, 2 * note);
         let rest = base - bookmark - highlight - note;
+        // A maximal note's text is 4 bytes a character; the rest is the record.
+        let note_record = note - 4 * MAX_NOTE_CHARS;
         // As documented on `MAX_FILE_BYTES`.
-        assert_eq!((bookmark, highlight, note, rest), (188, 231, 40_254, 487));
-        let total = rest + MAX_BOOKMARKS * bookmark + MAX_HIGHLIGHTS * highlight + MAX_NOTES * note;
-        assert_eq!(total, 131_882_487);
+        assert_eq!(
+            (bookmark, highlight, note_record, rest),
+            (188, 231, 254, 487)
+        );
+        let total = rest
+            + MAX_BOOKMARKS * bookmark
+            + MAX_HIGHLIGHTS * highlight
+            + MAX_NOTES * note_record
+            + 4 * MAX_TOTAL_NOTE_CHARS;
+        assert_eq!(total, 113_660_487);
         assert!(
             total as u64 <= MAX_FILE_BYTES,
             "a maximal file is {total} bytes, over the {MAX_FILE_BYTES}-byte limit"
         );
+        assert!(total as u64 > 96 * 1024 * 1024, "a smaller limit would do");
     }
 
     /// One more than each limit is refused, before anything else is checked.
@@ -1219,7 +1245,7 @@ mod tests {
                 ..empty()
             })
             .problems(),
-            ["It has 3001 notes; the most one file can hold is 3000."]
+            ["It has 10001 notes; the most one file can hold is 10000."]
         );
         // At the limit, the count is fine (here the book is what's wrong).
         let at_limit = refused(ReaderData {
