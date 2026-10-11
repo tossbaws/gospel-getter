@@ -2520,6 +2520,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn notes_export_shows_the_kjvs_markup_as_print_does_and_the_web_as_stored() {
+        use crate::notes_export::escape_block;
+        let (_db, state) = app_state("cmd_notes_export_kjv").await;
+        let tz = chrono::FixedOffset::west_opt(6 * 3600).unwrap();
+        let now = chrono::Utc::now();
+        for (book_id, chapter, verse_start, verse_end) in
+            [(19, 23, 1, 3), (43, 1, 5, 5), (58, 10, 34, 34)]
+        {
+            let passage = Passage {
+                book_id,
+                chapter,
+                verse_start,
+                verse_end,
+            };
+            note_add(&state, passage, "Note.").await.unwrap();
+        }
+        let kjv = build_notes_export(&state, "kjv", None, now, &tz)
+            .await
+            .unwrap()
+            .contents;
+        assert!(kjv.contains(
+            "> **1** \\[A Psalm of David.\\] The LORD *is* my shepherd; I shall not want. \
+             **2** He maketh me to lie down in green pastures: he leadeth me beside the still \
+             waters. **3** He restoreth my soul: he leadeth me in the paths of righteousness \
+             for his name\'s sake.\n"
+        ));
+        assert!(kjv.contains(
+            "> **5** And the light shineth in darkness; and the darkness comprehended it not.\n"
+        ));
+        // Hebrews 10:34's markup isn't well formed, so it's quoted as stored.
+        let hebrews = &bundled("kjv")[57].chapters[9][33];
+        assert!(hebrews.contains('{'));
+        assert!(kjv.contains(&format!("> **34** {}\n", escape_block(hebrews))));
+
+        // The WEB has no such markup: every verse is quoted as stored.
+        let web = build_notes_export(&state, "web", None, now, &tz)
+            .await
+            .unwrap()
+            .contents;
+        for (book, chapter, verse) in [
+            (19, 23, 1),
+            (19, 23, 2),
+            (19, 23, 3),
+            (43, 1, 5),
+            (58, 10, 34),
+        ] {
+            let text = &bundled("web")[book - 1].chapters[chapter - 1][verse - 1];
+            assert!(
+                web.contains(&format!("**{verse}** {}", escape_block(text))),
+                "{book} {chapter}:{verse}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn compare_returns_each_translations_own_numbering_and_text() {
         let (_db, state) = app_state("cmd_compare").await;
 

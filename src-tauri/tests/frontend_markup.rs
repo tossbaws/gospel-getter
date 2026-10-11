@@ -842,6 +842,56 @@ fn header_surfaces_use_tested_theme_colors() {
     assert!(menu_hover.body.contains("rgba(var(--accent-rgb), 0.15)"));
 }
 
+/// Export notes' book list is themed, not the platform's grey: no native
+/// appearance, `--text` on the opaque `--option-bg` (AA in every theme),
+/// a border and radius like the app's other controls, and a chevron and a
+/// focus ring in `--accent` (at least 3:1, a non-text contrast, on
+/// `--option-bg`). Its options are the same pair, and each theme's
+/// `color-scheme` keeps the list it opens legible.
+#[test]
+fn export_notes_book_list_uses_tested_theme_colors() {
+    let rules = rules();
+    let select = screen_rule(&rules, ".export-notes-book");
+    for declaration in [
+        "appearance: none",
+        "color: var(--text)",
+        "background-color: var(--option-bg)",
+        "border: 1px solid var(--accent-dim)",
+        "border-radius: 6px",
+    ] {
+        assert!(select.body.contains(declaration), "{declaration}");
+    }
+    let chevron = select
+        .body
+        .split_once("background-image:")
+        .and_then(|(_, rest)| rest.split_once(';'))
+        .map(|(value, _)| value)
+        .expect("a chevron");
+    assert_eq!(chevron.matches("var(--accent)").count(), 2, "{chevron}");
+    let option = screen_rule(&rules, ".export-notes-book option");
+    assert!(option.body.contains("color: var(--text)"));
+    assert!(option.body.contains("background-color: var(--option-bg)"));
+    let focus = screen_rule(
+        &rules,
+        ".export-notes-scope input:focus-visible,\n        .export-notes-book:focus-visible",
+    );
+    assert!(focus.body.contains("outline: 2px solid var(--accent)"));
+
+    for (theme, props) in theme_palettes(&rules) {
+        let option_bg = property(&props, "--option-bg");
+        let text = contrast_ratio(property(&props, "--text"), option_bg);
+        assert!(
+            text >= 4.5,
+            "theme `{theme}`: the book list's text is {text:.2}:1, below 4.5:1"
+        );
+        let accent = contrast_ratio(property(&props, "--accent"), option_bg);
+        assert!(
+            accent >= 3.0,
+            "theme `{theme}`: the book list's chevron and focus ring are {accent:.2}:1, below 3:1"
+        );
+    }
+}
+
 /// The theme swatches in Aa are drawn from the theme definitions
 /// themselves, not from copied colors: one per theme, each previewing its
 /// theme through `[data-theme-preview]`.

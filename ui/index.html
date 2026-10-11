@@ -1286,15 +1286,43 @@
             column-gap: 0.5rem;
         }
 
+        /* The book list: themed like the app's other controls, not the
+           platform's grey. --text on the opaque --option-bg (AA in every
+           theme, see the palette tests), with its chevron drawn in
+           --accent from two gradients, so it takes each theme's color. The
+           list it opens is still the platform's, kept legible by the
+           theme's color-scheme and --option-bg (see the top of this
+           stylesheet). */
         .export-notes-book {
+            -webkit-appearance: none;
+            appearance: none;
             max-width: 100%;
             font-family: inherit;
             font-size: 0.9rem;
+            line-height: 1.4;
             color: var(--text);
-            background: var(--option-bg);
+            background-color: var(--option-bg);
+            background-image:
+                linear-gradient(45deg, transparent 50%, var(--accent) 50%),
+                linear-gradient(135deg, var(--accent) 50%, transparent 50%);
+            background-position:
+                right 0.95rem center,
+                right 0.6rem center;
+            background-size: 0.35rem 0.35rem;
+            background-repeat: no-repeat;
             border: 1px solid var(--accent-dim);
             border-radius: 6px;
-            padding: 0.25rem 0.4rem;
+            padding: 0.3rem 1.8rem 0.3rem 0.55rem;
+            cursor: pointer;
+        }
+
+        .export-notes-book:hover {
+            border-color: var(--accent);
+        }
+
+        .export-notes-book option {
+            color: var(--text);
+            background-color: var(--option-bg);
         }
 
         .export-notes-scope input:focus-visible,
