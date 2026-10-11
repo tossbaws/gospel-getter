@@ -12,17 +12,26 @@
 //! Only the export does this: the reading view, Copy, search, the database
 //! and the JSON backup keep the text exactly as stored.
 //!
-//! Which is which, from a survey of every brace in the bundled text: a
-//! margin note always comes after the verse's own words, in the run of
-//! braces that ends the verse, and says so with a note marker (a colon, or
-//! "or,", "Heb." or "Gr." as a word). A marker alone isn't enough: in seven
-//! verses the source's braces take in the punctuation and words after an
-//! italic word ("in thine eyes, {tarry: for} I have learned", Genesis
-//! 30:27), so a span with a marker that's followed by more of the verse is
-//! supplied text, kept. When in doubt a span is kept, in italics: nothing
-//! the verse says is ever dropped. A verse whose braces are nested or
-//! unbalanced (Micah 7:12, Romans 16:27, 1 Corinthians 16:24, Hebrews
-//! 10:34) is quoted exactly as stored.
+//! Which is which is where it stands: a span is a margin note if and only
+//! if it's in the run of spans that ends the verse (after it, nothing but
+//! spans and spaces). Every other span is supplied words.
+//!
+//! That's safe for the bundled text, as a survey of every brace in it
+//! shows, and `every_kjv_verse_keeps_its_words` checks:
+//!
+//! - Every span in a verse's closing run is a note. All but two say so
+//!   with a note marker (a colon, or "or,", "Heb." or "Gr."); the other
+//!   two are Luke 10:22's and 17:36's notes on the Greek copies.
+//! - No closing span is supplied words: supplied words are always followed
+//!   by more of the verse, if only its final punctuation ("{him}.").
+//! - Looking like a note isn't what decides it. In seven verses the
+//!   source's braces take in the punctuation and words after an italic
+//!   word ("in thine eyes, {tarry: for} I have learned", Genesis 30:27);
+//!   those spans are followed by more of the verse, so they're supplied
+//!   words, kept.
+//!
+//! A verse whose braces are nested or unbalanced (Micah 7:12, Romans 16:27,
+//! 1 Corinthians 16:24, Hebrews 10:34) is quoted exactly as stored.
 
 use super::escape_inline;
 
@@ -54,15 +63,6 @@ fn brace_spans(text: &str) -> Option<Vec<(usize, usize)>> {
     open.is_none().then_some(spans)
 }
 
-/// Whether a span's contents say they're a note: a colon, or "or,",
-/// "Heb." or "Gr." as a word.
-fn has_note_marker(inner: &str) -> bool {
-    inner.contains(':')
-        || inner
-            .split(|c: char| c.is_whitespace() || c == ';')
-            .any(|word| matches!(word, "or," | "Heb." | "Gr."))
-}
-
 /// Each `{…}` span of `text` with what it is, or `None` if its braces are
 /// nested or unbalanced (or a span is empty), so it can only be quoted
 /// exactly.
@@ -81,11 +81,11 @@ pub fn classify(text: &str) -> Option<Vec<((usize, usize), Span)>> {
     spans
         .into_iter()
         .map(|(start, end)| {
-            let inner = &text[start + 1..end - 1];
-            if inner.trim().is_empty() {
+            if text[start + 1..end - 1].trim().is_empty() {
                 return None;
             }
-            let kind = if start >= tail && has_note_marker(inner) {
+            // The closing run is notes (see the module docs).
+            let kind = if start >= tail {
                 Span::MarginNote
             } else {
                 Span::Supplied
@@ -156,9 +156,13 @@ mod tests {
             Some("*In* that day *it is*, *so*.")
         );
         assert_eq!(
-            md("whom thou hast given me, {be} with me {where I am}").as_deref(),
-            Some("whom thou hast given me, *be* with me *where I am*")
+            md("whom thou hast given me, {be} with me {where I am}.").as_deref(),
+            Some("whom thou hast given me, *be* with me *where I am*.")
         );
+        // With nothing at all after it, a span ends the verse, so it's
+        // taken for a note; no supplied words in the bundled KJV do (see
+        // `every_kjv_verse_keeps_its_words`).
+        assert_eq!(md("with me {where I am}").as_deref(), Some("with me"));
         assert_eq!(
             md("but {there was} {none} to save").as_deref(),
             Some("but *there was* *none* to save")
@@ -200,22 +204,42 @@ mod tests {
     }
 
     #[test]
-    fn a_marker_followed_by_more_of_the_verse_is_kept() {
+    fn a_span_followed_by_more_of_the_verse_is_kept_however_it_looks() {
         // Genesis 30:27: the braces take in the colon and "for".
         assert_eq!(
             md("in thine eyes, {tarry: for} I have learned by experience").as_deref(),
             Some("in thine eyes, *tarry: for* I have learned by experience")
         );
+        // Followed only by the verse's final punctuation: still the verse's.
+        assert_eq!(
+            md("will reveal {him: or, Heb. it}.").as_deref(),
+            Some("will reveal *him: or, Heb. it*.")
+        );
     }
 
     #[test]
-    fn a_trailing_span_without_a_marker_is_kept() {
-        // Luke 17:36: a note without a marker stays, in italics, rather
-        // than risk dropping supplied words.
+    fn the_notes_in_luke_without_a_marker_are_left_out_too() {
         assert_eq!(
-            md("and the other left. {this verse is not found in most of the Greek copies}")
-                .as_deref(),
-            Some("and the other left. *this verse is not found in most of the Greek copies*")
+            md(
+                "All things are delivered to me of my Father: and no man knoweth who the Son \
+                is, but the Father; and who the Father is, but the Son, and {he} to whom the \
+                Son will reveal {him}. {many ancient copies add these words at the beginning \
+                of verse, and turning to his disciples, he said}"
+            )
+            .as_deref(),
+            Some(
+                "All things are delivered to me of my Father: and no man knoweth who the Son \
+                 is, but the Father; and who the Father is, but the Son, and *he* to whom the \
+                 Son will reveal *him*."
+            )
+        );
+        assert_eq!(
+            md(
+                "Two {men} shall be in the field; the one shall be taken, and the other left. \
+                {this verse is not found in most of the Greek copies}"
+            )
+            .as_deref(),
+            Some("Two *men* shall be in the field; the one shall be taken, and the other left.")
         );
     }
 
@@ -258,6 +282,7 @@ mod tests {
     fn every_kjv_verse_keeps_its_words() {
         let mut malformed = Vec::new();
         let (mut changed, mut notes, mut supplied) = (0, 0, 0);
+        let mut unmarked = Vec::new();
         for book in bundled("kjv") {
             for (c, chapter) in book.chapters.iter().enumerate() {
                 for (v, text) in chapter.iter().enumerate() {
@@ -285,7 +310,19 @@ mod tests {
                                 supplied += 1;
                                 expected.push_str(&text[start + 1..end - 1]);
                             }
-                            Span::MarginNote => notes += 1,
+                            Span::MarginNote => {
+                                notes += 1;
+                                // Why the closing run is safe to drop: each
+                                // of its spans looks like a note, but two.
+                                let inner = &text[start + 1..end - 1];
+                                let looks_like_a_note = inner.contains(':')
+                                    || inner
+                                        .split(|c: char| c.is_whitespace() || c == ';')
+                                        .any(|w| matches!(w, "or," | "Heb." | "Gr."));
+                                if !looks_like_a_note {
+                                    unmarked.push(format!("{} {}:{}", book.name, c + 1, v + 1));
+                                }
+                            }
                         }
                         pos = *end;
                     }
@@ -315,6 +352,7 @@ mod tests {
                 "Hebrews 10:34"
             ]
         );
-        assert_eq!((changed, notes, supplied), (17_362, 7_860, 21_523));
+        assert_eq!(unmarked, ["Luke 10:22", "Luke 17:36"]);
+        assert_eq!((changed, notes, supplied), (17_362, 7_862, 21_521));
     }
 }
