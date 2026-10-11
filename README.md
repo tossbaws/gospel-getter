@@ -48,7 +48,9 @@ bookmark or write notes on passages. No account and no network needed.
   Notes tab in the Library lists them all in Bible order. Deleting a note
   offers **Undo**. **Export notes…** (in the Library's Notes tab) saves
   them as a Markdown file, all of them or one book's, with each note's
-  verses quoted in the translation you're reading.
+  verses quoted in the translation you're reading; in the KJV,
+  translator-supplied words appear in italics, as in printed KJVs, and the
+  margin notes are left out.
 
   ![John 3:16 to 21 selected in the WEB in the Matrix theme, with ✎ marks after verses 16, 17, 18 and 21 and, under the Copy, Bookmark and + Add note buttons, a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and an Edit link](screenshots/notes.png)
 - **Compare translations.** Press `C` (or **Compare** under **Aa**) to see
@@ -194,14 +196,14 @@ without you choosing **Update and restart**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0, 2.7.0 or 2.8.0?** Each updates itself to 2.9.0: it
-offers the update when it starts (or from **Check now**, in **About Gospel
-Getter** from the ☰ menu in 2.7.0 and 2.8.0, or in the Updates section of
-Settings in 2.6.0), if it's one of the installs above that update
-themselves.
+**Coming from 2.6.0, 2.7.0, 2.8.0 or 2.9.0?** Each updates itself to
+2.9.1: it offers the update when it starts (or from **Check now**, in
+**About Gospel Getter** from the ☰ menu in 2.7.0, 2.8.0 and 2.9.0, or in
+the Updates section of Settings in 2.6.0), if it's one of the installs
+above that update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.9.0 by hand once, from the
+Install 2.9.1 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -279,7 +281,10 @@ stored exactly as their sources provide them.
   `{...}`, in about 56% of verses. These are kept verbatim, including a
   few places where the source's own markup is broken (Hebrews 10:34 has an
   unmatched `}`). The only changes are structural: removing the file's
-  byte-order mark and reshaping the JSON.
+  byte-order mark and reshaping the JSON. The reader, Copy and search show
+  this markup as stored; only **Export notes…** presents it as print does,
+  with supplied words in italics and margin notes left out, and it quotes
+  the four verses with broken markup as stored.
 - **WEB** comes from TehShrike/world-english-bible (public domain, via
   ebible.org). Verses the source splits into several entries, as in the
   Psalms' poetry, are joined back together in the source's own order, with
