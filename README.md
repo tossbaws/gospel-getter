@@ -48,10 +48,12 @@ bookmark or write notes on passages. No account and no network needed.
   verses with notes, selecting verses shows every note on them, and the
   Notes tab in the Library lists them all in Bible order. Deleting a note
   offers **Undo**. **Export notes…** (in the Library's Notes tab) saves
-  them as a Markdown file, all of them or one book's, with each note's
-  verses quoted in the translation you're reading; in the KJV,
-  translator-supplied words appear in italics, as in printed KJVs, and the
-  margin notes are left out.
+  them as a Markdown file, with each note's verses quoted in the
+  translation you're reading. Pick which books to include, a chapter range
+  when you pick one book, and when the notes were written (All time, Last
+  7 days, Last 30 days, This year or Custom dates); a live count shows
+  how many notes match. In the KJV, translator-supplied words appear in
+  italics, as in printed KJVs, and the margin notes are left out.
 
   ![John 3:16 to 21 selected in the WEB in the Matrix theme, with ✎ marks after verses 16, 17, 18 and 21 and, under the Copy, Bookmark and + Add note buttons, a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and an Edit link](screenshots/notes.png)
 - **Compare translations.** Press `C` (or **Compare** under **Aa**) to see
@@ -205,14 +207,14 @@ without you choosing **Update and restart**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.10.0?** Each updates itself to 2.10.1: it
+**Coming from 2.6.0 through 2.10.1?** Each updates itself to 2.11.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
 update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.10.1 by hand once, from the
+Install 2.11.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
