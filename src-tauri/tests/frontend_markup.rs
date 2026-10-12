@@ -1349,3 +1349,70 @@ fn kjv_footnotes_print_with_the_chapter() {
     assert!(block.contains(".xref-popup"));
     assert!(!block.contains(".xref-summary"));
 }
+
+/// The chapter's Cross References and Footnotes lists are two columns: the
+/// verse labels in one, and each row's citations or footnote wrapping in
+/// the other, beside its label (a hanging indent), never under it. Both
+/// lists share one rule, so they line up alike, and each row takes its
+/// list's columns, so every label in a list is as wide as the widest.
+/// Printing keeps the same layout.
+#[test]
+fn chapter_end_lists_wrap_beside_their_labels() {
+    let rules = rules();
+    // Every screen declaration for `selector`, from each rule that names it.
+    let styles = |selector: &str| -> String {
+        rules
+            .iter()
+            .filter(|r| r.at_rule.is_none() && selectors(r).any(|s| s == selector))
+            .map(|r| r.body.as_str())
+            .collect()
+    };
+    let shared = |a: &str, b: &str| {
+        rules
+            .iter()
+            .any(|r| r.at_rule.is_none() && selectors(r).eq([a, b]))
+    };
+    assert!(shared(".xref-summary-list", ".footnote-list"));
+    assert!(shared(".xref-summary-row", ".footnote-row"));
+    for (list, row, label, content) in [
+        (
+            ".xref-summary-list",
+            ".xref-summary-row",
+            ".xref-summary-verse",
+            ".xref-summary-chips",
+        ),
+        (
+            ".footnote-list",
+            ".footnote-row",
+            ".footnote-ref",
+            ".footnote-text",
+        ),
+    ] {
+        let list_styles = styles(list);
+        for declaration in [
+            "display: grid",
+            "grid-template-columns: minmax(3.6rem, max-content) minmax(0, 1fr)",
+        ] {
+            assert!(list_styles.contains(declaration), "{list}: {declaration}");
+        }
+        let row_styles = styles(row);
+        for declaration in [
+            "display: grid",
+            "grid-column: 1 / -1",
+            "grid-template-columns: subgrid",
+        ] {
+            assert!(row_styles.contains(declaration), "{row}: {declaration}");
+        }
+        // Nothing may wrap a row's content onto a line of its own again.
+        assert!(!row_styles.contains("flex"), "{row} isn't a flex row");
+        assert!(!styles(label).contains("grid-column"), "{label}");
+        assert!(styles(content).contains("min-width: 0"), "{content}");
+    }
+    let print = block_after(HTML, "@media print");
+    for selector in [".xref-summary-list", ".xref-summary-row", ".footnote-list"] {
+        assert!(
+            !print.contains(selector),
+            "print keeps `{selector}`'s layout"
+        );
+    }
+}

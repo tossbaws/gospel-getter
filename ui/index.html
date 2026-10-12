@@ -2483,16 +2483,32 @@
             margin-bottom: 0.6rem;
         }
 
+        /* The chapter's Cross References and Footnotes lists: a verse
+           label column, and each row's citations or footnote wrapping in
+           the column beside it (a hanging indent), never under the label.
+           Rows share their list's columns, so every label in a list takes
+           the width of the widest, and both lists start their text at
+           least 3.6rem in, so they line up with each other too. */
+        .xref-summary-list,
+        .footnote-list {
+            display: grid;
+            grid-template-columns: minmax(3.6rem, max-content) minmax(0, 1fr);
+            column-gap: 0.6rem;
+        }
+
+        .xref-summary-row,
+        .footnote-row {
+            display: grid;
+            grid-column: 1 / -1;
+            grid-template-columns: subgrid;
+        }
+
         .xref-summary-row {
-            display: flex;
-            gap: 0.6rem;
             font-size: 0.85rem;
             margin-bottom: 0.4rem;
-            flex-wrap: wrap;
         }
 
         .xref-summary-verse {
-            flex: 0 0 auto;
             color: var(--accent);
             font-weight: bold;
         }
@@ -2501,6 +2517,8 @@
             display: flex;
             flex-wrap: wrap;
             gap: 0.4rem;
+            min-width: 0;
+            overflow-wrap: anywhere;
         }
 
         .xref-summary-chip {
@@ -2538,14 +2556,11 @@
         }
 
         .footnote-row {
-            display: flex;
-            gap: 0.6rem;
             font-size: 0.85rem;
             margin-bottom: 0.4rem;
         }
 
         .footnote-ref {
-            flex: 0 0 auto;
             color: var(--accent);
             font-weight: bold;
         }
