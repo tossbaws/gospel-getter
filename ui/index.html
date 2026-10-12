@@ -51,13 +51,21 @@
             /* Verse numbers and KJV footnote markers sit straight on the
                page background. No one color is AA over every stop of this
                gradient (white peaks at 3.15:1 on its orange foot), so here
-               they're a brighter aqua on a badge in the --panel-bg tint,
-               the number centered in it: AA over every stop, selected or
-               highlighted (see the palette tests). The other themes keep
-               --accent, no badge and the number at the start. */
+               they're a brighter aqua with a crisp 1px outline in the
+               bar's near-black purple hugging each glyph, like neon
+               signage: the aqua is AA on the outline wherever the page
+               shows through (see the palette tests). The other themes
+               keep --accent and no outline. */
             --verse-num-color: #5ce1e6;
-            --verse-num-bg: rgba(20, 8, 44, 0.55);
-            --verse-num-align: center;
+            --verse-num-outline:
+                -1px -1px 0 #14082c, 0 -1px 0 #14082c, 1px -1px 0 #14082c,
+                -1px 0 0 #14082c, 1px 0 0 #14082c,
+                -1px 1px 0 #14082c, 0 1px 0 #14082c, 1px 1px 0 #14082c;
+            /* Lighter in the faded neighboring chapters, so their numbers
+               don't stand out heavier than their dimmed text. */
+            --verse-num-outline-faded:
+                0 -1px 0 rgba(20, 8, 44, 0.6), -1px 0 0 rgba(20, 8, 44, 0.6),
+                1px 0 0 rgba(20, 8, 44, 0.6), 0 1px 0 rgba(20, 8, 44, 0.6);
             /* Highlighter colors (behind highlighted verse text), one set
                per theme: muted on the dark themes, pastel on the light one,
                every one keeping --text at AA contrast. */
@@ -88,8 +96,8 @@
             --on-accent: #06141f;
             --bar-bg: #16181c;
             --verse-num-color: var(--accent);
-            --verse-num-bg: transparent;
-            --verse-num-align: start;
+            --verse-num-outline: none;
+            --verse-num-outline-faded: none;
             --hl-yellow: #5a4d12;
             --hl-green: #224f2f;
             --hl-blue: #1f3f6b;
@@ -110,8 +118,8 @@
             --on-accent: #ffffff;
             --bar-bg: #ffffff;
             --verse-num-color: var(--accent);
-            --verse-num-bg: transparent;
-            --verse-num-align: start;
+            --verse-num-outline: none;
+            --verse-num-outline-faded: none;
             --hl-yellow: #fbe78a;
             --hl-green: #c6ecbd;
             --hl-blue: #c9defc;
@@ -132,8 +140,8 @@
             --on-accent: #001a00;
             --bar-bg: #031003;
             --verse-num-color: var(--accent);
-            --verse-num-bg: transparent;
-            --verse-num-align: start;
+            --verse-num-outline: none;
+            --verse-num-outline-faded: none;
             --hl-yellow: #4a4708;
             --hl-green: #11521f;
             --hl-blue: #0f3a5c;
@@ -160,8 +168,8 @@
             --on-accent: #1a1410;
             --bar-bg: #1a1410;
             --verse-num-color: var(--accent);
-            --verse-num-bg: transparent;
-            --verse-num-align: start;
+            --verse-num-outline: none;
+            --verse-num-outline-faded: none;
             --hl-yellow: #6b5310;
             --hl-green: #31512a;
             --hl-blue: #22415f;
@@ -191,8 +199,8 @@
             --on-accent: #1a0411;
             --bar-bg: #12030c;
             --verse-num-color: var(--accent);
-            --verse-num-bg: transparent;
-            --verse-num-align: start;
+            --verse-num-outline: none;
+            --verse-num-outline-faded: none;
             --hl-yellow: #614c0f;
             --hl-green: #1f5038;
             --hl-blue: #263d6b;
@@ -1966,6 +1974,11 @@
             line-height: calc(var(--reading-leading) - 0.1);
         }
 
+        /* The neighbors show no footnote markers, only verse numbers. */
+        .chapter-side .verse-num {
+            text-shadow: var(--verse-num-outline-faded);
+        }
+
         .chapter-heading-link {
             display: block;
             width: 100%;
@@ -2020,10 +2033,7 @@
             font-size: calc(0.7rem * var(--reading-scale));
             font-weight: bold;
             color: var(--verse-num-color);
-            background: var(--verse-num-bg);
-            box-shadow: 0 0 0 0.12em var(--verse-num-bg);
-            border-radius: 0.2em;
-            text-align: var(--verse-num-align);
+            text-shadow: var(--verse-num-outline);
             vertical-align: super;
             margin-right: 0.2rem;
         }
@@ -2150,9 +2160,7 @@
             vertical-align: super;
             margin-left: 0.1em;
             color: var(--verse-num-color);
-            background: var(--verse-num-bg);
-            box-shadow: 0 0 0 0.12em var(--verse-num-bg);
-            border-radius: 0.2em;
+            text-shadow: var(--verse-num-outline);
             cursor: pointer;
             -webkit-user-select: none;
             user-select: none;
@@ -2658,8 +2666,8 @@
                 --accent-dim: #000000 !important;
                 --panel-bg: transparent !important;
                 --verse-num-color: #000000 !important;
-                --verse-num-bg: transparent !important;
-                --verse-num-align: start !important;
+                --verse-num-outline: none !important;
+                --verse-num-outline-faded: none !important;
                 --option-bg: #ffffff !important;
                 --on-accent: #ffffff !important;
                 /* Highlights aren't printed. */
