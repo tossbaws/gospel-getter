@@ -4,7 +4,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, storedVerse, verseCount } from './harness.mjs';
+import { closeBridge, openApp, shownVerse, storedVerse, verseCount } from './harness.mjs';
 
 after(closeBridge);
 
@@ -29,12 +29,17 @@ async function toggleCompare(app, how = 'button') {
     await app.idle(before);
 }
 
-/** The verse text of a rendered verse element, without its number or popup. */
+/**
+ * The verse text of a rendered verse element, without its number, popup,
+ * footnote markers or screen-reader cues.
+ */
 function shownText(el) {
     const clone = el.cloneNode(true);
-    clone.querySelectorAll('.verse-num, .xref-popup, .verse-actions').forEach((n) => n.remove());
+    clone.querySelectorAll('.verse-num, .xref-popup, .verse-actions, .fn-marker, .footnote-cue, .note-cue').forEach((n) => n.remove());
     return clone.textContent.trim();
 }
+
+const markers = (el) => [...el.querySelectorAll('.fn-marker')].map((m) => m.textContent);
 
 test('the Compare toggle swaps the faded neighbors for labeled side-by-side columns and back', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
@@ -89,7 +94,13 @@ for (const [book, chapter] of [['Romans', 14], ['Romans', 16], ['3 John', 1], ['
                         assert.equal(cell.dataset.translation, code);
                         assert.equal(Number(cell.dataset.verse), n, 'same row, same number');
                         assert.equal(cell.querySelector('.verse-num').textContent, String(n));
-                        assert.equal(shownText(cell), storedVerse(code, book, chapter, n).trim());
+                        // Each as the app shows it: the WEB as stored, the
+                        // KJV with its markup read (and markers for its
+                        // footnotes).
+                        const shown = await shownVerse(code, book, chapter, n);
+                        if (code === 'web') assert.equal(shown.text, storedVerse(code, book, chapter, n));
+                        assert.equal(shownText(cell), shown.text.trim());
+                        assert.deepEqual(markers(cell), shown.footnotes.map((f) => f.label));
                     } else {
                         assert.ok(cell.classList.contains('compare-gap'), `${code} ${n} is a gap`);
                         assert.equal(Number(cell.dataset.gapVerse), n);
@@ -122,7 +133,15 @@ test('selecting in either column copies that column’s text and translation cod
         assert.deepEqual(app.selectedVerseNumbers('web'), []);
         app.key('c', { ctrlKey: true });
         await app.idle(0);
-        assert.equal(app.clipboardWrites.at(-1), `${storedVerse('kjv', 'Romans', 14, 23)} — Romans 14:23 (KJV)`);
+        // The KJV's plain text: "because {he eateth} not … {doubteth: or,
+        // discerneth …} {damned: or, condemned …}" copies without braces
+        // or notes.
+        assert.match(storedVerse('kjv', 'Romans', 14, 23), /\{/);
+        assert.equal(
+            app.clipboardWrites.at(-1),
+            'And he that doubteth is damned if he eat, because he eateth not of faith: for whatsoever is not of faith is sin. — Romans 14:23 (KJV)',
+        );
+        assert.equal(app.clipboardWrites.at(-1), `${(await shownVerse('kjv', 'Romans', 14, 23)).text} — Romans 14:23 (KJV)`);
 
         // Clicking a gap is a click away.
         app.click(app.document.querySelector('.compare-gap'));

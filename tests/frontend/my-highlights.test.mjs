@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, storedVerse } from './harness.mjs';
+import { backend, bookId, closeBridge, openApp, shownVerse, storedVerse } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-my-highlights-'));
 after(async () => {
@@ -258,7 +258,10 @@ test('previews follow the translation, and a verse it does not number says so', 
         assert.equal(matthew.reference, 'Matthew 2:23');
         assert.ok(matthew.missing);
         assert.equal(matthew.preview, 'Not numbered in the KJV');
-        assert.equal(romans.preview, storedVerse('kjv', 'Romans', 16, 24));
+        // The KJV's plain text: "{be} with you all" without its braces.
+        assert.match(storedVerse('kjv', 'Romans', 16, 24), /\{be\}/);
+        assert.equal(romans.preview, 'The grace of our Lord Jesus Christ be with you all. Amen.');
+        assert.equal(romans.preview, (await shownVerse('kjv', 'Romans', 16, 24)).text);
         assert.ok(!romans.partial);
 
         // Opening it shows the chapter with the bookmarks' notice.

@@ -30,6 +30,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use gospel_getter_lib::commands::{self, AppState};
 use gospel_getter_lib::db::{self, Passage};
+use gospel_getter_lib::domain::kjv_markup::VerseText;
 use gospel_getter_lib::updater::{self, Problem, UpdateInfo};
 
 /// The scripted answer for the next file dialog: `Some(None)` is a
@@ -273,6 +274,14 @@ async fn dispatch(
         "cancel_import" => {
             commands::discard_pending_import(state, arg(args, "token")?);
             Ok(Value::Null)
+        }
+        // Test helper, not an app command: a verse as the app shows it,
+        // from its stored text, so tests can check the page against the
+        // app's one rule (`VerseText`) without a copy of it.
+        "__verse_text" => {
+            let code: String = arg(args, "code")?;
+            let text: String = arg(args, "text")?;
+            Ok(to_value(VerseText::new(&code, &text))?)
         }
         // Test setup: the answer the next file dialog gives.
         "__set_picker" => {

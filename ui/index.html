@@ -48,6 +48,16 @@
                scrolling beneath it never shows through, and --text and
                --accent stay AA on it (see the palette tests). */
             --bar-bg: #14082c;
+            /* Verse numbers and KJV footnote markers sit straight on the
+               page background. No one color is AA over every stop of this
+               gradient (white peaks at 3.15:1 on its orange foot), so here
+               they're a brighter aqua on a badge in the --panel-bg tint,
+               the number centered in it: AA over every stop, selected or
+               highlighted (see the palette tests). The other themes keep
+               --accent, no badge and the number at the start. */
+            --verse-num-color: #5ce1e6;
+            --verse-num-bg: rgba(20, 8, 44, 0.55);
+            --verse-num-align: center;
             /* Highlighter colors (behind highlighted verse text), one set
                per theme: muted on the dark themes, pastel on the light one,
                every one keeping --text at AA contrast. */
@@ -77,6 +87,9 @@
             --option-bg: #1a1c1f;
             --on-accent: #06141f;
             --bar-bg: #16181c;
+            --verse-num-color: var(--accent);
+            --verse-num-bg: transparent;
+            --verse-num-align: start;
             --hl-yellow: #5a4d12;
             --hl-green: #224f2f;
             --hl-blue: #1f3f6b;
@@ -96,6 +109,9 @@
             --option-bg: #ffffff;
             --on-accent: #ffffff;
             --bar-bg: #ffffff;
+            --verse-num-color: var(--accent);
+            --verse-num-bg: transparent;
+            --verse-num-align: start;
             --hl-yellow: #fbe78a;
             --hl-green: #c6ecbd;
             --hl-blue: #c9defc;
@@ -115,6 +131,9 @@
             --option-bg: #041404;
             --on-accent: #001a00;
             --bar-bg: #031003;
+            --verse-num-color: var(--accent);
+            --verse-num-bg: transparent;
+            --verse-num-align: start;
             --hl-yellow: #4a4708;
             --hl-green: #11521f;
             --hl-blue: #0f3a5c;
@@ -140,6 +159,9 @@
             --option-bg: #241a12;
             --on-accent: #1a1410;
             --bar-bg: #1a1410;
+            --verse-num-color: var(--accent);
+            --verse-num-bg: transparent;
+            --verse-num-align: start;
             --hl-yellow: #6b5310;
             --hl-green: #31512a;
             --hl-blue: #22415f;
@@ -168,6 +190,9 @@
             --option-bg: #2a0a1d;
             --on-accent: #1a0411;
             --bar-bg: #12030c;
+            --verse-num-color: var(--accent);
+            --verse-num-bg: transparent;
+            --verse-num-align: start;
             --hl-yellow: #614c0f;
             --hl-green: #1f5038;
             --hl-blue: #263d6b;
@@ -1994,7 +2019,11 @@
             min-width: 1.4rem;
             font-size: calc(0.7rem * var(--reading-scale));
             font-weight: bold;
-            color: var(--accent);
+            color: var(--verse-num-color);
+            background: var(--verse-num-bg);
+            box-shadow: 0 0 0 0.12em var(--verse-num-bg);
+            border-radius: 0.2em;
+            text-align: var(--verse-num-align);
             vertical-align: super;
             margin-right: 0.2rem;
         }
@@ -2076,7 +2105,7 @@
         .chapter-main .verse.is-bookmarked .verse-num::after {
             content: '\2605';
             margin-left: 0.15rem;
-            color: var(--accent);
+            color: var(--verse-num-color);
         }
 
         /* A small pencil, the same way, after the number of every verse
@@ -2087,18 +2116,51 @@
         .chapter-main .verse.has-notes .verse-num::after {
             content: '\270E';
             margin-left: 0.15rem;
-            color: var(--accent);
+            color: var(--verse-num-color);
         }
 
         .chapter-main .verse.is-bookmarked.has-notes .verse-num::after {
             content: '\2605\2009\270E';
         }
 
-        /* A verse's "has notes" is for screen readers only: it's never
-           copied with the verse's text. */
-        .note-cue {
+        /* A verse's "has notes" and "has footnotes" are for screen
+           readers only: they're never copied with the verse's text. */
+        .note-cue,
+        .footnote-cue {
             -webkit-user-select: none;
             user-select: none;
+        }
+
+        /* KJV words the translators supplied, in italics as printed KJVs
+           set them. */
+        .supplied {
+            font-style: italic;
+        }
+
+        /* A KJV margin note's marker, where the note stood: a small
+           letter, in the verse numbers' color. Clicking the verse (marker
+           included) shows its footnotes; the marker is no tab stop of its
+           own, isn't read out (the verse's .footnote-cue is, once) and is
+           never copied with the verse's text. */
+        .fn-marker {
+            font-size: 0.7em;
+            font-style: normal;
+            font-weight: bold;
+            line-height: 0;
+            vertical-align: super;
+            margin-left: 0.1em;
+            color: var(--verse-num-color);
+            background: var(--verse-num-bg);
+            box-shadow: 0 0 0 0.12em var(--verse-num-bg);
+            border-radius: 0.2em;
+            cursor: pointer;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* Two notes in a row read as "a b", not as one marker "ab". */
+        .fn-marker + .fn-marker {
+            margin-left: 0.3em;
         }
 
         /* Read by screen readers, never shown. */
@@ -2453,16 +2515,32 @@
             margin-bottom: 0.6rem;
         }
 
+        /* The chapter's Cross References and Footnotes lists: a verse
+           label column, and each row's citations or footnote wrapping in
+           the column beside it (a hanging indent), never under the label.
+           Rows share their list's columns, so every label in a list takes
+           the width of the widest, and both lists start their text at
+           least 3.6rem in, so they line up with each other too. */
+        .xref-summary-list,
+        .footnote-list {
+            display: grid;
+            grid-template-columns: minmax(3.6rem, max-content) minmax(0, 1fr);
+            column-gap: 0.6rem;
+        }
+
+        .xref-summary-row,
+        .footnote-row {
+            display: grid;
+            grid-column: 1 / -1;
+            grid-template-columns: subgrid;
+        }
+
         .xref-summary-row {
-            display: flex;
-            gap: 0.6rem;
             font-size: 0.85rem;
             margin-bottom: 0.4rem;
-            flex-wrap: wrap;
         }
 
         .xref-summary-verse {
-            flex: 0 0 auto;
             color: var(--accent);
             font-weight: bold;
         }
@@ -2471,6 +2549,8 @@
             display: flex;
             flex-wrap: wrap;
             gap: 0.4rem;
+            min-width: 0;
+            overflow-wrap: anywhere;
         }
 
         .xref-summary-chip {
@@ -2490,6 +2570,58 @@
 
         .xref-credit a {
             color: var(--accent);
+        }
+
+        /* The chapter's KJV footnotes, above its cross-references and
+           styled like them: "119:105a lamp: or, candle". */
+        .footnote-summary {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--accent-dim);
+        }
+
+        .footnote-summary-title {
+            font-size: 1rem;
+            font-weight: normal;
+            color: var(--accent);
+            margin-bottom: 0.6rem;
+        }
+
+        .footnote-row {
+            font-size: 0.85rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .footnote-ref {
+            color: var(--accent);
+            font-weight: bold;
+        }
+
+        .footnote-text {
+            color: var(--text-dim);
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        /* A verse's footnotes in its popup, above its cross-references. */
+        .popup-footnotes {
+            display: block;
+        }
+
+        .popup-footnotes + .xref-popup-title {
+            margin-top: 0.6rem;
+        }
+
+        .footnote-entry {
+            display: block;
+            margin-bottom: 0.3rem;
+            line-height: 1.45;
+        }
+
+        .footnote-label {
+            color: var(--accent);
+            font-weight: bold;
+            margin-right: 0.3rem;
         }
 
         footer {
@@ -2525,6 +2657,9 @@
                 --accent-rgb: 0, 0, 0 !important;
                 --accent-dim: #000000 !important;
                 --panel-bg: transparent !important;
+                --verse-num-color: #000000 !important;
+                --verse-num-bg: transparent !important;
+                --verse-num-align: start !important;
                 --option-bg: #ffffff !important;
                 --on-accent: #ffffff !important;
                 /* Highlights aren't printed. */
@@ -3612,8 +3747,10 @@
                 return `${reading.bookName} ${reading.chapter}:${verseRange(start, end)} (${translationCode.toUpperCase()})`;
             }
 
-            // The verses' stored text, unaltered, joined by single spaces,
-            // then " — " and the citation.
+            // The verses' plain text as the backend gives it (the KJV's
+            // supplied words as words, no braces or margin notes; any other
+            // translation as stored), joined by single spaces, then " — "
+            // and the citation.
             function selectionClipboardText() {
                 const text = selectionVerses().map((v) => v.text).join(' ');
                 return `${text} — ${selectionCitation()}`;
@@ -3644,7 +3781,7 @@
             }
 
             // Reflects `selection` in the reading column: highlights the
-            // selected verses, shows a lone selected verse's
+            // selected verses, shows a lone selected verse's footnotes and
             // cross-references (a range shows none), and puts the actions
             // under the last selected verse.
             function renderSelection() {
@@ -4373,14 +4510,15 @@
                 noteSession = { mode, note, passage, code, initial: note ? note.body : '' };
                 noteReturn = { el: opener, noteId: note ? note.id : null };
                 noteTitle.textContent = reference;
-                // The verses exactly as this translation stores and numbers
-                // them; any it doesn't number are said to be missing.
+                // The verses as this translation numbers and shows them (KJV
+                // supplied words in italics, no note markers); any it
+                // doesn't number are said to be missing.
                 const verses = reading.bookId === passage.bookId && reading.chapter === passage.chapter
                     ? columnVerses(code).filter((v) => v.number >= passage.start && v.number <= passage.end).sort((a, b) => a.number - b.number)
                     : [];
                 const missing = passage.end - passage.start + 1 - verses.length;
                 notePassageEl.innerHTML = verses
-                    .map((v) => `<span class="note-passage-num">${v.number}</span>${escapeHtml(v.text)}`)
+                    .map((v) => `<span class="note-passage-num">${v.number}</span>${verseHtml(v, { markers: false })}`)
                     .join(' ')
                     + (missing > 0 ? ` <em>${verses.length ? 'Not all of it is' : 'It isn’t'} numbered in the ${escapeHtml(code.toUpperCase())}.</em>` : '');
                 noteTextShown.textContent = `Text shown: ${code.toUpperCase()}`;
@@ -5249,10 +5387,30 @@
                 </div>`;
             }
 
+            // A verse's text as the backend shaped it (see VerseText in
+            // Rust): KJV supplied words in italics and, with `markers`,
+            // each margin note as its footnote's letter where it stood.
+            // Every part is escaped. Anything without parts is its text.
+            function verseHtml(v, { markers = true } = {}) {
+                if (!Array.isArray(v.parts)) return escapeHtml(v.text);
+                return v.parts
+                    .map((part) => {
+                        if (part.kind === 'supplied') return `<em class="supplied">${escapeHtml(part.text)}</em>`;
+                        if (part.kind === 'note') {
+                            return markers ? `<sup class="fn-marker" aria-hidden="true">${escapeHtml(part.label)}</sup>` : '';
+                        }
+                        return escapeHtml(part.text);
+                    })
+                    .join('');
+            }
+
+            // Faded neighbors show supplied words in italics but no note
+            // markers: their footnotes are listed only for the chapter
+            // being read.
             function renderSideChapter(side) {
                 if (!side) return '';
                 const verses = side.verses
-                    .map((v) => `<p class="verse" data-book="${side.bookId}" data-chapter="${side.chapter}" data-verse="${v.number}"><span class="verse-num">${v.number}</span><span class="verse-text">${escapeHtml(v.text)}</span></p>`)
+                    .map((v) => `<p class="verse" data-book="${side.bookId}" data-chapter="${side.chapter}" data-verse="${v.number}"><span class="verse-num">${v.number}</span><span class="verse-text">${verseHtml(v, { markers: false })}</span></p>`)
                     .join('');
                 return `<section>
                     <button type="button" class="chapter-heading-link" data-book="${side.bookId}" data-chapter="${side.chapter}">${escapeHtml(side.bookName)} ${side.chapter}</button>
@@ -5260,8 +5418,16 @@
                 </section>`;
             }
 
-            function renderXrefPopup(xrefs) {
-                if (!xrefs.length) return '';
+            // A selected verse's popup: its footnotes, then its
+            // cross-references; nothing when it has neither.
+            function renderVersePopup(footnotes, xrefs) {
+                if (!footnotes.length && !xrefs.length) return '';
+                const notes = footnotes.length
+                    ? `<span class="popup-footnotes">
+                        <span class="xref-popup-title">Footnotes</span>
+                        ${footnotes.map((f) => `<span class="footnote-entry"><span class="footnote-label">${escapeHtml(f.label)}</span>${footnoteHtml(f)}</span>`).join('')}
+                    </span>`
+                    : '';
                 const entries = xrefs
                     .map((x) => {
                         const endAttr = x.endVerse != null ? ` data-end-verse="${x.endVerse}"` : '';
@@ -5271,20 +5437,61 @@
                         </span>`;
                     })
                     .join('');
-                return `<span class="xref-popup" hidden>
-                    <span class="xref-popup-title">Cross references</span>
-                    ${entries}
-                </span>`;
+                const refs = xrefs.length
+                    ? `<span class="xref-popup-title">Cross references</span>
+                    ${entries}`
+                    : '';
+                return `<span class="xref-popup" hidden>${notes}${refs}</span>`;
             }
 
             // Cross-references are keyed by verse number, not translation,
             // so each column shows the same ones for the same number.
+            // Footnotes are the translation's own (the KJV's margin notes).
             function renderVerse(v, bookId, chapter, code, xrefs) {
                 const hasXref = xrefs.length > 0;
-                return `<p class="verse${hasXref ? ' has-xref' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}" data-translation="${escapeHtml(code)}" data-code="${escapeHtml(code.toUpperCase())}">
-                    <span class="verse-num">${v.number}</span><span class="verse-text">${escapeHtml(v.text)}</span>
-                    ${hasXref ? renderXrefPopup(xrefs) : ''}
+                const footnotes = v.footnotes || [];
+                const cue = footnotes.length ? '<span class="footnote-cue visually-hidden">(has footnotes) </span>' : '';
+                return `<p class="verse${hasXref ? ' has-xref' : ''}${footnotes.length ? ' has-footnotes' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}" data-translation="${escapeHtml(code)}" data-code="${escapeHtml(code.toUpperCase())}">
+                    <span class="verse-num">${v.number}</span>${cue}<span class="verse-text">${verseHtml(v)}</span>
+                    ${renderVersePopup(footnotes, xrefs)}
                 </p>`;
+            }
+
+            // A footnote's note as printed footnotes set it: the verse's
+            // words it's on (its lemma) in italics, then the rest as
+            // stored, "*lamp*: or, candle". The backend splits it, so the
+            // two are exactly the stored note; without a lemma, it's all
+            // plain.
+            function footnoteHtml(f) {
+                const lemma = f.lemma ? `<em class="footnote-lemma">${escapeHtml(f.lemma)}</em>` : '';
+                return lemma + escapeHtml(f.rest);
+            }
+
+            // The footnotes of the chapter being read, one row each
+            // ("119:105a lamp: or, candle"), for every column on screen
+            // that has any: the KJV's, while reading or comparing it.
+            // Named for its translation while comparing, where it could be
+            // either column's.
+            function renderFootnoteSummary(dto, compare) {
+                const columns = compare
+                    ? compare.columns
+                    : [{ code: reading.translationCode, verses: dto.currentVerses }];
+                return columns
+                    .map((c) => {
+                        const rows = c.verses
+                            .flatMap((v) => (v.footnotes || []).map((f) => `<div class="footnote-row">
+                                <span class="footnote-ref">${dto.currentChapter}:${v.number}${escapeHtml(f.label)}</span>
+                                <span class="footnote-text">${footnoteHtml(f)}</span>
+                            </div>`))
+                            .join('');
+                        if (!rows) return '';
+                        const title = compare ? `Footnotes (${escapeHtml(c.code.toUpperCase())})` : 'Footnotes';
+                        return `<div class="footnote-summary" data-code="${escapeHtml(c.code.toUpperCase())}">
+                            <h3 class="footnote-summary-title">${title}</h3>
+                            <div class="footnote-list">${rows}</div>
+                        </div>`;
+                    })
+                    .join('');
             }
 
             function renderXrefSummary(dto) {
@@ -5349,6 +5556,7 @@
                         <section class="chapter-main">
                             <h2 class="chapter-heading">${escapeHtml(dto.currentBookName)} ${dto.currentChapter}</h2>
                             ${body}
+                            ${renderFootnoteSummary(dto, compare)}
                             ${renderXrefSummary(dto)}
                         </section>
                         ${side(dto.next, 'next')}
@@ -5358,7 +5566,7 @@
 
             function renderXrefVerses(verses) {
                 return verses
-                    .map((v) => `<p class="verse xref-verse-text"><span class="verse-num">${v.number}</span>${escapeHtml(v.text)}</p>`)
+                    .map((v) => `<p class="verse xref-verse-text"><span class="verse-num">${v.number}</span>${verseHtml(v, { markers: false })}</p>`)
                     .join('');
             }
 
@@ -5742,6 +5950,11 @@
                     if (next) next.focus();
                     return;
                 }
+                // A verse's footnotes in its popup are there to read (and
+                // select), like its notes.
+                if (event.target.closest('.popup-footnotes')) {
+                    return;
+                }
                 if (event.target.closest('.verse-notes')) {
                     return;
                 }
@@ -5815,6 +6028,17 @@
                 // A selection never extends outside the chapter being
                 // read: Shift-click in a faded neighbor leaves it as is.
                 if (event.shiftKey && event.target.closest('.chapter-side')) {
+                    return;
+                }
+
+                // Clicking a footnote marker selects its verse, showing its
+                // footnotes; unlike the rest of the verse, it never clears
+                // the selection.
+                const marker = event.target.closest('.fn-marker');
+                const markedVerse = marker && marker.closest(SELECTABLE);
+                if (markedVerse && !event.shiftKey) {
+                    const number = Number(markedVerse.dataset.verse);
+                    selectVerses(markedVerse.dataset.translation, number, number);
                     return;
                 }
 

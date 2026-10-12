@@ -242,7 +242,7 @@ test('a bookmark list that fails to load says so', () =>
         assert.match(error.textContent, /Bookmarks couldn't be loaded/);
     }));
 
-test('markers show in reading mode and use the theme accent', () =>
+test('markers show in reading mode and use the verse number color', () =>
     withApp({ book: 'John', chapter: 3, readerMode: true }, async (app) => {
         app.click(app.verse(16));
         await bookmarkSelection(app);
@@ -252,7 +252,7 @@ test('markers show in reading mode and use the theme accent', () =>
         const css = app.document.querySelector('style').textContent;
         const rule = css.match(/\.chapter-main \.verse\.is-bookmarked \.verse-num::after \{([^}]*)\}/);
         assert.ok(rule, 'marker rule exists');
-        assert.match(rule[1], /color: var\(--accent\)/, 'every theme defines --accent');
+        assert.match(rule[1], /color: var\(--verse-num-color\)/, 'every theme defines --verse-num-color: its accent, or Vaporwave\'s brighter aqua');
         const readerModeRules = css.slice(css.indexOf('@media screen'), css.indexOf('header {'));
         assert.ok(!readerModeRules.includes('is-bookmarked'), 'reading mode does not hide markers');
     }));

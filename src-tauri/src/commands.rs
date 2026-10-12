@@ -14,6 +14,7 @@ use crate::db::{
 };
 use crate::domain::Store;
 use crate::domain::bible::{self, ChapterRef};
+use crate::domain::kjv_markup::VerseText;
 use crate::domain::query::{self, Interpretation};
 use crate::reader_data::{
     self, BookmarkRecord, HighlightRecord, NewBookmark, NewPosition, NoteRecord, PositionRecord,
@@ -171,19 +172,35 @@ pub struct XrefDto {
     pub citation: String,
 }
 
+/// A verse of the chapter being read: as shown (see `VerseText`), with its
+/// cross-references.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerseDto {
     pub number: i64,
-    pub text: String,
+    /// `text` (plain, for copying), `parts` and `footnotes`.
+    #[serde(flatten)]
+    pub shown: VerseText,
     pub xrefs: Vec<XrefDto>,
 }
 
+/// A verse as shown (see `VerseText`).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimpleVerseDto {
     pub number: i64,
-    pub text: String,
+    /// `text` (plain, for copying), `parts` and `footnotes`.
+    #[serde(flatten)]
+    pub shown: VerseText,
+}
+
+impl SimpleVerseDto {
+    fn new(translation_code: &str, verse: db::Verse) -> Self {
+        Self {
+            number: verse.verse,
+            shown: VerseText::new(translation_code, &verse.text),
+        }
+    }
 }
 
 /// A neighboring chapter shown in full, at reduced opacity, beside the one
@@ -234,6 +251,16 @@ fn build_citation(
     }
 }
 
+/// The code of the translation `translation_id` ("kjv", "web"), which
+/// decides how its verses are shown (see `VerseText`).
+fn code_of(state: &AppState, translation_id: i64) -> &str {
+    state
+        .translations
+        .iter()
+        .find(|t| t.id == translation_id)
+        .map_or("", |t| t.code.as_str())
+}
+
 /// Resolve a translation code to a translation id, falling back to the
 /// first bundled translation (the default) when the code is absent or
 /// doesn't match anything we have.
@@ -282,6 +309,7 @@ async fn build_side(
         .store
         .chapter_verses(translation_id, at.book_id, at.chapter)
         .await?;
+    let code = code_of(state, translation_id);
 
     Ok(ChapterSideDto {
         book_id: at.book_id,
@@ -289,10 +317,7 @@ async fn build_side(
         book_name,
         verses: verses
             .into_iter()
-            .map(|v| SimpleVerseDto {
-                number: v.verse,
-                text: v.text,
-            })
+            .map(|v| SimpleVerseDto::new(code, v))
             .collect(),
     })
 }
@@ -347,6 +372,7 @@ async fn build_reading_pane_dto(
     }
     let has_chapter_xrefs = !xrefs_by_verse.is_empty();
 
+    let code = code_of(state, translation_id);
     let current_verses = state
         .store
         .chapter_verses(translation_id, book_id, chapter)
@@ -354,7 +380,7 @@ async fn build_reading_pane_dto(
         .into_iter()
         .map(|v| VerseDto {
             number: v.verse,
-            text: v.text,
+            shown: VerseText::new(code, &v.text),
             xrefs: xrefs_by_verse.remove(&v.verse).unwrap_or_default(),
         })
         .collect();
@@ -531,13 +557,13 @@ pub async fn xref_text(
         .verse_range(translation_id, book_id, chapter, verse, end_verse)
         .await
     {
-        Ok(verses) => verses
-            .into_iter()
-            .map(|v| SimpleVerseDto {
-                number: v.verse,
-                text: v.text,
-            })
-            .collect(),
+        Ok(verses) => {
+            let code = code_of(state, translation_id);
+            verses
+                .into_iter()
+                .map(|v| SimpleVerseDto::new(code, v))
+                .collect()
+        }
         Err(e) => {
             tracing::error!(
                 "Failed to fetch xref verse text for {book_id} {chapter}:{verse}-{end_verse}: {e}"
@@ -577,15 +603,20 @@ pub struct BookmarkDto {
     pub verse_end: i64,
     /// e.g. "John 3:16–18".
     pub reference: String,
-    /// The first verse's stored text in the requested translation, or
-    /// `None` if that translation doesn't number it.
+    /// The first verse's plain text in the requested translation (see
+    /// `VerseText`), or `None` if that translation doesn't number it.
     pub preview: Option<String>,
     /// Whether the requested translation numbers every verse bookmarked.
     pub complete: bool,
     pub created_at: String,
 }
 
-fn bookmark_dto(state: &AppState, b: BookmarkInTranslation) -> BookmarkDto {
+/// A preview's plain text (see `VerseText`).
+fn preview_text(translation_code: &str, stored: Option<String>) -> Option<String> {
+    stored.map(|text| VerseText::new(translation_code, &text).text)
+}
+
+fn bookmark_dto(state: &AppState, code: &str, b: BookmarkInTranslation) -> BookmarkDto {
     let BookmarkInTranslation {
         bookmark,
         first_verse_text,
@@ -606,7 +637,7 @@ fn bookmark_dto(state: &AppState, b: BookmarkInTranslation) -> BookmarkDto {
         chapter: bookmark.chapter,
         verse_start: bookmark.verse_start,
         verse_end: bookmark.verse_end,
-        preview: first_verse_text,
+        preview: preview_text(code, first_verse_text),
         complete,
         created_at: bookmark.created_at,
     }
@@ -618,12 +649,13 @@ pub async fn bookmarks_in(
     translation_code: Option<&str>,
 ) -> anyhow::Result<Vec<BookmarkDto>> {
     let translation_id = resolve_translation(state, translation_code);
+    let code = code_of(state, translation_id);
     Ok(state
         .store
         .bookmarks(translation_id)
         .await?
         .into_iter()
-        .map(|b| bookmark_dto(state, b))
+        .map(|b| bookmark_dto(state, code, b))
         .collect())
 }
 
@@ -753,8 +785,8 @@ pub struct HighlightPassageDto {
     pub color: HighlightColor,
     /// e.g. "John 3:16–18".
     pub reference: String,
-    /// The first verse's stored text in the requested translation, or
-    /// `None` if that translation doesn't number it.
+    /// The first verse's plain text in the requested translation (see
+    /// `VerseText`), or `None` if that translation doesn't number it.
     pub preview: Option<String>,
     /// Whether the requested translation numbers every verse in it.
     pub complete: bool,
@@ -762,6 +794,7 @@ pub struct HighlightPassageDto {
 
 fn highlight_passage_dto(
     state: &AppState,
+    code: &str,
     h: HighlightPassageInTranslation,
 ) -> HighlightPassageDto {
     let HighlightPassageInTranslation {
@@ -782,7 +815,7 @@ fn highlight_passage_dto(
         verse_start: passage.verse_start,
         verse_end: passage.verse_end,
         color: passage.color,
-        preview: first_verse_text,
+        preview: preview_text(code, first_verse_text),
         complete,
     }
 }
@@ -794,12 +827,13 @@ pub async fn highlight_passages_in(
     translation_code: Option<&str>,
 ) -> anyhow::Result<Vec<HighlightPassageDto>> {
     let translation_id = resolve_translation(state, translation_code);
+    let code = code_of(state, translation_id);
     Ok(state
         .store
         .highlight_passages(translation_id)
         .await?
         .into_iter()
-        .map(|h| highlight_passage_dto(state, h))
+        .map(|h| highlight_passage_dto(state, code, h))
         .collect())
 }
 
@@ -1125,7 +1159,7 @@ pub struct SearchResultDto {
     pub verse: i64,
     /// e.g. "John 3:16".
     pub reference: String,
-    /// The verse's stored text, from `verses`.
+    /// The verse's plain text (see `VerseText`), the text search covers.
     pub text: String,
 }
 
@@ -1212,6 +1246,7 @@ pub async fn run_search(
                 .store
                 .search(translation_id, &terms, SEARCH_PAGE_SIZE, offset)
                 .await?;
+            let code = code_of(state, translation_id);
             let results = hits
                 .into_iter()
                 .map(|h| SearchResultDto {
@@ -1223,7 +1258,7 @@ pub async fn run_search(
                     book_id: h.book_id,
                     chapter: h.chapter,
                     verse: h.verse,
-                    text: h.text,
+                    text: VerseText::new(code, &h.text).text,
                 })
                 .collect();
             Ok(SearchDto::Text {
@@ -1264,8 +1299,8 @@ pub async fn search(
 pub struct CompareColumnDto {
     pub code: String,
     pub name: String,
-    /// The chapter's verses exactly as this translation stores and numbers
-    /// them.
+    /// The chapter's verses as this translation numbers them, each as
+    /// shown (see `VerseText`).
     pub verses: Vec<SimpleVerseDto>,
 }
 
@@ -1298,10 +1333,7 @@ pub async fn compare_chapter(
             name: t.name.clone(),
             verses: verses
                 .into_iter()
-                .map(|v| SimpleVerseDto {
-                    number: v.verse,
-                    text: v.text,
-                })
+                .map(|v| SimpleVerseDto::new(&t.code, v))
                 .collect(),
         });
     }
@@ -2163,7 +2195,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn text_search_pages_through_stored_text() {
+    async fn text_search_pages_through_verse_text() {
         let (_db, state) = app_state("cmd_search_text").await;
 
         let v = search_in(&state, "Faith, hope & charity", "kjv").await;
@@ -2174,9 +2206,16 @@ mod tests {
             .iter()
             .find(|r| r["reference"] == "1 Corinthians 13:13")
             .expect("1 Corinthians 13:13 found");
+        // The verse's plain text: "And now abideth faith, hope, charity,
+        // these three; but the greatest of these {is} charity." without
+        // its braces.
+        let stored = &bundled("kjv")[45].chapters[12][12];
+        assert!(stored.contains("{is}"));
+        assert_eq!(cor["text"], VerseText::new("kjv", stored).text);
         assert_eq!(
-            cor["text"].as_str().unwrap().as_bytes(),
-            bundled("kjv")[45].chapters[12][12].as_bytes()
+            cor["text"],
+            "And now abideth faith, hope, charity, these three; but the greatest of these is \
+             charity."
         );
 
         let first = run_search(&state, "love", Some("web"), 0).await.unwrap();
@@ -2575,6 +2614,122 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn kjv_verses_are_shown_clean_everywhere_and_the_web_as_stored() {
+        let (_db, state) = app_state("cmd_kjv_shown").await;
+        let psalm_119_105 =
+            "NUN. Thy word is a lamp unto my feet, and a light unto my path.".to_string();
+
+        // The chapter being read (which the note panel quotes from too):
+        // plain text, parts and footnotes.
+        let dto = reading(&state, 19, 119, Some("kjv")).await.unwrap();
+        let v105 = serde_json::to_value(&dto.current_verses[104]).unwrap();
+        assert_eq!(
+            v105,
+            serde_json::json!({
+                "number": 105,
+                "text": psalm_119_105,
+                "parts": [
+                    {"kind": "text", "text": "NUN. Thy word "},
+                    {"kind": "supplied", "text": "is"},
+                    {"kind": "text", "text": " a lamp unto my feet, and a light unto my path."},
+                    {"kind": "note", "text": "lamp: or, candle", "label": "a"},
+                ],
+                "footnotes": [{
+                    "label": "a",
+                    "lemma": "lamp",
+                    "rest": ": or, candle",
+                    "text": "lamp: or, candle",
+                }],
+                "xrefs": v105["xrefs"],
+            })
+        );
+        // A note without a colon has no lemma: Psalms 73:22's second.
+        let psalm_73 = reading(&state, 19, 73, Some("kjv")).await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&psalm_73.current_verses[21].shown.footnotes).unwrap(),
+            serde_json::json!([
+                {
+                    "label": "a",
+                    "lemma": "ignorant",
+                    "rest": ": Heb. I knew not",
+                    "text": "ignorant: Heb. I knew not",
+                },
+                {"label": "b", "lemma": null, "rest": "before Heb. with", "text": "before Heb. with"},
+            ])
+        );
+        assert!(!v105["xrefs"].as_array().unwrap().is_empty());
+        let kjv = bundled("kjv");
+        let every_verse = dto
+            .current_verses
+            .iter()
+            .map(|v| (&v.shown, v.number))
+            .chain(
+                dto.prev
+                    .iter()
+                    .chain(&dto.next)
+                    .flat_map(|side| side.verses.iter().map(|v| (&v.shown, v.number))),
+            );
+        for (shown, _) in every_verse {
+            assert!(!shown.text.contains(['{', '}']), "{}", shown.text);
+        }
+        // The neighbors are shown the same way (Psalms 118 and 120).
+        let prev = dto.prev.as_ref().unwrap();
+        assert_eq!(
+            prev.verses[0].shown,
+            VerseText::new("kjv", &kjv[18].chapters[117][0])
+        );
+
+        // A cross-reference expanded, and the comparison's KJV column.
+        let expanded = xref_text(&state, 19, 119, 105, None, Some("kjv")).await;
+        assert_eq!(expanded[0].shown.text, psalm_119_105);
+        assert_eq!(expanded[0].shown.footnotes.len(), 1);
+        let compare = compare_chapter(&state, 19, 119).await.unwrap().unwrap();
+        assert_eq!(compare.columns[0].verses[104].shown.text, psalm_119_105);
+
+        // Library previews.
+        bookmark_passage(&state, 19, 119, 105, 106).await.unwrap();
+        highlight_passage(&state, 19, 119, 105, 105, "yellow")
+            .await
+            .unwrap();
+        let bookmarks = bookmarks_in(&state, Some("kjv")).await.unwrap();
+        assert_eq!(
+            bookmarks[0].preview.as_deref(),
+            Some(psalm_119_105.as_str())
+        );
+        let highlights = highlight_passages_in(&state, Some("kjv")).await.unwrap();
+        assert_eq!(
+            highlights[0].preview.as_deref(),
+            Some(psalm_119_105.as_str())
+        );
+
+        // A malformed verse is shown exactly as stored (Hebrews 10:34).
+        let hebrews = reading(&state, 58, 10, Some("kjv")).await.unwrap();
+        let stored = &kjv[57].chapters[9][33];
+        assert_eq!(
+            hebrews.current_verses[33].shown,
+            VerseText::as_stored(stored)
+        );
+
+        // The WEB, everywhere, exactly as stored: one text part, no
+        // footnotes.
+        let web = bundled("web");
+        let dto = reading(&state, 19, 119, Some("web")).await.unwrap();
+        for (v, stored) in dto.current_verses.iter().zip(&web[18].chapters[118]) {
+            assert_eq!(v.shown, VerseText::as_stored(stored));
+        }
+        let expanded = xref_text(&state, 19, 119, 105, None, Some("web")).await;
+        assert_eq!(
+            expanded[0].shown,
+            VerseText::as_stored(&web[18].chapters[118][104])
+        );
+        let bookmarks = bookmarks_in(&state, Some("web")).await.unwrap();
+        assert_eq!(
+            bookmarks[0].preview.as_ref(),
+            Some(&web[18].chapters[118][104])
+        );
+    }
+
+    #[tokio::test]
     async fn compare_returns_each_translations_own_numbering_and_text() {
         let (_db, state) = app_state("cmd_compare").await;
 
@@ -2588,7 +2743,8 @@ mod tests {
             assert_eq!(column.verses.len(), stored.len());
             for (i, (verse, text)) in column.verses.iter().zip(stored).enumerate() {
                 assert_eq!(verse.number, i as i64 + 1);
-                assert_eq!(verse.text.as_bytes(), text.as_bytes());
+                // Each as shown: the WEB exactly as stored.
+                assert_eq!(verse.shown, VerseText::new(code, text));
             }
         }
         assert_eq!(dto.columns[0].verses.len(), 23);

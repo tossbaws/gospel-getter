@@ -203,5 +203,21 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .await
     .context("Failed to create search_index_state table")?;
 
+    // What `verse_search` holds for each verse, as a number
+    // (`db::search::SEARCH_CONTENT_VERSION`): when it isn't the current
+    // one, startup rebuilds the whole index once. One row, or none in a
+    // database whose index predates it (2.9.1 and older).
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS search_index_version (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            version INTEGER NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create search_index_version table")?;
+
     Ok(())
 }

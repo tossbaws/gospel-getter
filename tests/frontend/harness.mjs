@@ -44,6 +44,15 @@ export function storedVerse(code, book, chapter, verse) {
     return text;
 }
 
+/**
+ * A verse as the app shows it ({ text, parts, footnotes }), from its stored
+ * text, by the backend's own rule: the KJV's supplied words as words and
+ * its margin notes as footnotes; any other translation as stored.
+ */
+export function shownVerse(code, book, chapter, verse) {
+    return backend('__verse_text', { code, text: storedVerse(code, book, chapter, verse) });
+}
+
 export function verseCount(code, book, chapter) {
     return BIBLES[code][bookId(book) - 1].chapters[chapter - 1].length;
 }

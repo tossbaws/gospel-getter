@@ -12,7 +12,7 @@ use super::notes::{
     MAX_NOTE_CHARS, MAX_NOTES, MAX_TOTAL_NOTE_CHARS, NoteLimit, Passage, add_note, delete_note,
     list_notes, notes_overlapping, update_note,
 };
-use super::search::search_verses;
+use super::search::{SEARCH_CONTENT_VERSION, search_verses};
 use super::test_support::{
     TempDb, bundled, fill_notes, fresh_database, other_tables_snapshot, table_names,
     verses_snapshot, write_v2_1_0_database,
@@ -67,9 +67,11 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
         "notes",
         "verse_search",
         "search_index_state",
+        "search_index_version",
     ] {
         assert!(tables.iter().any(|t| t == table), "missing table {table}");
     }
+    assert_eq!(index_version(&pool).await, Some(SEARCH_CONTENT_VERSION));
 
     let state: Vec<(i64, i64)> =
         sqlx::query_as("SELECT translation_id, verse_count FROM search_index_state ORDER BY 1")
@@ -251,6 +253,135 @@ async fn search_returns_stored_text_in_bible_order_per_translation() {
             .await
             .unwrap_or_else(|e| panic!("{syntax:?} should be searched literally: {e:#}"));
     }
+}
+
+/// The version `search_index_version` records, if any.
+async fn index_version(pool: &sqlx::SqlitePool) -> Option<i64> {
+    sqlx::query_scalar("SELECT version FROM search_index_version WHERE id = 1")
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+}
+
+/// The (book, chapter, verse) of every verse in a translation with all of
+/// `words`.
+async fn found(pool: &sqlx::SqlitePool, translation: i64, words: &[&str]) -> Vec<(i64, i64, i64)> {
+    let (_, hits) = search_verses(pool, translation, &terms(words), 10_000, 0)
+        .await
+        .unwrap();
+    hits.iter()
+        .map(|h| (h.book_id, h.chapter, h.verse))
+        .collect()
+}
+
+const PSALM_119_105: (i64, i64, i64) = (19, 119, 105);
+const PSALM_23_1: (i64, i64, i64) = (19, 23, 1);
+
+#[tokio::test]
+async fn the_kjv_is_searched_as_shown_without_its_margin_notes() {
+    let (_db, pool) = fresh_database("search_shown").await;
+
+    // "{lamp: or, candle}" is Psalms 119:105's margin note, not its text.
+    let candle = found(&pool, KJV, &["candle"]).await;
+    assert!(!candle.contains(&PSALM_119_105), "{candle:?}");
+    // Other verses do say "candle" (Matthew 5:15).
+    assert!(candle.contains(&(40, 5, 15)), "{candle:?}");
+    // The verse's own words still find it, supplied words included.
+    assert!(
+        found(&pool, KJV, &["lamp", "feet"])
+            .await
+            .contains(&PSALM_119_105)
+    );
+    assert!(found(&pool, KJV, &["shepherd"]).await.contains(&PSALM_23_1));
+    assert!(
+        found(&pool, KJV, &["lord", "is", "my", "shepherd"])
+            .await
+            .contains(&PSALM_23_1)
+    );
+    // Luke 17:36's note on the Greek copies isn't searchable either.
+    assert!(
+        !found(&pool, KJV, &["greek", "copies"])
+            .await
+            .contains(&(42, 17, 36))
+    );
+    // A malformed verse is indexed as stored (Hebrews 10:34's note too).
+    assert!(
+        found(&pool, KJV, &["enduring", "substance"])
+            .await
+            .contains(&(58, 10, 34))
+    );
+
+    // The WEB is indexed exactly as stored.
+    assert!(
+        found(&pool, WEB, &["lamp", "feet"])
+            .await
+            .contains(&PSALM_119_105)
+    );
+}
+
+#[tokio::test]
+async fn an_index_of_stored_text_is_rebuilt_once() {
+    let (_db, pool) = fresh_database("search_reindex").await;
+    let verses_before = verses_snapshot(&pool).await;
+
+    // As 2.9.1 left it: no version table, and the KJV indexed as stored,
+    // so its margin notes' words find their verses.
+    sqlx::query("DROP TABLE search_index_version")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM verse_search WHERE rowid >= 100000000 AND rowid < 200000000")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO verse_search (rowid, text) \
+         SELECT 100000000 + book_id * 1000000 + chapter * 1000 + verse, text \
+         FROM verses WHERE translation_id = 1",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        found(&pool, KJV, &["candle"])
+            .await
+            .contains(&PSALM_119_105)
+    );
+
+    // The first launch after upgrading rebuilds everything, once.
+    prepare(&pool).await.unwrap();
+    let started = Instant::now();
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![KJV, WEB]);
+    println!("rebuild after upgrading: {:?}", started.elapsed());
+    assert_eq!(index_version(&pool).await, Some(SEARCH_CONTENT_VERSION));
+    assert!(
+        !found(&pool, KJV, &["candle"])
+            .await
+            .contains(&PSALM_119_105)
+    );
+    assert!(found(&pool, KJV, &["shepherd"]).await.contains(&PSALM_23_1));
+
+    // The next launch doesn't.
+    prepare(&pool).await.unwrap();
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
+
+    // An index recorded as an older version is rebuilt again.
+    sqlx::query("UPDATE search_index_version SET version = $1")
+        .bind(SEARCH_CONTENT_VERSION - 1)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![KJV, WEB]);
+    assert_eq!(index_version(&pool).await, Some(SEARCH_CONTENT_VERSION));
+    assert!(
+        !found(&pool, KJV, &["candle"])
+            .await
+            .contains(&PSALM_119_105)
+    );
+
+    // None of it touches the stored text.
+    assert_eq!(verses_snapshot(&pool).await, verses_before);
+    assert_verses_match_bundled(&verses_before);
 }
 
 #[tokio::test]

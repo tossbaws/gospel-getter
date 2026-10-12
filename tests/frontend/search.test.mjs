@@ -3,7 +3,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, storedVerse } from './harness.mjs';
+import { closeBridge, openApp, shownVerse, storedVerse } from './harness.mjs';
 
 after(closeBridge);
 
@@ -165,10 +165,13 @@ test('word search lists matching verses in Bible order with the words marked', (
         for (const r of results) {
             const [book, chapter, verse] = [r.dataset.book, r.dataset.chapter, r.dataset.verseStart].map(Number);
             const text = r.querySelector('.search-text');
-            // The shown text is the stored verse, character for character;
-            // the emphasis is markup around whole words, nothing more.
+            // The shown text is the verse's plain text (the KJV's without
+            // its braces or margin notes), character for character; the
+            // emphasis is markup around whole words, nothing more.
             const bookName = refs[results.indexOf(r)].replace(/ \d+:\d+$/, '');
-            assert.equal(text.textContent, storedVerse('kjv', bookName, chapter, verse));
+            const shown = (await shownVerse('kjv', bookName, chapter, verse)).text;
+            assert.equal(text.textContent, shown);
+            assert.doesNotMatch(text.textContent, /[{}]/);
             assert.equal(Number(r.dataset.book), book);
             for (const mark of text.querySelectorAll('mark')) {
                 assert.match(mark.textContent.toLowerCase(), /^(faith|hope|charity)$/);
@@ -176,6 +179,21 @@ test('word search lists matching verses in Bible order with the words marked', (
             }
             assert.ok(text.querySelectorAll('mark').length >= 3);
         }
+    }));
+
+test('KJV search covers verse text, not margin notes, and shows it plain', () =>
+    withApp({ translation: 'kjv' }, async (app) => {
+        // "{lamp: or, candle}" is Psalms 119:105's margin note.
+        await app.search('candle');
+        const refs = app.searchResults().map((r) => r.querySelector('.search-ref').textContent);
+        assert.ok(refs.includes('Matthew 5:15'), 'verses that say "candle" are found');
+        assert.ok(!refs.includes('Psalms 119:105'), 'a margin note is not searched');
+
+        await app.search('lord shepherd');
+        const result = app.searchResults().find((r) => r.querySelector('.search-ref').textContent === 'Psalms 23:1');
+        assert.ok(result, 'supplied words are verse text: Psalms 23:1 is found');
+        assert.equal(result.querySelector('.search-text').textContent, '[A Psalm of David.] The LORD is my shepherd; I shall not want.');
+        assert.equal(storedVerse('kjv', 'Psalms', 23, 1), '[A Psalm of David.] The LORD {is} my shepherd; I shall not want.');
     }));
 
 test('typed markup is searched as words, never rendered', () =>
