@@ -16,6 +16,7 @@ use crate::domain::Store;
 use crate::domain::bible::{self, ChapterRef};
 use crate::domain::kjv_markup::VerseText;
 use crate::domain::query::{self, Interpretation};
+use crate::notes_export::NotesFilter;
 use crate::reader_data::{
     self, BookmarkRecord, HighlightRecord, NewBookmark, NewPosition, NoteRecord, PositionRecord,
     Preferences, ReaderData, ValidatedImport,
@@ -2014,14 +2015,59 @@ pub struct NotesFile {
     pub notes: usize,
 }
 
+const NOTES_UNREADABLE: &str = "Your notes couldn't be read for export.";
+
+/// Every note, for an export (or its count).
+async fn notes_to_export(state: &AppState) -> Result<Vec<Note>, String> {
+    state.store.notes().await.map_err(|e| {
+        tracing::error!("Failed to read notes to export: {e:#}");
+        NOTES_UNREADABLE.to_string()
+    })
+}
+
+/// What the export dialog offers, worked out when it opens.
+#[derive(Debug, Serialize)]
+pub struct NotesExportOptions {
+    /// The books with notes, in Bible order.
+    pub books: Vec<crate::notes_export::NotedBook>,
+    /// The date choices, ending on today's local date.
+    pub dates: crate::notes_export::DatePresets,
+}
+
+/// The export dialog's choices: the books with notes, and date presets
+/// that end today in `tz`.
+pub async fn notes_export_options<Tz: chrono::TimeZone>(
+    state: &AppState,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+) -> Result<NotesExportOptions, String> {
+    let notes = notes_to_export(state).await?;
+    Ok(NotesExportOptions {
+        books: crate::notes_export::noted_books(&notes, &state.books),
+        dates: crate::notes_export::date_presets(crate::notes_export::local_date(now, tz)),
+    })
+}
+
+/// How many notes `filter` asks for, their dates read in `tz`: the
+/// export dialog's live count, by the export's own rule.
+pub async fn count_notes_to_export<Tz: chrono::TimeZone>(
+    state: &AppState,
+    filter: &NotesFilter,
+    tz: &Tz,
+) -> Result<usize, String> {
+    filter.check(&state.books)?;
+    let notes = notes_to_export(state).await?;
+    Ok(notes.iter().filter(|n| filter.matches(n, tz)).count())
+}
+
 /// The reader's notes as Markdown, with each note's verses quoted in the
-/// translation `translation_code`: every note, or only `book_id`'s. Dates
-/// (the notes', the export's and the file name's) are in `tz`. Each chapter
-/// a note is on is read once, however many notes it has.
+/// translation `translation_code`: those `filter` asks for. Dates (the
+/// notes', the filter's, the export's and the file name's) are in `tz`.
+/// Each chapter a note is on is read once, however many notes it has.
 pub async fn build_notes_export<Tz: chrono::TimeZone>(
     state: &AppState,
     translation_code: &str,
-    book_id: Option<i64>,
+    filter: &NotesFilter,
     now: chrono::DateTime<chrono::Utc>,
     tz: &Tz,
 ) -> Result<NotesFile, String> {
@@ -2030,26 +2076,25 @@ pub async fn build_notes_export<Tz: chrono::TimeZone>(
         .iter()
         .find(|t| t.code == translation_code)
         .ok_or_else(|| format!("There's no translation \u{201c}{translation_code}\u{201d}."))?;
-    let book = book_id
-        .map(|id| {
-            state
-                .books
-                .iter()
-                .find(|b| b.id == id && (1..=66).contains(&id))
-                .ok_or_else(|| format!("There's no book {id}."))
-        })
-        .transpose()?;
-    const FAILED: &str = "Your notes couldn't be read for export.";
-    let all = state.store.notes().await.map_err(|e| {
-        tracing::error!("Failed to read notes to export: {e:#}");
-        FAILED.to_string()
-    })?;
-    let notes: Vec<Note> = all
-        .into_iter()
-        .filter(|n| book_id.is_none_or(|b| n.book_id == b))
-        .collect();
+    filter.check(&state.books)?;
+    let all = notes_to_export(state).await?;
+    let mut export = crate::notes_export::NotesExport {
+        notes: &all,
+        books: &state.books,
+        verses: &HashMap::new(),
+        translation_code: &translation.code,
+        translation_name: &translation.name,
+        filter,
+        exported_at: now,
+    };
+    let notes = export.notes_in_scope(tz);
     if notes.is_empty() {
-        return Err("There are no notes to export.".to_string());
+        return Err(if all.is_empty() {
+            "There are no notes to export."
+        } else {
+            "No notes match these filters."
+        }
+        .to_string());
     }
     let mut verses: HashMap<(i64, i64), Vec<db::Verse>> = HashMap::new();
     for note in &notes {
@@ -2063,24 +2108,13 @@ pub async fn build_notes_export<Tz: chrono::TimeZone>(
             .await
             .map_err(|e| {
                 tracing::error!("Failed to read verses to export: {e:#}");
-                FAILED.to_string()
+                NOTES_UNREADABLE.to_string()
             })?;
         verses.insert(key, chapter);
     }
-    let export = crate::notes_export::NotesExport {
-        notes: &notes,
-        books: &state.books,
-        verses: &verses,
-        translation_code: &translation.code,
-        translation_name: &translation.name,
-        book: book_id,
-        exported_at: now,
-    };
+    export.verses = &verses;
     Ok(NotesFile {
-        file_name: crate::notes_export::file_name(
-            book.map(|b| b.name.as_str()),
-            crate::notes_export::local_date(now, tz),
-        ),
+        file_name: export.file_name(tz),
         contents: export.render(tz),
         notes: notes.len(),
     })
@@ -2103,7 +2137,25 @@ pub async fn save_notes_export(
     })
 }
 
-/// Export the reader's notes (all of them, or one book's) as Markdown, with
+/// What the export dialog offers: the books with notes, and date presets
+/// in the computer's time zone.
+#[tauri::command]
+pub async fn get_notes_export_options(
+    state: tauri::State<'_, AppState>,
+) -> Result<NotesExportOptions, String> {
+    notes_export_options(&state, chrono::Utc::now(), &chrono::Local).await
+}
+
+/// How many notes `filter` asks for, in the computer's time zone.
+#[tauri::command]
+pub async fn count_notes_export(
+    state: tauri::State<'_, AppState>,
+    filter: NotesFilter,
+) -> Result<usize, String> {
+    count_notes_to_export(&state, &filter, &chrono::Local).await
+}
+
+/// Export the reader's notes (those `filter` asks for) as Markdown, with
 /// their verses quoted in `translation_code`, to a file they choose with
 /// the native save dialog. Dates are in the computer's time zone.
 #[tauri::command]
@@ -2111,7 +2163,7 @@ pub async fn export_notes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
     translation_code: String,
-    book_id: Option<i64>,
+    filter: NotesFilter,
 ) -> Result<NotesExportOutcome, String> {
     use tauri_plugin_dialog::DialogExt;
     // Built before the dialog opens, so a problem is reported without
@@ -2119,7 +2171,7 @@ pub async fn export_notes<R: tauri::Runtime>(
     let file = build_notes_export(
         &state,
         &translation_code,
-        book_id,
+        &filter,
         chrono::Utc::now(),
         &chrono::Local,
     )
@@ -2452,7 +2504,11 @@ mod tests {
             .to_utc();
         let export = |code: &'static str, book: Option<i64>| {
             let state = &state;
-            async move { build_notes_export(state, code, book, now, &tz).await }
+            let filter = NotesFilter {
+                books: book.into_iter().collect(),
+                ..NotesFilter::default()
+            };
+            async move { build_notes_export(state, code, &filter, now, &tz).await }
         };
         assert_eq!(
             export("kjv", None).await.unwrap_err(),
@@ -2541,7 +2597,7 @@ mod tests {
         }
         assert_eq!(
             export("kjv", Some(1)).await.unwrap_err(),
-            "There are no notes to export."
+            "No notes match these filters."
         );
 
         // Saved as is: UTF-8, LF, no byte-order mark.
@@ -2556,6 +2612,169 @@ mod tests {
             serde_json::to_value(&outcome).unwrap()["status"],
             serde_json::json!("saved")
         );
+    }
+
+    #[tokio::test]
+    async fn the_export_dialogs_count_is_the_exports_own() {
+        use crate::notes_export::NotesFilter;
+        let (db, state) = app_state("cmd_notes_export_count").await;
+        // 10 pm local on Oct 9 at -06:00 is Oct 10 in UTC.
+        let tz = chrono::FixedOffset::west_opt(6 * 3600).unwrap();
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-12T18:00:00Z")
+            .unwrap()
+            .to_utc();
+        let options = notes_export_options(&state, now, &tz).await.unwrap();
+        assert!(options.books.is_empty());
+        assert_eq!(
+            options.dates,
+            crate::notes_export::date_presets(
+                chrono::NaiveDate::from_ymd_opt(2026, 10, 12).unwrap()
+            )
+        );
+        assert_eq!(
+            count_notes_to_export(&state, &NotesFilter::default(), &tz).await,
+            Ok(0)
+        );
+
+        let notes = [
+            (19, 23, 1, "2026-10-01T15:00:00.000Z"),
+            (43, 1, 1, "2026-10-05T15:00:00.000Z"),
+            (43, 3, 16, "2026-10-09T15:00:00.000Z"),
+            (43, 3, 17, "2026-10-10T04:00:00.000Z"),
+            (43, 5, 24, "2026-10-12T15:00:00.000Z"),
+            (45, 8, 28, "2026-10-11T15:00:00.000Z"),
+            (62, 1, 9, "2026-10-12T15:00:00.000Z"),
+        ];
+        let pool = db.connect().await;
+        for (book_id, chapter, verse, written) in notes {
+            let passage = Passage {
+                book_id,
+                chapter,
+                verse_start: verse,
+                verse_end: verse,
+            };
+            let body = format!("{book_id} {chapter}:{verse}");
+            note_add(&state, passage, &body).await.unwrap();
+            sqlx::query("UPDATE notes SET created_at = ?, updated_at = ? WHERE body = ?")
+                .bind(written)
+                .bind(written)
+                .bind(&body)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        let options = notes_export_options(&state, now, &tz).await.unwrap();
+        assert_eq!(
+            options
+                .books
+                .iter()
+                .map(|b| (
+                    b.id,
+                    b.notes,
+                    b.first_chapter,
+                    b.last_chapter,
+                    b.chapter_count
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (19, 1, 23, 23, 150),
+                (43, 4, 1, 5, 21),
+                (45, 1, 8, 8, 16),
+                (62, 1, 1, 1, 5)
+            ]
+        );
+
+        let day = |d| chrono::NaiveDate::from_ymd_opt(2026, 10, d);
+        let filters = [
+            NotesFilter::default(),
+            NotesFilter {
+                books: vec![43],
+                ..NotesFilter::default()
+            },
+            NotesFilter {
+                books: vec![43],
+                chapters: Some((3, 5)),
+                ..NotesFilter::default()
+            },
+            NotesFilter {
+                books: vec![62, 19],
+                ..NotesFilter::default()
+            },
+            NotesFilter {
+                written_from: day(5),
+                written_to: day(9),
+                ..NotesFilter::default()
+            },
+            NotesFilter {
+                written_from: day(11),
+                ..NotesFilter::default()
+            },
+            NotesFilter {
+                books: vec![43],
+                chapters: Some((3, 3)),
+                written_to: day(9),
+                ..NotesFilter::default()
+            },
+        ];
+        let expected = [7, 4, 3, 2, 3, 3, 2];
+        for (filter, expected) in filters.iter().zip(expected) {
+            let count = count_notes_to_export(&state, filter, &tz).await.unwrap();
+            let file = build_notes_export(&state, "kjv", filter, now, &tz)
+                .await
+                .unwrap();
+            assert_eq!((count, file.notes), (expected, expected), "{filter:?}");
+            let headings = file
+                .contents
+                .lines()
+                .filter(|l| l.starts_with("## ") || l.starts_with("### "))
+                .filter(|l| l.contains(':'))
+                .count();
+            assert_eq!(headings, expected, "{filter:?}");
+        }
+
+        // Nothing matching is a count of 0, but no file.
+        let none = NotesFilter {
+            books: vec![1],
+            ..NotesFilter::default()
+        };
+        assert_eq!(count_notes_to_export(&state, &none, &tz).await, Ok(0));
+        assert_eq!(
+            build_notes_export(&state, "kjv", &none, now, &tz)
+                .await
+                .unwrap_err(),
+            "No notes match these filters."
+        );
+        // A filter that can't be met is refused by both, the same way.
+        let backwards = NotesFilter {
+            written_from: day(12),
+            written_to: day(1),
+            ..NotesFilter::default()
+        };
+        let range = NotesFilter {
+            books: vec![43],
+            chapters: Some((20, 22)),
+            ..NotesFilter::default()
+        };
+        for (filter, message) in [
+            (backwards, "The From date is after the To date."),
+            (
+                range,
+                "Chapters 20\u{2013}22 aren\u{2019}t all in John, which has 21.",
+            ),
+        ] {
+            assert_eq!(
+                count_notes_to_export(&state, &filter, &tz)
+                    .await
+                    .unwrap_err(),
+                message
+            );
+            assert_eq!(
+                build_notes_export(&state, "kjv", &filter, now, &tz)
+                    .await
+                    .unwrap_err(),
+                message
+            );
+        }
     }
 
     #[tokio::test]
@@ -2575,7 +2794,7 @@ mod tests {
             };
             note_add(&state, passage, "Note.").await.unwrap();
         }
-        let kjv = build_notes_export(&state, "kjv", None, now, &tz)
+        let kjv = build_notes_export(&state, "kjv", &NotesFilter::default(), now, &tz)
             .await
             .unwrap()
             .contents;
@@ -2594,7 +2813,7 @@ mod tests {
         assert!(kjv.contains(&format!("> **34** {}\n", escape_block(hebrews))));
 
         // The WEB has no such markup: every verse is quoted as stored.
-        let web = build_notes_export(&state, "web", None, now, &tz)
+        let web = build_notes_export(&state, "web", &NotesFilter::default(), now, &tz)
             .await
             .unwrap()
             .contents;
