@@ -9,7 +9,7 @@ at a time with the chapters before and after shown alongside, search the
 whole Bible, compare the two translations verse by verse, and copy,
 bookmark or write notes on passages. No account and no network needed.
 
-![The reading view in the Matrix theme: John 3 in the centre, with John 2 and John 4 faded on either side, under the chapter picker](screenshots/reading-neighboring-chapters.png)
+![The reading view in the Matrix theme: John 3 in the KJV in the centre, with John 2 and John 4 faded on either side, under the chapter picker. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes](screenshots/reading-neighboring-chapters.png)
 
 ## Features
 
@@ -26,8 +26,9 @@ bookmark or write notes on passages. No account and no network needed.
   current translation containing all your words, in Bible order, with the
   words highlighted.
 - **Copy verses with their reference.** Click a verse, Shift-click another
-  to select a range, then **Copy** or Ctrl+C. You get the text exactly as
-  stored, followed by e.g. `— John 3:16–18 (WEB)`.
+  to select a range, then **Copy** or Ctrl+C. You get the verse text (in
+  the KJV, without its margin notes), followed by e.g.
+  `— John 3:16–18 (WEB)`.
 - **Bookmarks.** Save a verse or range with **★ Bookmark**. Bookmarked
   verses get a ★, and the Bookmarks list in the Library (the bookmark
   button at the top, or Ctrl+B) reopens any of them in whichever
@@ -59,6 +60,14 @@ bookmark or write notes on passages. No account and no network needed.
   shifting anything.
 - **Cross-references.** Click a verse to see related passages, and click a
   citation to read it in place.
+- **Footnotes (KJV).** Translator-supplied words are in italics, as in
+  printed KJVs, and the margin notes are moved out of the text into
+  lettered footnotes. Select a verse (or click its letter) to see its
+  footnotes above its cross-references, and each chapter ends with a
+  Footnotes list of all of them, with the words each note is on in
+  italics. Copy and search use the verse text without the notes.
+
+  ![Psalm 23:4–6 in the KJV in the Matrix theme, with "art" in italics and small letters after verses 5 and 6. Verse 6 is selected: under the Copy, Bookmark and + Add note buttons, its Footnotes list "a for ever: Heb. to length of days" above its cross-references. Below the chapter, a Footnotes section lists 23:2a, 23:2b, 23:5a and 23:6a](screenshots/footnotes.png)
 - **Comfortable reading.** Six themes (Vaporwave, Classic Dark, Classic
   Light, Matrix, Beast Slayer, Hot Pink), four text sizes, three line
   spacings, and a distraction-free reading mode, all under **Aa** with the
@@ -95,7 +104,7 @@ bookmark or write notes on passages. No account and no network needed.
 
 ## A quick tour
 
-All six screenshots in this README, including the one at the top, use the
+All seven screenshots in this README, including the one at the top, use the
 Matrix theme. The other five themes are under **Aa**.
 
 **Search the text, or jump straight to a reference.** Matching words are
@@ -107,7 +116,7 @@ highlighted, and clicking a result opens and selects that verse.
 three verses the KJV doesn't, and the KJV column says so rather than
 shifting anything.
 
-![Romans 14 in compare mode in the Matrix theme, with KJV and WEB columns side by side and verses 24 to 26 marked "Not numbered in the KJV"](screenshots/compare-translations.png)
+![Romans 14 in compare mode in the Matrix theme, with KJV and WEB columns side by side, the KJV's supplied words in italics, and verses 24 to 26 marked "Not numbered in the KJV"](screenshots/compare-translations.png)
 
 **Select a range and copy it with its reference.** The citation underneath
 shows exactly what will be copied.
@@ -117,7 +126,7 @@ shows exactly what will be copied.
 **Bookmark passages and come back to them.** Bookmarked verses are starred
 in the text, and the Library (Ctrl+B) lists each one with a preview.
 
-![Psalm 23 with verses 1 to 4 starred in the Matrix theme, and the Library panel open on its Bookmarks tab, beside the Highlights and Notes tabs, listing Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
+![Psalm 23 in the KJV with verses 1 to 4 starred in the Matrix theme, above its Footnotes and Cross References, and the Library panel open on its Bookmarks tab, beside the Highlights and Notes tabs, listing Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
 
 ## Keyboard
 
@@ -196,14 +205,14 @@ without you choosing **Update and restart**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0, 2.7.0, 2.8.0 or 2.9.0?** Each updates itself to
-2.9.1: it offers the update when it starts (or from **Check now**, in
-**About Gospel Getter** from the ☰ menu in 2.7.0, 2.8.0 and 2.9.0, or in
-the Updates section of Settings in 2.6.0), if it's one of the installs
-above that update themselves.
+**Coming from 2.6.0 through 2.9.1?** Each updates itself to 2.10.0: it
+offers the update when it starts (or from **Check now**, in **About
+Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
+section of Settings in 2.6.0), if it's one of the installs above that
+update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.9.1 by hand once, from the
+Install 2.10.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -217,7 +226,9 @@ Upgrading keeps your data.
   it's under `%APPDATA%\com.tossbaws.gospel-getter\`.
 - **Upgrades keep your data.** A new version adds any new tables and builds
   the search index once, in the background, without changing scripture
-  text, your reading position, bookmarks, highlights or notes. Moving back to an older
+  text, your reading position, bookmarks, highlights or notes. 2.10.0
+  rebuilds the index once, by itself, so KJV search leaves out the margin
+  notes. Moving back to an older
   version after upgrading hasn't been tested.
 - Theme, text size, line spacing, compare and reading mode are display
   settings stored in the app's web storage, not the database.
@@ -254,7 +265,8 @@ whole database) so it seeds again.
 - **Logic:** `domain/bible.rs` works out the previous and next chapter, and
   `domain/query.rs` decides whether search input is a reference or words.
 - **Search:** uses an SQLite FTS5 index derived from `verses`. It's never
-  written back, and results always show the stored text.
+  written back. It indexes each verse's text as the reader shows it (for
+  the KJV, without the margin notes), and results show that text.
 - **Copying:** uses the webview's own clipboard API, with no plugin or extra
   permission.
 
@@ -281,10 +293,12 @@ stored exactly as their sources provide them.
   `{...}`, in about 56% of verses. These are kept verbatim, including a
   few places where the source's own markup is broken (Hebrews 10:34 has an
   unmatched `}`). The only changes are structural: removing the file's
-  byte-order mark and reshaping the JSON. The reader, Copy and search show
-  this markup as stored; only **Export notes…** presents it as print does,
-  with supplied words in italics and margin notes left out, and it quotes
-  the four verses with broken markup as stored.
+  byte-order mark and reshaping the JSON. The stored text keeps the
+  markup; the app only changes how it's shown. The reader, Copy, search
+  and **Export notes…** present it as print does: supplied words in
+  italics (plain in Copy and search), and margin notes as lettered
+  footnotes in the reader, left out of Copy, search and the export. The
+  four verses with broken markup are shown as stored, braces and all.
 - **WEB** comes from TehShrike/world-english-bible (public domain, via
   ebible.org). Verses the source splits into several entries, as in the
   Psalms' poetry, are joined back together in the source's own order, with
