@@ -1424,12 +1424,14 @@ fn chapter_end_lists_wrap_beside_their_labels() {
 }
 
 /// Verse numbers, the bookmark and note marks after them, and KJV footnote
-/// markers sit straight on the page. On Vaporwave's gradient no one color
-/// can be AA over every stop (white peaks at 3.15:1 on its orange foot),
-/// so there they're a brighter aqua on a badge, and the badge, composited
-/// over every stop of the gradient, plain, selected or under each
-/// highlighter color, keeps them at AA for small text. Every other theme
-/// keeps exactly its accent, with no badge, as before.
+/// markers sit straight on the page, as plain text with no box behind them
+/// in any theme. On Vaporwave's gradient no one color can be AA over every
+/// stop (white peaks at 3.15:1 on its orange foot), so there they're a
+/// brighter aqua with a crisp 1px outline in the theme's near-black purple
+/// on all eight sides of each glyph, and the aqua is AA on that outline
+/// wherever the page shows through. In the faded neighboring chapters the
+/// outline is lighter, so their numbers don't look heavier than their
+/// text. Every other theme keeps exactly its accent, with no outline.
 #[test]
 fn verse_numbers_and_footnote_markers_are_legible_on_every_theme() {
     let rules = rules();
@@ -1437,86 +1439,121 @@ fn verse_numbers_and_footnote_markers_are_legible_on_every_theme() {
         let body = &screen_rule(&rules, selector).body;
         for declaration in [
             "color: var(--verse-num-color)",
-            "background: var(--verse-num-bg)",
-            "box-shadow: 0 0 0 0.12em var(--verse-num-bg)",
+            "text-shadow: var(--verse-num-outline)",
         ] {
             assert!(body.contains(declaration), "{selector}: {declaration}");
+        }
+        for boxed in ["background", "box-shadow", "border-radius", "padding"] {
+            assert!(!body.contains(boxed), "{selector} has no box: {boxed}");
         }
         assert!(!body.contains("var(--accent)"), "{selector}");
     }
     assert!(
-        screen_rule(&rules, ".verse-num")
+        screen_rule(&rules, ".chapter-side .verse-num")
             .body
-            .contains("text-align: var(--verse-num-align)")
+            .contains("text-shadow: var(--verse-num-outline-faded)")
     );
     for mark in [
         ".chapter-main .verse.is-bookmarked .verse-num::after",
         ".chapter-main .verse.has-notes .verse-num::after",
     ] {
+        let body = &screen_rule(&rules, mark).body;
         assert!(
-            screen_rule(&rules, mark)
-                .body
-                .contains("color: var(--verse-num-color)"),
+            body.contains("color: var(--verse-num-color)"),
             "{mark} matches its verse number"
         );
+        // It inherits the number's outline.
+        assert!(!body.contains("text-shadow"), "{mark}");
     }
 
     assert_eq!(default_theme(), "vaporwave");
-    let tint_alpha: f64 = screen_rule(&rules, ".chapter-main .verse.verse-selected")
-        .body
-        .split_once("background: rgba(var(--accent-rgb), ")
-        .and_then(|(_, rest)| rest.split_once(')'))
-        .map(|(alpha, _)| alpha.trim().parse().unwrap())
-        .expect("a selected verse is tinted with --accent");
     for (theme, props) in theme_palettes(&rules) {
         let color = property(&props, "--verse-num-color");
-        let badge = property(&props, "--verse-num-bg");
-        let align = property(&props, "--verse-num-align");
+        let outline = shadows(property(&props, "--verse-num-outline"));
+        let faded = shadows(property(&props, "--verse-num-outline-faded"));
         if theme != "vaporwave" {
             assert_eq!(color, "var(--accent)", "theme `{theme}`");
-            assert_eq!(badge, "transparent", "theme `{theme}`");
-            assert_eq!(align, "start", "theme `{theme}`");
+            assert_eq!(outline, ["none"], "theme `{theme}`");
+            assert_eq!(faded, ["none"], "theme `{theme}`");
             continue;
         }
-        assert_eq!(align, "center");
         // Still the theme's aqua family, so markers read as accent.
         assert_eq!(color, "#5ce1e6");
-        let gradient = property(&props, "--bg");
-        let stops: Vec<String> = gradient
-            .split('#')
-            .skip(1)
-            .map(|rest| format!("#{}", &rest[..6]))
+        // A crisp 1px outline on all eight sides, no blur, in the bar's
+        // near-black purple.
+        let ink = property(&props, "--bar-bg");
+        assert_eq!(ink, "#14082c");
+        let mut sides: Vec<String> = Vec::new();
+        for shadow in &outline {
+            let parts: Vec<&str> = shadow.split_whitespace().collect();
+            let [x, y, blur, shade] = parts[..] else {
+                panic!("vaporwave: expected `x y blur color`, got `{shadow}`")
+            };
+            assert_eq!(blur, "0", "vaporwave: `{shadow}` is crisp");
+            assert_eq!(shade, ink, "vaporwave: `{shadow}`");
+            sides.push(format!("{x} {y}"));
+        }
+        sides.sort();
+        let mut every_side: Vec<String> = ["-1px", "0", "1px"]
+            .iter()
+            .flat_map(|x| ["-1px", "0", "1px"].map(|y| format!("{x} {y}")))
+            .filter(|side| side != "0 0")
             .collect();
-        assert_eq!(
-            stops,
-            ["#14082c", "#441768", "#972378", "#bf5349", "#bf8545"]
+        every_side.sort();
+        assert_eq!(sides, every_side);
+        let ratio = contrast_ratio(color, ink);
+        assert!(
+            ratio >= 4.5,
+            "vaporwave: verse numbers on their outline are {ratio:.2}:1, below 4.5:1"
         );
-        let tint = format!("rgba({}, {tint_alpha})", property(&props, "--accent-rgb"));
-        let mut grounds = Vec::new();
-        for stop in &stops {
-            // As read, and inside a selection (`.verse-selected`'s tint).
-            grounds.push((stop.clone(), stop.clone()));
-            grounds.push((format!("{stop} selected"), composite(&tint, stop)));
-        }
-        for hl in ["--hl-yellow", "--hl-green", "--hl-blue", "--hl-pink"] {
-            grounds.push((hl.to_owned(), property(&props, hl).to_owned()));
-        }
-        for (name, ground) in grounds {
-            let ratio = contrast_ratio(color, &composite(badge, &ground));
-            assert!(
-                ratio >= 4.5,
-                "vaporwave: verse numbers over {name} are {ratio:.2}:1, below 4.5:1"
+        // The faded neighbors' outline: the same purple, see-through, on
+        // four sides.
+        assert_eq!(faded.len(), 4);
+        for shadow in &faded {
+            let (offsets, shade) = shadow
+                .split_once("rgba(")
+                .unwrap_or_else(|| panic!("vaporwave: `{shadow}` is see-through"));
+            assert!(offsets.trim().ends_with(" 0"), "`{shadow}` is crisp");
+            let shade = format!("rgba({shade}");
+            assert!(shade.starts_with("rgba(20, 8, 44, "), "{shade}");
+            assert_eq!(
+                composite(&shade, ink),
+                ink,
+                "{shade} is the outline's purple"
             );
+            assert_ne!(composite(&shade, "#ffffff"), ink, "{shade} is see-through");
         }
     }
 
-    // Printed in black, with no badge, like the other accents.
+    // Printed in black, with no outline, like the other accents.
     let print = block_after(HTML, "@media print");
     for declaration in [
         "--verse-num-color: #000000 !important",
-        "--verse-num-bg: transparent !important",
-        "--verse-num-align: start !important",
+        "--verse-num-outline: none !important",
+        "--verse-num-outline-faded: none !important",
     ] {
         assert!(print.contains(declaration), "{declaration}");
     }
+}
+
+/// A `text-shadow` value's shadows, split on its top-level commas, with
+/// runs of whitespace collapsed.
+fn shadows(value: &str) -> Vec<String> {
+    let mut list = vec![String::new()];
+    let mut depth = 0;
+    for c in value.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                list.push(String::new());
+                continue;
+            }
+            _ => {}
+        }
+        list.last_mut().unwrap().push(c);
+    }
+    list.iter()
+        .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect()
 }
