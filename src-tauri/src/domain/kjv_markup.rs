@@ -132,9 +132,43 @@ pub struct Part {
 pub struct Footnote {
     /// Its marker letter, lettered per verse from "a".
     pub label: String,
+    /// The verse's words the note is on, before its first colon, shown in
+    /// italics like a printed footnote's: "lamp" in "lamp: or, candle".
+    /// `None` when the note has no lemma (see [`Footnote::new`]).
+    pub lemma: Option<String>,
+    /// The rest of the note after the lemma, from its colon on: ": or,
+    /// candle". The whole note when there's no lemma. `lemma` and `rest`
+    /// together are always exactly `text`.
+    pub rest: String,
     /// The note exactly as stored inside the braces, e.g.
     /// "lamp: or, candle".
     pub text: String,
+}
+
+/// The most words a note's lemma has in the bundled KJV is six (Judges
+/// 19:9's "the day groweth to an end"); a first colon after more than
+/// this many words isn't taken to end one.
+const MAX_LEMMA_WORDS: usize = 8;
+
+impl Footnote {
+    /// The note `text`, marked `label`. Its lemma is everything before its
+    /// first colon, when that colon is followed by a space and comes after
+    /// one to eight words, with no space at either end. In
+    /// the bundled KJV that's every note with a colon; the ones without
+    /// ("sickle; or, scythe", Luke 17:36's) have none. Nothing is changed:
+    /// the lemma and the rest are the note's own characters, split.
+    pub fn new(label: String, text: &str) -> Self {
+        let lemma = text.split_once(": ").and_then(|(lemma, _)| {
+            let words = lemma.split_whitespace().count();
+            (lemma.trim() == lemma && (1..=MAX_LEMMA_WORDS).contains(&words)).then_some(lemma)
+        });
+        Self {
+            label,
+            lemma: lemma.map(str::to_string),
+            rest: text[lemma.map_or(0, str::len)..].to_string(),
+            text: text.to_string(),
+        }
+    }
 }
 
 /// A verse as the app shows it.
@@ -205,10 +239,7 @@ pub fn marked(stored: &str) -> Option<VerseText> {
                     text: inner.to_string(),
                     label: Some(label.clone()),
                 });
-                footnotes.push(Footnote {
-                    label,
-                    text: inner.to_string(),
-                });
+                footnotes.push(Footnote::new(label, inner));
             }
             Span::Supplied => {
                 push_text(&mut parts, before);
@@ -362,6 +393,8 @@ mod tests {
             verse.footnotes,
             [Footnote {
                 label: "a".to_string(),
+                lemma: Some("lamp".to_string()),
+                rest: ": or, candle".to_string(),
                 text: "lamp: or, candle".to_string()
             }]
         );
@@ -388,6 +421,63 @@ mod tests {
         assert_eq!(labels, ["a", "b", "c"]);
         // Letters start again at "a" in every verse.
         assert_eq!(kjv("it. {sickle; or, scythe}").footnotes[0].label, "a");
+    }
+
+    /// A note's (lemma, rest), checking they're the note, split.
+    fn lemma(note: &str) -> (Option<&str>, &str) {
+        let footnote = Footnote::new("a".to_string(), note);
+        assert_eq!(footnote.text, note);
+        let at = footnote.lemma.as_ref().map_or(0, String::len);
+        assert_eq!(footnote.lemma.as_deref(), (at > 0).then(|| &note[..at]));
+        assert_eq!(footnote.rest, &note[at..]);
+        ((at > 0).then(|| &note[..at]), &note[at..])
+    }
+
+    #[test]
+    fn a_footnote_s_lemma_is_the_words_before_its_first_colon() {
+        assert_eq!(lemma("lamp: or, candle"), (Some("lamp"), ": or, candle"));
+        // The words keep their "...", and only the first colon counts.
+        assert_eq!(
+            lemma("green...: Heb. pastures of tender grass"),
+            (Some("green..."), ": Heb. pastures of tender grass")
+        );
+        assert_eq!(
+            lemma("Eve: Heb. Chavah: that is Living"),
+            (Some("Eve"), ": Heb. Chavah: that is Living")
+        );
+        // Words that look like a note's are still the verse's.
+        assert_eq!(
+            lemma("or a sheep: or, or a goat"),
+            (Some("or a sheep"), ": or, or a goat")
+        );
+        assert_eq!(
+            lemma("the day groweth to an end: Heb. it is the pitching time of the day"),
+            (
+                Some("the day groweth to an end"),
+                ": Heb. it is the pitching time of the day"
+            )
+        );
+        // No colon: no lemma.
+        assert_eq!(lemma("sickle; or, scythe"), (None, "sickle; or, scythe"));
+        assert_eq!(lemma("before Heb. with"), (None, "before Heb. with"));
+        let luke_17_36 = "this verse is not found in most of the Greek copies";
+        assert_eq!(lemma(luke_17_36), (None, luke_17_36));
+        // A colon too late, with no space after it, or with nothing or a
+        // space before it doesn't end a lemma.
+        let late = "one two three four five six seven eight nine: ten";
+        assert_eq!(lemma(late), (None, late));
+        assert_eq!(lemma("see 3:16 below"), (None, "see 3:16 below"));
+        assert_eq!(lemma(": or, candle"), (None, ": or, candle"));
+        assert_eq!(lemma("lamp : or, candle"), (None, "lamp : or, candle"));
+        assert_eq!(
+            lemma("one two three four five six seven eight: nine").0,
+            Some("one two three four five six seven eight")
+        );
+        // HTML is just text here; it's escaped where it's shown.
+        assert_eq!(
+            lemma("<b>lamp</b>: or, <i>candle</i>"),
+            (Some("<b>lamp</b>"), ": or, <i>candle</i>")
+        );
     }
 
     #[test]
@@ -485,10 +575,13 @@ mod tests {
     /// none is emptied, the parts make up the plain text in order, the
     /// footnotes are the note parts lettered from "a", and what's shown is
     /// the verse's own words, in order, less exactly the margin notes'
-    /// words. Every WEB verse is untouched.
+    /// words. Every note with a colon has a lemma, of at most six words.
+    /// Every WEB verse is untouched.
     #[test]
     fn every_kjv_verse_keeps_its_words() {
         let mut malformed = Vec::new();
+        let (mut with_lemma, mut longest_lemma) = (0, 0);
+        let mut without_lemma = Vec::new();
         let (mut changed, mut notes, mut supplied) = (0, 0, 0);
         let mut unmarked = Vec::new();
         let mut colons = Vec::new();
@@ -580,6 +673,23 @@ mod tests {
                     // Each footnote is its note exactly as stored.
                     let texts: Vec<_> = verse.footnotes.iter().map(|f| f.text.clone()).collect();
                     assert_eq!(texts, note_texts, "{at}");
+                    // Each note's lemma, from its first colon.
+                    for f in &verse.footnotes {
+                        match &f.lemma {
+                            Some(lemma) => {
+                                with_lemma += 1;
+                                assert_eq!(format!("{lemma}{}", f.rest), f.text, "{at}");
+                                assert!(f.rest.starts_with(": "), "{at}");
+                                assert!(!lemma.contains(':'), "{at}");
+                                longest_lemma = longest_lemma.max(lemma.split_whitespace().count());
+                            }
+                            None => {
+                                assert_eq!(f.rest, f.text, "{at}");
+                                assert!(!f.text.contains(':'), "{at}");
+                                without_lemma.push(at.clone());
+                            }
+                        }
+                    }
                     // No space before a marker or at the end, and no
                     // double spaces, where a note was taken out.
                     assert!(
@@ -603,6 +713,23 @@ mod tests {
         assert_eq!(colons.len(), 7, "{colons:?}");
         assert!(colons.contains(&"Genesis 30:27".to_string()));
         assert_eq!((changed, notes, supplied), (17_362, 7_862, 21_521));
+        assert_eq!((with_lemma, longest_lemma), (7_851, 6));
+        assert_eq!(
+            without_lemma,
+            [
+                "Deuteronomy 3:17",
+                "Psalms 73:22",
+                "Ecclesiastes 5:8",
+                "Jeremiah 50:16",
+                "Micah 5:4",
+                "Zephaniah 1:2",
+                "Luke 10:22",
+                "Luke 17:36",
+                "1 Corinthians 5:7",
+                "2 Timothy 4:5",
+                "Hebrews 12:15"
+            ]
+        );
 
         for book in bundled("web") {
             for chapter in &book.chapters {

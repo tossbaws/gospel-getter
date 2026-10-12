@@ -5425,7 +5425,7 @@
                 const notes = footnotes.length
                     ? `<span class="popup-footnotes">
                         <span class="xref-popup-title">Footnotes</span>
-                        ${footnotes.map((f) => `<span class="footnote-entry"><span class="footnote-label">${escapeHtml(f.label)}</span>${escapeHtml(f.text)}</span>`).join('')}
+                        ${footnotes.map((f) => `<span class="footnote-entry"><span class="footnote-label">${escapeHtml(f.label)}</span>${footnoteHtml(f)}</span>`).join('')}
                     </span>`
                     : '';
                 const entries = xrefs
@@ -5457,6 +5457,16 @@
                 </p>`;
             }
 
+            // A footnote's note as printed footnotes set it: the verse's
+            // words it's on (its lemma) in italics, then the rest as
+            // stored, "*lamp*: or, candle". The backend splits it, so the
+            // two are exactly the stored note; without a lemma, it's all
+            // plain.
+            function footnoteHtml(f) {
+                const lemma = f.lemma ? `<em class="footnote-lemma">${escapeHtml(f.lemma)}</em>` : '';
+                return lemma + escapeHtml(f.rest);
+            }
+
             // The footnotes of the chapter being read, one row each
             // ("119:105a lamp: or, candle"), for every column on screen
             // that has any: the KJV's, while reading or comparing it.
@@ -5471,7 +5481,7 @@
                         const rows = c.verses
                             .flatMap((v) => (v.footnotes || []).map((f) => `<div class="footnote-row">
                                 <span class="footnote-ref">${dto.currentChapter}:${v.number}${escapeHtml(f.label)}</span>
-                                <span class="footnote-text">${escapeHtml(f.text)}</span>
+                                <span class="footnote-text">${footnoteHtml(f)}</span>
                             </div>`))
                             .join('');
                         if (!rows) return '';

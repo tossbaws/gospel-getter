@@ -2634,9 +2634,28 @@ mod tests {
                     {"kind": "text", "text": " a lamp unto my feet, and a light unto my path."},
                     {"kind": "note", "text": "lamp: or, candle", "label": "a"},
                 ],
-                "footnotes": [{"label": "a", "text": "lamp: or, candle"}],
+                "footnotes": [{
+                    "label": "a",
+                    "lemma": "lamp",
+                    "rest": ": or, candle",
+                    "text": "lamp: or, candle",
+                }],
                 "xrefs": v105["xrefs"],
             })
+        );
+        // A note without a colon has no lemma: Psalms 73:22's second.
+        let psalm_73 = reading(&state, 19, 73, Some("kjv")).await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&psalm_73.current_verses[21].shown.footnotes).unwrap(),
+            serde_json::json!([
+                {
+                    "label": "a",
+                    "lemma": "ignorant",
+                    "rest": ": Heb. I knew not",
+                    "text": "ignorant: Heb. I knew not",
+                },
+                {"label": "b", "lemma": null, "rest": "before Heb. with", "text": "before Heb. with"},
+            ])
         );
         assert!(!v105["xrefs"].as_array().unwrap().is_empty());
         let kjv = bundled("kjv");

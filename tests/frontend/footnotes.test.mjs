@@ -126,6 +126,50 @@ test('Psalms 119 lists 119:105a, every row in order', () =>
         assert.deepEqual(rows, expected);
     }));
 
+// Each footnote's lemma (the italic words before its first colon), or
+// null, and its text, for the section's rows or a popup's entries.
+const lemmas = (els) => els.map((el) => {
+    const ems = el.querySelectorAll('em');
+    assert.ok(ems.length <= 1);
+    return ems[0] ? ems[0].textContent : null;
+});
+const sectionLemmas = (app) => lemmas([...app.document.querySelectorAll('.footnote-summary .footnote-text')]);
+const popupLemmas = (verse) => lemmas([...verse.querySelectorAll('.xref-popup .footnote-entry')]);
+
+test('a footnote’s lemma is in italics, in the section and in the popup, the note otherwise as stored', () =>
+    withApp({ book: 'Psalms', chapter: 23, translation: 'kjv' }, async (app) => {
+        assert.deepEqual(sectionLemmas(app), ['green...', 'still...', 'anointest', 'for ever']);
+        const row = app.document.querySelector('.footnote-summary .footnote-text');
+        assert.equal(row.innerHTML, '<em class="footnote-lemma">green...</em>: Heb. pastures of tender grass');
+        // Still the stored note, character for character.
+        assert.deepEqual(summaryRows(app), PSALM_23);
+
+        const verse = app.verse(2);
+        await clickAndWait(app, verse.querySelector('.fn-marker'), 'list_notes');
+        assert.deepEqual(popupLemmas(verse), ['green...', 'still...']);
+        assert.deepEqual(popupFootnotes(verse), [
+            ['a', 'green...: Heb. pastures of tender grass'],
+            ['b', 'still...: Heb. waters of quietness'],
+        ]);
+    }));
+
+test('a note without a colon has no lemma: Psalms 73:22’s second, plain', () =>
+    withApp({ book: 'Psalms', chapter: 73, translation: 'kjv' }, async (app) => {
+        const v22 = await shownVerse('kjv', 'Psalms', 73, 22);
+        assert.deepEqual(
+            v22.footnotes.map((f) => [f.lemma, f.rest, f.text]),
+            [['ignorant', ': Heb. I knew not', 'ignorant: Heb. I knew not'], [null, 'before Heb. with', 'before Heb. with']],
+        );
+        const rows = [...app.document.querySelectorAll('.footnote-summary .footnote-row')]
+            .filter((r) => r.querySelector('.footnote-ref').textContent.startsWith('73:22'));
+        assert.deepEqual(lemmas(rows.map((r) => r.querySelector('.footnote-text'))), ['ignorant', null]);
+        assert.equal(rows[1].querySelector('.footnote-text').innerHTML, 'before Heb. with');
+
+        const verse = app.verse(22);
+        await clickAndWait(app, verse.querySelector('.fn-marker'), 'list_notes');
+        assert.deepEqual(popupLemmas(verse), ['ignorant', null]);
+    }));
+
 test('clicking a marker selects its verse and the popup lists its footnotes, then its cross references', () =>
     withApp({ book: 'Psalms', chapter: 119, translation: 'kjv' }, async (app) => {
         const verse = app.verse(105);
@@ -273,7 +317,12 @@ test('footnotes and supplied words are rendered as text, never as markup (synthe
                             { kind: 'text', text: ' & y' },
                             { kind: 'note', text: '<b>n</b>', label: '<u>a</u>' },
                         ],
-                        footnotes: [{ label: '<u>a</u>', text: '<img src=x onerror="window.pwned=1"> "q" \'a\'' }],
+                        footnotes: [{
+                            label: '<u>a</u>',
+                            lemma: '<img src=x onerror="window.pwned=1">',
+                            rest: ': <b>"q"</b> \'a\'',
+                            text: '<img src=x onerror="window.pwned=1">: <b>"q"</b> \'a\'',
+                        }],
                     }
                     : v)),
             }),
@@ -283,9 +332,11 @@ test('footnotes and supplied words are rendered as text, never as markup (synthe
             assert.equal(app.document.querySelector('#reading-pane img, #reading-pane b, #reading-pane u, #reading-pane i'), null);
             assert.equal(verse.querySelector('.supplied').textContent, '<i>x</i>');
             assert.equal(verse.querySelector('.fn-marker').textContent, '<u>a</u>');
-            assert.ok(summaryRows(app).includes('23:1<u>a</u> <img src=x onerror="window.pwned=1"> "q" \'a\''));
+            assert.ok(summaryRows(app).includes('23:1<u>a</u> <img src=x onerror="window.pwned=1">: <b>"q"</b> \'a\''));
+            assert.deepEqual(sectionLemmas(app)[0], '<img src=x onerror="window.pwned=1">');
             await clickAndWait(app, verse, 'list_notes');
-            assert.deepEqual(popupFootnotes(verse), [['<u>a</u>', '<img src=x onerror="window.pwned=1"> "q" \'a\'']]);
+            assert.deepEqual(popupFootnotes(verse), [['<u>a</u>', '<img src=x onerror="window.pwned=1">: <b>"q"</b> \'a\'']]);
+            assert.deepEqual(popupLemmas(verse), ['<img src=x onerror="window.pwned=1">']);
             assert.equal(app.window.pwned, undefined);
             await app.copyButton();
             assert.equal(app.clipboardWrites.at(-1), `SYNTHETIC <i>x</i> & y ${EM} Psalms 23:1 (KJV)`);
