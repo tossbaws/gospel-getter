@@ -73,6 +73,8 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::search,
         commands::get_compare,
         commands::export_reader_data,
+        commands::get_notes_export_options,
+        commands::count_notes_export,
         commands::export_notes,
         commands::choose_import_file,
         commands::apply_import,

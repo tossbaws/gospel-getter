@@ -5,7 +5,8 @@
 // process and its own disposable database; each test resets the bookmarks
 // and reading position first. The clipboard is a stub that can succeed,
 // fail, or be missing; get_reading can be made to fail, or (for escaping
-// tests only) have a clearly synthetic DTO swapped in. Update checks and
+// tests only) it and other commands can have a clearly synthetic answer
+// swapped in. Update checks and
 // installs are scripted in the bridge (`setUpdate`), and progress reaches
 // the page through a minimal Tauri `Channel`, as in the app.
 
@@ -176,7 +177,9 @@ export async function closeBridge() {
  * `failing` maps commands to the error they reject with from the start.
  * `fresh` starts with no saved reading position, as a new install does;
  * `storage` presets the page's local storage (see `app.storage()`);
- * `update` scripts updates from the start (see `setUpdate`).
+ * `update` scripts updates from the start (see `setUpdate`);
+ * `alterReading` and `alter` (command name → function) rewrite answers,
+ * for escaping tests only.
  */
 export async function openApp({
     book = 'John',
@@ -191,6 +194,7 @@ export async function openApp({
     storage = {},
     update = null,
     alterReading = (dto) => dto,
+    alter = {},
 } = {}) {
     await backend('__reset', fresh
         ? { translationCode: translation, keepBookmarks }
@@ -222,7 +226,8 @@ export async function openApp({
         }
         const channels = Object.fromEntries(Object.entries(args).filter(([, v]) => v instanceof Channel));
         const result = await backend(cmd, JSON.parse(JSON.stringify(args)), channels);
-        return cmd === 'get_reading' && result ? alterReading(result) : result;
+        if (cmd === 'get_reading' && result) return alterReading(result);
+        return alter[cmd] ? alter[cmd](result) : result;
     };
 
     const errors = [];

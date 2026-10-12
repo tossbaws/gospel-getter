@@ -20,8 +20,13 @@
 //! messages (`updater::check_message` and `install_message`). Progress
 //! events are written as their own lines, `{"id": 1, "channel": "onEvent",
 //! "message": ...}`, before the answer, as a Tauri `Channel` delivers them.
+//!
+//! The notes export's dates are the computer's, as in the app, unless a
+//! test fixes the time and time zone with `__set_clock`; `__note_written`
+//! backdates a note, which the app's own commands can't.
 
 use anyhow::{Context, bail};
+use chrono::{DateTime, FixedOffset, Local, Offset, Utc};
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
 use std::path::PathBuf;
@@ -40,6 +45,18 @@ static PICKER: Mutex<Option<Option<PathBuf>>> = Mutex::new(None);
 /// The scripted update behavior (see `__set_update`); `None` is the
 /// default: no update available.
 static UPDATE: Mutex<Option<Value>> = Mutex::new(None);
+
+/// A fixed time and time zone for the notes export (see `__set_clock`);
+/// `None` is the computer's own.
+static CLOCK: Mutex<Option<(DateTime<Utc>, FixedOffset)>> = Mutex::new(None);
+
+/// Now, and the time zone the export reads dates in.
+fn clock() -> anyhow::Result<(DateTime<Utc>, FixedOffset)> {
+    let fixed = *CLOCK
+        .lock()
+        .map_err(|_| anyhow::anyhow!("clock lock poisoned"))?;
+    Ok(fixed.unwrap_or_else(|| (Utc::now(), Local::now().offset().fix())))
+}
 
 fn update_script() -> anyhow::Result<Value> {
     Ok(UPDATE
@@ -235,16 +252,24 @@ async fn dispatch(
                 },
             }
         }
+        "get_notes_export_options" => {
+            let (now, tz) = clock()?;
+            match commands::notes_export_options(state, now, &tz).await {
+                Ok(options) => Ok(to_value(options)?),
+                Err(message) => Err(message),
+            }
+        }
+        "count_notes_export" => {
+            let (_, tz) = clock()?;
+            match commands::count_notes_to_export(state, &arg(args, "filter")?, &tz).await {
+                Ok(count) => Ok(to_value(count)?),
+                Err(message) => Err(message),
+            }
+        }
         "export_notes" => {
             let code: String = arg(args, "translationCode")?;
-            match commands::build_notes_export(
-                state,
-                &code,
-                arg(args, "bookId")?,
-                chrono::Utc::now(),
-                &chrono::Local,
-            )
-            .await
+            let (now, tz) = clock()?;
+            match commands::build_notes_export(state, &code, &arg(args, "filter")?, now, &tz).await
             {
                 Err(message) => Err(message),
                 Ok(file) => match pick()? {
@@ -282,6 +307,35 @@ async fn dispatch(
             let code: String = arg(args, "code")?;
             let text: String = arg(args, "text")?;
             Ok(to_value(VerseText::new(&code, &text))?)
+        }
+        // Test setup: the notes export's time and time zone from now on
+        // (`now`, RFC 3339, and `offsetMinutes` east of UTC).
+        "__set_clock" => {
+            let now: String = arg(args, "now")?;
+            let minutes: i32 = arg(args, "offsetMinutes")?;
+            let now = DateTime::parse_from_rfc3339(&now)?.to_utc();
+            let tz = FixedOffset::east_opt(minutes * 60).context("bad offset")?;
+            *CLOCK
+                .lock()
+                .map_err(|_| anyhow::anyhow!("clock lock poisoned"))? = Some((now, tz));
+            Ok(Value::Null)
+        }
+        // Test setup: the note(s) with this `body` were written (and last
+        // edited) at `createdAt`.
+        "__note_written" => {
+            let body: String = arg(args, "body")?;
+            let at: String = arg(args, "createdAt")?;
+            let done =
+                sqlx::query("UPDATE notes SET created_at = ?, updated_at = ? WHERE body = ?")
+                    .bind(&at)
+                    .bind(&at)
+                    .bind(&body)
+                    .execute(pool)
+                    .await?;
+            if done.rows_affected() == 0 {
+                bail!("no note says {body:?}");
+            }
+            Ok(Value::Null)
         }
         // Test setup: the answer the next file dialog gives.
         "__set_picker" => {
@@ -337,6 +391,9 @@ async fn dispatch(
             *UPDATE
                 .lock()
                 .map_err(|_| anyhow::anyhow!("update lock poisoned"))? = None;
+            *CLOCK
+                .lock()
+                .map_err(|_| anyhow::anyhow!("clock lock poisoned"))? = None;
             if !arg::<Option<bool>>(args, "keepBookmarks")?.unwrap_or(false) {
                 sqlx::query("DELETE FROM bookmarks").execute(pool).await?;
                 sqlx::query("DELETE FROM highlights").execute(pool).await?;

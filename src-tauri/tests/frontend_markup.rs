@@ -842,16 +842,18 @@ fn header_surfaces_use_tested_theme_colors() {
     assert!(menu_hover.body.contains("rgba(var(--accent-rgb), 0.15)"));
 }
 
-/// Export notes' book list is themed, not the platform's grey: no native
-/// appearance, `--text` on the opaque `--option-bg` (AA in every theme),
-/// a border and radius like the app's other controls, and a chevron and a
-/// focus ring in `--accent` (at least 3:1, a non-text contrast, on
-/// `--option-bg`). Its options are the same pair, and each theme's
-/// `color-scheme` keeps the list it opens legible.
+/// Export notes' Written list and its chapter and date fields are themed,
+/// not the platform's grey: `--text` on the opaque `--option-bg` (AA in
+/// every theme), a border and radius like the app's other controls, and
+/// for the list no native appearance and a chevron in `--accent`; each has
+/// a focus ring in `--accent` (at least 3:1, a non-text contrast, on
+/// `--option-bg`), as do the books' checkboxes and All / None. The list's
+/// options are the same pair, and each theme's `color-scheme` keeps the
+/// list it opens, and the date fields' calendar, legible.
 #[test]
 fn export_notes_book_list_uses_tested_theme_colors() {
     let rules = rules();
-    let select = screen_rule(&rules, ".export-notes-book");
+    let select = screen_rule(&rules, ".export-notes-select");
     for declaration in [
         "appearance: none",
         "color: var(--text)",
@@ -868,12 +870,27 @@ fn export_notes_book_list_uses_tested_theme_colors() {
         .map(|(value, _)| value)
         .expect("a chevron");
     assert_eq!(chevron.matches("var(--accent)").count(), 2, "{chevron}");
-    let option = screen_rule(&rules, ".export-notes-book option");
+    let option = screen_rule(&rules, ".export-notes-select option");
     assert!(option.body.contains("color: var(--text)"));
     assert!(option.body.contains("background-color: var(--option-bg)"));
+    let field = screen_rule(&rules, ".export-notes-field");
+    for declaration in [
+        "color: var(--text)",
+        "background-color: var(--option-bg)",
+        "border: 1px solid var(--accent-dim)",
+        "border-radius: 6px",
+    ] {
+        assert!(field.body.contains(declaration), "{declaration}");
+    }
+    assert!(
+        screen_rule(&rules, ".export-notes-book-count")
+            .body
+            .contains("color: var(--text-dim)")
+    );
     let focus = screen_rule(
         &rules,
-        ".export-notes-scope input:focus-visible,\n        .export-notes-book:focus-visible",
+        ".export-notes-books input:focus-visible,\n        .export-notes-select:focus-visible,\n        \
+         .export-notes-field:focus-visible,\n        .export-notes-tools .reader-mode-btn:focus-visible",
     );
     assert!(focus.body.contains("outline: 2px solid var(--accent)"));
 
@@ -883,6 +900,11 @@ fn export_notes_book_list_uses_tested_theme_colors() {
         assert!(
             text >= 4.5,
             "theme `{theme}`: the book list's text is {text:.2}:1, below 4.5:1"
+        );
+        let count = contrast_ratio(property(&props, "--text-dim"), option_bg);
+        assert!(
+            count >= 4.5,
+            "theme `{theme}`: the books' counts are {count:.2}:1, below 4.5:1"
         );
         let accent = contrast_ratio(property(&props, "--accent"), option_bg);
         assert!(
