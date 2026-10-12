@@ -1147,8 +1147,9 @@ fn compare_headers_stick_below_the_top_bar() {
 
 /// The note marker is the bookmark star's kind of mark — a pseudo-element
 /// after the verse number, never part of the text — but a different
-/// glyph, beside the star when a verse has both. It's `--accent`, AA on
-/// `--option-bg` in every theme (see the palette tests), and at least 3:1
+/// glyph, beside the star when a verse has both. It's the verse number's
+/// color (`--accent`, or Vaporwave's brighter aqua), AA on `--option-bg` in
+/// every theme (see the palette tests), and at least 3:1
 /// (a non-text contrast) on a selected verse's tint too. Like the star, it
 /// isn't printed.
 #[test]
@@ -1161,7 +1162,7 @@ fn note_marker_is_distinct_tested_and_not_printed() {
     let marker = screen_rule(&rules, ".chapter-main .verse.has-notes .verse-num::after");
     assert!(star.body.contains(r"content: '\2605'"));
     assert!(marker.body.contains(r"content: '\270E'"));
-    assert!(marker.body.contains("color: var(--accent)"));
+    assert!(marker.body.contains("color: var(--verse-num-color)"));
     let both = screen_rule(
         &rules,
         ".chapter-main .verse.is-bookmarked.has-notes .verse-num::after",
@@ -1175,7 +1176,11 @@ fn note_marker_is_distinct_tested_and_not_printed() {
         .map(|(alpha, _)| alpha.trim().parse().unwrap())
         .expect("a selected verse is tinted with --accent");
     for (theme, props) in theme_palettes(&rules) {
-        let accent = property(&props, "--accent");
+        // The verse number's color: --accent, or Vaporwave's own.
+        let accent = match property(&props, "--verse-num-color") {
+            "var(--accent)" => property(&props, "--accent"),
+            color => color,
+        };
         let tint = composite(
             &format!("rgba({}, {tint_alpha})", property(&props, "--accent-rgb")),
             property(&props, "--option-bg"),
@@ -1286,15 +1291,16 @@ fn the_has_notes_cue_is_never_copied() {
 
 /// KJV footnote markers and the chapter's Footnotes section are drawn in
 /// colors every theme keeps legible (see
-/// `theme_palettes_meet_wcag_aa_contrast`): markers in the accent, like the
-/// verse numbers, and the footnotes' text in the dimmed text color, like
-/// the cross-reference list. Markers are never copied with a verse.
+/// `theme_palettes_meet_wcag_aa_contrast`): markers in the verse numbers'
+/// color (see `verse_numbers_and_footnote_markers_are_legible_on_every_theme`),
+/// and the footnotes' text in the dimmed text color, like the
+/// cross-reference list. Markers are never copied with a verse.
 #[test]
 fn kjv_footnotes_use_tested_theme_colors() {
     let rules = rules();
     let marker = screen_rule(&rules, ".fn-marker");
     for declaration in [
-        "color: var(--accent)",
+        "color: var(--verse-num-color)",
         "font-weight: bold",
         "user-select: none",
     ] {
@@ -1414,5 +1420,103 @@ fn chapter_end_lists_wrap_beside_their_labels() {
             !print.contains(selector),
             "print keeps `{selector}`'s layout"
         );
+    }
+}
+
+/// Verse numbers, the bookmark and note marks after them, and KJV footnote
+/// markers sit straight on the page. On Vaporwave's gradient no one color
+/// can be AA over every stop (white peaks at 3.15:1 on its orange foot),
+/// so there they're a brighter aqua on a badge, and the badge, composited
+/// over every stop of the gradient, plain, selected or under each
+/// highlighter color, keeps them at AA for small text. Every other theme
+/// keeps exactly its accent, with no badge, as before.
+#[test]
+fn verse_numbers_and_footnote_markers_are_legible_on_every_theme() {
+    let rules = rules();
+    for selector in [".verse-num", ".fn-marker"] {
+        let body = &screen_rule(&rules, selector).body;
+        for declaration in [
+            "color: var(--verse-num-color)",
+            "background: var(--verse-num-bg)",
+            "box-shadow: 0 0 0 0.12em var(--verse-num-bg)",
+        ] {
+            assert!(body.contains(declaration), "{selector}: {declaration}");
+        }
+        assert!(!body.contains("var(--accent)"), "{selector}");
+    }
+    assert!(
+        screen_rule(&rules, ".verse-num")
+            .body
+            .contains("text-align: var(--verse-num-align)")
+    );
+    for mark in [
+        ".chapter-main .verse.is-bookmarked .verse-num::after",
+        ".chapter-main .verse.has-notes .verse-num::after",
+    ] {
+        assert!(
+            screen_rule(&rules, mark)
+                .body
+                .contains("color: var(--verse-num-color)"),
+            "{mark} matches its verse number"
+        );
+    }
+
+    assert_eq!(default_theme(), "vaporwave");
+    let tint_alpha: f64 = screen_rule(&rules, ".chapter-main .verse.verse-selected")
+        .body
+        .split_once("background: rgba(var(--accent-rgb), ")
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(alpha, _)| alpha.trim().parse().unwrap())
+        .expect("a selected verse is tinted with --accent");
+    for (theme, props) in theme_palettes(&rules) {
+        let color = property(&props, "--verse-num-color");
+        let badge = property(&props, "--verse-num-bg");
+        let align = property(&props, "--verse-num-align");
+        if theme != "vaporwave" {
+            assert_eq!(color, "var(--accent)", "theme `{theme}`");
+            assert_eq!(badge, "transparent", "theme `{theme}`");
+            assert_eq!(align, "start", "theme `{theme}`");
+            continue;
+        }
+        assert_eq!(align, "center");
+        // Still the theme's aqua family, so markers read as accent.
+        assert_eq!(color, "#5ce1e6");
+        let gradient = property(&props, "--bg");
+        let stops: Vec<String> = gradient
+            .split('#')
+            .skip(1)
+            .map(|rest| format!("#{}", &rest[..6]))
+            .collect();
+        assert_eq!(
+            stops,
+            ["#14082c", "#441768", "#972378", "#bf5349", "#bf8545"]
+        );
+        let tint = format!("rgba({}, {tint_alpha})", property(&props, "--accent-rgb"));
+        let mut grounds = Vec::new();
+        for stop in &stops {
+            // As read, and inside a selection (`.verse-selected`'s tint).
+            grounds.push((stop.clone(), stop.clone()));
+            grounds.push((format!("{stop} selected"), composite(&tint, stop)));
+        }
+        for hl in ["--hl-yellow", "--hl-green", "--hl-blue", "--hl-pink"] {
+            grounds.push((hl.to_owned(), property(&props, hl).to_owned()));
+        }
+        for (name, ground) in grounds {
+            let ratio = contrast_ratio(color, &composite(badge, &ground));
+            assert!(
+                ratio >= 4.5,
+                "vaporwave: verse numbers over {name} are {ratio:.2}:1, below 4.5:1"
+            );
+        }
+    }
+
+    // Printed in black, with no badge, like the other accents.
+    let print = block_after(HTML, "@media print");
+    for declaration in [
+        "--verse-num-color: #000000 !important",
+        "--verse-num-bg: transparent !important",
+        "--verse-num-align: start !important",
+    ] {
+        assert!(print.contains(declaration), "{declaration}");
     }
 }

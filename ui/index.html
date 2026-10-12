@@ -48,6 +48,16 @@
                scrolling beneath it never shows through, and --text and
                --accent stay AA on it (see the palette tests). */
             --bar-bg: #14082c;
+            /* Verse numbers and KJV footnote markers sit straight on the
+               page background. No one color is AA over every stop of this
+               gradient (white peaks at 3.15:1 on its orange foot), so here
+               they're a brighter aqua on a badge in the --panel-bg tint,
+               the number centered in it: AA over every stop, selected or
+               highlighted (see the palette tests). The other themes keep
+               --accent, no badge and the number at the start. */
+            --verse-num-color: #5ce1e6;
+            --verse-num-bg: rgba(20, 8, 44, 0.55);
+            --verse-num-align: center;
             /* Highlighter colors (behind highlighted verse text), one set
                per theme: muted on the dark themes, pastel on the light one,
                every one keeping --text at AA contrast. */
@@ -77,6 +87,9 @@
             --option-bg: #1a1c1f;
             --on-accent: #06141f;
             --bar-bg: #16181c;
+            --verse-num-color: var(--accent);
+            --verse-num-bg: transparent;
+            --verse-num-align: start;
             --hl-yellow: #5a4d12;
             --hl-green: #224f2f;
             --hl-blue: #1f3f6b;
@@ -96,6 +109,9 @@
             --option-bg: #ffffff;
             --on-accent: #ffffff;
             --bar-bg: #ffffff;
+            --verse-num-color: var(--accent);
+            --verse-num-bg: transparent;
+            --verse-num-align: start;
             --hl-yellow: #fbe78a;
             --hl-green: #c6ecbd;
             --hl-blue: #c9defc;
@@ -115,6 +131,9 @@
             --option-bg: #041404;
             --on-accent: #001a00;
             --bar-bg: #031003;
+            --verse-num-color: var(--accent);
+            --verse-num-bg: transparent;
+            --verse-num-align: start;
             --hl-yellow: #4a4708;
             --hl-green: #11521f;
             --hl-blue: #0f3a5c;
@@ -140,6 +159,9 @@
             --option-bg: #241a12;
             --on-accent: #1a1410;
             --bar-bg: #1a1410;
+            --verse-num-color: var(--accent);
+            --verse-num-bg: transparent;
+            --verse-num-align: start;
             --hl-yellow: #6b5310;
             --hl-green: #31512a;
             --hl-blue: #22415f;
@@ -168,6 +190,9 @@
             --option-bg: #2a0a1d;
             --on-accent: #1a0411;
             --bar-bg: #12030c;
+            --verse-num-color: var(--accent);
+            --verse-num-bg: transparent;
+            --verse-num-align: start;
             --hl-yellow: #614c0f;
             --hl-green: #1f5038;
             --hl-blue: #263d6b;
@@ -1994,7 +2019,11 @@
             min-width: 1.4rem;
             font-size: calc(0.7rem * var(--reading-scale));
             font-weight: bold;
-            color: var(--accent);
+            color: var(--verse-num-color);
+            background: var(--verse-num-bg);
+            box-shadow: 0 0 0 0.12em var(--verse-num-bg);
+            border-radius: 0.2em;
+            text-align: var(--verse-num-align);
             vertical-align: super;
             margin-right: 0.2rem;
         }
@@ -2076,7 +2105,7 @@
         .chapter-main .verse.is-bookmarked .verse-num::after {
             content: '\2605';
             margin-left: 0.15rem;
-            color: var(--accent);
+            color: var(--verse-num-color);
         }
 
         /* A small pencil, the same way, after the number of every verse
@@ -2087,7 +2116,7 @@
         .chapter-main .verse.has-notes .verse-num::after {
             content: '\270E';
             margin-left: 0.15rem;
-            color: var(--accent);
+            color: var(--verse-num-color);
         }
 
         .chapter-main .verse.is-bookmarked.has-notes .verse-num::after {
@@ -2120,7 +2149,10 @@
             line-height: 0;
             vertical-align: super;
             margin-left: 0.1em;
-            color: var(--accent);
+            color: var(--verse-num-color);
+            background: var(--verse-num-bg);
+            box-shadow: 0 0 0 0.12em var(--verse-num-bg);
+            border-radius: 0.2em;
             cursor: pointer;
             -webkit-user-select: none;
             user-select: none;
@@ -2625,6 +2657,9 @@
                 --accent-rgb: 0, 0, 0 !important;
                 --accent-dim: #000000 !important;
                 --panel-bg: transparent !important;
+                --verse-num-color: #000000 !important;
+                --verse-num-bg: transparent !important;
+                --verse-num-align: start !important;
                 --option-bg: #ffffff !important;
                 --on-accent: #ffffff !important;
                 /* Highlights aren't printed. */
