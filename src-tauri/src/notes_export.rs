@@ -12,9 +12,7 @@
 //! could read as structure is escaped, so the file shows exactly the
 //! characters written (and stored), never markup. The one exception is the
 //! KJV's own `{…}` markup, which the file shows as a printed KJV would
-//! (see `kjv_markup`).
-
-mod kjv_markup;
+//! (see `domain::kjv_markup`).
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -23,6 +21,7 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 
 use crate::db::notes::{grouped, in_bible_order};
 use crate::db::{Book, Note, Verse};
+use crate::domain::kjv_markup::{self, PartKind};
 
 /// Everything one export is made from.
 #[derive(Debug, Clone)]
@@ -171,13 +170,33 @@ impl NotesExport<'_> {
 
 /// One verse's stored text as Markdown. The KJV's `{…}` markup becomes
 /// italics for supplied words, and its margin notes are left out (see
-/// `kjv_markup`); any other translation's text, and a KJV verse whose
-/// markup isn't well formed, is quoted exactly, escaped.
+/// `domain::kjv_markup`); any other translation's text, and a KJV verse
+/// whose markup isn't well formed, is quoted exactly, escaped.
 fn verse_markdown(translation_code: &str, text: &str) -> String {
-    (translation_code == "kjv")
-        .then(|| kjv_markup::to_markdown(text))
+    (translation_code == kjv_markup::KJV)
+        .then(|| kjv_markdown(text))
         .flatten()
         .unwrap_or_else(|| escape_block(text))
+}
+
+/// A KJV verse as escaped Markdown, with supplied words in italics and
+/// margin notes (and the space before each) left out, or `None` when it
+/// should be quoted exactly as stored instead (see `kjv_markup::marked`).
+fn kjv_markdown(text: &str) -> Option<String> {
+    let verse = kjv_markup::marked(text)?;
+    Some(
+        verse
+            .parts
+            .iter()
+            .map(|part| match part.kind {
+                PartKind::Text => escape_inline(&part.text),
+                // Escaped first, so the words can't form other Markdown;
+                // the asterisks are the only markup added.
+                PartKind::Supplied => format!("*{}*", escape_inline(&part.text)),
+                PartKind::Note => String::new(),
+            })
+            .collect(),
+    )
 }
 
 /// "John 3:16" or "John 3:16–18", as the app writes a passage.
@@ -543,6 +562,48 @@ mod tests {
         let hebrews = "substance. {in yourselves...: or, that ye have in or, for} yourselves}";
         assert_eq!(verse_markdown("kjv", hebrews), escape_block(hebrews));
         assert_eq!(verse_markdown("web", "the {Word}"), "the {Word}");
+    }
+
+    #[test]
+    fn kjv_supplied_words_are_escaped_then_italic_and_notes_left_out() {
+        let md = |text: &str| kjv_markdown(text);
+        assert_eq!(
+            md("The LORD {is} my shepherd; I shall not want.").as_deref(),
+            Some("The LORD *is* my shepherd; I shall not want.")
+        );
+        // The words are escaped before the asterisks go on.
+        assert_eq!(md("a {*b_ [c]} d").as_deref(), Some(r"a *\*b\_ \[c\]* d"));
+        // Notes go, with the space before each.
+        assert_eq!(
+            md("So foolish {was} I. {ignorant: Heb. I knew not} {before Heb. with}").as_deref(),
+            Some("So foolish *was* I.")
+        );
+        // Malformed, or nothing to rewrite: quoted exactly instead.
+        assert_eq!(md("a {{and from} b: or, c}"), None);
+        assert_eq!(md("In the beginning God created"), None);
+    }
+
+    /// The export of every KJV verse is byte for byte what 2.9.1 wrote:
+    /// a fingerprint (FNV-1a, each verse's Markdown followed by 0xff) of
+    /// 2.9.1's own output, taken before the rule moved to
+    /// `domain::kjv_markup`.
+    #[test]
+    fn every_kjv_verse_exports_as_in_2_9_1() {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut verses = 0;
+        for book in crate::db::test_support::bundled("kjv") {
+            for chapter in &book.chapters {
+                for text in chapter {
+                    let out = kjv_markdown(text).unwrap_or_default();
+                    for byte in out.bytes().chain([0xff]) {
+                        hash ^= u64::from(byte);
+                        hash = hash.wrapping_mul(0x0100_0000_01b3);
+                    }
+                    verses += 1;
+                }
+            }
+        }
+        assert_eq!((verses, hash), (31_100, 0x5d3b_b105_7221_fd2b));
     }
 
     #[test]

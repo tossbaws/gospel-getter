@@ -4,7 +4,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, storedVerse } from './harness.mjs';
+import { closeBridge, openApp, shownVerse, storedVerse } from './harness.mjs';
 
 after(closeBridge);
 
@@ -37,7 +37,7 @@ test('search, select, copy, bookmark, switch, compare, reopen and read on', asyn
         assert.deepEqual(app.selectedVerseNumbers(), [9, 10, 11]);
         app.key('c', { ctrlKey: true });
         await app.idle(0);
-        const kjv = [9, 10, 11].map((n) => storedVerse('kjv', 'Genesis', 4, n)).join(' ');
+        const kjv = (await Promise.all([9, 10, 11].map((n) => shownVerse('kjv', 'Genesis', 4, n)))).map((v) => v.text).join(' ');
         assert.equal(app.clipboardWrites.at(-1), `${kjv} ${EM} Genesis 4:9${EN}11 (KJV)`);
         before = app.calls.length;
         app.click(app.bookmarkButton());
@@ -62,7 +62,7 @@ test('search, select, copy, bookmark, switch, compare, reopen and read on', asyn
         assert.deepEqual(app.bookmarkedVerseNumbers('web'), [9, 10, 11]);
         app.click(app.verse(10, 'kjv'));
         await app.copyButton();
-        assert.equal(app.clipboardWrites.at(-1), `${storedVerse('kjv', 'Genesis', 4, 10)} ${EM} Genesis 4:10 (KJV)`);
+        assert.equal(app.clipboardWrites.at(-1), `${(await shownVerse('kjv', 'Genesis', 4, 10)).text} ${EM} Genesis 4:10 (KJV)`);
 
         // Read on, then reopen the bookmark: it opens in compare, selected
         // in the selected translation's (WEB) column.

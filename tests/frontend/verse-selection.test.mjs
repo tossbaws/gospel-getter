@@ -3,7 +3,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, settle, storedVerse } from './harness.mjs';
+import { closeBridge, openApp, settle, shownVerse, storedVerse } from './harness.mjs';
 
 after(closeBridge);
 
@@ -84,7 +84,8 @@ test('verse numbers order numerically, not as strings', () =>
         app.click(app.verse(12), { shiftKey: true });
         assert.deepEqual(app.selectedVerseNumbers(), [9, 10, 11, 12]);
         await app.copyButton();
-        const text = [9, 10, 11, 12].map((n) => storedVerse('kjv', 'Genesis', 4, n)).join(' ');
+        const shown = await Promise.all([9, 10, 11, 12].map((n) => shownVerse('kjv', 'Genesis', 4, n)));
+        const text = shown.map((v) => v.text).join(' ');
         assertSameBytes(app.clipboardWrites[0], `${text} ${EM} Genesis 4:9${EN}12 (KJV)`);
     }));
 
@@ -98,23 +99,43 @@ test('three-digit verse ranges order numerically', () =>
         assertSameBytes(app.clipboardWrites[0], `${text} ${EM} Psalms 119:99${EN}105 (WEB)`);
     }));
 
-for (const [code, book, chapter, verse, note] of [
-    ['kjv', 'Genesis', 4, 9, "apostrophe and {} translator markup"],
-    ['kjv', 'Mark', 13, 8, 'straight double quotes inside a {} note'],
+for (const [code, book, chapter, verse, note, expected] of [
+    ['kjv', 'Genesis', 4, 9, 'an apostrophe, and {} supplied words as plain words',
+        "And the LORD said unto Cain, Where is Abel thy brother? And he said, I know not: Am I my brother's keeper?"],
+    ['kjv', 'Mark', 13, 8, 'its {} margin note, with straight double quotes, left out',
+        'For nation shall rise against nation, and kingdom against kingdom: and there shall be earthquakes in divers places, and there shall be famines and troubles: these are the beginnings of sorrows.'],
     ['web', 'Genesis', 4, 9, 'curly double quotes and apostrophes'],
     ['web', 'Genesis', 1, 3, 'curly quotes around a comma'],
 ]) {
     test(`${code.toUpperCase()} ${book} ${chapter}:${verse} copies byte for byte (${note})`, () =>
         withApp({ book, chapter, translation: code }, async (app) => {
             const stored = storedVerse(code, book, chapter, verse);
+            // The WEB copies exactly as stored; the KJV, its plain text,
+            // as the backend gives it.
+            const text = expected ?? stored;
+            assert.equal((await shownVerse(code, book, chapter, verse)).text, text);
             // The rendered verse carries its number and possibly
-            // cross-reference labels — none of which may be copied.
-            assert.notEqual(app.verse(verse).textContent.trim(), stored);
+            // cross-reference labels, footnote markers and cues — none of
+            // which may be copied.
+            assert.notEqual(app.verse(verse).textContent.trim(), text);
             app.click(app.verse(verse));
             await app.copyButton();
-            assertSameBytes(app.clipboardWrites[0], `${stored} ${EM} ${book} ${chapter}:${verse} (${code.toUpperCase()})`);
+            assertSameBytes(app.clipboardWrites[0], `${text} ${EM} ${book} ${chapter}:${verse} (${code.toUpperCase()})`);
         }));
 }
+
+test('Ctrl+C copies the KJV’s plain text: no braces, no margin notes', () =>
+    withApp({ book: 'Psalms', chapter: 23, translation: 'kjv' }, async (app) => {
+        app.click(app.verse(1));
+        app.click(app.verse(2), { shiftKey: true });
+        app.key('c', { ctrlKey: true });
+        await app.idle(0);
+        assertSameBytes(
+            app.clipboardWrites.at(-1),
+            '[A Psalm of David.] The LORD is my shepherd; I shall not want. He maketh me to lie down in green pastures: '
+                + `he leadeth me beside the still waters. ${EM} Psalms 23:1${EN}2 (KJV)`,
+        );
+    }));
 
 test('markup-like text is rendered as text and copied raw (synthetic DTO)', () =>
     withApp(
@@ -123,9 +144,10 @@ test('markup-like text is rendered as text and copied raw (synthetic DTO)', () =
             chapter: 3,
             alterReading: (dto) => ({
                 ...dto,
-                currentVerses: dto.currentVerses.map((v) =>
-                    v.number === 1 ? { ...v, text: 'SYNTHETIC <b>not bold</b> & "q" \'a\'' } : v,
-                ),
+                currentVerses: dto.currentVerses.map((v) => {
+                    const text = 'SYNTHETIC <b>not bold</b> & "q" \'a\'';
+                    return v.number === 1 ? { ...v, text, parts: [{ kind: 'text', text }] } : v;
+                }),
             }),
         },
         async (app) => {

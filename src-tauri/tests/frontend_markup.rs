@@ -1273,9 +1273,79 @@ fn notes_use_tested_theme_colors() {
 #[test]
 fn the_has_notes_cue_is_never_copied() {
     let rules = rules();
-    let cue = screen_rule(&rules, ".note-cue");
+    // The same goes for a KJV verse's "(has footnotes)".
+    let cue = rules
+        .iter()
+        .find(|r| r.at_rule.is_none() && selectors(r).eq([".note-cue", ".footnote-cue"]))
+        .expect("a `.note-cue, .footnote-cue` rule");
     assert!(cue.body.contains("-webkit-user-select: none"));
     assert!(cue.body.contains("user-select: none"));
     let hidden = screen_rule(&rules, ".visually-hidden");
     assert!(hidden.body.contains("clip: rect(0 0 0 0)"));
+}
+
+/// KJV footnote markers and the chapter's Footnotes section are drawn in
+/// colors every theme keeps legible (see
+/// `theme_palettes_meet_wcag_aa_contrast`): markers in the accent, like the
+/// verse numbers, and the footnotes' text in the dimmed text color, like
+/// the cross-reference list. Markers are never copied with a verse.
+#[test]
+fn kjv_footnotes_use_tested_theme_colors() {
+    let rules = rules();
+    let marker = screen_rule(&rules, ".fn-marker");
+    for declaration in [
+        "color: var(--accent)",
+        "font-weight: bold",
+        "user-select: none",
+    ] {
+        assert!(marker.body.contains(declaration), "{declaration}");
+    }
+    assert!(
+        screen_rule(&rules, ".footnote-ref")
+            .body
+            .contains("color: var(--accent)")
+    );
+    assert!(
+        screen_rule(&rules, ".footnote-text")
+            .body
+            .contains("color: var(--text-dim)")
+    );
+    assert!(
+        screen_rule(&rules, ".footnote-label")
+            .body
+            .contains("color: var(--accent)")
+    );
+    assert!(
+        screen_rule(&rules, ".supplied")
+            .body
+            .contains("font-style: italic")
+    );
+    for (theme, props) in theme_palettes(&rules) {
+        let option_bg = property(&props, "--option-bg");
+        for fg in ["--accent", "--text-dim"] {
+            let ratio = contrast_ratio(property(&props, fg), option_bg);
+            assert!(ratio >= 4.5, "theme `{theme}`: {fg} is {ratio:.2}:1");
+        }
+    }
+}
+
+/// Printing keeps the chapter's Footnotes section and the markers in the
+/// verses, as it keeps the Cross References section; the popup, which
+/// shows a selected verse's footnotes on screen, isn't printed.
+#[test]
+fn kjv_footnotes_print_with_the_chapter() {
+    let block = block_after(HTML, "@media print");
+    for selector in [
+        ".footnote-summary",
+        ".footnote-row",
+        ".fn-marker",
+        ".supplied",
+    ] {
+        assert!(
+            !block.contains(selector),
+            "the print stylesheet mustn't touch `{selector}`"
+        );
+    }
+    assert!(block.contains(".xref-popup"));
+    assert!(!block.contains(".xref-summary"));
 }

@@ -4,6 +4,11 @@
 //! carry each verse's text as stored in `verses`, not anything from the
 //! index.
 //!
+//! What's indexed is each verse's plain text as the app shows it (see
+//! `domain::kjv_markup::VerseText`): in the KJV, supplied words without
+//! their braces and no margin notes, so a note's words don't find the
+//! verse. Every other translation's text is indexed as stored.
+//!
 //! Each indexed row's rowid encodes the verse's coordinates —
 //! `translation * 10^8 + book * 10^6 + chapter * 10^3 + verse` — so one
 //! translation is a contiguous rowid range, and rowid order is canonical
@@ -11,6 +16,14 @@
 
 use anyhow::{Context, bail};
 use sqlx::{FromRow, SqlitePool};
+
+use crate::domain::kjv_markup::{KJV, VerseText};
+
+/// What `verse_search` holds, recorded in `search_index_version`. A
+/// database with any other version (or none: 2.9.1 and older indexed the
+/// KJV's stored text, braces and notes included) has its whole index
+/// rebuilt once. Change it whenever what's indexed changes.
+pub const SEARCH_CONTENT_VERSION: i64 = 1;
 
 const TRANSLATION_STRIDE: i64 = 100_000_000;
 const BOOK_STRIDE: i64 = 1_000_000;
@@ -34,10 +47,14 @@ pub struct SearchHit {
 
 /// Index every translation that isn't indexed yet, or whose verse count no
 /// longer matches what was indexed (`seed_missing` also clears the record
-/// for anything it seeds). Each translation is indexed in its own
-/// transaction, so the database stays usable in between. Returns the ids
-/// of the translations it (re)indexed — none at all on a normal launch.
+/// for anything it seeds), or all of them if the index holds an older
+/// kind of content (see `SEARCH_CONTENT_VERSION`). Each translation is
+/// indexed in its own transaction, so the database stays usable in
+/// between. Returns the ids of the translations it (re)indexed — none at
+/// all on a normal launch.
 pub async fn ensure_search_index(pool: &SqlitePool) -> anyhow::Result<Vec<i64>> {
+    forget_outdated_index(pool).await?;
+
     let translations: Vec<i64> = sqlx::query_scalar("SELECT id FROM translations ORDER BY id")
         .fetch_all(pool)
         .await
@@ -65,6 +82,46 @@ pub async fn ensure_search_index(pool: &SqlitePool) -> anyhow::Result<Vec<i64>> 
         indexed.push(translation_id);
     }
     Ok(indexed)
+}
+
+/// If the index holds an older kind of content, forget what it covers, so
+/// every translation is indexed again, and record the current version.
+/// Both happen in one transaction: if the app quits part-way through the
+/// rebuild, the translations already done stay done, and the rest are
+/// indexed on the next launch.
+async fn forget_outdated_index(pool: &SqlitePool) -> anyhow::Result<()> {
+    let version: Option<i64> =
+        sqlx::query_scalar("SELECT version FROM search_index_version WHERE id = 1")
+            .fetch_optional(pool)
+            .await
+            .context("Failed to read search index version")?;
+    if version == Some(SEARCH_CONTENT_VERSION) {
+        return Ok(());
+    }
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Failed to start search index version transaction")?;
+    sqlx::query("DELETE FROM search_index_state")
+        .execute(&mut *tx)
+        .await
+        .context("Failed to reset search index state")?;
+    sqlx::query(
+        "INSERT INTO search_index_version (id, version) VALUES (1, $1) \
+         ON CONFLICT (id) DO UPDATE SET version = excluded.version",
+    )
+    .bind(SEARCH_CONTENT_VERSION)
+    .execute(&mut *tx)
+    .await
+    .context("Failed to record search index version")?;
+    tx.commit()
+        .await
+        .context("Failed to commit search index version")?;
+    tracing::info!(
+        "Search index content version {version:?} is outdated; rebuilding it as version \
+         {SEARCH_CONTENT_VERSION}"
+    );
+    Ok(())
 }
 
 /// (Re)index one translation. It's done a book at a time, each in its own
@@ -113,6 +170,11 @@ async fn index_translation(
         .await
         .context("Failed to commit search index reset")?;
 
+    let code: String = sqlx::query_scalar("SELECT code FROM translations WHERE id = $1")
+        .bind(translation_id)
+        .fetch_one(pool)
+        .await
+        .context("Failed to read the translation to index")?;
     let books: Vec<i64> = sqlx::query_scalar(
         "SELECT DISTINCT book_id FROM verses WHERE translation_id = $1 ORDER BY book_id",
     )
@@ -121,18 +183,11 @@ async fn index_translation(
     .await
     .context("Failed to list books to index")?;
     for book_id in books {
-        sqlx::query(
-            "INSERT INTO verse_search (rowid, text) \
-             SELECT translation_id * $3 + book_id * $4 + chapter * $5 + verse, text \
-             FROM verses WHERE translation_id = $1 AND book_id = $2",
-        )
-        .bind(translation_id)
-        .bind(book_id)
-        .bind(TRANSLATION_STRIDE)
-        .bind(BOOK_STRIDE)
-        .bind(CHAPTER_STRIDE)
-        .execute(pool)
-        .await
+        if code == KJV {
+            index_book_as_shown(pool, translation_id, book_id).await
+        } else {
+            index_book_as_stored(pool, translation_id, book_id).await
+        }
         .with_context(|| format!("Failed to index book {book_id} for search"))?;
     }
 
@@ -147,6 +202,59 @@ async fn index_translation(
     .context("Failed to record search index state")?;
 
     tracing::info!("Indexed translation {translation_id} for search ({verse_count} verses)");
+    Ok(())
+}
+
+/// Index one book's stored text, as is.
+async fn index_book_as_stored(
+    pool: &SqlitePool,
+    translation_id: i64,
+    book_id: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO verse_search (rowid, text) \
+         SELECT translation_id * $3 + book_id * $4 + chapter * $5 + verse, text \
+         FROM verses WHERE translation_id = $1 AND book_id = $2",
+    )
+    .bind(translation_id)
+    .bind(book_id)
+    .bind(TRANSLATION_STRIDE)
+    .bind(BOOK_STRIDE)
+    .bind(CHAPTER_STRIDE)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Index one KJV book's plain text as the app shows it (see `VerseText`),
+/// in one transaction.
+async fn index_book_as_shown(
+    pool: &SqlitePool,
+    translation_id: i64,
+    book_id: i64,
+) -> anyhow::Result<()> {
+    let verses: Vec<(i64, i64, String)> = sqlx::query_as(
+        "SELECT chapter, verse, text FROM verses \
+         WHERE translation_id = $1 AND book_id = $2 ORDER BY chapter, verse",
+    )
+    .bind(translation_id)
+    .bind(book_id)
+    .fetch_all(pool)
+    .await?;
+    let mut tx = pool.begin().await?;
+    for (chapter, verse, stored) in verses {
+        sqlx::query("INSERT INTO verse_search (rowid, text) VALUES ($1, $2)")
+            .bind(
+                translation_id * TRANSLATION_STRIDE
+                    + book_id * BOOK_STRIDE
+                    + chapter * CHAPTER_STRIDE
+                    + verse,
+            )
+            .bind(VerseText::new(KJV, &stored).text)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
     Ok(())
 }
 
