@@ -35,7 +35,9 @@ import threading
 from pathlib import Path
 
 os.environ.setdefault("GDK_SCALE", "2")
-os.environ.setdefault("GDK_BACKEND", "x11")
+# Force XWayland: the session exports GDK_BACKEND=wayland,..., and GTK3's
+# key-simulation test helpers segfault on Wayland.
+os.environ["GDK_BACKEND"] = "x11"
 # Offscreen windows can't get a GL context; render in software.
 os.environ.setdefault("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
 
