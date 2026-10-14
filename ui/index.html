@@ -8,6 +8,48 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
     <style>
+        /* Literata (TypeTogether, SIL Open Font License, see
+           fonts/OFL.txt), bundled so scripture reads the same on every
+           computer, offline: regular, its true italic (the KJV's supplied
+           words) and bold, each cut to the Latin characters the
+           translations use. font-display: block, because the files are
+           local and load in milliseconds: the text waits for them instead
+           of flashing up in a fallback face and then jumping to this one. */
+        @font-face {
+            font-family: 'Literata';
+            font-style: normal;
+            font-weight: 400;
+            font-display: block;
+            src: url('fonts/literata-regular.woff2') format('woff2');
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+
+        @font-face {
+            font-family: 'Literata';
+            font-style: italic;
+            font-weight: 400;
+            font-display: block;
+            src: url('fonts/literata-italic.woff2') format('woff2');
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+
+        @font-face {
+            font-family: 'Literata';
+            font-style: normal;
+            font-weight: 700;
+            font-display: block;
+            src: url('fonts/literata-bold.woff2') format('woff2');
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+
+        /* The two typefaces every theme shares: Literata for scripture
+           and chapter headings, and the system's UI sans, as on the
+           website, for everything else. */
+        :root {
+            --font-scripture: 'Literata', Georgia, 'Times New Roman', serif;
+            --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, Cantarell, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+        }
+
         /* Default theme: vaporwave. Its darkest tone, #14082c, is also the
            app icon's background (packaging/icon.svg). Every
            theme defines this same set of custom properties — see the
@@ -227,7 +269,7 @@
         }
 
         body {
-            font-family: Georgia, 'Times New Roman', serif;
+            font-family: var(--font-ui);
             background: var(--bg);
             background-attachment: fixed;
             color: var(--text);
@@ -482,7 +524,7 @@
             justify-content: center;
             background: var(--bg);
             color: var(--accent);
-            font-family: Georgia, 'Times New Roman', serif;
+            font-family: var(--font-scripture);
             font-size: 0.85rem;
         }
 
@@ -1131,6 +1173,7 @@
         }
 
         .note-passage {
+            font-family: var(--font-scripture);
             max-height: calc(4 * 1.55em);
             overflow-y: auto;
             font-size: calc(0.95rem * var(--reading-scale));
@@ -2076,7 +2119,7 @@
             background: none;
             border: none;
             border-bottom: 1px solid var(--accent-dim);
-            font-family: inherit;
+            font-family: var(--font-scripture);
             font-size: 1.2rem;
             color: var(--accent);
             margin-bottom: 0.8rem;
@@ -2101,6 +2144,7 @@
         }
 
         .chapter-heading {
+            font-family: var(--font-scripture);
             font-size: calc(1.5rem * var(--reading-scale));
             font-weight: normal;
             color: var(--accent);
@@ -2111,6 +2155,7 @@
         }
 
         .verse {
+            font-family: var(--font-scripture);
             font-size: calc(1.05rem * var(--reading-scale));
             line-height: var(--reading-leading);
             margin-bottom: 0.5rem;
@@ -2120,6 +2165,7 @@
         .verse-num {
             display: inline-block;
             min-width: 1.4rem;
+            font-family: var(--font-scripture);
             font-size: calc(0.7rem * var(--reading-scale));
             font-weight: bold;
             color: var(--verse-num-color);
@@ -2151,6 +2197,7 @@
            selected verse, or at the top of a single verse's
            cross-reference popup when it has one. */
         .verse-actions {
+            font-family: var(--font-ui);
             display: flex;
             flex-wrap: wrap;
             align-items: center;
@@ -2278,6 +2325,7 @@
            note's passage, date and text (three lines of it until "more"),
            read-only, with Edit. The text keeps the reader's line breaks. */
         .verse-notes {
+            font-family: var(--font-ui);
             display: block;
             margin-top: 0.4rem;
             padding: 0.5rem 0.8rem;
@@ -2548,6 +2596,7 @@
         }
 
         .xref-popup:not([hidden]) {
+            font-family: var(--font-ui);
             display: block;
             margin-top: 0.4rem;
             padding: 0.6rem 0.8rem;

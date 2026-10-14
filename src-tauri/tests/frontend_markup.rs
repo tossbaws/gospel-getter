@@ -1579,3 +1579,114 @@ fn shadows(value: &str) -> Vec<String> {
         .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
         .collect()
 }
+
+// ---- The Tier 1 look: typefaces, brand themes, quieter chrome ---------
+
+/// Literata is bundled in ui/fonts with its licence: regular, true italic
+/// and bold, as WOFF2, and the `@font-face` rules point at exactly those
+/// files. Scripture and chapter headings use it; everything else uses the
+/// system UI sans (the website's `--sans`).
+#[test]
+fn literata_is_bundled_for_scripture_and_the_ui_uses_the_sans() {
+    let fonts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui/fonts");
+    let licence = std::fs::read_to_string(fonts.join("OFL.txt")).expect("ui/fonts/OFL.txt");
+    assert!(licence.contains("SIL Open Font License, Version 1.1"));
+    assert!(licence.contains("The Literata Project Authors"));
+
+    let css = stylesheet();
+    let faces: Vec<&str> = css
+        .match_indices("@font-face")
+        .map(|(at, _)| {
+            let open = at + css[at..].find('{').unwrap();
+            &css[open..matching_brace_end(&css, open)]
+        })
+        .collect();
+    assert_eq!(faces.len(), 3);
+    let mut seen = Vec::new();
+    for face in faces {
+        assert!(face.contains("font-family: 'Literata'"), "{face}");
+        assert!(face.contains("font-display: block"), "{face}");
+        let file = face
+            .split_once("url('fonts/")
+            .and_then(|(_, rest)| rest.split_once("')"))
+            .map(|(file, _)| file)
+            .expect("a src in ui/fonts");
+        assert!(face.contains("format('woff2')"));
+        let bytes = std::fs::read(fonts.join(file)).unwrap_or_else(|_| panic!("ui/fonts/{file}"));
+        assert_eq!(&bytes[..4], b"wOF2", "{file} is WOFF2");
+        let style = if face.contains("font-style: italic") {
+            "italic"
+        } else {
+            "normal"
+        };
+        let weight = face
+            .split_once("font-weight: ")
+            .map(|(_, rest)| &rest[..3])
+            .unwrap();
+        seen.push(format!("{file} {style} {weight}"));
+    }
+    seen.sort();
+    assert_eq!(
+        seen,
+        [
+            "literata-bold.woff2 normal 700",
+            "literata-italic.woff2 italic 400",
+            "literata-regular.woff2 normal 400",
+        ]
+    );
+
+    let rules = rules();
+    let root = custom_properties(&screen_rule(&rules, ":root").body);
+    assert!(property(&root, "--font-scripture").starts_with("'Literata', "));
+    assert!(property(&root, "--font-ui").starts_with("system-ui, "));
+    assert!(
+        screen_rule(&rules, "body")
+            .body
+            .contains("font-family: var(--font-ui)")
+    );
+    for selector in [
+        ".verse",
+        ".verse-num",
+        ".chapter-heading",
+        ".chapter-heading-link",
+        ".note-passage",
+        ".theme-swatch-preview",
+    ] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains("font-family: var(--font-scripture)"),
+            "{selector} is scripture"
+        );
+    }
+    // The selection's actions, notes and popup sit inside a verse, but
+    // they're controls.
+    for selector in [
+        ".verse-actions",
+        ".verse-notes",
+        ".xref-popup:not([hidden])",
+    ] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains("font-family: var(--font-ui)"),
+            "{selector} is UI"
+        );
+    }
+    // No other face is named anywhere.
+    let named: Vec<&str> = rules
+        .iter()
+        .flat_map(|r| r.body.split(';'))
+        .filter_map(|d| d.trim().strip_prefix("font-family:"))
+        .map(str::trim)
+        .filter(|v| !["inherit", "var(--font-ui)", "var(--font-scripture)"].contains(v))
+        .collect();
+    assert_eq!(named, Vec::<&str>::new());
+    // The supplied words are the real italic, never a synthesized one.
+    assert!(
+        screen_rule(&rules, ".supplied")
+            .body
+            .contains("font-style: italic")
+    );
+    assert!(!css.contains("font-synthesis"));
+}
