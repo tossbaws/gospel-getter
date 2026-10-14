@@ -801,7 +801,8 @@ fn header_buttons_announce_what_they_open() {
 
 /// The top bar, the popovers, the Library and the toast add only these
 /// colors to the theme palettes: the bar's opaque `--bar-bg`, with the bar
-/// buttons' text and their open state AA on it in every theme; and they
+/// buttons (ghost icons in `--text-dim`, `--text` on a wash under the
+/// pointer, `--accent` on it while open) AA on it in every theme; and they
 /// otherwise reuse the AA-tested pairs (`--accent` on `--panel-bg` over
 /// `--option-bg`, `--on-accent` on `--accent`, `--text`/`--text-dim` on
 /// `--option-bg`). The chosen theme swatch's ring is `--accent`, at least
@@ -817,6 +818,22 @@ fn header_surfaces_use_tested_theme_colors() {
         .and_then(|(_, rest)| rest.split_once(')'))
         .map(|(alpha, _)| alpha.trim().parse().unwrap())
         .expect("an open bar button is tinted with --accent");
+    let ghost = screen_rule(&rules, ".bar-btn");
+    for declaration in ["background: none", "border: none", "color: var(--text-dim)"] {
+        assert!(ghost.body.contains(declaration), ".bar-btn: {declaration}");
+    }
+    let hover = &screen_rule(&rules, ".bar-btn:hover").body;
+    assert!(hover.contains("color: var(--text)"));
+    let hover_alpha: f64 = hover
+        .split_once("rgba(var(--accent-rgb), ")
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(alpha, _)| alpha.trim().parse().unwrap())
+        .expect("a bar button under the pointer gets a wash");
+    assert!(
+        screen_rule(&rules, r#".bar-btn[aria-expanded="true"]"#)
+            .body
+            .contains("color: var(--accent)")
+    );
     for (theme, props) in theme_palettes(&rules) {
         let bar_bg = property(&props, "--bar-bg");
         let accent = property(&props, "--accent");
@@ -831,8 +848,13 @@ fn header_surfaces_use_tested_theme_colors() {
             ("--accent on --bar-bg", accent.to_owned(), bar_bg.to_owned()),
             (
                 "a bar button",
-                accent.to_owned(),
-                composite(property(&props, "--panel-bg"), bar_bg),
+                property(&props, "--text-dim").to_owned(),
+                bar_bg.to_owned(),
+            ),
+            (
+                "a bar button under the pointer",
+                property(&props, "--text").to_owned(),
+                composite(&format!("rgba({accent_rgb}, {hover_alpha})"), bar_bg),
             ),
             (
                 "an open bar button",
@@ -899,7 +921,7 @@ fn export_notes_book_list_uses_tested_theme_colors() {
         "color: var(--text)",
         "background-color: var(--option-bg)",
         "border: 1px solid var(--accent-dim)",
-        "border-radius: 6px",
+        "border-radius: var(--radius-m)",
     ] {
         assert!(select.body.contains(declaration), "{declaration}");
     }
@@ -918,7 +940,7 @@ fn export_notes_book_list_uses_tested_theme_colors() {
         "color: var(--text)",
         "background-color: var(--option-bg)",
         "border: 1px solid var(--accent-dim)",
-        "border-radius: 6px",
+        "border-radius: var(--radius-m)",
     ] {
         assert!(field.body.contains(declaration), "{declaration}");
     }
@@ -1950,6 +1972,53 @@ fn no_plain_color_is_aa_over_all_of_vaporwave() {
     );
     assert!((3.1..3.2).contains(&best), "{best:.3}");
     assert_ne!(property(&props, "--verse-num-outline"), "none");
+}
+
+/// One radius scale: small, medium and large, 4, 8 and 12px, and every
+/// corner in the stylesheet uses it (round things excepted).
+#[test]
+fn one_radius_scale() {
+    let rules = rules();
+    let root = custom_properties(&screen_rule(&rules, ":root").body);
+    assert_eq!(property(&root, "--radius-s"), "4px");
+    assert_eq!(property(&root, "--radius-m"), "8px");
+    assert_eq!(property(&root, "--radius-l"), "12px");
+    for rule in &rules {
+        for value in rule
+            .body
+            .split(';')
+            .filter_map(|d| d.trim().strip_prefix("border-radius:"))
+            .map(str::trim)
+        {
+            let ok = ["50%", "0"].contains(&value)
+                || value
+                    .split_whitespace()
+                    .all(|v| v == "0" || v.starts_with("var(--radius-"));
+            assert!(ok, "`{}`: border-radius: {value}", rule.selector);
+        }
+    }
+}
+
+/// The bar's buttons are ghost icons at least 36px square, and keep their
+/// focus ring.
+#[test]
+fn bar_buttons_are_ghost_icons_with_room_to_click() {
+    let rules = rules();
+    let body = &screen_rule(&rules, ".bar-btn").body;
+    let rem = |name: &str| -> f64 {
+        body.split(';')
+            .find_map(|d| d.trim().strip_prefix(name))
+            .and_then(|v| v.trim().strip_suffix("rem"))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| panic!("a {name} in rem"))
+    };
+    assert!(rem("width:") * 16.0 >= 36.0);
+    assert!(rem("height:") * 16.0 >= 36.0);
+    let focus = rules
+        .iter()
+        .find(|r| r.at_rule.is_none() && selectors(r).any(|s| s == ".bar-btn:focus-visible"))
+        .expect("a focus ring on the bar buttons");
+    assert!(focus.body.contains("outline: 2px solid var(--accent)"));
 }
 
 /// Literata is bundled in ui/fonts with its licence: regular, true italic
