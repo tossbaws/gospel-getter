@@ -42,24 +42,42 @@
             unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
         }
 
-        /* The two typefaces every theme shares: Literata for scripture
-           and chapter headings, and the system's UI sans, as on the
-           website, for everything else. */
+        /* What every theme shares: the two typefaces (Literata for
+           scripture and chapter headings, the system's UI sans, as on the
+           website, for everything else), and the reading-comfort presets
+           (see the text-size and line-spacing blocks below). The presets only scale the reading
+           content, chapter headings and verses, never the rest of the UI,
+           and these defaults are exactly the fixed values the verses used
+           before the presets existed. */
         :root {
             --font-scripture: 'Literata', Georgia, 'Times New Roman', serif;
             --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, Cantarell, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+            /* A hairline rule: the quiet accent, half strength. */
+            --rule: color-mix(in srgb, var(--accent-2) 50%, transparent);
+            --reading-scale: 1;
+            --reading-leading: 1.7;
         }
 
-        /* Default theme: vaporwave. Its darkest tone, #14082c, is also the
-           app icon's background (packaging/icon.svg). Every
-           theme defines this same set of custom properties — see the
-           `[data-theme="..."]` blocks below for the others. `--accent-rgb`
-           is a bare "r, g, b" triplet so glow/tint effects can composite it
-           at whatever alpha they need via rgba(var(--accent-rgb), X).
-           Each block also matches [data-theme-preview="..."], so the Aa
-           popover's theme swatches are drawn from these same definitions. */
+        /* Default theme: Chi Rho, the Chi Rho Code brand's palette (the
+           website's, site/styles.css): parchment on near-black green, gold
+           for what's chosen, active or primary, and teal for the quiet
+           jobs. Every theme defines this same set of custom properties;
+           see the `[data-theme="..."]` blocks below for the others.
+           `--accent-rgb` is a bare "r, g, b" triplet so tints can composite
+           it at whatever alpha they need via rgba(var(--accent-rgb), X).
+           `--accent-2` is the quiet accent: verse numbers, rules, links,
+           footnote markers and cross-references. `--glow` is the neon
+           behind the masthead, chapter headings and the chosen book and
+           chapter: none, except on Vaporwave, Matrix and Hot Pink.
+           System is Chi Rho in a dark OS, and Vellum (see the
+           prefers-color-scheme block after it) in a light one, following
+           the OS as it changes. Each block also matches
+           [data-theme-preview="..."], so the Aa popover's theme swatches
+           are drawn from these same definitions. */
         :root,
-        [data-theme-preview="vaporwave"] {
+        :root[data-theme="system"],
+        [data-theme-preview="chi-rho"],
+        [data-theme-preview="system"] {
             /* `color-scheme` and `--option-bg` exist for one reason: native
                <select> popup lists don't reliably composite our translucent
                --panel-bg the way the rest of the page does, and without a
@@ -69,6 +87,95 @@
                tells the browser which native palette family to use;
                --option-bg is a fully opaque fallback background so the
                popup itself is legible no matter how that compositing goes. */
+            color-scheme: dark;
+            --bg: #0b0d0c;
+            --text: #ede7d8;
+            --text-dim: #bdb6a5;
+            --accent: #f2c14e;
+            --accent-rgb: 242, 193, 78;
+            --accent-dim: rgba(66, 184, 165, 0.35);
+            --accent-2: #86dccd;
+            --panel-bg: rgba(22, 120, 90, 0.1);
+            --option-bg: #131c18;
+            --on-accent: #1a140e;
+            /* The top bar behind the header buttons: opaque, so the page
+               scrolling beneath it never shows through, and its buttons
+               stay AA on it (see the palette tests). */
+            --bar-bg: #101613;
+            /* Verse numbers and KJV footnote markers: --accent-2, with no
+               outline, in every theme but Vaporwave (see there). */
+            --verse-num-color: var(--accent-2);
+            --verse-num-outline: none;
+            --verse-num-outline-faded: none;
+            --glow: none;
+            /* Highlighter colors (behind highlighted verse text), one set
+               per theme: muted on the dark themes, pastel on the light
+               ones, every one keeping --text at AA contrast. */
+            --hl-yellow: #6b5310;
+            --hl-green: #2c5a46;
+            --hl-blue: #22415f;
+            --hl-pink: #682a47;
+        }
+
+        /* Vellum: Chi Rho's light twin, ink on warm paper, with emerald
+           for what's chosen and a deeper teal for the quiet jobs. The same
+           palette is System's in a light OS, below; the palette tests keep
+           the two copies identical. */
+        :root[data-theme="vellum"],
+        [data-theme-preview="vellum"] {
+            color-scheme: light;
+            --bg: #f5efe3;
+            --text: #1b1a17;
+            --text-dim: #6a655a;
+            --accent: #16785a;
+            --accent-rgb: 22, 120, 90;
+            --accent-dim: rgba(22, 120, 90, 0.3);
+            --accent-2: #1f6f63;
+            --panel-bg: rgba(255, 255, 255, 0.55);
+            --option-bg: #ffffff;
+            --on-accent: #ffffff;
+            --bar-bg: #fbf7ef;
+            --verse-num-color: var(--accent-2);
+            --verse-num-outline: none;
+            --verse-num-outline-faded: none;
+            --glow: none;
+            --hl-yellow: #fbe78a;
+            --hl-green: #c6ecbd;
+            --hl-blue: #c9defc;
+            --hl-pink: #f8cfe2;
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root[data-theme="system"],
+            [data-theme-preview="system"] {
+                color-scheme: light;
+                --bg: #f5efe3;
+                --text: #1b1a17;
+                --text-dim: #6a655a;
+                --accent: #16785a;
+                --accent-rgb: 22, 120, 90;
+                --accent-dim: rgba(22, 120, 90, 0.3);
+                --accent-2: #1f6f63;
+                --panel-bg: rgba(255, 255, 255, 0.55);
+                --option-bg: #ffffff;
+                --on-accent: #ffffff;
+                --bar-bg: #fbf7ef;
+                --verse-num-color: var(--accent-2);
+                --verse-num-outline: none;
+                --verse-num-outline-faded: none;
+                --glow: none;
+                --hl-yellow: #fbe78a;
+                --hl-green: #c6ecbd;
+                --hl-blue: #c9defc;
+                --hl-pink: #f8cfe2;
+            }
+        }
+
+        /* Vaporwave, the default before Chi Rho. Its darkest tone,
+           #14082c, is also the app icon's background
+           (packaging/icon.svg). */
+        :root[data-theme="vaporwave"],
+        [data-theme-preview="vaporwave"] {
             color-scheme: dark;
             --bg: linear-gradient(
                 180deg,
@@ -83,21 +190,18 @@
             --accent: #04a3ae;
             --accent-rgb: 4, 163, 174;
             --accent-dim: rgba(4, 163, 174, 0.45);
+            --accent-2: #04a3ae;
             --panel-bg: rgba(20, 8, 44, 0.55);
             --option-bg: #1e0f3a;
             --on-accent: #14082c;
-            /* The top bar behind the header buttons: opaque, so the page
-               scrolling beneath it never shows through, and --text and
-               --accent stay AA on it (see the palette tests). */
             --bar-bg: #14082c;
             /* Verse numbers and KJV footnote markers sit straight on the
                page background. No one color is AA over every stop of this
-               gradient (white peaks at 3.15:1 on its orange foot), so here
-               they're a brighter aqua with a crisp 1px outline in the
-               bar's near-black purple hugging each glyph, like neon
-               signage: the aqua is AA on the outline wherever the page
-               shows through (see the palette tests). The other themes
-               keep --accent and no outline. */
+               gradient (the best, white, peaks at 3.15:1 on its orange
+               foot), so here they're a brighter aqua with a crisp 1px
+               outline in the bar's near-black purple hugging each glyph,
+               like neon signage: the aqua is AA on the outline wherever
+               the page shows through (see the palette tests). */
             --verse-num-color: #5ce1e6;
             --verse-num-outline:
                 -1px -1px 0 #14082c, 0 -1px 0 #14082c, 1px -1px 0 #14082c,
@@ -108,20 +212,11 @@
             --verse-num-outline-faded:
                 0 -1px 0 rgba(20, 8, 44, 0.6), -1px 0 0 rgba(20, 8, 44, 0.6),
                 1px 0 0 rgba(20, 8, 44, 0.6), 0 1px 0 rgba(20, 8, 44, 0.6);
-            /* Highlighter colors (behind highlighted verse text), one set
-               per theme: muted on the dark themes, pastel on the light one,
-               every one keeping --text at AA contrast. */
+            --glow: 0 0 14px rgba(4, 163, 174, 0.5);
             --hl-yellow: #6a5310;
             --hl-green: #1e5541;
             --hl-blue: #23437a;
             --hl-pink: #74245c;
-            /* Reading-comfort presets (see the text-size/line-spacing
-               blocks below). These only scale the reading content —
-               chapter headings and verses — never the rest of the UI, and
-               these defaults are exactly the fixed values the verses used
-               before the presets existed. */
-            --reading-scale: 1;
-            --reading-leading: 1.7;
         }
 
         :root[data-theme="classic-dark"],
@@ -133,13 +228,15 @@
             --accent: #4da6ff;
             --accent-rgb: 77, 166, 255;
             --accent-dim: rgba(77, 166, 255, 0.35);
+            --accent-2: #4da6ff;
             --panel-bg: rgba(255, 255, 255, 0.05);
             --option-bg: #1a1c1f;
             --on-accent: #06141f;
             --bar-bg: #16181c;
-            --verse-num-color: var(--accent);
+            --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            --glow: none;
             --hl-yellow: #5a4d12;
             --hl-green: #224f2f;
             --hl-blue: #1f3f6b;
@@ -155,13 +252,15 @@
             --accent: #2563eb;
             --accent-rgb: 37, 99, 235;
             --accent-dim: rgba(37, 99, 235, 0.25);
+            --accent-2: #2563eb;
             --panel-bg: rgba(0, 0, 0, 0.035);
             --option-bg: #ffffff;
             --on-accent: #ffffff;
             --bar-bg: #ffffff;
-            --verse-num-color: var(--accent);
+            --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            --glow: none;
             --hl-yellow: #fbe78a;
             --hl-green: #c6ecbd;
             --hl-blue: #c9defc;
@@ -177,13 +276,15 @@
             --accent: #00ff41;
             --accent-rgb: 0, 255, 65;
             --accent-dim: rgba(0, 255, 65, 0.35);
+            --accent-2: #00ff41;
             --panel-bg: rgba(0, 255, 65, 0.06);
             --option-bg: #041404;
             --on-accent: #001a00;
             --bar-bg: #031003;
-            --verse-num-color: var(--accent);
+            --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            --glow: 0 0 14px rgba(0, 255, 65, 0.5);
             --hl-yellow: #4a4708;
             --hl-green: #11521f;
             --hl-blue: #0f3a5c;
@@ -205,13 +306,15 @@
             --accent: #d4a017;
             --accent-rgb: 212, 160, 23;
             --accent-dim: rgba(212, 160, 23, 0.4);
+            --accent-2: #d4a017;
             --panel-bg: rgba(26, 20, 16, 0.55);
             --option-bg: #241a12;
             --on-accent: #1a1410;
             --bar-bg: #1a1410;
-            --verse-num-color: var(--accent);
+            --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            --glow: none;
             --hl-yellow: #6b5310;
             --hl-green: #31512a;
             --hl-blue: #22415f;
@@ -236,13 +339,15 @@
             --accent: #ff3fa4;
             --accent-rgb: 255, 63, 164;
             --accent-dim: rgba(255, 63, 164, 0.45);
+            --accent-2: #ff3fa4;
             --panel-bg: rgba(255, 63, 164, 0.07);
             --option-bg: #2a0a1d;
             --on-accent: #1a0411;
             --bar-bg: #12030c;
-            --verse-num-color: var(--accent);
+            --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            --glow: 0 0 14px rgba(255, 63, 164, 0.5);
             --hl-yellow: #614c0f;
             --hl-green: #1f5038;
             --hl-blue: #263d6b;
@@ -497,13 +602,19 @@
             color: var(--text);
         }
 
-        /* Six swatches, each drawn by its own theme's definition (see the
+        /* Nine swatches, each drawn by its own theme's definition (see the
            theme blocks at the top), ringed in this theme's --text-dim and,
-           when chosen, in --accent: both AA on --option-bg. */
+           when chosen, in --accent: both AA on --option-bg. Chi Rho,
+           Vellum and System make the first row, and the other six the
+           second. */
         .theme-swatches {
             display: grid;
             grid-template-columns: repeat(6, 1fr);
             gap: 0.45rem;
+        }
+
+        .theme-swatch:nth-child(4) {
+            grid-column-start: 1;
         }
 
         .theme-swatch {
@@ -526,6 +637,13 @@
             color: var(--accent);
             font-family: var(--font-scripture);
             font-size: 0.85rem;
+        }
+
+        /* System is both: Chi Rho's ground and Vellum's, split, with no
+           letter (no one accent reads on both halves). */
+        .theme-swatch-preview[data-theme-preview="system"] {
+            background: linear-gradient(135deg, #0b0d0c 50%, #f5efe3 50%);
+            color: transparent;
         }
 
         .theme-swatch[aria-pressed="true"] {
@@ -765,7 +883,7 @@
         }
 
         .about-links a {
-            color: var(--accent);
+            color: var(--accent-2);
         }
 
         /* Export and import results: a small notice at the foot of the
@@ -1943,7 +2061,7 @@
             font-weight: normal;
             letter-spacing: 0.03em;
             color: var(--accent);
-            text-shadow: 0 0 18px rgba(var(--accent-rgb), 0.55);
+            text-shadow: var(--glow);
         }
 
         .subtitle {
@@ -2022,7 +2140,7 @@
             background: var(--accent);
             color: var(--on-accent);
             border-color: var(--accent);
-            box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.6);
+            box-shadow: var(--glow);
         }
 
         #chapter-list {
@@ -2066,11 +2184,11 @@
             background: var(--accent);
             color: var(--on-accent);
             border-color: var(--accent);
-            box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.6);
+            box-shadow: var(--glow);
         }
 
         #reading-pane {
-            border-top: 3px double var(--accent-dim);
+            border-top: 1px solid var(--rule);
             padding-top: 1.5rem;
         }
 
@@ -2118,7 +2236,7 @@
             text-align: left;
             background: none;
             border: none;
-            border-bottom: 1px solid var(--accent-dim);
+            border-bottom: 1px solid var(--rule);
             font-family: var(--font-scripture);
             font-size: 1.2rem;
             color: var(--accent);
@@ -2150,8 +2268,8 @@
             color: var(--accent);
             margin-bottom: 0.8rem;
             padding-bottom: 0.4rem;
-            border-bottom: 1px solid var(--accent-dim);
-            text-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4);
+            border-bottom: 1px solid var(--rule);
+            text-shadow: var(--glow);
         }
 
         .verse {
@@ -2405,7 +2523,7 @@
         .note-link {
             font-family: inherit;
             font-size: 0.8rem;
-            color: var(--accent);
+            color: var(--accent-2);
             background: none;
             border: none;
             padding: 0;
@@ -2625,7 +2743,7 @@
             border: none;
             font-family: inherit;
             font-size: 0.85rem;
-            color: var(--accent);
+            color: var(--accent-2);
             cursor: pointer;
             padding: 0;
             text-decoration: underline dotted;
@@ -2652,7 +2770,7 @@
         .xref-summary {
             margin-top: 2rem;
             padding-top: 1rem;
-            border-top: 1px solid var(--accent-dim);
+            border-top: 1px solid var(--rule);
         }
 
         .xref-summary-title {
@@ -2688,8 +2806,7 @@
         }
 
         .xref-summary-verse {
-            color: var(--accent);
-            font-weight: bold;
+            color: var(--accent-2);
         }
 
         .xref-summary-chips {
@@ -2716,7 +2833,7 @@
         }
 
         .xref-credit a {
-            color: var(--accent);
+            color: var(--accent-2);
         }
 
         /* The chapter's KJV footnotes, above its cross-references and
@@ -2724,7 +2841,7 @@
         .footnote-summary {
             margin-top: 2rem;
             padding-top: 1rem;
-            border-top: 1px solid var(--accent-dim);
+            border-top: 1px solid var(--rule);
         }
 
         .footnote-summary-title {
@@ -2740,8 +2857,7 @@
         }
 
         .footnote-ref {
-            color: var(--accent);
-            font-weight: bold;
+            color: var(--accent-2);
         }
 
         .footnote-text {
@@ -2766,8 +2882,7 @@
         }
 
         .footnote-label {
-            color: var(--accent);
-            font-weight: bold;
+            color: var(--accent-2);
             margin-right: 0.3rem;
         }
 
@@ -2803,6 +2918,9 @@
                 --accent: #000000 !important;
                 --accent-rgb: 0, 0, 0 !important;
                 --accent-dim: #000000 !important;
+                --accent-2: #000000 !important;
+                --rule: #000000 !important;
+                --glow: none !important;
                 --panel-bg: transparent !important;
                 --verse-num-color: #000000 !important;
                 --verse-num-outline: none !important;
@@ -2889,8 +3007,8 @@
                     key: 'gospel-getter-theme',
                     attr: 'theme',
                     select: 'theme-select',
-                    fallback: 'vaporwave',
-                    values: ['vaporwave', 'classic-dark', 'classic-light', 'matrix', 'beast-slayer', 'hot-pink'],
+                    fallback: 'chi-rho',
+                    values: ['chi-rho', 'vellum', 'system', 'vaporwave', 'classic-dark', 'classic-light', 'matrix', 'beast-slayer', 'hot-pink'],
                     // Theme keys that were renamed: a saved old key is
                     // rewritten to its new one rather than silently
                     // dropping the reader back to the default theme.
@@ -3495,6 +3613,9 @@
                     <div id="theme-choices" class="theme-swatches" role="group" aria-labelledby="theme-label"></div>
                     <p id="theme-name" class="theme-name" aria-hidden="true"></p>
                     <select id="theme-select" hidden>
+                        <option value="chi-rho">Chi Rho</option>
+                        <option value="vellum">Vellum</option>
+                        <option value="system">System</option>
                         <option value="vaporwave">Vaporwave</option>
                         <option value="classic-dark">Classic Dark</option>
                         <option value="classic-light">Classic Light</option>

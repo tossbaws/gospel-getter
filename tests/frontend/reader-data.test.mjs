@@ -388,6 +388,28 @@ test('while the preview is open, Tab stays in it and shortcuts do nothing', () =
         assert.ok(overlayOpen(app));
     }));
 
+test('a file with a brand theme or System imports, and applies it', async () => {
+    for (const theme of ['chi-rho', 'vellum', 'system']) {
+        const path = newPath(`theme-${theme}`);
+        writeFileSync(path, JSON.stringify({
+            format: 'gospel-getter-reader-data', format_version: 3, exported_at: '2026-10-13T12:00:00.000Z',
+            app_version: '2.11.0', reading_position: null, bookmarks: [], highlights: [], notes: [],
+            preferences: { theme },
+        }));
+        await withApp({ storage: { 'gospel-getter-theme': 'matrix' } }, async (app) => {
+            await clickData(app, 'import-data-btn', path);
+            assert.ok(overlayOpen(app), theme);
+            const before = app.calls.length;
+            app.click(el(app, 'import-confirm'));
+            await app.idle(before, 'apply_import');
+            assert.equal(el(app, 'theme-select').value, theme);
+            assert.equal(app.window.localStorage.getItem('gospel-getter-theme'), theme);
+            // Chi Rho is the page's own palette, so it sets no data-theme.
+            assert.equal(app.document.documentElement.dataset.theme, theme === 'chi-rho' ? undefined : theme);
+        });
+    }
+});
+
 test('data moves to a fresh install through a real file', async () => {
     const path = newPath('move');
     await withApp({ book: 'Psalms', chapter: 23, translation: 'web' }, async (app) => {

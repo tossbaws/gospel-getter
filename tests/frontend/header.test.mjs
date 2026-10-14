@@ -185,14 +185,14 @@ test('Aa changes the real preferences live, and they persist across a restart', 
         assert.equal(root.dataset.lineSpacing, 'relaxed');
         assert.equal($(app, 'line-spacing-select').value, 'relaxed', 'the same record the export reads');
 
-        // Theme: six swatches from the theme list, each previewing its own theme.
+        // Theme: nine swatches from the theme list, each previewing its own theme.
         const swatches = segments(app, 'theme-choices');
         assert.deepEqual(swatches.map((s) => s.getAttribute('aria-label')),
             [...$(app, 'theme-select').options].map((o) => o.textContent));
         for (const s of swatches) {
             assert.equal(s.querySelector('[data-theme-preview]').dataset.themePreview, s.dataset.value);
         }
-        assert.equal($(app, 'theme-name').textContent, 'Vaporwave');
+        assert.equal($(app, 'theme-name').textContent, 'Chi Rho');
         app.click(swatches.find((s) => s.dataset.value === 'matrix'));
         assert.equal(root.dataset.theme, 'matrix');
         assert.equal($(app, 'theme-name').textContent, 'Matrix');
@@ -218,6 +218,46 @@ test('Aa changes the real preferences live, and they persist across a restart', 
         assert.deepEqual(pressed(app, 'line-spacing-choices'), ['relaxed']);
         assert.equal($(app, 'text-size-value').textContent, 'Small');
         assert.equal($(app, 'text-size-down').disabled, true);
+    });
+});
+
+test('the theme list starts with Chi Rho, Vellum and System, and Chi Rho is the default', async () => {
+    await withApp({}, async (app) => {
+        const root = app.document.documentElement;
+        app.open('aa');
+        const swatches = segments(app, 'theme-choices');
+        assert.deepEqual(swatches.map((s) => s.getAttribute('aria-label')), [
+            'Chi Rho', 'Vellum', 'System',
+            'Vaporwave', 'Classic Dark', 'Classic Light', 'Matrix', 'Beast Slayer', 'Hot Pink',
+        ]);
+        // Nothing saved: Chi Rho, which is the page's own palette, so no
+        // data-theme, and nothing is written until the reader chooses.
+        assert.deepEqual(pressed(app, 'theme-choices'), ['chi-rho']);
+        assert.equal(root.dataset.theme, undefined);
+        assert.equal(app.window.localStorage.getItem('gospel-getter-theme'), null);
+        assert.equal(app.window.gospelGetterPreferences.current().theme, 'chi-rho');
+
+        // System is a theme of its own: the stylesheet picks Chi Rho or
+        // Vellum from the OS, so it's saved as "system", not resolved.
+        app.click(swatches.find((s) => s.dataset.value === 'system'));
+        assert.equal(root.dataset.theme, 'system');
+        assert.equal($(app, 'theme-name').textContent, 'System');
+        assert.equal(app.window.localStorage.getItem('gospel-getter-theme'), 'system');
+
+        app.click(swatches.find((s) => s.dataset.value === 'vellum'));
+        assert.equal(root.dataset.theme, 'vellum');
+        app.click(swatches.find((s) => s.dataset.value === 'chi-rho'));
+        assert.equal(root.dataset.theme, undefined);
+        assert.equal(app.window.localStorage.getItem('gospel-getter-theme'), 'chi-rho');
+    });
+    // Anyone who chose a theme keeps it, Vaporwave (the old default) included.
+    await withApp({ storage: { 'gospel-getter-theme': 'vaporwave' } }, async (app) => {
+        assert.equal(app.document.documentElement.dataset.theme, 'vaporwave');
+        app.open('aa');
+        assert.deepEqual(pressed(app, 'theme-choices'), ['vaporwave']);
+    });
+    await withApp({ storage: { 'gospel-getter-theme': 'system' } }, async (app) => {
+        assert.equal(app.document.documentElement.dataset.theme, 'system');
     });
 });
 
