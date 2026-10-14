@@ -253,6 +253,6 @@ test('markers show in reading mode and use the verse number color', () =>
         const rule = css.match(/\.chapter-main \.verse\.is-bookmarked \.verse-num::after \{([^}]*)\}/);
         assert.ok(rule, 'marker rule exists');
         assert.match(rule[1], /color: var\(--verse-num-color\)/, 'every theme defines --verse-num-color: its accent, or Vaporwave\'s brighter aqua');
-        const readerModeRules = css.slice(css.indexOf('@media screen'), css.indexOf('header {'));
+        const readerModeRules = css.slice(css.indexOf('@media screen'), css.indexOf('\n        .ref-btn {'));
         assert.ok(!readerModeRules.includes('is-bookmarked'), 'reading mode does not hide markers');
     }));
