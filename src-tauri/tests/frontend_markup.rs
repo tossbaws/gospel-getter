@@ -1363,7 +1363,7 @@ fn kjv_footnotes_use_tested_theme_colors() {
     let marker = screen_rule(&rules, ".fn-marker");
     for declaration in [
         "color: var(--verse-num-color)",
-        "font-weight: bold",
+        "font-weight: normal",
         "user-select: none",
     ] {
         assert!(marker.body.contains(declaration), "{declaration}");
@@ -1509,6 +1509,7 @@ fn verse_numbers_and_footnote_markers_are_legible_on_every_theme() {
             assert!(!body.contains(boxed), "{selector} has no box: {boxed}");
         }
         assert!(!body.contains("var(--accent)"), "{selector}");
+        assert!(body.contains("font-weight: normal"), "{selector} is quiet");
     }
     assert!(
         screen_rule(&rules, ".chapter-side .verse-num")
@@ -1878,6 +1879,77 @@ fn glow_is_only_on_the_neon_themes() {
             }
         }
     }
+}
+
+/// The side chapters are faded, not blurred: nothing is blurred, and they
+/// sit at 0.55, lifting to 0.95 under the pointer. Vaporwave's faded
+/// outline for their verse numbers still applies.
+#[test]
+fn side_chapters_fade_without_blur() {
+    let rules = rules();
+    assert!(!stylesheet().contains("blur("));
+    let side = screen_rule(&rules, ".chapter-side");
+    assert!(side.body.contains("opacity: 0.55"));
+    assert!(!side.body.contains("filter"));
+    assert!(
+        screen_rule(&rules, ".chapter-side:hover")
+            .body
+            .contains("opacity: 0.95")
+    );
+    assert!(
+        screen_rule(&rules, ".chapter-side .verse-num")
+            .body
+            .contains("text-shadow: var(--verse-num-outline-faded)")
+    );
+}
+
+/// Verse numbers are findable, not read: regular weight, smaller than
+/// before (0.7rem), tabular figures, still a superscript.
+#[test]
+fn verse_numbers_are_quiet() {
+    let rules = rules();
+    let num = &screen_rule(&rules, ".verse-num").body;
+    for declaration in [
+        "font-weight: normal",
+        "font-variant-numeric: tabular-nums",
+        "vertical-align: super",
+        "font-size: calc(0.64rem * var(--reading-scale))",
+    ] {
+        assert!(num.contains(declaration), "{declaration}");
+    }
+    let marker = &screen_rule(&rules, ".fn-marker").body;
+    assert!(marker.contains("font-weight: normal"));
+    assert!(marker.contains("vertical-align: super"));
+}
+
+/// On Vaporwave's gradient no plain color reaches AA over every stop, so
+/// its verse numbers keep their outline (see
+/// `verse_numbers_and_footnote_markers_are_legible_on_every_theme`). This
+/// checks every luminance a color can have, not just a few candidates.
+#[test]
+fn no_plain_color_is_aa_over_all_of_vaporwave() {
+    let rules = rules();
+    let props = custom_properties(&theme_rule(&rules, "vaporwave", "chi-rho").body);
+    let stops: Vec<f64> = backgrounds(&props)
+        .iter()
+        .map(|s| relative_luminance(s))
+        .collect();
+    assert_eq!(stops.len(), 5);
+    let best = (0..=10_000)
+        .map(|i| f64::from(i) / 10_000.0)
+        .map(|l| {
+            stops
+                .iter()
+                .map(|&s| (l.max(s) + 0.05) / (l.min(s) + 0.05))
+                .fold(f64::INFINITY, f64::min)
+        })
+        .fold(0.0, f64::max);
+    assert!(
+        best < 4.5,
+        "a plain color reaches {best:.2}:1 over every stop; the outline could go"
+    );
+    assert!((3.1..3.2).contains(&best), "{best:.3}");
+    assert_ne!(property(&props, "--verse-num-outline"), "none");
 }
 
 /// Literata is bundled in ui/fonts with its licence: regular, true italic

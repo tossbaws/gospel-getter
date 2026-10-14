@@ -2211,8 +2211,7 @@
         .chapter-side {
             flex: 0 0 260px;
             max-width: 260px;
-            opacity: 0.7;
-            filter: blur(0.3px);
+            opacity: 0.55;
             transition: opacity 0.2s;
         }
 
@@ -2280,12 +2279,15 @@
             color: var(--text);
         }
 
+        /* Findable, not read: regular weight, a little smaller than the
+           text around them, in tabular figures so they line up. */
         .verse-num {
             display: inline-block;
             min-width: 1.4rem;
             font-family: var(--font-scripture);
-            font-size: calc(0.7rem * var(--reading-scale));
-            font-weight: bold;
+            font-size: calc(0.64rem * var(--reading-scale));
+            font-weight: normal;
+            font-variant-numeric: tabular-nums;
             color: var(--verse-num-color);
             text-shadow: var(--verse-num-outline);
             vertical-align: super;
@@ -2408,9 +2410,9 @@
            own, isn't read out (the verse's .footnote-cue is, once) and is
            never copied with the verse's text. */
         .fn-marker {
-            font-size: 0.7em;
+            font-size: 0.64em;
             font-style: normal;
-            font-weight: bold;
+            font-weight: normal;
             line-height: 0;
             vertical-align: super;
             margin-left: 0.1em;
