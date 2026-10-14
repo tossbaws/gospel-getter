@@ -274,8 +274,10 @@ fn screen_rule<'a>(rules: &'a [Rule], selector: &str) -> &'a Rule {
 
 /// A theme's block: the default theme's on bare `:root`, every other one's
 /// on `:root[data-theme="..."]`. Each also styles that theme's swatch in
-/// Aa (`[data-theme-preview="..."]`), so the block's selector list is
-/// exactly the two.
+/// Aa (`[data-theme-preview="..."]`). System shares the default's block,
+/// so that block names System too; in a light OS a
+/// `@media (prefers-color-scheme: light)` block gives System Vellum's
+/// palette instead (see `system_follows_the_os_between_chi_rho_and_vellum`).
 fn theme_rule<'a>(rules: &'a [Rule], theme: &str, default_theme: &str) -> &'a Rule {
     let page = if theme == default_theme {
         ":root".to_owned()
@@ -285,8 +287,26 @@ fn theme_rule<'a>(rules: &'a [Rule], theme: &str, default_theme: &str) -> &'a Ru
     let preview = format!(r#"[data-theme-preview="{theme}"]"#);
     rules
         .iter()
-        .find(|r| r.at_rule.is_none() && selectors(r).eq([page.as_str(), preview.as_str()]))
+        .find(|r| {
+            r.at_rule.is_none()
+                && selectors(r).any(|s| s == page)
+                && selectors(r).any(|s| s == preview)
+        })
         .unwrap_or_else(|| panic!("expected a `{page}, {preview}` rule"))
+}
+
+/// System's block in a light OS.
+fn system_light_rule(rules: &[Rule]) -> &Rule {
+    rules
+        .iter()
+        .find(|r| {
+            r.at_rule.as_deref() == Some("@media (prefers-color-scheme: light)")
+                && selectors(r).eq([
+                    r#":root[data-theme="system"]"#,
+                    r#"[data-theme-preview="system"]"#,
+                ])
+        })
+        .expect("System should switch to Vellum's palette in a light OS")
 }
 
 fn default_theme() -> String {
@@ -372,14 +392,33 @@ fn contrast_ratio(a: &str, b: &str) -> f64 {
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 
-/// Palette for each theme the picker offers (see `theme_rule`).
+/// Palette for each theme the picker offers (see `theme_rule`), System
+/// twice: as it is in a dark OS and in a light one.
 fn theme_palettes(rules: &[Rule]) -> Vec<(String, Vec<(String, String)>)> {
+    theme_blocks(rules)
+        .into_iter()
+        .map(|(theme, rule)| (theme, custom_properties(&rule.body)))
+        .collect()
+}
+
+/// Each theme's block, by the names `theme_palettes` gives them.
+fn theme_blocks(rules: &[Rule]) -> Vec<(String, &Rule)> {
     let default_theme = default_theme();
     select_options("theme-select")
         .into_iter()
-        .map(|(value, _)| {
-            let props = custom_properties(&theme_rule(rules, &value, &default_theme).body);
-            (value, props)
+        .flat_map(|(value, _)| {
+            if value == "system" {
+                vec![
+                    (
+                        "system (dark)".to_owned(),
+                        theme_rule(rules, &value, &default_theme),
+                    ),
+                    ("system (light)".to_owned(), system_light_rule(rules)),
+                ]
+            } else {
+                let rule = theme_rule(rules, &value, &default_theme);
+                vec![(value, rule)]
+            }
         })
         .collect()
 }
@@ -395,8 +434,10 @@ fn every_theme_option_defines_a_complete_palette() {
     let color_props: Vec<String> = custom_properties(&default_rule.body)
         .into_iter()
         .map(|(name, _)| name)
-        .filter(|name| !name.starts_with("--reading-"))
         .collect();
+    for name in ["--accent-2", "--glow", "--verse-num-color"] {
+        assert!(color_props.iter().any(|n| n == name), "{name}");
+    }
 
     for (theme, props) in theme_palettes(&rules) {
         for name in &color_props {
@@ -406,8 +447,7 @@ fn every_theme_option_defines_a_complete_palette() {
             );
         }
     }
-    for (theme, _) in theme_palettes(&rules) {
-        let rule = theme_rule(&rules, &theme, &default_theme());
+    for (theme, rule) in theme_blocks(&rules) {
         assert!(
             rule.body.contains("color-scheme:"),
             "theme `{theme}` should set color-scheme so native controls use \
@@ -553,7 +593,7 @@ fn preference_selects_match_the_values_the_script_persists() {
 #[test]
 fn reading_presets_default_to_the_original_typography() {
     let rules = rules();
-    let root = custom_properties(&theme_rule(&rules, &default_theme(), &default_theme()).body);
+    let root = custom_properties(&screen_rule(&rules, ":root").body);
     assert_eq!(property(&root, "--reading-scale"), "1");
     assert_eq!(property(&root, "--reading-leading"), "1.7");
 
@@ -761,7 +801,8 @@ fn header_buttons_announce_what_they_open() {
 
 /// The top bar, the popovers, the Library and the toast add only these
 /// colors to the theme palettes: the bar's opaque `--bar-bg`, with the bar
-/// buttons' text and their open state AA on it in every theme; and they
+/// buttons (ghost icons in `--text-dim`, `--text` on a wash under the
+/// pointer, `--accent` on it while open) AA on it in every theme; and they
 /// otherwise reuse the AA-tested pairs (`--accent` on `--panel-bg` over
 /// `--option-bg`, `--on-accent` on `--accent`, `--text`/`--text-dim` on
 /// `--option-bg`). The chosen theme swatch's ring is `--accent`, at least
@@ -777,6 +818,22 @@ fn header_surfaces_use_tested_theme_colors() {
         .and_then(|(_, rest)| rest.split_once(')'))
         .map(|(alpha, _)| alpha.trim().parse().unwrap())
         .expect("an open bar button is tinted with --accent");
+    let ghost = screen_rule(&rules, ".bar-btn");
+    for declaration in ["background: none", "border: none", "color: var(--text-dim)"] {
+        assert!(ghost.body.contains(declaration), ".bar-btn: {declaration}");
+    }
+    let hover = &screen_rule(&rules, ".bar-btn:hover").body;
+    assert!(hover.contains("color: var(--text)"));
+    let hover_alpha: f64 = hover
+        .split_once("rgba(var(--accent-rgb), ")
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(alpha, _)| alpha.trim().parse().unwrap())
+        .expect("a bar button under the pointer gets a wash");
+    assert!(
+        screen_rule(&rules, r#".bar-btn[aria-expanded="true"]"#)
+            .body
+            .contains("color: var(--accent)")
+    );
     for (theme, props) in theme_palettes(&rules) {
         let bar_bg = property(&props, "--bar-bg");
         let accent = property(&props, "--accent");
@@ -791,8 +848,13 @@ fn header_surfaces_use_tested_theme_colors() {
             ("--accent on --bar-bg", accent.to_owned(), bar_bg.to_owned()),
             (
                 "a bar button",
-                accent.to_owned(),
-                composite(property(&props, "--panel-bg"), bar_bg),
+                property(&props, "--text-dim").to_owned(),
+                bar_bg.to_owned(),
+            ),
+            (
+                "a bar button under the pointer",
+                property(&props, "--text").to_owned(),
+                composite(&format!("rgba({accent_rgb}, {hover_alpha})"), bar_bg),
             ),
             (
                 "an open bar button",
@@ -859,7 +921,7 @@ fn export_notes_book_list_uses_tested_theme_colors() {
         "color: var(--text)",
         "background-color: var(--option-bg)",
         "border: 1px solid var(--accent-dim)",
-        "border-radius: 6px",
+        "border-radius: var(--radius-m)",
     ] {
         assert!(select.body.contains(declaration), "{declaration}");
     }
@@ -878,7 +940,7 @@ fn export_notes_book_list_uses_tested_theme_colors() {
         "color: var(--text)",
         "background-color: var(--option-bg)",
         "border: 1px solid var(--accent-dim)",
-        "border-radius: 6px",
+        "border-radius: var(--radius-m)",
     ] {
         assert!(field.body.contains(declaration), "{declaration}");
     }
@@ -1198,9 +1260,9 @@ fn note_marker_is_distinct_tested_and_not_printed() {
         .map(|(alpha, _)| alpha.trim().parse().unwrap())
         .expect("a selected verse is tinted with --accent");
     for (theme, props) in theme_palettes(&rules) {
-        // The verse number's color: --accent, or Vaporwave's own.
+        // The verse number's color: --accent-2, or Vaporwave's own.
         let accent = match property(&props, "--verse-num-color") {
-            "var(--accent)" => property(&props, "--accent"),
+            "var(--accent-2)" => property(&props, "--accent-2"),
             color => color,
         };
         let tint = composite(
@@ -1240,7 +1302,7 @@ fn notes_use_tested_theme_colors() {
         (".note-card-date", "--text-dim"),
         (".verse-notes-title", "--text-dim"),
         (".note-card-ref", "--accent"),
-        (".note-link", "--accent"),
+        (".note-link", "--accent-2"),
     ] {
         assert!(
             screen_rule(&rules, selector)
@@ -1254,7 +1316,7 @@ fn notes_use_tested_theme_colors() {
             property(&props, "--panel-bg"),
             property(&props, "--option-bg"),
         );
-        for fg in ["--text", "--text-dim", "--accent"] {
+        for fg in ["--text", "--text-dim", "--accent", "--accent-2"] {
             let ratio = contrast_ratio(property(&props, fg), &behind);
             assert!(
                 ratio >= 4.5,
@@ -1323,7 +1385,7 @@ fn kjv_footnotes_use_tested_theme_colors() {
     let marker = screen_rule(&rules, ".fn-marker");
     for declaration in [
         "color: var(--verse-num-color)",
-        "font-weight: bold",
+        "font-weight: normal",
         "user-select: none",
     ] {
         assert!(marker.body.contains(declaration), "{declaration}");
@@ -1331,7 +1393,7 @@ fn kjv_footnotes_use_tested_theme_colors() {
     assert!(
         screen_rule(&rules, ".footnote-ref")
             .body
-            .contains("color: var(--accent)")
+            .contains("color: var(--accent-2)")
     );
     assert!(
         screen_rule(&rules, ".footnote-text")
@@ -1341,7 +1403,7 @@ fn kjv_footnotes_use_tested_theme_colors() {
     assert!(
         screen_rule(&rules, ".footnote-label")
             .body
-            .contains("color: var(--accent)")
+            .contains("color: var(--accent-2)")
     );
     assert!(
         screen_rule(&rules, ".supplied")
@@ -1350,7 +1412,7 @@ fn kjv_footnotes_use_tested_theme_colors() {
     );
     for (theme, props) in theme_palettes(&rules) {
         let option_bg = property(&props, "--option-bg");
-        for fg in ["--accent", "--text-dim"] {
+        for fg in ["--accent", "--accent-2", "--text-dim"] {
             let ratio = contrast_ratio(property(&props, fg), option_bg);
             assert!(ratio >= 4.5, "theme `{theme}`: {fg} is {ratio:.2}:1");
         }
@@ -1469,6 +1531,7 @@ fn verse_numbers_and_footnote_markers_are_legible_on_every_theme() {
             assert!(!body.contains(boxed), "{selector} has no box: {boxed}");
         }
         assert!(!body.contains("var(--accent)"), "{selector}");
+        assert!(body.contains("font-weight: normal"), "{selector} is quiet");
     }
     assert!(
         screen_rule(&rules, ".chapter-side .verse-num")
@@ -1488,13 +1551,12 @@ fn verse_numbers_and_footnote_markers_are_legible_on_every_theme() {
         assert!(!body.contains("text-shadow"), "{mark}");
     }
 
-    assert_eq!(default_theme(), "vaporwave");
     for (theme, props) in theme_palettes(&rules) {
         let color = property(&props, "--verse-num-color");
         let outline = shadows(property(&props, "--verse-num-outline"));
         let faded = shadows(property(&props, "--verse-num-outline-faded"));
         if theme != "vaporwave" {
-            assert_eq!(color, "var(--accent)", "theme `{theme}`");
+            assert_eq!(color, "var(--accent-2)", "theme `{theme}`");
             assert_eq!(outline, ["none"], "theme `{theme}`");
             assert_eq!(faded, ["none"], "theme `{theme}`");
             continue;
@@ -1578,4 +1640,492 @@ fn shadows(value: &str) -> Vec<String> {
     list.iter()
         .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
         .collect()
+}
+
+// ---- The Tier 1 look: typefaces, brand themes, quieter chrome ---------
+
+/// The display colors a palette's background tokens resolve to: a flat
+/// `--bg` itself, or every stop of a gradient one.
+fn backgrounds(props: &[(String, String)]) -> Vec<String> {
+    property(props, "--bg")
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '#')
+        .filter(|word| word.starts_with('#'))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// New installs, and everyone who never chose a theme, get Chi Rho: it's
+/// the preferences script's fallback, so with nothing saved no
+/// `data-theme` is set, and its palette is the bare `:root` block. Anyone
+/// with a saved theme keeps it, Vaporwave included, which now has a
+/// `data-theme` block of its own. The picker lists Chi Rho, Vellum and
+/// System first, then the other six as before.
+#[test]
+fn chi_rho_is_the_default_theme() {
+    assert_eq!(default_theme(), "chi-rho");
+    assert_eq!(
+        select_options("theme-select"),
+        [
+            ("chi-rho", "Chi Rho"),
+            ("vellum", "Vellum"),
+            ("system", "System"),
+            ("vaporwave", "Vaporwave"),
+            ("classic-dark", "Classic Dark"),
+            ("classic-light", "Classic Light"),
+            ("matrix", "Matrix"),
+            ("beast-slayer", "Beast Slayer"),
+            ("hot-pink", "Hot Pink"),
+        ]
+        .map(|(v, l)| (v.to_owned(), l.to_owned()))
+    );
+    let rules = rules();
+    let root = theme_rule(&rules, "chi-rho", "chi-rho");
+    assert!(selectors(root).any(|s| s == ":root"));
+    assert!(selectors(root).any(|s| s == r#"[data-theme-preview="chi-rho"]"#));
+    theme_rule(&rules, "vaporwave", "chi-rho");
+    assert!(HTML.contains("renamed: { 'monster-hunter': 'beast-slayer' }"));
+}
+
+/// Chi Rho and Vellum are the website's palette (site/styles.css) and its
+/// light twin: flat grounds, no gradient, and every text color, both
+/// accents included, AA on the page, the bar, the popups and the panels.
+#[test]
+fn chi_rho_and_vellum_use_the_brand_palette() {
+    let rules = rules();
+    let palettes = theme_palettes(&rules);
+    let palette = |theme: &str| &palettes.iter().find(|(t, _)| t == theme).unwrap().1;
+    for (theme, expected) in [
+        (
+            "chi-rho",
+            [
+                ("--bg", "#0b0d0c"),
+                ("--bar-bg", "#101613"),
+                ("--option-bg", "#131c18"),
+                ("--text", "#ede7d8"),
+                ("--text-dim", "#bdb6a5"),
+                ("--accent", "#f2c14e"),
+                ("--accent-2", "#86dccd"),
+            ],
+        ),
+        (
+            "vellum",
+            [
+                ("--bg", "#f5efe3"),
+                ("--bar-bg", "#fbf7ef"),
+                ("--option-bg", "#ffffff"),
+                ("--text", "#1b1a17"),
+                ("--text-dim", "#6a655a"),
+                ("--accent", "#16785a"),
+                ("--accent-2", "#1f6f63"),
+            ],
+        ),
+    ] {
+        let props = palette(theme);
+        for (name, value) in expected {
+            assert_eq!(property(props, name), value, "{theme} {name}");
+        }
+        assert_eq!(property(props, "--glow"), "none", "{theme}");
+        let bg = property(props, "--bg");
+        let bar = property(props, "--bar-bg");
+        let option = property(props, "--option-bg");
+        let panel = property(props, "--panel-bg");
+        for fg in ["--text", "--text-dim", "--accent", "--accent-2"] {
+            for (on, behind) in [
+                ("the page", bg.to_owned()),
+                ("the bar", bar.to_owned()),
+                ("a popup", option.to_owned()),
+                ("a panel on the page", composite(panel, bg)),
+                ("a panel in a popup", composite(panel, option)),
+            ] {
+                let ratio = contrast_ratio(property(props, fg), &behind);
+                assert!(
+                    ratio >= 4.5,
+                    "{theme}: {fg} on {on} is {ratio:.2}:1, below 4.5:1"
+                );
+            }
+        }
+    }
+}
+
+/// System is Chi Rho in a dark OS and Vellum in a light one, through
+/// `prefers-color-scheme`, so it follows the OS live, with no script: its
+/// dark palette is Chi Rho's own block, and its light one an exact copy
+/// of Vellum's. Its swatch shows both grounds.
+#[test]
+fn system_follows_the_os_between_chi_rho_and_vellum() {
+    let rules = rules();
+    let chi_rho = theme_rule(&rules, "chi-rho", "chi-rho");
+    for selector in [
+        r#":root[data-theme="system"]"#,
+        r#"[data-theme-preview="system"]"#,
+    ] {
+        assert!(selectors(chi_rho).any(|s| s == selector), "{selector}");
+    }
+    let vellum = theme_rule(&rules, "vellum", "chi-rho");
+    let light = system_light_rule(&rules);
+    assert_eq!(
+        custom_properties(&light.body),
+        custom_properties(&vellum.body)
+    );
+    assert!(light.body.contains("color-scheme: light"));
+    let swatch = screen_rule(
+        &rules,
+        r#".theme-swatch-preview[data-theme-preview="system"]"#,
+    );
+    let grounds = [
+        property(&custom_properties(&chi_rho.body), "--bg").to_owned(),
+        property(&custom_properties(&vellum.body), "--bg").to_owned(),
+    ];
+    assert!(
+        swatch
+            .body
+            .contains(&format!("{} 50%, {} 50%", grounds[0], grounds[1])),
+        "{}",
+        swatch.body
+    );
+}
+
+/// The quiet accent: verse numbers, rules, links, footnote markers and
+/// cross-references use `--accent-2`, AA wherever they're drawn; on the
+/// six older themes it starts as their `--accent`.
+#[test]
+fn the_quiet_accent_carries_the_quiet_jobs() {
+    let rules = rules();
+    for selector in [
+        ".xref-citation",
+        ".about-links a",
+        ".xref-credit a",
+        ".note-link",
+        ".footnote-ref",
+        ".footnote-label",
+        ".xref-summary-verse",
+    ] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains("color: var(--accent-2)"),
+            "{selector}"
+        );
+    }
+    let root = custom_properties(&screen_rule(&rules, ":root").body);
+    assert_eq!(
+        property(&root, "--rule"),
+        "color-mix(in srgb, var(--accent-2) 50%, transparent)"
+    );
+    for selector in [".chapter-heading", ".chapter-heading-link"] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains("border-bottom: 1px solid var(--rule)"),
+            "{selector}'s rule is a hairline in --accent-2"
+        );
+    }
+    for (theme, props) in theme_palettes(&rules) {
+        let accent_2 = property(&props, "--accent-2");
+        if [
+            "vaporwave",
+            "classic-dark",
+            "classic-light",
+            "matrix",
+            "beast-slayer",
+            "hot-pink",
+        ]
+        .contains(&theme.as_str())
+        {
+            assert_eq!(accent_2, property(&props, "--accent"), "{theme}");
+        }
+        let option = property(&props, "--option-bg");
+        let bar = property(&props, "--bar-bg");
+        let mut behind = vec![
+            option.to_owned(),
+            bar.to_owned(),
+            composite(property(&props, "--panel-bg"), option),
+        ];
+        let page = backgrounds(&props);
+        if page.len() == 1 {
+            behind.push(page[0].clone());
+        }
+        for bg in behind {
+            let ratio = contrast_ratio(accent_2, &bg);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: --accent-2 on {bg} is {ratio:.2}:1, below 4.5:1"
+            );
+        }
+        // On a flat page the verse numbers are --accent-2 on it.
+        if page.len() == 1 && theme != "vaporwave" {
+            let ratio = contrast_ratio(accent_2, &page[0]);
+            assert!(ratio >= 4.5, "theme `{theme}`: verse numbers {ratio:.2}:1");
+        }
+    }
+}
+
+/// Neon only where it's the point: `--glow` is none except on Vaporwave,
+/// Matrix and Hot Pink, and it's the only glow there is, on the masthead,
+/// the chapter headings and the chosen book and chapter.
+#[test]
+fn glow_is_only_on_the_neon_themes() {
+    let rules = rules();
+    for (theme, props) in theme_palettes(&rules) {
+        let glow = property(&props, "--glow");
+        if ["vaporwave", "matrix", "hot-pink"].contains(&theme.as_str()) {
+            assert!(glow.starts_with("0 0 14px rgba("), "{theme}: {glow}");
+            let accent_rgb = property(&props, "--accent-rgb");
+            assert!(glow.contains(accent_rgb), "{theme}: {glow}");
+        } else {
+            assert_eq!(glow, "none", "{theme}");
+        }
+    }
+    for (selector, declaration) in [
+        ("h1", "text-shadow: var(--glow)"),
+        (".chapter-heading", "text-shadow: var(--glow)"),
+        (".book-item.active", "box-shadow: var(--glow)"),
+        (".chapter-btn.active", "box-shadow: var(--glow)"),
+    ] {
+        assert!(
+            screen_rule(&rules, selector).body.contains(declaration),
+            "{selector}: {declaration}"
+        );
+    }
+    for rule in rules
+        .iter()
+        .filter(|r| r.at_rule.as_deref() != Some("@media print"))
+    {
+        for decl in rule.body.split(';').map(str::trim) {
+            if decl.starts_with("text-shadow:") {
+                assert!(
+                    decl == "text-shadow: var(--glow)" || decl.contains("var(--verse-num-outline"),
+                    "`{}` has a glow of its own: {decl}",
+                    rule.selector
+                );
+            }
+        }
+    }
+}
+
+/// The side chapters are faded, not blurred: nothing is blurred, and they
+/// sit at 0.55, lifting to 0.95 under the pointer. Vaporwave's faded
+/// outline for their verse numbers still applies.
+#[test]
+fn side_chapters_fade_without_blur() {
+    let rules = rules();
+    assert!(!stylesheet().contains("blur("));
+    let side = screen_rule(&rules, ".chapter-side");
+    assert!(side.body.contains("opacity: 0.55"));
+    assert!(!side.body.contains("filter"));
+    assert!(
+        screen_rule(&rules, ".chapter-side:hover")
+            .body
+            .contains("opacity: 0.95")
+    );
+    assert!(
+        screen_rule(&rules, ".chapter-side .verse-num")
+            .body
+            .contains("text-shadow: var(--verse-num-outline-faded)")
+    );
+}
+
+/// Verse numbers are findable, not read: regular weight, smaller than
+/// before (0.7rem), tabular figures, still a superscript.
+#[test]
+fn verse_numbers_are_quiet() {
+    let rules = rules();
+    let num = &screen_rule(&rules, ".verse-num").body;
+    for declaration in [
+        "font-weight: normal",
+        "font-variant-numeric: tabular-nums",
+        "vertical-align: super",
+        "font-size: calc(0.64rem * var(--reading-scale))",
+    ] {
+        assert!(num.contains(declaration), "{declaration}");
+    }
+    let marker = &screen_rule(&rules, ".fn-marker").body;
+    assert!(marker.contains("font-weight: normal"));
+    assert!(marker.contains("vertical-align: super"));
+}
+
+/// On Vaporwave's gradient no plain color reaches AA over every stop, so
+/// its verse numbers keep their outline (see
+/// `verse_numbers_and_footnote_markers_are_legible_on_every_theme`). This
+/// checks every luminance a color can have, not just a few candidates.
+#[test]
+fn no_plain_color_is_aa_over_all_of_vaporwave() {
+    let rules = rules();
+    let props = custom_properties(&theme_rule(&rules, "vaporwave", "chi-rho").body);
+    let stops: Vec<f64> = backgrounds(&props)
+        .iter()
+        .map(|s| relative_luminance(s))
+        .collect();
+    assert_eq!(stops.len(), 5);
+    let best = (0..=10_000)
+        .map(|i| f64::from(i) / 10_000.0)
+        .map(|l| {
+            stops
+                .iter()
+                .map(|&s| (l.max(s) + 0.05) / (l.min(s) + 0.05))
+                .fold(f64::INFINITY, f64::min)
+        })
+        .fold(0.0, f64::max);
+    assert!(
+        best < 4.5,
+        "a plain color reaches {best:.2}:1 over every stop; the outline could go"
+    );
+    assert!((3.1..3.2).contains(&best), "{best:.3}");
+    assert_ne!(property(&props, "--verse-num-outline"), "none");
+}
+
+/// One radius scale: small, medium and large, 4, 8 and 12px, and every
+/// corner in the stylesheet uses it (round things excepted).
+#[test]
+fn one_radius_scale() {
+    let rules = rules();
+    let root = custom_properties(&screen_rule(&rules, ":root").body);
+    assert_eq!(property(&root, "--radius-s"), "4px");
+    assert_eq!(property(&root, "--radius-m"), "8px");
+    assert_eq!(property(&root, "--radius-l"), "12px");
+    for rule in &rules {
+        for value in rule
+            .body
+            .split(';')
+            .filter_map(|d| d.trim().strip_prefix("border-radius:"))
+            .map(str::trim)
+        {
+            let ok = ["50%", "0"].contains(&value)
+                || value
+                    .split_whitespace()
+                    .all(|v| v == "0" || v.starts_with("var(--radius-"));
+            assert!(ok, "`{}`: border-radius: {value}", rule.selector);
+        }
+    }
+}
+
+/// The bar's buttons are ghost icons at least 36px square, and keep their
+/// focus ring.
+#[test]
+fn bar_buttons_are_ghost_icons_with_room_to_click() {
+    let rules = rules();
+    let body = &screen_rule(&rules, ".bar-btn").body;
+    let rem = |name: &str| -> f64 {
+        body.split(';')
+            .find_map(|d| d.trim().strip_prefix(name))
+            .and_then(|v| v.trim().strip_suffix("rem"))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| panic!("a {name} in rem"))
+    };
+    assert!(rem("width:") * 16.0 >= 36.0);
+    assert!(rem("height:") * 16.0 >= 36.0);
+    let focus = rules
+        .iter()
+        .find(|r| r.at_rule.is_none() && selectors(r).any(|s| s == ".bar-btn:focus-visible"))
+        .expect("a focus ring on the bar buttons");
+    assert!(focus.body.contains("outline: 2px solid var(--accent)"));
+}
+
+/// Literata is bundled in ui/fonts with its licence: regular, true italic
+/// and bold, as WOFF2, and the `@font-face` rules point at exactly those
+/// files. Scripture and chapter headings use it; everything else uses the
+/// system UI sans (the website's `--sans`).
+#[test]
+fn literata_is_bundled_for_scripture_and_the_ui_uses_the_sans() {
+    let fonts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui/fonts");
+    let licence = std::fs::read_to_string(fonts.join("OFL.txt")).expect("ui/fonts/OFL.txt");
+    assert!(licence.contains("SIL Open Font License, Version 1.1"));
+    assert!(licence.contains("The Literata Project Authors"));
+
+    let css = stylesheet();
+    let faces: Vec<&str> = css
+        .match_indices("@font-face")
+        .map(|(at, _)| {
+            let open = at + css[at..].find('{').unwrap();
+            &css[open..matching_brace_end(&css, open)]
+        })
+        .collect();
+    assert_eq!(faces.len(), 3);
+    let mut seen = Vec::new();
+    for face in faces {
+        assert!(face.contains("font-family: 'Literata'"), "{face}");
+        assert!(face.contains("font-display: block"), "{face}");
+        let file = face
+            .split_once("url('fonts/")
+            .and_then(|(_, rest)| rest.split_once("')"))
+            .map(|(file, _)| file)
+            .expect("a src in ui/fonts");
+        assert!(face.contains("format('woff2')"));
+        let bytes = std::fs::read(fonts.join(file)).unwrap_or_else(|_| panic!("ui/fonts/{file}"));
+        assert_eq!(&bytes[..4], b"wOF2", "{file} is WOFF2");
+        let style = if face.contains("font-style: italic") {
+            "italic"
+        } else {
+            "normal"
+        };
+        let weight = face
+            .split_once("font-weight: ")
+            .map(|(_, rest)| &rest[..3])
+            .unwrap();
+        seen.push(format!("{file} {style} {weight}"));
+    }
+    seen.sort();
+    assert_eq!(
+        seen,
+        [
+            "literata-bold.woff2 normal 700",
+            "literata-italic.woff2 italic 400",
+            "literata-regular.woff2 normal 400",
+        ]
+    );
+
+    let rules = rules();
+    let root = custom_properties(&screen_rule(&rules, ":root").body);
+    assert!(property(&root, "--font-scripture").starts_with("'Literata', "));
+    assert!(property(&root, "--font-ui").starts_with("system-ui, "));
+    assert!(
+        screen_rule(&rules, "body")
+            .body
+            .contains("font-family: var(--font-ui)")
+    );
+    for selector in [
+        ".verse",
+        ".verse-num",
+        ".chapter-heading",
+        ".chapter-heading-link",
+        ".note-passage",
+        ".theme-swatch-preview",
+    ] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains("font-family: var(--font-scripture)"),
+            "{selector} is scripture"
+        );
+    }
+    // The selection's actions, notes and popup sit inside a verse, but
+    // they're controls.
+    for selector in [
+        ".verse-actions",
+        ".verse-notes",
+        ".xref-popup:not([hidden])",
+    ] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains("font-family: var(--font-ui)"),
+            "{selector} is UI"
+        );
+    }
+    // No other face is named anywhere.
+    let named: Vec<&str> = rules
+        .iter()
+        .flat_map(|r| r.body.split(';'))
+        .filter_map(|d| d.trim().strip_prefix("font-family:"))
+        .map(str::trim)
+        .filter(|v| !["inherit", "var(--font-ui)", "var(--font-scripture)"].contains(v))
+        .collect();
+    assert_eq!(named, Vec::<&str>::new());
+    // The supplied words are the real italic, never a synthesized one.
+    assert!(
+        screen_rule(&rules, ".supplied")
+            .body
+            .contains("font-style: italic")
+    );
+    assert!(!css.contains("font-synthesis"));
 }

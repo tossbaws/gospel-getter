@@ -223,6 +223,10 @@ impl Preferences {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Theme {
+    ChiRho,
+    Vellum,
+    /// Chi Rho or Vellum, following the computer's light or dark setting.
+    System,
     Vaporwave,
     ClassicDark,
     ClassicLight,
@@ -898,6 +902,9 @@ mod tests {
         use Theme as T;
         assert_eq!(
             names(&[
+                T::ChiRho,
+                T::Vellum,
+                T::System,
                 T::Vaporwave,
                 T::ClassicDark,
                 T::ClassicLight,
@@ -1029,6 +1036,29 @@ mod tests {
         )
         .unwrap_err();
         assert!(bad_theme.to_string().contains("neon"), "{bad_theme}");
+    }
+
+    /// The themes added after 2.11 import, and the older ones still do.
+    #[test]
+    fn the_brand_themes_and_system_import() {
+        let with_theme = |theme: &str| {
+            parse(
+                format!(
+                    r#"{{"format": "gospel-getter-reader-data", "format_version": 3,
+                         "exported_at": "x", "app_version": "2.11.0", "reading_position": null,
+                         "bookmarks": [], "highlights": [], "notes": [],
+                         "preferences": {{"theme": "{theme}"}}}}"#
+                )
+                .as_bytes(),
+            )
+            .unwrap_or_else(|e| panic!("{theme}: {e}"))
+            .preferences
+            .theme
+        };
+        assert_eq!(with_theme("chi-rho"), Some(Theme::ChiRho));
+        assert_eq!(with_theme("vellum"), Some(Theme::Vellum));
+        assert_eq!(with_theme("system"), Some(Theme::System));
+        assert_eq!(with_theme("vaporwave"), Some(Theme::Vaporwave));
     }
 
     #[test]
