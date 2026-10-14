@@ -131,3 +131,21 @@ fn pkgbuild_installs_desktop_file_icon_and_license() {
          convention"
     );
 }
+
+/// The window opens at 1280×900 and can't be made smaller than 640×480:
+/// the smallest size the layout is designed and checked for (with the book
+/// and chapter picker as a popover, at Extra large text).
+#[test]
+fn tauri_conf_window_is_at_least_640_by_480() {
+    let conf: Value = serde_json::from_str(TAURI_CONF).expect("tauri.conf.json must be valid JSON");
+    let windows = conf["app"]["windows"]
+        .as_array()
+        .expect("app.windows should be an array");
+    assert_eq!(windows.len(), 1, "one window");
+    let window = &windows[0];
+    assert_eq!(window["width"], 1280);
+    assert_eq!(window["height"], 900);
+    assert_eq!(window["minWidth"], 640);
+    assert_eq!(window["minHeight"], 480);
+    assert_eq!(window["resizable"], true);
+}
