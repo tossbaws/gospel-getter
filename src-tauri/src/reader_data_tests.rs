@@ -305,6 +305,65 @@ async fn restoring_the_position_is_optional() {
     assert_eq!(personal(&state).await.1, Some((1, 1, 1)));
 }
 
+/// A display preference this version can't apply (here a theme from a
+/// later version, and a text size that doesn't exist) is skipped and
+/// named in the preview; the bookmarks, position and the valid
+/// preferences import as usual. (An invalid preference used to refuse the
+/// whole file: see `invalid_files_are_rejected_whole_and_change_nothing`
+/// for what still does.)
+#[tokio::test]
+async fn unknown_preferences_are_skipped_and_everything_else_imports() {
+    let (db, state) = app("rd_lenient_prefs").await;
+    let ok = r#"{"book": 43, "chapter": 3, "verse_start": 16, "verse_end": 16}"#;
+    let path = file(&db, "later.gospel-getter.json");
+    std::fs::write(
+        &path,
+        file_with(ok, r#"{"translation": "web", "book": 19, "chapter": 23}"#).replace(
+            "\"bookmarks\"",
+            "\"preferences\": {\"theme\": \"aurora\", \"text_size\": \"huge\", \
+             \"line_spacing\": \"relaxed\"}, \"bookmarks\"",
+        ),
+    )
+    .unwrap();
+    let p = preview(&state, &path).await;
+    assert_eq!(
+        p.skipped_preferences,
+        ["theme “aurora”", "text size “huge”"]
+    );
+    assert_eq!(
+        p.skipped_preferences_notice.as_deref(),
+        Some(
+            "Skipped 2 display settings this version of Gospel Getter doesn’t know: \
+             theme “aurora”, text size “huge”."
+        )
+    );
+    assert_eq!(
+        p.preferences,
+        Preferences {
+            line_spacing: Some(LineSpacing::Relaxed),
+            ..Preferences::default()
+        }
+    );
+    let result = commands::apply_pending_import(&state, p.token, false, true)
+        .await
+        .unwrap();
+    assert_eq!(result.added, 1);
+    let (bookmarks, position) = personal(&state).await;
+    let coordinates: Vec<_> = bookmarks.iter().map(|b| (b.0, b.1, b.2, b.3)).collect();
+    assert_eq!(coordinates, [(43, 3, 16, 16)]);
+    assert_eq!(
+        position.map(|(_, book, chapter)| (book, chapter)),
+        Some((19, 23))
+    );
+
+    // A file with nothing to skip says nothing about it.
+    let plain = file(&db, "plain.gospel-getter.json");
+    std::fs::write(&plain, file_with(ok, "null")).unwrap();
+    let p = preview(&state, &plain).await;
+    assert!(p.skipped_preferences.is_empty());
+    assert_eq!(p.skipped_preferences_notice, None);
+}
+
 #[tokio::test]
 async fn invalid_files_are_rejected_whole_and_change_nothing() {
     let (db, state) = app("rd_invalid").await;
@@ -397,14 +456,6 @@ async fn invalid_files_are_rejected_whole_and_change_nothing() {
             "bad position chapter",
             file_with(ok, r#"{"translation": "kjv", "book": 65, "chapter": 2}"#),
             "there's no Jude 2",
-        ),
-        (
-            "bad preference",
-            file_with(ok, "null").replace(
-                "\"bookmarks\"",
-                "\"preferences\": {\"text_size\": \"huge\"}, \"bookmarks\"",
-            ),
-            "unknown variant `huge`",
         ),
         (
             "negative book",

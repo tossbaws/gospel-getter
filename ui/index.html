@@ -5460,6 +5460,9 @@
                 }
                 if (!preview.position) summary.push('No reading position.');
                 if (!describePreferences(preview.preferences).length) summary.push('No display settings.');
+                // Settings from a later version (a theme this one doesn't
+                // have, say) are skipped; the backend names them.
+                if (preview.skippedPreferencesNotice) summary.push(preview.skippedPreferencesNotice);
                 document.getElementById('import-summary').innerHTML = summary.map((s) => `<li>${escapeHtml(s)}</li>`).join('');
 
                 importBookmarkChoice.hidden = !(preview.bookmarksInFile || preview.highlightsInFile || preview.notesInFile);
@@ -5590,6 +5593,7 @@
                         : `Added ${plural(result.notesAdded, 'note')}${result.notesAlreadyPresent ? ` (${result.notesAlreadyPresent} you already had)` : ''}.`);
                 }
                 if (result.position) parts.push(`Went to ${result.position.reference}.`);
+                if (preview.skippedPreferencesNotice) parts.push(preview.skippedPreferencesNotice);
 
                 // Display settings live in the webview's own storage, not
                 // the database, so they're applied after the database part

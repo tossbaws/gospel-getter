@@ -410,6 +410,34 @@ test('a file with a brand theme or System imports, and applies it', async () => 
     }
 });
 
+test('settings from a later version are skipped and named, and the rest imports', () =>
+    withApp({ book: 'John', chapter: 3, storage: { 'gospel-getter-theme': 'matrix' } }, async (app) => {
+        const path = writeFile(fileData({
+            format_version: 3,
+            app_version: '9.0.0',
+            highlights: [],
+            notes: [],
+            preferences: { theme: 'aurora', text_size: 'huge', line_spacing: 'relaxed' },
+        }));
+        await clickData(app, 'import-data-btn', path);
+        assert.ok(overlayOpen(app), 'the file is previewed, not refused');
+        const notice = 'Skipped 2 display settings this version of Gospel Getter doesn’t know: theme “aurora”, text size “huge”.';
+        const summary = [...el(app, 'import-summary').children].map((li) => li.textContent);
+        assert.ok(summary.includes(notice), summary.join('\n'));
+        assert.equal(el(app, 'import-prefs-label').textContent, 'Use the file’s display settings: relaxed line spacing');
+
+        const before = app.calls.length;
+        app.click(el(app, 'import-confirm'));
+        await app.idle(before, 'apply_import');
+        assert.equal(app.notice(), `Import complete. Added 2 bookmarks. Went to Romans 8 (WEB). ${notice} Display settings applied.`);
+        const root = app.document.documentElement;
+        assert.equal(root.dataset.theme, 'matrix', 'the unknown theme left the theme alone');
+        assert.equal(root.dataset.textSize, undefined);
+        assert.equal(root.dataset.lineSpacing, 'relaxed');
+        assert.deepEqual(await bookmarksIn('web'), ['John 3:16', 'Psalms 23:1–4']);
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
 test('data moves to a fresh install through a real file', async () => {
     const path = newPath('move');
     await withApp({ book: 'Psalms', chapter: 23, translation: 'web' }, async (app) => {
