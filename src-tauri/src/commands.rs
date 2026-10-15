@@ -1471,6 +1471,12 @@ pub struct ImportPreviewDto {
     pub current_notes: usize,
     pub position: Option<PositionPreviewDto>,
     pub preferences: Preferences,
+    /// The display preferences in the file this version can't apply (a
+    /// theme added later, say), each named for the reader. They're
+    /// skipped; everything else imports.
+    pub skipped_preferences: Vec<String>,
+    /// What to tell the reader about them, if any were skipped.
+    pub skipped_preferences_notice: Option<String>,
 }
 
 /// The result of choosing a file to import.
@@ -1581,6 +1587,7 @@ pub async fn build_reader_data(
             })
             .collect(),
         preferences,
+        skipped_preferences: Vec::new(),
     })
 }
 
@@ -1800,6 +1807,10 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
         current_notes: noted.len(),
         position: import.position.as_ref().map(PositionPreviewDto::from),
         preferences: import.preferences,
+        skipped_preferences_notice: reader_data::skipped_preferences_notice(
+            &import.skipped_preferences,
+        ),
+        skipped_preferences: import.skipped_preferences.clone(),
     };
     *lock(&state.pending_import) = Some(PendingImport {
         token: preview.token,

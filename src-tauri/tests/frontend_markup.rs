@@ -59,7 +59,7 @@ fn mobile_breakpoint_hides_chapter_side_neighbors() {
 
 /// Regression guard for GH-6: printing a chapter should hide all page
 /// chrome (the top bar and its popovers, the Library, the dialogs and the
-/// toast, header, book list, chapter chooser, neighboring chapter panes,
+/// toast, the book and chapter picker, neighboring chapter panes,
 /// nav hint, footer, cross-reference popups) but must
 /// never target the reading content itself — the chapter heading and
 /// verses are the whole point of printing the page.
@@ -78,9 +78,7 @@ fn print_stylesheet_hides_chrome_but_not_reading_content() {
         ".import-overlay",
         ".welcome-overlay",
         ".toast",
-        "header",
-        ".book-list",
-        "#chapter-list",
+        ".picker",
         ".chapter-side",
         ".nav-hint",
         "footer",
@@ -202,7 +200,9 @@ fn frontend_uses_invoke_not_http() {
         "the frontend should call Tauri commands via the global __TAURI__ \
          bridge (app.withGlobalTauri), not an npm-bundled API import"
     );
-    for command in ["get_home", "get_chapters", "get_reading", "get_xref_text"] {
+    // The picker builds a book's chapters from its chapter count in
+    // `get_home`, so it doesn't call `get_chapters`.
+    for command in ["get_home", "get_reading", "get_xref_text"] {
         assert!(
             HTML.contains(&format!("invoke('{command}'")),
             "expected a call to the `{command}` Tauri command"
@@ -660,9 +660,7 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
         .collect();
 
     for chrome in [
-        "header",
-        ".book-list",
-        "#chapter-list",
+        ".sidebar-toggle",
         ".chapter-side",
         ".nav-hint",
         "footer",
@@ -683,6 +681,7 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
         ".top-bar",
         "#aa-toggle",
         ".search-toggle",
+        ".ref-btn",
         ".reader-exit",
     ] {
         assert!(
@@ -1861,8 +1860,9 @@ fn the_quiet_accent_carries_the_quiet_jobs() {
 }
 
 /// Neon only where it's the point: `--glow` is none except on Vaporwave,
-/// Matrix and Hot Pink, and it's the only glow there is, on the masthead,
-/// the chapter headings and the chosen book and chapter.
+/// Matrix and Hot Pink, and it's the only glow there is, on the chapter
+/// headings (the masthead it also lit is gone, and the picker marks the
+/// chosen book and chapter without it).
 #[test]
 fn glow_is_only_on_the_neon_themes() {
     let rules = rules();
@@ -1876,17 +1876,22 @@ fn glow_is_only_on_the_neon_themes() {
             assert_eq!(glow, "none", "{theme}");
         }
     }
-    for (selector, declaration) in [
-        ("h1", "text-shadow: var(--glow)"),
-        (".chapter-heading", "text-shadow: var(--glow)"),
-        (".book-item.active", "box-shadow: var(--glow)"),
-        (".chapter-btn.active", "box-shadow: var(--glow)"),
-    ] {
-        assert!(
-            screen_rule(&rules, selector).body.contains(declaration),
-            "{selector}: {declaration}"
-        );
-    }
+    assert!(
+        screen_rule(&rules, ".chapter-heading")
+            .body
+            .contains("text-shadow: var(--glow)")
+    );
+    let lit: Vec<&str> = rules
+        .iter()
+        .filter(|r| r.at_rule.as_deref() != Some("@media print"))
+        .filter(|r| {
+            r.body
+                .split(';')
+                .any(|d| !d.trim().starts_with("--") && d.contains("var(--glow)"))
+        })
+        .map(|r| r.selector.as_str())
+        .collect();
+    assert_eq!(lit, [".chapter-heading"], "only chapter headings glow");
     for rule in rules
         .iter()
         .filter(|r| r.at_rule.as_deref() != Some("@media print"))
@@ -2128,4 +2133,320 @@ fn literata_is_bundled_for_scripture_and_the_ui_uses_the_sans() {
             .contains("font-style: italic")
     );
     assert!(!css.contains("font-synthesis"));
+}
+
+// ---- Tier 1 structure: text first, the picker, the reference in the bar
+
+/// The masthead is gone: no `<header>` with the name, "The Holy Bible" and
+/// Random chapter, and none of their styles. The page's only `<h1>` names
+/// the app for screen readers; the chapter heading is the first thing on
+/// screen under the bar.
+#[test]
+fn there_is_no_masthead() {
+    let rules = rules();
+    assert!(!HTML.contains("<header"), "the masthead is gone");
+    assert!(!HTML.contains("The Holy Bible"));
+    for gone in [
+        "header",
+        "h1",
+        ".subtitle",
+        ".random-chapter-btn",
+        ".book-list",
+        "#chapter-list",
+    ] {
+        assert!(
+            !rules.iter().any(|r| selectors(r).any(|s| s == gone)),
+            "`{gone}` is still styled"
+        );
+    }
+    let h1 = HTML.find("<h1").expect("an <h1> for screen readers");
+    let tag = &HTML[h1..h1 + HTML[h1..].find('>').unwrap()];
+    assert!(tag.contains(r#"class="visually-hidden""#), "{tag}");
+    assert_eq!(HTML.matches("<h1").count(), 1);
+    // Between the top of the page and the chapter: only that heading and
+    // the notice line (hidden unless there's something to say).
+    let main = HTML.find(r#"<main class="container">"#).expect("<main>");
+    let pane = HTML.find(r#"<div id="reading-pane">"#).unwrap();
+    let before: Vec<&str> = HTML[main..pane]
+        .lines()
+        .skip(1)
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    assert_eq!(before.len(), 2, "{before:?}");
+    assert!(before[0].starts_with(r#"<h1 class="visually-hidden">"#));
+    assert!(before[1].starts_with(r#"<p id="reader-notice""#) && before[1].contains(" hidden>"));
+}
+
+/// The reference button sits at the left of the bar (after only the
+/// sidebar's own button), in the UI sans, and opens the picker. Its
+/// accessible name says where the reader is, in full, once a chapter is
+/// read; `G` is its shortcut.
+#[test]
+fn the_reference_button_says_where_the_reader_is() {
+    let tag = tag_of("ref-btn");
+    for attr in [
+        r#"type="button""#,
+        r#"aria-label="Choose a book and chapter""#,
+        r#"aria-keyshortcuts="G""#,
+        r#"aria-controls="picker""#,
+        r#"aria-expanded="false""#,
+        r#"title="Choose a book and chapter (G)""#,
+    ] {
+        assert!(tag.contains(attr), "#ref-btn: {attr}");
+    }
+    let bar = &HTML[HTML.find(r#"<div id="top-bar""#).unwrap()..];
+    let order: Vec<usize> = [
+        r#"id="sidebar-toggle""#,
+        r#"id="ref-btn""#,
+        r#"id="reader-exit""#,
+        r#"id="aa-toggle""#,
+    ]
+    .iter()
+    .map(|id| bar.find(id).unwrap())
+    .collect();
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
+    let rules = rules();
+    let button = &screen_rule(&rules, ".ref-btn").body;
+    for declaration in [
+        "font-family: var(--font-ui)",
+        "margin-right: auto",
+        "color: var(--text)",
+        "background: none",
+    ] {
+        assert!(button.contains(declaration), ".ref-btn: {declaration}");
+    }
+    assert!(HTML.contains(
+        "refText.textContent = `${place} · ${codes.map((c) => c.toUpperCase()).join(' + ')}`;"
+    ));
+    assert!(HTML.contains(
+        "refBtn.setAttribute('aria-label', `${place}, ${spoken}. Choose a book and chapter`);"
+    ));
+    // Updated whenever a chapter is put on screen.
+    let render = block_after(HTML, "function renderCurrent()");
+    assert!(render.contains("updateReference(compare);"));
+    assert!(render.contains("markPickerCurrent();"));
+    // G opens the picker, in the main keyboard handler, which leaves keys
+    // typed into a form control alone.
+    assert!(
+        HTML.contains(
+            "if (plain && !event.shiftKey && (event.key === 'g' || event.key === 'G')) {"
+        )
+    );
+}
+
+/// The picker is one `<nav>` landmark, "Books and chapters": Random
+/// chapter, then each testament's books under its heading. As a popover
+/// it's a dialog (the preferences script sets the role), and both the
+/// reference button and the sidebar's button control it.
+#[test]
+fn the_picker_is_a_navigation_landmark_or_a_dialog() {
+    let tag = tag_of("picker");
+    assert!(tag.starts_with("<nav"), "{tag}");
+    assert!(tag.contains(r#"aria-label="Books and chapters""#));
+    assert!(tag.contains(" hidden"));
+    let nav = &HTML[HTML.find(r#"<nav id="picker""#).unwrap()..];
+    let nav = &nav[..nav.find("</nav>").unwrap()];
+    for part in [
+        r#"<button type="button" id="random-chapter-btn" class="picker-random">"#,
+        r#"<h2 id="picker-ot-title" class="picker-testament">Old Testament</h2>"#,
+        r#"<ul id="ot-book-list" class="picker-books" aria-labelledby="picker-ot-title"></ul>"#,
+        r#"<h2 id="picker-nt-title" class="picker-testament">New Testament</h2>"#,
+        r#"<ul id="nt-book-list" class="picker-books" aria-labelledby="picker-nt-title"></ul>"#,
+    ] {
+        assert!(nav.contains(part), "the picker should have {part}");
+    }
+    let toggle = tag_of("sidebar-toggle");
+    for attr in [
+        r#"aria-controls="picker""#,
+        r#"aria-expanded="false""#,
+        r#"aria-label="Books and chapters""#,
+        r#"class="bar-btn sidebar-toggle""#,
+    ] {
+        assert!(toggle.contains(attr), "#sidebar-toggle: {attr}");
+    }
+    let head = &HTML[..HTML.find("</head>").unwrap()];
+    for wiring in [
+        "picker.setAttribute('role', 'dialog');",
+        "picker.removeAttribute('role');",
+        "refBtn.setAttribute('aria-haspopup', 'dialog');",
+        "picker: { el: picker, toggle: refBtn, popover: true },",
+        "key: 'gospel-getter-sidebar',",
+    ] {
+        assert!(head.contains(wiring), "the preferences script: {wiring}");
+    }
+    // A book is a disclosure for its chapters, and the chapter and book
+    // being read are marked.
+    assert!(HTML.contains(r#"class="book-item" data-book-id="${book.id}" data-chapter-count="${book.chapterCount}" aria-expanded="false""#));
+    assert!(HTML.contains("button.setAttribute('aria-controls', 'picker-chapters');"));
+    assert!(HTML.contains("grid.setAttribute('role', 'group');"));
+    assert!(HTML.contains("book.setAttribute('aria-current', 'true');"));
+    assert!(HTML.contains(r#"${n === current ? ' aria-current="page"' : ''}"#));
+}
+
+/// Psalms (and any book over 50 chapters) gets a compact numeric grid, ten
+/// to a row; the rest get round pills, six to a row. The chapter and book
+/// being read are marked in `--accent`, with no glow.
+#[test]
+fn psalms_get_a_compact_grid_ten_to_a_row() {
+    let rules = rules();
+    assert!(HTML.contains("const COMPACT_OVER = 50;"));
+    assert!(HTML.contains("const COMPACT_COLUMNS = 10;"));
+    assert!(HTML.contains("const PILL_COLUMNS = 6;"));
+    assert!(HTML.contains("const compact = count > COMPACT_OVER;"));
+    let pills = &screen_rule(&rules, ".chapter-grid").body;
+    assert!(pills.contains("grid-template-columns: repeat(6, 2rem)"));
+    assert!(
+        screen_rule(&rules, ".chapter-btn")
+            .body
+            .contains("border-radius: 50%")
+    );
+    let compact = &screen_rule(&rules, ".chapter-grid.is-compact").body;
+    assert!(compact.contains("grid-template-columns: repeat(10, minmax(0, 1fr))"));
+    let cell = &screen_rule(&rules, ".chapter-grid.is-compact .chapter-btn").body;
+    assert!(cell.contains("border-radius: var(--radius-s)"));
+    assert!(cell.contains("border: none"));
+    let current = &screen_rule(&rules, r#".chapter-btn[aria-current="page"]"#).body;
+    assert!(current.contains("background: var(--accent)"));
+    assert!(current.contains("color: var(--on-accent)"));
+    assert!(!current.contains("glow"));
+    let book = &screen_rule(&rules, r#".book-item[aria-current="true"]"#).body;
+    assert!(book.contains("color: var(--accent)"));
+}
+
+/// The sidebar: from 1200px, 16.5rem down the left below the bar, in the
+/// bar's `--bar-bg`, with the page moved over (on screen only); the
+/// chapter and its neighbors share the narrower room. Reading mode and
+/// print never show it, and its own button only shows where it can.
+#[test]
+fn the_sidebar_is_for_wide_windows_only() {
+    let rules = rules();
+    assert!(HTML.contains("var WIDE = '(min-width: 1200px)';"));
+    let html = custom_properties(&screen_rule(&rules, "html").body);
+    assert_eq!(property(&html, "--sidebar-width"), "16.5rem");
+    let screen = |selector: &str| -> &Rule {
+        rules
+            .iter()
+            .find(|r| r.at_rule.as_deref() == Some("@media screen") && r.selector == selector)
+            .unwrap_or_else(|| panic!("expected a screen-only `{selector}` rule"))
+    };
+    assert!(
+        screen(r#":root[data-picker="sidebar"] body"#)
+            .body
+            .contains("padding-left: var(--sidebar-width)")
+    );
+    let sidebar = &screen(r#":root[data-picker="sidebar"] .picker:not([hidden])"#).body;
+    for declaration in [
+        "top: var(--bar-height)",
+        "left: 0",
+        "bottom: 0",
+        "width: var(--sidebar-width)",
+        "background: var(--bar-bg)",
+    ] {
+        assert!(sidebar.contains(declaration), "the sidebar: {declaration}");
+    }
+    assert!(
+        screen(r#":root[data-picker="sidebar"] .chapter-side"#)
+            .body
+            .contains("flex: 0 1 260px")
+    );
+    assert!(
+        screen_rule(&rules, ":root:not([data-wide]) .sidebar-toggle")
+            .body
+            .contains("display: none")
+    );
+    let popover = &screen_rule(&rules, ".picker:not([hidden])").body;
+    for declaration in [
+        "background: var(--option-bg)",
+        "color: var(--text)",
+        "font-family: var(--font-ui)",
+        "overflow-y: auto",
+        "max-height: calc(100vh - var(--bar-height) - 1rem)",
+    ] {
+        assert!(popover.contains(declaration), "the popover: {declaration}");
+    }
+    // Reading mode never shows the sidebar (see sidebarShown).
+    assert!(
+        HTML.contains("return isWide() && data.sidebar !== 'closed' && data.readerMode !== 'on';")
+    );
+    // It's a setting for this window, not exported with the display ones.
+    let names = block_after(HTML, "var FILE_NAMES =");
+    assert!(!names.contains("sidebar"));
+}
+
+/// The picker's colors are pairs AA in every theme, on the sidebar's
+/// `--bar-bg` and the popover's `--option-bg` alike: books and Random
+/// chapter in `--text` (on a wash under the pointer), testament headings in
+/// `--text-dim`, the book being read in `--accent`, and chapters in
+/// `--text` on `--panel-bg` (`--on-accent` on `--accent` for the one being
+/// read, tested with the other controls).
+#[test]
+fn the_picker_uses_tested_theme_colors() {
+    let rules = rules();
+    let over = |color: &str, under: &str| -> String {
+        if color.starts_with("rgba(") {
+            composite(color, under)
+        } else {
+            color.to_owned()
+        }
+    };
+    for (theme, props) in theme_palettes(&rules) {
+        let accent_rgb = property(&props, "--accent-rgb");
+        for surface in ["--bar-bg", "--option-bg"] {
+            let bg = property(&props, surface);
+            let wash = composite(&format!("rgba({accent_rgb}, 0.12)"), bg);
+            let panel = over(property(&props, "--panel-bg"), bg);
+            for (what, fg, under) in [
+                ("a book", property(&props, "--text"), bg.to_owned()),
+                ("a book under the pointer", property(&props, "--text"), wash),
+                (
+                    "a testament heading",
+                    property(&props, "--text-dim"),
+                    bg.to_owned(),
+                ),
+                (
+                    "the book being read",
+                    property(&props, "--accent"),
+                    bg.to_owned(),
+                ),
+                ("a chapter", property(&props, "--text"), panel),
+            ] {
+                let ratio = contrast_ratio(fg, &under);
+                assert!(
+                    ratio >= 4.5,
+                    "theme `{theme}` on {surface}: {what} is {ratio:.2}:1, below 4.5:1"
+                );
+            }
+        }
+    }
+    for (selector, declaration) in [
+        (".book-item", "color: var(--text)"),
+        (".picker-random", "color: var(--text)"),
+        (".picker-testament", "color: var(--text-dim)"),
+        (".chapter-btn", "color: var(--text)"),
+        (".chapter-btn", "background: var(--panel-bg)"),
+    ] {
+        assert!(
+            screen_rule(&rules, selector).body.contains(declaration),
+            "{selector}: {declaration}"
+        );
+    }
+    let hover = rules
+        .iter()
+        .find(|r| r.at_rule.is_none() && selectors(r).any(|s| s == ".book-item:hover"))
+        .expect("a hover wash on the books");
+    assert!(
+        hover
+            .body
+            .contains("background: rgba(var(--accent-rgb), 0.12)")
+    );
+    for control in [".ref-btn", ".book-item", ".chapter-btn", ".picker-random"] {
+        let focus = format!("{control}:focus-visible");
+        assert!(
+            rules.iter().any(|r| r.at_rule.is_none()
+                && selectors(r).any(|s| s == focus)
+                && r.body.contains("outline: 2px solid var(--accent)")),
+            "{focus} has the focus ring"
+        );
+    }
 }

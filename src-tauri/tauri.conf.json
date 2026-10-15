@@ -13,8 +13,8 @@
         "title": "Gospel Getter",
         "width": 1280,
         "height": 900,
-        "minWidth": 380,
-        "minHeight": 400,
+        "minWidth": 640,
+        "minHeight": 480,
         "resizable": true
       }
     ],

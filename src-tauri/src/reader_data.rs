@@ -17,6 +17,11 @@
 //! them, still import exactly as before and leave the reader's notes
 //! alone.
 //!
+//! Display preferences are read leniently: one this version
+//! doesn't know, or with a value it doesn't offer (a theme added later,
+//! say), is skipped and named in `ReaderData::skipped_preferences`, and the
+//! rest of the file imports. Everything else is checked strictly.
+//!
 //! This module is the format and its validation; reading and writing the
 //! database is `db::reader_data`, and the commands (with the native file
 //! pickers) are in `commands`.
@@ -105,6 +110,10 @@ pub struct ReaderData {
     pub notes: Vec<NoteRecord>,
     #[serde(default)]
     pub preferences: Preferences,
+    /// The display preferences in the file that `parse` skipped, each as
+    /// the reader should see it named, e.g. `theme “neon”`. Never written.
+    #[serde(skip)]
+    pub skipped_preferences: Vec<String>,
 }
 
 /// The last chapter read, and in which translation.
@@ -205,6 +214,15 @@ pub struct Preferences {
 }
 
 impl Preferences {
+    /// Every preference's name in the file.
+    pub const NAMES: [&'static str; 5] = [
+        "theme",
+        "text_size",
+        "line_spacing",
+        "reading_mode",
+        "compare",
+    ];
+
     /// How many preferences are set.
     pub fn count(&self) -> usize {
         [
@@ -353,9 +371,86 @@ pub fn parse(bytes: &[u8]) -> Result<ReaderData, ImportError> {
             )));
         }
     }
-    serde_json::from_value(value).map_err(|e| {
+    let mut value = value;
+    let skipped_preferences = value
+        .get_mut("preferences")
+        .map(drop_unknown_preferences)
+        .unwrap_or_default();
+    let mut data: ReaderData = serde_json::from_value(value).map_err(|e| {
         ImportError::Malformed(format!("The file doesn't have the expected layout: {e}."))
-    })
+    })?;
+    data.skipped_preferences = skipped_preferences;
+    Ok(data)
+}
+
+/// The longest a skipped preference's name or value is shown, in
+/// characters, before it's cut short with "…".
+const MAX_SHOWN_PREFERENCE_CHARS: usize = 40;
+
+/// Removes from a file's `preferences` object every entry this version
+/// can't apply: a name it doesn't have, or a value it doesn't offer for
+/// that name. Returns them as the reader should see them named: the
+/// settings this version has first, in Aa's order, then any others by
+/// name. Anything but an object is left for the structural check to
+/// refuse.
+fn drop_unknown_preferences(preferences: &mut Value) -> Vec<String> {
+    let Some(entries) = preferences.as_object_mut() else {
+        return Vec::new();
+    };
+    let mut skipped = Vec::new();
+    entries.retain(|name, value| {
+        let single = Value::Object([(name.clone(), value.clone())].into_iter().collect());
+        if serde_json::from_value::<Preferences>(single).is_ok() {
+            return true;
+        }
+        let known = Preferences::NAMES.iter().position(|n| n == name);
+        skipped.push((
+            known.unwrap_or(Preferences::NAMES.len()),
+            name.clone(),
+            describe_skipped_preference(name, value),
+        ));
+        false
+    });
+    skipped.sort();
+    skipped.into_iter().map(|(_, _, shown)| shown).collect()
+}
+
+/// `theme “neon”`, `text size “huge”` or `reading mode 3` for a value this
+/// version doesn't offer; `“font” (not a setting in this version)` for a
+/// name it doesn't have.
+fn describe_skipped_preference(name: &str, value: &Value) -> String {
+    let shown = |text: &str| -> String {
+        if text.chars().count() > MAX_SHOWN_PREFERENCE_CHARS {
+            let cut: String = text.chars().take(MAX_SHOWN_PREFERENCE_CHARS - 1).collect();
+            format!("{cut}…")
+        } else {
+            text.to_owned()
+        }
+    };
+    if !Preferences::NAMES.contains(&name) {
+        return format!("“{}” (not a setting in this version)", shown(name));
+    }
+    let label = name.replace('_', " ");
+    match value {
+        Value::String(text) => format!("{label} “{}”", shown(text)),
+        other => format!("{label} {}", shown(&other.to_string())),
+    }
+}
+
+/// The notice for the reader when an import skipped display preferences,
+/// naming each one; `None` when it skipped none.
+pub fn skipped_preferences_notice(skipped: &[String]) -> Option<String> {
+    match skipped {
+        [] => None,
+        [one] => Some(format!(
+            "Skipped a display setting this version of Gospel Getter doesn’t know: {one}."
+        )),
+        many => Some(format!(
+            "Skipped {} display settings this version of Gospel Getter doesn’t know: {}.",
+            many.len(),
+            many.join(", ")
+        )),
+    }
 }
 
 /// Serialize for writing: pretty-printed, with a trailing newline. A
@@ -468,6 +563,9 @@ pub struct ValidatedImport {
     pub note_duplicates_in_file: usize,
     pub position: Option<NewPosition>,
     pub preferences: Preferences,
+    /// The file's display preferences that were skipped (see
+    /// `ReaderData::skipped_preferences`).
+    pub skipped_preferences: Vec<String>,
 }
 
 /// Check one passage in a file (a bookmark's or a note's, labelled
@@ -814,6 +912,7 @@ pub fn validate(
         note_duplicates_in_file,
         position,
         preferences: data.preferences,
+        skipped_preferences: data.skipped_preferences,
     })
 }
 
@@ -1030,12 +1129,147 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(unknown, ImportError::Malformed(_)), "{unknown:?}");
+        // A theme this version doesn't have is skipped, not a reason to
+        // refuse the file (see `unknown_preferences_are_skipped_and_the_rest_imports`).
         let bad_theme = parse(
             br#"{"format": "gospel-getter-reader-data", "format_version": 1, "exported_at": "x",
                  "app_version": "2.2.0", "reading_position": null, "preferences": {"theme": "neon"}}"#,
         )
+        .unwrap();
+        assert_eq!(bad_theme.preferences, Preferences::default());
+        assert_eq!(bad_theme.skipped_preferences, ["theme “neon”"]);
+        // But `preferences` itself must still be an object.
+        let not_an_object = parse(
+            br#"{"format": "gospel-getter-reader-data", "format_version": 1, "exported_at": "x",
+                 "app_version": "2.2.0", "reading_position": null, "preferences": "neon"}"#,
+        )
         .unwrap_err();
-        assert!(bad_theme.to_string().contains("neon"), "{bad_theme}");
+        assert!(
+            matches!(not_an_object, ImportError::Malformed(_)),
+            "{not_an_object:?}"
+        );
+    }
+
+    /// A file from a later version, with display settings this one doesn't
+    /// know, imports everything else: each unknown or invalid preference is
+    /// skipped and named, and the valid ones still apply. Bookmarks,
+    /// highlights and notes stay strict.
+    #[test]
+    fn unknown_preferences_are_skipped_and_the_rest_imports() {
+        let file = |preferences: &str, bookmarks: &str| {
+            format!(
+                r#"{{"format": "gospel-getter-reader-data", "format_version": 3,
+                     "exported_at": "x", "app_version": "9.0.0", "reading_position": null,
+                     "bookmarks": {bookmarks}, "preferences": {preferences}}}"#
+            )
+        };
+        let bookmark = r#"[{"book": 43, "chapter": 3, "verse_start": 16, "verse_end": 16}]"#;
+        let data = parse(
+            file(
+                r#"{"theme": "aurora", "text_size": "huge", "line_spacing": "relaxed",
+                    "reading_mode": "yes", "compare": true, "font": "serif",
+                    "accent": {"hue": 40}}"#,
+                bookmark,
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            data.preferences,
+            Preferences {
+                line_spacing: Some(LineSpacing::Relaxed),
+                compare: Some(true),
+                ..Preferences::default()
+            }
+        );
+        assert_eq!(
+            data.skipped_preferences,
+            [
+                "theme “aurora”",
+                "text size “huge”",
+                "reading mode “yes”",
+                "“accent” (not a setting in this version)",
+                "“font” (not a setting in this version)",
+            ]
+        );
+        assert_eq!(data.bookmarks.len(), 1);
+        assert_eq!(
+            skipped_preferences_notice(&data.skipped_preferences).unwrap(),
+            "Skipped 5 display settings this version of Gospel Getter doesn’t know: \
+             theme “aurora”, text size “huge”, reading mode “yes”, \
+             “accent” (not a setting in this version), “font” (not a setting in this version)."
+        );
+
+        // Numbers, nulls and long values: null is "not set", the others are
+        // named, and anything long is cut short.
+        let long = "x".repeat(100);
+        let data = parse(
+            file(
+                &format!(r#"{{"theme": null, "text_size": 3, "compare": "{long}"}}"#),
+                "[]",
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(data.preferences, Preferences::default());
+        assert_eq!(
+            data.skipped_preferences,
+            [
+                "text size 3".to_string(),
+                format!("compare “{}…”", "x".repeat(39))
+            ]
+        );
+        assert_eq!(
+            skipped_preferences_notice(&data.skipped_preferences[..1]).unwrap(),
+            "Skipped a display setting this version of Gospel Getter doesn’t know: text size 3."
+        );
+        assert_eq!(skipped_preferences_notice(&[]), None);
+
+        // Only preferences are lenient: a bad bookmark still refuses the file.
+        let bad_bookmark = parse(
+            file(
+                r#"{"theme": "aurora"}"#,
+                r#"[{"book": 43, "chapter": 3, "verse": 16}]"#,
+            )
+            .as_bytes(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(bad_bookmark, ImportError::Malformed(_)),
+            "{bad_bookmark:?}"
+        );
+        // And so does an unknown field anywhere else.
+        let unknown = parse(
+            file("{}", "[]")
+                .replace("\"bookmarks\"", "\"bookmark\"")
+                .as_bytes(),
+        )
+        .unwrap_err();
+        assert!(matches!(unknown, ImportError::Malformed(_)), "{unknown:?}");
+    }
+
+    /// `Preferences::NAMES` is exactly the file's preference names, in Aa's
+    /// order.
+    #[test]
+    fn preference_names_match_the_file() {
+        let all = Preferences {
+            theme: Some(Theme::ChiRho),
+            text_size: Some(TextSize::Small),
+            line_spacing: Some(LineSpacing::Normal),
+            reading_mode: Some(true),
+            compare: Some(false),
+        };
+        let value = serde_json::to_value(all).unwrap();
+        let mut names: Vec<&str> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut expected = Preferences::NAMES.to_vec();
+        names.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(names, expected);
     }
 
     /// The themes added after 2.11 import, and the older ones still do.
@@ -1156,6 +1390,7 @@ mod tests {
                 reading_mode: Some(false),
                 compare: Some(false),
             },
+            skipped_preferences: Vec::new(),
         };
         to_file_contents(&data).unwrap().len()
     }
@@ -1224,6 +1459,7 @@ mod tests {
             highlights: Vec::new(),
             notes: Vec::new(),
             preferences: Preferences::default(),
+            skipped_preferences: Vec::new(),
         };
         let bookmark = BookmarkRecord {
             book: 43,

@@ -366,9 +366,12 @@
         :root[data-line-spacing="relaxed"] { --reading-leading: 2.05; }
 
         /* The top bar's height: the page content starts below it, and
-           the Library panel hangs from it. */
+           the Library panel and the sidebar hang from it. The sidebar is
+           wide enough for Psalms' chapters ten to a row, each at least 24px
+           from the next (WCAG's minimum target spacing). */
         html {
             --bar-height: 3.4rem;
+            --sidebar-width: 16.5rem;
         }
 
         * {
@@ -1951,6 +1954,10 @@
         }
 
         .bar-btn:focus-visible,
+        .ref-btn:focus-visible,
+        .picker-random:focus-visible,
+        .book-item:focus-visible,
+        .chapter-btn:focus-visible,
         .stepper-btn:focus-visible,
         .panel-close:focus-visible,
         .library-tab:focus-visible,
@@ -2039,9 +2046,7 @@
 
             :root[data-reader-mode="on"] #library-toggle,
             :root[data-reader-mode="on"] #menu-toggle,
-            :root[data-reader-mode="on"] header,
-            :root[data-reader-mode="on"] .book-list,
-            :root[data-reader-mode="on"] #chapter-list,
+            :root[data-reader-mode="on"] .sidebar-toggle,
             :root[data-reader-mode="on"] .chapter-side,
             :root[data-reader-mode="on"] .nav-hint,
             :root[data-reader-mode="on"] footer {
@@ -2053,136 +2058,224 @@
                 padding-top: 4.5rem;
             }
 
-            :root[data-reader-mode="on"] #reading-pane {
-                border-top: none;
-                padding-top: 0;
+            /* The reference stays legible over the text scrolling under
+               the (now transparent) bar. */
+            :root[data-reader-mode="on"] .ref-btn {
+                background: var(--bar-bg);
+            }
+
+            /* The sidebar (the picker on a wide window, while it's shown:
+               the preferences script sets data-picker): down the left,
+               below the bar, in the bar's opaque --bar-bg, and the page
+               moves over to make room. Reading mode never shows it. */
+            :root[data-picker="sidebar"] body {
+                padding-left: var(--sidebar-width);
+            }
+
+            :root[data-picker="sidebar"] .picker:not([hidden]) {
+                top: var(--bar-height);
+                left: 0;
+                bottom: 0;
+                z-index: 15;
+                width: var(--sidebar-width);
+                max-height: none;
+                background: var(--bar-bg);
+                border: none;
+                border-right: 1px solid var(--accent-dim);
+                border-radius: 0;
+                box-shadow: none;
+            }
+
+            /* With the sidebar in, the chapter and its neighbors share
+               the narrower room in proportion, rather than the chapter
+               being read giving up all of it. */
+            :root[data-picker="sidebar"] .chapter-main {
+                flex: 1 1 472px;
+            }
+
+            :root[data-picker="sidebar"] .chapter-side {
+                flex: 0 1 260px;
             }
         }
 
-        header {
-            text-align: center;
-            margin-bottom: 2rem;
-            padding-bottom: 1.5rem;
-            border-bottom: 3px double var(--accent-dim);
-        }
-
-        h1 {
-            font-size: 2.6rem;
-            font-weight: normal;
-            letter-spacing: 0.03em;
-            color: var(--accent);
-            text-shadow: var(--glow);
-        }
-
-        .subtitle {
-            font-size: 0.9rem;
-            font-style: italic;
-            color: var(--text-dim);
-            margin-top: 0.25rem;
-        }
-
-        .random-chapter-btn {
-            display: inline-block;
-            margin-top: 0.9rem;
-            background: var(--panel-bg);
-            border: 1px solid var(--accent-dim);
+        /* The reference button, at the left of the bar: the chapter being
+           read and its translation ("John 3 · KJV"), in the UI sans,
+           always in view. It opens the book and chapter picker (as G does):
+           the sidebar on wide windows, a popover below it otherwise. Like
+           the bar's icons, it has no box until the pointer is over it (a
+           wash) or its popover is open (the wash, in --accent). */
+        .ref-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            min-width: 0;
+            max-width: min(24rem, 50vw);
+            height: 2.4rem;
+            margin-right: auto;
+            padding: 0 0.7rem;
+            background: none;
+            border: none;
             border-radius: var(--radius-m);
-            padding: 0.4rem 0.9rem;
-            font-family: inherit;
-            font-size: 0.85rem;
-            color: var(--accent);
+            color: var(--text);
+            font-family: var(--font-ui);
+            font-size: 0.95rem;
+            white-space: nowrap;
             cursor: pointer;
-            transition: all 0.15s;
         }
 
-        .random-chapter-btn:hover {
-            background: rgba(var(--accent-rgb), 0.3);
-            border-color: var(--accent);
+        .ref-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        .book-list {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2rem;
-            margin-bottom: 1.5rem;
+        .ref-btn svg {
+            flex: none;
+            width: 0.9rem;
+            height: 0.9rem;
+            color: var(--text-dim);
         }
 
-        @media (max-width: 640px) {
-            .book-list {
-                grid-template-columns: 1fr;
-            }
+        .ref-btn:hover {
+            background: rgba(var(--accent-rgb), 0.12);
         }
 
-        .testament-title {
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
+        .ref-btn[aria-haspopup="dialog"][aria-expanded="true"] {
+            background: rgba(var(--accent-rgb), 0.08);
             color: var(--accent);
-            margin-bottom: 0.6rem;
-            border-bottom: 1px solid var(--accent-dim);
-            padding-bottom: 0.3rem;
         }
 
-        .book-grid {
+        /* The sidebar's own show/hide button, before the reference: only
+           where there's room for the sidebar. */
+        :root:not([data-wide]) .sidebar-toggle {
+            display: none;
+        }
+
+        /* The book and chapter picker: Random chapter, then the Old and New
+           Testament books, with the chosen book's chapters under it. On
+           wide windows it's a sidebar down the left (see the screen block
+           below); otherwise a popover from the reference button, opaque
+           --option-bg like Aa's. */
+        .picker:not([hidden]) {
+            position: fixed;
+            top: calc(var(--bar-height) + 0.4rem);
+            left: 0.5rem;
+            z-index: 26;
             display: flex;
-            flex-wrap: wrap;
-            gap: 0.4rem;
+            flex-direction: column;
+            width: min(20rem, calc(100vw - 1rem));
+            max-height: calc(100vh - var(--bar-height) - 1rem);
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            padding: 0.5rem 0.6rem 0.9rem;
+            background: var(--option-bg);
+            color: var(--text);
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-l);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+            font-family: var(--font-ui);
+            font-size: 0.9rem;
+        }
+
+        .picker-random {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            width: 100%;
+            min-height: 2.2rem;
+            padding: 0.3rem 0.6rem;
+            background: none;
+            border: none;
+            border-radius: var(--radius-m);
+            color: var(--text);
+            font-family: inherit;
+            font-size: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .picker-random svg {
+            width: 1rem;
+            height: 1rem;
+            color: var(--text-dim);
+        }
+
+        .picker-testament {
+            padding: 0.9rem 0.6rem 0.3rem;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+        }
+
+        .picker-books {
+            list-style: none;
         }
 
         .book-item {
-            background: var(--panel-bg);
-            border: 1px solid var(--accent-dim);
-            border-radius: var(--radius-m);
-            padding: 0.35rem 0.7rem;
-            font-family: inherit;
-            font-size: 0.85rem;
-            color: var(--text);
-            cursor: pointer;
-            transition: all 0.15s;
-        }
-
-        .book-item:hover {
-            background: rgba(var(--accent-rgb), 0.3);
-            border-color: var(--accent);
-        }
-
-        .book-item.active {
-            background: var(--accent);
-            color: var(--on-accent);
-            border-color: var(--accent);
-            box-shadow: var(--glow);
-        }
-
-        #chapter-list {
-            min-height: 3rem;
-            margin: 1.5rem 0;
-        }
-
-        .chapter-grid-title {
-            font-size: 1rem;
-            font-weight: normal;
-            font-style: italic;
-            color: var(--accent);
-            margin-bottom: 0.6rem;
-        }
-
-        .chapter-grid {
             display: flex;
-            flex-wrap: wrap;
-            gap: 0.4rem;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            width: 100%;
+            min-height: 2rem;
+            padding: 0.25rem 0.6rem;
+            background: none;
+            border: none;
+            border-radius: var(--radius-m);
+            color: var(--text);
+            font-family: inherit;
+            font-size: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        /* A chevron: pointing right, or down while the book's chapters
+           show. */
+        .book-item::after {
+            content: "";
+            flex: none;
+            width: 0.4rem;
+            height: 0.4rem;
+            border-right: 1.5px solid var(--text-dim);
+            border-bottom: 1.5px solid var(--text-dim);
+            transform: rotate(-45deg);
+        }
+
+        .book-item[aria-expanded="true"]::after {
+            transform: rotate(45deg);
+        }
+
+        .picker-random:hover,
+        .book-item:hover {
+            background: rgba(var(--accent-rgb), 0.12);
+        }
+
+        /* The book being read. */
+        .book-item[aria-current="true"] {
+            color: var(--accent);
+        }
+
+        /* A book's chapters: round pills, six to a row. */
+        .chapter-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 2rem);
+            gap: 0.3rem;
+            padding: 0.3rem 0.6rem 0.7rem;
         }
 
         .chapter-btn {
-            width: 2.4rem;
-            height: 2.4rem;
+            width: 2rem;
+            height: 2rem;
+            padding: 0;
             border: 1px solid var(--accent-dim);
             border-radius: 50%;
             background: var(--panel-bg);
             font-family: inherit;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
+            font-variant-numeric: tabular-nums;
             color: var(--text);
             cursor: pointer;
-            transition: all 0.15s;
         }
 
         .chapter-btn:hover {
@@ -2190,16 +2283,28 @@
             border-color: var(--accent);
         }
 
-        .chapter-btn.active {
+        /* The chapter being read. */
+        .chapter-btn[aria-current="page"] {
             background: var(--accent);
             color: var(--on-accent);
             border-color: var(--accent);
-            box-shadow: var(--glow);
         }
 
-        #reading-pane {
-            border-top: 1px solid var(--rule);
-            padding-top: 1.5rem;
+        /* Psalms, and any book over 50 chapters: a compact numeric grid,
+           ten to a row, rather than rows and rows of pills. */
+        .chapter-grid.is-compact {
+            grid-template-columns: repeat(10, minmax(0, 1fr));
+            gap: 0.15rem;
+            padding: 0.3rem 0 0.7rem;
+        }
+
+        /* Borderless, so "150" fits a tenth of the sidebar. */
+        .chapter-grid.is-compact .chapter-btn {
+            width: auto;
+            height: 1.7rem;
+            border: none;
+            border-radius: var(--radius-s);
+            font-size: 0.72rem;
         }
 
         .reading-row {
@@ -2955,9 +3060,7 @@
             .library-panel,
             .toast,
             .reader-exit,
-            header,
-            .book-list,
-            #chapter-list,
+            .picker,
             .chapter-side,
             .nav-hint,
             footer,
@@ -3061,6 +3164,17 @@
                     values: ['off', 'on'],
                     renamed: {},
                 },
+                // Whether the book and chapter picker shows as a sidebar on
+                // a wide window (see applyPickerShape). Like updateCheck,
+                // it's for this computer's window, so it isn't exported.
+                sidebar: {
+                    key: 'gospel-getter-sidebar',
+                    attr: 'sidebar',
+                    select: null,
+                    fallback: 'open',
+                    values: ['open', 'closed'],
+                    renamed: {},
+                },
                 // Check for updates when the app starts. A setting for this
                 // computer, not a display one, so it isn't exported.
                 updateCheck: {
@@ -3106,8 +3220,45 @@
                 apply(PREFS[name], load(PREFS[name]));
             });
 
-            // The header's popovers and panels: Aa, the Library, the ☰ menu
-            // and the About dialog. Only one is open at a time; Escape
+            // The book and chapter picker is a sidebar down the left on a
+            // window at least this wide, and a popover from the reference
+            // button on a narrower one. At 1200px the sidebar
+            // (--sidebar-width, 264px) and the page's gutters leave 888px
+            // for the chapter and its two faded neighbors: a reading column
+            // of about 51 characters at the default size (55 in the default
+            // 1280px window, which gets the sidebar; 62 from 1440px up, as
+            // without it). Any narrower and the column drops below 50.
+            var WIDE = '(min-width: 1200px)';
+            var wideQuery = window.matchMedia ? window.matchMedia(WIDE) : null;
+
+            function isWide() {
+                return !!(wideQuery && wideQuery.matches);
+            }
+
+            // The sidebar shows on a wide window unless the reader hid it;
+            // reading mode never shows it.
+            function sidebarShown() {
+                var data = document.documentElement.dataset;
+                return isWide() && data.sidebar !== 'closed' && data.readerMode !== 'on';
+            }
+
+            // On <html>, for the CSS: data-wide while there's room for the
+            // sidebar, and data-picker="sidebar" while it shows (the page
+            // makes room for it). Set here, before <body> paints, so the
+            // page is laid out for it from the start.
+            function applyPickerShape() {
+                var data = document.documentElement.dataset;
+                if (isWide()) data.wide = '';
+                else delete data.wide;
+                if (sidebarShown()) data.picker = 'sidebar';
+                else delete data.picker;
+            }
+
+            applyPickerShape();
+
+            // The header's popovers and panels: Aa, the Library, the ☰ menu,
+            // the About dialog, and the book and chapter picker when it's a
+            // popover. Only one is open at a time; Escape
             // closes it, and so does a click outside a popover (the Aa
             // popover or the menu). Opening one moves focus into it, and
             // closing it gives focus back to the button that opened it.
@@ -3131,6 +3282,9 @@
                 var readerModeBtn = byId('reader-mode-btn');
                 var readerExit = byId('reader-exit');
                 var compareBtn = byId('compare-btn');
+                var picker = byId('picker');
+                var refBtn = byId('ref-btn');
+                var sidebarToggle = byId('sidebar-toggle');
 
                 function isReaderMode() {
                     return root.dataset.readerMode === 'on';
@@ -3143,18 +3297,114 @@
                     library: { el: libraryPanel, toggle: libraryToggle, popover: false },
                     menu: { el: appMenu, toggle: menuToggle, popover: true },
                     about: { el: aboutOverlay, toggle: null, popover: false },
+                    // The picker as a popover. As the sidebar it isn't a
+                    // surface: it stays while the reader reads, beside any
+                    // of these.
+                    picker: { el: picker, toggle: refBtn, popover: true },
                 };
                 var current = null;
                 var returnFocus = null;
+                var pickerPopoverOpen = false;
 
                 function shown(el) {
                     return !!el && el.isConnected && !el.closest('[hidden]') && getComputedStyle(el).display !== 'none';
                 }
 
                 function setShown(name, open) {
+                    if (name === 'picker') {
+                        pickerPopoverOpen = open;
+                        syncPicker();
+                        return;
+                    }
                     var surface = SURFACES[name];
                     surface.el.hidden = !open;
                     if (surface.toggle) surface.toggle.setAttribute('aria-expanded', String(open));
+                }
+
+                // ---- The picker's two shapes. As the sidebar it's a
+                // navigation landmark, shown while sidebarShown(); as the
+                // popover it's a dialog, shown while open. The reference
+                // button and the sidebar's own button say which.
+                function syncPicker() {
+                    applyPickerShape();
+                    var sidebar = sidebarShown();
+                    var wasHidden = picker.hidden;
+                    picker.hidden = !(sidebar || pickerPopoverOpen);
+                    if (sidebar) {
+                        picker.removeAttribute('role');
+                        refBtn.removeAttribute('aria-haspopup');
+                    } else {
+                        picker.setAttribute('role', 'dialog');
+                        refBtn.setAttribute('aria-haspopup', 'dialog');
+                    }
+                    refBtn.setAttribute('aria-expanded', String(!picker.hidden));
+                    sidebarToggle.setAttribute('aria-expanded', String(sidebar));
+                    // The main script scrolls it to the book being read.
+                    if (wasHidden && !picker.hidden) document.dispatchEvent(new CustomEvent('gospel-getter:picker-shown'));
+                }
+
+                // Makes `change` (which reflows the page) keep the reader's
+                // place: the first heading or verse of the chapter being
+                // read that reaches below the bar stays where it was on
+                // screen.
+                function keepReadingPlace(change) {
+                    var barBottom = byId('top-bar').getBoundingClientRect().bottom;
+                    var marks = document.querySelectorAll('.chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap');
+                    var anchor = null;
+                    var before = 0;
+                    for (var i = 0; i < marks.length; i++) {
+                        var rect = marks[i].getBoundingClientRect();
+                        if (rect.bottom > barBottom) {
+                            anchor = marks[i];
+                            before = rect.top;
+                            break;
+                        }
+                    }
+                    change();
+                    if (!anchor) return;
+                    var shift = anchor.getBoundingClientRect().top - before;
+                    if (shift) window.scrollBy(0, shift);
+                }
+
+                // Shows or hides the sidebar, and remembers it.
+                function setSidebar(open) {
+                    keepReadingPlace(function () {
+                        var value = open ? 'open' : 'closed';
+                        apply(PREFS.sidebar, value);
+                        store(PREFS.sidebar, value);
+                        syncPicker();
+                    });
+                }
+
+                // The reference button, or G: on a wide window, into the
+                // sidebar (showing it, if it was hidden); otherwise the
+                // popover, which the button also closes (`toggle`). Focus
+                // goes to the chapter being read.
+                function openPicker(toggle) {
+                    if (isWide() && !isReaderMode()) {
+                        if (current && SURFACES[current].popover) closeSurface(false);
+                        if (!sidebarShown()) setSidebar(true);
+                        focusInto('picker');
+                    } else if (toggle) {
+                        toggleSurface('picker');
+                    } else if (current !== 'picker') {
+                        openSurface('picker');
+                    }
+                }
+
+                // A window resized across the breakpoint changes shape: an
+                // open popover closes, and focus in a sidebar that's gone
+                // goes to the reference button.
+                function onShapeChange() {
+                    var focusWasInside = picker.contains(document.activeElement);
+                    if (current === 'picker') closeSurface(false);
+                    syncPicker();
+                    if (focusWasInside && picker.hidden) refBtn.focus();
+                }
+
+                if (wideQuery) {
+                    if (wideQuery.addEventListener) wideQuery.addEventListener('change', onShapeChange);
+                    else wideQuery.addListener(onShapeChange);
                 }
 
                 // Closes whatever is open. Focus goes back to the button
@@ -3181,6 +3431,10 @@
                         first = libraryPanel.querySelector('[role="tab"][aria-selected="true"]');
                     } else if (name === 'menu') {
                         first = menuItems()[0];
+                    } else if (name === 'picker') {
+                        first = picker.querySelector('.chapter-btn[aria-current="page"]')
+                            || picker.querySelector('.book-item[aria-current="true"]')
+                            || byId('random-chapter-btn');
                     } else {
                         first = byId('about-close');
                     }
@@ -3213,7 +3467,12 @@
                     open: openSurface,
                     close: closeSurface,
                     toggle: toggleSurface,
+                    openPicker: function () { openPicker(false); },
                 };
+
+                syncPicker();
+                refBtn.addEventListener('click', function () { openPicker(true); });
+                sidebarToggle.addEventListener('click', function () { setSidebar(!sidebarShown()); });
 
                 aaToggle.addEventListener('click', function () { toggleSurface('aa'); });
                 libraryToggle.addEventListener('click', function () { toggleSurface('library'); });
@@ -3460,6 +3719,9 @@
                     // exit button, or Aa, which holds the reading-mode
                     // toggle.
                     closeSurface(false);
+                    // Reading mode hides the sidebar; leaving it brings
+                    // the sidebar back.
+                    syncPicker();
                     (on ? readerExit : aaToggle).focus();
                 }
 
@@ -3558,6 +3820,7 @@
                         });
                         readerModeBtn.setAttribute('aria-pressed', String(isReaderMode()));
                         compareBtn.setAttribute('aria-pressed', String(root.dataset.compare === 'on'));
+                        syncPicker();
                         if (compareChanged) document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
                         return { persisted: persisted };
                     },
@@ -3585,6 +3848,8 @@
 </head>
 <body>
     <div id="top-bar" class="top-bar">
+        <button type="button" id="sidebar-toggle" class="bar-btn sidebar-toggle" aria-label="Books and chapters" title="Show or hide books and chapters" aria-controls="picker" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+        <button type="button" id="ref-btn" class="ref-btn" aria-label="Choose a book and chapter" title="Choose a book and chapter (G)" aria-keyshortcuts="G" aria-controls="picker" aria-expanded="false"><span id="ref-text" class="ref-text"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg></button>
         <button type="button" id="reader-exit" class="reader-exit">Exit reading mode <span aria-hidden="true">(Esc)</span></button>
         <div class="bar-item">
             <button type="button" id="aa-toggle" class="bar-btn aa-toggle" aria-label="Text and display" title="Text and display" aria-haspopup="dialog" aria-controls="aa-popover" aria-expanded="false">Aa</button>
@@ -3654,6 +3919,13 @@
             </div>
         </div>
     </div>
+    <nav id="picker" class="picker" aria-label="Books and chapters" hidden>
+        <button type="button" id="random-chapter-btn" class="picker-random"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>Random chapter</button>
+        <h2 id="picker-ot-title" class="picker-testament">Old Testament</h2>
+        <ul id="ot-book-list" class="picker-books" aria-labelledby="picker-ot-title"></ul>
+        <h2 id="picker-nt-title" class="picker-testament">New Testament</h2>
+        <ul id="nt-book-list" class="picker-books" aria-labelledby="picker-nt-title"></ul>
+    </nav>
     <aside id="library-panel" class="library-panel" aria-labelledby="library-title" hidden>
         <div class="library-head">
             <h2 id="library-title" class="library-title">Library</h2>
@@ -3741,7 +4013,7 @@
                     <ul id="welcome-text-2">
                         <li>The chapter you’re reading sits in the middle, with the chapters before and after it faded on either side.</li>
                         <li>Press <kbd>←</kbd> and <kbd>→</kbd> to turn chapters, right across the Bible.</li>
-                        <li>Pick a book and chapter at the top, or try Random chapter.</li>
+                        <li>Choose a book and chapter from the reference at the top left, or press <kbd>G</kbd>. Random chapter is there too.</li>
                         <li>Click a verse to see related passages.</li>
                     </ul>
                 </section>
@@ -3758,7 +4030,7 @@
                 <section class="welcome-page" hidden>
                     <h2 id="welcome-title-4">Make it yours</h2>
                     <ul id="welcome-text-4">
-                        <li>Aa, top right, has six themes, four text sizes, three line spacings, the translation and a distraction-free reading mode.</li>
+                        <li>Aa, top right, has nine themes, four text sizes, three line spacings, the translation and a distraction-free reading mode.</li>
                         <li>Your bookmarks, highlights and notes are in the Library, the bookmark button beside Aa (or press <kbd>Ctrl</kbd>+<kbd>B</kbd>).</li>
                         <li>Press <kbd>C</kbd> to compare the KJV and WEB side by side.</li>
                         <li>Your chapter, bookmarks, highlights, notes and settings are remembered. To see this tour again, choose Show welcome in the ☰ menu.</li>
@@ -3862,25 +4134,8 @@
         </div>
     </section>
 
-    <div class="container">
-        <header>
-            <h1>Gospel Getter</h1>
-            <p class="subtitle">The Holy Bible</p>
-            <button type="button" id="random-chapter-btn" class="random-chapter-btn">Random chapter</button>
-        </header>
-
-        <div class="book-list">
-            <div>
-                <div class="testament-title">Old Testament</div>
-                <div class="book-grid" id="ot-book-grid"></div>
-            </div>
-            <div>
-                <div class="testament-title">New Testament</div>
-                <div class="book-grid" id="nt-book-grid"></div>
-            </div>
-        </div>
-
-        <div id="chapter-list"></div>
+    <main class="container">
+        <h1 class="visually-hidden">Gospel Getter</h1>
 
         <p id="reader-notice" class="reader-notice" role="status" hidden></p>
 
@@ -3889,7 +4144,7 @@
         <p class="nav-hint">Use &larr; and &rarr; to move a chapter at a time, / to search, C to compare translations.</p>
 
         <footer>Gospel Getter &mdash; read the whole counsel of God, one chapter at a time.</footer>
-    </div>
+    </main>
 
     <script>
         (function () {
@@ -3898,9 +4153,11 @@
             const invoke = window.__TAURI__.core.invoke;
 
             const root = document.documentElement;
-            const otBookGrid = document.getElementById('ot-book-grid');
-            const ntBookGrid = document.getElementById('nt-book-grid');
-            const chapterList = document.getElementById('chapter-list');
+            const picker = document.getElementById('picker');
+            const otBookList = document.getElementById('ot-book-list');
+            const ntBookList = document.getElementById('nt-book-list');
+            const refBtn = document.getElementById('ref-btn');
+            const refText = document.getElementById('ref-text');
             const readingPane = document.getElementById('reading-pane');
             const readerNotice = document.getElementById('reader-notice');
             const translationSelect = document.getElementById('translation-select');
@@ -5460,6 +5717,9 @@
                 }
                 if (!preview.position) summary.push('No reading position.');
                 if (!describePreferences(preview.preferences).length) summary.push('No display settings.');
+                // Settings from a later version (a theme this one doesn't
+                // have, say) are skipped; the backend names them.
+                if (preview.skippedPreferencesNotice) summary.push(preview.skippedPreferencesNotice);
                 document.getElementById('import-summary').innerHTML = summary.map((s) => `<li>${escapeHtml(s)}</li>`).join('');
 
                 importBookmarkChoice.hidden = !(preview.bookmarksInFile || preview.highlightsInFile || preview.notesInFile);
@@ -5590,6 +5850,7 @@
                         : `Added ${plural(result.notesAdded, 'note')}${result.notesAlreadyPresent ? ` (${result.notesAlreadyPresent} you already had)` : ''}.`);
                 }
                 if (result.position) parts.push(`Went to ${result.position.reference}.`);
+                if (preview.skippedPreferencesNotice) parts.push(preview.skippedPreferencesNotice);
 
                 // Display settings live in the webview's own storage, not
                 // the database, so they're applied after the database part
@@ -5789,26 +6050,207 @@
                 return { bookId, chapter };
             }
 
-            function setActiveBook(bookId) {
-                document.querySelectorAll('.book-item').forEach((el) => {
-                    el.classList.toggle('active', el.dataset.bookId === String(bookId));
-                });
-            }
+            // ---- The book and chapter picker: the sidebar, or the popover
+            // from the reference button (the preferences script in <head>
+            // shows and hides it, in either shape). Random chapter, then
+            // the books; choosing a book shows its chapters under it, and
+            // choosing a chapter reads it. The chapter being read, and its
+            // book, are marked.
 
-            function setActiveChapterButton(chapter) {
-                document.querySelectorAll('.chapter-btn').forEach((el) => {
-                    el.classList.toggle('active', el.dataset.chapter === String(chapter));
-                });
-            }
+            // A book with more chapters than this (Psalms, Isaiah,
+            // Jeremiah) gets the compact grid, ten to a row; the rest get
+            // pills, six to a row (see .chapter-grid).
+            const COMPACT_OVER = 50;
+            const COMPACT_COLUMNS = 10;
+            const PILL_COLUMNS = 6;
 
-            function renderBookButton(book, activeBookId) {
-                const active = book.id === activeBookId ? ' active' : '';
-                return `<button type="button" class="book-item${active}" data-book-id="${book.id}" data-chapter-count="${book.chapterCount}">${escapeHtml(book.name)}</button>`;
+            // The book whose chapters show, as a string, or null.
+            let pickerBook = null;
+
+            function renderBookButton(book) {
+                return `<li><button type="button" class="book-item" data-book-id="${book.id}" data-chapter-count="${book.chapterCount}" aria-expanded="false">${escapeHtml(book.name)}</button></li>`;
             }
 
             function renderBookLists(home) {
-                otBookGrid.innerHTML = home.otBooks.map((b) => renderBookButton(b, home.currentBookId)).join('');
-                ntBookGrid.innerHTML = home.ntBooks.map((b) => renderBookButton(b, home.currentBookId)).join('');
+                otBookList.innerHTML = home.otBooks.map((b) => renderBookButton(b)).join('');
+                ntBookList.innerHTML = home.ntBooks.map((b) => renderBookButton(b)).join('');
+            }
+
+            function bookButton(bookId) {
+                return picker.querySelector(`.book-item[data-book-id="${bookId}"]`);
+            }
+
+            // Shows `bookId`'s chapters under it (and no other book's), or
+            // no book's for null. Built from the book's chapter count, so
+            // it needs nothing from the backend.
+            function showPickerChapters(bookId) {
+                const shown = document.getElementById('picker-chapters');
+                if (shown) shown.remove();
+                picker.querySelectorAll('.book-item[aria-expanded="true"]').forEach((b) => {
+                    b.setAttribute('aria-expanded', 'false');
+                    b.removeAttribute('aria-controls');
+                });
+                pickerBook = null;
+                const button = bookId == null ? null : bookButton(bookId);
+                if (!button) return;
+                const count = Number(button.dataset.chapterCount);
+                const compact = count > COMPACT_OVER;
+                const current = reading && String(reading.bookId) === String(bookId) ? reading.chapter : null;
+                const grid = document.createElement('div');
+                grid.id = 'picker-chapters';
+                grid.className = compact ? 'chapter-grid is-compact' : 'chapter-grid';
+                grid.setAttribute('role', 'group');
+                grid.setAttribute('aria-label', `${button.textContent} chapters`);
+                grid.dataset.bookId = String(bookId);
+                grid.dataset.columns = String(compact ? COMPACT_COLUMNS : PILL_COLUMNS);
+                let buttons = '';
+                for (let n = 1; n <= count; n++) {
+                    buttons += `<button type="button" class="chapter-btn" data-chapter="${n}"${n === current ? ' aria-current="page"' : ''}>${n}</button>`;
+                }
+                grid.innerHTML = buttons;
+                button.setAttribute('aria-expanded', 'true');
+                button.setAttribute('aria-controls', 'picker-chapters');
+                button.after(grid);
+                pickerBook = String(bookId);
+            }
+
+            // Scrolls the picker (not the page) just enough to show `el`.
+            function revealInPicker(el) {
+                if (!el || picker.hidden) return;
+                const top = el.offsetTop;
+                const bottom = top + el.offsetHeight;
+                if (top < picker.scrollTop) picker.scrollTop = top - 8;
+                else if (bottom > picker.scrollTop + picker.clientHeight) picker.scrollTop = bottom - picker.clientHeight + 8;
+            }
+
+            // Scrolls the picker so the book being read, and as much of its
+            // chapters as fit, are in view: unless they already are, its
+            // name goes a little below the top.
+            function revealCurrentInPicker() {
+                const book = bookButton(reading.bookId);
+                if (!book || picker.hidden) return;
+                const grid = gridAfter(book);
+                const bottom = (grid || book).offsetTop + (grid || book).offsetHeight;
+                const inView = book.offsetTop >= picker.scrollTop
+                    && bottom <= picker.scrollTop + picker.clientHeight;
+                if (!inView) picker.scrollTop = book.offsetTop - 48;
+            }
+
+            function gridAfter(book) {
+                return book.getAttribute('aria-expanded') === 'true' ? book.nextElementSibling : null;
+            }
+
+            // After a chapter is put on screen: its book and chapter are
+            // the ones marked, and its book's chapters show (unless they
+            // already do, so a reader choosing chapters keeps their place).
+            function markPickerCurrent() {
+                picker.querySelectorAll('.book-item[aria-current]').forEach((b) => b.removeAttribute('aria-current'));
+                const book = bookButton(reading.bookId);
+                if (book) book.setAttribute('aria-current', 'true');
+                if (pickerBook !== String(reading.bookId)) {
+                    showPickerChapters(reading.bookId);
+                } else {
+                    picker.querySelectorAll('.chapter-btn').forEach((b) => {
+                        if (Number(b.dataset.chapter) === reading.chapter) b.setAttribute('aria-current', 'page');
+                        else b.removeAttribute('aria-current');
+                    });
+                }
+                if (!picker.contains(document.activeElement)) revealCurrentInPicker();
+            }
+
+            // Reads a chapter chosen in the picker. The popover closes
+            // (focus going back to the reference button); the sidebar
+            // stays.
+            function choosePickerChapter(bookId, chapter) {
+                if (surfaces() && surfaces().current() === 'picker') closeSurfaces();
+                loadReading(bookId, chapter);
+            }
+
+            document.addEventListener('gospel-getter:picker-shown', function () {
+                if (reading) revealCurrentInPicker();
+            });
+
+            picker.addEventListener('click', function (event) {
+                const book = event.target.closest('.book-item');
+                if (book) {
+                    showPickerChapters(book.getAttribute('aria-expanded') === 'true' ? null : book.dataset.bookId);
+                    return;
+                }
+                const chapter = event.target.closest('.chapter-btn');
+                if (chapter) {
+                    choosePickerChapter(chapter.closest('.chapter-grid').dataset.bookId, chapter.dataset.chapter);
+                    return;
+                }
+                if (event.target.closest('#random-chapter-btn')) {
+                    const pick = pickRandomBookAndChapter();
+                    if (pick) choosePickerChapter(pick.bookId, pick.chapter);
+                }
+            });
+
+            // The keyboard, besides Tab: ↑ and ↓ move through Random
+            // chapter and the books (into and out of a book's chapters), →
+            // shows a book's chapters and ← hides them; in the chapters,
+            // the arrows move around the grid, and Home and End go to its
+            // first and last. Arrows never turn the chapter here.
+            picker.addEventListener('keydown', function (event) {
+                if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                event.stopPropagation();
+                event.preventDefault();
+                const items = [document.getElementById('random-chapter-btn'), ...picker.querySelectorAll('.book-item')];
+                const gridOf = (book) => (book ? gridAfter(book) : null);
+                const chapter = event.target.closest('.chapter-btn');
+                let next = null;
+                if (chapter) {
+                    const grid = chapter.closest('.chapter-grid');
+                    const buttons = [...grid.querySelectorAll('.chapter-btn')];
+                    const i = buttons.indexOf(chapter);
+                    const columns = Number(grid.dataset.columns);
+                    const lastRow = Math.floor((buttons.length - 1) / columns);
+                    const book = grid.previousElementSibling;
+                    if (event.key === 'ArrowLeft') next = buttons[i - 1];
+                    else if (event.key === 'ArrowRight') next = buttons[i + 1];
+                    else if (event.key === 'Home') next = buttons[0];
+                    else if (event.key === 'End') next = buttons[buttons.length - 1];
+                    else if (event.key === 'ArrowUp') next = i < columns ? book : buttons[i - columns];
+                    else if (buttons[i + columns]) next = buttons[i + columns];
+                    else if (Math.floor(i / columns) < lastRow) next = buttons[buttons.length - 1];
+                    else next = items[items.indexOf(book) + 1];
+                } else {
+                    const i = items.indexOf(event.target);
+                    if (i === -1) return;
+                    const target = event.target;
+                    if (event.key === 'Home') next = items[0];
+                    else if (event.key === 'End') next = items[items.length - 1];
+                    else if (event.key === 'ArrowDown') {
+                        const grid = gridOf(target);
+                        next = grid ? grid.querySelector('.chapter-btn') : items[i + 1];
+                    } else if (event.key === 'ArrowUp') {
+                        const grid = gridOf(items[i - 1]);
+                        next = grid ? [...grid.querySelectorAll('.chapter-btn')].pop() : items[i - 1];
+                    } else if (target.classList.contains('book-item')) {
+                        const open = target.getAttribute('aria-expanded') === 'true';
+                        if (event.key === 'ArrowRight' && !open) showPickerChapters(target.dataset.bookId);
+                        else if (event.key === 'ArrowRight') next = gridOf(target).querySelector('.chapter-btn');
+                        else if (open) showPickerChapters(null);
+                    }
+                }
+                if (next) {
+                    next.focus();
+                    revealInPicker(next);
+                }
+            });
+
+            // The reference button says where the reader is: the chapter
+            // being read, and its translation (or, while comparing, every
+            // translation on screen), e.g. "John 3 · KJV", named in full
+            // for screen readers.
+            function updateReference(compare) {
+                const codes = compare ? compare.columns.map((c) => c.code) : [reading.translationCode];
+                const names = codes.map(translationName);
+                const place = `${reading.bookName} ${reading.chapter}`;
+                const spoken = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+                refText.textContent = `${place} · ${codes.map((c) => c.toUpperCase()).join(' + ')}`;
+                refBtn.setAttribute('aria-label', `${place}, ${spoken}. Choose a book and chapter`);
             }
 
             function renderTranslationOptions(home) {
@@ -5818,16 +6260,6 @@
                         return `<option value="${t.code}"${selected}>${escapeHtml(t.name)}</option>`;
                     })
                     .join('');
-            }
-
-            function renderChapters(dto) {
-                const buttons = dto.chapters
-                    .map((c) => `<button type="button" class="chapter-btn${c.isActive ? ' active' : ''}" data-chapter="${c.number}">${c.number}</button>`)
-                    .join('');
-                return `<div id="chapter-grid-inner" data-book-id="${dto.bookId}">
-                    <h3 class="chapter-grid-title">${escapeHtml(dto.bookName)} &mdash; Chapters</h3>
-                    <div class="chapter-grid">${buttons}</div>
-                </div>`;
             }
 
             // A verse's text as the backend shaped it (see VerseText in
@@ -6026,6 +6458,8 @@
                 }
                 reading.columns = columns;
                 readingPane.innerHTML = renderReadingPane(lastDto, compare);
+                updateReference(compare);
+                markPickerCurrent();
                 selection = null;
                 renderSelection();
                 applyBookmarkMarkers();
@@ -6050,22 +6484,8 @@
             // rendered markup into the DOM, same shape as the old
             // network-fetched fragment loads used to.
 
-            async function loadChapters(bookId, activeChapter) {
-                try {
-                    const dto = await invoke('get_chapters', {
-                        bookId: Number(bookId),
-                        active: activeChapter ? Number(activeChapter) : null,
-                    });
-                    if (!dto) return;
-                    chapterList.innerHTML = renderChapters(dto);
-                    setActiveBook(bookId);
-                } catch (e) {
-                    console.error('Failed to load chapters', e);
-                }
-            }
-
             // Returns whether the chapter was put on screen.
-            async function loadReading(bookId, chapter, { syncChapters } = { syncChapters: true }) {
+            async function loadReading(bookId, chapter) {
                 const token = ++loadToken;
                 // The reader has asked for another chapter or translation:
                 // drop the selection now, not when the new text arrives, so
@@ -6094,16 +6514,6 @@
                     };
                     showNotice(isComparing() && !compare ? COMPARE_FAILED : '');
                     renderCurrent();
-                    setActiveBook(bookId);
-
-                    const grid = document.getElementById('chapter-grid-inner');
-                    const gridBookId = grid ? grid.dataset.bookId : null;
-
-                    if (syncChapters && gridBookId !== String(bookId)) {
-                        await loadChapters(bookId, chapter);
-                    } else {
-                        setActiveChapterButton(chapter);
-                    }
 
                     if (window.history && window.history.pushState) {
                         window.history.pushState({ bookId, chapter }, '', `#${bookId}/${chapter}`);
@@ -6317,10 +6727,10 @@
                 next.focus();
             });
 
-            // Primary navigation: clicking a book jumps straight to its
-            // first chapter (and brings its chapter grid up, in case the
-            // reader wants a different one); clicking a chapter number then
-            // reads that one instead.
+            // Clicks in the reading pane: the selected verses' actions,
+            // neighboring chapters' headings, cross-references, and
+            // selecting verses. (The book and chapter picker has its own
+            // handler, above.)
             document.body.addEventListener('click', function (event) {
                 // A click anywhere outside the search panel closes it.
                 if (!searchPanel.hidden && !event.target.closest('#search-panel, #search-toggle')) {
@@ -6332,7 +6742,7 @@
                 // preferences script in <head> (and the lists' own
                 // handlers above); they're never navigation or a "click
                 // away" from a verse selection. Nor is the search panel.
-                if (event.target.closest('#top-bar, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-notes-overlay, #data-status')) {
+                if (event.target.closest('#top-bar, #picker, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-notes-overlay, #data-status')) {
                     return;
                 }
 
@@ -6399,28 +6809,6 @@
                     return;
                 }
                 if (event.target.closest('.verse-notes')) {
-                    return;
-                }
-
-                const randomBtn = event.target.closest('#random-chapter-btn');
-                if (randomBtn) {
-                    const pick = pickRandomBookAndChapter();
-                    if (pick) {
-                        loadReading(pick.bookId, pick.chapter);
-                    }
-                    return;
-                }
-
-                const bookBtn = event.target.closest('.book-item');
-                if (bookBtn) {
-                    loadReading(bookBtn.dataset.bookId, 1);
-                    return;
-                }
-
-                const chapterBtn = event.target.closest('.chapter-btn');
-                if (chapterBtn) {
-                    const grid = document.getElementById('chapter-grid-inner');
-                    loadReading(grid.dataset.bookId, chapterBtn.dataset.chapter, { syncChapters: false });
                     return;
                 }
 
@@ -6605,6 +6993,14 @@
                     return;
                 }
 
+                // G opens the book and chapter picker, as the reference
+                // button does.
+                if (plain && !event.shiftKey && (event.key === 'g' || event.key === 'G')) {
+                    event.preventDefault();
+                    if (surfaces()) surfaces().openPicker();
+                    return;
+                }
+
                 // C toggles compare, through Aa's own toggle.
                 if (plain && !event.shiftKey && (event.key === 'c' || event.key === 'C')) {
                     document.getElementById('compare-btn').click();
@@ -6651,8 +7047,7 @@
                     const home = await invoke('get_home');
                     renderBookLists(home);
                     renderTranslationOptions(home);
-                    await loadChapters(home.currentBookId, home.currentChapter);
-                    await loadReading(home.currentBookId, home.currentChapter, { syncChapters: false });
+                    await loadReading(home.currentBookId, home.currentChapter);
                     await refreshBookmarks();
                     await refreshHighlights();
                     await refreshNoteList();

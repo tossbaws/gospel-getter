@@ -243,7 +243,7 @@ test('the tour points to Aa, the Library and the ☰ menu, with no Settings draw
         await booted(app);
         const items = [...app.document.querySelectorAll('#welcome-text-4 li')].map((li) => li.textContent);
         assert.deepEqual(items, [
-            'Aa, top right, has six themes, four text sizes, three line spacings, the translation and a distraction-free reading mode.',
+            'Aa, top right, has nine themes, four text sizes, three line spacings, the translation and a distraction-free reading mode.',
             'Your bookmarks, highlights and notes are in the Library, the bookmark button beside Aa (or press Ctrl+B).',
             'Press C to compare the KJV and WEB side by side.',
             'Your chapter, bookmarks, highlights, notes and settings are remembered. To see this tour again, choose Show welcome in the ☰ menu.',
@@ -251,4 +251,19 @@ test('the tour points to Aa, the Library and the ☰ menu, with no Settings draw
         assert.match(app.document.getElementById('welcome-text-3').textContent, /Export data… and Import data… in the ☰ menu/);
         const tour = app.document.getElementById('welcome-panel').textContent;
         assert.ok(!/Settings/.test(tour), 'nothing refers to the old Settings drawer');
+    }));
+
+test('the tour sends the reader to the reference button and G for books and chapters, over the new layout', () =>
+    withFreshApp({}, async (app) => {
+        // The page behind it is the chapter, with the sidebar beside it.
+        assert.equal(app.document.querySelector('header'), null);
+        assert.equal(app.document.getElementById('picker').hidden, false);
+        assert.equal(app.document.getElementById('ref-text').textContent, 'Genesis 1 · KJV');
+        const items = [...app.document.querySelectorAll('#welcome-text-2 li')].map((li) => li.textContent);
+        assert.equal(items[2], 'Choose a book and chapter from the reference at the top left, or press G. Random chapter is there too.');
+        const tour = app.document.getElementById('welcome-panel').textContent;
+        assert.ok(!/at the top, or try Random chapter/.test(tour), 'nothing points at the old book grid');
+        // And while it's open, G is the welcome's, like every other key.
+        app.key('g', {}, app.document.body);
+        assert.equal(app.document.activeElement, button(app, 'next'));
     }));

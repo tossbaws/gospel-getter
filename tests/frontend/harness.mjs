@@ -8,7 +8,9 @@
 // tests only) it and other commands can have a clearly synthetic answer
 // swapped in. Update checks and
 // installs are scripted in the bridge (`setUpdate`), and progress reaches
-// the page through a minimal Tauri `Channel`, as in the app.
+// the page through a minimal Tauri `Channel`, as in the app. jsdom has no
+// layout, so the window's width is a number the page's width media
+// queries (window.matchMedia) answer from, and can change (`app.resize`).
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -178,6 +180,8 @@ export async function closeBridge() {
  * `fresh` starts with no saved reading position, as a new install does;
  * `storage` presets the page's local storage (see `app.storage()`);
  * `update` scripts updates from the start (see `setUpdate`);
+ * `width` is the window's width for matchMedia (1280, the app's default,
+ * which shows the book and chapter sidebar; see `app.resize`);
  * `alterReading` and `alter` (command name → function) rewrite answers,
  * for escaping tests only.
  */
@@ -193,6 +197,7 @@ export async function openApp({
     fresh = false,
     storage = {},
     update = null,
+    width = 1280,
     alterReading = (dto) => dto,
     alter = {},
 } = {}) {
@@ -231,6 +236,14 @@ export async function openApp({
     };
 
     const errors = [];
+    // Width media queries, answered from `media.width`; each list tells its
+    // listeners when its answer changes.
+    const media = { width, lists: [] };
+    const widthQuery = (query) => {
+        const m = /^\((min|max)-width:\s*(\d+)px\)$/.exec(query.trim());
+        if (!m) throw new Error(`the harness can't answer the media query ${query}`);
+        return () => (m[1] === 'min' ? media.width >= Number(m[2]) : media.width <= Number(m[2]));
+    };
     const dom = new JSDOM(HTML, {
         url: 'http://tauri.localhost/',
         runScripts: 'dangerously',
@@ -240,6 +253,20 @@ export async function openApp({
             if (readerMode) window.localStorage.setItem('gospel-getter-reader-mode', 'on');
             if (compare) window.localStorage.setItem('gospel-getter-compare', 'on');
             window.__TAURI__ = { core: { invoke, Channel } };
+            window.matchMedia = (query) => {
+                const matches = widthQuery(query);
+                const listeners = [];
+                const list = {
+                    media: query,
+                    get matches() { return matches(); },
+                    addEventListener(type, fn) { if (type === 'change') listeners.push(fn); },
+                    removeEventListener() {},
+                    addListener(fn) { listeners.push(fn); },
+                    removeListener() {},
+                };
+                media.lists.push({ list, listeners, last: matches() });
+                return list;
+            };
             const stub = {
                 writeText(text) {
                     if (state.clipboard === 'reject') {
@@ -277,6 +304,16 @@ export async function openApp({
             }
             return out;
         },
+        /** Resizes the window to `width`, telling media query listeners that change. */
+        resize(newWidth) {
+            media.width = newWidth;
+            for (const entry of media.lists) {
+                const now = entry.list.matches;
+                if (now === entry.last) continue;
+                entry.last = now;
+                for (const fn of entry.listeners) fn({ matches: now, media: entry.list.media });
+            }
+        },
         setClipboard(mode) {
             state.clipboard = mode;
         },
@@ -301,9 +338,9 @@ export async function openApp({
         async pick(path) {
             await backend('__set_picker', { path });
         },
-        /** The element of a header surface: 'aa', 'library', 'menu' or 'about'. */
+        /** The element of a header surface: 'aa', 'library', 'menu', 'about' or 'picker'. */
         surface(name) {
-            return document.getElementById({ aa: 'aa-popover', library: 'library-panel', menu: 'app-menu', about: 'about-overlay' }[name]);
+            return document.getElementById({ aa: 'aa-popover', library: 'library-panel', menu: 'app-menu', about: 'about-overlay', picker: 'picker' }[name]);
         },
         /** Opens a header surface the way a reader would (About through the ☰ menu). */
         open(name) {

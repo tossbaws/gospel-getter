@@ -74,7 +74,7 @@ test('search works in reading mode, and Escape closes it before leaving reading 
 
         // The toggle isn't among the things reading mode hides.
         const css = app.document.querySelector('style').textContent;
-        const readerModeHides = css.slice(css.indexOf('@media screen'), css.indexOf('header {'));
+        const readerModeHides = css.slice(css.indexOf('@media screen'), css.indexOf('\n        .ref-btn {'));
         assert.ok(!readerModeHides.includes('search'));
     }));
 
