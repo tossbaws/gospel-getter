@@ -44,20 +44,43 @@ from pathlib import Path
 # and draws it at 2x, which spaces Literata's letters unevenly. Set, not
 # defaulted, as sessions often export their own GDK_SCALE.
 os.environ["GDK_SCALE"] = "1"
-# Force XWayland: the session exports GDK_BACKEND=wayland,..., and GTK3's
-# key-simulation test helpers segfault on Wayland.
+# Capture on XWayland, set rather than defaulted, as the session exports
+# GDK_BACKEND=wayland,... The backend doesn't matter for key events: GTK3's
+# key-simulation test helpers (Gtk.test_widget_send_key, Gdk.test_simulate_key)
+# segfault on any backend here, as offscreen windows leave them unimplemented
+# and GDK calls through a NULL pointer. Use send_key below instead.
 os.environ["GDK_BACKEND"] = "x11"
 # Offscreen windows can't get a GL context; render in software.
 os.environ.setdefault("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
 
 import gi  # noqa: E402
 
+gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 gi.require_version("WebKit2", "4.1")
-from gi.repository import GLib, Gtk, WebKit2  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk, WebKit2  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 BRIDGE = ROOT / "src-tauri/target/debug/examples/frontend_bridge"
+
+
+def send_key(widget, keyval, mods=0):
+    """Press and release a key on `widget`, which may sit in the offscreen
+    window. Builds the events itself, as Gtk.test_widget_send_key segfaults
+    on offscreen windows."""
+    display = Gdk.Display.get_default()
+    keyboard = display.get_default_seat().get_keyboard()
+    ok, entries = Gdk.Keymap.get_for_display(display).get_entries_for_keyval(keyval)
+    for kind in (Gdk.EventType.KEY_PRESS, Gdk.EventType.KEY_RELEASE):
+        event = Gdk.Event.new(kind)
+        event.key.window = widget.get_window()
+        event.key.send_event = True
+        event.key.time = Gdk.CURRENT_TIME
+        event.key.keyval = keyval
+        event.key.state = mods
+        event.key.hardware_keycode = entries[0].keycode if ok else 0
+        event.set_device(keyboard)
+        widget.event(event)
 
 
 class Bridge:
