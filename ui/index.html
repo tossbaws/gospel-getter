@@ -1741,14 +1741,22 @@
             overflow-y: auto;
         }
 
+        /* A row opens its passage wherever it's clicked (the open button
+           fills it; the rest forwards), so the whole row lights up. */
         .bookmark-item {
             display: flex;
             align-items: flex-start;
             gap: 0.3rem;
             border-bottom: 1px solid var(--accent-dim);
+            cursor: pointer;
+        }
+
+        .bookmark-item:has(.bookmark-open):hover {
+            background: rgba(var(--accent-rgb), 0.12);
         }
 
         .bookmark-open {
+            align-self: stretch;
             flex: 1 1 auto;
             min-width: 0;
             text-align: left;
@@ -1758,10 +1766,6 @@
             border: none;
             padding: 0.4rem 0.2rem;
             cursor: pointer;
-        }
-
-        .bookmark-open:hover {
-            background: rgba(var(--accent-rgb), 0.12);
         }
 
         .bookmark-ref {
@@ -1812,13 +1816,16 @@
             border-color: var(--accent-dim);
         }
 
-        /* My notes: the Bookmarks list's look, with the first line of each
-           note in place of the verse text, and Edit beside it. */
+        /* My notes: the Bookmarks list's look, with the start of each note
+           (two lines, clipped visually, never shortened) in place of the
+           verse text, and a small Edit beside it. */
         .note-preview {
-            display: block;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
             overflow: hidden;
-            white-space: nowrap;
-            text-overflow: ellipsis;
+            overflow-wrap: anywhere;
             font-size: 0.75rem;
             line-height: 1.35;
             color: var(--text-dim);
@@ -5499,6 +5506,18 @@
             // After any change to notes, wherever it came from.
             async function refreshNotes() {
                 await Promise.all([refreshChapterNotes(), refreshSelectionNotes(), refreshNoteList()]);
+            }
+
+            // A Library row is one link to its passage: a click anywhere on
+            // it, outside its own buttons, is a click on the row's open
+            // button, which is what the keyboard and screen readers reach
+            // (Edit and × stay separate buttons beside it, never inside).
+            for (const list of [bookmarkList, highlightList, noteList]) {
+                list.addEventListener('click', function (event) {
+                    if (event.target.closest('button, a, input')) return;
+                    const open = event.target.closest('.bookmark-item')?.querySelector('.bookmark-open');
+                    if (open) open.click();
+                });
             }
 
             // Opening a note's row works as opening a bookmark: its chapter,
