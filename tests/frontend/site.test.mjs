@@ -159,14 +159,23 @@ test('the Chi Rho Code LLC mark is the favicon and the header icon, and only the
     );
 });
 
-test('the feature screenshots are in the Matrix theme; the theme strip keeps all six', () => {
+test('the feature screenshots are in the default theme, Chi Rho; the theme strip has every theme but System, Chi Rho first', () => {
     const { document } = pages.find((p) => p.name === 'index.html');
     for (const img of document.querySelectorAll('.hero-shot img, .feature .shot img')) {
-        assert.match(img.getAttribute('alt'), /in the Matrix theme/, img.getAttribute('src'));
-        assert.doesNotMatch(img.getAttribute('alt'), /Classic Light/);
+        assert.match(img.getAttribute('alt'), /in the Chi Rho theme/, img.getAttribute('src'));
+        assert.doesNotMatch(img.getAttribute('alt'), /Matrix|Classic Light/);
     }
+    // System has no tile: it shows Vellum or Chi Rho, as the computer is set.
+    const tiles = [...document.querySelectorAll('.themes figure')];
     assert.deepEqual(
-        [...document.querySelectorAll('.themes figcaption')].map((f) => f.textContent),
-        ['Classic Light', 'Classic Dark', 'Vaporwave', 'Matrix', 'Beast Slayer', 'Hot Pink'],
+        tiles.map((f) => f.querySelector('figcaption').textContent),
+        ['Chi Rho', 'Vellum', 'Classic Light', 'Classic Dark', 'Vaporwave', 'Matrix', 'Beast Slayer', 'Hot Pink'],
     );
+    for (const f of tiles) {
+        const img = f.querySelector('img');
+        const slug = f.querySelector('figcaption').textContent.toLowerCase().replace(/ /g, '-');
+        assert.equal(img.getAttribute('src'), `assets/theme-${slug}.webp`);
+        assert.deepEqual([img.getAttribute('width'), img.getAttribute('height')], ['720', '435']);
+        assert.match(img.getAttribute('alt'), new RegExp(`in the ${f.querySelector('figcaption').textContent} theme`));
+    }
 });

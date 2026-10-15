@@ -9,7 +9,7 @@ at a time with the chapters before and after shown alongside, search the
 whole Bible, compare the two translations verse by verse, and copy,
 bookmark or write notes on passages. No account and no network needed.
 
-![The reading view in the Matrix theme: John 3 in the KJV in the centre, with John 2 and John 4 faded on either side, under the chapter picker. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes](screenshots/reading-neighboring-chapters.png)
+![The reading view in the Chi Rho theme (parchment text on near-black, gold headings): John 3 in the KJV in the centre, with John 2 and John 4 faded on either side. The bar's reference button says "John 3 · KJV", and the sidebar on the left lists the books, with John's chapters open and 3 marked. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes](screenshots/reading-neighboring-chapters.png)
 
 ## Features
 
@@ -19,7 +19,12 @@ bookmark or write notes on passages. No account and no network needed.
 - **Read in context.** The chapter you're reading sits in the middle with
   the previous and next chapters faded on either side, scrolling with it.
   ← and → turn chapters across the whole Bible, from Genesis 50 into
-  Exodus 1 and so on. Or pick a book and chapter, or try **Random chapter**.
+  Exodus 1 and so on.
+- **Go to any chapter.** The reference button at the left of the bar
+  (`John 3 · KJV`) always says where you are. It, or `G`, opens the book
+  and chapter picker: **Random chapter**, then the Old and New Testament
+  books, each opening onto its chapters. On wide windows the picker is a
+  sidebar you can hide, and on narrow ones a popover.
 - **Search and go to a reference.** One search box (`/` or Ctrl+K) jumps to
   references such as `John 3:16`, `jn 3:16-18`, `1 Cor 13` or `Psalm 23`,
   and searches the text for anything else. Results show every verse in the
@@ -55,7 +60,7 @@ bookmark or write notes on passages. No account and no network needed.
   how many notes match. In the KJV, translator-supplied words appear in
   italics, as in printed KJVs, and the margin notes are left out.
 
-  ![John 3:16 to 21 selected in the WEB in the Matrix theme, with ✎ marks after verses 16, 17, 18 and 21 and, under the Copy, Bookmark and + Add note buttons, a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and an Edit link](screenshots/notes.png)
+  ![John 3:16 to 21 selected in the WEB in the Chi Rho theme, seen from verse 18, with ✎ marks after verses 18 and 21 and, under the Copy, Bookmark and + Add note buttons, a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and an Edit link](screenshots/notes.png)
 - **Compare translations.** Press `C` (or **Compare** under **Aa**) to see
   KJV and WEB side by side, one row per verse number. Where only one
   translation numbers a verse, the other column says so instead of
@@ -69,16 +74,19 @@ bookmark or write notes on passages. No account and no network needed.
   Footnotes list of all of them, with the words each note is on in
   italics. Copy and search use the verse text without the notes.
 
-  ![Psalm 23:4–6 in the KJV in the Matrix theme, with "art" in italics and small letters after verses 5 and 6. Verse 6 is selected: under the Copy, Bookmark and + Add note buttons, its Footnotes list "a for ever: Heb. to length of days" above its cross-references. Below the chapter, a Footnotes section lists 23:2a, 23:2b, 23:5a and 23:6a](screenshots/footnotes.png)
-- **Comfortable reading.** Six themes (Vaporwave, Classic Dark, Classic
-  Light, Matrix, Beast Slayer, Hot Pink), four text sizes, three line
-  spacings, and a distraction-free reading mode, all under **Aa** with the
-  translation. Printing is always black on white.
+  ![Psalm 23:4–6 in the KJV in the Chi Rho theme, with "art" in italics and small letters after verses 5 and 6. Verse 6 is selected: under the Copy, Bookmark and + Add note buttons, its Footnotes list "a for ever: Heb. to length of days" above its cross-references. Below the chapter, a Footnotes section lists 23:2a, 23:2b, 23:5a and 23:6a](screenshots/footnotes.png)
+- **Comfortable reading.** Scripture is set in Literata, bundled with the
+  app. Nine themes: Chi Rho (the default), Vellum, System (which follows
+  your computer's light or dark setting, as Vellum or Chi Rho), Vaporwave,
+  Classic Dark, Classic Light, Matrix, Beast Slayer and Hot Pink. Four text
+  sizes, three line spacings, and a distraction-free reading mode, all
+  under **Aa** with the translation. Printing is always black on white.
 - **Everything in reach, out of the way.** A slim bar at the top holds
-  **Aa** (text and display), the **Library** (bookmarks, highlights and
-  notes),
-  search and the **☰** menu (export, import, the welcome and **About
-  Gospel Getter**). Only one opens at a time, and Esc closes it.
+  the reference button (and, on wide windows, the button that hides or
+  shows the sidebar), **Aa** (text and display), the **Library**
+  (bookmarks, highlights and notes), search and the **☰** menu (export,
+  import, the welcome and **About Gospel Getter**). Only one panel or
+  popover opens at a time, and Esc closes it.
 - **Picks up where you left off.** Your chapter, translation, bookmarks,
   highlights, notes and display settings are remembered between sessions.
 - **Back up or move your data.** In the ☰ menu, **Export data…** saves your
@@ -89,9 +97,12 @@ bookmark or write notes on passages. No account and no network needed.
   database. Files exported by 2.8.0 or newer (data format 3, which adds
   notes) can't be imported by 2.7.0 or older, which say the file is from a
   newer version; files from older versions still import into 2.8.0 and
-  newer. **Export data…** is the backup, and its file imports again;
-  **Export notes…** makes a readable copy of your notes, which isn't
-  imported.
+  newer. Restore a backup made in 2.12 in 2.12 or later: 2.11 and older
+  refuse a whole file whose theme they don't know. From 2.12 on, a display
+  setting the app doesn't know is skipped, with a notice naming it, and
+  the rest of the file imports. **Export data…** is the backup, and its
+  file imports again; **Export notes…** makes a readable copy of your
+  notes, which isn't imported.
 - **A short welcome.** On a new install, a four-page overview of the
   features opens the first time. **Skip** (or Esc) closes it, and
   **Show welcome** in the ☰ menu opens it again. Upgrading doesn't show it.
@@ -102,39 +113,42 @@ bookmark or write notes on passages. No account and no network needed.
   **Update and restart**. See [Updates](#updates) for which installs
   update themselves and how to turn the check off.
 - **A native desktop app.** Built with Tauri: no browser, no background
-  server, nothing listening on a port.
+  server, nothing listening on a port. The window can be as small as
+  640×480.
 
 ## A quick tour
 
-All seven screenshots in this README, including the one at the top, use the
-Matrix theme. The other five themes are under **Aa**.
+All seven screenshots in this README, including the one at the top, use
+Chi Rho, the default theme, in a window wide enough for the picker's
+sidebar. The other eight themes are under **Aa**.
 
 **Search the text, or jump straight to a reference.** Matching words are
 highlighted, and clicking a result opens and selects that verse.
 
-![The search panel in the Matrix theme, listing World English Bible verses that contain "love one another", with the words highlighted](screenshots/search-results.png)
+![The search panel in the Chi Rho theme, listing World English Bible verses that contain "love one another", with the words highlighted](screenshots/search-results.png)
 
 **Compare the KJV and WEB verse by verse.** In Romans 14 the WEB numbers
 three verses the KJV doesn't, and the KJV column says so rather than
 shifting anything.
 
-![Romans 14 in compare mode in the Matrix theme, with KJV and WEB columns side by side, the KJV's supplied words in italics, and verses 24 to 26 marked "Not numbered in the KJV"](screenshots/compare-translations.png)
+![Romans 14 from verse 21 in compare mode in the Chi Rho theme, with KJV and WEB columns side by side, the KJV's supplied words in italics, and verses 24 to 26 marked "Not numbered in the KJV"](screenshots/compare-translations.png)
 
 **Select a range and copy it with its reference.** The citation underneath
 shows exactly what will be copied.
 
-![John 3:16 to 18 selected in the WEB in the Matrix theme, with Copy, Bookmark and + Add note buttons, four highlight color swatches and the citation "John 3:16–18 (WEB)"](screenshots/copy-verse-range.png)
+![John 3:16 to 18 selected in the WEB in the Chi Rho theme, with Copy, Bookmark and + Add note buttons, four highlight color swatches and the citation "John 3:16–18 (WEB)"](screenshots/copy-verse-range.png)
 
 **Bookmark passages and come back to them.** Bookmarked verses are starred
 in the text, and the Library (Ctrl+B) lists each one with a preview.
 
-![Psalm 23 in the KJV with verses 1 to 4 starred in the Matrix theme, above its Footnotes and Cross References, and the Library panel open on its Bookmarks tab, beside the Highlights and Notes tabs, listing Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
+![Psalm 23 in the KJV with verses 1 to 4 starred in the Chi Rho theme, above its Footnotes and Cross References, and the Library panel open on its Bookmarks tab, beside the Highlights and Notes tabs, listing Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
 
 ## Keyboard
 
 | Key | Does |
 |---|---|
 | ← / → | Previous / next chapter, across books |
+| `G` | Open the book and chapter picker. The arrow keys, Home and End move through it; Enter opens a book or chapter |
 | `/` or Ctrl+K | Open search. Enter goes to a reference; ↓ / ↑ move through results |
 | Ctrl+C | Copy the selected verses with their reference. If you've highlighted text yourself, that's copied instead, as usual |
 | `C` | Compare translations on/off |
@@ -207,14 +221,14 @@ without you choosing **Update and restart**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.10.1?** Each updates itself to 2.11.0: it
+**Coming from 2.6.0 through 2.11.0?** Each updates itself to 2.12.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
 update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.11.0 by hand once, from the
+Install 2.12.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -233,7 +247,8 @@ Upgrading keeps your data.
   notes. Moving back to an older
   version after upgrading hasn't been tested.
 - Theme, text size, line spacing, compare and reading mode are display
-  settings stored in the app's web storage, not the database.
+  settings stored in the app's web storage, not the database, as is
+  whether the sidebar is shown (which isn't exported).
 - Coming from the old browser-based Gospel Getter (the local server on
   `localhost:3002`)? The first launch copies its database from
   `~/.local/share/gospel-getter/data/gospel_getter.db` and leaves the
