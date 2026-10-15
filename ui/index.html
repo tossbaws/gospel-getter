@@ -373,14 +373,18 @@
             --bar-height: 3.4rem;
             --sidebar-width: 16.5rem;
             /* The reading column (Aa's Width): Normal is the width it has
-               always had, 492px, about 62 characters a line at the Medium
-               text size in Literata; Narrow is 416px (about 52) and Wide
-               592px (about 75). Reading mode's single column is wider:
-               732px at Normal, as it has always been (about 92), with
-               Narrow at 592px (about 75) and Wide at 880px (about 111). */
+               always had, 492px, 62 characters a line at the Medium text
+               size in Literata (measured in WebKitGTK); Narrow is 416px (52)
+               and Wide 592px (74). Reading mode's single column is wider:
+               732px at Normal, as it has always been (92), with Narrow at
+               592px (74) and Wide at 880px (111). The faded neighbors give
+               way first, down to --side-min, and the column only then, never
+               below --column-min: 400px, 50 characters (see .chapter-side). */
             --column: 30.75rem;
             --reader-column: 45.75rem;
+            --column-min: 25rem;
             --side-width: 260px;
+            --side-min: 180px;
             --row-gap: 1.25rem;
         }
 
@@ -2115,15 +2119,9 @@
                 box-shadow: none;
             }
 
-            /* With the sidebar in, the chapter and its neighbors share
-               the narrower room in proportion, rather than the chapter
-               being read giving up all of it. */
-            :root[data-picker="sidebar"] .chapter-main {
-                flex: 1 1 472px;
-            }
-
-            :root[data-picker="sidebar"] .chapter-side {
-                flex: 0 1 260px;
+            /* Reading mode's one column is as wide as its container. */
+            :root[data-reader-mode="on"] .chapter-main {
+                max-width: none;
             }
         }
 
@@ -2338,15 +2336,24 @@
 
         .reading-row {
             display: flex;
+            justify-content: center;
             align-items: flex-start;
             gap: var(--row-gap);
         }
 
-        /* Positioned: the selection card is placed in it. */
+        /* The chapter being read: its Width when there's room, and never
+           narrower than --column-min because of its neighbors (they shrink
+           far faster, and hide first; see below). While comparing it takes
+           the whole row. Positioned: the selection card is placed in it. */
         .chapter-main {
             position: relative;
-            flex: 1 1 auto;
-            min-width: 0;
+            flex: 1 1 var(--column);
+            max-width: var(--column);
+            min-width: min(var(--column-min), 100%);
+        }
+
+        .reading-row.is-comparing .chapter-main {
+            max-width: none;
         }
 
         /* The chapter being read sits in the wide center column. The chapter
@@ -2355,7 +2362,8 @@
            opacity, in narrower side columns — and scroll along with the
            page as one continuous reading surface, not as separate boxes. */
         .chapter-side {
-            flex: 0 0 var(--side-width);
+            flex: 0 50 var(--side-width);
+            min-width: var(--side-min);
             max-width: var(--side-width);
             opacity: 0.55;
             transition: opacity 0.2s;
@@ -2394,15 +2402,30 @@
             text-decoration: underline;
         }
 
-        /* Below this width there isn't room to show a chapter and its two
-           faded neighbors side by side without forcing the reader to scroll
-           past the previous chapter to reach the current one, so the
-           neighbors are hidden entirely and only .chapter-main is shown.
-           They stay in the DOM (data attributes, arrow-key navigation, and
-           heading-jump navigation are untouched) — this is display-only. */
-        @media (max-width: 800px) {
-            .chapter-side {
+        /* The neighbors never squeeze the chapter being read below
+           --column-min (400px, about 50 characters a line at Medium). With
+           both at --side-min (180px), the gaps (20px each) and the page's
+           padding (48px), that takes an 848px window; below it only the
+           next chapter shows, and below 648px (400 + 180 + 20 + 48) neither
+           does. The sidebar takes 264px but only shows from 1200px, which
+           leaves 888px: always room for both, at any Width (the floor is the
+           same for all three). Display only: the neighbors stay in the DOM,
+           so the arrow keys and their headings work the same. */
+        @media (max-width: 847px) {
+            .chapter-side-prev {
                 display: none;
+            }
+        }
+
+        /* Alone, the chapter fills the narrow window (at most 592px here,
+           about 74 characters), as it always has. */
+        @media (max-width: 647px) {
+            .chapter-side-next {
+                display: none;
+            }
+
+            .chapter-main {
+                max-width: none;
             }
         }
 

@@ -38,23 +38,25 @@ fn block_after<'a>(src: &'a str, needle: &str) -> &'a str {
 }
 
 /// Regression guard for GH-1: on narrow screens the reader must only see
-/// the current chapter, not scroll past the full previous one first. This
-/// pins down the `@media (max-width: 800px)` rule that hides
-/// `.chapter-side` (the prev/next chapter columns) rather than just
-/// re-stacking them under `.chapter-main`.
+/// the current chapter, not scroll past the full previous one first. The
+/// neighbors are hidden (never re-stacked under `.chapter-main`): the
+/// previous one first, below 848px, then the next, below 648px (see
+/// `side_chapters_never_squeeze_the_column_below_50_characters`).
 #[test]
 fn mobile_breakpoint_hides_chapter_side_neighbors() {
-    let block = block_after(HTML, "@media (max-width: 800px)");
-
-    assert!(
-        block.contains(".chapter-side"),
-        "mobile breakpoint should target .chapter-side"
-    );
-    assert!(
-        block.contains("display: none"),
-        "mobile breakpoint should hide .chapter-side instead of just \
-         restacking it, so only the current chapter is visible"
-    );
+    for (query, side) in [
+        ("@media (max-width: 847px)", ".chapter-side-prev"),
+        ("@media (max-width: 647px)", ".chapter-side-next"),
+    ] {
+        let block = block_after(HTML, query);
+        let rule = block
+            .find(side)
+            .unwrap_or_else(|| panic!("{query} should hide {side}"));
+        assert!(
+            block[rule..].starts_with(&format!("{side} {{\n                display: none;")),
+            "{query} should hide {side} instead of re-stacking it"
+        );
+    }
 }
 
 /// Regression guard for GH-6: printing a chapter should hide all page
@@ -2317,7 +2319,7 @@ fn psalms_get_a_compact_grid_ten_to_a_row() {
 
 /// The sidebar: from 1200px, 16.5rem down the left below the bar, in the
 /// bar's `--bar-bg`, with the page moved over (on screen only); the
-/// chapter and its neighbors share the narrower room. Reading mode and
+/// neighbors give way first, as on any narrower page. Reading mode and
 /// print never show it, and its own button only shows where it can.
 #[test]
 fn the_sidebar_is_for_wide_windows_only() {
@@ -2347,9 +2349,10 @@ fn the_sidebar_is_for_wide_windows_only() {
         assert!(sidebar.contains(declaration), "the sidebar: {declaration}");
     }
     assert!(
-        screen(r#":root[data-picker="sidebar"] .chapter-side"#)
-            .body
-            .contains("flex: 0 1 260px")
+        !rules
+            .iter()
+            .any(|r| r.selector.contains(r#"[data-picker="sidebar"] .chapter-"#)),
+        "the column and its neighbors share one set of rules, sidebar or not"
     );
     assert!(
         screen_rule(&rules, ":root:not([data-wide]) .sidebar-toggle")
@@ -2841,4 +2844,87 @@ fn the_text_size_keys_step_aa_and_never_zoom_the_page() {
     assert!(body.contains("choose(textSizeSelect, 'medium');"));
     assert!(body.contains("stepTextSize(step);"));
     assert!(HTML.contains(r#"<p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>"#));
+}
+
+/// The faded neighbors never squeeze the chapter being read below 50
+/// characters a line at Medium (400px, measured in WebKitGTK at 7.96px a
+/// character): they shrink first (flex-shrink 50 against the column's 1),
+/// down to 180px, and the column only then, to its floor. When even that
+/// doesn't fit, the previous chapter hides, then the next. The breakpoints
+/// follow from those numbers and the page's padding: both need
+/// 400 + 2 × 180 + 2 × 20 + 48 = 848px, the next alone 400 + 180 + 20 + 48 =
+/// 648px.
+/// The sidebar (264px) only shows from 1200px, leaving 888px, so it never
+/// hides a neighbor; and the floor is the same at every Width. Alone, below
+/// 648px, the column fills the window again.
+#[test]
+fn side_chapters_never_squeeze_the_column_below_50_characters() {
+    let rules = rules();
+    let html = custom_properties(&screen_rule(&rules, "html").body);
+    let px = |name: &str| -> f64 {
+        let value = property(&html, name);
+        value
+            .strip_suffix("rem")
+            .map(|r| r.parse::<f64>().unwrap() * 16.0)
+            .or_else(|| value.strip_suffix("px").map(|p| p.parse().unwrap()))
+            .unwrap_or_else(|| panic!("{name}: a length, got `{value}`"))
+    };
+    let (floor, side_min, gap, sidebar) = (
+        px("--column-min"),
+        px("--side-min"),
+        px("--row-gap"),
+        px("--sidebar-width"),
+    );
+    assert_eq!(floor, 400.0, "50 characters at 7.96px");
+    let padding = 48.0;
+    let both = floor + 2.0 * side_min + 2.0 * gap + padding;
+    let next = floor + side_min + gap + padding;
+    assert_eq!((both, next), (848.0, 648.0));
+    assert!(HTML.contains(&format!("@media (max-width: {}px)", both - 1.0)));
+    assert!(HTML.contains(&format!("@media (max-width: {}px)", next - 1.0)));
+    assert!(
+        1200.0 - sidebar - padding >= both - padding,
+        "the sidebar never hides a neighbor"
+    );
+
+    let main = screen_rule(&rules, ".chapter-main");
+    for declaration in [
+        "flex: 1 1 var(--column)",
+        "max-width: var(--column)",
+        "min-width: min(var(--column-min), 100%)",
+    ] {
+        assert!(
+            main.body.contains(declaration),
+            ".chapter-main: {declaration}"
+        );
+    }
+    let side = screen_rule(&rules, ".chapter-side");
+    for declaration in [
+        "flex: 0 50 var(--side-width)",
+        "min-width: var(--side-min)",
+        "max-width: var(--side-width)",
+    ] {
+        assert!(
+            side.body.contains(declaration),
+            ".chapter-side: {declaration}"
+        );
+    }
+    assert!(
+        screen_rule(&rules, ".reading-row")
+            .body
+            .contains("justify-content: center")
+    );
+    assert!(
+        screen_rule(&rules, ".reading-row.is-comparing .chapter-main")
+            .body
+            .contains("max-width: none")
+    );
+    let alone = rules
+        .iter()
+        .find(|r| {
+            r.at_rule.as_deref() == Some("@media (max-width: 647px)")
+                && r.selector == ".chapter-main"
+        })
+        .expect("alone, the column fills the window");
+    assert!(alone.body.contains("max-width: none"));
 }
