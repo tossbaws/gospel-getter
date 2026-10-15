@@ -2402,6 +2402,23 @@
             text-decoration: underline;
         }
 
+        /* In a missing neighbor's place: its heading's look, then a line
+           in the neighbors' text, faded with them. */
+        .edge-card-title {
+            font-family: var(--font-scripture);
+            font-size: 1.2rem;
+            color: var(--accent);
+            border-bottom: 1px solid var(--rule);
+            margin-bottom: 0.8rem;
+            padding-bottom: 0.4rem;
+        }
+
+        .edge-card-detail {
+            font-family: var(--font-scripture);
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+
         /* The neighbors never squeeze the chapter being read below
            --column-min (400px, about 50 characters a line at Medium). With
            both at --side-min (180px), the gaps (20px each) and the page's
@@ -6676,6 +6693,20 @@
                 </section>`;
             }
 
+            // Before Genesis 1 and after Revelation 22 there's no
+            // neighboring chapter: its place (so the chapter being read
+            // stays put) holds a quiet card in the neighbors' faded style,
+            // the backend's words about the Bible's shape, e.g. "The Old
+            // Testament" over "Genesis · 50 chapters". No scripture text.
+            function renderEdgeCard(edge) {
+                if (!edge) return '';
+                const detail = edge.detail ? `<p class="edge-card-detail">${escapeHtml(edge.detail)}</p>` : '';
+                return `<div class="edge-card">
+                    <p class="edge-card-title">${escapeHtml(edge.title)}</p>
+                    ${detail}
+                </div>`;
+            }
+
             // Cross-references are keyed by verse number, not translation,
             // so each column shows the same ones for the same number.
             // Footnotes are the translation's own (the KJV's margin notes).
@@ -6831,13 +6862,15 @@
                 // While comparing, the columns take the place of the faded
                 // neighboring chapters; prev/next stay on the wrapper, so
                 // arrow keys work the same either way.
-                const side = (s, which) => (compare ? '' : `<div class="chapter-side chapter-side-${which}">${renderSideChapter(s)}</div>`);
+                const side = (s, edge, which) => (compare
+                    ? ''
+                    : `<div class="chapter-side chapter-side-${which}">${s ? renderSideChapter(s) : renderEdgeCard(edge)}</div>`);
                 return `<div id="reading-pane-inner"
                      data-current-book="${dto.currentBookId}"
                      data-current-chapter="${dto.currentChapter}"${prevAttrs}${nextAttrs}
                 >
                     <div class="reading-row${compare ? ' is-comparing' : ''}">
-                        ${side(dto.prev, 'prev')}
+                        ${side(dto.prev, dto.prevEdge, 'prev')}
                         <section class="chapter-main">
                             <h2 class="chapter-heading">${escapeHtml(dto.currentBookName)} ${dto.currentChapter}</h2>
                             ${body}
@@ -6845,7 +6878,7 @@
                             ${renderFootnoteSummary(dto, compare)}
                             ${renderXrefSummary(dto)}
                         </section>
-                        ${side(dto.next, 'next')}
+                        ${side(dto.next, dto.nextEdge, 'next')}
                     </div>
                 </div>`;
             }

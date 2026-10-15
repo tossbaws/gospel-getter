@@ -422,3 +422,37 @@ test('the size keys do nothing while typing in a field', () =>
         assert.equal(size(app), 'medium');
         assert.ok($(app, 'size-status').classList.contains('is-hidden'));
     }));
+
+// ---- Genesis 1 and Revelation 22
+
+const edge = (app, which) => app.document.querySelector(`.chapter-side-${which} .edge-card`);
+
+test('Genesis 1 has a quiet start card where the previous chapter would be', () =>
+    withApp({ book: 'Genesis', chapter: 1, translation: 'kjv' }, async (app) => {
+        const card = edge(app, 'prev');
+        assert.ok(card, 'in the previous chapter’s place, so the column stays put');
+        assert.deepEqual([...card.children].map((p) => [p.className, p.textContent]), [
+            ['edge-card-title', 'The Old Testament'],
+            ['edge-card-detail', 'Genesis · 50 chapters'],
+        ]);
+        // Presentational: no verses, nothing to click.
+        assert.equal(card.closest('.chapter-side').querySelectorAll('.verse, button, a').length, 0);
+        assert.equal(edge(app, 'next'), null);
+        assert.ok(app.document.querySelector('.chapter-side-next .chapter-heading-link'));
+    }));
+
+test('Revelation 22 has “The end of the Bible” where the next chapter would be', () =>
+    withApp({ book: 'Revelation', chapter: 22, translation: 'web' }, async (app) => {
+        const card = edge(app, 'next');
+        assert.deepEqual([...card.children].map((p) => p.textContent), ['The end of the Bible']);
+        assert.equal(edge(app, 'prev'), null);
+    }));
+
+test('other chapters have no edge card, and comparing shows none', async () => {
+    await withApp({ book: 'Malachi', chapter: 4, translation: 'kjv' }, async (app) => {
+        assert.equal(app.document.querySelector('.edge-card'), null);
+    });
+    await withApp({ book: 'Genesis', chapter: 1, compare: true }, async (app) => {
+        assert.equal(app.document.querySelector('.edge-card, .chapter-side'), null);
+    });
+});

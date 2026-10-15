@@ -2928,3 +2928,39 @@ fn side_chapters_never_squeeze_the_column_below_50_characters() {
         .expect("alone, the column fills the window");
     assert!(alone.body.contains("max-width: none"));
 }
+
+/// Before Genesis 1 and after Revelation 22, the missing neighbor's place
+/// holds the backend's edge card (so the chapter being read doesn't move
+/// between Genesis 1 and 2), in the neighbors' faded style with no new
+/// colors: a heading like theirs in --accent over --rule, and a line in
+/// --text. It has no verses and nothing to click.
+#[test]
+fn the_bible_s_edges_have_a_quiet_card_in_the_neighbor_s_place() {
+    let pane = function_body("renderReadingPane");
+    assert!(pane.contains("${s ? renderSideChapter(s) : renderEdgeCard(edge)}"));
+    assert!(pane.contains("side(dto.prev, dto.prevEdge, 'prev')"));
+    assert!(pane.contains("side(dto.next, dto.nextEdge, 'next')"));
+    let card = function_body("renderEdgeCard");
+    assert!(card.contains("escapeHtml(edge.title)") && card.contains("escapeHtml(edge.detail)"));
+    assert!(!card.contains("<button") && !card.contains("class=\"verse"));
+    let rules = rules();
+    let title = screen_rule(&rules, ".edge-card-title");
+    for declaration in [
+        "font-family: var(--font-scripture)",
+        "color: var(--accent)",
+        "border-bottom: 1px solid var(--rule)",
+    ] {
+        assert!(
+            title.body.contains(declaration),
+            ".edge-card-title: {declaration}"
+        );
+    }
+    let detail = screen_rule(&rules, ".edge-card-detail");
+    assert!(detail.body.contains("color: var(--text)"));
+    for rule in [title, detail] {
+        assert!(
+            !rule.body.contains('#') && !rule.body.contains("rgb"),
+            "no new colors"
+        );
+    }
+}
