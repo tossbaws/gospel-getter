@@ -6672,7 +6672,9 @@
             // The reference button says where the reader is: the chapter
             // being read, and its translation (or, while comparing, every
             // translation on screen), e.g. "John 3 · KJV", named in full
-            // for screen readers.
+            // for screen readers. The window title says the same, so the
+            // taskbar and Alt-Tab do too (the backend copies the page's
+            // title to the window; see window.rs).
             function updateReference(compare) {
                 const codes = compare ? compare.columns.map((c) => c.code) : [reading.translationCode];
                 const names = codes.map(translationName);
@@ -6680,6 +6682,7 @@
                 const spoken = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
                 refText.textContent = `${place} · ${codes.map((c) => c.toUpperCase()).join(' + ')}`;
                 refBtn.setAttribute('aria-label', `${place}, ${spoken}. Choose a book and chapter`);
+                document.title = `${refText.textContent} — Gospel Getter`;
             }
 
             function renderTranslationOptions(home) {

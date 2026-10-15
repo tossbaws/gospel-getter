@@ -8,6 +8,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { closeBridge, openApp, settle } from './harness.mjs';
 
 after(closeBridge);
@@ -106,6 +107,45 @@ test('the reference follows navigation, the translation and compare', () =>
         assert.equal(refText(app), 'John 3 · WEB');
         assert.deepEqual(app.consoleErrors, []);
     }));
+
+// The backend copies the page's title to the native window (window.rs),
+// so the taskbar and Alt-Tab say where the reader is.
+test('the window title follows the reference: navigation, the translation and compare', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        const title = () => app.document.title;
+        assert.equal(title(), 'John 3 · KJV — Gospel Getter');
+        await keyAndWait(app, 'ArrowRight');
+        assert.equal(title(), 'John 4 · KJV — Gospel Getter');
+
+        app.click(book(app, 'Mark'));
+        await clickAndWait(app, chapter(app, 16), 'get_reading');
+        assert.equal(title(), 'Mark 16 · KJV — Gospel Getter');
+
+        app.open('aa');
+        await clickAndWait(app, $(app, 'translation-choices').querySelector('[data-value="web"]'), 'get_reading');
+        assert.equal(title(), 'Mark 16 · WEB — Gospel Getter');
+
+        // Comparing: what the reference button shows.
+        app.key('Escape', {}, app.document.activeElement);
+        await keyAndWait(app, 'c');
+        assert.equal(refText(app), 'Mark 16 · KJV + WEB');
+        assert.equal(title(), 'Mark 16 · KJV + WEB — Gospel Getter');
+        await keyAndWait(app, 'ArrowLeft');
+        assert.equal(title(), 'Mark 15 · KJV + WEB — Gospel Getter');
+        await keyAndWait(app, 'c');
+        assert.equal(title(), 'Mark 15 · WEB — Gospel Getter');
+
+        // History.
+        const before = app.calls.length;
+        app.window.dispatchEvent(new app.window.PopStateEvent('popstate', { state: { bookId: 43, chapter: 3 } }));
+        await app.idle(before, 'get_reading');
+        assert.equal(title(), 'John 3 · WEB — Gospel Getter');
+    }));
+
+test('before a chapter is read the window title is the app’s name', () => {
+    const html = readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(html, /<title>Gospel Getter<\/title>/);
+});
 
 test('scrolling never changes the reference: it is the chapter in the center column', () =>
     withApp({ book: 'John', chapter: 3 }, async (app) => {

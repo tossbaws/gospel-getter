@@ -10,6 +10,7 @@ pub mod reader_data;
 #[cfg(test)]
 mod reader_data_tests;
 pub mod updater;
+pub mod window;
 
 use anyhow::Context;
 use tauri::Manager;
@@ -19,7 +20,8 @@ use tracing_subscriber::fmt::format::FmtSpan;
 use commands::AppState;
 use db::create_pool;
 
-/// Start the app: set up logging, open the database and show the window.
+/// Start the app: set up logging, open the database and show the window
+/// where it was last time.
 pub fn run() {
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
@@ -89,7 +91,8 @@ fn invoke_handler<R: tauri::Runtime>()
 /// Resolve where this app's database lives, migrate the pre-Tauri
 /// (systemd/browser-wrapper) install's database into place on first run if
 /// there is one, connect, and load everything into `AppState` — all before
-/// the window is shown, so there's nothing left to "load" once it appears.
+/// the window is created, so there's nothing left to "load" once it
+/// appears. Then create the window, where it was last time.
 fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
     let app_data_dir = app
         .path()
@@ -124,6 +127,16 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
         .context("Failed to initialize application state")?;
     spawn_search_index_build(&state);
     app.manage(state);
+
+    // Desktop only (as the plugin is). Registered here, not on the
+    // builder, as its file goes in the data directory resolved above.
+    #[cfg(desktop)]
+    {
+        app.handle()
+            .plugin(window::state_plugin(&app_data_dir)?)
+            .context("Failed to set up the window state")?;
+        window::create_main_window(app)?;
+    }
 
     Ok(())
 }
