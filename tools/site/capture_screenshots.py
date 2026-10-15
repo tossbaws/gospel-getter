@@ -11,17 +11,22 @@ the frontend tests do. Nothing is drawn over or composited in.
 
 Usage, from the repository root:
     cargo build --manifest-path src-tauri/Cargo.toml --example frontend_bridge
-    python3 tools/site/capture_screenshots.py OUT_DIR [--theme NAME] [SCENE ...]
+    PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py OUT_DIR [--theme NAME] [SCENE ...]
+    PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py --readme OUT_DIR [--theme NAME] [SCENE ...]
 
---theme sets the theme of the feature screenshots (reading, search, compare,
-select); it defaults to matrix, the site's. The theme-* scenes are always in
-their own themes. Naming scenes captures only those. The first-run welcome is
-marked as seen and no highlights are set, and a capture fails if either is on
-screen.
+--theme sets the theme of the feature screenshots (the site's reading,
+search, compare and select, or the README's); it defaults to chi-rho, the
+app's default theme. The theme-* scenes are always in their own themes.
+Naming scenes captures only those. The first-run welcome is marked as seen
+and no highlights are set, and a capture fails if either is on screen.
 
-Writes raw PNGs (at 2x) to OUT_DIR; cropping and WebP conversion are
-separate (see site/README.md). Needs PyGObject with WebKit2 4.1 and a
-display (it never shows a window).
+Without --readme, writes the site's raw PNGs (at 2x) to OUT_DIR; cropping
+and WebP conversion are separate (see site/README.md). With --readme, writes
+the README's screenshots at 1x, at their final names and sizes (OUT_DIR
+can be screenshots/ itself). Every scene uses the app's default layout for its
+window size: from 1200px wide the book and chapter picker is a sidebar on
+the left, and narrower it's a popover from the reference button, closed.
+Needs PyGObject with WebKit2 4.1 and a display (it never shows a window).
 """
 
 import functools
@@ -34,7 +39,11 @@ import tempfile
 import threading
 from pathlib import Path
 
-os.environ.setdefault("GDK_SCALE", "2")
+# One device pixel per GTK pixel. The site's 2x captures use the page's
+# zoom instead (see Capturer): with GDK_SCALE=2, WebKit lays text out at 1x
+# and draws it at 2x, which spaces Literata's letters unevenly. Set, not
+# defaulted, as sessions often export their own GDK_SCALE.
+os.environ["GDK_SCALE"] = "1"
 # Force XWayland: the session exports GDK_BACKEND=wayland,..., and GTK3's
 # key-simulation test helpers segfault on Wayland.
 os.environ["GDK_BACKEND"] = "x11"
@@ -149,7 +158,7 @@ def book_id(name):
 
 
 class Capturer:
-    def __init__(self, out_dir, base_url, bridge):
+    def __init__(self, out_dir, base_url, bridge, scale=1):
         self.out_dir = Path(out_dir)
         self.base_url = base_url
         self.bridge = bridge
@@ -157,6 +166,10 @@ class Capturer:
         self.ucm.register_script_message_handler("invoke")
         self.ucm.connect("script-message-received::invoke", self.on_invoke)
         self.view = WebKit2.WebView.new_with_user_content_manager(self.ucm)
+        # `scale` device pixels per CSS pixel: a window `scale` times the
+        # scene's size, zoomed so the page still sees the scene's size.
+        self.scale = scale
+        self.view.set_zoom_level(scale)
         self.window = Gtk.OffscreenWindow()
         self.window.add(self.view)
         self.window.show_all()
@@ -196,6 +209,7 @@ class Capturer:
             INIT_JS % {"prefs": json.dumps(prefs)},
             WebKit2.UserContentInjectedFrames.TOP_FRAME,
             WebKit2.UserScriptInjectionTime.START, None, None))
+        size = (size[0] * self.scale, size[1] * self.scale)
         self.window.resize(*size)
         self.view.set_size_request(*size)
 
@@ -246,10 +260,11 @@ def feature_scenes(theme):
     """The site's feature screenshots, in `theme`."""
     look = {**SEEN, "gospel-getter-theme": theme}
     return [
-        # Reading in context: the chapter with its neighbours on either side.
-        # The headings sit where build_images.sh's hero and og crops expect.
+        # Reading in context: the chapter with its neighbours on either side,
+        # the picker's sidebar on the left. The page is at its top, so the
+        # headings sit where build_images.sh's hero and og crops expect.
         dict(name="reading", size=(1280, 800), prefs=look, position=("John", 3, "web"),
-             steps=SCROLL_TO % ("document.querySelector('.chapter-heading')", 86)),
+             steps="window.scrollTo(0, 0);"),
         # Searching the words of the text.
         dict(name="search", size=(1280, 800), prefs=look, position=("John", 15, "web"),
              steps="""
@@ -266,6 +281,7 @@ def feature_scenes(theme):
              """ + SCROLL_TO % ("document.querySelector('.chapter-heading')", 40)),
         # A selected range with Copy, Bookmark and + Add note, earlier
         # bookmarks starred, and the range's note under its actions.
+        # From verse 1, so the note fits below.
         dict(name="select", size=(1280, 800), prefs=look, position=("1 Corinthians", 13, "web"),
              bookmarks=[("1 Corinthians", 13, 1, 3)],
              notes=[("1 Corinthians", 13, 4, 7,
@@ -275,17 +291,84 @@ def feature_scenes(theme):
                 __gg.click(__gg.verse(4));
                 __gg.click(__gg.verse(7), { shiftKey: true });
                 await __gg.until(() => document.querySelector('.verse-notes'), 'the notes on it');
-             """ + SCROLL_TO % ("document.querySelector('.chapter-heading')", 40)),
+             """ + SCROLL_TO % ("__gg.verse(1)", 4)),
     ]
 
 
-THEMES = ["vaporwave", "classic-dark", "classic-light", "matrix", "beast-slayer", "hot-pink"]
-# The "Make it yours" strip: the same passage in each theme.
+def readme_scenes(theme):
+    """The README's screenshots, in `theme`, at their final sizes."""
+    look = {**SEEN, "gospel-getter-theme": theme}
+    return [
+        # John 3 in the KJV with John 2 and 4, the reference in the bar and
+        # John's chapters open in the sidebar.
+        dict(name="reading-neighboring-chapters", size=(1280, 850), prefs=look,
+             position=("John", 3, "kjv"), steps="window.scrollTo(0, 0);"),
+        # Searching the words of the text.
+        dict(name="search-results", size=(1280, 1000), prefs=look, position=("John", 3, "web"),
+             steps="""
+                __gg.click(document.getElementById('search-toggle'));
+                __gg.type(document.getElementById('search-input'), 'love one another');
+                await __gg.until(() => document.querySelector('#search-results .search-result'), 'results');
+                window.scrollTo(0, 0);
+             """),
+        # Romans 14 from verse 21 in compare mode: the WEB numbers 24-26, the
+        # KJV doesn't.
+        dict(name="compare-translations", size=(1280, 750),
+             prefs={**look, "gospel-getter-compare": "on"}, position=("Romans", 14, "web"),
+             steps="""
+                await __gg.until(() => document.querySelector('.compare-grid'), 'compare grid');
+             """ + SCROLL_TO % ("__gg.verse(21, 'kjv')", 40)),
+        # John 3:16-18 selected, with its actions and citation.
+        dict(name="copy-verse-range", size=(1280, 850), prefs=look, position=("John", 3, "web"),
+             steps="""
+                __gg.click(__gg.verse(16));
+                __gg.click(__gg.verse(18), { shiftKey: true });
+                await __gg.until(() => document.querySelector('.verse-actions'), 'verse actions');
+             """ + SCROLL_TO % ("__gg.verse(12)", 8)),
+        # John 3:16-21 selected, showing its three notes, from verse 18.
+        dict(name="notes", size=(1280, 850), prefs=look, position=("John", 3, "web"),
+             notes=[
+                 ("John", 3, 16, 16,
+                  "The whole gospel in one verse: God loves first, and his love gives."),
+                 ("John", 3, 16, 18,
+                  "Verse 17 matters as much as 16: he came to save, not to condemn. "
+                  "The judgment in 18 is what unbelief already chooses."),
+                 ("John", 3, 21, 21,
+                  "Coming to the light is something you do, not only something you believe."),
+             ],
+             steps="""
+                __gg.click(__gg.verse(16));
+                __gg.click(__gg.verse(21), { shiftKey: true });
+                await __gg.until(() => document.querySelectorAll('.verse-notes .note-card').length === 3, 'notes');
+             """ + SCROLL_TO % ("__gg.verse(18)", 4)),
+        # Psalm 23:4-6 in the KJV, verse 6's footnote open.
+        dict(name="footnotes", size=(1280, 850), prefs=look, position=("Psalms", 23, "kjv"),
+             steps="""
+                __gg.click(__gg.verse(6).querySelector('.fn-marker'));
+                await __gg.until(() => document.querySelector('.xref-popup:not([hidden])'), 'the popup');
+             """ + SCROLL_TO % ("__gg.verse(4)", 24)),
+        # Psalm 23 with verses 1-4 bookmarked, and the Library's Bookmarks tab.
+        dict(name="bookmarks", size=(1280, 850), prefs=look, position=("Psalms", 23, "kjv"),
+             bookmarks=[("John", 3, 16, 16), ("Romans", 8, 28, 28), ("Psalms", 23, 1, 4)],
+             steps="""
+                __gg.click(document.getElementById('library-toggle'));
+                __gg.click(document.getElementById('library-tab-bookmarks'));
+                await __gg.until(() => document.querySelectorAll('#bookmark-list .bookmark-preview').length === 3, 'previews');
+             """ + SCROLL_TO % ("document.querySelector('.chapter-main .chapter-heading')", 36)),
+    ]
+
+
+# Every theme, in the app's order (Aa).
+THEMES = ["chi-rho", "vellum", "system", "vaporwave", "classic-dark", "classic-light", "matrix",
+          "beast-slayer", "hot-pink"]
+# The "Make it yours" strip: the same passage in each theme. System has no
+# tile of its own: it shows Chi Rho or Vellum, following the computer's
+# dark or light setting.
 THEME_SCENES = [
     dict(name=f"theme-{theme}", size=(1280, 800), prefs={**SEEN, "gospel-getter-theme": theme},
          position=("Psalms", 23, "web"),
          steps=SCROLL_TO % ("document.querySelector('.chapter-heading')", 40))
-    for theme in THEMES
+    for theme in THEMES if theme != "system"
 ]
 
 
@@ -302,7 +385,10 @@ def serve(directory):
 
 def main():
     args = sys.argv[1:]
-    theme = "matrix"
+    readme = "--readme" in args
+    if readme:
+        args.remove("--readme")
+    theme = "chi-rho"
     if "--theme" in args:
         i = args.index("--theme")
         theme = args[i + 1]
@@ -315,8 +401,10 @@ def main():
     server = serve(str(ROOT / "ui"))
     with tempfile.TemporaryDirectory() as tmp:
         bridge = Bridge(Path(tmp) / "gospel_getter.db")
-        capturer = Capturer(out_dir, f"http://127.0.0.1:{server.server_port}/index.html", bridge)
-        for scene in feature_scenes(theme) + THEME_SCENES:
+        capturer = Capturer(out_dir, f"http://127.0.0.1:{server.server_port}/index.html", bridge,
+                            scale=1 if readme else 2)
+        scenes = readme_scenes(theme) if readme else feature_scenes(theme) + THEME_SCENES
+        for scene in scenes:
             if not only or scene["name"] in only:
                 capturer.scene(**scene)
         bridge.proc.stdin.close()
