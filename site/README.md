@@ -71,7 +71,15 @@ version bump: until a release has those names, the links 404.
 
   ```bash
   cargo build --manifest-path src-tauri/Cargo.toml --example frontend_bridge
-  PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py /tmp/gg-raw            # everything
+  PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py --all   # every image, in place
+  ```
+
+  `--all` captures the site's scenes into a temporary folder, runs
+  `build_images.sh` on them and captures the README's into `screenshots/`.
+  To capture some scenes, or look at the raw captures first:
+
+  ```bash
+  PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py /tmp/gg-raw            # the site's, raw
   PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py /tmp/gg-raw reading search compare select
   tools/site/build_images.sh /tmp/gg-raw
   PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py --readme screenshots   # the README's, in place

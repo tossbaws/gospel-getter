@@ -11,6 +11,7 @@ the frontend tests do. Nothing is drawn over or composited in.
 
 Usage, from the repository root:
     cargo build --manifest-path src-tauri/Cargo.toml --example frontend_bridge
+    PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py --all
     PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py OUT_DIR [--theme NAME] [SCENE ...]
     PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py --readme OUT_DIR [--theme NAME] [SCENE ...]
 
@@ -19,6 +20,10 @@ search, compare and select, or the README's); it defaults to chi-rho, the
 app's default theme. The theme-* scenes are always in their own themes.
 Naming scenes captures only those. The first-run welcome is marked as seen
 and no highlights are set, and a capture fails if either is on screen.
+
+--all remakes every image in place: the site's raw captures go to a
+temporary folder and through tools/site/build_images.sh into site/assets/,
+and the README's go to screenshots/.
 
 Without --readme, writes the site's raw PNGs (at 2x) to OUT_DIR; cropping
 and WebP conversion are separate (see site/README.md). With --readme, writes
@@ -279,6 +284,17 @@ if (document.querySelector('[data-highlight]')) throw new Error('a highlight is 
 SCROLL_TO = ("window.scrollTo(0, window.scrollY + %s.getBoundingClientRect().top"
              " - document.getElementById('top-bar').getBoundingClientRect().bottom - %d);")
 
+# Select verses `start` through `end` of the chapter being read, as a
+# reader does (a click, then a Shift-click), and wait for the card. The
+# scenes scroll first: the card is placed under the selection, or above it
+# when the window has no room below, as the page stands when it opens.
+SELECT = """
+                __gg.click(__gg.verse(%d));
+                __gg.click(__gg.verse(%d), { shiftKey: true });
+                await __gg.until(() => document.querySelector('#selection-card .verse-actions'), 'the card');
+"""
+
+
 def feature_scenes(theme):
     """The site's feature screenshots, in `theme`."""
     look = {**SEEN, "gospel-getter-theme": theme}
@@ -302,19 +318,17 @@ def feature_scenes(theme):
              steps="""
                 await __gg.until(() => document.querySelector('.compare-grid'), 'compare grid');
              """ + SCROLL_TO % ("document.querySelector('.chapter-heading')", 40)),
-        # A selected range with Copy, Bookmark and + Add note, earlier
-        # bookmarks starred, and the range's note under its actions.
-        # From verse 1, so the note fits below.
+        # A selected range with its card floating under it: Copy, Bookmark
+        # and + Add note, the highlights, the range's note and its
+        # cross-references, over the verses after it. From verse 4, so the
+        # whole card fits below.
         dict(name="select", size=(1280, 800), prefs=look, position=("1 Corinthians", 13, "web"),
-             bookmarks=[("1 Corinthians", 13, 1, 3)],
              notes=[("1 Corinthians", 13, 4, 7,
                      "Paul describes love by what it does. Read verses 4\u20137 again with "
                      "\u201cChrist\u201d in place of \u201clove\u201d.")],
-             steps="""
-                __gg.click(__gg.verse(4));
-                __gg.click(__gg.verse(7), { shiftKey: true });
-                await __gg.until(() => document.querySelector('.verse-notes'), 'the notes on it');
-             """ + SCROLL_TO % ("__gg.verse(1)", 4)),
+             steps=SCROLL_TO % ("__gg.verse(4)", 8) + SELECT % (4, 7)
+             + "await __gg.until(() => document.querySelector('#selection-card .verse-notes'),"
+               " 'the notes on it');"),
     ]
 
 
@@ -340,15 +354,12 @@ def readme_scenes(theme):
              prefs={**look, "gospel-getter-compare": "on"}, position=("Romans", 14, "web"),
              steps="""
                 await __gg.until(() => document.querySelector('.compare-grid'), 'compare grid');
-             """ + SCROLL_TO % ("__gg.verse(21, 'kjv')", 40)),
-        # John 3:16-18 selected, with its actions and citation.
+             """ + SCROLL_TO % ("__gg.verse(21, 'kjv')", 16)),
+        # John 3:16-18 selected, its card under it with the actions,
+        # citation and cross-references.
         dict(name="copy-verse-range", size=(1280, 850), prefs=look, position=("John", 3, "web"),
-             steps="""
-                __gg.click(__gg.verse(16));
-                __gg.click(__gg.verse(18), { shiftKey: true });
-                await __gg.until(() => document.querySelector('.verse-actions'), 'verse actions');
-             """ + SCROLL_TO % ("__gg.verse(12)", 8)),
-        # John 3:16-21 selected, showing its three notes, from verse 18.
+             steps=SCROLL_TO % ("__gg.verse(12)", 8) + SELECT % (16, 18)),
+        # John 3:16-21 selected, its card showing the range's three notes.
         dict(name="notes", size=(1280, 850), prefs=look, position=("John", 3, "web"),
              notes=[
                  ("John", 3, 16, 16,
@@ -359,17 +370,16 @@ def readme_scenes(theme):
                  ("John", 3, 21, 21,
                   "Coming to the light is something you do, not only something you believe."),
              ],
-             steps="""
-                __gg.click(__gg.verse(16));
-                __gg.click(__gg.verse(21), { shiftKey: true });
-                await __gg.until(() => document.querySelectorAll('.verse-notes .note-card').length === 3, 'notes');
-             """ + SCROLL_TO % ("__gg.verse(18)", 4)),
-        # Psalm 23:4-6 in the KJV, verse 6's footnote open.
+             steps=SCROLL_TO % ("__gg.verse(16)", 4) + SELECT % (16, 21) + """
+                await __gg.until(() => document.querySelectorAll('#selection-card .note-card').length === 3, 'notes');
+             """),
+        # Psalm 23 in the KJV, verse 6 selected by its footnote marker, the
+        # card under it showing its footnote.
         dict(name="footnotes", size=(1280, 850), prefs=look, position=("Psalms", 23, "kjv"),
-             steps="""
+             steps=SCROLL_TO % ("__gg.verse(1)", 24) + """
                 __gg.click(__gg.verse(6).querySelector('.fn-marker'));
-                await __gg.until(() => document.querySelector('.xref-popup:not([hidden])'), 'the popup');
-             """ + SCROLL_TO % ("__gg.verse(4)", 24)),
+                await __gg.until(() => document.querySelector('#selection-card .selection-footnotes:not([hidden])'), 'the footnotes');
+             """),
         # Psalm 23 with verses 1-4 bookmarked, and the Library's Bookmarks tab.
         dict(name="bookmarks", size=(1280, 850), prefs=look, position=("Psalms", 23, "kjv"),
              bookmarks=[("John", 3, 16, 16), ("Romans", 8, 28, 28), ("Psalms", 23, 1, 4)],
@@ -406,21 +416,11 @@ def serve(directory):
     return server
 
 
-def main():
-    args = sys.argv[1:]
-    readme = "--readme" in args
-    if readme:
-        args.remove("--readme")
-    theme = "chi-rho"
-    if "--theme" in args:
-        i = args.index("--theme")
-        theme = args[i + 1]
-        del args[i:i + 2]
-    if theme not in THEMES:
-        sys.exit(f"unknown theme {theme!r}; one of {', '.join(THEMES)}")
-    out_dir = Path(args[0] if args else "screenshots-raw")
+def capture(out_dir, *, readme, theme, only=()):
+    """Capture the README's scenes or the site's (named in `only`, or all)
+    into `out_dir`."""
+    out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    only = set(args[1:])
     server = serve(str(ROOT / "ui"))
     with tempfile.TemporaryDirectory() as tmp:
         bridge = Bridge(Path(tmp) / "gospel_getter.db")
@@ -433,6 +433,33 @@ def main():
         bridge.proc.stdin.close()
         bridge.proc.wait()
     server.shutdown()
+
+
+def main():
+    args = sys.argv[1:]
+    remake = "--all" in args
+    if remake:
+        args.remove("--all")
+    readme = "--readme" in args
+    if readme:
+        args.remove("--readme")
+    theme = "chi-rho"
+    if "--theme" in args:
+        i = args.index("--theme")
+        theme = args[i + 1]
+        del args[i:i + 2]
+    if theme not in THEMES:
+        sys.exit(f"unknown theme {theme!r}; one of {', '.join(THEMES)}")
+    if remake:
+        if args or readme:
+            sys.exit("--all takes no folder or scenes, and makes the README's too")
+        with tempfile.TemporaryDirectory() as raw:
+            capture(raw, readme=False, theme=theme)
+            subprocess.run([str(ROOT / "tools/site/build_images.sh"), raw], check=True)
+        capture(ROOT / "screenshots", readme=True, theme=theme)
+        return
+    capture(args[0] if args else "screenshots-raw", readme=readme, theme=theme,
+            only=set(args[1:]))
 
 
 if __name__ == "__main__":
