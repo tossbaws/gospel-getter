@@ -10,6 +10,7 @@ pub mod reader_data;
 #[cfg(test)]
 mod reader_data_tests;
 pub mod release_notes;
+pub mod start_here;
 pub mod updater;
 pub mod window;
 
