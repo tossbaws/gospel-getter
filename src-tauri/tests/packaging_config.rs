@@ -149,3 +149,14 @@ fn tauri_conf_window_is_at_least_640_by_480() {
     assert_eq!(window["minHeight"], 480);
     assert_eq!(window["resizable"], true);
 }
+
+/// The webview's own page zoom is off: Ctrl+=, Ctrl+- and Ctrl+0 are the
+/// app's text-size keys (and Ctrl+wheel does nothing). With
+/// `zoomHotkeysEnabled` false, WebView2's `IsZoomControlEnabled` is off on
+/// Windows, and Tauri injects no zoom polyfill into WebKitGTK on Linux,
+/// which has no zoom keys of its own.
+#[test]
+fn tauri_conf_turns_off_the_webview_page_zoom() {
+    let conf: Value = serde_json::from_str(TAURI_CONF).expect("tauri.conf.json must be valid JSON");
+    assert_eq!(conf["app"]["windows"][0]["zoomHotkeysEnabled"], false);
+}

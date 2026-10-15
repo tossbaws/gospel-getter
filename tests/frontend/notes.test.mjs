@@ -82,8 +82,7 @@ test('every verse a note covers is marked, in the chapter being read only, once 
         assert.ok(cues[0].classList.contains('visually-hidden'));
         assert.equal(app.verse(19).querySelectorAll('.note-cue').length, 0);
         // The marker is a pseudo-element: no new tab stops, nothing to click.
-        const focusable = [...app.verse(17).querySelectorAll('button, a, [tabindex]')];
-        assert.ok(focusable.every((e) => e.closest('.xref-popup')), 'only its cross-references, as before');
+        assert.equal(app.verse(17).querySelectorAll('button, a, [tabindex]').length, 0);
         // The verse text itself is untouched.
         assert.equal(app.verse(17).querySelector('.verse-text').textContent, storedVerse('kjv', 'John', 3, 17));
         // Clicking a marked verse still selects it.
@@ -105,8 +104,11 @@ test('the Notes section lists every note overlapping the selection, in order', (
         app.click(showAll);
         assert.deepEqual(cards(app).map((c) => c.reference), ['John 3:16', 'John 3:16–18', 'John 3:19', 'John 3:21']);
         assert.equal(app.document.activeElement, region.querySelectorAll('.note-edit')[3]);
-        // It sits right under the selection's actions.
-        assert.equal(app.actions().nextElementSibling, region);
+        // It's in the selection card: after the actions and the selection's
+        // footnotes, before its cross-references.
+        assert.equal(region.parentElement, app.document.getElementById('selection-card'));
+        assert.ok(region.previousElementSibling.classList.contains('selection-footnotes'));
+        assert.ok(region.nextElementSibling.classList.contains('selection-xrefs'));
         for (const card of region.querySelectorAll('.note-card')) {
             assert.ok(card.querySelector('.note-card-date').textContent.match(/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/));
             assert.equal(card.querySelector('.note-edit').textContent, 'Edit');

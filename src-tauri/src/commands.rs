@@ -216,6 +216,46 @@ pub struct ChapterSideDto {
     pub verses: Vec<SimpleVerseDto>,
 }
 
+/// A quiet card in a neighbor's place, where there's no neighboring
+/// chapter: before Genesis 1 ("The Old Testament", "Genesis · 50
+/// chapters") and after Revelation 22 ("The end of the Bible"). Words
+/// about the Bible's shape, never scripture text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BibleEdgeDto {
+    pub title: String,
+    pub detail: Option<String>,
+}
+
+impl BibleEdgeDto {
+    /// Before the first chapter of `book`: its testament, and the book with
+    /// its chapter count.
+    fn start(book: &Book) -> Self {
+        let testament = if book.testament == "NT" {
+            "The New Testament"
+        } else {
+            "The Old Testament"
+        };
+        let chapters = if book.chapter_count == 1 {
+            "chapter"
+        } else {
+            "chapters"
+        };
+        Self {
+            title: testament.to_owned(),
+            detail: Some(format!("{} · {} {chapters}", book.name, book.chapter_count)),
+        }
+    }
+
+    /// After the last chapter.
+    fn end() -> Self {
+        Self {
+            title: "The end of the Bible".to_owned(),
+            detail: None,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadingPaneDto {
@@ -225,6 +265,10 @@ pub struct ReadingPaneDto {
     pub current_verses: Vec<VerseDto>,
     pub prev: Option<ChapterSideDto>,
     pub next: Option<ChapterSideDto>,
+    /// What shows in the previous chapter's place when there's none (at
+    /// Genesis 1), and in the next's (at Revelation 22).
+    pub prev_edge: Option<BibleEdgeDto>,
+    pub next_edge: Option<BibleEdgeDto>,
     pub has_chapter_xrefs: bool,
 }
 
@@ -347,9 +391,14 @@ async fn build_reading_pane_dto(
         None => None,
     };
 
-    let current_book_name = book_name(state, book_id)
-        .ok_or_else(|| anyhow::anyhow!("unknown book id in navigation"))?
-        .to_string();
+    let current_book = state
+        .books
+        .iter()
+        .find(|b| b.id == book_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown book id in navigation"))?;
+    let current_book_name = current_book.name.clone();
+    let prev_edge = prev.is_none().then(|| BibleEdgeDto::start(current_book));
+    let next_edge = next.is_none().then(BibleEdgeDto::end);
 
     let cross_refs = state
         .store
@@ -393,6 +442,8 @@ async fn build_reading_pane_dto(
         current_verses,
         prev,
         next,
+        prev_edge,
+        next_edge,
         has_chapter_xrefs,
     })
 }
@@ -2219,6 +2270,56 @@ mod tests {
             .await
             .expect("search");
         serde_json::to_value(dto).expect("serialize")
+    }
+
+    /// Only the first and last chapters of the Bible have an edge card, in
+    /// the place of the neighbor they lack; every other chapter, the book
+    /// boundaries included, has both neighbors and no card.
+    #[tokio::test]
+    async fn the_bible_s_first_and_last_chapters_have_an_edge_card() {
+        let (_db, state) = app_state("cmd_bible_edges").await;
+        let genesis_1 = reading(&state, 1, 1, Some("kjv")).await.unwrap();
+        assert!(genesis_1.prev.is_none());
+        assert_eq!(
+            genesis_1.prev_edge,
+            Some(BibleEdgeDto {
+                title: "The Old Testament".to_owned(),
+                detail: Some("Genesis · 50 chapters".to_owned()),
+            })
+        );
+        assert_eq!(genesis_1.next_edge, None);
+        assert_eq!(genesis_1.next.as_ref().map(|n| n.chapter), Some(2));
+
+        let revelation_22 = reading(&state, 66, 22, Some("web")).await.unwrap();
+        assert!(revelation_22.next.is_none());
+        assert_eq!(
+            revelation_22.next_edge,
+            Some(BibleEdgeDto {
+                title: "The end of the Bible".to_owned(),
+                detail: None,
+            })
+        );
+        assert_eq!(revelation_22.prev_edge, None);
+
+        for (book, chapter) in [(1, 50), (2, 1), (39, 4), (40, 1), (66, 21), (19, 119)] {
+            let dto = reading(&state, book, chapter, Some("kjv")).await.unwrap();
+            assert!(dto.prev.is_some() && dto.next.is_some(), "{book}:{chapter}");
+            assert_eq!(
+                (dto.prev_edge, dto.next_edge),
+                (None, None),
+                "{book}:{chapter}"
+            );
+        }
+
+        // The words are the book's own facts: the testament and chapter
+        // count, as stored; one chapter is singular.
+        let obadiah = state.books.iter().find(|b| b.name == "Obadiah").unwrap();
+        assert_eq!(
+            BibleEdgeDto::start(obadiah).detail.as_deref(),
+            Some("Obadiah · 1 chapter")
+        );
+        let matthew = state.books.iter().find(|b| b.name == "Matthew").unwrap();
+        assert_eq!(BibleEdgeDto::start(matthew).title, "The New Testament");
     }
 
     #[tokio::test]

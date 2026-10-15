@@ -372,6 +372,30 @@
         html {
             --bar-height: 3.4rem;
             --sidebar-width: 16.5rem;
+            /* The reading column (Aa's Width): Normal is the width it has
+               always had, 492px, 62 characters a line at the Medium text
+               size in Literata (measured in WebKitGTK); Narrow is 416px (52)
+               and Wide 592px (74). Reading mode's single column is wider:
+               732px at Normal, as it has always been (92), with Narrow at
+               592px (74) and Wide at 880px (111). The faded neighbors give
+               way first, down to --side-min, and the column only then, never
+               below --column-min: 400px, 50 characters (see .chapter-side). */
+            --column: 30.75rem;
+            --reader-column: 45.75rem;
+            --column-min: 25rem;
+            --side-width: 260px;
+            --side-min: 180px;
+            --row-gap: 1.25rem;
+        }
+
+        :root[data-width="narrow"] {
+            --column: 26rem;
+            --reader-column: 37rem;
+        }
+
+        :root[data-width="wide"] {
+            --column: 37rem;
+            --reader-column: 55rem;
         }
 
         * {
@@ -388,8 +412,10 @@
             min-height: 100vh;
         }
 
+        /* As wide as the reading column and its two neighbors (1100px at
+           Normal width), so the column has its width when there's room. */
         .container {
-            max-width: 1100px;
+            max-width: calc(var(--column) + 2 * var(--side-width) + 2 * var(--row-gap) + 3rem);
             margin: 0 auto;
             padding: 2.5rem 1.5rem 6rem;
         }
@@ -924,6 +950,14 @@
 
         .toast.is-error {
             font-weight: bold;
+        }
+
+        /* "Text size: Large", briefly, after Ctrl+= or Ctrl+-: smaller
+           and higher than export's notices, so the two never overlap. */
+        .size-status {
+            bottom: 4.5rem;
+            padding: 0.35rem 0.75rem;
+            border-color: var(--accent-dim);
         }
 
         .toast.is-hidden {
@@ -2048,13 +2082,12 @@
             :root[data-reader-mode="on"] #menu-toggle,
             :root[data-reader-mode="on"] .sidebar-toggle,
             :root[data-reader-mode="on"] .chapter-side,
-            :root[data-reader-mode="on"] .nav-hint,
-            :root[data-reader-mode="on"] footer {
+            :root[data-reader-mode="on"] .nav-hint {
                 display: none;
             }
 
             :root[data-reader-mode="on"] .container {
-                max-width: 780px;
+                max-width: calc(var(--reader-column) + 3rem);
                 padding-top: 4.5rem;
             }
 
@@ -2086,15 +2119,9 @@
                 box-shadow: none;
             }
 
-            /* With the sidebar in, the chapter and its neighbors share
-               the narrower room in proportion, rather than the chapter
-               being read giving up all of it. */
-            :root[data-picker="sidebar"] .chapter-main {
-                flex: 1 1 472px;
-            }
-
-            :root[data-picker="sidebar"] .chapter-side {
-                flex: 0 1 260px;
+            /* Reading mode's one column is as wide as its container. */
+            :root[data-reader-mode="on"] .chapter-main {
+                max-width: none;
             }
         }
 
@@ -2309,13 +2336,24 @@
 
         .reading-row {
             display: flex;
+            justify-content: center;
             align-items: flex-start;
-            gap: 1.25rem;
+            gap: var(--row-gap);
         }
 
+        /* The chapter being read: its Width when there's room, and never
+           narrower than --column-min because of its neighbors (they shrink
+           far faster, and hide first; see below). While comparing it takes
+           the whole row. Positioned: the selection card is placed in it. */
         .chapter-main {
-            flex: 1 1 auto;
-            min-width: 0;
+            position: relative;
+            flex: 1 1 var(--column);
+            max-width: var(--column);
+            min-width: min(var(--column-min), 100%);
+        }
+
+        .reading-row.is-comparing .chapter-main {
+            max-width: none;
         }
 
         /* The chapter being read sits in the wide center column. The chapter
@@ -2324,8 +2362,9 @@
            opacity, in narrower side columns — and scroll along with the
            page as one continuous reading surface, not as separate boxes. */
         .chapter-side {
-            flex: 0 0 260px;
-            max-width: 260px;
+            flex: 0 50 var(--side-width);
+            min-width: var(--side-min);
+            max-width: var(--side-width);
             opacity: 0.55;
             transition: opacity 0.2s;
         }
@@ -2363,15 +2402,47 @@
             text-decoration: underline;
         }
 
-        /* Below this width there isn't room to show a chapter and its two
-           faded neighbors side by side without forcing the reader to scroll
-           past the previous chapter to reach the current one, so the
-           neighbors are hidden entirely and only .chapter-main is shown.
-           They stay in the DOM (data attributes, arrow-key navigation, and
-           heading-jump navigation are untouched) — this is display-only. */
-        @media (max-width: 800px) {
-            .chapter-side {
+        /* In a missing neighbor's place: its heading's look, then a line
+           in the neighbors' text, faded with them. */
+        .edge-card-title {
+            font-family: var(--font-scripture);
+            font-size: 1.2rem;
+            color: var(--accent);
+            border-bottom: 1px solid var(--rule);
+            margin-bottom: 0.8rem;
+            padding-bottom: 0.4rem;
+        }
+
+        .edge-card-detail {
+            font-family: var(--font-scripture);
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+
+        /* The neighbors never squeeze the chapter being read below
+           --column-min (400px, about 50 characters a line at Medium). With
+           both at --side-min (180px), the gaps (20px each) and the page's
+           padding (48px), that takes an 848px window; below it only the
+           next chapter shows, and below 648px (400 + 180 + 20 + 48) neither
+           does. The sidebar takes 264px but only shows from 1200px, which
+           leaves 888px: always room for both, at any Width (the floor is the
+           same for all three). Display only: the neighbors stay in the DOM,
+           so the arrow keys and their headings work the same. */
+        @media (max-width: 847px) {
+            .chapter-side-prev {
                 display: none;
+            }
+        }
+
+        /* Alone, the chapter fills the narrow window (at most 592px here,
+           about 74 characters), as it always has. */
+        @media (max-width: 647px) {
+            .chapter-side-next {
+                display: none;
+            }
+
+            .chapter-main {
+                max-width: none;
             }
         }
 
@@ -2447,13 +2518,80 @@
             cursor: default;
         }
 
-        .xref-popup .verse-actions {
-            margin: 0 0 0.5rem;
+        /* The selection card floats over the text (see placeCard): out
+           of the flow, opaque, at most a set height with its own scroll,
+           so a long list of notes or cross-references never covers the
+           window. Docked, it sits at the bottom of the window. */
+        .selection-card {
+            position: absolute;
+            z-index: 12;
+            top: 0;
+            left: 0;
+            width: min(100%, 34rem);
+            max-height: min(24rem, calc(100vh - var(--bar-height) - 2rem));
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            padding: 0.6rem 0.8rem;
+            font-family: var(--font-ui);
+            font-size: 0.85rem;
+            line-height: 1.4;
+            color: var(--text);
+            background: var(--option-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-l);
+            box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.35);
+            cursor: default;
+        }
+
+        .selection-card.is-docked {
+            position: fixed;
+            top: auto;
+            bottom: 0.5rem;
+            max-height: min(45vh, 20rem);
+        }
+
+        .selection-card > * + * {
+            margin-top: 0.6rem;
+        }
+
+        .selection-card > [hidden] {
+            display: none;
+        }
+
+        .selection-card .verse-actions {
+            margin: 0;
             padding: 0 0 0.5rem;
             background: none;
             border: none;
             border-bottom: 1px solid var(--accent-dim);
             border-radius: 0;
+        }
+
+        /* Cross-references as inline chips: "Romans 5:8 · 1 John 4:9-10". */
+        .xref-chips {
+            display: inline;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .xref-chips li {
+            display: inline;
+        }
+
+        .xref-chips li + li::before {
+            content: '\00b7';
+            margin: 0 0.45rem;
+            color: var(--text-dim);
+        }
+
+        .selection-xref-row + .selection-xref-row {
+            margin-top: 0.3rem;
+        }
+
+        .selection-xref-verse {
+            margin-right: 0.5rem;
+            color: var(--text-dim);
         }
 
         .verse-copy-btn,
@@ -2572,8 +2710,8 @@
             cursor: default;
         }
 
-        .xref-popup .verse-notes {
-            margin: 0 0 0.5rem;
+        .selection-card .verse-notes {
+            margin: 0;
             padding: 0 0 0.5rem;
             background: none;
             border: none;
@@ -2830,17 +2968,6 @@
             font-weight: bold;
         }
 
-        .xref-popup:not([hidden]) {
-            font-family: var(--font-ui);
-            display: block;
-            margin-top: 0.4rem;
-            padding: 0.6rem 0.8rem;
-            background: var(--panel-bg);
-            border: 1px solid var(--accent-dim);
-            border-radius: var(--radius-m);
-            font-size: 0.85rem;
-        }
-
         .xref-popup-title {
             display: block;
             font-size: 0.7rem;
@@ -2848,11 +2975,6 @@
             letter-spacing: 0.05em;
             color: var(--text-dim);
             margin-bottom: 0.4rem;
-        }
-
-        .xref-entry {
-            display: block;
-            margin-bottom: 0.3rem;
         }
 
         .xref-citation {
@@ -2870,20 +2992,6 @@
             text-decoration: underline solid;
         }
 
-        .xref-expanded:not([hidden]) {
-            display: block;
-            margin: 0.3rem 0 0.3rem 0.8rem;
-            padding-left: 0.6rem;
-            border-left: 2px solid var(--accent-dim);
-            color: var(--text);
-            font-size: 0.9rem;
-            line-height: 1.5;
-        }
-
-        .xref-verse-text {
-            margin-bottom: 0.3rem;
-        }
-
         .xref-summary {
             margin-top: 2rem;
             padding-top: 1rem;
@@ -2894,7 +3002,6 @@
             font-size: 1rem;
             font-weight: normal;
             color: var(--accent);
-            margin-bottom: 0.6rem;
         }
 
         /* The chapter's Cross References and Footnotes lists: a verse
@@ -2965,7 +3072,6 @@
             font-size: 1rem;
             font-weight: normal;
             color: var(--accent);
-            margin-bottom: 0.6rem;
         }
 
         .footnote-row {
@@ -2988,10 +3094,6 @@
             display: block;
         }
 
-        .popup-footnotes + .xref-popup-title {
-            margin-top: 0.6rem;
-        }
-
         .footnote-entry {
             display: block;
             margin-bottom: 0.3rem;
@@ -3003,19 +3105,135 @@
             margin-right: 0.3rem;
         }
 
-        footer {
-            text-align: center;
-            margin-top: 3rem;
-            font-size: 0.75rem;
-            font-style: italic;
-            color: var(--text-dim);
+        /* The chapter ends with a next step: the chapters before and
+           after it, as two large buttons in the UI sans (only the one
+           there is, at Genesis 1 and Revelation 22), then the keys' hint
+           in one quiet line. */
+        .chapter-end {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 2rem;
+            font-family: var(--font-ui);
         }
 
+        .chapter-step {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.6rem;
+            min-height: 3rem;
+            padding: 0.6rem 1.25rem;
+            font-family: var(--font-ui);
+            font-size: 1rem;
+            color: var(--accent);
+            background: var(--option-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-l);
+            cursor: pointer;
+        }
+
+        .chapter-step-next {
+            margin-left: auto;
+        }
+
+        .chapter-step:hover {
+            border-color: var(--accent);
+        }
+
+        .chapter-step:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        /* One quiet line, its keys as small caps alike. A cap's own
+           opaque --option-bg keeps its key AA in every theme. */
         .nav-hint {
             text-align: center;
+            font-family: var(--font-ui);
             font-size: 0.75rem;
+            line-height: 1.9;
             color: var(--text-dim);
-            margin-top: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        .nav-hint kbd {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.6em;
+            height: 1.6em;
+            padding: 0 0.35em;
+            margin: 0 0.1em;
+            vertical-align: middle;
+            font-family: var(--font-ui);
+            font-size: 1em;
+            line-height: 1;
+            color: var(--text-dim);
+            background: var(--option-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-s);
+        }
+
+        .nav-hint kbd svg {
+            width: 1em;
+            height: 1em;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.6;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /* The chapter's Footnotes and Cross references are disclosures,
+           closed until opened; each kind remembers being opened or closed
+           for every chapter. Printing opens both. */
+        .disclosure-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.2rem 0;
+            font-family: var(--font-ui);
+            font-size: 1rem;
+            font-weight: normal;
+            color: var(--text);
+            background: none;
+            border: none;
+            cursor: pointer;
+        }
+
+        .disclosure-toggle:hover {
+            text-decoration: underline;
+        }
+
+        .disclosure-toggle:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+            border-radius: var(--radius-s);
+        }
+
+        /* In --accent, as a mark (3:1 is enough, and every theme's
+           --accent is), with the label in --text. */
+        .disclosure-chevron {
+            color: var(--accent);
+            width: 0.45rem;
+            height: 0.45rem;
+            border-right: 2px solid currentColor;
+            border-bottom: 2px solid currentColor;
+            transform: rotate(-45deg);
+            transition: transform 0.15s;
+        }
+
+        .disclosure-toggle[aria-expanded="true"] .disclosure-chevron {
+            transform: rotate(45deg);
+        }
+
+        .disclosure-body {
+            margin-top: 0.6rem;
+        }
+
+        /* The lists are grids, which would otherwise win over [hidden]. */
+        .disclosure-body[hidden] {
+            display: none;
         }
 
         /* Printing should show just the chapter being read — its heading
@@ -3063,8 +3281,9 @@
             .picker,
             .chapter-side,
             .nav-hint,
-            footer,
-            .xref-popup,
+            .chapter-end,
+            .disclosure-chevron,
+            .selection-card,
             .verse-actions,
             .verse-notes,
             .search-toggle,
@@ -3097,6 +3316,17 @@
             .chapter-main .verse.verse-selected {
                 background: none !important;
                 box-shadow: none !important;
+            }
+
+            /* Footnotes and Cross references print open, whatever they
+               show on screen. */
+            .disclosure-body[hidden] {
+                display: block !important;
+            }
+
+            .disclosure-toggle {
+                padding: 0;
+                color: #000000 !important;
             }
         }
     </style>
@@ -3143,6 +3373,16 @@
                     select: 'line-spacing-select',
                     fallback: 'normal',
                     values: ['compact', 'normal', 'relaxed'],
+                    renamed: {},
+                },
+                // The reading column's width (and reading mode's); Normal
+                // is the width it always had.
+                width: {
+                    key: 'gospel-getter-width',
+                    attr: 'width',
+                    select: 'width-select',
+                    fallback: 'normal',
+                    values: ['narrow', 'normal', 'wide'],
                     renamed: {},
                 },
                 readerMode: {
@@ -3610,6 +3850,8 @@
                 var themeSelect = byId('theme-select');
                 var translationChoices = byId('translation-choices');
                 var lineSpacingChoices = byId('line-spacing-choices');
+                var widthSelect = byId('width-select');
+                var widthChoices = byId('width-choices');
                 var themeChoices = byId('theme-choices');
                 var textSizeDown = byId('text-size-down');
                 var textSizeUp = byId('text-size-up');
@@ -3637,6 +3879,9 @@
 
                 optionsOf(lineSpacingSelect).forEach(function (option) {
                     lineSpacingChoices.appendChild(segmentButton(option, option.textContent));
+                });
+                optionsOf(widthSelect).forEach(function (option) {
+                    widthChoices.appendChild(segmentButton(option, option.textContent));
                 });
 
                 optionsOf(themeSelect).forEach(function (option) {
@@ -3677,6 +3922,7 @@
                 function syncAa() {
                     setPressed(translationChoices, translationSelect.value);
                     setPressed(lineSpacingChoices, lineSpacingSelect.value);
+                    setPressed(widthChoices, widthSelect.value);
                     setPressed(themeChoices, themeSelect.value);
                     var theme = themeSelect.options[themeSelect.selectedIndex];
                     byId('theme-name').textContent = theme ? theme.textContent : '';
@@ -3697,8 +3943,8 @@
                     if (option) choose(textSizeSelect, option.value);
                 }
 
-                [translationChoices, lineSpacingChoices, themeChoices].forEach(function (group) {
-                    var select = { 'translation-choices': translationSelect, 'line-spacing-choices': lineSpacingSelect, 'theme-choices': themeSelect }[group.id];
+                [translationChoices, lineSpacingChoices, widthChoices, themeChoices].forEach(function (group) {
+                    var select = { 'translation-choices': translationSelect, 'line-spacing-choices': lineSpacingSelect, 'width-choices': widthSelect, 'theme-choices': themeSelect }[group.id];
                     group.addEventListener('click', function (event) {
                         var btn = event.target.closest('button');
                         if (btn) choose(select, btn.dataset.value);
@@ -3706,6 +3952,50 @@
                 });
                 textSizeDown.addEventListener('click', function () { stepTextSize(-1); });
                 textSizeUp.addEventListener('click', function () { stepTextSize(1); });
+
+                // Ctrl+= (Ctrl++, Ctrl+Shift+=, numpad +) and Ctrl+- (numpad
+                // -) step through the four text sizes, and Ctrl+0 goes back
+                // to Medium, through Aa's own control, so Aa stays in step.
+                // They're never the webview's page zoom: the app turns that
+                // off (zoomHotkeysEnabled is false, in tauri.conf.json), and
+                // these keys' default is prevented besides. While typing in
+                // a field they do nothing.
+                var sizeStatus = byId('size-status');
+                var sizeStatusTimer = null;
+
+                function showTextSize() {
+                    var option = textSizeSelect.options[textSizeSelect.selectedIndex];
+                    clearTimeout(sizeStatusTimer);
+                    sizeStatus.textContent = 'Text size: ' + (option ? option.textContent : '');
+                    sizeStatus.classList.remove('is-hidden');
+                    sizeStatusTimer = setTimeout(function () {
+                        sizeStatus.classList.add('is-hidden');
+                    }, 1500);
+                }
+
+                function sizeKey(event) {
+                    if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
+                    var key = event.key;
+                    var code = event.code || '';
+                    if (key === '=' || key === '+' || code === 'NumpadAdd') return 1;
+                    if (key === '-' || key === '_' || code === 'NumpadSubtract') return -1;
+                    if ((key === '0' && !event.shiftKey) || code === 'Numpad0') return 0;
+                    return null;
+                }
+
+                document.addEventListener('keydown', function (event) {
+                    var step = sizeKey(event);
+                    if (step === null) return;
+                    event.preventDefault();
+                    var target = event.target;
+                    if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) return;
+                    if (step === 0) {
+                        choose(textSizeSelect, 'medium');
+                    } else {
+                        stepTextSize(step);
+                    }
+                    showTextSize();
+                });
 
                 // ---- Preferences
 
@@ -3764,12 +4054,13 @@
                 // All display preferences at once, for exporting and
                 // importing them (Export data… and Import data… in the ☰
                 // menu). Names and values are the export file's: theme,
-                // text_size and line_spacing as Aa's option values,
+                // text_size, line_spacing and width as Aa's option values,
                 // reading_mode and compare as true/false.
                 var FILE_NAMES = {
                     theme: 'theme',
                     text_size: 'textSize',
                     line_spacing: 'lineSpacing',
+                    width: 'width',
                     reading_mode: 'readerMode',
                     compare: 'compare',
                 };
@@ -3883,6 +4174,15 @@
                         <option value="compact">Compact</option>
                         <option value="normal">Normal</option>
                         <option value="relaxed">Relaxed</option>
+                    </select>
+                </div>
+                <div class="aa-section">
+                    <span class="section-label" id="width-label">Width</span>
+                    <div id="width-choices" class="segmented" role="group" aria-labelledby="width-label"></div>
+                    <select id="width-select" hidden>
+                        <option value="narrow">Narrow</option>
+                        <option value="normal">Normal</option>
+                        <option value="wide">Wide</option>
                     </select>
                 </div>
                 <div class="aa-section">
@@ -4118,6 +4418,7 @@
         </div>
     </div>
     <p id="data-status" class="toast is-hidden" role="status" aria-live="polite"></p>
+    <p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>
 
     <section id="update-banner" class="update-banner" aria-labelledby="update-title" tabindex="-1" hidden>
         <p id="update-title" class="update-title" role="status" aria-live="polite"></p>
@@ -4140,10 +4441,6 @@
         <p id="reader-notice" class="reader-notice" role="status" hidden></p>
 
         <div id="reading-pane"></div>
-
-        <p class="nav-hint">Use &larr; and &rarr; to move a chapter at a time, / to search, C to compare translations.</p>
-
-        <footer>Gospel Getter &mdash; read the whole counsel of God, one chapter at a time.</footer>
     </main>
 
     <script>
@@ -4240,6 +4537,26 @@
                 </span>
                 <span class="verse-actions-ref"></span>
                 <span class="verse-actions-status" role="status" aria-live="polite"></span>`;
+            // The selection card: everything about the selected verses, in
+            // one card that floats over the text just under them (or just
+            // above, when there's no room below), so selecting never moves
+            // the text. It sits in the DOM straight after the last
+            // selected verse, so Tab reaches it right after the selection,
+            // but it's out of the flow (absolutely placed in the reading
+            // column). In order: the actions and citation, the selection's
+            // footnotes, its notes, and its cross-references as chips.
+            const selectionCard = document.createElement('div');
+            selectionCard.id = 'selection-card';
+            selectionCard.className = 'selection-card';
+            selectionCard.setAttribute('role', 'group');
+            const cardFootnotes = document.createElement('div');
+            cardFootnotes.className = 'popup-footnotes selection-footnotes';
+            const cardXrefs = document.createElement('div');
+            cardXrefs.className = 'selection-xrefs';
+            selectionCard.append(verseActions, cardFootnotes, cardXrefs);
+            // The verse the card belongs to (the last selected one), where
+            // focus goes back to when it closes.
+            let cardVerse = null;
             const actionStatus = verseActions.querySelector('.verse-actions-status');
             const bookmarkBtn = verseActions.querySelector('.verse-bookmark-btn');
             const highlightSwatches = [...verseActions.querySelectorAll('.highlight-swatch')];
@@ -4343,13 +4660,13 @@
             }
 
             // Reflects `selection` in the reading column: highlights the
-            // selected verses, shows a lone selected verse's footnotes and
-            // cross-references (a range shows none), and puts the actions
-            // under the last selected verse.
+            // selected verses and opens the selection card on them (or
+            // closes it, returning focus to the verse if it was in the
+            // card). Nothing is added to the column's flow.
             function renderSelection() {
                 actionAttempt += 1;
                 setActionStatus('', false);
-                const single = selection && selection.start === selection.end;
+                const hadFocus = selectionCard.contains(document.activeElement);
                 let last = null;
                 document.querySelectorAll(SELECTABLE).forEach((el) => {
                     const number = Number(el.dataset.verse);
@@ -4358,8 +4675,6 @@
                         && number >= selection.start
                         && number <= selection.end;
                     el.classList.toggle('verse-selected', selected);
-                    const popup = el.querySelector('.xref-popup');
-                    if (popup) popup.hidden = !(selected && single);
                     if (selected && number === selection.end) last = el;
                 });
                 selectionNotesToken += 1;
@@ -4368,19 +4683,129 @@
                 showAllNotes = false;
                 notesSection.remove();
                 if (!last) {
-                    verseActions.remove();
+                    const verse = cardVerse;
+                    cardVerse = null;
+                    selectionCard.remove();
+                    if (hadFocus && verse && verse.isConnected) {
+                        verse.setAttribute('tabindex', '-1');
+                        verse.focus({ preventScroll: true });
+                    }
                     return;
                 }
-                const popup = single ? last.querySelector('.xref-popup') : null;
-                if (popup) {
-                    popup.prepend(verseActions);
-                } else {
-                    last.append(verseActions);
-                }
-                verseActions.querySelector('.verse-actions-ref').textContent = selectionCitation();
+                cardVerse = last;
+                const citation = selectionCitation();
+                selectionCard.setAttribute('aria-label', `Selection: ${citation}`);
+                verseActions.querySelector('.verse-actions-ref').textContent = citation;
+                renderCardReferences();
+                last.after(selectionCard);
                 updateBookmarkButton();
                 updateHighlightControls();
+                placeCard();
                 refreshSelectionNotes();
+            }
+
+            // The selection's footnotes and cross-references, from the
+            // chapter as the backend returned it. Cross-references are by
+            // verse number (the same in every column); footnotes are the
+            // column's own. A range labels each with its verse.
+            function renderCardReferences() {
+                const verses = selectionVerses();
+                const range = selection.start !== selection.end;
+                const notes = verses.flatMap((v) => (v.footnotes || []).map((f) => ({ v, f })));
+                cardFootnotes.hidden = !notes.length;
+                cardFootnotes.innerHTML = notes.length
+                    ? `<span class="xref-popup-title">Footnotes</span>
+                        ${notes.map(({ v, f }) => `<span class="footnote-entry"><span class="footnote-label">${range ? v.number : ''}${escapeHtml(f.label)}</span>${footnoteHtml(f)}</span>`).join('')}`
+                    : '';
+                const xrefsByVerse = new Map(lastDto.currentVerses.map((v) => [v.number, v.xrefs]));
+                const rows = verses
+                    .map((v) => ({ number: v.number, xrefs: xrefsByVerse.get(v.number) || [] }))
+                    .filter((row) => row.xrefs.length);
+                cardXrefs.hidden = !rows.length;
+                cardXrefs.innerHTML = rows.length
+                    ? `<span class="xref-popup-title" id="selection-xrefs-title">Cross references</span>
+                        ${rows.map((row) => `<div class="selection-xref-row">
+                            ${range ? `<span class="selection-xref-verse">${reading.chapter}:${row.number}</span>` : ''}
+                            <ul class="xref-chips" aria-labelledby="selection-xrefs-title">${row.xrefs.map((x) => {
+                                const end = x.endVerse != null ? ` data-end-verse="${x.endVerse}"` : '';
+                                return `<li><button type="button" class="xref-citation" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${end}>${escapeHtml(x.citation)}</button></li>`;
+                            }).join('')}</ul>
+                        </div>`).join('')}`
+                    : '';
+            }
+
+            // Where the card goes, measured each time it opens or its
+            // contents change (not on scroll: it's placed in the reading
+            // column, so it moves with the verses):
+            // - under the last selected verse, if it fits in the window
+            //   below it;
+            // - otherwise above the first selected verse, if it fits there;
+            // - otherwise on whichever side has more room, scrolling inside
+            //   a shorter card;
+            // - and if neither side has CARD_MIN px (a selection taller than
+            //   the window), docked to the bottom of the window, across the
+            //   reading column.
+            // It never covers the selected verses unless docked, and stays
+            // inside the reading column: as wide as it, up to CARD_WIDTH, at
+            // the selected verse's left edge where there's room (the
+            // selected column, while comparing).
+            const CARD_GAP = 8;
+            const CARD_MIN = 120;
+            const CARD_WIDTH = 544;
+
+            function placeCard() {
+                if (!selectionCard.isConnected || !cardVerse) return;
+                const column = selectionCard.closest('.chapter-main');
+                const first = document.querySelector(`${SELECTABLE}.verse-selected`) || cardVerse;
+                const columnRect = column.getBoundingClientRect();
+                const firstRect = first.getBoundingClientRect();
+                const lastRect = cardVerse.getBoundingClientRect();
+                const bar = document.getElementById('top-bar').getBoundingClientRect().bottom;
+                const width = Math.min(columnRect.width, CARD_WIDTH) || columnRect.width;
+                const left = Math.max(0, Math.min(firstRect.left - columnRect.left, columnRect.width - width));
+                selectionCard.classList.remove('is-docked', 'is-above');
+                selectionCard.style.maxHeight = '';
+                selectionCard.style.width = width ? `${width}px` : '';
+                selectionCard.style.left = `${left}px`;
+                const cap = parseFloat(window.getComputedStyle(selectionCard).maxHeight) || Infinity;
+                const wanted = Math.min(selectionCard.scrollHeight, cap);
+                const below = window.innerHeight - lastRect.bottom - 2 * CARD_GAP;
+                const above = firstRect.top - bar - 2 * CARD_GAP;
+                let side = 'below';
+                let room = wanted;
+                if (below < wanted) {
+                    if (above >= wanted) {
+                        side = 'above';
+                    } else {
+                        side = above > below ? 'above' : 'below';
+                        room = Math.max(above, below);
+                    }
+                }
+                if (room < Math.min(wanted, CARD_MIN)) {
+                    selectionCard.classList.add('is-docked');
+                    selectionCard.style.left = `${columnRect.left}px`;
+                    selectionCard.style.width = `${columnRect.width}px`;
+                    selectionCard.style.top = '';
+                    return;
+                }
+                if (room < wanted) selectionCard.style.maxHeight = `${room}px`;
+                if (side === 'below') {
+                    selectionCard.style.top = `${lastRect.bottom - columnRect.top + CARD_GAP}px`;
+                } else {
+                    selectionCard.classList.add('is-above');
+                    selectionCard.style.top = `${firstRect.top - columnRect.top - CARD_GAP - selectionCard.offsetHeight}px`;
+                }
+            }
+
+            window.addEventListener('resize', placeCard);
+            // The card grows as its notes load or a status line shows.
+            if (typeof ResizeObserver === 'function') {
+                let lastHeight = 0;
+                new ResizeObserver(() => {
+                    if (selectionCard.scrollHeight === lastHeight) return;
+                    lastHeight = selectionCard.scrollHeight;
+                    placeCard();
+                }).observe(selectionCard);
             }
 
             function selectVerses(translationCode, anchor, focus) {
@@ -4722,6 +5147,7 @@
                     selectVerses(code, start, end);
                     const el = verseElement(code, start);
                     if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+                    placeCard();
                 } else {
                     const verses = columnVerses(code);
                     const lastVerse = verses.length ? verses[verses.length - 1].number : 0;
@@ -4899,6 +5325,7 @@
             function renderNotesSection() {
                 if (!selection || !reading || !verseActions.isConnected || (!selectionNotes.length && !selectionNotesError)) {
                     notesSection.remove();
+                    placeCard();
                     return;
                 }
                 const hadFocus = notesSection.contains(document.activeElement) ? document.activeElement : null;
@@ -4923,12 +5350,13 @@
                         : '';
                     notesSection.innerHTML = `<p class="verse-notes-title">Notes (${selectionNotes.length})</p>${cards}${all}`;
                 }
-                verseActions.after(notesSection);
+                cardXrefs.before(notesSection);
                 // "more" only where the text is cut short.
                 notesSection.querySelectorAll('.note-card-body[id]').forEach((body) => {
                     const more = body.parentElement.querySelector('.note-more');
                     if (more) more.hidden = !(body.scrollHeight > body.clientHeight + 1);
                 });
+                placeCard();
                 if (hadFocus && !hadFocus.isConnected) {
                     const same = hadFocus.dataset.noteId
                         && notesSection.querySelector(`.note-edit[data-note-id="${hadFocus.dataset.noteId}"]`);
@@ -5623,6 +6051,7 @@
                 if (prefs.theme) parts.push(`${optionText('theme-select', prefs.theme)} theme`);
                 if (prefs.text_size) parts.push(`${optionText('text-size-select', prefs.text_size).toLowerCase()} text`);
                 if (prefs.line_spacing) parts.push(`${optionText('line-spacing-select', prefs.line_spacing).toLowerCase()} line spacing`);
+                if (prefs.width) parts.push(`${optionText('width-select', prefs.width).toLowerCase()} width`);
                 if (prefs.compare != null) parts.push(`compare ${prefs.compare ? 'on' : 'off'}`);
                 if (prefs.reading_mode != null) parts.push(`reading mode ${prefs.reading_mode ? 'on' : 'off'}`);
                 return parts;
@@ -6293,30 +6722,18 @@
                 </section>`;
             }
 
-            // A selected verse's popup: its footnotes, then its
-            // cross-references; nothing when it has neither.
-            function renderVersePopup(footnotes, xrefs) {
-                if (!footnotes.length && !xrefs.length) return '';
-                const notes = footnotes.length
-                    ? `<span class="popup-footnotes">
-                        <span class="xref-popup-title">Footnotes</span>
-                        ${footnotes.map((f) => `<span class="footnote-entry"><span class="footnote-label">${escapeHtml(f.label)}</span>${footnoteHtml(f)}</span>`).join('')}
-                    </span>`
-                    : '';
-                const entries = xrefs
-                    .map((x) => {
-                        const endAttr = x.endVerse != null ? ` data-end-verse="${x.endVerse}"` : '';
-                        return `<span class="xref-entry">
-                            <button type="button" class="xref-citation" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${endAttr}>${escapeHtml(x.citation)}</button>
-                            <span class="xref-expanded" hidden></span>
-                        </span>`;
-                    })
-                    .join('');
-                const refs = xrefs.length
-                    ? `<span class="xref-popup-title">Cross references</span>
-                    ${entries}`
-                    : '';
-                return `<span class="xref-popup" hidden>${notes}${refs}</span>`;
+            // Before Genesis 1 and after Revelation 22 there's no
+            // neighboring chapter: its place (so the chapter being read
+            // stays put) holds a quiet card in the neighbors' faded style,
+            // the backend's words about the Bible's shape, e.g. "The Old
+            // Testament" over "Genesis · 50 chapters". No scripture text.
+            function renderEdgeCard(edge) {
+                if (!edge) return '';
+                const detail = edge.detail ? `<p class="edge-card-detail">${escapeHtml(edge.detail)}</p>` : '';
+                return `<div class="edge-card">
+                    <p class="edge-card-title">${escapeHtml(edge.title)}</p>
+                    ${detail}
+                </div>`;
             }
 
             // Cross-references are keyed by verse number, not translation,
@@ -6328,7 +6745,6 @@
                 const cue = footnotes.length ? '<span class="footnote-cue visually-hidden">(has footnotes) </span>' : '';
                 return `<p class="verse${hasXref ? ' has-xref' : ''}${footnotes.length ? ' has-footnotes' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}" data-translation="${escapeHtml(code)}" data-code="${escapeHtml(code.toUpperCase())}">
                     <span class="verse-num">${v.number}</span>${cue}<span class="verse-text">${verseHtml(v)}</span>
-                    ${renderVersePopup(footnotes, xrefs)}
                 </p>`;
             }
 
@@ -6340,6 +6756,67 @@
             function footnoteHtml(f) {
                 const lemma = f.lemma ? `<em class="footnote-lemma">${escapeHtml(f.lemma)}</em>` : '';
                 return lemma + escapeHtml(f.rest);
+            }
+
+            // ---- The chapter's Footnotes and Cross references: each is a
+            // disclosure, closed by default, and each kind remembers being
+            // opened or closed (for every chapter, not per chapter), in
+            // this webview's storage like the display settings. It isn't
+            // exported: it's how this window was left, not a setting.
+            const DISCLOSURE_KEYS = { footnotes: 'gospel-getter-footnotes', xrefs: 'gospel-getter-cross-references' };
+
+            function disclosureOpen(kind) {
+                try {
+                    return localStorage.getItem(DISCLOSURE_KEYS[kind]) === 'open';
+                } catch (e) {
+                    return false;
+                }
+            }
+
+            function disclosureToggle(kind, controls, label) {
+                return `<button type="button" class="disclosure-toggle" data-disclosure="${kind}" aria-expanded="${disclosureOpen(kind)}" aria-controls="${controls}"><span class="disclosure-chevron" aria-hidden="true"></span>${label}</button>`;
+            }
+
+            // Opens or closes every disclosure of that kind on screen (both
+            // columns' footnotes while comparing), and remembers it.
+            function setDisclosure(kind, open) {
+                try {
+                    localStorage.setItem(DISCLOSURE_KEYS[kind], open ? 'open' : 'closed');
+                } catch (e) {}
+                document.querySelectorAll(`.disclosure-toggle[data-disclosure="${kind}"]`).forEach((toggle) => {
+                    toggle.setAttribute('aria-expanded', String(open));
+                    const body = document.getElementById(toggle.getAttribute('aria-controls'));
+                    if (body) body.hidden = !open;
+                });
+            }
+
+            // The chapter's next step, after its last verse: the chapters
+            // before and after it (the backend's prev and next, so books
+            // are crossed, Genesis 50 into Exodus 1), as two large
+            // buttons; Genesis 1 has only the one forward, Revelation 22
+            // only the one back. Then the keys' hint.
+            // The hint's keys, as small key caps. The arrows are drawn: the
+            // UI sans at the hint's size falls back to a face whose arrows
+            // are tiny. Screen readers hear the key's name.
+            const ARROW_LEFT = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg>';
+            const ARROW_RIGHT = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3 8h10M9 4l4 4-4 4"/></svg>';
+
+            function hintKey(name, drawn = null) {
+                return drawn ? `<kbd><span class="visually-hidden">${name}</span>${drawn}</kbd>` : `<kbd>${name}</kbd>`;
+            }
+
+            function renderChapterEnd(dto) {
+                const step = (side, which) => {
+                    if (!side) return '';
+                    const name = `${escapeHtml(side.bookName)} ${side.chapter}`;
+                    const label = `${name}, ${which === 'prev' ? 'previous' : 'next'} chapter`;
+                    const text = which === 'prev'
+                        ? `<span aria-hidden="true">&larr;</span> ${name}`
+                        : `${name} <span aria-hidden="true">&rarr;</span>`;
+                    return `<button type="button" class="chapter-step chapter-step-${which}" data-book="${side.bookId}" data-chapter="${side.chapter}" aria-label="${label}">${text}</button>`;
+                };
+                return `<nav class="chapter-end" aria-label="Previous and next chapter">${step(dto.prev, 'prev')}${step(dto.next, 'next')}</nav>
+                    <p class="nav-hint">Use ${hintKey('Left arrow', ARROW_LEFT)} and ${hintKey('Right arrow', ARROW_RIGHT)} to move a chapter at a time, ${hintKey('/')} to search, ${hintKey('C')} to compare translations.</p>`;
             }
 
             // The footnotes of the chapter being read, one row each
@@ -6360,10 +6837,12 @@
                             </div>`))
                             .join('');
                         if (!rows) return '';
-                        const title = compare ? `Footnotes (${escapeHtml(c.code.toUpperCase())})` : 'Footnotes';
-                        return `<div class="footnote-summary" data-code="${escapeHtml(c.code.toUpperCase())}">
-                            <h3 class="footnote-summary-title">${title}</h3>
-                            <div class="footnote-list">${rows}</div>
+                        const count = c.verses.reduce((n, v) => n + (v.footnotes || []).length, 0);
+                        const code = escapeHtml(c.code.toUpperCase());
+                        const title = compare ? `${code} footnotes (${count})` : `Footnotes (${count})`;
+                        return `<div class="footnote-summary" data-code="${code}">
+                            <h3 class="footnote-summary-title">${disclosureToggle('footnotes', `footnote-list-${escapeHtml(c.code)}`, title)}</h3>
+                            <div class="footnote-list disclosure-body" id="footnote-list-${escapeHtml(c.code)}"${disclosureOpen('footnotes') ? '' : ' hidden'}>${rows}</div>
                         </div>`;
                     })
                     .join('');
@@ -6381,9 +6860,10 @@
                         </div>`;
                     })
                     .join('');
+                const count = dto.currentVerses.reduce((n, v) => n + v.xrefs.length, 0);
                 return `<div class="xref-summary">
-                    <h3 class="xref-summary-title">Cross References</h3>
-                    <div class="xref-summary-list">${rows}</div>
+                    <h3 class="xref-summary-title">${disclosureToggle('xrefs', 'xref-summary-list', `Cross references (${count})`)}</h3>
+                    <div class="xref-summary-list disclosure-body" id="xref-summary-list"${disclosureOpen('xrefs') ? '' : ' hidden'}>${rows}</div>
                     <p class="xref-credit">Cross-reference data from <a href="https://www.openbible.info/labs/cross-references/" target="_blank" rel="noopener noreferrer">OpenBible.info</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
                 </div>`;
             }
@@ -6421,28 +6901,25 @@
                 // While comparing, the columns take the place of the faded
                 // neighboring chapters; prev/next stay on the wrapper, so
                 // arrow keys work the same either way.
-                const side = (s, which) => (compare ? '' : `<div class="chapter-side chapter-side-${which}">${renderSideChapter(s)}</div>`);
+                const side = (s, edge, which) => (compare
+                    ? ''
+                    : `<div class="chapter-side chapter-side-${which}">${s ? renderSideChapter(s) : renderEdgeCard(edge)}</div>`);
                 return `<div id="reading-pane-inner"
                      data-current-book="${dto.currentBookId}"
                      data-current-chapter="${dto.currentChapter}"${prevAttrs}${nextAttrs}
                 >
                     <div class="reading-row${compare ? ' is-comparing' : ''}">
-                        ${side(dto.prev, 'prev')}
+                        ${side(dto.prev, dto.prevEdge, 'prev')}
                         <section class="chapter-main">
                             <h2 class="chapter-heading">${escapeHtml(dto.currentBookName)} ${dto.currentChapter}</h2>
                             ${body}
+                            ${renderChapterEnd(dto)}
                             ${renderFootnoteSummary(dto, compare)}
                             ${renderXrefSummary(dto)}
                         </section>
-                        ${side(dto.next, 'next')}
+                        ${side(dto.next, dto.nextEdge, 'next')}
                     </div>
                 </div>`;
-            }
-
-            function renderXrefVerses(verses) {
-                return verses
-                    .map((v) => `<p class="verse xref-verse-text"><span class="verse-num">${v.number}</span>${verseHtml(v, { markers: false })}</p>`)
-                    .join('');
             }
 
             // Puts lastDto (and lastCompare, while comparing) on screen.
@@ -6803,12 +7280,36 @@
                     if (next) next.focus();
                     return;
                 }
-                // A verse's footnotes in its popup are there to read (and
-                // select), like its notes.
-                if (event.target.closest('.popup-footnotes')) {
+                // A cross-reference chip in the card reads that passage,
+                // selected (Back returns).
+                const citation = event.target.closest('#selection-card .xref-citation');
+                if (citation) {
+                    openPassage(
+                        citation.dataset.book,
+                        citation.dataset.chapter,
+                        Number(citation.dataset.verse),
+                        Number(citation.dataset.endVerse || citation.dataset.verse),
+                    );
                     return;
                 }
-                if (event.target.closest('.verse-notes')) {
+                // The rest of the card (its footnotes and notes, to read
+                // and select) is never a click away from the selection.
+                if (event.target.closest('#selection-card')) {
+                    return;
+                }
+
+                // The chapter's end: the chapter before or after, from its
+                // top.
+                const step = event.target.closest('.chapter-step');
+                if (step) {
+                    loadReading(step.dataset.book, step.dataset.chapter).then((loaded) => {
+                        if (loaded) window.scrollTo(0, 0);
+                    });
+                    return;
+                }
+                const disclosure = event.target.closest('.disclosure-toggle');
+                if (disclosure) {
+                    setDisclosure(disclosure.dataset.disclosure, disclosure.getAttribute('aria-expanded') !== 'true');
                     return;
                 }
 
@@ -6819,40 +7320,6 @@
                 const sideHeading = event.target.closest('.chapter-heading-link');
                 if (sideHeading) {
                     loadReading(sideHeading.dataset.book, sideHeading.dataset.chapter);
-                    return;
-                }
-
-                // Clicking a cross-reference citation "expands" it in place:
-                // fetch the referenced verse(s) and show them right under
-                // the citation, in the translation of the column it's in.
-                // Clicking it again collapses it back down.
-                const citation = event.target.closest('.xref-citation');
-                if (citation) {
-                    const expanded = citation.parentElement.querySelector('.xref-expanded');
-                    if (!expanded.hidden) {
-                        expanded.hidden = true;
-                        return;
-                    }
-                    if (expanded.dataset.loaded) {
-                        expanded.hidden = false;
-                        return;
-                    }
-                    const column = citation.closest('[data-translation]');
-                    const payload = {
-                        bookId: Number(citation.dataset.book),
-                        chapter: Number(citation.dataset.chapter),
-                        verse: Number(citation.dataset.verse),
-                        endVerse: citation.dataset.endVerse ? Number(citation.dataset.endVerse) : null,
-                        translationCode: column ? column.dataset.translation : currentTranslation(),
-                    };
-                    invoke('get_xref_text', payload)
-                        .then((verses) => {
-                            if (!verses) return;
-                            expanded.innerHTML = renderXrefVerses(verses);
-                            expanded.dataset.loaded = 'true';
-                            expanded.hidden = false;
-                        })
-                        .catch((e) => console.error('Failed to load cross-reference text', e));
                     return;
                 }
 

@@ -74,12 +74,12 @@ test('a click outside closes Aa and the menu, but the Library stays while the re
             app.click(app.surface(name).querySelector('button'));
             if (name === 'aa') assert.ok(isOpen(app, name), 'a click inside Aa keeps it open');
             app.open(name);
-            app.click(app.document.querySelector('footer'));
+            app.click(app.document.querySelector('.chapter-main .chapter-heading'));
             assert.ok(!isOpen(app, name), `${name} closes`);
             assert.equal(app.document.activeElement, toggle(app, name), 'focus returns to the button');
         }
         app.open('library');
-        app.click(app.document.querySelector('footer'));
+        app.click(app.document.querySelector('.chapter-main .chapter-heading'));
         app.click(app.verse(16));
         assert.ok(isOpen(app, 'library'));
         // Clicking in the Library isn't a click away from the verse selection.
@@ -153,7 +153,7 @@ test('Aa changes the real preferences live, and they persist across a restart', 
         assert.equal(dialog.getAttribute('aria-label'), 'Text and display');
         // In this order: translation and compare, text size, line spacing, theme, reading mode.
         const order = [...dialog.querySelectorAll('.section-label')].map((l) => l.textContent);
-        assert.deepEqual(order, ['Translation', 'Text size', 'Line spacing', 'Theme']);
+        assert.deepEqual(order, ['Translation', 'Text size', 'Line spacing', 'Width', 'Theme']);
         assert.equal(dialog.lastElementChild.querySelector('button').id, 'reader-mode-btn');
         assert.ok($(app, 'compare-btn').closest('.aa-row').contains($(app, 'translation-choices')), 'Compare beside the translations');
 
@@ -202,7 +202,7 @@ test('Aa changes the real preferences live, and they persist across a restart', 
 
         // The export sees exactly these.
         assert.deepEqual(JSON.parse(JSON.stringify(app.window.gospelGetterPreferences.current())), {
-            theme: 'matrix', text_size: 'small', line_spacing: 'relaxed', reading_mode: false, compare: false,
+            theme: 'matrix', text_size: 'small', line_spacing: 'relaxed', width: 'normal', reading_mode: false, compare: false,
         });
         storage = app.storage();
         const keys = Object.keys(storage).sort();

@@ -13,7 +13,7 @@ use crate::db::Passage;
 use crate::db::test_support::{
     TempDb, bundled, fill_notes, fresh_database, other_tables_snapshot, verses_snapshot,
 };
-use crate::reader_data::{LineSpacing, Preferences, TextSize, Theme};
+use crate::reader_data::{LineSpacing, Preferences, TextSize, Theme, Width};
 
 async fn app(label: &str) -> (TempDb, AppState) {
     let (db, pool) = fresh_database(label).await;
@@ -32,6 +32,7 @@ fn matrix_prefs() -> Preferences {
         theme: Some(Theme::Matrix),
         text_size: Some(TextSize::Large),
         line_spacing: Some(LineSpacing::Relaxed),
+        width: Some(Width::Wide),
         reading_mode: Some(false),
         compare: Some(true),
     }
@@ -125,7 +126,7 @@ async fn export_round_trips_into_a_fresh_install() {
     else {
         panic!("expected saved")
     };
-    assert_eq!((bookmarks, has_position, preferences), (3, true, 5));
+    assert_eq!((bookmarks, has_position, preferences), (3, true, 6));
 
     // The file is readable JSON with exactly the reader's data.
     let text = std::fs::read_to_string(&path).unwrap();
@@ -142,7 +143,7 @@ async fn export_round_trips_into_a_fresh_install() {
     assert_eq!(
         json["preferences"],
         serde_json::json!({"theme": "matrix", "text_size": "large", "line_spacing": "relaxed",
-                           "reading_mode": false, "compare": true})
+                           "width": "wide", "reading_mode": false, "compare": true})
     );
     // Never Bible text, ids or anything internal.
     let john_3_16 = &bundled("kjv")[42].chapters[2][15];

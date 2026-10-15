@@ -37,8 +37,9 @@ test('the empty Bookmarks list explains how to add one', () =>
 test('bookmarking a verse marks it, lists it and turns the action into Remove', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
         app.click(app.verse(16));
-        // John 3:16 has cross-references, so the action sits in its popup.
-        assert.equal(app.actions().parentElement, app.verse(16).querySelector('.xref-popup'));
+        // The actions are in the selection card, which follows the verse.
+        assert.equal(app.actions().parentElement, app.document.getElementById('selection-card'));
+        assert.equal(app.actions().parentElement.previousElementSibling, app.verse(16));
         assert.equal(app.bookmarkButton().textContent, '★ Bookmark');
 
         await bookmarkSelection(app);

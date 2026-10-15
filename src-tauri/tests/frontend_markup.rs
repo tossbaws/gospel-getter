@@ -38,29 +38,31 @@ fn block_after<'a>(src: &'a str, needle: &str) -> &'a str {
 }
 
 /// Regression guard for GH-1: on narrow screens the reader must only see
-/// the current chapter, not scroll past the full previous one first. This
-/// pins down the `@media (max-width: 800px)` rule that hides
-/// `.chapter-side` (the prev/next chapter columns) rather than just
-/// re-stacking them under `.chapter-main`.
+/// the current chapter, not scroll past the full previous one first. The
+/// neighbors are hidden (never re-stacked under `.chapter-main`): the
+/// previous one first, below 848px, then the next, below 648px (see
+/// `side_chapters_never_squeeze_the_column_below_50_characters`).
 #[test]
 fn mobile_breakpoint_hides_chapter_side_neighbors() {
-    let block = block_after(HTML, "@media (max-width: 800px)");
-
-    assert!(
-        block.contains(".chapter-side"),
-        "mobile breakpoint should target .chapter-side"
-    );
-    assert!(
-        block.contains("display: none"),
-        "mobile breakpoint should hide .chapter-side instead of just \
-         restacking it, so only the current chapter is visible"
-    );
+    for (query, side) in [
+        ("@media (max-width: 847px)", ".chapter-side-prev"),
+        ("@media (max-width: 647px)", ".chapter-side-next"),
+    ] {
+        let block = block_after(HTML, query);
+        let rule = block
+            .find(side)
+            .unwrap_or_else(|| panic!("{query} should hide {side}"));
+        assert!(
+            block[rule..].starts_with(&format!("{side} {{\n                display: none;")),
+            "{query} should hide {side} instead of re-stacking it"
+        );
+    }
 }
 
 /// Regression guard for GH-6: printing a chapter should hide all page
 /// chrome (the top bar and its popovers, the Library, the dialogs and the
 /// toast, the book and chapter picker, neighboring chapter panes,
-/// nav hint, footer, cross-reference popups) but must
+/// nav hint, the chapter's end buttons, the selection card) but must
 /// never target the reading content itself — the chapter heading and
 /// verses are the whole point of printing the page.
 #[test]
@@ -81,8 +83,8 @@ fn print_stylesheet_hides_chrome_but_not_reading_content() {
         ".picker",
         ".chapter-side",
         ".nav-hint",
-        "footer",
-        ".xref-popup",
+        ".chapter-end",
+        ".selection-card",
     ] {
         assert!(
             block.contains(chrome_selector),
@@ -201,8 +203,9 @@ fn frontend_uses_invoke_not_http() {
          bridge (app.withGlobalTauri), not an npm-bundled API import"
     );
     // The picker builds a book's chapters from its chapter count in
-    // `get_home`, so it doesn't call `get_chapters`.
-    for command in ["get_home", "get_reading", "get_xref_text"] {
+    // `get_home`, so it doesn't call `get_chapters`; cross-references open
+    // their passage, so it doesn't call `get_xref_text`.
+    for command in ["get_home", "get_reading", "list_notes"] {
         assert!(
             HTML.contains(&format!("invoke('{command}'")),
             "expected a call to the `{command}` Tauri command"
@@ -569,7 +572,12 @@ fn beast_slayer_replaces_monster_hunter_and_migrates_saved_choice() {
 /// uses.
 #[test]
 fn preference_selects_match_the_values_the_script_persists() {
-    for id in ["theme-select", "text-size-select", "line-spacing-select"] {
+    for id in [
+        "theme-select",
+        "text-size-select",
+        "line-spacing-select",
+        "width-select",
+    ] {
         let offered: Vec<String> = select_options(id).into_iter().map(|(v, _)| v).collect();
         let (accepted, fallback) = script_preset(id);
         assert_eq!(
@@ -663,7 +671,6 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
         ".sidebar-toggle",
         ".chapter-side",
         ".nav-hint",
-        "footer",
         "#library-toggle",
         "#menu-toggle",
     ] {
@@ -1419,8 +1426,8 @@ fn kjv_footnotes_use_tested_theme_colors() {
 }
 
 /// Printing keeps the chapter's Footnotes section and the markers in the
-/// verses, as it keeps the Cross References section; the popup, which
-/// shows a selected verse's footnotes on screen, isn't printed.
+/// verses, as it keeps the Cross References section; the selection card,
+/// which shows the selected verses' footnotes on screen, isn't printed.
 #[test]
 fn kjv_footnotes_print_with_the_chapter() {
     let block = block_after(HTML, "@media print");
@@ -1435,7 +1442,7 @@ fn kjv_footnotes_print_with_the_chapter() {
             "the print stylesheet mustn't touch `{selector}`"
         );
     }
-    assert!(block.contains(".xref-popup"));
+    assert!(block.contains(".selection-card"));
     assert!(!block.contains(".xref-summary"));
 }
 
@@ -2103,13 +2110,9 @@ fn literata_is_bundled_for_scripture_and_the_ui_uses_the_sans() {
             "{selector} is scripture"
         );
     }
-    // The selection's actions, notes and popup sit inside a verse, but
+    // The selection card, its actions and notes sit over the verses, but
     // they're controls.
-    for selector in [
-        ".verse-actions",
-        ".verse-notes",
-        ".xref-popup:not([hidden])",
-    ] {
+    for selector in [".verse-actions", ".verse-notes", ".selection-card"] {
         assert!(
             screen_rule(&rules, selector)
                 .body
@@ -2316,7 +2319,7 @@ fn psalms_get_a_compact_grid_ten_to_a_row() {
 
 /// The sidebar: from 1200px, 16.5rem down the left below the bar, in the
 /// bar's `--bar-bg`, with the page moved over (on screen only); the
-/// chapter and its neighbors share the narrower room. Reading mode and
+/// neighbors give way first, as on any narrower page. Reading mode and
 /// print never show it, and its own button only shows where it can.
 #[test]
 fn the_sidebar_is_for_wide_windows_only() {
@@ -2346,9 +2349,10 @@ fn the_sidebar_is_for_wide_windows_only() {
         assert!(sidebar.contains(declaration), "the sidebar: {declaration}");
     }
     assert!(
-        screen(r#":root[data-picker="sidebar"] .chapter-side"#)
-            .body
-            .contains("flex: 0 1 260px")
+        !rules
+            .iter()
+            .any(|r| r.selector.contains(r#"[data-picker="sidebar"] .chapter-"#)),
+        "the column and its neighbors share one set of rules, sidebar or not"
     );
     assert!(
         screen_rule(&rules, ":root:not([data-wide]) .sidebar-toggle")
@@ -2447,6 +2451,546 @@ fn the_picker_uses_tested_theme_colors() {
                 && selectors(r).any(|s| s == focus)
                 && r.body.contains("outline: 2px solid var(--accent)")),
             "{focus} has the focus ring"
+        );
+    }
+}
+
+// ---- Tier 2: the reading flow ----------------------------------------
+
+/// The script's source from `needle` to the end of that function's body.
+fn function_body(name: &str) -> &'static str {
+    block_after(HTML, &format!("function {name}("))
+}
+
+/// The chapter ends with a next step: the backend's previous and next
+/// chapters (so books are crossed) as two large buttons in the UI sans,
+/// straight after the verses (or the compare grid), in a labelled
+/// navigation landmark; only the one there is at Genesis 1 and
+/// Revelation 22. The keys' hint is one quiet line under them, inside the
+/// chapter.
+#[test]
+fn the_chapter_ends_with_buttons_to_the_chapters_around_it() {
+    let end = function_body("renderChapterEnd");
+    assert!(end.contains(r#"<nav class="chapter-end" aria-label="Previous and next chapter">"#));
+    assert!(
+        end.contains("if (!side) return '';"),
+        "one button per neighbour there is"
+    );
+    assert!(end.contains("step(dto.prev, 'prev')}${step(dto.next, 'next')"));
+    assert!(end.contains(r#"class="chapter-step chapter-step-${which}""#));
+    assert!(end.contains(r#"data-book="${side.bookId}" data-chapter="${side.chapter}""#));
+    assert!(end.contains(r#"<p class="nav-hint">"#));
+    // Its four keys are caps alike; the arrows are drawn, and named.
+    for key in [
+        "${hintKey('Left arrow', ARROW_LEFT)}",
+        "${hintKey('Right arrow', ARROW_RIGHT)}",
+        "${hintKey('/')}",
+        "${hintKey('C')}",
+    ] {
+        assert!(end.contains(key), "{key}");
+    }
+    let caps = function_body("hintKey");
+    assert!(caps.contains(r#"<kbd><span class="visually-hidden">${name}</span>${drawn}</kbd>"#));
+    assert!(HTML.contains(r#"const ARROW_LEFT = '<svg viewBox="0 0 16 16" aria-hidden="true""#));
+    let pane = function_body("renderReadingPane");
+    let body = pane.find("${body}").expect("the verses");
+    let after = pane.find("${renderChapterEnd(dto)}").expect("the buttons");
+    let lists = pane.find("${renderFootnoteSummary(dto, compare)}").unwrap();
+    assert!(
+        body < after && after < lists,
+        "after the verses, before the lists"
+    );
+    let rules = rules();
+    let step = screen_rule(&rules, ".chapter-step");
+    assert!(step.body.contains("font-family: var(--font-ui)"));
+    assert!(step.body.contains("min-height: 3rem"), "large");
+    assert!(
+        rules
+            .iter()
+            .any(|r| r.selector == ".chapter-step:focus-visible" && r.body.contains("outline")),
+        "a visible focus ring"
+    );
+    // Reading mode keeps them (it hides only the hint), and print drops them.
+    let reading_mode_hidden: Vec<&str> = rules
+        .iter()
+        .filter(|r| {
+            r.at_rule.as_deref() == Some("@media screen") && r.body.contains("display: none")
+        })
+        .flat_map(selectors)
+        .collect();
+    assert!(reading_mode_hidden.contains(&r#":root[data-reader-mode="on"] .nav-hint"#));
+    assert!(
+        !reading_mode_hidden
+            .iter()
+            .any(|s| s.contains(".chapter-end") || s.contains(".chapter-step"))
+    );
+    assert!(block_after(HTML, "@media print").contains(".chapter-end"));
+}
+
+/// The tagline footer is gone; nothing in the page or stylesheet is left
+/// for it.
+#[test]
+fn there_is_no_tagline() {
+    assert!(!HTML.contains("<footer"));
+    assert!(!HTML.contains("whole counsel of God"));
+    assert!(
+        !rules()
+            .iter()
+            .any(|r| selectors(r).any(|s| s == "footer" || s.ends_with(" footer")))
+    );
+}
+
+/// Footnotes and Cross references are disclosures: a button with
+/// aria-expanded controlling its list, closed unless the reader opened
+/// that kind before (one remembered state per kind, read for every
+/// chapter). Printing opens both.
+#[test]
+fn footnotes_and_cross_references_are_disclosures_closed_by_default() {
+    let keys = block_after(HTML, "const DISCLOSURE_KEYS =");
+    assert!(keys.contains("footnotes: 'gospel-getter-footnotes'"));
+    assert!(keys.contains("xrefs: 'gospel-getter-cross-references'"));
+    let open = function_body("disclosureOpen");
+    assert!(open.contains("=== 'open'"), "closed unless saved open");
+    assert!(
+        open.contains("return false;"),
+        "closed when storage can't be read"
+    );
+    let toggle = function_body("disclosureToggle");
+    assert!(toggle.contains(r#"<button type="button" class="disclosure-toggle""#));
+    assert!(toggle.contains(r#"aria-expanded="${disclosureOpen(kind)}""#));
+    assert!(toggle.contains(r#"aria-controls="${controls}""#));
+    for (function, kind, title) in [
+        (
+            "renderFootnoteSummary",
+            "footnotes",
+            "`Footnotes (${count})`",
+        ),
+        (
+            "renderXrefSummary",
+            "xrefs",
+            "`Cross references (${count})`",
+        ),
+    ] {
+        let body = function_body(function);
+        assert!(
+            body.contains(&format!("disclosureToggle('{kind}'")),
+            "{function}"
+        );
+        assert!(body.contains(title), "{function}");
+        assert!(
+            body.contains(&format!("disclosureOpen('{kind}') ? '' : ' hidden'")),
+            "{function}: the list is hidden while closed"
+        );
+    }
+    // A closed list is hidden on screen, though the lists are grids.
+    assert!(
+        rules().iter().any(|r| r.at_rule.is_none()
+            && r.selector == ".disclosure-body[hidden]"
+            && r.body.contains("display: none")),
+        "closed lists must not show"
+    );
+    let set = function_body("setDisclosure");
+    assert!(set.contains("localStorage.setItem(DISCLOSURE_KEYS[kind]"));
+    let print = block_after(HTML, "@media print");
+    let open_in_print = print
+        .find(".disclosure-body[hidden]")
+        .expect("print opens them");
+    assert!(print[open_in_print..].contains("display: block !important"));
+}
+
+/// Everything the chapter's end adds is in tested colors: the buttons are
+/// --accent on the opaque --option-bg (Vaporwave's --panel-bg lets its
+/// gradient through), the disclosure toggles --text on the page (their
+/// chevron, a mark, --accent, at least 3:1), and the hint one quiet line of
+/// --text-dim, its four keys as caps of --text-dim on their own opaque
+/// --option-bg (the arrows drawn, not a fallback font's).
+///
+/// Over the page itself, --text-dim is AA on every stop of every theme's
+/// background but two, which every other --text-dim line on the page shares
+/// and the palette test (--option-bg only) doesn't see: Vaporwave's
+/// gradient, where no plain color is AA (see
+/// `no_plain_color_is_aa_over_all_of_vaporwave`), and the deepest stop of
+/// Beast Slayer's, 4.00:1 at the very bottom of the window (the gradient is
+/// fixed to it). Pinned here, so any other falls out.
+#[test]
+fn the_chapter_end_uses_tested_theme_colors() {
+    let rules = rules();
+    for (selector, declarations) in [
+        (
+            ".chapter-step",
+            &["color: var(--accent)", "background: var(--option-bg)"][..],
+        ),
+        (
+            ".disclosure-toggle",
+            &["color: var(--text)", "background: none"][..],
+        ),
+        (".disclosure-chevron", &["color: var(--accent)"][..]),
+        (".nav-hint", &["color: var(--text-dim)"][..]),
+        (
+            ".nav-hint kbd",
+            &["color: var(--text-dim)", "background: var(--option-bg)"][..],
+        ),
+        (".nav-hint kbd svg", &["stroke: currentColor"][..]),
+    ] {
+        let rule = screen_rule(&rules, selector);
+        for declaration in declarations {
+            assert!(rule.body.contains(declaration), "{selector}: {declaration}");
+        }
+    }
+    let mut hint_below_aa = Vec::new();
+    for (theme, props) in theme_palettes(&rules) {
+        let option = property(&props, "--option-bg").to_owned();
+        let dim = property(&props, "--text-dim");
+        let key = contrast_ratio(dim, &option);
+        assert!(key >= 4.5, "theme `{theme}`: a hint key is {key:.2}:1");
+        let grounds = if theme == "vaporwave" {
+            vec![option.clone()]
+        } else {
+            backgrounds(&props)
+        };
+        for bg in grounds {
+            for (what, fg, under) in [
+                (
+                    "a chapter button",
+                    property(&props, "--accent"),
+                    option.as_str(),
+                ),
+                ("a disclosure", property(&props, "--text"), bg.as_str()),
+            ] {
+                let ratio = contrast_ratio(fg, under);
+                assert!(
+                    ratio >= 4.5,
+                    "theme `{theme}`: {what} is {ratio:.2}:1 on {under}"
+                );
+            }
+            let chevron = contrast_ratio(property(&props, "--accent"), &bg);
+            assert!(
+                chevron >= 3.0,
+                "theme `{theme}`: a chevron is {chevron:.2}:1 on {bg}"
+            );
+            let hint = contrast_ratio(dim, &bg);
+            if hint < 4.5 {
+                hint_below_aa.push(format!("{theme} on {bg}: {hint:.2}"));
+            }
+        }
+    }
+    assert_eq!(hint_below_aa, ["beast-slayer on #6b3a1f: 4.00"]);
+}
+
+/// Selecting verses opens one card that floats over the text (absolutely
+/// placed in the reading column, which is its containing block), so the
+/// chapter never reflows: everything that used to sit inline under a
+/// selection is in it, in order (the actions and citation, the footnotes,
+/// the notes, the cross-references as chips), and the verses carry no
+/// popup of their own. It's a labelled group straight after the last
+/// selected verse in the DOM (next in Tab order), at most a set height
+/// with its own scroll, docked to the bottom of the window only when the
+/// selection leaves no room on either side; it isn't printed.
+#[test]
+fn the_selection_card_floats_over_the_text() {
+    assert!(HTML.contains("selectionCard.id = 'selection-card';"));
+    assert!(HTML.contains("selectionCard.setAttribute('role', 'group');"));
+    assert!(HTML.contains("selectionCard.append(verseActions, cardFootnotes, cardXrefs);"));
+    let render = function_body("renderSelection");
+    assert!(render.contains("selectionCard.setAttribute('aria-label', `Selection: ${citation}`);"));
+    assert!(
+        render.contains("last.after(selectionCard);"),
+        "after the last selected verse"
+    );
+    assert!(
+        !render.contains("last.append("),
+        "nothing goes inside a verse"
+    );
+    assert!(
+        render.contains("verse.focus({ preventScroll: true });"),
+        "focus returns to the verse"
+    );
+    assert!(
+        HTML.contains("cardXrefs.before(notesSection);"),
+        "notes before the cross-references"
+    );
+    assert!(!HTML.contains("renderVersePopup"), "verses carry no popup");
+    let chips = function_body("renderCardReferences");
+    assert!(chips.contains(r#"<ul class="xref-chips""#));
+    assert!(chips.contains(r#"<li><button type="button" class="xref-citation""#));
+    let place = function_body("placeCard");
+    for rule in [
+        "below < wanted",
+        "above >= wanted",
+        "classList.add('is-above')",
+        "classList.add('is-docked')",
+    ] {
+        assert!(place.contains(rule), "placeCard: {rule}");
+    }
+
+    let rules = rules();
+    let main = screen_rule(&rules, ".chapter-main");
+    assert!(
+        main.body.contains("position: relative"),
+        "the card's containing block"
+    );
+    let card = screen_rule(&rules, ".selection-card");
+    for declaration in [
+        "position: absolute",
+        "max-height: min(24rem, calc(100vh - var(--bar-height) - 2rem))",
+        "overflow-y: auto",
+        "font-family: var(--font-ui)",
+        "color: var(--text)",
+        "background: var(--option-bg)",
+    ] {
+        assert!(
+            card.body.contains(declaration),
+            ".selection-card: {declaration}"
+        );
+    }
+    let docked = screen_rule(&rules, ".selection-card.is-docked");
+    assert!(docked.body.contains("position: fixed") && docked.body.contains("bottom: 0.5rem"));
+    assert!(
+        screen_rule(&rules, ".xref-chips li + li::before")
+            .body
+            .contains("color: var(--text-dim)")
+    );
+    assert!(
+        screen_rule(&rules, ".xref-citation")
+            .body
+            .contains("color: var(--accent-2)")
+    );
+    assert!(block_after(HTML, "@media print").contains(".selection-card"));
+    // On the card's opaque --option-bg, every color it uses is AA; its
+    // buttons' --panel-bg over it is covered by notes_use_tested_theme_colors.
+    for (theme, props) in theme_palettes(&rules) {
+        let bg = property(&props, "--option-bg");
+        for fg in ["--text", "--text-dim", "--accent", "--accent-2"] {
+            let ratio = contrast_ratio(property(&props, fg), bg);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: {fg} in the card is {ratio:.2}:1"
+            );
+        }
+    }
+}
+
+/// Aa's Width row: Narrow, Normal and Wide, as a labelled group of buttons
+/// over a hidden <select> like line spacing, Normal by default (no
+/// attribute, so nothing changes for anyone who never chose). Normal keeps
+/// the widths the columns always had, 492px in three columns (the
+/// container's 1100px) and 732px in reading mode (its 780px); Narrow and
+/// Wide set both. It's a display setting the backup carries (`width`).
+#[test]
+fn width_is_a_display_setting_in_aa() {
+    assert_eq!(
+        select_options("width-select"),
+        [
+            ("narrow".to_owned(), "Narrow".to_owned()),
+            ("normal".to_owned(), "Normal".to_owned()),
+            ("wide".to_owned(), "Wide".to_owned()),
+        ]
+    );
+    assert_eq!(script_preset("width-select").1, "normal");
+    assert!(HTML.contains(
+        r#"<div id="width-choices" class="segmented" role="group" aria-labelledby="width-label"></div>"#
+    ));
+    assert!(HTML.contains(r#"<span class="section-label" id="width-label">Width</span>"#));
+    // Between line spacing and the theme.
+    let spacing = HTML.find(r#"id="line-spacing-label""#).unwrap();
+    let width = HTML.find(r#"id="width-label""#).unwrap();
+    let theme = HTML.find(r#"id="theme-label""#).unwrap();
+    assert!(spacing < width && width < theme);
+    assert!(block_after(HTML, "var FILE_NAMES =").contains("width: 'width',"));
+
+    let rules = rules();
+    let html = custom_properties(&screen_rule(&rules, "html").body);
+    let px = |value: &str| -> f64 {
+        value
+            .strip_suffix("rem")
+            .map(|r| r.parse::<f64>().unwrap() * 16.0)
+            .or_else(|| value.strip_suffix("px").map(|p| p.parse().unwrap()))
+            .unwrap_or_else(|| panic!("a length, got `{value}`"))
+    };
+    let column = px(property(&html, "--column"));
+    let reading = px(property(&html, "--reader-column"));
+    let side = px(property(&html, "--side-width"));
+    let gap = px(property(&html, "--row-gap"));
+    assert_eq!(
+        column, 492.0,
+        "Normal is the three-column width it always had"
+    );
+    assert_eq!(column + 2.0 * side + 2.0 * gap + 48.0, 1100.0);
+    assert_eq!(reading + 48.0, 780.0, "and reading mode's");
+    for (width, expected_column, expected_reading) in
+        [("narrow", 416.0, 592.0), ("wide", 592.0, 880.0)]
+    {
+        let rule = screen_rule(&rules, &format!(r#":root[data-width="{width}"]"#));
+        let props = custom_properties(&rule.body);
+        assert_eq!(px(property(&props, "--column")), expected_column, "{width}");
+        assert_eq!(
+            px(property(&props, "--reader-column")),
+            expected_reading,
+            "{width}"
+        );
+    }
+    assert!(screen_rule(&rules, ".container").body.contains(
+        "max-width: calc(var(--column) + 2 * var(--side-width) + 2 * var(--row-gap) + 3rem)"
+    ));
+    let reading_mode = rules
+        .iter()
+        .find(|r| {
+            r.at_rule.as_deref() == Some("@media screen")
+                && r.selector == r#":root[data-reader-mode="on"] .container"#
+        })
+        .expect("reading mode's column");
+    assert!(
+        reading_mode
+            .body
+            .contains("max-width: calc(var(--reader-column) + 3rem)")
+    );
+}
+
+/// Ctrl+= (and Ctrl++, numpad +) and Ctrl+- (numpad -) step the text size,
+/// Ctrl+0 resets it, through Aa's control; their default (the page zoom) is
+/// always prevented, and in a field they change nothing. A brief status
+/// says the new size, politely.
+#[test]
+fn the_text_size_keys_step_aa_and_never_zoom_the_page() {
+    let keys = function_body("sizeKey");
+    for key in [
+        "key === '='",
+        "key === '+'",
+        "code === 'NumpadAdd'",
+        "key === '-'",
+        "code === 'NumpadSubtract'",
+        "code === 'Numpad0'",
+    ] {
+        assert!(keys.contains(key), "{key}");
+    }
+    let at = HTML.find("var step = sizeKey(event);").unwrap();
+    let body = &HTML[at..at + HTML[at..].find("showTextSize();").unwrap()];
+    let prevent = body.find("event.preventDefault();").unwrap();
+    let typing = body.find("INPUT|TEXTAREA|SELECT").unwrap();
+    assert!(
+        prevent < typing,
+        "the page zoom is prevented even in a field"
+    );
+    assert!(body.contains("choose(textSizeSelect, 'medium');"));
+    assert!(body.contains("stepTextSize(step);"));
+    assert!(HTML.contains(r#"<p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>"#));
+}
+
+/// The faded neighbors never squeeze the chapter being read below 50
+/// characters a line at Medium (400px, measured in WebKitGTK at 7.96px a
+/// character): they shrink first (flex-shrink 50 against the column's 1),
+/// down to 180px, and the column only then, to its floor. When even that
+/// doesn't fit, the previous chapter hides, then the next. The breakpoints
+/// follow from those numbers and the page's padding: both need
+/// 400 + 2 × 180 + 2 × 20 + 48 = 848px, the next alone 400 + 180 + 20 + 48 =
+/// 648px.
+/// The sidebar (264px) only shows from 1200px, leaving 888px, so it never
+/// hides a neighbor; and the floor is the same at every Width. Alone, below
+/// 648px, the column fills the window again.
+#[test]
+fn side_chapters_never_squeeze_the_column_below_50_characters() {
+    let rules = rules();
+    let html = custom_properties(&screen_rule(&rules, "html").body);
+    let px = |name: &str| -> f64 {
+        let value = property(&html, name);
+        value
+            .strip_suffix("rem")
+            .map(|r| r.parse::<f64>().unwrap() * 16.0)
+            .or_else(|| value.strip_suffix("px").map(|p| p.parse().unwrap()))
+            .unwrap_or_else(|| panic!("{name}: a length, got `{value}`"))
+    };
+    let (floor, side_min, gap, sidebar) = (
+        px("--column-min"),
+        px("--side-min"),
+        px("--row-gap"),
+        px("--sidebar-width"),
+    );
+    assert_eq!(floor, 400.0, "50 characters at 7.96px");
+    let padding = 48.0;
+    let both = floor + 2.0 * side_min + 2.0 * gap + padding;
+    let next = floor + side_min + gap + padding;
+    assert_eq!((both, next), (848.0, 648.0));
+    assert!(HTML.contains(&format!("@media (max-width: {}px)", both - 1.0)));
+    assert!(HTML.contains(&format!("@media (max-width: {}px)", next - 1.0)));
+    assert!(
+        1200.0 - sidebar - padding >= both - padding,
+        "the sidebar never hides a neighbor"
+    );
+
+    let main = screen_rule(&rules, ".chapter-main");
+    for declaration in [
+        "flex: 1 1 var(--column)",
+        "max-width: var(--column)",
+        "min-width: min(var(--column-min), 100%)",
+    ] {
+        assert!(
+            main.body.contains(declaration),
+            ".chapter-main: {declaration}"
+        );
+    }
+    let side = screen_rule(&rules, ".chapter-side");
+    for declaration in [
+        "flex: 0 50 var(--side-width)",
+        "min-width: var(--side-min)",
+        "max-width: var(--side-width)",
+    ] {
+        assert!(
+            side.body.contains(declaration),
+            ".chapter-side: {declaration}"
+        );
+    }
+    assert!(
+        screen_rule(&rules, ".reading-row")
+            .body
+            .contains("justify-content: center")
+    );
+    assert!(
+        screen_rule(&rules, ".reading-row.is-comparing .chapter-main")
+            .body
+            .contains("max-width: none")
+    );
+    let alone = rules
+        .iter()
+        .find(|r| {
+            r.at_rule.as_deref() == Some("@media (max-width: 647px)")
+                && r.selector == ".chapter-main"
+        })
+        .expect("alone, the column fills the window");
+    assert!(alone.body.contains("max-width: none"));
+}
+
+/// Before Genesis 1 and after Revelation 22, the missing neighbor's place
+/// holds the backend's edge card (so the chapter being read doesn't move
+/// between Genesis 1 and 2), in the neighbors' faded style with no new
+/// colors: a heading like theirs in --accent over --rule, and a line in
+/// --text. It has no verses and nothing to click.
+#[test]
+fn the_bible_s_edges_have_a_quiet_card_in_the_neighbor_s_place() {
+    let pane = function_body("renderReadingPane");
+    assert!(pane.contains("${s ? renderSideChapter(s) : renderEdgeCard(edge)}"));
+    assert!(pane.contains("side(dto.prev, dto.prevEdge, 'prev')"));
+    assert!(pane.contains("side(dto.next, dto.nextEdge, 'next')"));
+    let card = function_body("renderEdgeCard");
+    assert!(card.contains("escapeHtml(edge.title)") && card.contains("escapeHtml(edge.detail)"));
+    assert!(!card.contains("<button") && !card.contains("class=\"verse"));
+    let rules = rules();
+    let title = screen_rule(&rules, ".edge-card-title");
+    for declaration in [
+        "font-family: var(--font-scripture)",
+        "color: var(--accent)",
+        "border-bottom: 1px solid var(--rule)",
+    ] {
+        assert!(
+            title.body.contains(declaration),
+            ".edge-card-title: {declaration}"
+        );
+    }
+    let detail = screen_rule(&rules, ".edge-card-detail");
+    assert!(detail.body.contains("color: var(--text)"));
+    for rule in [title, detail] {
+        assert!(
+            !rule.body.contains('#') && !rule.body.contains("rgb"),
+            "no new colors"
         );
     }
 }

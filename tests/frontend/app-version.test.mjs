@@ -100,7 +100,7 @@ test('Check now in About works, and About keeps the keyboard while open', () =>
         assert.equal(app.heading(), 'John 3');
         assert.ok(app.searchPanel().hidden);
         assert.ok(app.surface('library').hidden);
-        app.click(app.document.querySelector('footer'));
+        app.click(app.document.querySelector('.chapter-main .chapter-heading'));
         assert.equal(app.surface('about').hidden, false);
 
         // Escape closes it, and focus goes back to ☰, where it was opened.

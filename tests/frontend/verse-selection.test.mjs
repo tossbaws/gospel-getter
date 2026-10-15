@@ -52,8 +52,10 @@ test('Shift-click selects a visible contiguous range and copies it in order', ()
         assert.ok(down.defaultPrevented, 'Shift+mousedown must not extend the native text selection');
         assert.deepEqual(app.selectedVerseNumbers(), [16, 17, 18]);
         assert.equal(app.document.querySelector('.verse-actions-ref').textContent, `John 3:16${EN}18 (WEB)`);
-        // The actions sit under the last verse of the range.
-        assert.equal(app.actions().closest('.verse'), app.verse(18));
+        // The actions are in the card, which follows the last verse of the
+        // range, outside every verse.
+        assert.equal(app.actions().closest('.verse'), null);
+        assert.equal(app.actions().parentElement.previousElementSibling, app.verse(18));
 
         await app.copyButton();
         const text = [16, 17, 18].map((n) => storedVerse('web', 'John', 3, n)).join(' ');
@@ -304,7 +306,7 @@ test('clicking elsewhere or the selected verse again clears the selection', () =
         assert.deepEqual(app.selectedVerseNumbers(), []);
 
         app.click(app.verse(16));
-        app.click(app.document.querySelector('footer'));
+        app.click(app.document.querySelector('.chapter-main .chapter-heading'));
         assert.deepEqual(app.selectedVerseNumbers(), []);
         assert.equal(app.actions(), null);
 
@@ -315,45 +317,38 @@ test('clicking elsewhere or the selected verse again clears the selection', () =
         assert.deepEqual(app.selectedVerseNumbers(), [2]);
     }));
 
-test('cross-reference popups still open, expand and sit alongside Copy', () =>
+test('a selected verse’s card has Copy and its cross-references as chips, and Copy copies only the verse', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
         const verse = app.verse(16);
         assert.ok(verse.classList.contains('has-xref'), 'fixture: John 3:16 has cross-references');
-        const popup = verse.querySelector('.xref-popup');
-        assert.equal(popup.hidden, true);
+        assert.equal(app.document.getElementById('selection-card'), null, 'no card until a selection');
 
         app.click(verse);
-        assert.equal(popup.hidden, false);
-        assert.equal(app.actions().parentElement, popup, 'Copy lives in the verse popup');
+        const card = app.document.getElementById('selection-card');
+        assert.equal(app.actions().parentElement, card, 'Copy lives in the card');
+        const chips = [...card.querySelectorAll('.selection-xrefs .xref-chips > li > .xref-citation')];
+        assert.ok(chips.length > 1);
+        assert.ok(chips.some((c) => c.textContent === 'Romans 5:8'), 'fixture: John 3:16 cites Romans 5:8');
+        assert.equal(card.querySelectorAll('.selection-xref-verse').length, 0, 'one verse: no verse labels');
 
-        const citation = popup.querySelector('.xref-citation');
-        app.click(citation);
-        const expanded = citation.parentElement.querySelector('.xref-expanded');
-        await app.until(() => !expanded.hidden, 'cross-reference text');
-        assert.ok(expanded.querySelector('.xref-verse-text'));
-        assert.deepEqual(app.selectedVerseNumbers(), [16], 'expanding a citation keeps the selection');
-        assert.ok(app.calls.some((c) => c.cmd === 'get_xref_text' && c.args.translationCode === 'kjv'));
-
-        // Copy still copies only the selected verse, not the popup content.
+        // Copy still copies only the selected verse, not the card's content.
         await app.copyButton();
         assertSameBytes(app.clipboardWrites[0], `${storedVerse('kjv', 'John', 3, 16)} ${EM} John 3:16 (KJV)`);
-        assert.equal(popup.hidden, false, 'Copy keeps the popup open');
-
-        // Shift-click into the expanded text of a citation doesn't count as a
-        // verse of its own.
-        app.click(expanded.querySelector('.xref-verse-text'), { shiftKey: true });
+        assert.ok(card.isConnected, 'Copy keeps the card open');
+        // Clicking in the card isn't a click away, even with Shift.
+        app.click(card.querySelector('.xref-popup-title'), { shiftKey: true });
+        app.click(card);
         assert.deepEqual(app.selectedVerseNumbers(), [16]);
     }));
 
-test('a range hides cross-reference popups', () =>
+test('a range’s card lists each verse’s cross-references under its number', () =>
     withApp({ book: 'John', chapter: 3 }, async (app) => {
         app.click(app.verse(16));
         app.click(app.verse(17), { shiftKey: true });
         assert.ok(app.verse(17).classList.contains('has-xref'), 'fixture: John 3:17 has cross-references');
-        for (const popup of app.document.querySelectorAll('.chapter-main .xref-popup')) {
-            assert.equal(popup.hidden, true);
-        }
-        assert.equal(app.actions().parentElement, app.verse(17));
+        const card = app.document.getElementById('selection-card');
+        assert.equal(card.previousElementSibling, app.verse(17));
+        assert.deepEqual([...card.querySelectorAll('.selection-xref-verse')].map((v) => v.textContent), ['3:16', '3:17']);
         assert.equal(app.document.querySelectorAll('.verse-actions').length, 1);
     }));
 
@@ -363,7 +358,8 @@ test('verses without cross-references are selectable and get Copy', () =>
         assert.ok(!plain.classList.contains('has-xref'), 'fixture: Genesis 1:13 has no cross-references');
         app.click(plain);
         assert.deepEqual(app.selectedVerseNumbers(), [13]);
-        assert.equal(app.actions().parentElement, plain);
+        assert.equal(app.actions().parentElement.previousElementSibling, plain);
+        assert.equal(app.document.querySelector('.selection-xrefs').hidden, true);
         await app.copyButton();
         assertSameBytes(app.clipboardWrites[0], `${storedVerse('web', 'Genesis', 1, 13)} ${EM} Genesis 1:13 (WEB)`);
     }));
