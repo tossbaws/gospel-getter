@@ -148,20 +148,22 @@ test('selecting in either column copies that column’s text and translation cod
         assert.deepEqual(app.selectedVerseNumbers(), []);
     }));
 
-test('cross-references open in either column and expand in that column’s translation', () =>
+test('the selection card opens on either column, and its chips open the passage, still comparing', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv', compare: true }, async (app) => {
         const web = app.verse(16, 'web');
         app.click(web);
-        const popup = web.querySelector('.xref-popup');
-        assert.equal(popup.hidden, false);
-        assert.equal(app.verse(16, 'kjv').querySelector('.xref-popup').hidden, true);
-        const citation = popup.querySelector('.xref-citation');
+        const card = app.document.getElementById('selection-card');
+        assert.equal(card.previousElementSibling, web, 'on the WEB verse');
+        assert.equal(card.getAttribute('aria-label'), 'Selection: John 3:16 (WEB)');
+        const citation = card.querySelector('.xref-citation');
+        const [book, chapter, verse] = [citation.dataset.book, citation.dataset.chapter, citation.dataset.verse].map(Number);
         const before = app.calls.length;
         app.click(citation);
-        await app.idle(before, 'get_xref_text');
-        const call = app.calls.filter((c) => c.cmd === 'get_xref_text').at(-1);
-        assert.equal(call.args.translationCode, 'web');
-        assert.equal(citation.parentElement.querySelector('.xref-expanded').hidden, false);
+        await app.idle(before, 'get_compare');
+        assert.ok(app.isComparing());
+        const inner = app.document.getElementById('reading-pane-inner');
+        assert.deepEqual([Number(inner.dataset.currentBook), Number(inner.dataset.currentChapter)], [book, chapter]);
+        assert.ok(app.selectedVerseNumbers().includes(verse));
     }));
 
 test('bookmarks stay translation-independent while comparing', () =>

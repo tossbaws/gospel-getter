@@ -119,7 +119,7 @@ test('the print stylesheet hides every new control but keeps the reading content
         const css = app.document.querySelector('style').textContent;
         const print = css.slice(css.indexOf('@media print'));
         const hidden = print.slice(0, print.indexOf('display: none !important'));
-        for (const selector of ['.verse-actions', '.search-toggle', '.search-panel', '.reader-notice', '.xref-popup']) {
+        for (const selector of ['.verse-actions', '.search-toggle', '.search-panel', '.reader-notice', '.selection-card']) {
             assert.ok(hidden.includes(selector), `print should hide ${selector}`);
         }
         assert.match(print, /\.is-bookmarked \.verse-num::after \{\s*content: none !important;/);

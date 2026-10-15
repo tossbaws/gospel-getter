@@ -25,12 +25,15 @@ const supplied = (el) => [...el.querySelectorAll('.supplied')].map((m) => m.text
 const summary = (app) => app.document.querySelector('.footnote-summary');
 const summaryRows = (app) => [...app.document.querySelectorAll('.footnote-summary .footnote-row')]
     .map((row) => `${row.querySelector('.footnote-ref').textContent} ${row.querySelector('.footnote-text').textContent}`);
-const popupFootnotes = (verse) => [...verse.querySelectorAll('.xref-popup .footnote-entry')]
-    .map((entry) => [entry.querySelector('.footnote-label').textContent, entry.textContent.slice(entry.querySelector('.footnote-label').textContent.length)]);
+// The selection card, while it's open on `verse` (it follows the last
+// selected verse).
 const visiblePopup = (verse) => {
-    const popup = verse.querySelector('.xref-popup');
-    return popup && !popup.hidden ? popup : null;
+    const card = verse.ownerDocument.getElementById('selection-card');
+    return card && card.previousElementSibling === verse ? card : null;
 };
+const popupEntries = (verse) => [...(visiblePopup(verse)?.querySelectorAll('.selection-footnotes .footnote-entry') || [])];
+const popupFootnotes = (verse) => popupEntries(verse)
+    .map((entry) => [entry.querySelector('.footnote-label').textContent, entry.textContent.slice(entry.querySelector('.footnote-label').textContent.length)]);
 
 async function clickAndWait(app, target, cmd) {
     const before = app.calls.length;
@@ -134,9 +137,9 @@ const lemmas = (els) => els.map((el) => {
     return ems[0] ? ems[0].textContent : null;
 });
 const sectionLemmas = (app) => lemmas([...app.document.querySelectorAll('.footnote-summary .footnote-text')]);
-const popupLemmas = (verse) => lemmas([...verse.querySelectorAll('.xref-popup .footnote-entry')]);
+const popupLemmas = (verse) => lemmas(popupEntries(verse));
 
-test('a footnote’s lemma is in italics, in the section and in the popup, the note otherwise as stored', () =>
+test('a footnote’s lemma is in italics, in the section and in the selection card, the note otherwise as stored', () =>
     withApp({ book: 'Psalms', chapter: 23, translation: 'kjv' }, async (app) => {
         assert.deepEqual(sectionLemmas(app), ['green...', 'still...', 'anointest', 'for ever']);
         const row = app.document.querySelector('.footnote-summary .footnote-text');
@@ -170,7 +173,7 @@ test('a note without a colon has no lemma: Psalms 73:22’s second, plain', () =
         assert.deepEqual(popupLemmas(verse), ['ignorant', null]);
     }));
 
-test('clicking a marker selects its verse and the popup lists its footnotes, then its cross references', () =>
+test('clicking a marker selects its verse and the card lists its footnotes, then its cross references', () =>
     withApp({ book: 'Psalms', chapter: 119, translation: 'kjv' }, async (app) => {
         const verse = app.verse(105);
         const marker = verse.querySelector('.fn-marker');
@@ -178,9 +181,9 @@ test('clicking a marker selects its verse and the popup lists its footnotes, the
         await clickAndWait(app, marker, 'list_notes');
         assert.deepEqual(app.selectedVerseNumbers(), [105]);
         const popup = visiblePopup(verse);
-        assert.ok(popup, 'the popup shows');
+        assert.ok(popup, 'the card shows');
         assert.deepEqual(popupFootnotes(verse), [['a', 'lamp: or, candle']]);
-        const titles = [...popup.querySelectorAll('.xref-popup-title')].map((t) => t.textContent);
+        const titles = [...popup.querySelectorAll('.xref-popup-title')].filter((t) => !t.closest('[hidden]')).map((t) => t.textContent);
         assert.deepEqual(titles, ['Footnotes', 'Cross references']);
         assert.ok(popup.querySelectorAll('.xref-citation').length > 0);
 
@@ -198,7 +201,7 @@ test('clicking a marker selects its verse and the popup lists its footnotes, the
         assert.equal(visiblePopup(verse), null);
     }));
 
-test('a verse with footnotes and no cross references gets the popup too', () =>
+test('the card shows a verse’s footnotes and cross references exactly when it has them', () =>
     withApp({ book: 'Genesis', chapter: 1, translation: 'kjv' }, async (app) => {
         const dto = await backend('get_reading', { bookId: bookId('Genesis'), chapter: 1, translationCode: 'kjv' });
         const v13 = dto.currentVerses[12];
@@ -211,17 +214,18 @@ test('a verse with footnotes and no cross references gets the popup too', () =>
         const popup = visiblePopup(verse);
         assert.ok(popup);
         assert.deepEqual(popupFootnotes(verse), [['a', 'And the evening...: Heb. And the evening was, and the morning was etc.']]);
-        assert.deepEqual([...popup.querySelectorAll('.xref-popup-title')].map((t) => t.textContent), ['Footnotes']);
-        // The verse's actions sit in it, as they do with cross references.
-        assert.ok(popup.contains(app.actions()));
+        assert.deepEqual([...popup.querySelectorAll('.xref-popup-title')].filter((t) => !t.closest('[hidden]')).map((t) => t.textContent), ['Footnotes']);
+        // The verse's actions are first in it, as with cross references.
+        assert.equal(popup.firstElementChild, app.actions());
 
-        // Every verse has a popup exactly when it has either; Genesis 1:15
-        // has neither.
+        // Genesis 1:15 has neither: the card has only its actions.
         const v15 = dto.currentVerses[14];
         assert.deepEqual([v15.xrefs, v15.footnotes], [[], []], 'fixture: Genesis 1:15 has neither');
-        assert.equal(app.verse(15).querySelector('.xref-popup'), null);
         for (const v of dto.currentVerses) {
-            assert.equal(!!app.verse(v.number).querySelector('.xref-popup'), v.xrefs.length + v.footnotes.length > 0, `Genesis 1:${v.number}`);
+            await clickAndWait(app, app.verse(v.number), 'list_notes');
+            const card = visiblePopup(app.verse(v.number));
+            assert.equal(card.querySelector('.selection-footnotes').hidden, v.footnotes.length === 0, `Genesis 1:${v.number} footnotes`);
+            assert.equal(card.querySelector('.selection-xrefs').hidden, v.xrefs.length === 0, `Genesis 1:${v.number} cross references`);
         }
     }));
 
@@ -248,19 +252,18 @@ test('Copy and the note panel’s quote use the plain text and italics, with no 
         );
     }));
 
-test('an expanded cross reference shows KJV text in italics, without braces or markers', () =>
+test('a cross reference chip opens its passage, selected, with the KJV’s italics and no braces', () =>
     withApp({ book: 'John', chapter: 10, translation: 'kjv' }, async (app) => {
         // John 10:11 refers to Psalms 23:1.
         const verse = app.verse(11);
         await clickAndWait(app, verse, 'list_notes');
-        const citation = [...verse.querySelectorAll('.xref-citation')].find((c) => c.textContent === 'Psalms 23:1');
+        const citation = [...visiblePopup(verse).querySelectorAll('.xref-citation')].find((c) => c.textContent === 'Psalms 23:1');
         assert.ok(citation, 'fixture: John 10:11 cites Psalms 23:1');
-        await clickAndWait(app, citation, 'get_xref_text');
-        const expanded = citation.parentElement.querySelector('.xref-expanded');
-        assert.ok(!expanded.hidden);
-        assert.deepEqual(supplied(expanded), ['is']);
-        assert.equal(expanded.querySelectorAll('.fn-marker').length, 0);
-        assert.equal(expanded.textContent, '1[A Psalm of David.] The LORD is my shepherd; I shall not want.');
+        await clickAndWait(app, citation, 'get_reading');
+        assert.equal(app.heading(), 'Psalms 23');
+        assert.deepEqual(app.selectedVerseNumbers(), [1]);
+        assert.deepEqual(supplied(app.verse(1)), ['is']);
+        assert.doesNotMatch(app.verse(1).querySelector('.verse-text').textContent, /[{}]/);
     }));
 
 test('Library previews are the plain text', () =>

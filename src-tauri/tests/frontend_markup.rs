@@ -60,7 +60,7 @@ fn mobile_breakpoint_hides_chapter_side_neighbors() {
 /// Regression guard for GH-6: printing a chapter should hide all page
 /// chrome (the top bar and its popovers, the Library, the dialogs and the
 /// toast, the book and chapter picker, neighboring chapter panes,
-/// nav hint, the chapter's end buttons, cross-reference popups) but must
+/// nav hint, the chapter's end buttons, the selection card) but must
 /// never target the reading content itself — the chapter heading and
 /// verses are the whole point of printing the page.
 #[test]
@@ -82,7 +82,7 @@ fn print_stylesheet_hides_chrome_but_not_reading_content() {
         ".chapter-side",
         ".nav-hint",
         ".chapter-end",
-        ".xref-popup",
+        ".selection-card",
     ] {
         assert!(
             block.contains(chrome_selector),
@@ -201,8 +201,9 @@ fn frontend_uses_invoke_not_http() {
          bridge (app.withGlobalTauri), not an npm-bundled API import"
     );
     // The picker builds a book's chapters from its chapter count in
-    // `get_home`, so it doesn't call `get_chapters`.
-    for command in ["get_home", "get_reading", "get_xref_text"] {
+    // `get_home`, so it doesn't call `get_chapters`; cross-references open
+    // their passage, so it doesn't call `get_xref_text`.
+    for command in ["get_home", "get_reading", "list_notes"] {
         assert!(
             HTML.contains(&format!("invoke('{command}'")),
             "expected a call to the `{command}` Tauri command"
@@ -1418,8 +1419,8 @@ fn kjv_footnotes_use_tested_theme_colors() {
 }
 
 /// Printing keeps the chapter's Footnotes section and the markers in the
-/// verses, as it keeps the Cross References section; the popup, which
-/// shows a selected verse's footnotes on screen, isn't printed.
+/// verses, as it keeps the Cross References section; the selection card,
+/// which shows the selected verses' footnotes on screen, isn't printed.
 #[test]
 fn kjv_footnotes_print_with_the_chapter() {
     let block = block_after(HTML, "@media print");
@@ -1434,7 +1435,7 @@ fn kjv_footnotes_print_with_the_chapter() {
             "the print stylesheet mustn't touch `{selector}`"
         );
     }
-    assert!(block.contains(".xref-popup"));
+    assert!(block.contains(".selection-card"));
     assert!(!block.contains(".xref-summary"));
 }
 
@@ -2102,13 +2103,9 @@ fn literata_is_bundled_for_scripture_and_the_ui_uses_the_sans() {
             "{selector} is scripture"
         );
     }
-    // The selection's actions, notes and popup sit inside a verse, but
+    // The selection card, its actions and notes sit over the verses, but
     // they're controls.
-    for selector in [
-        ".verse-actions",
-        ".verse-notes",
-        ".xref-popup:not([hidden])",
-    ] {
+    for selector in [".verse-actions", ".verse-notes", ".selection-card"] {
         assert!(
             screen_rule(&rules, selector)
                 .body
@@ -2565,6 +2562,13 @@ fn footnotes_and_cross_references_are_disclosures_closed_by_default() {
             "{function}: the list is hidden while closed"
         );
     }
+    // A closed list is hidden on screen, though the lists are grids.
+    assert!(
+        rules().iter().any(|r| r.at_rule.is_none()
+            && r.selector == ".disclosure-body[hidden]"
+            && r.body.contains("display: none")),
+        "closed lists must not show"
+    );
     let set = function_body("setDisclosure");
     assert!(set.contains("localStorage.setItem(DISCLOSURE_KEYS[kind]"));
     let print = block_after(HTML, "@media print");
@@ -2630,6 +2634,99 @@ fn the_chapter_end_uses_tested_theme_colors() {
             assert!(
                 chevron >= 3.0,
                 "theme `{theme}`: a chevron is {chevron:.2}:1 on {bg}"
+            );
+        }
+    }
+}
+
+/// Selecting verses opens one card that floats over the text (absolutely
+/// placed in the reading column, which is its containing block), so the
+/// chapter never reflows: everything that used to sit inline under a
+/// selection is in it, in order (the actions and citation, the footnotes,
+/// the notes, the cross-references as chips), and the verses carry no
+/// popup of their own. It's a labelled group straight after the last
+/// selected verse in the DOM (next in Tab order), at most a set height
+/// with its own scroll, docked to the bottom of the window only when the
+/// selection leaves no room on either side; it isn't printed.
+#[test]
+fn the_selection_card_floats_over_the_text() {
+    assert!(HTML.contains("selectionCard.id = 'selection-card';"));
+    assert!(HTML.contains("selectionCard.setAttribute('role', 'group');"));
+    assert!(HTML.contains("selectionCard.append(verseActions, cardFootnotes, cardXrefs);"));
+    let render = function_body("renderSelection");
+    assert!(render.contains("selectionCard.setAttribute('aria-label', `Selection: ${citation}`);"));
+    assert!(
+        render.contains("last.after(selectionCard);"),
+        "after the last selected verse"
+    );
+    assert!(
+        !render.contains("last.append("),
+        "nothing goes inside a verse"
+    );
+    assert!(
+        render.contains("verse.focus({ preventScroll: true });"),
+        "focus returns to the verse"
+    );
+    assert!(
+        HTML.contains("cardXrefs.before(notesSection);"),
+        "notes before the cross-references"
+    );
+    assert!(!HTML.contains("renderVersePopup"), "verses carry no popup");
+    let chips = function_body("renderCardReferences");
+    assert!(chips.contains(r#"<ul class="xref-chips""#));
+    assert!(chips.contains(r#"<li><button type="button" class="xref-citation""#));
+    let place = function_body("placeCard");
+    for rule in [
+        "below < wanted",
+        "above >= wanted",
+        "classList.add('is-above')",
+        "classList.add('is-docked')",
+    ] {
+        assert!(place.contains(rule), "placeCard: {rule}");
+    }
+
+    let rules = rules();
+    let main = screen_rule(&rules, ".chapter-main");
+    assert!(
+        main.body.contains("position: relative"),
+        "the card's containing block"
+    );
+    let card = screen_rule(&rules, ".selection-card");
+    for declaration in [
+        "position: absolute",
+        "max-height: min(24rem, calc(100vh - var(--bar-height) - 2rem))",
+        "overflow-y: auto",
+        "font-family: var(--font-ui)",
+        "color: var(--text)",
+        "background: var(--option-bg)",
+    ] {
+        assert!(
+            card.body.contains(declaration),
+            ".selection-card: {declaration}"
+        );
+    }
+    let docked = screen_rule(&rules, ".selection-card.is-docked");
+    assert!(docked.body.contains("position: fixed") && docked.body.contains("bottom: 0.5rem"));
+    assert!(
+        screen_rule(&rules, ".xref-chips li + li::before")
+            .body
+            .contains("color: var(--text-dim)")
+    );
+    assert!(
+        screen_rule(&rules, ".xref-citation")
+            .body
+            .contains("color: var(--accent-2)")
+    );
+    assert!(block_after(HTML, "@media print").contains(".selection-card"));
+    // On the card's opaque --option-bg, every color it uses is AA; its
+    // buttons' --panel-bg over it is covered by notes_use_tested_theme_colors.
+    for (theme, props) in theme_palettes(&rules) {
+        let bg = property(&props, "--option-bg");
+        for fg in ["--text", "--text-dim", "--accent", "--accent-2"] {
+            let ratio = contrast_ratio(property(&props, fg), bg);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: {fg} in the card is {ratio:.2}:1"
             );
         }
     }

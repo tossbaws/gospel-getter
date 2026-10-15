@@ -2312,7 +2312,9 @@
             gap: 1.25rem;
         }
 
+        /* Positioned: the selection card is placed in it. */
         .chapter-main {
+            position: relative;
             flex: 1 1 auto;
             min-width: 0;
         }
@@ -2446,13 +2448,80 @@
             cursor: default;
         }
 
-        .xref-popup .verse-actions {
-            margin: 0 0 0.5rem;
+        /* The selection card floats over the text (see placeCard): out
+           of the flow, opaque, at most a set height with its own scroll,
+           so a long list of notes or cross-references never covers the
+           window. Docked, it sits at the bottom of the window. */
+        .selection-card {
+            position: absolute;
+            z-index: 12;
+            top: 0;
+            left: 0;
+            width: min(100%, 34rem);
+            max-height: min(24rem, calc(100vh - var(--bar-height) - 2rem));
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            padding: 0.6rem 0.8rem;
+            font-family: var(--font-ui);
+            font-size: 0.85rem;
+            line-height: 1.4;
+            color: var(--text);
+            background: var(--option-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-l);
+            box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.35);
+            cursor: default;
+        }
+
+        .selection-card.is-docked {
+            position: fixed;
+            top: auto;
+            bottom: 0.5rem;
+            max-height: min(45vh, 20rem);
+        }
+
+        .selection-card > * + * {
+            margin-top: 0.6rem;
+        }
+
+        .selection-card > [hidden] {
+            display: none;
+        }
+
+        .selection-card .verse-actions {
+            margin: 0;
             padding: 0 0 0.5rem;
             background: none;
             border: none;
             border-bottom: 1px solid var(--accent-dim);
             border-radius: 0;
+        }
+
+        /* Cross-references as inline chips: "Romans 5:8 · 1 John 4:9-10". */
+        .xref-chips {
+            display: inline;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .xref-chips li {
+            display: inline;
+        }
+
+        .xref-chips li + li::before {
+            content: '\00b7';
+            margin: 0 0.45rem;
+            color: var(--text-dim);
+        }
+
+        .selection-xref-row + .selection-xref-row {
+            margin-top: 0.3rem;
+        }
+
+        .selection-xref-verse {
+            margin-right: 0.5rem;
+            color: var(--text-dim);
         }
 
         .verse-copy-btn,
@@ -2571,8 +2640,8 @@
             cursor: default;
         }
 
-        .xref-popup .verse-notes {
-            margin: 0 0 0.5rem;
+        .selection-card .verse-notes {
+            margin: 0;
             padding: 0 0 0.5rem;
             background: none;
             border: none;
@@ -2829,17 +2898,6 @@
             font-weight: bold;
         }
 
-        .xref-popup:not([hidden]) {
-            font-family: var(--font-ui);
-            display: block;
-            margin-top: 0.4rem;
-            padding: 0.6rem 0.8rem;
-            background: var(--panel-bg);
-            border: 1px solid var(--accent-dim);
-            border-radius: var(--radius-m);
-            font-size: 0.85rem;
-        }
-
         .xref-popup-title {
             display: block;
             font-size: 0.7rem;
@@ -2847,11 +2905,6 @@
             letter-spacing: 0.05em;
             color: var(--text-dim);
             margin-bottom: 0.4rem;
-        }
-
-        .xref-entry {
-            display: block;
-            margin-bottom: 0.3rem;
         }
 
         .xref-citation {
@@ -2867,20 +2920,6 @@
 
         .xref-citation:hover {
             text-decoration: underline solid;
-        }
-
-        .xref-expanded:not([hidden]) {
-            display: block;
-            margin: 0.3rem 0 0.3rem 0.8rem;
-            padding-left: 0.6rem;
-            border-left: 2px solid var(--accent-dim);
-            color: var(--text);
-            font-size: 0.9rem;
-            line-height: 1.5;
-        }
-
-        .xref-verse-text {
-            margin-bottom: 0.3rem;
         }
 
         .xref-summary {
@@ -2983,10 +3022,6 @@
         /* A verse's footnotes in its popup, above its cross-references. */
         .popup-footnotes {
             display: block;
-        }
-
-        .popup-footnotes + .xref-popup-title {
-            margin-top: 0.6rem;
         }
 
         .footnote-entry {
@@ -3097,6 +3132,11 @@
             margin-top: 0.6rem;
         }
 
+        /* The lists are grids, which would otherwise win over [hidden]. */
+        .disclosure-body[hidden] {
+            display: none;
+        }
+
         /* Printing should show just the chapter being read — its heading
            and verses — not the app chrome around it, which is meaningless
            on paper, or anything tied to on-screen interaction like the
@@ -3144,7 +3184,7 @@
             .nav-hint,
             .chapter-end,
             .disclosure-chevron,
-            .xref-popup,
+            .selection-card,
             .verse-actions,
             .verse-notes,
             .search-toggle,
@@ -4327,6 +4367,26 @@
                 </span>
                 <span class="verse-actions-ref"></span>
                 <span class="verse-actions-status" role="status" aria-live="polite"></span>`;
+            // The selection card: everything about the selected verses, in
+            // one card that floats over the text just under them (or just
+            // above, when there's no room below), so selecting never moves
+            // the text. It sits in the DOM straight after the last
+            // selected verse, so Tab reaches it right after the selection,
+            // but it's out of the flow (absolutely placed in the reading
+            // column). In order: the actions and citation, the selection's
+            // footnotes, its notes, and its cross-references as chips.
+            const selectionCard = document.createElement('div');
+            selectionCard.id = 'selection-card';
+            selectionCard.className = 'selection-card';
+            selectionCard.setAttribute('role', 'group');
+            const cardFootnotes = document.createElement('div');
+            cardFootnotes.className = 'popup-footnotes selection-footnotes';
+            const cardXrefs = document.createElement('div');
+            cardXrefs.className = 'selection-xrefs';
+            selectionCard.append(verseActions, cardFootnotes, cardXrefs);
+            // The verse the card belongs to (the last selected one), where
+            // focus goes back to when it closes.
+            let cardVerse = null;
             const actionStatus = verseActions.querySelector('.verse-actions-status');
             const bookmarkBtn = verseActions.querySelector('.verse-bookmark-btn');
             const highlightSwatches = [...verseActions.querySelectorAll('.highlight-swatch')];
@@ -4430,13 +4490,13 @@
             }
 
             // Reflects `selection` in the reading column: highlights the
-            // selected verses, shows a lone selected verse's footnotes and
-            // cross-references (a range shows none), and puts the actions
-            // under the last selected verse.
+            // selected verses and opens the selection card on them (or
+            // closes it, returning focus to the verse if it was in the
+            // card). Nothing is added to the column's flow.
             function renderSelection() {
                 actionAttempt += 1;
                 setActionStatus('', false);
-                const single = selection && selection.start === selection.end;
+                const hadFocus = selectionCard.contains(document.activeElement);
                 let last = null;
                 document.querySelectorAll(SELECTABLE).forEach((el) => {
                     const number = Number(el.dataset.verse);
@@ -4445,8 +4505,6 @@
                         && number >= selection.start
                         && number <= selection.end;
                     el.classList.toggle('verse-selected', selected);
-                    const popup = el.querySelector('.xref-popup');
-                    if (popup) popup.hidden = !(selected && single);
                     if (selected && number === selection.end) last = el;
                 });
                 selectionNotesToken += 1;
@@ -4455,19 +4513,129 @@
                 showAllNotes = false;
                 notesSection.remove();
                 if (!last) {
-                    verseActions.remove();
+                    const verse = cardVerse;
+                    cardVerse = null;
+                    selectionCard.remove();
+                    if (hadFocus && verse && verse.isConnected) {
+                        verse.setAttribute('tabindex', '-1');
+                        verse.focus({ preventScroll: true });
+                    }
                     return;
                 }
-                const popup = single ? last.querySelector('.xref-popup') : null;
-                if (popup) {
-                    popup.prepend(verseActions);
-                } else {
-                    last.append(verseActions);
-                }
-                verseActions.querySelector('.verse-actions-ref').textContent = selectionCitation();
+                cardVerse = last;
+                const citation = selectionCitation();
+                selectionCard.setAttribute('aria-label', `Selection: ${citation}`);
+                verseActions.querySelector('.verse-actions-ref').textContent = citation;
+                renderCardReferences();
+                last.after(selectionCard);
                 updateBookmarkButton();
                 updateHighlightControls();
+                placeCard();
                 refreshSelectionNotes();
+            }
+
+            // The selection's footnotes and cross-references, from the
+            // chapter as the backend returned it. Cross-references are by
+            // verse number (the same in every column); footnotes are the
+            // column's own. A range labels each with its verse.
+            function renderCardReferences() {
+                const verses = selectionVerses();
+                const range = selection.start !== selection.end;
+                const notes = verses.flatMap((v) => (v.footnotes || []).map((f) => ({ v, f })));
+                cardFootnotes.hidden = !notes.length;
+                cardFootnotes.innerHTML = notes.length
+                    ? `<span class="xref-popup-title">Footnotes</span>
+                        ${notes.map(({ v, f }) => `<span class="footnote-entry"><span class="footnote-label">${range ? v.number : ''}${escapeHtml(f.label)}</span>${footnoteHtml(f)}</span>`).join('')}`
+                    : '';
+                const xrefsByVerse = new Map(lastDto.currentVerses.map((v) => [v.number, v.xrefs]));
+                const rows = verses
+                    .map((v) => ({ number: v.number, xrefs: xrefsByVerse.get(v.number) || [] }))
+                    .filter((row) => row.xrefs.length);
+                cardXrefs.hidden = !rows.length;
+                cardXrefs.innerHTML = rows.length
+                    ? `<span class="xref-popup-title" id="selection-xrefs-title">Cross references</span>
+                        ${rows.map((row) => `<div class="selection-xref-row">
+                            ${range ? `<span class="selection-xref-verse">${reading.chapter}:${row.number}</span>` : ''}
+                            <ul class="xref-chips" aria-labelledby="selection-xrefs-title">${row.xrefs.map((x) => {
+                                const end = x.endVerse != null ? ` data-end-verse="${x.endVerse}"` : '';
+                                return `<li><button type="button" class="xref-citation" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${end}>${escapeHtml(x.citation)}</button></li>`;
+                            }).join('')}</ul>
+                        </div>`).join('')}`
+                    : '';
+            }
+
+            // Where the card goes, measured each time it opens or its
+            // contents change (not on scroll: it's placed in the reading
+            // column, so it moves with the verses):
+            // - under the last selected verse, if it fits in the window
+            //   below it;
+            // - otherwise above the first selected verse, if it fits there;
+            // - otherwise on whichever side has more room, scrolling inside
+            //   a shorter card;
+            // - and if neither side has CARD_MIN px (a selection taller than
+            //   the window), docked to the bottom of the window, across the
+            //   reading column.
+            // It never covers the selected verses unless docked, and stays
+            // inside the reading column: as wide as it, up to CARD_WIDTH, at
+            // the selected verse's left edge where there's room (the
+            // selected column, while comparing).
+            const CARD_GAP = 8;
+            const CARD_MIN = 120;
+            const CARD_WIDTH = 544;
+
+            function placeCard() {
+                if (!selectionCard.isConnected || !cardVerse) return;
+                const column = selectionCard.closest('.chapter-main');
+                const first = document.querySelector(`${SELECTABLE}.verse-selected`) || cardVerse;
+                const columnRect = column.getBoundingClientRect();
+                const firstRect = first.getBoundingClientRect();
+                const lastRect = cardVerse.getBoundingClientRect();
+                const bar = document.getElementById('top-bar').getBoundingClientRect().bottom;
+                const width = Math.min(columnRect.width, CARD_WIDTH) || columnRect.width;
+                const left = Math.max(0, Math.min(firstRect.left - columnRect.left, columnRect.width - width));
+                selectionCard.classList.remove('is-docked', 'is-above');
+                selectionCard.style.maxHeight = '';
+                selectionCard.style.width = width ? `${width}px` : '';
+                selectionCard.style.left = `${left}px`;
+                const cap = parseFloat(window.getComputedStyle(selectionCard).maxHeight) || Infinity;
+                const wanted = Math.min(selectionCard.scrollHeight, cap);
+                const below = window.innerHeight - lastRect.bottom - 2 * CARD_GAP;
+                const above = firstRect.top - bar - 2 * CARD_GAP;
+                let side = 'below';
+                let room = wanted;
+                if (below < wanted) {
+                    if (above >= wanted) {
+                        side = 'above';
+                    } else {
+                        side = above > below ? 'above' : 'below';
+                        room = Math.max(above, below);
+                    }
+                }
+                if (room < Math.min(wanted, CARD_MIN)) {
+                    selectionCard.classList.add('is-docked');
+                    selectionCard.style.left = `${columnRect.left}px`;
+                    selectionCard.style.width = `${columnRect.width}px`;
+                    selectionCard.style.top = '';
+                    return;
+                }
+                if (room < wanted) selectionCard.style.maxHeight = `${room}px`;
+                if (side === 'below') {
+                    selectionCard.style.top = `${lastRect.bottom - columnRect.top + CARD_GAP}px`;
+                } else {
+                    selectionCard.classList.add('is-above');
+                    selectionCard.style.top = `${firstRect.top - columnRect.top - CARD_GAP - selectionCard.offsetHeight}px`;
+                }
+            }
+
+            window.addEventListener('resize', placeCard);
+            // The card grows as its notes load or a status line shows.
+            if (typeof ResizeObserver === 'function') {
+                let lastHeight = 0;
+                new ResizeObserver(() => {
+                    if (selectionCard.scrollHeight === lastHeight) return;
+                    lastHeight = selectionCard.scrollHeight;
+                    placeCard();
+                }).observe(selectionCard);
             }
 
             function selectVerses(translationCode, anchor, focus) {
@@ -4809,6 +4977,7 @@
                     selectVerses(code, start, end);
                     const el = verseElement(code, start);
                     if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+                    placeCard();
                 } else {
                     const verses = columnVerses(code);
                     const lastVerse = verses.length ? verses[verses.length - 1].number : 0;
@@ -4986,6 +5155,7 @@
             function renderNotesSection() {
                 if (!selection || !reading || !verseActions.isConnected || (!selectionNotes.length && !selectionNotesError)) {
                     notesSection.remove();
+                    placeCard();
                     return;
                 }
                 const hadFocus = notesSection.contains(document.activeElement) ? document.activeElement : null;
@@ -5010,12 +5180,13 @@
                         : '';
                     notesSection.innerHTML = `<p class="verse-notes-title">Notes (${selectionNotes.length})</p>${cards}${all}`;
                 }
-                verseActions.after(notesSection);
+                cardXrefs.before(notesSection);
                 // "more" only where the text is cut short.
                 notesSection.querySelectorAll('.note-card-body[id]').forEach((body) => {
                     const more = body.parentElement.querySelector('.note-more');
                     if (more) more.hidden = !(body.scrollHeight > body.clientHeight + 1);
                 });
+                placeCard();
                 if (hadFocus && !hadFocus.isConnected) {
                     const same = hadFocus.dataset.noteId
                         && notesSection.querySelector(`.note-edit[data-note-id="${hadFocus.dataset.noteId}"]`);
@@ -6380,32 +6551,6 @@
                 </section>`;
             }
 
-            // A selected verse's popup: its footnotes, then its
-            // cross-references; nothing when it has neither.
-            function renderVersePopup(footnotes, xrefs) {
-                if (!footnotes.length && !xrefs.length) return '';
-                const notes = footnotes.length
-                    ? `<span class="popup-footnotes">
-                        <span class="xref-popup-title">Footnotes</span>
-                        ${footnotes.map((f) => `<span class="footnote-entry"><span class="footnote-label">${escapeHtml(f.label)}</span>${footnoteHtml(f)}</span>`).join('')}
-                    </span>`
-                    : '';
-                const entries = xrefs
-                    .map((x) => {
-                        const endAttr = x.endVerse != null ? ` data-end-verse="${x.endVerse}"` : '';
-                        return `<span class="xref-entry">
-                            <button type="button" class="xref-citation" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${endAttr}>${escapeHtml(x.citation)}</button>
-                            <span class="xref-expanded" hidden></span>
-                        </span>`;
-                    })
-                    .join('');
-                const refs = xrefs.length
-                    ? `<span class="xref-popup-title">Cross references</span>
-                    ${entries}`
-                    : '';
-                return `<span class="xref-popup" hidden>${notes}${refs}</span>`;
-            }
-
             // Cross-references are keyed by verse number, not translation,
             // so each column shows the same ones for the same number.
             // Footnotes are the translation's own (the KJV's margin notes).
@@ -6415,7 +6560,6 @@
                 const cue = footnotes.length ? '<span class="footnote-cue visually-hidden">(has footnotes) </span>' : '';
                 return `<p class="verse${hasXref ? ' has-xref' : ''}${footnotes.length ? ' has-footnotes' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}" data-translation="${escapeHtml(code)}" data-code="${escapeHtml(code.toUpperCase())}">
                     <span class="verse-num">${v.number}</span>${cue}<span class="verse-text">${verseHtml(v)}</span>
-                    ${renderVersePopup(footnotes, xrefs)}
                 </p>`;
             }
 
@@ -6579,12 +6723,6 @@
                         ${side(dto.next, 'next')}
                     </div>
                 </div>`;
-            }
-
-            function renderXrefVerses(verses) {
-                return verses
-                    .map((v) => `<p class="verse xref-verse-text"><span class="verse-num">${v.number}</span>${verseHtml(v, { markers: false })}</p>`)
-                    .join('');
             }
 
             // Puts lastDto (and lastCompare, while comparing) on screen.
@@ -6945,12 +7083,21 @@
                     if (next) next.focus();
                     return;
                 }
-                // A verse's footnotes in its popup are there to read (and
-                // select), like its notes.
-                if (event.target.closest('.popup-footnotes')) {
+                // A cross-reference chip in the card reads that passage,
+                // selected (Back returns).
+                const citation = event.target.closest('#selection-card .xref-citation');
+                if (citation) {
+                    openPassage(
+                        citation.dataset.book,
+                        citation.dataset.chapter,
+                        Number(citation.dataset.verse),
+                        Number(citation.dataset.endVerse || citation.dataset.verse),
+                    );
                     return;
                 }
-                if (event.target.closest('.verse-notes')) {
+                // The rest of the card (its footnotes and notes, to read
+                // and select) is never a click away from the selection.
+                if (event.target.closest('#selection-card')) {
                     return;
                 }
 
@@ -6976,40 +7123,6 @@
                 const sideHeading = event.target.closest('.chapter-heading-link');
                 if (sideHeading) {
                     loadReading(sideHeading.dataset.book, sideHeading.dataset.chapter);
-                    return;
-                }
-
-                // Clicking a cross-reference citation "expands" it in place:
-                // fetch the referenced verse(s) and show them right under
-                // the citation, in the translation of the column it's in.
-                // Clicking it again collapses it back down.
-                const citation = event.target.closest('.xref-citation');
-                if (citation) {
-                    const expanded = citation.parentElement.querySelector('.xref-expanded');
-                    if (!expanded.hidden) {
-                        expanded.hidden = true;
-                        return;
-                    }
-                    if (expanded.dataset.loaded) {
-                        expanded.hidden = false;
-                        return;
-                    }
-                    const column = citation.closest('[data-translation]');
-                    const payload = {
-                        bookId: Number(citation.dataset.book),
-                        chapter: Number(citation.dataset.chapter),
-                        verse: Number(citation.dataset.verse),
-                        endVerse: citation.dataset.endVerse ? Number(citation.dataset.endVerse) : null,
-                        translationCode: column ? column.dataset.translation : currentTranslation(),
-                    };
-                    invoke('get_xref_text', payload)
-                        .then((verses) => {
-                            if (!verses) return;
-                            expanded.innerHTML = renderXrefVerses(verses);
-                            expanded.dataset.loaded = 'true';
-                            expanded.hidden = false;
-                        })
-                        .catch((e) => console.error('Failed to load cross-reference text', e));
                     return;
                 }
 
