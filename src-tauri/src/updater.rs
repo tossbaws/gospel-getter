@@ -23,6 +23,8 @@
 
 use serde::Serialize;
 
+use crate::release_notes;
+
 /// Where a build that can't update itself sends the reader.
 pub const RELEASES_PAGE: &str = "https://github.com/tossbaws/gospel-getter/releases/latest";
 
@@ -91,17 +93,42 @@ pub fn is_offered(current: &semver::Version, remote: &semver::Version) -> bool {
     remote.pre.is_empty() && remote.cmp_precedence(current).is_gt()
 }
 
-/// An available update, for the banner.
+/// An available update, for the banner and About.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateInfo {
     pub version: String,
-    /// The release notes, as plain text.
+    /// The release notes, as plain text (the banner's What's new).
     pub notes: Option<String>,
+    /// The same notes read as blocks of text (About shows them).
+    pub note_blocks: Vec<release_notes::Block>,
     /// When it was published, as `YYYY-MM-DD`.
     pub date: Option<String>,
     /// Whether this build can install it (otherwise it links to it).
     pub can_self_update: bool,
+}
+
+impl UpdateInfo {
+    /// `version`, with its notes (none if they're blank) also as blocks.
+    pub fn new(
+        version: String,
+        notes: Option<String>,
+        date: Option<String>,
+        can_self_update: bool,
+    ) -> Self {
+        let notes = notes.filter(|n| !n.trim().is_empty());
+        let note_blocks = notes
+            .as_deref()
+            .map(release_notes::blocks)
+            .unwrap_or_default();
+        Self {
+            version,
+            notes,
+            note_blocks,
+            date,
+            can_self_update,
+        }
+    }
 }
 
 /// Download progress, sent to the banner while an update downloads.
@@ -274,14 +301,14 @@ mod desktop {
     }
 
     fn update_info(update: &Update, mode: UpdateMode) -> UpdateInfo {
-        UpdateInfo {
-            version: update.version.clone(),
-            notes: update.body.clone().filter(|n| !n.trim().is_empty()),
-            date: update
+        UpdateInfo::new(
+            update.version.clone(),
+            update.body.clone(),
+            update
                 .date
                 .map(|d| format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())),
-            can_self_update: mode == UpdateMode::SelfUpdate,
-        }
+            mode == UpdateMode::SelfUpdate,
+        )
     }
 
     /// The latest release, if it's newer than this one.
@@ -520,18 +547,23 @@ mod tests {
 
     #[test]
     fn update_info_and_progress_serialize_as_the_frontend_reads_them() {
-        let info = UpdateInfo {
-            version: "2.6.0".into(),
-            notes: Some("Notes".into()),
-            date: Some("2026-10-20".into()),
-            can_self_update: true,
-        };
+        let info = UpdateInfo::new(
+            "2.6.0".into(),
+            Some("**New**".into()),
+            Some("2026-10-20".into()),
+            true,
+        );
         assert_eq!(
             serde_json::to_value(info).unwrap(),
             serde_json::json!({
-                "version": "2.6.0", "notes": "Notes", "date": "2026-10-20", "canSelfUpdate": true
+                "version": "2.6.0", "notes": "**New**",
+                "noteBlocks": [{ "kind": "paragraph", "spans": [{ "text": "New", "strong": true }] }],
+                "date": "2026-10-20", "canSelfUpdate": true
             })
         );
+        // Blank notes are none.
+        let info = UpdateInfo::new("2.6.0".into(), Some(" \n".into()), None, false);
+        assert_eq!((info.notes, info.note_blocks), (None, vec![]));
         assert_eq!(
             serde_json::to_value(DownloadEvent::Started {
                 content_length: Some(10)

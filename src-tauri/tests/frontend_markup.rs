@@ -1197,6 +1197,49 @@ fn update_banner_uses_tested_theme_colors_and_is_not_printed() {
     assert!(print_hidden.body.contains("display: none !important"));
 }
 
+/// An update found while About is open shows in About: its notes are
+/// --text in a box with an --accent-dim border, their headings and file
+/// names --accent, its status --text-dim (`.update-status`, as the
+/// banner's), all on the About panel's opaque --option-bg, and AA there in
+/// every theme. The notes scroll inside their box.
+#[test]
+fn about_update_uses_tested_theme_colors() {
+    let rules = rules();
+    let panel = screen_rule(&rules, ".import-panel");
+    assert!(panel.body.contains("background: var(--option-bg)"));
+    for (selector, declarations) in [
+        (
+            ".about-update-notes",
+            &[
+                "color: var(--text)",
+                "border: 1px solid var(--accent-dim)",
+                "overflow-y: auto",
+                "max-height: min(14rem, 40vh)",
+            ][..],
+        ),
+        (".about-update-notes h5", &["color: var(--accent)"][..]),
+        (
+            ".about-update-notes code",
+            &["color: var(--accent)", "font-family: inherit"][..],
+        ),
+    ] {
+        let rule = screen_rule(&rules, selector);
+        for declaration in declarations {
+            assert!(rule.body.contains(declaration), "{selector}: {declaration}");
+        }
+    }
+    for (theme, props) in theme_palettes(&rules) {
+        let option = property(&props, "--option-bg");
+        for token in ["--text", "--text-dim", "--accent"] {
+            let ratio = contrast_ratio(property(&props, token), option);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: {token} on --option-bg is {ratio:.2}:1"
+            );
+        }
+    }
+}
+
 /// Printing stays black on white: the print stylesheet clears every
 /// highlighter color.
 #[test]

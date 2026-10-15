@@ -1,7 +1,8 @@
 // Behavior tests for updates: the Updates section in About, the check at
 // startup (and the setting that turns it off), Check now, the "new version"
-// banner with Later, installing with download progress, and the
-// download-page variant for builds that can't update themselves. The check
+// banner with Later, the update shown inside About when it's found there,
+// installing with download progress (from either), and the download-page
+// variant for builds that can't update themselves. The check
 // and the install are scripted in the test bridge (`setUpdate`), which
 // answers with the app's own messages.
 
@@ -149,11 +150,12 @@ test('with the setting off there is no check at startup; it is kept, but not exp
         assert.equal(checks(app), 0, 'no request at all');
         assert.equal(banner(app).hidden, true);
 
-        // Check now still works.
+        // Check now still works, and About shows what it finds.
         app.open('about');
         await click(app, $(app, 'update-check-btn'), 'check_for_update');
         assert.equal(checks(app), 1);
-        assert.equal(banner(app).hidden, false);
+        assert.equal($(app, 'about-update').hidden, false);
+        assert.equal(banner(app).hidden, true);
         assert.equal(checkStatus(app).textContent, 'Gospel Getter 2.6.0 is available.');
     });
 });
@@ -168,12 +170,14 @@ test('Check now says when the app is up to date', () =>
         assert.equal($(app, 'update-check-btn').disabled, false);
     }));
 
-test('Check now finds an update after Later, and shows the banner again', () =>
+test('Check now finds an update after Later, and shows it in About', () =>
     withApp({ update: { check: UPDATE } }, async (app) => {
         app.click($(app, 'update-later'));
         app.open('about');
         await click(app, $(app, 'update-check-btn'), 'check_for_update');
-        assert.equal(banner(app).hidden, false);
+        assert.equal($(app, 'about-update').hidden, false);
+        assert.equal($(app, 'about-update-title').textContent, 'Gospel Getter 2.6.0 is available');
+        assert.equal(banner(app).hidden, true);
         assert.equal(checkStatus(app).textContent, 'Gospel Getter 2.6.0 is available.');
     }));
 
@@ -296,4 +300,245 @@ test('an update that fails verification is reported, and can be retried or put o
         await setUpdate({ check: UPDATE, install: { events: [], problem: 'offline' } });
         await click(app, $(app, 'update-install'), 'install_update');
         assert.equal(status.textContent, 'The update couldn’t be downloaded. Check your internet connection and try again.');
+    }));
+
+// ---- An update found in About shows in About
+
+const NOTES_MD = [
+    'Gospel Getter 2.13.1 fixes two things.',
+    '',
+    '## Fixes',
+    '- **Search** finds words again.',
+    '  - Even `G`.',
+    '- The [About](https://example.com) box.',
+    '',
+    '| File | Platform |',
+    '|---|---|',
+    '| `a.deb` | Debian |',
+].join('\n');
+const FOUND = { ...UPDATE, version: '2.13.1', notes: NOTES_MD };
+const aboutUpdate = (app) => $(app, 'about-update');
+const notesBox = (app) => $(app, 'about-update-notes');
+
+async function checkInAbout(app) {
+    app.open('about');
+    await click(app, $(app, 'update-check-btn'), 'check_for_update');
+}
+
+test('About’s check finds an update: About shows it, its notes, Update now and Close, and no banner', async () => {
+    let storage;
+    // Checks at startup are off, so the banner can't have come first.
+    await withApp({ update: { check: FOUND }, storage: { 'gospel-getter-update-check': 'off' } }, async (app) => {
+        await checkInAbout(app);
+        assert.equal(banner(app).hidden, true, 'no banner as well');
+        assert.equal(aboutUpdate(app).hidden, false);
+        assert.ok(app.surface('about').contains(aboutUpdate(app)), 'in the About panel');
+        assert.equal(aboutUpdate(app).getAttribute('role'), 'group');
+        const title = $(app, aboutUpdate(app).getAttribute('aria-labelledby'));
+        assert.equal(title.textContent, 'Gospel Getter 2.13.1 is available');
+        // Said once, by the check's status line (the heading shows it).
+        assert.equal(checkStatus(app).textContent, 'Gospel Getter 2.13.1 is available.');
+        assert.ok(checkStatus(app).classList.contains('visually-hidden'));
+
+        // The notes, read as Markdown by the backend, built as text.
+        const box = notesBox(app);
+        assert.equal(box.hidden, false);
+        assert.equal(box.getAttribute('role'), 'region');
+        assert.equal(box.getAttribute('aria-label'), 'What’s new in 2.13.1');
+        assert.equal(box.tabIndex, 0, 'scrollable from the keyboard');
+        assert.deepEqual([...box.children].map((el) => el.tagName), ['P', 'H5', 'UL', 'P', 'P']);
+        assert.equal(box.querySelector('h5').textContent, 'Fixes');
+        const items = [...box.querySelectorAll(':scope > ul > li')];
+        assert.equal(items.length, 2);
+        assert.equal(items[0].querySelector('strong').textContent, 'Search');
+        assert.equal(items[0].querySelector('ul > li code').textContent, 'G', 'nested under its item');
+        assert.equal(items[1].textContent, 'The About box.');
+        assert.equal(box.querySelector('a'), null, 'links are their text');
+        assert.equal(box.children[4].textContent, 'a.deb — Debian');
+
+        const install = $(app, 'about-update-install');
+        assert.equal(install.textContent, 'Update now');
+        assert.equal(install.hidden, false);
+        assert.equal($(app, 'about-update-download').hidden, true);
+        assert.equal($(app, 'about-update-close').textContent, 'Close');
+        assert.equal(app.calls.filter((c) => c.cmd === 'install_update').length, 0, 'nothing installed unasked');
+
+        // Close: About closes, focus goes back to ☰, and no banner follows.
+        $(app, 'about-update-close').focus();
+        app.click($(app, 'about-update-close'));
+        assert.equal(app.surface('about').hidden, true);
+        assert.equal(app.document.activeElement, $(app, 'menu-toggle'));
+        assert.equal(banner(app).hidden, true, 'the banner stays away, as after Later');
+        // Reopened, About still offers it.
+        app.open('about');
+        assert.equal(aboutUpdate(app).hidden, false);
+        // Esc closes About as it does any panel.
+        app.key('Escape', {}, app.document.activeElement);
+        assert.equal(app.surface('about').hidden, true);
+        assert.equal(app.document.activeElement, $(app, 'menu-toggle'));
+        assert.equal(banner(app).hidden, true);
+        storage = app.storage();
+        assert.deepEqual(app.consoleErrors, []);
+    });
+    // Nothing is remembered: the next launch's check shows the banner.
+    delete storage['gospel-getter-update-check'];
+    await withApp({ update: { check: FOUND }, storage }, async (app) => {
+        assert.equal(banner(app).hidden, false);
+        assert.equal(aboutUpdate(app).hidden, true);
+    });
+});
+
+test('release notes in About are never treated as markup', () =>
+    withApp({ update: { check: { ...FOUND, notes: '<img src=x onerror="window.pwned=1"> **<b>bold</b>**' } } }, async (app) => {
+        await checkInAbout(app);
+        const box = notesBox(app);
+        assert.equal(box.textContent, '<img src=x onerror="window.pwned=1"> <b>bold</b>');
+        assert.equal(box.querySelector('img, b'), null);
+        assert.deepEqual([...box.querySelectorAll('*')].map((el) => el.tagName), ['P', 'STRONG']);
+        assert.equal(app.window.pwned, undefined);
+    }));
+
+test('an update with no notes shows no notes box in About', () =>
+    withApp({ update: { check: { ...FOUND, notes: null } } }, async (app) => {
+        await checkInAbout(app);
+        assert.equal(aboutUpdate(app).hidden, false);
+        assert.equal(notesBox(app).hidden, true);
+    }));
+
+test('About’s check finding nothing, or failing, shows no update', async () => {
+    await withApp({}, async (app) => {
+        await checkInAbout(app);
+        assert.equal(checkStatus(app).textContent, `Gospel Getter ${VERSION} is the latest version.`);
+        assert.ok(!checkStatus(app).classList.contains('visually-hidden'));
+        assert.equal(aboutUpdate(app).hidden, true);
+        assert.equal(banner(app).hidden, true);
+    });
+    await withApp({ update: { check: { problem: 'offline' } } }, async (app) => {
+        await checkInAbout(app);
+        assert.equal(checkStatus(app).textContent, OFFLINE);
+        assert.ok(checkStatus(app).classList.contains('is-error'));
+        assert.equal(aboutUpdate(app).hidden, true);
+        assert.equal(banner(app).hidden, true);
+    });
+});
+
+test('the launch check finishing while About is open shows the update in About, not the banner', () =>
+    withApp({ update: { check: FOUND }, hold: ['check_for_update'] }, async (app) => {
+        // The reader opens About before the check at startup answers.
+        app.open('about');
+        assert.equal(aboutUpdate(app).hidden, true);
+        app.release('check_for_update');
+        await app.idle(0, 'check_for_update');
+        assert.equal(checks(app), 1, 'the startup check, not Check now');
+        assert.equal(aboutUpdate(app).hidden, false);
+        assert.equal($(app, 'about-update-title').textContent, 'Gospel Getter 2.13.1 is available');
+        assert.equal(banner(app).hidden, true);
+        assert.equal(app.document.activeElement, $(app, 'about-close'), 'focus stays where it was');
+    }));
+
+test('Update now installs from About, with its progress there; closing About hands it to the banner', () =>
+    withApp({
+        update: {
+            check: FOUND,
+            install: {
+                events: [
+                    { event: 'started', data: { contentLength: 1000 } },
+                    { event: 'progress', data: { chunkLength: 400 } },
+                ],
+            },
+        },
+        storage: { 'gospel-getter-update-check': 'off' },
+    }, async (app) => {
+        await checkInAbout(app);
+        const install = $(app, 'about-update-install');
+        install.focus();
+        const before = app.calls.length;
+        app.click(install);
+        await app.until(() => app.calls.slice(before).some((c) => c.cmd === 'install_update'), 'install_update');
+        const status = $(app, 'about-update-status');
+        await app.until(() => status.textContent.endsWith('40%'), 'progress');
+        assert.equal(status.textContent, 'Downloading the update… 40%');
+        assert.equal(status.getAttribute('role'), 'status');
+        const progress = $(app, 'about-update-progress');
+        assert.equal(progress.hidden, false);
+        assert.equal(progress.max, 1000);
+        assert.equal(progress.value, 400);
+        assert.equal(install.hidden, true, 'no second install');
+        assert.equal($(app, 'about-update-close').hidden, true);
+        assert.equal(app.document.activeElement, aboutUpdate(app), 'focus moves to the update, not lost');
+        assert.equal(banner(app).hidden, true, 'About shows it; no banner');
+
+        // Esc still closes About; the banner carries on with the download.
+        app.key('Escape', {}, app.document.activeElement);
+        assert.equal(app.surface('about').hidden, true);
+        assert.equal(banner(app).hidden, false);
+        assert.equal($(app, 'update-title').textContent, 'Gospel Getter 2.13.1 is available');
+        assert.equal($(app, 'update-status').textContent, 'Downloading the update… 40%');
+        assert.equal($(app, 'update-progress').value, 400);
+        assert.equal($(app, 'update-install').hidden, true);
+        assert.equal($(app, 'update-later').hidden, true);
+        assert.equal(app.calls.filter((c) => c.cmd === 'install_update').length, 1);
+    }));
+
+test('when the download finishes, About says it is installing and will restart', () =>
+    withApp({
+        update: {
+            check: FOUND,
+            install: {
+                events: [
+                    { event: 'started', data: { contentLength: null } },
+                    { event: 'progress', data: { chunkLength: 3145728 } },
+                    { event: 'finished' },
+                ],
+            },
+        },
+        storage: { 'gospel-getter-update-check': 'off' },
+    }, async (app) => {
+        await checkInAbout(app);
+        app.click($(app, 'about-update-install'));
+        const status = $(app, 'about-update-status');
+        await app.until(() => status.textContent.startsWith('Installing'), 'installing');
+        assert.equal(status.textContent, 'Installing the update. Gospel Getter will restart when it’s done.');
+        // Unknown size: no percentage, an indeterminate bar.
+        assert.equal($(app, 'about-update-progress').hasAttribute('value'), false);
+        const install = app.calls.find((c) => c.cmd === 'install_update');
+        assert.equal(install.done, false, 'restarting, so it never answers');
+    }));
+
+test('an install that fails in About says why there, and can be retried', () =>
+    withApp({
+        update: {
+            check: FOUND,
+            install: { events: [{ event: 'started', data: { contentLength: 10 } }], problem: 'notVerified' },
+        },
+        storage: { 'gospel-getter-update-check': 'off' },
+    }, async (app) => {
+        await checkInAbout(app);
+        const install = $(app, 'about-update-install');
+        install.focus();
+        await click(app, install, 'install_update');
+        const status = $(app, 'about-update-status');
+        assert.equal(status.textContent, NOT_VERIFIED);
+        assert.ok(status.classList.contains('is-error'));
+        assert.equal($(app, 'about-update-progress').hidden, true);
+        assert.equal(install.hidden, false);
+        assert.equal($(app, 'about-update-close').hidden, false);
+        assert.equal(app.document.activeElement, install);
+        assert.equal(app.surface('about').hidden, false, 'About stays open');
+        assert.equal(banner(app).hidden, true);
+
+        await setUpdate({ check: FOUND, install: { events: [], problem: 'offline' } });
+        await click(app, install, 'install_update');
+        assert.equal(status.textContent, 'The update couldn’t be downloaded. Check your internet connection and try again.');
+    }));
+
+test('a build that can’t update itself offers the download page in About', () =>
+    withApp({ update: { check: { ...FOUND, canSelfUpdate: false } }, storage: { 'gospel-getter-update-check': 'off' } }, async (app) => {
+        await checkInAbout(app);
+        assert.equal($(app, 'about-update-install').hidden, true);
+        const download = $(app, 'about-update-download');
+        assert.equal(download.hidden, false);
+        await click(app, download, 'open_download_page');
+        assert.equal($(app, 'about-update-status').textContent, 'The releases page is open in your browser.');
+        assert.equal(app.calls.filter((c) => c.cmd === 'install_update').length, 0);
     }));

@@ -913,6 +913,72 @@
             width: auto;
         }
 
+        /* An update found while About is open shows here, not in the
+           banner: its name, its notes (scrolling inside a box, so the
+           buttons stay in view), Update now and Close. --text, --accent
+           and --text-dim on the dialog's --option-bg, AA in every theme
+           (see the palette tests). */
+        .about-update:not([hidden]) {
+            display: block;
+            margin-top: 0.9rem;
+            padding-top: 0.8rem;
+            border-top: 1px solid var(--accent-dim);
+        }
+
+        .about-update-title {
+            font-size: 0.95rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .about-update-notes {
+            max-height: min(14rem, 40vh);
+            overflow-y: auto;
+            overflow-wrap: anywhere;
+            margin-bottom: 0.6rem;
+            padding: 0.5rem 0.7rem;
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-s);
+            font-size: 0.8rem;
+            line-height: 1.45;
+            color: var(--text);
+        }
+
+        .about-update-notes h5 {
+            font-size: 0.85rem;
+            color: var(--accent);
+            margin: 0.6rem 0 0.2rem;
+        }
+
+        .about-update-notes h5:first-child {
+            margin-top: 0;
+        }
+
+        .about-update-notes p {
+            margin: 0 0 0.4rem;
+        }
+
+        .about-update-notes ul {
+            margin: 0 0 0.4rem;
+            padding-left: 1.1rem;
+        }
+
+        .about-update-notes ul ul {
+            margin-bottom: 0;
+        }
+
+        /* File names and keys: the UI face, as everywhere (not the
+           browser's monospace: no third face), in --accent. */
+        .about-update-notes code {
+            font-family: inherit;
+            color: var(--accent);
+        }
+
+        .about-update:focus-visible,
+        .about-update-notes:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
         .about-links {
             margin-top: 1rem;
             padding-top: 0.8rem;
@@ -3657,10 +3723,14 @@
                     var target = returnFocus;
                     var active = document.activeElement;
                     var focusWasInside = !active || active === document.body || el.contains(active);
+                    var closed = current;
                     setShown(current, false);
                     current = null;
                     returnFocus = null;
                     if (restoreFocus !== false && focusWasInside && target && shown(target)) target.focus();
+                    // The main script brings up the update banner if About
+                    // closes on an install.
+                    document.dispatchEvent(new CustomEvent('gospel-getter:surface-close', { detail: { name: closed } }));
                 }
 
                 function focusInto(name) {
@@ -4293,6 +4363,17 @@
                 <p class="section-note" id="update-note">Checking downloads a small file from GitHub that names the latest version, so GitHub sees your IP address, as with any download. Nothing about your reading or your data is sent.</p>
                 <button type="button" id="update-check-btn" class="reader-mode-btn" aria-describedby="update-note">Check now</button>
                 <p id="update-check-status" class="data-status" role="status" aria-live="polite"></p>
+                <div id="about-update" class="about-update" role="group" aria-labelledby="about-update-title" tabindex="-1" hidden>
+                    <h4 id="about-update-title" class="about-update-title"></h4>
+                    <div id="about-update-notes" class="about-update-notes" role="region" tabindex="0" hidden></div>
+                    <progress id="about-update-progress" class="update-progress" aria-labelledby="about-update-status" hidden></progress>
+                    <p id="about-update-status" class="update-status" role="status" aria-live="polite"></p>
+                    <div class="update-actions">
+                        <button type="button" id="about-update-install" class="import-confirm">Update now</button>
+                        <button type="button" id="about-update-download" class="import-confirm" hidden>Download page</button>
+                        <button type="button" id="about-update-close" class="reader-mode-btn">Close</button>
+                    </div>
+                </div>
             </section>
             <p class="about-links"><a id="release-notes-link" href="https://github.com/tossbaws/gospel-getter/releases" hidden>Release notes</a> <span id="release-notes-status" class="data-status" role="status" aria-live="polite"></span></p>
         </div>
@@ -7560,25 +7641,63 @@
             // ---- Updates. The backend decides what this copy can do: a
             // release installer downloads, verifies and installs the update
             // (then restarts); any other build links to the releases page.
-            // Nothing is installed until the reader chooses Update and
-            // restart. A failed check at startup says nothing (the app works
-            // the same offline); Check now says what went wrong.
+            // Nothing is installed until the reader chooses to. A failed
+            // check at startup says nothing (the app works the same
+            // offline); Check now says what went wrong.
+            //
+            // Where an update shows: found while About is open (by Check
+            // now, or by the launch check finishing), About shows it in
+            // place, with its notes, Update now and Close, and the banner
+            // stays away for the rest of the session, as after Later.
+            // Found by the launch check with About closed, the banner shows
+            // it, as before. Installing from either one shows its progress
+            // in both, and closing About part way through brings the
+            // banner up, so the download never runs out of sight.
             const updateBanner = document.getElementById('update-banner');
             const updateTitle = document.getElementById('update-title');
             const updateNotes = document.getElementById('update-notes');
             const updateNotesText = document.getElementById('update-notes-text');
-            const updateProgress = document.getElementById('update-progress');
-            const updateStatus = document.getElementById('update-status');
-            const updateInstallBtn = document.getElementById('update-install');
-            const updateDownloadBtn = document.getElementById('update-download');
             const updateLaterBtn = document.getElementById('update-later');
             const updateCheckBtn = document.getElementById('update-check-btn');
             const updateCheckStatus = document.getElementById('update-check-status');
+            const aboutUpdate = document.getElementById('about-update');
+            const aboutUpdateTitle = document.getElementById('about-update-title');
+            const aboutUpdateNotes = document.getElementById('about-update-notes');
+            const aboutUpdateClose = document.getElementById('about-update-close');
+            // The banner's and About's own controls, which the install
+            // flow keeps in step.
+            const updateViews = {
+                banner: {
+                    root: updateBanner,
+                    progress: document.getElementById('update-progress'),
+                    status: document.getElementById('update-status'),
+                    install: document.getElementById('update-install'),
+                    download: document.getElementById('update-download'),
+                    dismiss: updateLaterBtn,
+                },
+                about: {
+                    root: aboutUpdate,
+                    progress: document.getElementById('about-update-progress'),
+                    status: document.getElementById('about-update-status'),
+                    install: document.getElementById('about-update-install'),
+                    download: document.getElementById('about-update-download'),
+                    dismiss: aboutUpdateClose,
+                },
+            };
+            const bothViews = [updateViews.banner, updateViews.about];
             let installing = false;
+            // The update the last check found, and whether About has shown
+            // it (after which the banner stays away).
+            let offered = null;
+            let shownInAbout = false;
+
+            const aboutOpen = () => !aboutOverlay.hidden;
 
             function setUpdateStatus(message, isError) {
-                updateStatus.textContent = message;
-                updateStatus.classList.toggle('is-error', !!isError);
+                for (const view of bothViews) {
+                    view.status.textContent = message;
+                    view.status.classList.toggle('is-error', !!isError);
+                }
             }
 
             function setCheckStatus(message, isError) {
@@ -7586,38 +7705,108 @@
                 updateCheckStatus.classList.toggle('is-error', !!isError);
             }
 
-            function showUpdate(update) {
+            // The notes as the backend read them (headings, paragraphs,
+            // lists, bold and code), built as elements holding text: never
+            // markup.
+            function renderNoteBlocks(container, blocks) {
+                container.replaceChildren();
+                const lists = [];
+                const inline = (el, spans) => {
+                    for (const span of spans) {
+                        let node = document.createTextNode(span.text);
+                        if (span.code) {
+                            const code = document.createElement('code');
+                            code.append(node);
+                            node = code;
+                        }
+                        if (span.strong) {
+                            const strong = document.createElement('strong');
+                            strong.append(node);
+                            node = strong;
+                        }
+                        el.append(node);
+                    }
+                    return el;
+                };
+                for (const block of blocks) {
+                    if (block.kind !== 'item') {
+                        lists.length = 0;
+                        container.append(inline(document.createElement(block.kind === 'heading' ? 'h5' : 'p'), block.spans));
+                        continue;
+                    }
+                    // A list as deep as the item, inside the last item of
+                    // the list above it.
+                    lists.length = Math.min(lists.length, block.depth + 1);
+                    while (lists.length < block.depth + 1) {
+                        const list = document.createElement('ul');
+                        const parent = lists.length ? lists[lists.length - 1].lastElementChild || lists[lists.length - 1] : container;
+                        parent.append(list);
+                        lists.push(list);
+                    }
+                    lists[block.depth].append(inline(document.createElement('li'), block.spans));
+                }
+            }
+
+            function resetView(view, update) {
+                view.install.hidden = !update.canSelfUpdate;
+                view.install.disabled = false;
+                view.download.hidden = update.canSelfUpdate;
+                view.dismiss.hidden = false;
+                view.progress.hidden = true;
+            }
+
+            // The banner, when About isn't showing the update.
+            function showBanner(update) {
                 if (installing) return;
                 updateTitle.textContent = `Gospel Getter ${update.version} is available`;
                 updateNotes.hidden = !update.notes;
                 updateNotes.open = false;
                 updateNotesText.textContent = update.notes || '';
-                updateInstallBtn.hidden = !update.canSelfUpdate;
-                updateInstallBtn.disabled = false;
-                updateDownloadBtn.hidden = update.canSelfUpdate;
-                updateLaterBtn.hidden = false;
-                updateProgress.hidden = true;
+                resetView(updateViews.banner, update);
                 setUpdateStatus('', false);
                 updateBanner.hidden = false;
             }
 
-            // Later: out of the way until the next launch (or Check now).
-            function hideUpdate() {
+            // About, showing the update in place of the banner.
+            function showInAbout(update) {
+                shownInAbout = true;
+                hideBanner();
+                if (installing) return;
+                aboutUpdateTitle.textContent = `Gospel Getter ${update.version} is available`;
+                renderNoteBlocks(aboutUpdateNotes, update.noteBlocks || []);
+                aboutUpdateNotes.hidden = !aboutUpdateNotes.childElementCount;
+                aboutUpdateNotes.setAttribute('aria-label', `What’s new in ${update.version}`);
+                resetView(updateViews.about, update);
+                setUpdateStatus('', false);
+                aboutUpdate.hidden = false;
+                // Said once, by the check's own status line; the heading
+                // shows it.
+                setCheckStatus(`Gospel Getter ${update.version} is available.`, false);
+                updateCheckStatus.classList.add('visually-hidden');
+            }
+
+            function hideBanner() {
                 const hadFocus = updateBanner.contains(document.activeElement);
                 updateBanner.hidden = true;
                 if (hadFocus) focusHome();
             }
 
+            function offer(update) {
+                offered = update;
+                if (aboutOpen()) showInAbout(update);
+                else if (!shownInAbout) showBanner(update);
+            }
+
             async function checkForUpdate({ quiet }) {
                 if (!quiet) {
                     updateCheckBtn.disabled = true;
+                    updateCheckStatus.classList.remove('visually-hidden');
                     setCheckStatus('Checking for updates…', false);
                 }
                 try {
                     const update = await invoke('check_for_update');
                     if (update) {
-                        showUpdate(update);
-                        if (!quiet) setCheckStatus(`Gospel Getter ${update.version} is available.`, false);
+                        offer(update);
                     } else if (!quiet) {
                         await versionRead;
                         setCheckStatus(appVersion ? `Gospel Getter ${appVersion} is the latest version.` : 'You have the latest version.', false);
@@ -7633,36 +7822,40 @@
                 return `${(bytes / 1048576).toFixed(1)} MB`;
             }
 
-            updateInstallBtn.addEventListener('click', async function () {
-                if (installing) return;
+            // Update now (About) or Update and restart (the banner).
+            async function install(from) {
+                if (installing || !offered) return;
                 installing = true;
-                // The reader can go on reading while it downloads; only the
-                // banner changes. The button goes, so focus moves to the
-                // banner itself rather than being lost.
-                const hadFocus = document.activeElement === updateInstallBtn;
-                updateInstallBtn.hidden = true;
-                updateLaterBtn.hidden = true;
-                updateProgress.hidden = false;
-                updateProgress.removeAttribute('value');
+                // The reader can go on reading while it downloads. The
+                // button goes, so focus moves to its panel rather than
+                // being lost.
+                const hadFocus = document.activeElement === from.install;
+                for (const view of bothViews) {
+                    view.install.hidden = true;
+                    view.download.hidden = true;
+                    view.dismiss.hidden = true;
+                    view.progress.hidden = false;
+                    view.progress.removeAttribute('value');
+                }
                 setUpdateStatus('Downloading the update…', false);
-                if (hadFocus) updateBanner.focus();
+                if (hadFocus) from.root.focus();
                 let total = null;
                 let received = 0;
                 const channel = new window.__TAURI__.core.Channel();
                 channel.onmessage = (message) => {
                     if (message.event === 'started') {
                         total = message.data.contentLength || null;
-                        if (total) updateProgress.max = total;
+                        if (total) for (const view of bothViews) view.progress.max = total;
                     } else if (message.event === 'progress') {
                         received += message.data.chunkLength;
                         if (total) {
-                            updateProgress.value = Math.min(received, total);
+                            for (const view of bothViews) view.progress.value = Math.min(received, total);
                             setUpdateStatus(`Downloading the update… ${Math.floor((Math.min(received, total) / total) * 100)}%`, false);
                         } else {
                             setUpdateStatus(`Downloading the update… ${megabytes(received)}`, false);
                         }
                     } else if (message.event === 'finished') {
-                        if (total) updateProgress.value = total;
+                        if (total) for (const view of bothViews) view.progress.value = total;
                         setUpdateStatus('Installing the update. Gospel Getter will restart when it’s done.', false);
                     }
                 };
@@ -7672,24 +7865,45 @@
                     await invoke('install_update', { onEvent: channel });
                 } catch (e) {
                     installing = false;
-                    updateProgress.hidden = true;
+                    for (const view of bothViews) {
+                        resetView(view, offered);
+                    }
                     setUpdateStatus(errorText(e), true);
-                    updateInstallBtn.hidden = false;
-                    updateLaterBtn.hidden = false;
-                    updateInstallBtn.focus();
+                    if (from.root.contains(document.activeElement) || document.activeElement === document.body) from.install.focus();
                 }
-            });
+            }
 
-            updateDownloadBtn.addEventListener('click', async function () {
+            async function openDownloadPage() {
                 try {
                     await invoke('open_download_page');
                     setUpdateStatus('The releases page is open in your browser.', false);
                 } catch (e) {
                     setUpdateStatus(errorText(e), true);
                 }
+            }
+
+            for (const view of bothViews) {
+                view.install.addEventListener('click', function () { install(view); });
+                view.download.addEventListener('click', openDownloadPage);
+            }
+
+            // Later: out of the way until the next launch (or Check now).
+            updateLaterBtn.addEventListener('click', hideBanner);
+
+            // Close: About closes, and the update stays offered there.
+            aboutUpdateClose.addEventListener('click', function () {
+                window.gospelGetterSurfaces.close();
             });
 
-            updateLaterBtn.addEventListener('click', hideUpdate);
+            // About closed part way through an install: the banner carries
+            // on showing it.
+            document.addEventListener('gospel-getter:surface-close', function (event) {
+                if (event.detail.name !== 'about' || !installing || !updateBanner.hidden) return;
+                updateTitle.textContent = `Gospel Getter ${offered.version} is available`;
+                updateNotes.hidden = !offered.notes;
+                updateNotesText.textContent = offered.notes || '';
+                updateBanner.hidden = false;
+            });
 
             updateCheckBtn.addEventListener('click', function () {
                 checkForUpdate({ quiet: false });

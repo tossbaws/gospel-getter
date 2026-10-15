@@ -180,6 +180,8 @@ export async function closeBridge() {
  * `fresh` starts with no saved reading position, as a new install does;
  * `storage` presets the page's local storage (see `app.storage()`);
  * `update` scripts updates from the start (see `setUpdate`);
+ * `hold` lists commands held from the start, until `app.release(cmd)`
+ * (waiting for the page to be idle doesn't wait for them meanwhile);
  * `width` is the window's width for matchMedia (1280, the app's default,
  * which shows the book and chapter sidebar; see `app.resize`);
  * `alterReading` and `alter` (command name → function) rewrite answers,
@@ -197,6 +199,7 @@ export async function openApp({
     fresh = false,
     storage = {},
     update = null,
+    hold = [],
     width = 1280,
     alterReading = (dto) => dto,
     alter = {},
@@ -209,6 +212,10 @@ export async function openApp({
     const calls = [];
     const clipboardWrites = [];
     const state = { failReading: false, clipboard, failing: new Map(Object.entries(failing)), held: new Map() };
+    const releases = new Map();
+    for (const cmd of hold) {
+        state.held.set(cmd, new Promise((resolve) => releases.set(cmd, resolve)));
+    }
 
     const invoke = async (cmd, args = {}) => {
         const call = { cmd, args, done: false };
@@ -325,6 +332,12 @@ export async function openApp({
             if (message === null) state.failing.delete(cmd);
             else state.failing.set(cmd, message);
         },
+        /** Lets go of `cmd`, held from the start (see `hold`). */
+        release(cmd) {
+            state.held.delete(cmd);
+            releases.get(cmd)();
+            releases.delete(cmd);
+        },
         /** Holds every `cmd` call until the returned function is called. */
         holdCommand(cmd) {
             let release;
@@ -401,12 +414,12 @@ export async function openApp({
             for (;;) {
                 await until(() => {
                     const recent = calls.slice(since);
-                    return (!cmd || recent.some((c) => c.cmd === cmd)) && recent.every((c) => c.done);
+                    return (!cmd || recent.some((c) => c.cmd === cmd)) && recent.every((c) => c.done || releases.has(c.cmd));
                 }, `${cmd || 'backend'} calls`);
                 const count = calls.length;
                 await settle();
                 await new Promise((r) => setTimeout(r, 10));
-                if (calls.length === count && calls.slice(since).every((c) => c.done)) return;
+                if (calls.length === count && calls.slice(since).every((c) => c.done || releases.has(c.cmd))) return;
             }
         },
         isComparing() {

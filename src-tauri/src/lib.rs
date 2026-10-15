@@ -9,6 +9,7 @@ pub mod notes_export;
 pub mod reader_data;
 #[cfg(test)]
 mod reader_data_tests;
+pub mod release_notes;
 pub mod updater;
 pub mod window;
 
