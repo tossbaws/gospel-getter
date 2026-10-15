@@ -10,6 +10,8 @@ use serde_json::Value;
 const TAURI_CONF: &str = include_str!("../tauri.conf.json");
 const CARGO_TOML: &str = include_str!("../Cargo.toml");
 const PKGBUILD: &str = include_str!("../../packaging/PKGBUILD");
+const LIB_RS: &str = include_str!("../src/lib.rs");
+const CAPABILITY: &str = include_str!("../capabilities/default.json");
 
 /// Crude but sufficient: pull `version = "X.Y.Z"` out of Cargo.toml's
 /// `[package]` table without pulling in a TOML parser as a dev-only dep.
@@ -159,4 +161,42 @@ fn tauri_conf_window_is_at_least_640_by_480() {
 fn tauri_conf_turns_off_the_webview_page_zoom() {
     let conf: Value = serde_json::from_str(TAURI_CONF).expect("tauri.conf.json must be valid JSON");
     assert_eq!(conf["app"]["windows"][0]["zoomHotkeysEnabled"], false);
+}
+
+/// The window comes back where it was: the official window state plugin is
+/// a dependency and is registered at startup, and the window is created by
+/// the app (`create: false`), hidden (`visible: false`), so it's shown only
+/// once its size and place are restored (see `window.rs`). The plugin is
+/// used only from Rust, so the webview gets none of its permissions, nor
+/// any window permission for the title (the page's own title is copied to
+/// the window).
+#[test]
+fn the_window_state_plugin_restores_a_hidden_window_before_showing_it() {
+    assert!(
+        CARGO_TOML
+            .lines()
+            .any(|l| l.starts_with("tauri-plugin-window-state = \"~2.")),
+        "tauri-plugin-window-state should be a desktop dependency"
+    );
+    assert!(LIB_RS.contains(".plugin(window::state_plugin(&app_data_dir)?)"));
+    assert!(LIB_RS.contains("window::create_main_window(app)?;"));
+
+    let conf: Value = serde_json::from_str(TAURI_CONF).unwrap();
+    let window = &conf["app"]["windows"][0];
+    assert_eq!(window["label"], "main");
+    assert_eq!(window["create"], false);
+    assert_eq!(window["visible"], false);
+    // A new install still opens at 1280x900, with the native title bar.
+    assert_eq!(
+        (window["width"].as_u64(), window["height"].as_u64()),
+        (Some(1280), Some(900))
+    );
+    assert!(window.get("decorations").is_none());
+
+    let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
+    assert_eq!(capability["windows"], serde_json::json!(["main"]));
+    assert_eq!(
+        capability["permissions"],
+        serde_json::json!(["core:default"])
+    );
 }

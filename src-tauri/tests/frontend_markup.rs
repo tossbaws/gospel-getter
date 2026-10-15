@@ -1081,6 +1081,46 @@ fn highlight_colors_keep_verse_text_at_wcag_aa_in_every_theme() {
     }
 }
 
+/// The hue of a `#rrggbb` color, in degrees.
+fn hue(hex: &str) -> f64 {
+    let hex = hex.trim_start_matches('#');
+    let [r, g, b] = [0, 2, 4].map(|i| f64::from(u8::from_str_radix(&hex[i..i + 2], 16).unwrap()));
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let d = max - min;
+    let h = if d == 0.0 {
+        0.0
+    } else if max == r {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    h * 60.0
+}
+
+/// Matrix's yellow highlighter reads as yellow on its black-green, not
+/// olive (it was #4a4708, hue 57°): a warm amber, hue 40-50°, as dark as
+/// AA for its pale green text allows (7.06:1), and lighter than the page
+/// so the band shows.
+#[test]
+fn matrix_yellow_is_warm_not_olive() {
+    let rules = rules();
+    let (_, props) = theme_palettes(&rules)
+        .into_iter()
+        .find(|(theme, _)| theme == "matrix")
+        .expect("the Matrix theme");
+    let yellow = property(&props, "--hl-yellow");
+    assert_eq!(yellow, "#664e00");
+    let h = hue(yellow);
+    assert!((40.0..=50.0).contains(&h), "hue {h:.1}");
+    assert!(hue("#4a4708") > 55.0, "the old one was olive");
+    let text = contrast_ratio(property(&props, "--text"), yellow);
+    assert!(text >= 7.0, "{text:.2}:1");
+    let band = contrast_ratio(yellow, property(&props, "--bg"));
+    assert!(band >= 2.5, "against the page: {band:.2}:1");
+}
+
 /// Each color has a verse style and a swatch style, and the highlight sits
 /// on the verse text (a band behind the words), not the whole verse block
 /// the selection tints.
@@ -1195,6 +1235,49 @@ fn update_banner_uses_tested_theme_colors_and_is_not_printed() {
         })
         .expect("print stylesheet should hide the update banner");
     assert!(print_hidden.body.contains("display: none !important"));
+}
+
+/// An update found while About is open shows in About: its notes are
+/// --text in a box with an --accent-dim border, their headings and file
+/// names --accent, its status --text-dim (`.update-status`, as the
+/// banner's), all on the About panel's opaque --option-bg, and AA there in
+/// every theme. The notes scroll inside their box.
+#[test]
+fn about_update_uses_tested_theme_colors() {
+    let rules = rules();
+    let panel = screen_rule(&rules, ".import-panel");
+    assert!(panel.body.contains("background: var(--option-bg)"));
+    for (selector, declarations) in [
+        (
+            ".about-update-notes",
+            &[
+                "color: var(--text)",
+                "border: 1px solid var(--accent-dim)",
+                "overflow-y: auto",
+                "max-height: min(14rem, 40vh)",
+            ][..],
+        ),
+        (".about-update-notes h5", &["color: var(--accent)"][..]),
+        (
+            ".about-update-notes code",
+            &["color: var(--accent)", "font-family: inherit"][..],
+        ),
+    ] {
+        let rule = screen_rule(&rules, selector);
+        for declaration in declarations {
+            assert!(rule.body.contains(declaration), "{selector}: {declaration}");
+        }
+    }
+    for (theme, props) in theme_palettes(&rules) {
+        let option = property(&props, "--option-bg");
+        for token in ["--text", "--text-dim", "--accent"] {
+            let ratio = contrast_ratio(property(&props, token), option);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: {token} on --option-bg is {ratio:.2}:1"
+            );
+        }
+    }
 }
 
 /// Printing stays black on white: the print stylesheet clears every
@@ -2306,6 +2389,52 @@ fn psalms_get_a_compact_grid_ten_to_a_row() {
     );
     let compact = &screen_rule(&rules, ".chapter-grid.is-compact").body;
     assert!(compact.contains("grid-template-columns: repeat(10, minmax(0, 1fr))"));
+    assert!(compact.contains("gap: 0.15rem 1px"));
+    assert!(compact.contains("margin: 0 -0.35rem"));
+    // Room for "150" (21px of digits at 0.72rem, measured in WebKitGTK):
+    // the picker's width, less its border and side padding, plus the
+    // grid's reach into that padding, shared by ten cells a hairline
+    // apart. 27px in the sidebar, 30.1px in the popover, and over 24px
+    // even with a 17px Windows scrollbar.
+    let picker = &screen_rule(&rules, ".picker:not([hidden])").body;
+    assert!(picker.contains("padding: 0.5rem 0.6rem 0.9rem"));
+    assert!(picker.contains("width: min(20rem, calc(100vw - 1rem))"));
+    let html = custom_properties(&screen_rule(&rules, "html").body);
+    let sidebar = property(&html, "--sidebar-width")
+        .strip_suffix("rem")
+        .unwrap()
+        .parse::<f64>()
+        .unwrap()
+        * 16.0;
+    let cell = |outer: f64, border: f64, scrollbar: f64| {
+        (outer - border - scrollbar - 2.0 * 0.6 * 16.0 + 2.0 * 0.35 * 16.0 - 9.0) / 10.0
+    };
+    let digits = 21.0;
+    for (place, width) in [
+        ("sidebar", cell(sidebar, 1.0, 0.0)),
+        ("popover", cell(20.0 * 16.0, 2.0, 0.0)),
+        ("sidebar, Windows scrollbar", cell(sidebar, 1.0, 17.0)),
+        ("popover, Windows scrollbar", cell(20.0 * 16.0, 2.0, 17.0)),
+    ] {
+        assert!(width >= 24.0, "{place}: a {width:.1}px cell");
+        if !place.contains("Windows") {
+            assert!(
+                (width - digits) / 2.0 >= 3.0,
+                "{place}: {:.1}px either side of 150",
+                (width - digits) / 2.0
+            );
+        }
+    }
+    assert_eq!(cell(sidebar, 1.0, 0.0), 27.0);
+    // The focus ring stays inside the cell.
+    assert!(
+        screen_rule(
+            &rules,
+            ".chapter-grid.is-compact .chapter-btn:focus-visible"
+        )
+        .body
+        .contains("outline-offset: -2px")
+    );
     let cell = &screen_rule(&rules, ".chapter-grid.is-compact .chapter-btn").body;
     assert!(cell.contains("border-radius: var(--radius-s)"));
     assert!(cell.contains("border: none"));
@@ -2317,7 +2446,7 @@ fn psalms_get_a_compact_grid_ten_to_a_row() {
     assert!(book.contains("color: var(--accent)"));
 }
 
-/// The sidebar: from 1200px, 16.5rem down the left below the bar, in the
+/// The sidebar: from 1200px, 18rem down the left below the bar, in the
 /// bar's `--bar-bg`, with the page moved over (on screen only); the
 /// neighbors give way first, as on any narrower page. Reading mode and
 /// print never show it, and its own button only shows where it can.
@@ -2326,7 +2455,7 @@ fn the_sidebar_is_for_wide_windows_only() {
     let rules = rules();
     assert!(HTML.contains("var WIDE = '(min-width: 1200px)';"));
     let html = custom_properties(&screen_rule(&rules, "html").body);
-    assert_eq!(property(&html, "--sidebar-width"), "16.5rem");
+    assert_eq!(property(&html, "--sidebar-width"), "18rem");
     let screen = |selector: &str| -> &Rule {
         rules
             .iter()
@@ -2884,7 +3013,7 @@ fn the_text_size_keys_step_aa_and_never_zoom_the_page() {
 /// follow from those numbers and the page's padding: both need
 /// 400 + 2 × 180 + 2 × 20 + 48 = 848px, the next alone 400 + 180 + 20 + 48 =
 /// 648px.
-/// The sidebar (264px) only shows from 1200px, leaving 888px, so it never
+/// The sidebar (288px) only shows from 1200px, leaving 864px, so it never
 /// hides a neighbor; and the floor is the same at every Width. Alone, below
 /// 648px, the column fills the window again.
 #[test]

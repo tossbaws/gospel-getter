@@ -352,12 +352,12 @@ async fn dispatch(
                 Some(check) => match check.get("problem").and_then(Value::as_str) {
                     Some(name) => Err(updater::check_message(problem(name)?).to_string()),
                     None => {
-                        let info: UpdateInfo = UpdateInfo {
-                            version: arg(check, "version")?,
-                            notes: arg(check, "notes")?,
-                            date: arg(check, "date")?,
-                            can_self_update: arg(check, "canSelfUpdate")?,
-                        };
+                        let info = UpdateInfo::new(
+                            arg(check, "version")?,
+                            arg(check, "notes")?,
+                            arg(check, "date")?,
+                            arg(check, "canSelfUpdate")?,
+                        );
                         Ok(to_value(info)?)
                     }
                 },

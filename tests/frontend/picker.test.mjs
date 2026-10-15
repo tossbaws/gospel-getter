@@ -8,6 +8,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { closeBridge, openApp, settle } from './harness.mjs';
 
 after(closeBridge);
@@ -107,6 +108,45 @@ test('the reference follows navigation, the translation and compare', () =>
         assert.deepEqual(app.consoleErrors, []);
     }));
 
+// The backend copies the page's title to the native window (window.rs),
+// so the taskbar and Alt-Tab say where the reader is.
+test('the window title follows the reference: navigation, the translation and compare', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        const title = () => app.document.title;
+        assert.equal(title(), 'John 3 · KJV — Gospel Getter');
+        await keyAndWait(app, 'ArrowRight');
+        assert.equal(title(), 'John 4 · KJV — Gospel Getter');
+
+        app.click(book(app, 'Mark'));
+        await clickAndWait(app, chapter(app, 16), 'get_reading');
+        assert.equal(title(), 'Mark 16 · KJV — Gospel Getter');
+
+        app.open('aa');
+        await clickAndWait(app, $(app, 'translation-choices').querySelector('[data-value="web"]'), 'get_reading');
+        assert.equal(title(), 'Mark 16 · WEB — Gospel Getter');
+
+        // Comparing: what the reference button shows.
+        app.key('Escape', {}, app.document.activeElement);
+        await keyAndWait(app, 'c');
+        assert.equal(refText(app), 'Mark 16 · KJV + WEB');
+        assert.equal(title(), 'Mark 16 · KJV + WEB — Gospel Getter');
+        await keyAndWait(app, 'ArrowLeft');
+        assert.equal(title(), 'Mark 15 · KJV + WEB — Gospel Getter');
+        await keyAndWait(app, 'c');
+        assert.equal(title(), 'Mark 15 · WEB — Gospel Getter');
+
+        // History.
+        const before = app.calls.length;
+        app.window.dispatchEvent(new app.window.PopStateEvent('popstate', { state: { bookId: 43, chapter: 3 } }));
+        await app.idle(before, 'get_reading');
+        assert.equal(title(), 'John 3 · WEB — Gospel Getter');
+    }));
+
+test('before a chapter is read the window title is the app’s name', () => {
+    const html = readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');
+    assert.match(html, /<title>Gospel Getter<\/title>/);
+});
+
 test('scrolling never changes the reference: it is the chapter in the center column', () =>
     withApp({ book: 'John', chapter: 3 }, async (app) => {
         // The neighbors sit beside the chapter, not above or below it, so
@@ -191,6 +231,30 @@ test('Psalms, and every book over 50 chapters, gets a compact grid ten to a row'
         }
         assert.equal(chapters(app).length, 1, 'Obadiah has one chapter');
     }));
+
+// jsdom lays nothing out, so the cell widths are measured in WebKit and
+// checked as arithmetic in frontend_markup.rs; here, the rules each grid
+// gets, in the sidebar and in the popover.
+test('the compact grid is roomier: it reaches into the picker’s padding, a hairline apart, in the sidebar and the popover', async () => {
+    for (const width of [1280, 1000]) {
+        await withApp({ book: 'Psalms', chapter: 119, width }, async (app) => {
+            if (width < 1200) {
+                app.click($(app, 'ref-btn'));
+                assert.equal($(app, 'picker').getAttribute('role'), 'dialog', 'the popover');
+            } else {
+                assert.equal($(app, 'picker').getAttribute('role'), null, 'the sidebar');
+            }
+            const grid = $(app, 'picker-chapters');
+            const style = app.window.getComputedStyle(grid);
+            assert.equal(style.gridTemplateColumns, 'repeat(10, minmax(0, 1fr))');
+            assert.equal(style.marginLeft, '-5.6px');
+            assert.equal(style.marginRight, '-5.6px');
+            assert.equal(style.getPropertyValue('gap'), '0.15rem 1px');
+            assert.equal(grid.querySelectorAll('.chapter-btn').length, 150);
+            assert.equal(app.window.getComputedStyle(grid.querySelector('.chapter-btn')).height, '27.2px', 'at least 24px tall');
+        });
+    }
+});
 
 test('the sidebar can be hidden and shown, is remembered, and keeps the reading place', async () => {
     let storage;
