@@ -442,6 +442,9 @@ pub struct NotedBook {
     /// starting values.
     pub first_chapter: i64,
     pub last_chapter: i64,
+    /// How many chapters have notes. With only one there's no range to
+    /// choose, so the dialog doesn't offer one.
+    pub noted_chapters: usize,
     /// The range's limits are 1 and this.
     pub chapter_count: i64,
 }
@@ -453,6 +456,9 @@ pub fn noted_books(notes: &[Note], books: &[Book]) -> Vec<NotedBook> {
         match noted.last_mut() {
             Some(book) if book.id == note.book_id => {
                 book.notes += 1;
+                if note.chapter != book.last_chapter {
+                    book.noted_chapters += 1;
+                }
                 book.last_chapter = note.chapter;
             }
             _ => {
@@ -465,6 +471,7 @@ pub fn noted_books(notes: &[Note], books: &[Book]) -> Vec<NotedBook> {
                     notes: 1,
                     first_chapter: note.chapter,
                     last_chapter: note.chapter,
+                    noted_chapters: 1,
                     chapter_count: book.chapter_count,
                 });
             }
@@ -1469,14 +1476,16 @@ mod tests {
                     b.notes,
                     b.first_chapter,
                     b.last_chapter,
+                    b.noted_chapters,
                     b.chapter_count
                 ))
                 .collect::<Vec<_>>(),
             [
-                (19, "Psalms", 1, 23, 23, 50),
-                (JOHN, "John", 4, 1, 5, 50),
-                (45, "Romans", 1, 8, 8, 16),
-                (62, "1 John", 1, 1, 1, 50),
+                (19, "Psalms", 1, 23, 23, 1, 50),
+                // Chapters 1, 3 (twice) and 5: three chapters with notes.
+                (JOHN, "John", 4, 1, 5, 3, 50),
+                (45, "Romans", 1, 8, 8, 1, 16),
+                (62, "1 John", 1, 1, 1, 1, 50),
             ]
         );
         assert_eq!(noted_books(&[], &books), []);

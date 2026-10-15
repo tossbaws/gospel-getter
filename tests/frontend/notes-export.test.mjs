@@ -243,14 +243,37 @@ test('the chapter fields show only with exactly one book, starting on its chapte
         await toggle(app, PSALMS);
         assert.ok(!chaptersShown(app));
         assert.deepEqual(lastFilter(app), { ...EVERY, books: [PSALMS, JOHN] });
-        // One again, another book: its own chapters.
+        // One again, another book: its own chapters, but Psalms' notes are
+        // all in Psalm 23, so there's no range to choose.
         await toggle(app, JOHN);
-        assert.ok(chaptersShown(app));
+        assert.ok(!chaptersShown(app));
         assert.deepEqual(chapterFields(app), ['23', '23']);
-        assert.equal(el(app, 'export-notes-chapter-to').max, '150');
+        assert.deepEqual(lastFilter(app), { ...EVERY, books: [PSALMS] });
         app.click(el(app, 'export-notes-none'));
         await settle();
         assert.ok(!chaptersShown(app));
+    }));
+
+test('the chapter range hides when the one ticked book has notes in only one chapter', () =>
+    withNotes([[FIRST_JOHN, 1, 9, 9, 'Confess.'], [FIRST_JOHN, 1, 7, 7, 'Light.'], [JOHN, 3, 16, 16, 'Loved.'], [JOHN, 5, 24, 24, 'Life.']], { book: '1 John', chapter: 1 }, async (app) => {
+        await openDialog(app);
+        // The dialog opens on the book being read: 1 John, notes in
+        // chapter 1 only (two of them).
+        assert.deepEqual(ticked(app), [FIRST_JOHN]);
+        assert.ok(!chaptersShown(app));
+        assert.deepEqual(lastFilter(app), { ...EVERY, books: [FIRST_JOHN] });
+        assert.equal(countLine(app), '2 notes match');
+        // John has two chapters with notes: the range is back.
+        await toggle(app, FIRST_JOHN);
+        await toggle(app, JOHN);
+        assert.ok(chaptersShown(app));
+        assert.deepEqual(chapterFields(app), ['3', '5']);
+        // And gone again for 1 John.
+        await toggle(app, JOHN);
+        await toggle(app, FIRST_JOHN);
+        assert.ok(!chaptersShown(app));
+        await clickAndWait(app, confirm(app), 'export_notes');
+        assert.deepEqual(exportCalls(app).at(-1).filter, { ...EVERY, books: [FIRST_JOHN] });
     }));
 
 test('the Written presets are local days ending today, and Custom shows From and To', () =>

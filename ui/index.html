@@ -5944,11 +5944,12 @@
             }
 
             // The chapter fields show only while exactly one book is
-            // ticked, starting on its chapters with notes.
+            // ticked, starting on its chapters with notes, and only when
+            // there are two such chapters to choose between.
             function syncExportChapters() {
                 const ticked = tickedBooks();
                 const book = ticked.length === 1 ? ticked[0] : null;
-                exportNotesChapters.hidden = !book;
+                exportNotesChapters.hidden = !book || book.notedChapters < 2;
                 if (book && book.id !== exportChapterBook) {
                     for (const input of [exportNotesChapterFrom, exportNotesChapterTo]) input.max = String(book.chapterCount);
                     exportNotesChapterFrom.value = String(book.firstChapter);
