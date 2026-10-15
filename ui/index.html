@@ -1399,6 +1399,162 @@
             }
         }
 
+        /* The welcome: one card over the open chapter, in the UI sans,
+           which (like the rest of the UI) doesn't grow with the reading
+           text size; its body scrolls inside the card on a small window.
+           Text is --text, --text-dim and --accent on --option-bg (AA in
+           every theme), and a place to start under the pointer gets a
+           faint 0.06 --accent wash, which keeps its --accent title at AA
+           (at the picker's 0.12, Classic Light's would be 4.37:1). */
+        .welcome-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1.1rem 1.4rem 0;
+        }
+
+        .welcome-panel:focus {
+            outline: none;
+        }
+
+        .welcome-title {
+            font-size: 1.35rem;
+            font-weight: normal;
+            color: var(--accent);
+        }
+
+        .welcome-head .panel-close {
+            flex: 0 0 auto;
+        }
+
+        .welcome-body {
+            padding-top: 0.6rem;
+        }
+
+        .welcome-intro {
+            font-size: 0.95rem;
+            margin-bottom: 1rem;
+        }
+
+        .welcome-looks {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.6rem;
+        }
+
+        /* Each look previews its theme for real (data-theme-preview), as
+           Aa's swatches do: its background, its accent and its text. */
+        .welcome-look {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            padding: 0.4rem;
+            font-family: inherit;
+            font-size: 0.85rem;
+            text-align: left;
+            color: var(--text);
+            background: none;
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-m);
+            cursor: pointer;
+        }
+
+        .welcome-look:hover {
+            border-color: var(--accent);
+        }
+
+        .welcome-look[aria-checked="true"] {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px var(--accent);
+        }
+
+        .welcome-look-preview {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            height: 4.2rem;
+            padding: 0 0.8rem;
+            background: var(--bg);
+            border-radius: var(--radius-s);
+        }
+
+        .welcome-look-sample {
+            font-family: var(--font-scripture);
+            font-size: 1.6rem;
+            color: var(--accent);
+        }
+
+        .welcome-look-lines {
+            display: flex;
+            flex: 1 1 auto;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .welcome-look-lines span {
+            height: 0.3rem;
+            border-radius: var(--radius-s);
+            background: var(--text);
+        }
+
+        .welcome-look-lines span:last-child {
+            width: 60%;
+        }
+
+        .welcome-look-name {
+            padding: 0 0.15rem;
+        }
+
+        .welcome-hint {
+            font-size: 0.78rem;
+            color: var(--text-dim);
+            margin: 0.4rem 0 1.1rem;
+        }
+
+        .welcome-start {
+            margin: 0 0 0.6rem;
+            padding: 0;
+            list-style: none;
+            border-top: 1px solid var(--accent-dim);
+        }
+
+        .welcome-start li {
+            border-bottom: 1px solid var(--accent-dim);
+        }
+
+        .welcome-start-row {
+            display: block;
+            width: 100%;
+            padding: 0.5rem 0.4rem;
+            font-family: inherit;
+            text-align: left;
+            color: var(--text);
+            background: none;
+            border: none;
+            cursor: pointer;
+        }
+
+        .welcome-start-row:hover {
+            background: rgba(var(--accent-rgb), 0.06);
+        }
+
+        .welcome-start-title {
+            display: block;
+            font-size: 0.95rem;
+            color: var(--accent);
+        }
+
+        .welcome-start-line {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+        }
+
+        .welcome-buttons {
+            justify-content: flex-end;
+        }
+
         /* The note panel: one passage's text, quoted in the translation on
            screen, and a note about it. The passage and the note are in the
            reading text size, so they stay as legible as the chapter; the
@@ -4506,49 +4662,23 @@
         </div>
     </div>
     <div id="welcome-overlay" class="welcome-overlay modal-overlay" hidden>
-        <div id="welcome-panel" class="welcome-panel modal-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title-1" aria-describedby="welcome-text-1">
-            <div class="welcome-pages modal-body" aria-live="polite">
-                <section class="welcome-page">
-                    <img class="welcome-icon" src="favicon.svg" alt="" width="48" height="48">
-                    <h2 id="welcome-title-1">Welcome to Gospel Getter</h2>
-                    <div id="welcome-text-1">
-                        <p>A quiet place to read the Bible on your computer. The King James Version and the World English Bible are built in, so it works offline, with no account.</p>
-                        <p>Here’s a quick look around, or choose Skip to start reading.</p>
-                    </div>
-                </section>
-                <section class="welcome-page" hidden>
-                    <h2 id="welcome-title-2">Read in context</h2>
-                    <ul id="welcome-text-2">
-                        <li>The chapter you’re reading sits in the middle, with the chapters before and after it faded on either side.</li>
-                        <li>Press <kbd>←</kbd> and <kbd>→</kbd> to turn chapters, right across the Bible.</li>
-                        <li>Choose a book and chapter from the reference at the top left, or press <kbd>G</kbd>. Random chapter is there too.</li>
-                        <li>Click a verse to see related passages.</li>
-                    </ul>
-                </section>
-                <section class="welcome-page" hidden>
-                    <h2 id="welcome-title-3">Find and keep</h2>
-                    <ul id="welcome-text-3">
-                        <li>Press <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> to search the text, or type a reference like John 3:16 to go straight there.</li>
-                        <li>Click a verse, and Shift-click another to select a range. Copy (or <kbd>Ctrl</kbd>+<kbd>C</kbd>) copies it with its reference, and ★ Bookmark saves it.</li>
-                        <li>Selected verses can also be highlighted in yellow, green, blue or pink.</li>
-                        <li>Press <kbd>N</kbd> or + Add note to write a note on them, which shows in every translation.</li>
-                        <li>To back up or move your bookmarks, highlights and notes, use Export data… and Import data… in the ☰ menu, top right.</li>
-                    </ul>
-                </section>
-                <section class="welcome-page" hidden>
-                    <h2 id="welcome-title-4">Make it yours</h2>
-                    <ul id="welcome-text-4">
-                        <li>Aa, top right, has nine themes, four text sizes, three line spacings, the translation and a distraction-free reading mode.</li>
-                        <li>Your bookmarks, highlights and notes are in the Library, the bookmark button beside Aa (or press <kbd>Ctrl</kbd>+<kbd>B</kbd>).</li>
-                        <li>Press <kbd>C</kbd> to compare the KJV and WEB side by side.</li>
-                        <li>Your chapter, bookmarks, highlights, notes and settings are remembered. To see this tour again, choose Show welcome in the ☰ menu.</li>
-                    </ul>
-                </section>
+        <div id="welcome-panel" class="welcome-panel modal-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-intro" tabindex="-1">
+            <div class="welcome-head">
+                <h2 id="welcome-title" class="welcome-title">Welcome to Gospel Getter</h2>
+                <button type="button" id="welcome-close" class="panel-close" aria-label="Close" title="Close (Esc)">&times;</button>
+            </div>
+            <div class="welcome-body modal-body">
+                <p id="welcome-intro" class="welcome-intro">A quiet place to read the Bible on your computer, offline and with no account.</p>
+                <h3 class="section-label" id="welcome-look-label">Pick a look</h3>
+                <div id="welcome-looks" class="welcome-looks" role="radiogroup" aria-labelledby="welcome-look-label">
+                    <button type="button" class="welcome-look" role="radio" aria-checked="false" data-value="chi-rho"><span class="welcome-look-preview" data-theme-preview="chi-rho" aria-hidden="true"><span class="welcome-look-sample">Aa</span><span class="welcome-look-lines"><span></span><span></span><span></span></span></span><span class="welcome-look-name">Chi Rho</span></button>
+                    <button type="button" class="welcome-look" role="radio" aria-checked="false" data-value="vellum"><span class="welcome-look-preview" data-theme-preview="vellum" aria-hidden="true"><span class="welcome-look-sample">Aa</span><span class="welcome-look-lines"><span></span><span></span><span></span></span></span><span class="welcome-look-name">Vellum</span></button>
+                </div>
+                <p class="welcome-hint">More themes in Aa.</p>
+                <h3 class="section-label" id="welcome-start-label">Where to start</h3>
+                <ul id="welcome-start" class="welcome-start" aria-labelledby="welcome-start-label"></ul>
             </div>
             <div class="welcome-buttons modal-buttons">
-                <button type="button" id="welcome-back" class="reader-mode-btn welcome-back" disabled>Back</button>
-                <p id="welcome-progress" class="welcome-progress">1 of 4</p>
-                <button type="button" id="welcome-next" class="import-confirm">Next</button>
                 <button type="button" id="welcome-skip" class="reader-mode-btn">Skip</button>
             </div>
         </div>
@@ -6568,45 +6698,64 @@
                 }
             });
 
-            // ---- First-run welcome: a four-page tour in a modal over the
-            // reader. It opens by itself only on a fresh install (see
-            // isFreshInstall), and whenever Show welcome is chosen in the
-            // ☰ menu. Closing it any way (Skip, Start reading, Escape)
+            // ---- The welcome: one card over the open chapter. It opens by
+            // itself only on a fresh install (see isFreshInstall), and
+            // whenever Show welcome is chosen in the ☰ menu. It offers a
+            // look (Chi Rho or Vellum, applied as Aa applies a theme) and a
+            // few places to start reading (the backend's startHere list).
+            // Closing it any way (Skip, ×, Escape, or a place to start)
             // records that it's been seen, in local storage beside the
-            // display preferences.
+            // display preferences, under the key the earlier four-page tour
+            // used: anyone who saw that never gets this on upgrade.
             const WELCOME_KEY = 'gospel-getter-welcome';
             const welcomeOverlay = document.getElementById('welcome-overlay');
             const welcomePanel = document.getElementById('welcome-panel');
-            const welcomePages = [...welcomePanel.querySelectorAll('.welcome-page')];
-            const welcomeBack = document.getElementById('welcome-back');
-            const welcomeNext = document.getElementById('welcome-next');
-            const welcomeSkip = document.getElementById('welcome-skip');
-            const welcomeProgress = document.getElementById('welcome-progress');
-            let welcomePage = 0;
+            const welcomeLooks = [...document.querySelectorAll('#welcome-looks [role="radio"]')];
+            const welcomeStart = document.getElementById('welcome-start');
+            const welcomeStartLabel = document.getElementById('welcome-start-label');
+            const themeSelect = document.getElementById('theme-select');
             let welcomeReturnFocus = null;
 
-            function showWelcomePage(index) {
-                welcomePage = Math.max(0, Math.min(index, welcomePages.length - 1));
-                welcomePages.forEach((page, i) => {
-                    page.hidden = i !== welcomePage;
+            // The places to start, from the backend: each a book (or a
+            // chapter) and a line about it. With none, the section hides.
+            function renderStartHere(rows) {
+                const list = Array.isArray(rows) ? rows : [];
+                welcomeStart.innerHTML = list
+                    .map((row) => `<li><button type="button" class="welcome-start-row" data-book="${row.bookId}" data-chapter="${row.chapter}"><span class="welcome-start-title">${escapeHtml(row.title)}</span> <span class="welcome-start-line">${escapeHtml(row.line)}</span></button></li>`)
+                    .join('');
+                welcomeStart.hidden = !list.length;
+                welcomeStartLabel.hidden = !list.length;
+            }
+
+            // The look in effect is checked (neither, for another theme),
+            // and is the radio group's one tab stop (the first, if neither).
+            function syncWelcomeLooks() {
+                const theme = themeSelect.value;
+                const checked = welcomeLooks.find((radio) => radio.dataset.value === theme);
+                welcomeLooks.forEach((radio) => {
+                    radio.setAttribute('aria-checked', String(radio === checked));
+                    radio.tabIndex = radio === (checked || welcomeLooks[0]) ? 0 : -1;
                 });
-                const number = welcomePage + 1;
-                welcomePanel.setAttribute('aria-labelledby', `welcome-title-${number}`);
-                welcomePanel.setAttribute('aria-describedby', `welcome-text-${number}`);
-                welcomeProgress.textContent = `${number} of ${welcomePages.length}`;
-                welcomeBack.disabled = welcomePage === 0;
-                welcomeNext.textContent = number === welcomePages.length ? 'Start reading' : 'Next';
-                // Back disappears on the first page; don't leave focus on it.
-                if (document.activeElement === welcomeBack && welcomeBack.disabled) welcomeNext.focus();
+            }
+
+            // Applies the look live, through Aa's own record of the theme.
+            function chooseLook(radio) {
+                if (themeSelect.value !== radio.dataset.value) {
+                    themeSelect.value = radio.dataset.value;
+                    themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                syncWelcomeLooks();
+                radio.focus();
             }
 
             function openWelcome(returnFocus) {
                 closeSurfaces(false);
                 if (!searchPanel.hidden) setSearchOpen(false);
                 welcomeReturnFocus = returnFocus || null;
-                showWelcomePage(0);
+                syncWelcomeLooks();
                 welcomeOverlay.hidden = false;
-                welcomeNext.focus();
+                welcomePanel.querySelector('.modal-body').scrollTop = 0;
+                welcomePanel.focus();
             }
 
             function closeWelcome() {
@@ -6646,12 +6795,21 @@
                 }
             }
 
-            welcomeBack.addEventListener('click', () => showWelcomePage(welcomePage - 1));
-            welcomeNext.addEventListener('click', function () {
-                if (welcomePage === welcomePages.length - 1) closeWelcome();
-                else showWelcomePage(welcomePage + 1);
+            welcomeLooks.forEach((radio) => {
+                radio.addEventListener('click', () => chooseLook(radio));
             });
-            welcomeSkip.addEventListener('click', closeWelcome);
+            // A place to start opens its chapter, from the top, and closes
+            // the card.
+            welcomeStart.addEventListener('click', function (event) {
+                const row = event.target.closest('.welcome-start-row');
+                if (!row) return;
+                closeWelcome();
+                loadReading(row.dataset.book, row.dataset.chapter).then((loaded) => {
+                    if (loaded) window.scrollTo(0, 0);
+                });
+            });
+            document.getElementById('welcome-skip').addEventListener('click', closeWelcome);
+            document.getElementById('welcome-close').addEventListener('click', closeWelcome);
             document.getElementById('welcome-btn').addEventListener('click', () => openWelcome(menuToggle));
 
             // Clicking the dimmed page behind the welcome does nothing, and
@@ -6660,30 +6818,42 @@
                 if (event.target === welcomeOverlay) event.preventDefault();
             });
 
+            // The card's tab stops, in order: ×, the checked look, the places
+            // to start and Skip.
+            function welcomeStops() {
+                return [...welcomePanel.querySelectorAll('button')]
+                    .filter((el) => !el.disabled && el.tabIndex >= 0 && !el.closest('[hidden]'));
+            }
+
             // While the welcome is open it has the keyboard, before any
             // other handler sees a key (this listens on window, capturing):
-            // Escape skips, ← and → change pages, Tab stays inside, and
-            // none of the reader's shortcuts run.
+            // Escape closes it, the arrow keys move between the looks (and
+            // choose, as radio buttons do), Tab stays inside, and none of
+            // the reader's shortcuts run.
             window.addEventListener('keydown', function (event) {
                 if (welcomeOverlay.hidden) return;
                 event.stopPropagation();
+                const radio = event.target.closest && event.target.closest('#welcome-looks [role="radio"]');
                 if (event.key === 'Escape') {
                     event.preventDefault();
                     closeWelcome();
-                } else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                } else if (radio && /^Arrow(Left|Right|Up|Down)$/.test(event.key)) {
                     event.preventDefault();
-                    showWelcomePage(welcomePage + (event.key === 'ArrowRight' ? 1 : -1));
+                    const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
+                    const index = welcomeLooks.indexOf(radio);
+                    chooseLook(welcomeLooks[(index + step + welcomeLooks.length) % welcomeLooks.length]);
                 } else if (event.key === 'Tab') {
-                    const focusable = [welcomeBack, welcomeNext, welcomeSkip].filter((el) => !el.disabled);
-                    const first = focusable[0];
-                    const last = focusable[focusable.length - 1];
-                    if (!welcomePanel.contains(document.activeElement)) {
+                    const stops = welcomeStops();
+                    const first = stops[0];
+                    const last = stops[stops.length - 1];
+                    const active = document.activeElement;
+                    if (!welcomePanel.contains(active) || (active === welcomePanel && event.shiftKey)) {
                         event.preventDefault();
                         (event.shiftKey ? last : first).focus();
-                    } else if (event.shiftKey && document.activeElement === first) {
+                    } else if (event.shiftKey && active === first) {
                         event.preventDefault();
                         last.focus();
-                    } else if (!event.shiftKey && document.activeElement === last) {
+                    } else if (!event.shiftKey && active === last) {
                         event.preventDefault();
                         first.focus();
                     }
@@ -7757,6 +7927,7 @@
                     const home = await invoke('get_home');
                     renderBookLists(home);
                     renderTranslationOptions(home);
+                    renderStartHere(home.startHere);
                     await loadReading(home.currentBookId, home.currentChapter);
                     await refreshBookmarks();
                     await refreshHighlights();

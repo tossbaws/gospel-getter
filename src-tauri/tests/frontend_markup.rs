@@ -3327,3 +3327,165 @@ fn the_selection_card_anchors_to_line_boxes_in_flowing() {
     assert!(HTML.contains("document.addEventListener('gospel-getter:layout-change', placeCard);"));
     assert!(HTML.contains("keepReadingPlace(change);"));
 }
+
+/// The welcome is one card: a modal dialog labelled by its title and
+/// described by its one sentence, focusable itself (focus goes there on
+/// open), with × and Skip, "Pick a look" as a radio group of two real theme
+/// previews, and "Where to start" as a list the backend fills. No pages,
+/// no Next or Back, and no key lists.
+#[test]
+fn the_welcome_is_one_accessible_card() {
+    let start = HTML.find(r#"<div id="welcome-overlay""#).unwrap();
+    let end = start + HTML[start..].find("\n    </div>\n").unwrap();
+    let card = &HTML[start..end];
+    assert!(card.contains(
+        r#"<div id="welcome-panel" class="welcome-panel modal-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-intro" tabindex="-1">"#
+    ));
+    assert!(
+        card.contains(
+            r#"<h2 id="welcome-title" class="welcome-title">Welcome to Gospel Getter</h2>"#
+        )
+    );
+    assert!(card.contains(
+        r#"<p id="welcome-intro" class="welcome-intro">A quiet place to read the Bible on your computer, offline and with no account.</p>"#
+    ));
+    assert!(card.contains(
+        r#"<button type="button" id="welcome-close" class="panel-close" aria-label="Close" title="Close (Esc)">&times;</button>"#
+    ));
+    assert!(card.contains(
+        r#"<button type="button" id="welcome-skip" class="reader-mode-btn">Skip</button>"#
+    ));
+    assert!(card.contains(
+        r#"<div id="welcome-looks" class="welcome-looks" role="radiogroup" aria-labelledby="welcome-look-label">"#
+    ));
+    assert!(card.contains(r#"<h3 class="section-label" id="welcome-look-label">Pick a look</h3>"#));
+    assert!(card.contains(r#"<p class="welcome-hint">More themes in Aa.</p>"#));
+    assert!(
+        card.contains(r#"<h3 class="section-label" id="welcome-start-label">Where to start</h3>"#)
+    );
+    assert!(card.contains(
+        r#"<ul id="welcome-start" class="welcome-start" aria-labelledby="welcome-start-label"></ul>"#
+    ));
+    // The two looks: radios named by theme (as the theme list names them),
+    // each a preview of its own theme, hidden from assistive tech.
+    let themes = select_options("theme-select");
+    let mut looks = 0;
+    for (value, name) in [("chi-rho", "Chi Rho"), ("vellum", "Vellum")] {
+        assert!(themes.contains(&(value.to_owned(), name.to_owned())));
+        assert!(card.contains(&format!(
+            r#"<button type="button" class="welcome-look" role="radio" aria-checked="false" data-value="{value}"><span class="welcome-look-preview" data-theme-preview="{value}" aria-hidden="true">"#
+        )));
+        assert!(card.contains(&format!(
+            r#"<span class="welcome-look-name">{name}</span></button>"#
+        )));
+        looks += 1;
+    }
+    assert_eq!(card.matches(r#"role="radio""#).count(), looks);
+    for gone in [
+        "welcome-page",
+        "welcome-next",
+        "welcome-back",
+        "welcome-progress",
+        "<kbd>",
+        "<li>",
+    ] {
+        assert!(!card.contains(gone), "the card has no {gone}");
+    }
+    // Its own keyboard: Escape, the radios' arrows, and Tab kept inside.
+    let script = block_after(
+        HTML,
+        "            window.addEventListener('keydown', function (event) {\n                if (welcomeOverlay.hidden) return;",
+    );
+    assert!(script.contains("event.stopPropagation();"));
+    assert!(script.contains("closeWelcome();"));
+    assert!(script.contains("/^Arrow(Left|Right|Up|Down)$/"));
+    assert!(script.contains("event.key === 'Tab'"));
+    assert!(function_body("openWelcome").contains("welcomePanel.focus();"));
+    // The places to start are escaped text from the backend.
+    let rows = function_body("renderStartHere");
+    assert!(rows.contains("${escapeHtml(row.title)}"));
+    assert!(rows.contains("${escapeHtml(row.line)}"));
+    assert!(HTML.contains("renderStartHere(home.startHere);"));
+    // And the seen flag is the old tour's.
+    assert!(HTML.contains("const WELCOME_KEY = 'gospel-getter-welcome';"));
+}
+
+/// The card adds no colors of its own: --text, --text-dim and --accent on
+/// the modal's opaque --option-bg, all AA in every theme; a place to start
+/// under the pointer gets a 0.06 --accent wash, with its title (--accent)
+/// and line (--text-dim) still AA; a look's border and its checked ring are
+/// --accent-dim and --accent, and the checked ring is at least 3:1. Each
+/// look previews its theme's own --bg and --accent.
+#[test]
+fn the_welcome_uses_tested_theme_colors() {
+    let rules = rules();
+    for (selector, color) in [
+        (".welcome-title", "--accent"),
+        (".welcome-look", "--text"),
+        (".welcome-hint", "--text-dim"),
+        (".welcome-start-row", "--text"),
+        (".welcome-start-title", "--accent"),
+        (".welcome-start-line", "--text-dim"),
+        (".welcome-look-sample", "--accent"),
+    ] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains(&format!("color: var({color})")),
+            "{selector} should be {color}"
+        );
+    }
+    assert!(
+        screen_rule(&rules, ".welcome-start-row:hover")
+            .body
+            .contains("background: rgba(var(--accent-rgb), 0.06)")
+    );
+    let checked = screen_rule(&rules, r#".welcome-look[aria-checked="true"]"#);
+    assert!(checked.body.contains("border-color: var(--accent)"));
+    assert!(checked.body.contains("box-shadow: 0 0 0 1px var(--accent)"));
+    assert!(
+        screen_rule(&rules, ".welcome-look-preview")
+            .body
+            .contains("background: var(--bg)")
+    );
+    for (theme, props) in theme_palettes(&rules) {
+        let bg = property(&props, "--option-bg");
+        let wash = composite(
+            &format!("rgba({}, 0.06)", property(&props, "--accent-rgb")),
+            bg,
+        );
+        for (what, fg, under) in [
+            ("the title", "--accent", bg.to_owned()),
+            ("a look's name", "--text", bg.to_owned()),
+            ("the hint", "--text-dim", bg.to_owned()),
+            (
+                "a place's title under the pointer",
+                "--accent",
+                wash.clone(),
+            ),
+            (
+                "a place's line under the pointer",
+                "--text-dim",
+                wash.clone(),
+            ),
+        ] {
+            let ratio = contrast_ratio(property(&props, fg), &under);
+            assert!(ratio >= 4.5, "theme `{theme}`: {what} is {ratio:.2}:1");
+        }
+        let ring = contrast_ratio(property(&props, "--accent"), bg);
+        assert!(
+            ring >= 3.0,
+            "theme `{theme}`: the checked ring is {ring:.2}:1"
+        );
+    }
+    // The previews: each theme's large "Aa" on its own page background.
+    for theme in ["chi-rho", "vellum"] {
+        let props = theme_palettes(&rules)
+            .into_iter()
+            .find(|(name, _)| name == theme)
+            .unwrap()
+            .1;
+        let ratio = contrast_ratio(property(&props, "--accent"), property(&props, "--bg"));
+        assert!(ratio >= 3.0, "{theme}'s preview is {ratio:.2}:1");
+    }
+}

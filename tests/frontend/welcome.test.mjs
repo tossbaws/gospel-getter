@@ -1,7 +1,9 @@
-// The first-run welcome: a four-page tour that opens by itself only on a
-// fresh install, closes for good by any route (Skip, Start reading,
-// Escape), keeps the keyboard to itself while open, and can be reopened
-// from the ☰ menu — against the real backend and database.
+// The welcome: one card over the open chapter, with a look to pick (Chi
+// Rho or Vellum) and places to start reading. It opens by itself only on
+// a fresh install (never for anyone who saw the earlier tour), closes for
+// good by any route (Skip, ×, Escape, a place to start), keeps the
+// keyboard to itself while open, and can be reopened from the ☰ menu —
+// against the real backend and database.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,13 +20,20 @@ async function withApp(options, body) {
     }
 }
 
-const overlay = (app) => app.document.getElementById('welcome-overlay');
-const panel = (app) => app.document.getElementById('welcome-panel');
-const button = (app, name) => app.document.getElementById(`welcome-${name}`);
+const $ = (app, id) => app.document.getElementById(id);
+const overlay = (app) => $(app, 'welcome-overlay');
+const panel = (app) => $(app, 'welcome-panel');
 const isOpen = (app) => !overlay(app).hidden;
-const progress = (app) => app.document.getElementById('welcome-progress').textContent;
-const pageTitle = (app) => [...app.document.querySelectorAll('.welcome-page')]
-    .find((page) => !page.hidden).querySelector('h2').textContent;
+const looks = (app) => [...app.document.querySelectorAll('#welcome-looks [role="radio"]')];
+const checked = (app) => looks(app).filter((r) => r.getAttribute('aria-checked') === 'true').map((r) => r.dataset.value);
+const rows = (app) => [...app.document.querySelectorAll('#welcome-start .welcome-start-row')];
+
+const START_HERE = [
+    ['Mark', 'The shortest Gospel, 16 chapters. A good first read.', 'Mark 1'],
+    ['John', 'Who Jesus is, in his own words.', 'John 1'],
+    ['Psalms', 'Prayers for every mood. Read one a day.', 'Psalms 1'],
+    ['Genesis 1', 'Start at the beginning.', 'Genesis 1'],
+];
 
 // Boot has finished (the harness waits for the bookmark list); give the
 // last step, which decides on the welcome, a moment.
@@ -49,19 +58,46 @@ async function withFreshApp(options, body) {
     }
 }
 
-test('a fresh install opens the welcome on its first page, over the reader', () =>
+test('a fresh install opens the welcome card over the first chapter', () =>
     withFreshApp({}, async (app) => {
-        assert.equal(app.heading(), 'Genesis 1');
+        assert.equal(app.heading(), 'Genesis 1', 'the chapter is open behind it');
         assert.equal(panel(app).getAttribute('role'), 'dialog');
         assert.equal(panel(app).getAttribute('aria-modal'), 'true');
-        assert.equal(panel(app).getAttribute('aria-labelledby'), 'welcome-title-1');
-        assert.equal(panel(app).getAttribute('aria-describedby'), 'welcome-text-1');
-        assert.equal(app.document.getElementById('welcome-title-1').textContent, 'Welcome to Gospel Getter');
-        assert.equal(progress(app), '1 of 4');
-        assert.equal(button(app, 'next').textContent, 'Next');
-        assert.equal(button(app, 'back').disabled, true);
-        assert.equal(button(app, 'skip').textContent, 'Skip');
-        assert.equal(app.document.activeElement, button(app, 'next'));
+        assert.equal(panel(app).getAttribute('aria-labelledby'), 'welcome-title');
+        assert.equal(panel(app).getAttribute('aria-describedby'), 'welcome-intro');
+        assert.equal($(app, 'welcome-title').textContent, 'Welcome to Gospel Getter');
+        assert.equal($(app, 'welcome-intro').textContent, 'A quiet place to read the Bible on your computer, offline and with no account.');
+        assert.equal(app.document.activeElement, panel(app), 'focus moves into the card');
+
+        // Pick a look: Chi Rho (the default, checked) and Vellum.
+        const group = $(app, 'welcome-looks');
+        assert.equal(group.getAttribute('role'), 'radiogroup');
+        assert.equal($(app, group.getAttribute('aria-labelledby')).textContent, 'Pick a look');
+        // Named by their theme (the preview is hidden from assistive tech).
+        assert.deepEqual(looks(app).map((r) => r.querySelector('.welcome-look-name').textContent), ['Chi Rho', 'Vellum']);
+        assert.ok(looks(app).every((r) => r.querySelector('.welcome-look-preview').getAttribute('aria-hidden') === 'true'));
+        assert.deepEqual(looks(app).map((r) => r.children.length), [2, 2]);
+        assert.deepEqual(checked(app), ['chi-rho']);
+        assert.deepEqual(looks(app).map((r) => r.tabIndex), [0, -1]);
+        for (const radio of looks(app)) {
+            assert.equal(radio.querySelector('[data-theme-preview]').dataset.themePreview, radio.dataset.value);
+        }
+        assert.equal(app.document.querySelector('.welcome-hint').textContent, 'More themes in Aa.');
+
+        // Where to start: the backend's list, word for word.
+        const list = $(app, 'welcome-start');
+        assert.equal($(app, list.getAttribute('aria-labelledby')).textContent, 'Where to start');
+        assert.deepEqual(rows(app).map((r) => [
+            r.querySelector('.welcome-start-title').textContent,
+            r.querySelector('.welcome-start-line').textContent,
+        ]), START_HERE.map(([title, line]) => [title, line]));
+        assert.equal(rows(app)[0].textContent, 'Mark The shortest Gospel, 16 chapters. A good first read.');
+        assert.equal($(app, 'welcome-skip').textContent, 'Skip');
+        assert.equal($(app, 'welcome-close').getAttribute('aria-label'), 'Close');
+
+        // No tour left: no pages, no Next or Back, no key lists.
+        assert.equal(app.document.querySelector('.welcome-page, #welcome-next, #welcome-back, #welcome-progress'), null);
+        assert.equal(panel(app).querySelector('kbd'), null);
         assert.deepEqual(app.consoleErrors, []);
     }));
 
@@ -70,6 +106,12 @@ test('an existing reading position means no welcome', () =>
         await booted(app);
         assert.equal(isOpen(app), false);
         assert.equal(app.heading(), 'John 3');
+    }));
+
+test('anyone who saw the earlier tour never gets the card, even with nothing else saved', () =>
+    withApp({ fresh: true, storage: { 'gospel-getter-welcome': 'seen' } }, async (app) => {
+        await booted(app);
+        assert.equal(isOpen(app), false);
     }));
 
 test('existing bookmarks mean no welcome, even with no reading position', async () => {
@@ -87,6 +129,7 @@ test('saved display settings mean no welcome, even with nothing else saved', asy
         ['gospel-getter-theme', 'matrix'],
         ['gospel-getter-text-size', 'large'],
         ['gospel-getter-compare', 'off'],
+        ['gospel-getter-layout', 'flowing'],
     ]) {
         await withApp({ fresh: true, storage: { [key]: value } }, async (app) => {
             await booted(app);
@@ -103,20 +146,20 @@ test('if the bookmarks can\'t be loaded, the welcome doesn\'t open', () =>
     }));
 
 for (const [route, dismiss] of [
-    ['Skip', (app) => app.click(button(app, 'skip'))],
-    ['Start reading', (app) => {
-        for (let i = 0; i < 3; i++) app.click(button(app, 'next'));
-        assert.equal(button(app, 'next').textContent, 'Start reading');
-        app.click(button(app, 'next'));
-    }],
+    ['Skip', (app) => app.click($(app, 'welcome-skip'))],
+    ['×', (app) => app.click($(app, 'welcome-close'))],
     ['Escape', (app) => app.key('Escape', {}, app.document.activeElement)],
 ]) {
-    test(`${route} closes the welcome, and it stays closed after a restart`, async () => {
+    test(`${route} closes the welcome where the reader is, and it stays closed after a restart`, async () => {
         let storage;
         await withFreshApp({}, async (app) => {
+            const before = app.calls.length;
             dismiss(app);
+            await settle();
             assert.equal(isOpen(app), false);
             assert.ok(!overlay(app).contains(app.document.activeElement), 'focus left inside the closed welcome');
+            assert.equal(app.heading(), 'Genesis 1', 'the reader stays where they are');
+            assert.deepEqual(app.calls.slice(before).map((c) => c.cmd), []);
             storage = app.storage();
             assert.equal(storage['gospel-getter-welcome'], 'seen');
         });
@@ -128,72 +171,90 @@ for (const [route, dismiss] of [
     });
 }
 
-test('Next, Back and the arrow keys move through the four pages', () =>
+for (const [title, , heading] of START_HERE) {
+    test(`“${title}” opens ${heading} and closes the card`, () =>
+        withFreshApp({}, async (app) => {
+            const row = rows(app).find((r) => r.querySelector('.welcome-start-title').textContent === title);
+            const before = app.calls.length;
+            app.click(row);
+            assert.equal(isOpen(app), false);
+            await app.idle(before, 'get_reading');
+            assert.equal(app.heading(), heading);
+            assert.equal(app.storage()['gospel-getter-welcome'], 'seen');
+            assert.ok(!overlay(app).contains(app.document.activeElement));
+        }));
+}
+
+test('a look applies its theme live, as Aa does, and the arrow keys move between the two', () =>
     withFreshApp({}, async (app) => {
-        const titles = ['Welcome to Gospel Getter', 'Read in context', 'Find and keep', 'Make it yours'];
-        app.click(button(app, 'next'));
-        assert.equal(progress(app), '2 of 4');
-        assert.equal(pageTitle(app), titles[1]);
-        assert.equal(panel(app).getAttribute('aria-labelledby'), 'welcome-title-2');
-        assert.equal(panel(app).getAttribute('aria-describedby'), 'welcome-text-2');
-        assert.equal(button(app, 'back').disabled, false);
+        const root = app.document.documentElement;
+        const [chiRho, vellum] = looks(app);
+        app.click(vellum);
+        assert.equal(root.dataset.theme, 'vellum');
+        assert.equal(app.storage()['gospel-getter-theme'], 'vellum');
+        assert.equal($(app, 'theme-select').value, 'vellum', 'the record Aa and the export read');
+        assert.deepEqual(checked(app), ['vellum']);
+        assert.deepEqual(looks(app).map((r) => r.tabIndex), [-1, 0]);
+        assert.equal(app.document.activeElement, vellum);
+        assert.ok(isOpen(app), 'choosing a look keeps the card open');
 
-        app.click(button(app, 'back'));
-        assert.equal(progress(app), '1 of 4');
-        assert.equal(pageTitle(app), titles[0]);
-        assert.equal(button(app, 'back').disabled, true);
+        // ← and → (↑ and ↓ too) move and choose, wrapping.
+        app.key('ArrowRight', {}, vellum);
+        assert.equal(app.document.activeElement, chiRho);
+        assert.deepEqual(checked(app), ['chi-rho']);
+        assert.equal(root.dataset.theme, undefined, 'Chi Rho is the default: no attribute');
+        app.key('ArrowUp', {}, chiRho);
+        assert.deepEqual(checked(app), ['vellum']);
+        app.key('ArrowDown', {}, vellum);
+        assert.deepEqual(checked(app), ['chi-rho']);
 
-        for (let i = 2; i <= 4; i++) {
-            app.key('ArrowRight', {}, app.document.activeElement);
-            assert.equal(progress(app), `${i} of 4`);
-            assert.equal(pageTitle(app), titles[i - 1]);
-        }
-        assert.equal(button(app, 'next').textContent, 'Start reading');
-        // Past the last page, → does nothing (it doesn't close the tour).
-        app.key('ArrowRight', {}, app.document.activeElement);
-        assert.equal(progress(app), '4 of 4');
-        assert.equal(isOpen(app), true);
-
-        app.key('ArrowLeft', {}, app.document.activeElement);
-        assert.equal(progress(app), '3 of 4');
-        assert.equal(button(app, 'next').textContent, 'Next');
-        // The reader underneath never moved.
-        assert.equal(app.heading(), 'Genesis 1');
+        // Aa agrees.
+        app.click($(app, 'welcome-skip'));
+        app.open('aa');
+        const pressed = [...$(app, 'theme-choices').querySelectorAll('[aria-pressed="true"]')].map((b) => b.dataset.value);
+        assert.deepEqual(pressed, ['chi-rho']);
     }));
 
-test('Tab stays inside the welcome', () =>
+test('with another theme in use, neither look is checked, and the first is the tab stop', () =>
+    withApp({ storage: { 'gospel-getter-welcome': 'seen', 'gospel-getter-theme': 'matrix' } }, async (app) => {
+        await booted(app);
+        app.open('menu');
+        app.click($(app, 'welcome-btn'));
+        assert.deepEqual(checked(app), []);
+        assert.deepEqual(looks(app).map((r) => r.tabIndex), [0, -1]);
+        assert.equal(app.document.documentElement.dataset.theme, 'matrix', 'opening it changes nothing');
+    }));
+
+test('Tab stays inside the card, through ×, the look, the places to start and Skip', () =>
     withFreshApp({}, async (app) => {
         const tab = (shiftKey = false) => app.key('Tab', { shiftKey }, app.document.activeElement);
-        // Page 1: Back is hidden, so Next and Skip are the only stops.
-        button(app, 'skip').focus();
-        tab();
-        assert.equal(app.document.activeElement, button(app, 'next'));
+        // From the card itself, Tab's default reaches × first; Shift+Tab
+        // wraps to Skip.
         tab(true);
-        assert.equal(app.document.activeElement, button(app, 'skip'));
-
-        app.click(button(app, 'next'));
-        button(app, 'skip').focus();
+        assert.equal(app.document.activeElement, $(app, 'welcome-skip'));
+        const stops = [$(app, 'welcome-close'), looks(app)[0], ...rows(app), $(app, 'welcome-skip')];
+        // Forward from Skip wraps to ×; backward from × wraps to Skip.
         tab();
-        assert.equal(app.document.activeElement, button(app, 'back'));
+        assert.equal(app.document.activeElement, stops[0]);
         tab(true);
-        assert.equal(app.document.activeElement, button(app, 'skip'));
+        assert.equal(app.document.activeElement, stops.at(-1));
+        // Only the checked look is a stop.
+        assert.deepEqual(stops.map((el) => el.tabIndex >= 0), stops.map(() => true));
+        assert.equal(looks(app)[1].tabIndex, -1);
 
         // Focus that somehow got out (say, onto the page) comes back in.
         app.document.activeElement.blur();
         tab();
-        assert.equal(app.document.activeElement, button(app, 'back'));
-
-        // Going back to page 1 from Back moves focus off the hidden button.
-        app.click(button(app, 'back'));
-        button(app, 'back').focus();
-        app.key('ArrowLeft', {}, app.document.activeElement);
-        assert.notEqual(app.document.activeElement, button(app, 'back'));
+        assert.equal(app.document.activeElement, stops[0]);
+        app.document.activeElement.blur();
+        tab(true);
+        assert.equal(app.document.activeElement, stops.at(-1));
     }));
 
 test('the reader\'s shortcuts don\'t run while the welcome is open', () =>
     withFreshApp({}, async (app) => {
         const before = app.calls.length;
-        for (const [key, opts] of [['/', {}], ['k', { ctrlKey: true }], ['c', {}], ['C', {}], ['ArrowRight', {}], ['ArrowLeft', {}]]) {
+        for (const [key, opts] of [['/', {}], ['k', { ctrlKey: true }], ['c', {}], ['C', {}], ['g', {}], ['ArrowRight', {}], ['ArrowLeft', {}]]) {
             app.key(key, opts, app.document.activeElement);
             app.key(key, opts, app.document.body);
         }
@@ -203,6 +264,7 @@ test('the reader\'s shortcuts don\'t run while the welcome is open', () =>
         assert.equal(app.storage()['gospel-getter-compare'], undefined);
         assert.equal(app.heading(), 'Genesis 1');
         assert.deepEqual(app.calls.slice(before).map((c) => c.cmd), []);
+        assert.ok(panel(app).contains(app.document.activeElement));
 
         // Escape closes only the welcome; then the shortcuts work again.
         app.key('Escape', {}, app.document.body);
@@ -211,59 +273,56 @@ test('the reader\'s shortcuts don\'t run while the welcome is open', () =>
         assert.equal(app.searchPanel().hidden, false);
     }));
 
-test('Show welcome in the ☰ menu reopens it on page 1, and focus returns to ☰', () =>
+test('Show welcome in the ☰ menu opens the card, and focus returns to ☰', () =>
     withApp({ storage: { 'gospel-getter-welcome': 'seen' } }, async (app) => {
         await booted(app);
         assert.equal(isOpen(app), false);
         app.open('menu');
-        const show = app.document.getElementById('welcome-btn');
+        const show = $(app, 'welcome-btn');
         assert.equal(show.textContent, 'Show welcome');
         app.click(show);
         assert.equal(isOpen(app), true);
         assert.equal(app.surface('menu').hidden, true);
-        assert.equal(progress(app), '1 of 4');
-        assert.equal(app.document.activeElement, button(app, 'next'));
+        assert.equal(app.document.activeElement, panel(app));
 
-        app.click(button(app, 'next'));
-        app.click(button(app, 'skip'));
+        app.click($(app, 'welcome-close'));
         assert.equal(isOpen(app), false);
-        assert.equal(app.document.activeElement, app.document.getElementById('menu-toggle'));
+        assert.equal(app.document.activeElement, $(app, 'menu-toggle'));
 
-        // Opening it again starts from the first page.
+        // Escape returns focus to ☰ as well, and the reader stays put.
         app.open('menu');
         app.click(show);
-        assert.equal(progress(app), '1 of 4');
         app.key('Escape', {}, app.document.activeElement);
         assert.equal(isOpen(app), false);
+        assert.equal(app.document.activeElement, $(app, 'menu-toggle'));
         assert.equal(app.surface('menu').hidden, true);
+        assert.equal(app.heading(), 'John 3');
+
+        // A place to start, from the menu, reads it.
+        app.open('menu');
+        app.click(show);
+        const before = app.calls.length;
+        app.click(rows(app)[2]);
+        await app.idle(before, 'get_reading');
+        assert.equal(app.heading(), 'Psalms 1');
+        assert.equal(isOpen(app), false);
     }));
 
-test('the tour points to Aa, the Library and the ☰ menu, with no Settings drawer left', () =>
-    withApp({ storage: { 'gospel-getter-welcome': 'seen' } }, async (app) => {
-        await booted(app);
-        const items = [...app.document.querySelectorAll('#welcome-text-4 li')].map((li) => li.textContent);
-        assert.deepEqual(items, [
-            'Aa, top right, has nine themes, four text sizes, three line spacings, the translation and a distraction-free reading mode.',
-            'Your bookmarks, highlights and notes are in the Library, the bookmark button beside Aa (or press Ctrl+B).',
-            'Press C to compare the KJV and WEB side by side.',
-            'Your chapter, bookmarks, highlights, notes and settings are remembered. To see this tour again, choose Show welcome in the ☰ menu.',
-        ]);
-        assert.match(app.document.getElementById('welcome-text-3').textContent, /Export data… and Import data… in the ☰ menu/);
-        const tour = app.document.getElementById('welcome-panel').textContent;
-        assert.ok(!/Settings/.test(tour), 'nothing refers to the old Settings drawer');
+test('with no places to start, the card leaves out that section', () =>
+    withApp({ fresh: true, alter: { get_home: (home) => ({ ...home, startHere: [] }) } }, async (app) => {
+        await app.until(() => isOpen(app), 'the welcome');
+        assert.equal($(app, 'welcome-start').hidden, true);
+        assert.equal($(app, 'welcome-start-label').hidden, true);
+        assert.equal(looks(app).length, 2, 'the looks are still there');
     }));
 
-test('the tour sends the reader to the reference button and G for books and chapters, over the new layout', () =>
-    withFreshApp({}, async (app) => {
-        // The page behind it is the chapter, with the sidebar beside it.
-        assert.equal(app.document.querySelector('header'), null);
-        assert.equal(app.document.getElementById('picker').hidden, false);
-        assert.equal(app.document.getElementById('ref-text').textContent, 'Genesis 1 · KJV');
-        const items = [...app.document.querySelectorAll('#welcome-text-2 li')].map((li) => li.textContent);
-        assert.equal(items[2], 'Choose a book and chapter from the reference at the top left, or press G. Random chapter is there too.');
-        const tour = app.document.getElementById('welcome-panel').textContent;
-        assert.ok(!/at the top, or try Random chapter/.test(tour), 'nothing points at the old book grid');
-        // And while it's open, G is the welcome's, like every other key.
-        app.key('g', {}, app.document.body);
-        assert.equal(app.document.activeElement, button(app, 'next'));
+test('the places to start are text, never markup', () =>
+    withApp({
+        fresh: true,
+        alter: { get_home: (home) => ({ ...home, startHere: [{ bookId: 41, chapter: 1, title: '<b>Mark</b>', line: '<img src=x onerror=alert(1)>' }] }) },
+    }, async (app) => {
+        await app.until(() => isOpen(app), 'the welcome');
+        const row = rows(app)[0];
+        assert.equal(row.querySelector('.welcome-start-title').textContent, '<b>Mark</b>');
+        assert.equal(row.querySelector('img, b'), null);
     }));
