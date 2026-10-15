@@ -24,17 +24,19 @@ webp "$raw/search.png" "$out/search-1440.webp" -crop 1440x1300+560+0 +repage
 webp "$raw/search.png" "$out/search-720.webp" -crop 1440x1300+560+0 +repage -resize 720x
 
 # Hero: the reading view cropped to John 3, with the edges of the faded
-# neighbouring chapters (John 2 and John 4) on either side.
-webp "$raw/reading.png" "$out/hero-1400.webp" -crop 1760x1350+400+250 +repage -resize 1400x
-webp "$raw/reading.png" "$out/hero-700.webp" -crop 1760x1350+400+250 +repage -resize 700x
+# neighbouring chapters (John 2 and John 4) on either side, right of the
+# picker's sidebar and below the top bar.
+webp "$raw/reading.png" "$out/hero-1400.webp" -crop 1760x1350+664+130 +repage -resize 1400x
+webp "$raw/reading.png" "$out/hero-700.webp" -crop 1760x1350+664+130 +repage -resize 700x
 
 # Themes: the centre column's heading and first verses of Psalm 23, below
-# the app's top bar. A theme that wasn't captured this time keeps its
-# existing tile.
-for theme in vaporwave classic-dark classic-light matrix beast-slayer hot-pink; do
+# the app's top bar, between the neighbouring chapters. A theme that wasn't
+# captured this time keeps its existing tile.
+for theme in chi-rho vellum vaporwave classic-dark classic-light matrix beast-slayer hot-pink; do
     [ -f "$raw/theme-$theme.png" ] || continue
-    webp "$raw/theme-$theme.png" "$out/theme-$theme.webp" -crop 1060x640+750+148 +repage -resize 720x
+    webp "$raw/theme-$theme.png" "$out/theme-$theme.webp" -crop 940x568+1074+137 +repage -resize 720x
 done
 
-# Open Graph / social preview: 1200x630 from the reading view.
-magick "$raw/reading.png" -resize 1600x -crop 1200x630+200+120 +repage -strip -quality 85 "$out/og-image.jpg"
+# Open Graph / social preview: 1200x630 from the reading view, John 3
+# centred.
+magick "$raw/reading.png" -resize 1600x -crop 1200x630+365+68 +repage -strip -quality 85 "$out/og-image.jpg"

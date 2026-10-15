@@ -56,8 +56,11 @@ version bump: until a release has those names, the links 404.
 - The screenshots are the real app (`ui/index.html`) showing the real
   bundled KJV and WEB text, in WebKitGTK, the engine the Linux app uses.
   The feature screenshots (hero, search, copy, bookmark and note, compare, and
-  `og-image.jpg`) are in the Matrix theme; the "Make it yours" strip shows
-  all six themes.
+  `og-image.jpg`) are in Chi Rho, the app's default theme, in a 1280×800
+  window, where the book and chapter picker is a sidebar; the "Make it
+  yours" strip shows every theme but System, which is Chi Rho or Vellum as
+  the computer is set. The README's screenshots (`screenshots/`) come from
+  the same script with `--readme`, at their final sizes.
   `tools/site/capture_screenshots.py` loads the page offscreen and answers
   its Tauri calls with the app's real command code, through the frontend
   tests' bridge (`src-tauri/examples/frontend_bridge.rs`) and a throwaway
@@ -68,12 +71,13 @@ version bump: until a release has those names, the links 404.
 
   ```bash
   cargo build --manifest-path src-tauri/Cargo.toml --example frontend_bridge
-  python3 tools/site/capture_screenshots.py /tmp/gg-raw            # everything
-  python3 tools/site/capture_screenshots.py /tmp/gg-raw reading search compare select
+  PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py /tmp/gg-raw            # everything
+  PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py /tmp/gg-raw reading search compare select
   tools/site/build_images.sh /tmp/gg-raw
+  PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py --readme screenshots   # the README's, in place
   ```
 
-  `--theme NAME` sets the feature screenshots' theme (default `matrix`);
+  `--theme NAME` sets the feature screenshots' theme (default `chi-rho`);
   naming scenes captures only those, and `build_images.sh` leaves any
   theme tile it has no capture for as it is. Every capture marks the
   first-run welcome as seen and sets no highlights, and fails if either
