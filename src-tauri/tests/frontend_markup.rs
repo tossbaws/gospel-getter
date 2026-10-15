@@ -60,7 +60,7 @@ fn mobile_breakpoint_hides_chapter_side_neighbors() {
 /// Regression guard for GH-6: printing a chapter should hide all page
 /// chrome (the top bar and its popovers, the Library, the dialogs and the
 /// toast, the book and chapter picker, neighboring chapter panes,
-/// nav hint, footer, cross-reference popups) but must
+/// nav hint, the chapter's end buttons, cross-reference popups) but must
 /// never target the reading content itself — the chapter heading and
 /// verses are the whole point of printing the page.
 #[test]
@@ -81,7 +81,7 @@ fn print_stylesheet_hides_chrome_but_not_reading_content() {
         ".picker",
         ".chapter-side",
         ".nav-hint",
-        "footer",
+        ".chapter-end",
         ".xref-popup",
     ] {
         assert!(
@@ -663,7 +663,6 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
         ".sidebar-toggle",
         ".chapter-side",
         ".nav-hint",
-        "footer",
         "#library-toggle",
         "#menu-toggle",
     ] {
@@ -2448,5 +2447,190 @@ fn the_picker_uses_tested_theme_colors() {
                 && r.body.contains("outline: 2px solid var(--accent)")),
             "{focus} has the focus ring"
         );
+    }
+}
+
+// ---- Tier 2: the reading flow ----------------------------------------
+
+/// The script's source from `needle` to the end of that function's body.
+fn function_body(name: &str) -> &'static str {
+    block_after(HTML, &format!("function {name}("))
+}
+
+/// The chapter ends with a next step: the backend's previous and next
+/// chapters (so books are crossed) as two large buttons in the UI sans,
+/// straight after the verses (or the compare grid), in a labelled
+/// navigation landmark; only the one there is at Genesis 1 and
+/// Revelation 22. The keys' hint is one quiet line under them, inside the
+/// chapter.
+#[test]
+fn the_chapter_ends_with_buttons_to_the_chapters_around_it() {
+    let end = function_body("renderChapterEnd");
+    assert!(end.contains(r#"<nav class="chapter-end" aria-label="Previous and next chapter">"#));
+    assert!(
+        end.contains("if (!side) return '';"),
+        "one button per neighbour there is"
+    );
+    assert!(end.contains("step(dto.prev, 'prev')}${step(dto.next, 'next')"));
+    assert!(end.contains(r#"class="chapter-step chapter-step-${which}""#));
+    assert!(end.contains(r#"data-book="${side.bookId}" data-chapter="${side.chapter}""#));
+    assert!(end.contains(r#"<p class="nav-hint">"#));
+    let pane = function_body("renderReadingPane");
+    let body = pane.find("${body}").expect("the verses");
+    let after = pane.find("${renderChapterEnd(dto)}").expect("the buttons");
+    let lists = pane.find("${renderFootnoteSummary(dto, compare)}").unwrap();
+    assert!(
+        body < after && after < lists,
+        "after the verses, before the lists"
+    );
+    let rules = rules();
+    let step = screen_rule(&rules, ".chapter-step");
+    assert!(step.body.contains("font-family: var(--font-ui)"));
+    assert!(step.body.contains("min-height: 3rem"), "large");
+    assert!(
+        rules
+            .iter()
+            .any(|r| r.selector == ".chapter-step:focus-visible" && r.body.contains("outline")),
+        "a visible focus ring"
+    );
+    // Reading mode keeps them (it hides only the hint), and print drops them.
+    let reading_mode_hidden: Vec<&str> = rules
+        .iter()
+        .filter(|r| {
+            r.at_rule.as_deref() == Some("@media screen") && r.body.contains("display: none")
+        })
+        .flat_map(selectors)
+        .collect();
+    assert!(reading_mode_hidden.contains(&r#":root[data-reader-mode="on"] .nav-hint"#));
+    assert!(
+        !reading_mode_hidden
+            .iter()
+            .any(|s| s.contains(".chapter-end") || s.contains(".chapter-step"))
+    );
+    assert!(block_after(HTML, "@media print").contains(".chapter-end"));
+}
+
+/// The tagline footer is gone; nothing in the page or stylesheet is left
+/// for it.
+#[test]
+fn there_is_no_tagline() {
+    assert!(!HTML.contains("<footer"));
+    assert!(!HTML.contains("whole counsel of God"));
+    assert!(
+        !rules()
+            .iter()
+            .any(|r| selectors(r).any(|s| s == "footer" || s.ends_with(" footer")))
+    );
+}
+
+/// Footnotes and Cross references are disclosures: a button with
+/// aria-expanded controlling its list, closed unless the reader opened
+/// that kind before (one remembered state per kind, read for every
+/// chapter). Printing opens both.
+#[test]
+fn footnotes_and_cross_references_are_disclosures_closed_by_default() {
+    let keys = block_after(HTML, "const DISCLOSURE_KEYS =");
+    assert!(keys.contains("footnotes: 'gospel-getter-footnotes'"));
+    assert!(keys.contains("xrefs: 'gospel-getter-cross-references'"));
+    let open = function_body("disclosureOpen");
+    assert!(open.contains("=== 'open'"), "closed unless saved open");
+    assert!(
+        open.contains("return false;"),
+        "closed when storage can't be read"
+    );
+    let toggle = function_body("disclosureToggle");
+    assert!(toggle.contains(r#"<button type="button" class="disclosure-toggle""#));
+    assert!(toggle.contains(r#"aria-expanded="${disclosureOpen(kind)}""#));
+    assert!(toggle.contains(r#"aria-controls="${controls}""#));
+    for (function, kind, title) in [
+        (
+            "renderFootnoteSummary",
+            "footnotes",
+            "`Footnotes (${count})`",
+        ),
+        (
+            "renderXrefSummary",
+            "xrefs",
+            "`Cross references (${count})`",
+        ),
+    ] {
+        let body = function_body(function);
+        assert!(
+            body.contains(&format!("disclosureToggle('{kind}'")),
+            "{function}"
+        );
+        assert!(body.contains(title), "{function}");
+        assert!(
+            body.contains(&format!("disclosureOpen('{kind}') ? '' : ' hidden'")),
+            "{function}: the list is hidden while closed"
+        );
+    }
+    let set = function_body("setDisclosure");
+    assert!(set.contains("localStorage.setItem(DISCLOSURE_KEYS[kind]"));
+    let print = block_after(HTML, "@media print");
+    let open_in_print = print
+        .find(".disclosure-body[hidden]")
+        .expect("print opens them");
+    assert!(print[open_in_print..].contains("display: block !important"));
+}
+
+/// Everything the chapter's end adds is in tested colors: the buttons are
+/// --accent on the opaque --option-bg (Vaporwave's --panel-bg lets its
+/// gradient through), the disclosure toggles --text on the page (their
+/// chevron, a mark, --accent, at least 3:1), and the hint --text on the
+/// page (quiet by its size), all AA over every stop of every theme's
+/// background (Vaporwave's over its --option-bg).
+#[test]
+fn the_chapter_end_uses_tested_theme_colors() {
+    let rules = rules();
+    for (selector, declarations) in [
+        (
+            ".chapter-step",
+            &["color: var(--accent)", "background: var(--option-bg)"][..],
+        ),
+        (
+            ".disclosure-toggle",
+            &["color: var(--text)", "background: none"][..],
+        ),
+        (".disclosure-chevron", &["color: var(--accent)"][..]),
+        (".nav-hint", &["color: var(--text)"][..]),
+    ] {
+        let rule = screen_rule(&rules, selector);
+        for declaration in declarations {
+            assert!(rule.body.contains(declaration), "{selector}: {declaration}");
+        }
+    }
+    for (theme, props) in theme_palettes(&rules) {
+        let option = property(&props, "--option-bg").to_owned();
+        // No plain color is AA over all of Vaporwave's gradient (see
+        // `no_plain_color_is_aa_over_all_of_vaporwave`); its page text is
+        // held to its opaque surface, as the palette test does.
+        let grounds = if theme == "vaporwave" {
+            vec![option.clone()]
+        } else {
+            backgrounds(&props)
+        };
+        for bg in grounds {
+            for (what, fg, under) in [
+                (
+                    "a chapter button",
+                    property(&props, "--accent"),
+                    option.as_str(),
+                ),
+                ("a disclosure", property(&props, "--text"), bg.as_str()),
+                ("the hint", property(&props, "--text"), bg.as_str()),
+            ] {
+                let ratio = contrast_ratio(fg, under);
+                assert!(
+                    ratio >= 4.5,
+                    "theme `{theme}`: {what} is {ratio:.2}:1 on {under}"
+                );
+            }
+            let chevron = contrast_ratio(property(&props, "--accent"), &bg);
+            assert!(
+                chevron >= 3.0,
+                "theme `{theme}`: a chevron is {chevron:.2}:1 on {bg}"
+            );
+        }
     }
 }

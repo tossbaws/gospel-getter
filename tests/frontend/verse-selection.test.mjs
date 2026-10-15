@@ -304,7 +304,7 @@ test('clicking elsewhere or the selected verse again clears the selection', () =
         assert.deepEqual(app.selectedVerseNumbers(), []);
 
         app.click(app.verse(16));
-        app.click(app.document.querySelector('footer'));
+        app.click(app.document.querySelector('.chapter-main .chapter-heading'));
         assert.deepEqual(app.selectedVerseNumbers(), []);
         assert.equal(app.actions(), null);
 

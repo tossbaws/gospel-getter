@@ -53,7 +53,7 @@ test('/ and Ctrl+K open search, Escape closes it', () =>
 
         app.click(toggle);
         assert.equal(panel.hidden, false);
-        app.click(app.document.querySelector('footer'));
+        app.click(app.document.querySelector('.chapter-main .chapter-heading'));
         assert.equal(panel.hidden, true, 'clicking away closes it');
     }));
 

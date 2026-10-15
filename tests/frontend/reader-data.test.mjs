@@ -384,7 +384,7 @@ test('while the preview is open, Tab stays in it and shortcuts do nothing', () =
         assert.ok(!app.isComparing());
         assert.ok(app.searchPanel().hidden);
         // Clicking the page behind does nothing either.
-        app.click(app.document.querySelector('footer'));
+        app.click(app.document.querySelector('.chapter-main .chapter-heading'));
         assert.ok(overlayOpen(app));
     }));
 

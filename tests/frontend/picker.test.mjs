@@ -271,7 +271,7 @@ test('on a narrow window the reference button opens a popover dialog; choosing a
         app.click(refBtn(app));
         assert.equal(picker(app).hidden, true);
         app.click(refBtn(app));
-        app.click(app.document.querySelector('footer'));
+        app.click(app.document.querySelector('.chapter-main .chapter-heading'));
         assert.equal(picker(app).hidden, true);
         assert.equal(app.document.activeElement, refBtn(app));
         assert.deepEqual(app.consoleErrors, []);

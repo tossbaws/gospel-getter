@@ -2048,8 +2048,7 @@
             :root[data-reader-mode="on"] #menu-toggle,
             :root[data-reader-mode="on"] .sidebar-toggle,
             :root[data-reader-mode="on"] .chapter-side,
-            :root[data-reader-mode="on"] .nav-hint,
-            :root[data-reader-mode="on"] footer {
+            :root[data-reader-mode="on"] .nav-hint {
                 display: none;
             }
 
@@ -2894,7 +2893,6 @@
             font-size: 1rem;
             font-weight: normal;
             color: var(--accent);
-            margin-bottom: 0.6rem;
         }
 
         /* The chapter's Cross References and Footnotes lists: a verse
@@ -2965,7 +2963,6 @@
             font-size: 1rem;
             font-weight: normal;
             color: var(--accent);
-            margin-bottom: 0.6rem;
         }
 
         .footnote-row {
@@ -3003,19 +3000,101 @@
             margin-right: 0.3rem;
         }
 
-        footer {
-            text-align: center;
-            margin-top: 3rem;
-            font-size: 0.75rem;
-            font-style: italic;
-            color: var(--text-dim);
+        /* The chapter ends with a next step: the chapters before and
+           after it, as two large buttons in the UI sans (only the one
+           there is, at Genesis 1 and Revelation 22), then the keys' hint
+           in one quiet line. */
+        .chapter-end {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 2rem;
+            font-family: var(--font-ui);
         }
 
+        .chapter-step {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.6rem;
+            min-height: 3rem;
+            padding: 0.6rem 1.25rem;
+            font-family: var(--font-ui);
+            font-size: 1rem;
+            color: var(--accent);
+            background: var(--option-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-l);
+            cursor: pointer;
+        }
+
+        .chapter-step-next {
+            margin-left: auto;
+        }
+
+        .chapter-step:hover {
+            border-color: var(--accent);
+        }
+
+        .chapter-step:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        /* Quiet by its size: --text-dim isn't AA at the deep end of
+           Beast Slayer's and Hot Pink's gradients. */
         .nav-hint {
             text-align: center;
+            font-family: var(--font-ui);
             font-size: 0.75rem;
-            color: var(--text-dim);
-            margin-top: 0.5rem;
+            color: var(--text);
+            margin-top: 0.75rem;
+        }
+
+        /* The chapter's Footnotes and Cross references are disclosures,
+           closed until opened; each kind remembers being opened or closed
+           for every chapter. Printing opens both. */
+        .disclosure-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.2rem 0;
+            font-family: var(--font-ui);
+            font-size: 1rem;
+            font-weight: normal;
+            color: var(--text);
+            background: none;
+            border: none;
+            cursor: pointer;
+        }
+
+        .disclosure-toggle:hover {
+            text-decoration: underline;
+        }
+
+        .disclosure-toggle:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+            border-radius: var(--radius-s);
+        }
+
+        /* In --accent, as a mark (3:1 is enough, and every theme's
+           --accent is), with the label in --text. */
+        .disclosure-chevron {
+            color: var(--accent);
+            width: 0.45rem;
+            height: 0.45rem;
+            border-right: 2px solid currentColor;
+            border-bottom: 2px solid currentColor;
+            transform: rotate(-45deg);
+            transition: transform 0.15s;
+        }
+
+        .disclosure-toggle[aria-expanded="true"] .disclosure-chevron {
+            transform: rotate(45deg);
+        }
+
+        .disclosure-body {
+            margin-top: 0.6rem;
         }
 
         /* Printing should show just the chapter being read — its heading
@@ -3063,7 +3142,8 @@
             .picker,
             .chapter-side,
             .nav-hint,
-            footer,
+            .chapter-end,
+            .disclosure-chevron,
             .xref-popup,
             .verse-actions,
             .verse-notes,
@@ -3097,6 +3177,17 @@
             .chapter-main .verse.verse-selected {
                 background: none !important;
                 box-shadow: none !important;
+            }
+
+            /* Footnotes and Cross references print open, whatever they
+               show on screen. */
+            .disclosure-body[hidden] {
+                display: block !important;
+            }
+
+            .disclosure-toggle {
+                padding: 0;
+                color: #000000 !important;
             }
         }
     </style>
@@ -4140,10 +4231,6 @@
         <p id="reader-notice" class="reader-notice" role="status" hidden></p>
 
         <div id="reading-pane"></div>
-
-        <p class="nav-hint">Use &larr; and &rarr; to move a chapter at a time, / to search, C to compare translations.</p>
-
-        <footer>Gospel Getter &mdash; read the whole counsel of God, one chapter at a time.</footer>
     </main>
 
     <script>
@@ -6342,6 +6429,57 @@
                 return lemma + escapeHtml(f.rest);
             }
 
+            // ---- The chapter's Footnotes and Cross references: each is a
+            // disclosure, closed by default, and each kind remembers being
+            // opened or closed (for every chapter, not per chapter), in
+            // this webview's storage like the display settings. It isn't
+            // exported: it's how this window was left, not a setting.
+            const DISCLOSURE_KEYS = { footnotes: 'gospel-getter-footnotes', xrefs: 'gospel-getter-cross-references' };
+
+            function disclosureOpen(kind) {
+                try {
+                    return localStorage.getItem(DISCLOSURE_KEYS[kind]) === 'open';
+                } catch (e) {
+                    return false;
+                }
+            }
+
+            function disclosureToggle(kind, controls, label) {
+                return `<button type="button" class="disclosure-toggle" data-disclosure="${kind}" aria-expanded="${disclosureOpen(kind)}" aria-controls="${controls}"><span class="disclosure-chevron" aria-hidden="true"></span>${label}</button>`;
+            }
+
+            // Opens or closes every disclosure of that kind on screen (both
+            // columns' footnotes while comparing), and remembers it.
+            function setDisclosure(kind, open) {
+                try {
+                    localStorage.setItem(DISCLOSURE_KEYS[kind], open ? 'open' : 'closed');
+                } catch (e) {}
+                document.querySelectorAll(`.disclosure-toggle[data-disclosure="${kind}"]`).forEach((toggle) => {
+                    toggle.setAttribute('aria-expanded', String(open));
+                    const body = document.getElementById(toggle.getAttribute('aria-controls'));
+                    if (body) body.hidden = !open;
+                });
+            }
+
+            // The chapter's next step, after its last verse: the chapters
+            // before and after it (the backend's prev and next, so books
+            // are crossed, Genesis 50 into Exodus 1), as two large
+            // buttons; Genesis 1 has only the one forward, Revelation 22
+            // only the one back. Then the keys' hint.
+            function renderChapterEnd(dto) {
+                const step = (side, which) => {
+                    if (!side) return '';
+                    const name = `${escapeHtml(side.bookName)} ${side.chapter}`;
+                    const label = `${name}, ${which === 'prev' ? 'previous' : 'next'} chapter`;
+                    const text = which === 'prev'
+                        ? `<span aria-hidden="true">&larr;</span> ${name}`
+                        : `${name} <span aria-hidden="true">&rarr;</span>`;
+                    return `<button type="button" class="chapter-step chapter-step-${which}" data-book="${side.bookId}" data-chapter="${side.chapter}" aria-label="${label}">${text}</button>`;
+                };
+                return `<nav class="chapter-end" aria-label="Previous and next chapter">${step(dto.prev, 'prev')}${step(dto.next, 'next')}</nav>
+                    <p class="nav-hint">Use &larr; and &rarr; to move a chapter at a time, / to search, C to compare translations.</p>`;
+            }
+
             // The footnotes of the chapter being read, one row each
             // ("119:105a lamp: or, candle"), for every column on screen
             // that has any: the KJV's, while reading or comparing it.
@@ -6360,10 +6498,12 @@
                             </div>`))
                             .join('');
                         if (!rows) return '';
-                        const title = compare ? `Footnotes (${escapeHtml(c.code.toUpperCase())})` : 'Footnotes';
-                        return `<div class="footnote-summary" data-code="${escapeHtml(c.code.toUpperCase())}">
-                            <h3 class="footnote-summary-title">${title}</h3>
-                            <div class="footnote-list">${rows}</div>
+                        const count = c.verses.reduce((n, v) => n + (v.footnotes || []).length, 0);
+                        const code = escapeHtml(c.code.toUpperCase());
+                        const title = compare ? `${code} footnotes (${count})` : `Footnotes (${count})`;
+                        return `<div class="footnote-summary" data-code="${code}">
+                            <h3 class="footnote-summary-title">${disclosureToggle('footnotes', `footnote-list-${escapeHtml(c.code)}`, title)}</h3>
+                            <div class="footnote-list disclosure-body" id="footnote-list-${escapeHtml(c.code)}"${disclosureOpen('footnotes') ? '' : ' hidden'}>${rows}</div>
                         </div>`;
                     })
                     .join('');
@@ -6381,9 +6521,10 @@
                         </div>`;
                     })
                     .join('');
+                const count = dto.currentVerses.reduce((n, v) => n + v.xrefs.length, 0);
                 return `<div class="xref-summary">
-                    <h3 class="xref-summary-title">Cross References</h3>
-                    <div class="xref-summary-list">${rows}</div>
+                    <h3 class="xref-summary-title">${disclosureToggle('xrefs', 'xref-summary-list', `Cross references (${count})`)}</h3>
+                    <div class="xref-summary-list disclosure-body" id="xref-summary-list"${disclosureOpen('xrefs') ? '' : ' hidden'}>${rows}</div>
                     <p class="xref-credit">Cross-reference data from <a href="https://www.openbible.info/labs/cross-references/" target="_blank" rel="noopener noreferrer">OpenBible.info</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
                 </div>`;
             }
@@ -6431,6 +6572,7 @@
                         <section class="chapter-main">
                             <h2 class="chapter-heading">${escapeHtml(dto.currentBookName)} ${dto.currentChapter}</h2>
                             ${body}
+                            ${renderChapterEnd(dto)}
                             ${renderFootnoteSummary(dto, compare)}
                             ${renderXrefSummary(dto)}
                         </section>
@@ -6809,6 +6951,21 @@
                     return;
                 }
                 if (event.target.closest('.verse-notes')) {
+                    return;
+                }
+
+                // The chapter's end: the chapter before or after, from its
+                // top.
+                const step = event.target.closest('.chapter-step');
+                if (step) {
+                    loadReading(step.dataset.book, step.dataset.chapter).then((loaded) => {
+                        if (loaded) window.scrollTo(0, 0);
+                    });
+                    return;
+                }
+                const disclosure = event.target.closest('.disclosure-toggle');
+                if (disclosure) {
+                    setDisclosure(disclosure.dataset.disclosure, disclosure.getAttribute('aria-expanded') !== 'true');
                     return;
                 }
 

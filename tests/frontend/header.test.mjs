@@ -74,12 +74,12 @@ test('a click outside closes Aa and the menu, but the Library stays while the re
             app.click(app.surface(name).querySelector('button'));
             if (name === 'aa') assert.ok(isOpen(app, name), 'a click inside Aa keeps it open');
             app.open(name);
-            app.click(app.document.querySelector('footer'));
+            app.click(app.document.querySelector('.chapter-main .chapter-heading'));
             assert.ok(!isOpen(app, name), `${name} closes`);
             assert.equal(app.document.activeElement, toggle(app, name), 'focus returns to the button');
         }
         app.open('library');
-        app.click(app.document.querySelector('footer'));
+        app.click(app.document.querySelector('.chapter-main .chapter-heading'));
         app.click(app.verse(16));
         assert.ok(isOpen(app, 'library'));
         // Clicking in the Library isn't a click away from the verse selection.

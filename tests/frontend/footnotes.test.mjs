@@ -103,7 +103,7 @@ test('the Footnotes section lists the chapter’s footnotes, above Cross Referen
     withApp({ book: 'Psalms', chapter: 23, translation: 'kjv' }, async (app) => {
         const section = summary(app);
         assert.ok(section);
-        assert.equal(section.querySelector('h3').textContent, 'Footnotes');
+        assert.equal(section.querySelector('h3').textContent, 'Footnotes (4)');
         assert.deepEqual(summaryRows(app), PSALM_23);
         assert.ok(section.nextElementSibling.classList.contains('xref-summary'), 'right above Cross References');
         assert.equal(section.closest('.chapter-main').querySelectorAll('.footnote-summary').length, 1);
@@ -289,7 +289,7 @@ test('comparing: the KJV column has the markers, and the section is the KJV’s,
         assert.equal(app.verse(2, 'web').querySelector('.verse-text').textContent, storedVerse('web', 'Psalms', 23, 2));
 
         const section = summary(app);
-        assert.equal(section.querySelector('h3').textContent, 'Footnotes (KJV)');
+        assert.equal(section.querySelector('h3').textContent, 'KJV footnotes (4)');
         assert.deepEqual(summaryRows(app), PSALM_23);
         assert.ok(section.nextElementSibling.classList.contains('xref-summary'));
 
