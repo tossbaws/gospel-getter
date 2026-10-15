@@ -580,6 +580,14 @@
             text-decoration: underline;
         }
 
+        /* A row that has no effect for now (Layout, while comparing): the
+           choice still shows, pressed; the others are quiet. */
+        .segment:disabled {
+            color: var(--text-dim);
+            text-decoration: none;
+            cursor: default;
+        }
+
         .segment[aria-pressed="true"] {
             background: var(--accent);
             color: var(--on-accent);
@@ -2571,7 +2579,7 @@
         /* Every verse of the chapter being read is selectable (click, then
            Shift-click to extend). The faded neighbors aren't: they stay
            plain text. */
-        .chapter-main > .verse {
+        .chapter-main .chapter-text > .verse {
             cursor: pointer;
         }
 
@@ -2581,6 +2589,59 @@
             background: rgba(var(--accent-rgb), 0.12);
             border-radius: var(--radius-s);
             box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
+        }
+
+        /* Flowing (Aa's Layout): the chapter runs on as prose, in the
+           chapter being read, its faded neighbors and reading mode, and
+           when printed. Each verse is an inline run of the one paragraph,
+           its number small and raised in the quiet --accent-2 (as
+           --verse-num-color), a space between verses. Presentation only:
+           the verses are the same elements, with the same text. Compare
+           has no .chapter-text (its grid is a verse to a row), so it's
+           untouched. */
+        :root[data-layout="flowing"] .chapter-text {
+            font-family: var(--font-scripture);
+            font-size: calc(1.05rem * var(--reading-scale));
+            line-height: var(--reading-leading);
+            color: var(--text);
+            margin-bottom: 0.5rem;
+        }
+
+        :root[data-layout="flowing"] .chapter-side .chapter-text {
+            font-size: calc(0.9rem * var(--reading-scale));
+            line-height: calc(var(--reading-leading) - 0.1);
+        }
+
+        :root[data-layout="flowing"] .chapter-text > .verse {
+            display: inline;
+            margin: 0;
+        }
+
+        /* Raised without raising the line: no line height of its own. */
+        :root[data-layout="flowing"] .chapter-text > .verse > .verse-num {
+            display: inline;
+            min-width: 0;
+            line-height: 0;
+            margin-right: 0.2em;
+        }
+
+        /* A verse's own runs, line by line: the selection tint, and on
+           hover a fainter wash, so where one verse ends is clear without
+           chopping up the text. Both keep --text at AA in every theme
+           (see the palette tests). */
+        :root[data-layout="flowing"] .chapter-main .chapter-text > .verse {
+            border-radius: var(--radius-s);
+            -webkit-box-decoration-break: clone;
+            box-decoration-break: clone;
+        }
+
+        :root[data-layout="flowing"] .chapter-main .chapter-text > .verse:hover {
+            background: rgba(var(--accent-rgb), 0.06);
+        }
+
+        :root[data-layout="flowing"] .chapter-main .chapter-text > .verse.verse-selected {
+            background: rgba(var(--accent-rgb), 0.12);
+            box-shadow: none;
         }
 
         /* Actions for the current verse selection. Shown under the last
@@ -3469,6 +3530,17 @@
                     values: ['narrow', 'normal', 'wide'],
                     renamed: {},
                 },
+                // How a chapter is set: a verse to a line, as it always
+                // was, or flowing on as prose. Compare keeps a verse to a
+                // row whichever is chosen (see .chapter-text).
+                layout: {
+                    key: 'gospel-getter-layout',
+                    attr: 'layout',
+                    select: 'layout-select',
+                    fallback: 'verses',
+                    values: ['verses', 'flowing'],
+                    renamed: {},
+                },
                 readerMode: {
                     key: 'gospel-getter-reader-mode',
                     attr: 'readerMode',
@@ -3940,6 +4012,9 @@
                 var lineSpacingChoices = byId('line-spacing-choices');
                 var widthSelect = byId('width-select');
                 var widthChoices = byId('width-choices');
+                var layoutSelect = byId('layout-select');
+                var layoutChoices = byId('layout-choices');
+                var layoutNote = byId('layout-note');
                 var themeChoices = byId('theme-choices');
                 var textSizeDown = byId('text-size-down');
                 var textSizeUp = byId('text-size-up');
@@ -3970,6 +4045,9 @@
                 });
                 optionsOf(widthSelect).forEach(function (option) {
                     widthChoices.appendChild(segmentButton(option, option.textContent));
+                });
+                optionsOf(layoutSelect).forEach(function (option) {
+                    layoutChoices.appendChild(segmentButton(option, option.textContent));
                 });
 
                 optionsOf(themeSelect).forEach(function (option) {
@@ -4011,7 +4089,15 @@
                     setPressed(translationChoices, translationSelect.value);
                     setPressed(lineSpacingChoices, lineSpacingSelect.value);
                     setPressed(widthChoices, widthSelect.value);
+                    setPressed(layoutChoices, layoutSelect.value);
                     setPressed(themeChoices, themeSelect.value);
+                    // While comparing, Layout is kept but has no effect, so
+                    // its buttons are disabled and a note says why.
+                    var comparing = root.dataset.compare === 'on';
+                    [].slice.call(layoutChoices.querySelectorAll('button')).forEach(function (btn) {
+                        btn.disabled = comparing;
+                    });
+                    layoutNote.hidden = !comparing;
                     var theme = themeSelect.options[themeSelect.selectedIndex];
                     byId('theme-name').textContent = theme ? theme.textContent : '';
                     var sizes = textSizeSelect.options;
@@ -4031,8 +4117,8 @@
                     if (option) choose(textSizeSelect, option.value);
                 }
 
-                [translationChoices, lineSpacingChoices, widthChoices, themeChoices].forEach(function (group) {
-                    var select = { 'translation-choices': translationSelect, 'line-spacing-choices': lineSpacingSelect, 'width-choices': widthSelect, 'theme-choices': themeSelect }[group.id];
+                [translationChoices, lineSpacingChoices, widthChoices, layoutChoices, themeChoices].forEach(function (group) {
+                    var select = { 'translation-choices': translationSelect, 'line-spacing-choices': lineSpacingSelect, 'width-choices': widthSelect, 'layout-choices': layoutSelect, 'theme-choices': themeSelect }[group.id];
                     group.addEventListener('click', function (event) {
                         var btn = event.target.closest('button');
                         if (btn) choose(select, btn.dataset.value);
@@ -4109,8 +4195,19 @@
                     var select = document.getElementById(pref.select);
                     select.value = load(pref);
                     select.addEventListener('change', function () {
-                        apply(pref, select.value);
-                        store(pref, select.value);
+                        // A new layout reflows the whole chapter: keep the
+                        // reader's place, and let the main script move the
+                        // selection's card to its verses' new place.
+                        var change = function () {
+                            apply(pref, select.value);
+                            store(pref, select.value);
+                        };
+                        if (pref === PREFS.layout) {
+                            keepReadingPlace(change);
+                            document.dispatchEvent(new CustomEvent('gospel-getter:layout-change'));
+                        } else {
+                            change();
+                        }
                     });
                 });
 
@@ -4136,19 +4233,21 @@
                     apply(PREFS.compare, value);
                     store(PREFS.compare, value);
                     compareBtn.setAttribute('aria-pressed', String(value === 'on'));
+                    syncAa();
                     document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
                 });
 
                 // All display preferences at once, for exporting and
                 // importing them (Export data… and Import data… in the ☰
                 // menu). Names and values are the export file's: theme,
-                // text_size, line_spacing and width as Aa's option values,
-                // reading_mode and compare as true/false.
+                // text_size, line_spacing, width and layout as Aa's option
+                // values, reading_mode and compare as true/false.
                 var FILE_NAMES = {
                     theme: 'theme',
                     text_size: 'textSize',
                     line_spacing: 'lineSpacing',
                     width: 'width',
+                    layout: 'layout',
                     reading_mode: 'readerMode',
                     compare: 'compare',
                 };
@@ -4199,6 +4298,7 @@
                         });
                         readerModeBtn.setAttribute('aria-pressed', String(isReaderMode()));
                         compareBtn.setAttribute('aria-pressed', String(root.dataset.compare === 'on'));
+                        syncAa();
                         syncPicker();
                         if (compareChanged) document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
                         return { persisted: persisted };
@@ -4271,6 +4371,15 @@
                         <option value="narrow">Narrow</option>
                         <option value="normal">Normal</option>
                         <option value="wide">Wide</option>
+                    </select>
+                </div>
+                <div class="aa-section">
+                    <span class="section-label" id="layout-label">Layout</span>
+                    <div id="layout-choices" class="segmented" role="group" aria-labelledby="layout-label" aria-describedby="layout-note"></div>
+                    <p id="layout-note" class="section-note layout-note" hidden>Compare always shows a verse to a row.</p>
+                    <select id="layout-select" hidden>
+                        <option value="verses">Verses</option>
+                        <option value="flowing">Flowing</option>
                     </select>
                 </div>
                 <div class="aa-section">
@@ -4847,21 +4956,35 @@
             // It never covers the selected verses unless docked, and stays
             // inside the reading column: as wide as it, up to CARD_WIDTH, at
             // the selected verse's left edge where there's room (the
-            // selected column, while comparing).
+            // selected column, while comparing). In the Flowing layout a
+            // verse is a run of lines that can start and end mid-line, so
+            // "under" is under the last selected verse's last line, "above"
+            // is above the first one's first line, and the card starts at
+            // the column's left edge.
             const CARD_GAP = 8;
             const CARD_MIN = 120;
             const CARD_WIDTH = 544;
+
+            // The box of a verse's first or last line (its whole box when
+            // it's a block, a verse to a line).
+            function lineRect(verse, which) {
+                const rects = [...verse.getClientRects()].filter((r) => r.width > 0 || r.height > 0);
+                if (rects.length < 2) return verse.getBoundingClientRect();
+                return which === 'first' ? rects[0] : rects[rects.length - 1];
+            }
 
             function placeCard() {
                 if (!selectionCard.isConnected || !cardVerse) return;
                 const column = selectionCard.closest('.chapter-main');
                 const first = document.querySelector(`${SELECTABLE}.verse-selected`) || cardVerse;
+                const flowing = document.documentElement.dataset.layout === 'flowing'
+                    && cardVerse.parentElement.classList.contains('chapter-text');
                 const columnRect = column.getBoundingClientRect();
-                const firstRect = first.getBoundingClientRect();
-                const lastRect = cardVerse.getBoundingClientRect();
+                const firstRect = lineRect(first, 'first');
+                const lastRect = lineRect(cardVerse, 'last');
                 const bar = document.getElementById('top-bar').getBoundingClientRect().bottom;
                 const width = Math.min(columnRect.width, CARD_WIDTH) || columnRect.width;
-                const left = Math.max(0, Math.min(firstRect.left - columnRect.left, columnRect.width - width));
+                const left = flowing ? 0 : Math.max(0, Math.min(firstRect.left - columnRect.left, columnRect.width - width));
                 selectionCard.classList.remove('is-docked', 'is-above');
                 selectionCard.style.maxHeight = '';
                 selectionCard.style.width = width ? `${width}px` : '';
@@ -4897,6 +5020,8 @@
             }
 
             window.addEventListener('resize', placeCard);
+            // A new layout moves the selected verses.
+            document.addEventListener('gospel-getter:layout-change', placeCard);
             // The card grows as its notes load or a status line shows.
             if (typeof ResizeObserver === 'function') {
                 let lastHeight = 0;
@@ -6164,6 +6289,7 @@
                 if (prefs.text_size) parts.push(`${optionText('text-size-select', prefs.text_size).toLowerCase()} text`);
                 if (prefs.line_spacing) parts.push(`${optionText('line-spacing-select', prefs.line_spacing).toLowerCase()} line spacing`);
                 if (prefs.width) parts.push(`${optionText('width-select', prefs.width).toLowerCase()} width`);
+                if (prefs.layout) parts.push(`${optionText('layout-select', prefs.layout).toLowerCase()} layout`);
                 if (prefs.compare != null) parts.push(`compare ${prefs.compare ? 'on' : 'off'}`);
                 if (prefs.reading_mode != null) parts.push(`reading mode ${prefs.reading_mode ? 'on' : 'off'}`);
                 return parts;
@@ -6830,10 +6956,10 @@
                 if (!side) return '';
                 const verses = side.verses
                     .map((v) => `<p class="verse" data-book="${side.bookId}" data-chapter="${side.chapter}" data-verse="${v.number}"><span class="verse-num">${v.number}</span><span class="verse-text">${verseHtml(v, { markers: false })}</span></p>`)
-                    .join('');
+                    .join('\n');
                 return `<section>
                     <button type="button" class="chapter-heading-link" data-book="${side.bookId}" data-chapter="${side.chapter}">${escapeHtml(side.bookName)} ${side.chapter}</button>
-                    ${verses}
+                    <div class="chapter-text">${verses}</div>
                 </section>`;
             }
 
@@ -6858,9 +6984,7 @@
                 const hasXref = xrefs.length > 0;
                 const footnotes = v.footnotes || [];
                 const cue = footnotes.length ? '<span class="footnote-cue visually-hidden">(has footnotes) </span>' : '';
-                return `<p class="verse${hasXref ? ' has-xref' : ''}${footnotes.length ? ' has-footnotes' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}" data-translation="${escapeHtml(code)}" data-code="${escapeHtml(code.toUpperCase())}">
-                    <span class="verse-num">${v.number}</span>${cue}<span class="verse-text">${verseHtml(v)}</span>
-                </p>`;
+                return `<p class="verse${hasXref ? ' has-xref' : ''}${footnotes.length ? ' has-footnotes' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}" data-translation="${escapeHtml(code)}" data-code="${escapeHtml(code.toUpperCase())}"><span class="verse-num">${v.number}</span>${cue}<span class="verse-text">${verseHtml(v)}</span></p>`;
             }
 
             // A footnote's note as printed footnotes set it: the verse's
@@ -7010,9 +7134,13 @@
             function renderReadingPane(dto, compare) {
                 const prevAttrs = dto.prev ? ` data-prev-book="${dto.prev.bookId}" data-prev-chapter="${dto.prev.chapter}"` : '';
                 const nextAttrs = dto.next ? ` data-next-book="${dto.next.bookId}" data-next-chapter="${dto.next.chapter}"` : '';
+                // The verses, in .chapter-text: a verse to a line, or, in
+                // the Flowing layout, running on as prose, a space between
+                // verses (the newlines between them, which only show when
+                // they flow). Compare's grid is a verse to a row either way.
                 const body = compare
                     ? renderCompareGrid(dto, compare)
-                    : dto.currentVerses.map((v) => renderVerse(v, dto.currentBookId, dto.currentChapter, reading.translationCode, v.xrefs)).join('');
+                    : `<div class="chapter-text">${dto.currentVerses.map((v) => renderVerse(v, dto.currentBookId, dto.currentChapter, reading.translationCode, v.xrefs)).join('\n')}</div>`;
                 // While comparing, the columns take the place of the faded
                 // neighboring chapters; prev/next stay on the wrapper, so
                 // arrow keys work the same either way.

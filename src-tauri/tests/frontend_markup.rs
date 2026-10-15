@@ -639,6 +639,8 @@ fn reading_presets_scale_only_reading_content() {
                 [
                     ".verse",
                     ".chapter-side .verse",
+                    r#":root[data-layout="flowing"] .chapter-text"#,
+                    r#":root[data-layout="flowing"] .chapter-side .chapter-text"#,
                     ".verse-num",
                     ".chapter-heading",
                     ".compare-gap",
@@ -3122,4 +3124,206 @@ fn the_bible_s_edges_have_a_quiet_card_in_the_neighbor_s_place() {
             "no new colors"
         );
     }
+}
+
+/// Layout is a display setting in Aa, after Width: Verses (the default, a
+/// verse to a line as always) or Flowing. It's exported with the others.
+/// While comparing, its buttons are disabled and a note says why.
+#[test]
+fn layout_is_a_display_setting_in_aa() {
+    assert_eq!(
+        select_options("layout-select"),
+        [
+            ("verses".to_owned(), "Verses".to_owned()),
+            ("flowing".to_owned(), "Flowing".to_owned()),
+        ]
+    );
+    assert_eq!(script_preset("layout-select").1, "verses");
+    assert!(HTML.contains(r#"<span class="section-label" id="layout-label">Layout</span>"#));
+    assert!(HTML.contains(
+        r#"<div id="layout-choices" class="segmented" role="group" aria-labelledby="layout-label" aria-describedby="layout-note"></div>"#
+    ));
+    assert!(HTML.contains(
+        r#"<p id="layout-note" class="section-note layout-note" hidden>Compare always shows a verse to a row.</p>"#
+    ));
+    let width = HTML.find(r#"id="width-label""#).unwrap();
+    let layout = HTML.find(r#"id="layout-label""#).unwrap();
+    let theme = HTML.find(r#"id="theme-label""#).unwrap();
+    assert!(width < layout && layout < theme);
+    assert!(block_after(HTML, "var FILE_NAMES =").contains("layout: 'layout',"));
+    assert!(HTML.contains("btn.disabled = comparing;"));
+    assert!(HTML.contains("layoutNote.hidden = !comparing;"));
+
+    // A disabled segment is quiet but still AA: --text-dim on the
+    // segments' --panel-bg, over the popover's --option-bg.
+    let rules = rules();
+    let disabled = screen_rule(&rules, ".segment:disabled");
+    assert!(disabled.body.contains("color: var(--text-dim)"));
+    for (theme, props) in theme_palettes(&rules) {
+        let option_bg = property(&props, "--option-bg");
+        let panel = property(&props, "--panel-bg");
+        let behind = if panel.starts_with("rgba(") {
+            composite(panel, option_bg)
+        } else {
+            panel.to_owned()
+        };
+        let ratio = contrast_ratio(property(&props, "--text-dim"), &behind);
+        assert!(
+            ratio >= 4.5,
+            "theme `{theme}`: a disabled segment is {ratio:.2}:1"
+        );
+    }
+}
+
+/// Flowing runs each chapter's verses inline in one paragraph, in the
+/// chapter being read and the faded neighbors (and so reading mode and
+/// print, which show them). It keys off `.chapter-text`, which compare's
+/// grid doesn't have, so compare stays a verse to a row. The verse number
+/// is inline with no line height, so it can't open up its line.
+#[test]
+fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
+    let rules = rules();
+    let verse = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-text > .verse"#,
+    );
+    assert!(verse.body.contains("display: inline"));
+    assert!(verse.body.contains("margin: 0"));
+    let number = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-text > .verse > .verse-num"#,
+    );
+    for decl in ["display: inline", "min-width: 0", "line-height: 0"] {
+        assert!(number.body.contains(decl), "{decl}");
+    }
+    let text = screen_rule(&rules, r#":root[data-layout="flowing"] .chapter-text"#);
+    for decl in [
+        "font-family: var(--font-scripture)",
+        "font-size: calc(1.05rem * var(--reading-scale))",
+        "line-height: var(--reading-leading)",
+        "color: var(--text)",
+    ] {
+        assert!(text.body.contains(decl), "{decl}");
+    }
+    // The same size as a verse, in the center and the neighbors.
+    assert!(
+        screen_rule(&rules, ".verse")
+            .body
+            .contains("font-size: calc(1.05rem * var(--reading-scale))")
+    );
+    let side = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-side .chapter-text"#,
+    );
+    assert!(
+        side.body
+            .contains("font-size: calc(0.9rem * var(--reading-scale))")
+    );
+    // Only .chapter-text flows, and only the reading pane and the side
+    // chapters have one; compare's grid doesn't.
+    for rule in rules
+        .iter()
+        .filter(|r| r.selector.contains(r#"data-layout="flowing""#))
+    {
+        for selector in selectors(rule) {
+            assert!(selector.contains(".chapter-text"), "{selector}");
+            assert!(!selector.contains("compare"), "{selector}");
+        }
+    }
+    let pane = function_body("renderReadingPane");
+    assert!(pane.contains("? renderCompareGrid(dto, compare)"));
+    assert!(pane.contains(r#": `<div class="chapter-text">${dto.currentVerses.map("#));
+    assert!(!function_body("renderCompareGrid").contains("chapter-text"));
+    assert!(
+        function_body("renderSideChapter").contains(r#"<div class="chapter-text">${verses}</div>"#)
+    );
+    // Nothing in print touches the verses' display: printed, Flowing
+    // flows (and Verses stays a verse to a line).
+    for rule in rules
+        .iter()
+        .filter(|r| r.at_rule.as_deref() == Some("@media print"))
+    {
+        let names_a_verse = |selector: &str| {
+            selector
+                .split(|c: char| c.is_whitespace() || c == '>')
+                .any(|part| {
+                    part.starts_with(".chapter-text")
+                        || part.strip_prefix(".verse").is_some_and(|rest| {
+                            !rest.starts_with(|c: char| c.is_alphanumeric() || c == '-')
+                        })
+                })
+        };
+        let verses = selectors(rule).any(names_a_verse);
+        assert!(
+            !(verses && rule.body.contains("display")),
+            "print sets a verse's display: {}",
+            rule.selector
+        );
+    }
+}
+
+/// In Flowing, a verse shows where it starts and ends without boxes
+/// breaking up the text: a faint wash under the pointer and the selection
+/// tint, each on the verse's own lines. Over both, --text stays AA on every
+/// theme's background (each stop of a gradient one), and never less legible
+/// than on the bare page: Vaporwave's two lowest stops are under AA for its
+/// text already (3.93:1 on #bf5349), and the wash raises that.
+#[test]
+fn flowing_verses_wash_and_select_at_aa_in_every_theme() {
+    let rules = rules();
+    let hover = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-main .chapter-text > .verse:hover"#,
+    );
+    assert!(
+        hover
+            .body
+            .contains("background: rgba(var(--accent-rgb), 0.06)")
+    );
+    let selected = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-main .chapter-text > .verse.verse-selected"#,
+    );
+    assert!(
+        selected
+            .body
+            .contains("background: rgba(var(--accent-rgb), 0.12)")
+    );
+    assert!(selected.body.contains("box-shadow: none"));
+    let runs = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-main .chapter-text > .verse"#,
+    );
+    assert!(runs.body.contains("box-decoration-break: clone"));
+    for (theme, props) in theme_palettes(&rules) {
+        let accent_rgb = property(&props, "--accent-rgb");
+        for bg in backgrounds(&props) {
+            for alpha in ["0.06", "0.12"] {
+                let under = composite(&format!("rgba({accent_rgb}, {alpha})"), &bg);
+                let text = property(&props, "--text");
+                let ratio = contrast_ratio(text, &under);
+                let bare = contrast_ratio(text, &bg);
+                assert!(
+                    ratio >= 4.5_f64.min(bare),
+                    "theme `{theme}`: verse text over a {alpha} wash on {bg} is {ratio:.2}:1 \
+                     (on the bare page, {bare:.2}:1)"
+                );
+            }
+        }
+    }
+}
+
+/// The card's place in Flowing: under the last selected verse's last line
+/// and above the first one's first line (their line boxes, not the whole
+/// run's box), from the column's left edge. A new layout re-places it.
+#[test]
+fn the_selection_card_anchors_to_line_boxes_in_flowing() {
+    let place = function_body("placeCard");
+    assert!(place.contains("const firstRect = lineRect(first, 'first');"));
+    assert!(place.contains("const lastRect = lineRect(cardVerse, 'last');"));
+    assert!(place.contains("const left = flowing ? 0 :"));
+    let line = function_body("lineRect");
+    assert!(line.contains("verse.getClientRects()"));
+    assert!(HTML.contains("document.addEventListener('gospel-getter:layout-change', placeCard);"));
+    assert!(HTML.contains("keepReadingPlace(change);"));
 }

@@ -52,7 +52,8 @@ test('after the last verse come the chapters before and after, as buttons, then 
         assert.equal(end.tagName, 'NAV');
         // Straight after the verses, before the chapter's lists.
         const verses = main(app).querySelectorAll('.verse[data-translation]');
-        assert.equal(end.previousElementSibling, verses[verses.length - 1]);
+        assert.equal(end.previousElementSibling, main(app).querySelector('.chapter-text'));
+        assert.equal(end.previousElementSibling.lastElementChild, verses[verses.length - 1]);
         assert.ok(end.nextElementSibling.classList.contains('nav-hint'));
         const hint = end.nextElementSibling;
         assert.equal(hint.textContent.replace(/\s+/g, ' '), 'Use Left arrow and Right arrow to move a chapter at a time, / to search, C to compare translations.');
@@ -204,12 +205,16 @@ function layout(app, { innerHeight = 800, bar = 56, verses, cardHeight }) {
 
 test('selecting puts nothing into the column’s flow: the card floats, and the verses are untouched', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
-        const before = [...main(app).children];
+        const column = [...main(app).children];
+        const text = main(app).querySelector('.chapter-text');
+        const before = [...text.children];
         const html = before.map((el) => el.innerHTML);
         await clickAndWait(app, app.verse(16), 'list_notes');
-        const after = [...main(app).children];
-        // The only new element is the card, straight after the verse.
+        const after = [...text.children];
+        // The only new element is the card, straight after the verse; the
+        // column around the verses is as it was.
         assert.deepEqual(after.filter((el) => !before.includes(el)), [card(app)]);
+        assert.deepEqual([...main(app).children], column);
         assert.equal(card(app).previousElementSibling, app.verse(16));
         assert.equal(app.window.getComputedStyle(card(app)).position, 'absolute');
         // Every verse's own content is exactly as it was.
