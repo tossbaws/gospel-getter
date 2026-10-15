@@ -371,7 +371,7 @@
            from the next (WCAG's minimum target spacing). */
         html {
             --bar-height: 3.4rem;
-            --sidebar-width: 16.5rem;
+            --sidebar-width: 18rem;
             /* The reading column (Aa's Width): Normal is the width it has
                always had, 492px, 62 characters a line at the Medium text
                size in Literata (measured in WebKitGTK); Narrow is 416px (52)
@@ -2384,11 +2384,22 @@
         }
 
         /* Psalms, and any book over 50 chapters: a compact numeric grid,
-           ten to a row, rather than rows and rows of pills. */
+           ten to a row, rather than rows and rows of pills. It reaches into
+           the picker's side padding, with a hairline between cells, so
+           "150" has room on both sides: in the 18rem sidebar each cell is
+           about 27px wide (21px of digits), in the popover about 30px; a
+           Windows scrollbar still leaves over 24px. */
         .chapter-grid.is-compact {
             grid-template-columns: repeat(10, minmax(0, 1fr));
-            gap: 0.15rem;
+            gap: 0.15rem 1px;
+            margin: 0 -0.35rem;
             padding: 0.3rem 0 0.7rem;
+        }
+
+        /* The focus ring inside the cell, so the picker's edge doesn't
+           clip it and it doesn't cover the next number. */
+        .chapter-grid.is-compact .chapter-btn:focus-visible {
+            outline-offset: -2px;
         }
 
         /* Borderless, so "150" fits a tenth of the sidebar. */

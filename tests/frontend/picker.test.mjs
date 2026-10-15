@@ -232,6 +232,30 @@ test('Psalms, and every book over 50 chapters, gets a compact grid ten to a row'
         assert.equal(chapters(app).length, 1, 'Obadiah has one chapter');
     }));
 
+// jsdom lays nothing out, so the cell widths are measured in WebKit and
+// checked as arithmetic in frontend_markup.rs; here, the rules each grid
+// gets, in the sidebar and in the popover.
+test('the compact grid is roomier: it reaches into the picker’s padding, a hairline apart, in the sidebar and the popover', async () => {
+    for (const width of [1280, 1000]) {
+        await withApp({ book: 'Psalms', chapter: 119, width }, async (app) => {
+            if (width < 1200) {
+                app.click($(app, 'ref-btn'));
+                assert.equal($(app, 'picker').getAttribute('role'), 'dialog', 'the popover');
+            } else {
+                assert.equal($(app, 'picker').getAttribute('role'), null, 'the sidebar');
+            }
+            const grid = $(app, 'picker-chapters');
+            const style = app.window.getComputedStyle(grid);
+            assert.equal(style.gridTemplateColumns, 'repeat(10, minmax(0, 1fr))');
+            assert.equal(style.marginLeft, '-5.6px');
+            assert.equal(style.marginRight, '-5.6px');
+            assert.equal(style.getPropertyValue('gap'), '0.15rem 1px');
+            assert.equal(grid.querySelectorAll('.chapter-btn').length, 150);
+            assert.equal(app.window.getComputedStyle(grid.querySelector('.chapter-btn')).height, '27.2px', 'at least 24px tall');
+        });
+    }
+});
+
 test('the sidebar can be hidden and shown, is remembered, and keeps the reading place', async () => {
     let storage;
     await withApp({ book: 'John', chapter: 3 }, async (app) => {

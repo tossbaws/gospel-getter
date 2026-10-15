@@ -2349,6 +2349,52 @@ fn psalms_get_a_compact_grid_ten_to_a_row() {
     );
     let compact = &screen_rule(&rules, ".chapter-grid.is-compact").body;
     assert!(compact.contains("grid-template-columns: repeat(10, minmax(0, 1fr))"));
+    assert!(compact.contains("gap: 0.15rem 1px"));
+    assert!(compact.contains("margin: 0 -0.35rem"));
+    // Room for "150" (21px of digits at 0.72rem, measured in WebKitGTK):
+    // the picker's width, less its border and side padding, plus the
+    // grid's reach into that padding, shared by ten cells a hairline
+    // apart. 27px in the sidebar, 30.1px in the popover, and over 24px
+    // even with a 17px Windows scrollbar.
+    let picker = &screen_rule(&rules, ".picker:not([hidden])").body;
+    assert!(picker.contains("padding: 0.5rem 0.6rem 0.9rem"));
+    assert!(picker.contains("width: min(20rem, calc(100vw - 1rem))"));
+    let html = custom_properties(&screen_rule(&rules, "html").body);
+    let sidebar = property(&html, "--sidebar-width")
+        .strip_suffix("rem")
+        .unwrap()
+        .parse::<f64>()
+        .unwrap()
+        * 16.0;
+    let cell = |outer: f64, border: f64, scrollbar: f64| {
+        (outer - border - scrollbar - 2.0 * 0.6 * 16.0 + 2.0 * 0.35 * 16.0 - 9.0) / 10.0
+    };
+    let digits = 21.0;
+    for (place, width) in [
+        ("sidebar", cell(sidebar, 1.0, 0.0)),
+        ("popover", cell(20.0 * 16.0, 2.0, 0.0)),
+        ("sidebar, Windows scrollbar", cell(sidebar, 1.0, 17.0)),
+        ("popover, Windows scrollbar", cell(20.0 * 16.0, 2.0, 17.0)),
+    ] {
+        assert!(width >= 24.0, "{place}: a {width:.1}px cell");
+        if !place.contains("Windows") {
+            assert!(
+                (width - digits) / 2.0 >= 3.0,
+                "{place}: {:.1}px either side of 150",
+                (width - digits) / 2.0
+            );
+        }
+    }
+    assert_eq!(cell(sidebar, 1.0, 0.0), 27.0);
+    // The focus ring stays inside the cell.
+    assert!(
+        screen_rule(
+            &rules,
+            ".chapter-grid.is-compact .chapter-btn:focus-visible"
+        )
+        .body
+        .contains("outline-offset: -2px")
+    );
     let cell = &screen_rule(&rules, ".chapter-grid.is-compact .chapter-btn").body;
     assert!(cell.contains("border-radius: var(--radius-s)"));
     assert!(cell.contains("border: none"));
@@ -2360,7 +2406,7 @@ fn psalms_get_a_compact_grid_ten_to_a_row() {
     assert!(book.contains("color: var(--accent)"));
 }
 
-/// The sidebar: from 1200px, 16.5rem down the left below the bar, in the
+/// The sidebar: from 1200px, 18rem down the left below the bar, in the
 /// bar's `--bar-bg`, with the page moved over (on screen only); the
 /// neighbors give way first, as on any narrower page. Reading mode and
 /// print never show it, and its own button only shows where it can.
@@ -2369,7 +2415,7 @@ fn the_sidebar_is_for_wide_windows_only() {
     let rules = rules();
     assert!(HTML.contains("var WIDE = '(min-width: 1200px)';"));
     let html = custom_properties(&screen_rule(&rules, "html").body);
-    assert_eq!(property(&html, "--sidebar-width"), "16.5rem");
+    assert_eq!(property(&html, "--sidebar-width"), "18rem");
     let screen = |selector: &str| -> &Rule {
         rules
             .iter()
@@ -2927,7 +2973,7 @@ fn the_text_size_keys_step_aa_and_never_zoom_the_page() {
 /// follow from those numbers and the page's padding: both need
 /// 400 + 2 × 180 + 2 × 20 + 48 = 848px, the next alone 400 + 180 + 20 + 48 =
 /// 648px.
-/// The sidebar (264px) only shows from 1200px, leaving 888px, so it never
+/// The sidebar (288px) only shows from 1200px, leaving 864px, so it never
 /// hides a neighbor; and the floor is the same at every Width. Alone, below
 /// 648px, the column fills the window again.
 #[test]
