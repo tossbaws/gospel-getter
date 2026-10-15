@@ -60,7 +60,7 @@
                         <a class="button button-primary" href="#download-windows">Download for Windows</a>
                         <a class="button button-secondary" href="#download-linux">Download for Linux</a>
                     </div>
-                    <p class="hero-note">Version 2.12.0, for 64-bit Windows and Linux computers. The Windows installer isn’t code-signed yet, so Windows will probably warn you before it runs. <a href="#faq-smartscreen">What to expect</a>.</p>
+                    <p class="hero-note">Version 2.13.0, for 64-bit Windows and Linux computers. The Windows installer isn’t code-signed yet, so Windows will probably warn you before it runs. <a href="#faq-smartscreen">What to expect</a>.</p>
                     <p class="touch-only touch-note">Gospel Getter is a desktop app for <strong>Windows and Linux computers</strong>. There’s no phone, tablet or Mac version. To install it, open this page on your computer.</p>
 
                     <ul class="facts">
@@ -90,10 +90,10 @@
                 <div class="feature text-only" id="context">
                     <div class="feature-text">
                         <h3>Read in context</h3>
-                        <p>The chapter you’re reading sits in the middle, with the chapters before and after it faded on either side, as in the picture above. Press <kbd>←</kbd> and <kbd>→</kbd> to turn chapters across the whole Bible, from Genesis 50 straight into Exodus 1.</p>
+                        <p>The chapter you’re reading sits in the middle, with the chapters before and after it faded on either side, as in the picture above. Press <kbd>←</kbd> and <kbd>→</kbd> to turn chapters across the whole Bible, from Genesis 50 straight into Exodus 1, or use the buttons at the end of each chapter. The window’s title says where you are, and the window opens at the size and place you left it.</p>
                         <p>The reference at the top left, such as “John 3 · KJV”, always says where you are. Click it or press <kbd>G</kbd> to choose a book and chapter, or a random chapter. On a wide window the books and chapters stay open in a sidebar you can hide.</p>
-                        <p>Click a verse to see related passages, and click one of them to read it in place. The cross-references come from OpenBible.info.</p>
-                        <p>In the KJV, words the translators supplied are in italics, as in printed KJVs, and its margin notes are lettered footnotes. Select a verse to read its notes, or find all of a chapter’s notes at its end.</p>
+                        <p>Click a verse to see related passages in a card under it, and click one of them to read it in place. The card floats over the text, so nothing moves. The cross-references come from OpenBible.info.</p>
+                        <p>In the KJV, words the translators supplied are in italics, as in printed KJVs, and its margin notes are lettered footnotes. Select a verse to read its notes, or open a chapter’s Footnotes at its end.</p>
                     </div>
                 </div>
 
@@ -116,7 +116,7 @@
                     <div class="feature-text">
                         <h3>Keep what matters</h3>
                         <ul>
-                            <li><strong>Copy with the reference.</strong> Click a verse, Shift-click another to select a range, then Copy. You get the text followed by its reference, such as “— 1 Corinthians 13:4–7 (WEB)”.</li>
+                            <li><strong>Copy with the reference.</strong> Click a verse, Shift-click another to select a range, then Copy in the card under them. You get the text followed by its reference, such as “— 1 Corinthians 13:4–7 (WEB)”.</li>
                             <li><strong>Bookmark passages.</strong> Bookmarked verses get a star, and the Library (the bookmark button at the top) opens any of them again.</li>
                             <li><strong>Highlight verses.</strong> Highlight the verses you’ve selected in yellow, green, blue or pink, like a highlighter pen. They show in whichever translation you’re reading.</li>
                             <li><strong>See all your highlights.</strong> The Highlights list in the Library shows every highlighted passage in Bible order, with its color and a preview. Filter by color, or click one to go back to it.</li>
@@ -130,7 +130,7 @@
                              srcset="assets/select-800.webp 800w, assets/select-1600.webp 1600w"
                              sizes="(min-width: 56rem) 42rem, calc(100vw - 2rem)"
                              width="1600" height="1000" loading="lazy" decoding="async"
-                             alt="1 Corinthians 13 in the WEB in the Chi Rho theme, with 1 Corinthians open in the sidebar. Verses 1 to 3 have bookmark stars, and verses 4 to 7 are selected and marked with a pencil for their note. Beneath them are Copy, Bookmark and + Add note buttons, four highlight color swatches and the reference “1 Corinthians 13:4–7 (WEB)”, then the note: “Paul describes love by what it does. Read verses 4–7 again with ‘Christ’ in place of ‘love’.”">
+                             alt="1 Corinthians 13 in the WEB in the Chi Rho theme, with 1 Corinthians open in the sidebar. Verses 4 to 7 are selected and marked with a pencil for their note. The card under them has Copy, Bookmark and + Add note buttons, four highlight color swatches and the reference “1 Corinthians 13:4–7 (WEB)”, then the note, “Paul describes love by what it does. Read verses 4–7 again with ‘Christ’ in place of ‘love’.”, and the cross-references for each verse. The card floats over the verses that follow.">
                     </figure>
                 </div>
 
@@ -145,7 +145,7 @@
                              srcset="assets/compare-800.webp 800w, assets/compare-1600.webp 1600w"
                              sizes="(min-width: 56rem) 42rem, calc(100vw - 2rem)"
                              width="1600" height="1000" loading="lazy" decoding="async"
-                             alt="Psalms 23 in compare mode in the Chi Rho theme, with the Psalms open in the sidebar, ten chapters to a row: the King James Version and the World English Bible in two columns, one row per verse. The KJV column sets the words its translators supplied, such as “is” and “art”, in italics, with small letters marking its margin notes, which are listed under the psalm as “Footnotes (KJV)”.">
+                             alt="Psalms 23 in compare mode in the Chi Rho theme, with the Psalms open in the sidebar, ten chapters to a row: the King James Version and the World English Bible in two columns, one row per verse. The KJV column sets the words its translators supplied, such as “is” and “art”, in italics, with small letters marking its margin notes. Under the psalm are buttons for Psalms 22 and Psalms 24.">
                     </figure>
                 </div>
             </div>
@@ -173,61 +173,61 @@
         <section class="section" id="themes" aria-labelledby="themes-title">
             <div class="wrap">
                 <h2 id="themes-title">Make it yours</h2>
-                <p class="section-intro">Under <strong>Aa</strong>, at the top of the app, choose from nine themes, four text sizes and three line spacings, or switch on reading mode to hide everything but the text. Scripture is set in Literata, which comes with the app. The System theme follows your computer, Vellum when it’s light and Chi Rho when it’s dark. Printing is always black on white.</p>
+                <p class="section-intro">Under <strong>Aa</strong>, at the top of the app, choose from nine themes, four text sizes, three line spacings and three widths, or switch on reading mode to hide everything but the text. Scripture is set in Literata, which comes with the app. The System theme follows your computer, Vellum when it’s light and Chi Rho when it’s dark. Printing is always black on white.</p>
                 <ul class="themes">
                     <li>
                         <figure>
                             <img class="shot" src="assets/theme-chi-rho.webp" width="720" height="435" loading="lazy" decoding="async"
-                                 alt="Psalms 23, verses 1 to 3 and the start of verse 4, in the Chi Rho theme, the default: parchment text on a near-black background with gold headings.">
+                                 alt="Psalms 23, verses 1 to 3 and most of verse 4, in the Chi Rho theme, the default: parchment text on a near-black background with gold headings.">
                             <figcaption>Chi Rho</figcaption>
                         </figure>
                     </li>
                     <li>
                         <figure>
                             <img class="shot" src="assets/theme-vellum.webp" width="720" height="435" loading="lazy" decoding="async"
-                                 alt="Psalms 23, verses 1 to 3 and the start of verse 4, in the Vellum theme: near-black text on a warm parchment background with green headings.">
+                                 alt="Psalms 23, verses 1 to 3 and most of verse 4, in the Vellum theme: near-black text on a warm parchment background with green headings.">
                             <figcaption>Vellum</figcaption>
                         </figure>
                     </li>
                     <li>
                         <figure>
                             <img class="shot" src="assets/theme-classic-light.webp" width="720" height="435" loading="lazy" decoding="async"
-                                 alt="Psalms 23, verses 1 to 3 and the start of verse 4, in the Classic Light theme: dark text on an off-white background with blue headings.">
+                                 alt="Psalms 23, verses 1 to 3 and most of verse 4, in the Classic Light theme: dark text on an off-white background with blue headings.">
                             <figcaption>Classic Light</figcaption>
                         </figure>
                     </li>
                     <li>
                         <figure>
                             <img class="shot" src="assets/theme-classic-dark.webp" width="720" height="435" loading="lazy" decoding="async"
-                                 alt="Psalms 23, verses 1 to 3 and the start of verse 4, in the Classic Dark theme: light grey text on a near-black background with blue headings.">
+                                 alt="Psalms 23, verses 1 to 3 and most of verse 4, in the Classic Dark theme: light grey text on a near-black background with blue headings.">
                             <figcaption>Classic Dark</figcaption>
                         </figure>
                     </li>
                     <li>
                         <figure>
                             <img class="shot" src="assets/theme-vaporwave.webp" width="720" height="435" loading="lazy" decoding="async"
-                                 alt="Psalms 23, verses 1 to 3 and the start of verse 4, in the Vaporwave theme: pale lavender text on a deep purple gradient with teal headings.">
+                                 alt="Psalms 23, verses 1 to 3 and most of verse 4, in the Vaporwave theme: pale lavender text on a deep purple gradient with teal headings.">
                             <figcaption>Vaporwave</figcaption>
                         </figure>
                     </li>
                     <li>
                         <figure>
                             <img class="shot" src="assets/theme-matrix.webp" width="720" height="435" loading="lazy" decoding="async"
-                                 alt="Psalms 23, verses 1 to 3 and the start of verse 4, in the Matrix theme: pale green text on a black background with bright green headings.">
+                                 alt="Psalms 23, verses 1 to 3 and most of verse 4, in the Matrix theme: pale green text on a black background with bright green headings.">
                             <figcaption>Matrix</figcaption>
                         </figure>
                     </li>
                     <li>
                         <figure>
                             <img class="shot" src="assets/theme-beast-slayer.webp" width="720" height="435" loading="lazy" decoding="async"
-                                 alt="Psalms 23, verses 1 to 3 and the start of verse 4, in the Beast Slayer theme: cream text on a dark brown background with gold headings.">
+                                 alt="Psalms 23, verses 1 to 3 and most of verse 4, in the Beast Slayer theme: cream text on a dark brown background with gold headings.">
                             <figcaption>Beast Slayer</figcaption>
                         </figure>
                     </li>
                     <li>
                         <figure>
                             <img class="shot" src="assets/theme-hot-pink.webp" width="720" height="435" loading="lazy" decoding="async"
-                                 alt="Psalms 23, verses 1 to 3 and the start of verse 4, in the Hot Pink theme: pale pink text on a near-black plum background with hot pink headings.">
+                                 alt="Psalms 23, verses 1 to 3 and most of verse 4, in the Hot Pink theme: pale pink text on a near-black plum background with hot pink headings.">
                             <figcaption>Hot Pink</figcaption>
                         </figure>
                     </li>
@@ -238,7 +238,7 @@
         <section class="section section-alt download" id="download" aria-labelledby="download-title">
             <div class="wrap">
                 <h2 id="download-title">Download Gospel Getter</h2>
-                <p class="release-line"><strong>Version 2.12.0.</strong> Free, for 64-bit Windows and Linux. <a href="https://github.com/tossbaws/gospel-getter/releases/latest">What’s new</a></p>
+                <p class="release-line"><strong>Version 2.13.0.</strong> Free, for 64-bit Windows and Linux. <a href="https://github.com/tossbaws/gospel-getter/releases/latest">What’s new</a></p>
                 <p class="touch-only touch-note">You seem to be on a phone or tablet. Gospel Getter runs on <strong>Windows and Linux computers</strong> only, so open this page on your computer to install it.</p>
 
                 <div class="platforms">
@@ -319,11 +319,11 @@
                 <details id="faq-update">
                     <summary>Does it update itself? Will I lose my bookmarks?</summary>
                     <div>
-                        <p>It can, and it always asks first. When Gospel Getter starts, it checks whether there’s a new version. If there is, it tells you, and nothing is downloaded or installed until you choose <strong>Update and restart</strong>. You can choose <strong>Later</strong> instead, or turn the check off in <strong>About Gospel Getter</strong>, from the ☰ menu. <strong>Check now</strong> there checks whenever you like.</p>
+                        <p>It can, and it always asks first. When Gospel Getter starts, it checks whether there’s a new version. If there is, it tells you, and nothing is downloaded or installed until you choose <strong>Update and restart</strong>. You can choose <strong>Later</strong> instead, or turn the check off in <strong>About Gospel Getter</strong>, from the ☰ menu. <strong>Check now</strong> there checks whenever you like, and shows a new version right there, with its release notes and <strong>Update now</strong>.</p>
                         <p>The Windows installers (setup.exe or MSI), the AppImage and the .deb from this page update themselves. If you built Gospel Getter yourself or installed it another way, the app offers a link to the download page instead.</p>
-                        <p>Versions 2.6 through 2.11 update themselves to this one. Versions 2.5 and older can’t update themselves. If you have one of those, download the new version from this page and install it over the old one, just this once.</p>
+                        <p>Versions 2.6 through 2.12 update themselves to this one. Versions 2.5 and older can’t update themselves. If you have one of those, download the new version from this page and install it over the old one, just this once.</p>
                         <p>Checking downloads a small file from GitHub that names the latest version, so GitHub sees your IP address, as with any download. Nothing about your reading or your data is sent.</p>
-                        <p>Updating keeps your bookmarks, highlights, notes, reading position and settings. To be safe, or to move to another computer, use <strong>Export data…</strong> in the ☰ menu first. A file exported by version 2.8 or newer needs 2.8 or newer to import, and one exported by 2.12 needs 2.12 or newer: 2.11 and older refuse a file whose theme they don’t know. From 2.12 on, a display setting the app doesn’t know is skipped with a notice, and the rest imports.</p>
+                        <p>Updating keeps your bookmarks, highlights, notes, reading position and settings. To be safe, or to move to another computer, use <strong>Export data…</strong> in the ☰ menu first. A file exported by version 2.8 or newer needs 2.8 or newer to import, and one exported by 2.12 needs 2.12 or newer: 2.11 and older refuse a file whose theme they don’t know. From 2.12 on, a display setting the app doesn’t know is skipped with a notice, and the rest imports, as 2.12 does with a 2.13 file’s Width.</p>
                     </div>
                 </details>
 
