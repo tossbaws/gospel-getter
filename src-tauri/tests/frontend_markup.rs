@@ -1081,6 +1081,46 @@ fn highlight_colors_keep_verse_text_at_wcag_aa_in_every_theme() {
     }
 }
 
+/// The hue of a `#rrggbb` color, in degrees.
+fn hue(hex: &str) -> f64 {
+    let hex = hex.trim_start_matches('#');
+    let [r, g, b] = [0, 2, 4].map(|i| f64::from(u8::from_str_radix(&hex[i..i + 2], 16).unwrap()));
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let d = max - min;
+    let h = if d == 0.0 {
+        0.0
+    } else if max == r {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    h * 60.0
+}
+
+/// Matrix's yellow highlighter reads as yellow on its black-green, not
+/// olive (it was #4a4708, hue 57°): a warm amber, hue 40-50°, as dark as
+/// AA for its pale green text allows (7.06:1), and lighter than the page
+/// so the band shows.
+#[test]
+fn matrix_yellow_is_warm_not_olive() {
+    let rules = rules();
+    let (_, props) = theme_palettes(&rules)
+        .into_iter()
+        .find(|(theme, _)| theme == "matrix")
+        .expect("the Matrix theme");
+    let yellow = property(&props, "--hl-yellow");
+    assert_eq!(yellow, "#664e00");
+    let h = hue(yellow);
+    assert!((40.0..=50.0).contains(&h), "hue {h:.1}");
+    assert!(hue("#4a4708") > 55.0, "the old one was olive");
+    let text = contrast_ratio(property(&props, "--text"), yellow);
+    assert!(text >= 7.0, "{text:.2}:1");
+    let band = contrast_ratio(yellow, property(&props, "--bg"));
+    assert!(band >= 2.5, "against the page: {band:.2}:1");
+}
+
 /// Each color has a verse style and a swatch style, and the highlight sits
 /// on the verse text (a band behind the words), not the whole verse block
 /// the selection tints.
