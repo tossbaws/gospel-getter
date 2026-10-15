@@ -103,7 +103,7 @@ test('Export saves bookmarks, reading position and display settings to the chose
         );
         assert.deepEqual(json.reading_position, { translation: 'kjv', book: 43, book_name: 'John', chapter: 3 });
         assert.deepEqual(json.preferences, {
-            theme: 'matrix', text_size: 'medium', line_spacing: 'normal', reading_mode: false, compare: false,
+            theme: 'matrix', text_size: 'medium', line_spacing: 'normal', width: 'normal', reading_mode: false, compare: false,
         });
         assert.ok(!text.includes(storedVerse('kjv', 'John', 3, 16)), 'no Bible text');
     }));

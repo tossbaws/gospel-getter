@@ -66,9 +66,9 @@ pub const FILE_SUFFIX: &str = ".gospel-getter.json";
 ///   characters JSON would escape in 6, like `\u0001`, are refused — so
 ///   100,000,000 bytes;
 /// - the rest of the file (its header, reading position and every
-///   preference) takes 487 bytes.
+///   preference) takes 510 bytes.
 ///
-/// That's 113,660,487 bytes in all, 108.4 MiB: over 96 MiB, under 128.
+/// That's 113,660,510 bytes in all, 108.4 MiB: over 96 MiB, under 128.
 /// Format 2's limit was 16 MiB; it rose because the reader's notes can
 /// hold far more text than every other record together, and a backup of
 /// them must always import. The limit is still there to refuse a file
@@ -207,6 +207,11 @@ pub struct Preferences {
     pub text_size: Option<TextSize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_spacing: Option<LineSpacing>,
+    /// The reading column's width. Added in 2.13; older versions skip it
+    /// (2.12) or refuse the file (2.11 and older, which also refuse 2.12's
+    /// themes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<Width>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reading_mode: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -215,10 +220,11 @@ pub struct Preferences {
 
 impl Preferences {
     /// Every preference's name in the file.
-    pub const NAMES: [&'static str; 5] = [
+    pub const NAMES: [&'static str; 6] = [
         "theme",
         "text_size",
         "line_spacing",
+        "width",
         "reading_mode",
         "compare",
     ];
@@ -229,6 +235,7 @@ impl Preferences {
             self.theme.is_some(),
             self.text_size.is_some(),
             self.line_spacing.is_some(),
+            self.width.is_some(),
             self.reading_mode.is_some(),
             self.compare.is_some(),
         ]
@@ -268,6 +275,15 @@ pub enum LineSpacing {
     Compact,
     Normal,
     Relaxed,
+}
+
+/// The reading column's width (Aa's Width row).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Width {
+    Narrow,
+    Normal,
+    Wide,
 }
 
 /// Why a file can't be imported, in words for the reader.
@@ -1021,6 +1037,10 @@ mod tests {
             names(&[L::Compact, L::Normal, L::Relaxed]),
             select_options("line-spacing-select")
         );
+        assert_eq!(
+            names(&[Width::Narrow, Width::Normal, Width::Wide]),
+            select_options("width-select")
+        );
     }
 
     #[test]
@@ -1256,6 +1276,7 @@ mod tests {
             theme: Some(Theme::ChiRho),
             text_size: Some(TextSize::Small),
             line_spacing: Some(LineSpacing::Normal),
+            width: Some(Width::Wide),
             reading_mode: Some(true),
             compare: Some(false),
         };
@@ -1387,6 +1408,7 @@ mod tests {
                 theme: Some(Theme::ClassicLight),
                 text_size: Some(TextSize::Medium),
                 line_spacing: Some(LineSpacing::Compact),
+                width: Some(Width::Narrow),
                 reading_mode: Some(false),
                 compare: Some(false),
             },
@@ -1431,14 +1453,14 @@ mod tests {
         // As documented on `MAX_FILE_BYTES`.
         assert_eq!(
             (bookmark, highlight, note_record, rest),
-            (188, 231, 254, 487)
+            (188, 231, 254, 510)
         );
         let total = rest
             + MAX_BOOKMARKS * bookmark
             + MAX_HIGHLIGHTS * highlight
             + MAX_NOTES * note_record
             + 4 * MAX_TOTAL_NOTE_CHARS;
-        assert_eq!(total, 113_660_487);
+        assert_eq!(total, 113_660_510);
         assert!(
             total as u64 <= MAX_FILE_BYTES,
             "a maximal file is {total} bytes, over the {MAX_FILE_BYTES}-byte limit"

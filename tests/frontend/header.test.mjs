@@ -153,7 +153,7 @@ test('Aa changes the real preferences live, and they persist across a restart', 
         assert.equal(dialog.getAttribute('aria-label'), 'Text and display');
         // In this order: translation and compare, text size, line spacing, theme, reading mode.
         const order = [...dialog.querySelectorAll('.section-label')].map((l) => l.textContent);
-        assert.deepEqual(order, ['Translation', 'Text size', 'Line spacing', 'Theme']);
+        assert.deepEqual(order, ['Translation', 'Text size', 'Line spacing', 'Width', 'Theme']);
         assert.equal(dialog.lastElementChild.querySelector('button').id, 'reader-mode-btn');
         assert.ok($(app, 'compare-btn').closest('.aa-row').contains($(app, 'translation-choices')), 'Compare beside the translations');
 
@@ -202,7 +202,7 @@ test('Aa changes the real preferences live, and they persist across a restart', 
 
         // The export sees exactly these.
         assert.deepEqual(JSON.parse(JSON.stringify(app.window.gospelGetterPreferences.current())), {
-            theme: 'matrix', text_size: 'small', line_spacing: 'relaxed', reading_mode: false, compare: false,
+            theme: 'matrix', text_size: 'small', line_spacing: 'relaxed', width: 'normal', reading_mode: false, compare: false,
         });
         storage = app.storage();
         const keys = Object.keys(storage).sort();

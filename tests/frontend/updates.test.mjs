@@ -141,7 +141,7 @@ test('with the setting off there is no check at startup; it is kept, but not exp
         // A setting for this computer: data export carries only display settings.
         assert.deepEqual(
             Object.keys(app.window.gospelGetterPreferences.current()).sort(),
-            ['compare', 'line_spacing', 'reading_mode', 'text_size', 'theme'],
+            ['compare', 'line_spacing', 'reading_mode', 'text_size', 'theme', 'width'],
         );
     });
     await withApp({ update: { check: UPDATE }, storage }, async (app) => {

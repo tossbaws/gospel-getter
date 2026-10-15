@@ -372,6 +372,26 @@
         html {
             --bar-height: 3.4rem;
             --sidebar-width: 16.5rem;
+            /* The reading column (Aa's Width): Normal is the width it has
+               always had, 492px, about 62 characters a line at the Medium
+               text size in Literata; Narrow is 416px (about 52) and Wide
+               592px (about 75). Reading mode's single column is wider:
+               732px at Normal, as it has always been (about 92), with
+               Narrow at 592px (about 75) and Wide at 880px (about 111). */
+            --column: 30.75rem;
+            --reader-column: 45.75rem;
+            --side-width: 260px;
+            --row-gap: 1.25rem;
+        }
+
+        :root[data-width="narrow"] {
+            --column: 26rem;
+            --reader-column: 37rem;
+        }
+
+        :root[data-width="wide"] {
+            --column: 37rem;
+            --reader-column: 55rem;
         }
 
         * {
@@ -388,8 +408,10 @@
             min-height: 100vh;
         }
 
+        /* As wide as the reading column and its two neighbors (1100px at
+           Normal width), so the column has its width when there's room. */
         .container {
-            max-width: 1100px;
+            max-width: calc(var(--column) + 2 * var(--side-width) + 2 * var(--row-gap) + 3rem);
             margin: 0 auto;
             padding: 2.5rem 1.5rem 6rem;
         }
@@ -924,6 +946,14 @@
 
         .toast.is-error {
             font-weight: bold;
+        }
+
+        /* "Text size: Large", briefly, after Ctrl+= or Ctrl+-: smaller
+           and higher than export's notices, so the two never overlap. */
+        .size-status {
+            bottom: 4.5rem;
+            padding: 0.35rem 0.75rem;
+            border-color: var(--accent-dim);
         }
 
         .toast.is-hidden {
@@ -2053,7 +2083,7 @@
             }
 
             :root[data-reader-mode="on"] .container {
-                max-width: 780px;
+                max-width: calc(var(--reader-column) + 3rem);
                 padding-top: 4.5rem;
             }
 
@@ -2309,7 +2339,7 @@
         .reading-row {
             display: flex;
             align-items: flex-start;
-            gap: 1.25rem;
+            gap: var(--row-gap);
         }
 
         /* Positioned: the selection card is placed in it. */
@@ -2325,8 +2355,8 @@
            opacity, in narrower side columns — and scroll along with the
            page as one continuous reading surface, not as separate boxes. */
         .chapter-side {
-            flex: 0 0 260px;
-            max-width: 260px;
+            flex: 0 0 var(--side-width);
+            max-width: var(--side-width);
             opacity: 0.55;
             transition: opacity 0.2s;
         }
@@ -3276,6 +3306,16 @@
                     values: ['compact', 'normal', 'relaxed'],
                     renamed: {},
                 },
+                // The reading column's width (and reading mode's); Normal
+                // is the width it always had.
+                width: {
+                    key: 'gospel-getter-width',
+                    attr: 'width',
+                    select: 'width-select',
+                    fallback: 'normal',
+                    values: ['narrow', 'normal', 'wide'],
+                    renamed: {},
+                },
                 readerMode: {
                     key: 'gospel-getter-reader-mode',
                     attr: 'readerMode',
@@ -3741,6 +3781,8 @@
                 var themeSelect = byId('theme-select');
                 var translationChoices = byId('translation-choices');
                 var lineSpacingChoices = byId('line-spacing-choices');
+                var widthSelect = byId('width-select');
+                var widthChoices = byId('width-choices');
                 var themeChoices = byId('theme-choices');
                 var textSizeDown = byId('text-size-down');
                 var textSizeUp = byId('text-size-up');
@@ -3768,6 +3810,9 @@
 
                 optionsOf(lineSpacingSelect).forEach(function (option) {
                     lineSpacingChoices.appendChild(segmentButton(option, option.textContent));
+                });
+                optionsOf(widthSelect).forEach(function (option) {
+                    widthChoices.appendChild(segmentButton(option, option.textContent));
                 });
 
                 optionsOf(themeSelect).forEach(function (option) {
@@ -3808,6 +3853,7 @@
                 function syncAa() {
                     setPressed(translationChoices, translationSelect.value);
                     setPressed(lineSpacingChoices, lineSpacingSelect.value);
+                    setPressed(widthChoices, widthSelect.value);
                     setPressed(themeChoices, themeSelect.value);
                     var theme = themeSelect.options[themeSelect.selectedIndex];
                     byId('theme-name').textContent = theme ? theme.textContent : '';
@@ -3828,8 +3874,8 @@
                     if (option) choose(textSizeSelect, option.value);
                 }
 
-                [translationChoices, lineSpacingChoices, themeChoices].forEach(function (group) {
-                    var select = { 'translation-choices': translationSelect, 'line-spacing-choices': lineSpacingSelect, 'theme-choices': themeSelect }[group.id];
+                [translationChoices, lineSpacingChoices, widthChoices, themeChoices].forEach(function (group) {
+                    var select = { 'translation-choices': translationSelect, 'line-spacing-choices': lineSpacingSelect, 'width-choices': widthSelect, 'theme-choices': themeSelect }[group.id];
                     group.addEventListener('click', function (event) {
                         var btn = event.target.closest('button');
                         if (btn) choose(select, btn.dataset.value);
@@ -3837,6 +3883,50 @@
                 });
                 textSizeDown.addEventListener('click', function () { stepTextSize(-1); });
                 textSizeUp.addEventListener('click', function () { stepTextSize(1); });
+
+                // Ctrl+= (Ctrl++, Ctrl+Shift+=, numpad +) and Ctrl+- (numpad
+                // -) step through the four text sizes, and Ctrl+0 goes back
+                // to Medium, through Aa's own control, so Aa stays in step.
+                // They're never the webview's page zoom: the app turns that
+                // off (zoomHotkeysEnabled is false, in tauri.conf.json), and
+                // these keys' default is prevented besides. While typing in
+                // a field they do nothing.
+                var sizeStatus = byId('size-status');
+                var sizeStatusTimer = null;
+
+                function showTextSize() {
+                    var option = textSizeSelect.options[textSizeSelect.selectedIndex];
+                    clearTimeout(sizeStatusTimer);
+                    sizeStatus.textContent = 'Text size: ' + (option ? option.textContent : '');
+                    sizeStatus.classList.remove('is-hidden');
+                    sizeStatusTimer = setTimeout(function () {
+                        sizeStatus.classList.add('is-hidden');
+                    }, 1500);
+                }
+
+                function sizeKey(event) {
+                    if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
+                    var key = event.key;
+                    var code = event.code || '';
+                    if (key === '=' || key === '+' || code === 'NumpadAdd') return 1;
+                    if (key === '-' || key === '_' || code === 'NumpadSubtract') return -1;
+                    if ((key === '0' && !event.shiftKey) || code === 'Numpad0') return 0;
+                    return null;
+                }
+
+                document.addEventListener('keydown', function (event) {
+                    var step = sizeKey(event);
+                    if (step === null) return;
+                    event.preventDefault();
+                    var target = event.target;
+                    if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) return;
+                    if (step === 0) {
+                        choose(textSizeSelect, 'medium');
+                    } else {
+                        stepTextSize(step);
+                    }
+                    showTextSize();
+                });
 
                 // ---- Preferences
 
@@ -3895,12 +3985,13 @@
                 // All display preferences at once, for exporting and
                 // importing them (Export data… and Import data… in the ☰
                 // menu). Names and values are the export file's: theme,
-                // text_size and line_spacing as Aa's option values,
+                // text_size, line_spacing and width as Aa's option values,
                 // reading_mode and compare as true/false.
                 var FILE_NAMES = {
                     theme: 'theme',
                     text_size: 'textSize',
                     line_spacing: 'lineSpacing',
+                    width: 'width',
                     reading_mode: 'readerMode',
                     compare: 'compare',
                 };
@@ -4014,6 +4105,15 @@
                         <option value="compact">Compact</option>
                         <option value="normal">Normal</option>
                         <option value="relaxed">Relaxed</option>
+                    </select>
+                </div>
+                <div class="aa-section">
+                    <span class="section-label" id="width-label">Width</span>
+                    <div id="width-choices" class="segmented" role="group" aria-labelledby="width-label"></div>
+                    <select id="width-select" hidden>
+                        <option value="narrow">Narrow</option>
+                        <option value="normal">Normal</option>
+                        <option value="wide">Wide</option>
                     </select>
                 </div>
                 <div class="aa-section">
@@ -4249,6 +4349,7 @@
         </div>
     </div>
     <p id="data-status" class="toast is-hidden" role="status" aria-live="polite"></p>
+    <p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>
 
     <section id="update-banner" class="update-banner" aria-labelledby="update-title" tabindex="-1" hidden>
         <p id="update-title" class="update-title" role="status" aria-live="polite"></p>
@@ -5881,6 +5982,7 @@
                 if (prefs.theme) parts.push(`${optionText('theme-select', prefs.theme)} theme`);
                 if (prefs.text_size) parts.push(`${optionText('text-size-select', prefs.text_size).toLowerCase()} text`);
                 if (prefs.line_spacing) parts.push(`${optionText('line-spacing-select', prefs.line_spacing).toLowerCase()} line spacing`);
+                if (prefs.width) parts.push(`${optionText('width-select', prefs.width).toLowerCase()} width`);
                 if (prefs.compare != null) parts.push(`compare ${prefs.compare ? 'on' : 'off'}`);
                 if (prefs.reading_mode != null) parts.push(`reading mode ${prefs.reading_mode ? 'on' : 'off'}`);
                 return parts;

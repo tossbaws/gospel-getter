@@ -5,9 +5,16 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { closeBridge, openApp } from './harness.mjs';
 
-after(closeBridge);
+const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-reading-flow-'));
+after(async () => {
+    await closeBridge();
+    rmSync(dir, { recursive: true, force: true });
+});
 
 async function withApp(options, body) {
     const app = await openApp(options);
@@ -289,4 +296,129 @@ test('the card works in reading mode', () =>
         app.key('Escape');
         assert.equal(card(app), null);
         assert.equal(app.document.documentElement.dataset.readerMode, 'on', 'Esc closed the card first');
+    }));
+
+// ---- Width, and the text size keys
+
+const $ = (app, id) => app.document.getElementById(id);
+const widthButton = (app, label) => [...$(app, 'width-choices').querySelectorAll('button')].find((b) => b.textContent === label);
+
+test('Width is a row in Aa: Narrow, Normal and Wide, Normal by default', () =>
+    withApp({}, async (app) => {
+        app.open('aa');
+        const row = $(app, 'width-choices');
+        assert.equal(row.getAttribute('role'), 'group');
+        assert.equal($(app, row.getAttribute('aria-labelledby')).textContent, 'Width');
+        assert.deepEqual([...row.querySelectorAll('button')].map((b) => [b.textContent, b.getAttribute('aria-pressed')]),
+            [['Narrow', 'false'], ['Normal', 'true'], ['Wide', 'false']]);
+        assert.equal(app.document.documentElement.dataset.width, undefined, 'Normal is no attribute: nothing changes');
+    }));
+
+test('choosing a width applies it, and it’s remembered after a restart', async () => {
+    let storage;
+    await withApp({}, async (app) => {
+        app.open('aa');
+        app.click(widthButton(app, 'Wide'));
+        assert.equal(app.document.documentElement.dataset.width, 'wide');
+        assert.equal(widthButton(app, 'Wide').getAttribute('aria-pressed'), 'true');
+        assert.equal($(app, 'width-select').value, 'wide');
+        storage = app.storage();
+    });
+    assert.equal(storage['gospel-getter-width'], 'wide');
+    await withApp({ storage }, async (app) => {
+        assert.equal(app.document.documentElement.dataset.width, 'wide');
+        app.click(widthButton(app, 'Narrow'));
+        assert.equal(app.document.documentElement.dataset.width, 'narrow');
+        app.click(widthButton(app, 'Normal'));
+        assert.equal(app.document.documentElement.dataset.width, undefined);
+    });
+});
+
+test('Width survives a backup: exported, then imported into a fresh window', async () => {
+    const path = join(dir, 'width.gospel-getter.json');
+    await withApp({ storage: { 'gospel-getter-width': 'narrow' } }, async (app) => {
+        await app.pick(path);
+        app.open('menu');
+        const before = app.calls.length;
+        app.click($(app, 'export-data-btn'));
+        await app.idle(before);
+    });
+    assert.equal(JSON.parse(readFileSync(path, 'utf8')).preferences.width, 'narrow');
+    await withApp({}, async (app) => {
+        assert.equal(app.document.documentElement.dataset.width, undefined);
+        await app.pick(path);
+        app.open('menu');
+        let before = app.calls.length;
+        app.click($(app, 'import-data-btn'));
+        await app.idle(before);
+        assert.match($(app, 'import-overlay').textContent, /narrow width/);
+        before = app.calls.length;
+        app.click($(app, 'import-confirm'));
+        await app.idle(before);
+        assert.equal(app.document.documentElement.dataset.width, 'narrow');
+        assert.equal(app.storage()['gospel-getter-width'], 'narrow');
+        assert.equal($(app, 'width-select').value, 'narrow');
+    });
+});
+
+const size = (app) => $(app, 'text-size-select').value;
+const ctrl = (app, key, opts = {}, target) => app.key(key, { ctrlKey: true, ...opts }, target);
+
+test('Ctrl+= and Ctrl+- step through the text sizes, clamped at the ends, and Ctrl+0 goes back to Medium', () =>
+    withApp({}, async (app) => {
+        assert.equal(size(app), 'medium');
+        const status = $(app, 'size-status');
+        assert.equal(status.getAttribute('role'), 'status');
+        assert.equal(status.getAttribute('aria-live'), 'polite');
+        assert.ok(status.classList.contains('is-hidden'));
+
+        const first = ctrl(app, '=');
+        assert.ok(first.defaultPrevented, 'never the page zoom');
+        assert.equal(size(app), 'large');
+        assert.equal(app.document.documentElement.dataset.textSize, 'large');
+        assert.equal(status.textContent, 'Text size: Large');
+        assert.ok(!status.classList.contains('is-hidden'));
+        // Aa shows the same size.
+        assert.equal($(app, 'text-size-value').textContent, 'Large');
+
+        ctrl(app, '+', { shiftKey: true });
+        assert.equal(size(app), 'x-large');
+        assert.ok(ctrl(app, '+', { code: 'NumpadAdd' }).defaultPrevented);
+        assert.equal(size(app), 'x-large', 'clamped at the largest');
+        assert.equal(status.textContent, 'Text size: Extra large');
+
+        for (const expected of ['large', 'medium', 'small', 'small']) {
+            assert.ok(ctrl(app, '-').defaultPrevented);
+            assert.equal(size(app), expected);
+        }
+        ctrl(app, '-', { code: 'NumpadSubtract' });
+        assert.equal(size(app), 'small', 'clamped at the smallest');
+        assert.equal(status.textContent, 'Text size: Small');
+
+        ctrl(app, '0');
+        assert.equal(size(app), 'medium');
+        assert.equal(app.document.documentElement.dataset.textSize, undefined);
+        assert.equal(app.storage()['gospel-getter-text-size'], 'medium');
+        ctrl(app, '=', { code: 'NumpadAdd', key: '+' });
+        assert.equal(size(app), 'large');
+        ctrl(app, '0', { code: 'Numpad0' });
+        assert.equal(size(app), 'medium');
+
+        // Without Ctrl, or with Alt, they're nothing to do with size.
+        app.key('=');
+        app.key('-', { ctrlKey: true, altKey: true });
+        assert.equal(size(app), 'medium');
+    }));
+
+test('the size keys do nothing while typing in a field', () =>
+    withApp({}, async (app) => {
+        app.key('/');
+        const input = app.searchInput();
+        const event = ctrl(app, '=', {}, input);
+        assert.ok(event.defaultPrevented, 'still no page zoom');
+        assert.equal(size(app), 'medium');
+        ctrl(app, '-', {}, input);
+        ctrl(app, '0', {}, input);
+        assert.equal(size(app), 'medium');
+        assert.ok($(app, 'size-status').classList.contains('is-hidden'));
     }));

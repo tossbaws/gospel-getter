@@ -570,7 +570,12 @@ fn beast_slayer_replaces_monster_hunter_and_migrates_saved_choice() {
 /// uses.
 #[test]
 fn preference_selects_match_the_values_the_script_persists() {
-    for id in ["theme-select", "text-size-select", "line-spacing-select"] {
+    for id in [
+        "theme-select",
+        "text-size-select",
+        "line-spacing-select",
+        "width-select",
+    ] {
         let offered: Vec<String> = select_options(id).into_iter().map(|(v, _)| v).collect();
         let (accepted, fallback) = script_preset(id);
         assert_eq!(
@@ -2730,4 +2735,110 @@ fn the_selection_card_floats_over_the_text() {
             );
         }
     }
+}
+
+/// Aa's Width row: Narrow, Normal and Wide, as a labelled group of buttons
+/// over a hidden <select> like line spacing, Normal by default (no
+/// attribute, so nothing changes for anyone who never chose). Normal keeps
+/// the widths the columns always had, 492px in three columns (the
+/// container's 1100px) and 732px in reading mode (its 780px); Narrow and
+/// Wide set both. It's a display setting the backup carries (`width`).
+#[test]
+fn width_is_a_display_setting_in_aa() {
+    assert_eq!(
+        select_options("width-select"),
+        [
+            ("narrow".to_owned(), "Narrow".to_owned()),
+            ("normal".to_owned(), "Normal".to_owned()),
+            ("wide".to_owned(), "Wide".to_owned()),
+        ]
+    );
+    assert_eq!(script_preset("width-select").1, "normal");
+    assert!(HTML.contains(
+        r#"<div id="width-choices" class="segmented" role="group" aria-labelledby="width-label"></div>"#
+    ));
+    assert!(HTML.contains(r#"<span class="section-label" id="width-label">Width</span>"#));
+    // Between line spacing and the theme.
+    let spacing = HTML.find(r#"id="line-spacing-label""#).unwrap();
+    let width = HTML.find(r#"id="width-label""#).unwrap();
+    let theme = HTML.find(r#"id="theme-label""#).unwrap();
+    assert!(spacing < width && width < theme);
+    assert!(block_after(HTML, "var FILE_NAMES =").contains("width: 'width',"));
+
+    let rules = rules();
+    let html = custom_properties(&screen_rule(&rules, "html").body);
+    let px = |value: &str| -> f64 {
+        value
+            .strip_suffix("rem")
+            .map(|r| r.parse::<f64>().unwrap() * 16.0)
+            .or_else(|| value.strip_suffix("px").map(|p| p.parse().unwrap()))
+            .unwrap_or_else(|| panic!("a length, got `{value}`"))
+    };
+    let column = px(property(&html, "--column"));
+    let reading = px(property(&html, "--reader-column"));
+    let side = px(property(&html, "--side-width"));
+    let gap = px(property(&html, "--row-gap"));
+    assert_eq!(
+        column, 492.0,
+        "Normal is the three-column width it always had"
+    );
+    assert_eq!(column + 2.0 * side + 2.0 * gap + 48.0, 1100.0);
+    assert_eq!(reading + 48.0, 780.0, "and reading mode's");
+    for (width, expected_column, expected_reading) in
+        [("narrow", 416.0, 592.0), ("wide", 592.0, 880.0)]
+    {
+        let rule = screen_rule(&rules, &format!(r#":root[data-width="{width}"]"#));
+        let props = custom_properties(&rule.body);
+        assert_eq!(px(property(&props, "--column")), expected_column, "{width}");
+        assert_eq!(
+            px(property(&props, "--reader-column")),
+            expected_reading,
+            "{width}"
+        );
+    }
+    assert!(screen_rule(&rules, ".container").body.contains(
+        "max-width: calc(var(--column) + 2 * var(--side-width) + 2 * var(--row-gap) + 3rem)"
+    ));
+    let reading_mode = rules
+        .iter()
+        .find(|r| {
+            r.at_rule.as_deref() == Some("@media screen")
+                && r.selector == r#":root[data-reader-mode="on"] .container"#
+        })
+        .expect("reading mode's column");
+    assert!(
+        reading_mode
+            .body
+            .contains("max-width: calc(var(--reader-column) + 3rem)")
+    );
+}
+
+/// Ctrl+= (and Ctrl++, numpad +) and Ctrl+- (numpad -) step the text size,
+/// Ctrl+0 resets it, through Aa's control; their default (the page zoom) is
+/// always prevented, and in a field they change nothing. A brief status
+/// says the new size, politely.
+#[test]
+fn the_text_size_keys_step_aa_and_never_zoom_the_page() {
+    let keys = function_body("sizeKey");
+    for key in [
+        "key === '='",
+        "key === '+'",
+        "code === 'NumpadAdd'",
+        "key === '-'",
+        "code === 'NumpadSubtract'",
+        "code === 'Numpad0'",
+    ] {
+        assert!(keys.contains(key), "{key}");
+    }
+    let at = HTML.find("var step = sizeKey(event);").unwrap();
+    let body = &HTML[at..at + HTML[at..].find("showTextSize();").unwrap()];
+    let prevent = body.find("event.preventDefault();").unwrap();
+    let typing = body.find("INPUT|TEXTAREA|SELECT").unwrap();
+    assert!(
+        prevent < typing,
+        "the page zoom is prevented even in a field"
+    );
+    assert!(body.contains("choose(textSizeSelect, 'medium');"));
+    assert!(body.contains("stepTextSize(step);"));
+    assert!(HTML.contains(r#"<p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>"#));
 }
