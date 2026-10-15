@@ -1342,63 +1342,6 @@
             }
         }
 
-        /* First-run welcome: a short tour, in a modal. Like the rest of the
-           UI it doesn't grow with the reading text size. */
-
-        .welcome-icon {
-            display: block;
-            width: 48px;
-            height: 48px;
-            margin-bottom: 0.8rem;
-        }
-
-        .welcome-page h2 {
-            font-size: 1.35rem;
-            font-weight: normal;
-            color: var(--accent);
-            margin-bottom: 0.7rem;
-        }
-
-        .welcome-page p,
-        .welcome-page li {
-            font-size: 0.95rem;
-            margin-bottom: 0.6rem;
-        }
-
-        .welcome-page ul {
-            margin: 0 0 0.4rem 1.1rem;
-        }
-
-        .welcome-page li {
-            margin-bottom: 0.4rem;
-        }
-
-        .welcome-page kbd {
-            font-family: inherit;
-            font-size: 0.9em;
-            padding: 0 0.35em;
-            border: 1px solid var(--accent-dim);
-            border-radius: var(--radius-s);
-        }
-
-        .welcome-progress {
-            margin-right: auto;
-            font-size: 0.8rem;
-            color: var(--text-dim);
-        }
-
-        /* Back keeps its place on the first page, so the buttons don't
-           jump around between pages. */
-        .welcome-back:disabled {
-            visibility: hidden;
-        }
-
-        @media (max-height: 520px) {
-            .welcome-icon {
-                display: none;
-            }
-        }
-
         /* The welcome: one card over the open chapter, in the UI sans,
            which (like the rest of the UI) doesn't grow with the reading
            text size; its body scrolls inside the card on a small window.

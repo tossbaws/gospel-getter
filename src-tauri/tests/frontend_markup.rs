@@ -3489,3 +3489,41 @@ fn the_welcome_uses_tested_theme_colors() {
         assert!(ratio >= 3.0, "{theme}'s preview is {ratio:.2}:1");
     }
 }
+
+/// The four-page tour is gone entirely: no markup, style or script of its
+/// own is left (its pages, Next and Back, the progress line, the icon and
+/// the key caps it styled), and nothing in the app refers to a tour.
+#[test]
+fn nothing_is_left_of_the_old_tour() {
+    for gone in [
+        "welcome-page",
+        "welcome-pages",
+        "welcome-next",
+        "welcome-back",
+        "welcome-progress",
+        "welcome-icon",
+        "welcome-text-",
+        "welcome-title-",
+        "showWelcomePage",
+        "Start reading",
+    ] {
+        assert!(!HTML.contains(gone), "`{gone}` is left of the tour");
+    }
+    // Every welcome class the stylesheet styles is used outside it, in the
+    // markup or the script.
+    let outside = &HTML[HTML.find("</style>").unwrap()..];
+    let rules = rules();
+    for rule in rules.iter().filter(|r| r.selector.contains("welcome")) {
+        for class in rule
+            .selector
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .filter(|word| word.starts_with("welcome"))
+        {
+            assert!(
+                outside.contains(class),
+                "`{class}` (in `{}`) styles nothing",
+                rule.selector
+            );
+        }
+    }
+}
