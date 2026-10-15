@@ -3145,14 +3145,43 @@
             outline-offset: 2px;
         }
 
-        /* Quiet by its size: --text-dim isn't AA at the deep end of
-           Beast Slayer's and Hot Pink's gradients. */
+        /* One quiet line, its keys as small caps alike. A cap's own
+           opaque --option-bg keeps its key AA in every theme. */
         .nav-hint {
             text-align: center;
             font-family: var(--font-ui);
             font-size: 0.75rem;
-            color: var(--text);
+            line-height: 1.9;
+            color: var(--text-dim);
             margin-top: 0.75rem;
+        }
+
+        .nav-hint kbd {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.6em;
+            height: 1.6em;
+            padding: 0 0.35em;
+            margin: 0 0.1em;
+            vertical-align: middle;
+            font-family: var(--font-ui);
+            font-size: 1em;
+            line-height: 1;
+            color: var(--text-dim);
+            background: var(--option-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-s);
+        }
+
+        .nav-hint kbd svg {
+            width: 1em;
+            height: 1em;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.6;
+            stroke-linecap: round;
+            stroke-linejoin: round;
         }
 
         /* The chapter's Footnotes and Cross references are disclosures,
@@ -6766,6 +6795,16 @@
             // are crossed, Genesis 50 into Exodus 1), as two large
             // buttons; Genesis 1 has only the one forward, Revelation 22
             // only the one back. Then the keys' hint.
+            // The hint's keys, as small key caps. The arrows are drawn: the
+            // UI sans at the hint's size falls back to a face whose arrows
+            // are tiny. Screen readers hear the key's name.
+            const ARROW_LEFT = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg>';
+            const ARROW_RIGHT = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3 8h10M9 4l4 4-4 4"/></svg>';
+
+            function hintKey(name, drawn = null) {
+                return drawn ? `<kbd><span class="visually-hidden">${name}</span>${drawn}</kbd>` : `<kbd>${name}</kbd>`;
+            }
+
             function renderChapterEnd(dto) {
                 const step = (side, which) => {
                     if (!side) return '';
@@ -6777,7 +6816,7 @@
                     return `<button type="button" class="chapter-step chapter-step-${which}" data-book="${side.bookId}" data-chapter="${side.chapter}" aria-label="${label}">${text}</button>`;
                 };
                 return `<nav class="chapter-end" aria-label="Previous and next chapter">${step(dto.prev, 'prev')}${step(dto.next, 'next')}</nav>
-                    <p class="nav-hint">Use &larr; and &rarr; to move a chapter at a time, / to search, C to compare translations.</p>`;
+                    <p class="nav-hint">Use ${hintKey('Left arrow', ARROW_LEFT)} and ${hintKey('Right arrow', ARROW_RIGHT)} to move a chapter at a time, ${hintKey('/')} to search, ${hintKey('C')} to compare translations.</p>`;
             }
 
             // The footnotes of the chapter being read, one row each

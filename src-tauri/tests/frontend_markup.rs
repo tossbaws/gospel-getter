@@ -2480,6 +2480,18 @@ fn the_chapter_ends_with_buttons_to_the_chapters_around_it() {
     assert!(end.contains(r#"class="chapter-step chapter-step-${which}""#));
     assert!(end.contains(r#"data-book="${side.bookId}" data-chapter="${side.chapter}""#));
     assert!(end.contains(r#"<p class="nav-hint">"#));
+    // Its four keys are caps alike; the arrows are drawn, and named.
+    for key in [
+        "${hintKey('Left arrow', ARROW_LEFT)}",
+        "${hintKey('Right arrow', ARROW_RIGHT)}",
+        "${hintKey('/')}",
+        "${hintKey('C')}",
+    ] {
+        assert!(end.contains(key), "{key}");
+    }
+    let caps = function_body("hintKey");
+    assert!(caps.contains(r#"<kbd><span class="visually-hidden">${name}</span>${drawn}</kbd>"#));
+    assert!(HTML.contains(r#"const ARROW_LEFT = '<svg viewBox="0 0 16 16" aria-hidden="true""#));
     let pane = function_body("renderReadingPane");
     let body = pane.find("${body}").expect("the verses");
     let after = pane.find("${renderChapterEnd(dto)}").expect("the buttons");
@@ -2589,9 +2601,17 @@ fn footnotes_and_cross_references_are_disclosures_closed_by_default() {
 /// Everything the chapter's end adds is in tested colors: the buttons are
 /// --accent on the opaque --option-bg (Vaporwave's --panel-bg lets its
 /// gradient through), the disclosure toggles --text on the page (their
-/// chevron, a mark, --accent, at least 3:1), and the hint --text on the
-/// page (quiet by its size), all AA over every stop of every theme's
-/// background (Vaporwave's over its --option-bg).
+/// chevron, a mark, --accent, at least 3:1), and the hint one quiet line of
+/// --text-dim, its four keys as caps of --text-dim on their own opaque
+/// --option-bg (the arrows drawn, not a fallback font's).
+///
+/// Over the page itself, --text-dim is AA on every stop of every theme's
+/// background but two, which every other --text-dim line on the page shares
+/// and the palette test (--option-bg only) doesn't see: Vaporwave's
+/// gradient, where no plain color is AA (see
+/// `no_plain_color_is_aa_over_all_of_vaporwave`), and the deepest stop of
+/// Beast Slayer's, 4.00:1 at the very bottom of the window (the gradient is
+/// fixed to it). Pinned here, so any other falls out.
 #[test]
 fn the_chapter_end_uses_tested_theme_colors() {
     let rules = rules();
@@ -2605,18 +2625,24 @@ fn the_chapter_end_uses_tested_theme_colors() {
             &["color: var(--text)", "background: none"][..],
         ),
         (".disclosure-chevron", &["color: var(--accent)"][..]),
-        (".nav-hint", &["color: var(--text)"][..]),
+        (".nav-hint", &["color: var(--text-dim)"][..]),
+        (
+            ".nav-hint kbd",
+            &["color: var(--text-dim)", "background: var(--option-bg)"][..],
+        ),
+        (".nav-hint kbd svg", &["stroke: currentColor"][..]),
     ] {
         let rule = screen_rule(&rules, selector);
         for declaration in declarations {
             assert!(rule.body.contains(declaration), "{selector}: {declaration}");
         }
     }
+    let mut hint_below_aa = Vec::new();
     for (theme, props) in theme_palettes(&rules) {
         let option = property(&props, "--option-bg").to_owned();
-        // No plain color is AA over all of Vaporwave's gradient (see
-        // `no_plain_color_is_aa_over_all_of_vaporwave`); its page text is
-        // held to its opaque surface, as the palette test does.
+        let dim = property(&props, "--text-dim");
+        let key = contrast_ratio(dim, &option);
+        assert!(key >= 4.5, "theme `{theme}`: a hint key is {key:.2}:1");
         let grounds = if theme == "vaporwave" {
             vec![option.clone()]
         } else {
@@ -2630,7 +2656,6 @@ fn the_chapter_end_uses_tested_theme_colors() {
                     option.as_str(),
                 ),
                 ("a disclosure", property(&props, "--text"), bg.as_str()),
-                ("the hint", property(&props, "--text"), bg.as_str()),
             ] {
                 let ratio = contrast_ratio(fg, under);
                 assert!(
@@ -2643,8 +2668,13 @@ fn the_chapter_end_uses_tested_theme_colors() {
                 chevron >= 3.0,
                 "theme `{theme}`: a chevron is {chevron:.2}:1 on {bg}"
             );
+            let hint = contrast_ratio(dim, &bg);
+            if hint < 4.5 {
+                hint_below_aa.push(format!("{theme} on {bg}: {hint:.2}"));
+            }
         }
     }
+    assert_eq!(hint_below_aa, ["beast-slayer on #6b3a1f: 4.00"]);
 }
 
 /// Selecting verses opens one card that floats over the text (absolutely
