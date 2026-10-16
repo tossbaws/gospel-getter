@@ -88,9 +88,17 @@ bookmark or write notes on passages. No account and no network needed.
   your computer's light or dark setting, as Vellum or Chi Rho), Vaporwave,
   Classic Dark, Classic Light, Matrix, Beast Slayer and Hot Pink. Four text
   sizes (also Ctrl+= and Ctrl+-, and Ctrl+0 for Medium), three line
-  spacings, three widths for the text (Narrow, Normal and Wide), and a
-  distraction-free reading mode, all under **Aa** with the translation.
-  Printing is always black on white.
+  spacings, three widths for the text (Narrow, Normal and Wide), a
+  layout, and a distraction-free reading mode, all under **Aa** with the
+  translation. Printing is always black on white.
+- **Verses or Flowing.** **Layout** under **Aa** sets the verses one to a
+  line (**Verses**, the default) or runs each chapter on as prose with
+  small raised verse numbers (**Flowing**), in the chapter you're reading,
+  the faded chapters beside it, reading mode and print. Selecting, notes,
+  highlights, bookmarks and footnotes work the same in both. Compare always
+  shows a verse to a row.
+
+  ![John 3 in the KJV in the Flowing layout, in the Chi Rho theme: the verses run on as paragraphs, each starting after a small raised number, with John 2 and John 4 faded on either side, also flowing. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes. The sidebar on the left lists the books, with John's chapters open and 3 marked](screenshots/flowing.png)
 - **Everything in reach, out of the way.** A slim bar at the top holds
   the reference button (and, on wide windows, the button that hides or
   shows the sidebar), **Aa** (text and display), the **Library**
@@ -101,7 +109,7 @@ bookmark or write notes on passages. No account and no network needed.
   highlights, notes and display settings are remembered between sessions.
 - **Back up or move your data.** In the ☰ menu, **Export data…** saves your
   bookmarks, highlights, notes, reading position and display settings
-  (Width included) to a
+  (Width and Layout included) to a
   JSON file, and **Import data…** shows what a file contains before adding
   it (or, if you choose, replacing your bookmarks, highlights and notes).
   Only that personal data is exported, not Bible text or the app's
@@ -111,12 +119,16 @@ bookmark or write notes on passages. No account and no network needed.
   newer. Restore a backup made in 2.12 in 2.12 or later: 2.11 and older
   refuse a whole file whose theme they don't know. From 2.12 on, a display
   setting the app doesn't know is skipped, with a notice naming it, and
-  the rest of the file imports: 2.12 skips a 2.13 backup's Width that way.
+  the rest of the file imports: 2.12 skips a 2.13 backup's Width that way,
+  and 2.12 and 2.13 skip a 2.14 backup's Layout.
   **Export data…** is the backup, and its file imports again; **Export
   notes…** makes a readable copy of your notes, which isn't imported.
-- **A short welcome.** On a new install, a four-page overview of the
-  features opens the first time. **Skip** (or Esc) closes it, and
-  **Show welcome** in the ☰ menu opens it again. Upgrading doesn't show it.
+- **A short welcome.** On a new install, one card opens over the
+  chapter. **Pick a look** tries Chi Rho or Vellum on the spot (the other
+  themes are under **Aa**), and **Where to start** suggests Mark, John,
+  Psalms or Genesis 1, each a click away. **Skip**, × or Esc closes it
+  where you are, and **Show welcome** in the ☰ menu opens it again.
+  Upgrading doesn't show it.
 - **Updates from inside the app, always asked first.** When it starts,
   Gospel Getter checks GitHub Releases for a newer version and, if there
   is one, shows a banner with the release notes, **Update and restart**
@@ -133,7 +145,7 @@ bookmark or write notes on passages. No account and no network needed.
 
 ## A quick tour
 
-All seven screenshots in this README, including the one at the top, use
+All eight screenshots in this README, including the one at the top, use
 Chi Rho, the default theme, in a window wide enough for the picker's
 sidebar. The other eight themes are under **Aa**.
 
@@ -241,14 +253,14 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.12.0?** Each updates itself to 2.13.0: it
+**Coming from 2.6.0 through 2.13.0?** Each updates itself to 2.14.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
 update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.13.0 by hand once, from the
+Install 2.14.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -266,7 +278,7 @@ Upgrading keeps your data.
   rebuilds the index once, by itself, so KJV search leaves out the margin
   notes. Moving back to an older
   version after upgrading hasn't been tested.
-- Theme, text size, line spacing, width, compare and reading mode are
+- Theme, text size, line spacing, width, layout, compare and reading mode are
   display settings stored in the app's web storage, not the database, as
   are whether the sidebar is shown and whether the chapter's Footnotes and
   Cross references are open (which aren't exported).
