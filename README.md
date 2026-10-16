@@ -72,7 +72,10 @@ bookmark or write notes on passages. No account and no network needed.
   translation numbers a verse, the other column says so instead of
   shifting anything.
 - **Cross-references.** Select a verse to see related passages in its
-  card, and click a citation to read it in place.
+  card. Click one to read it right there in the card, a whole range at
+  once, in the translation you're reading; click it again to close it, and
+  **Go to** opens it. Only one shows at a time. The Cross references list
+  at the end of each chapter links straight to each passage, selected.
 - **Footnotes (KJV).** Translator-supplied words are in italics, as in
   printed KJVs, and the margin notes are moved out of the text into
   lettered footnotes. Select a verse (or click its letter) to see its
