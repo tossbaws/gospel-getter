@@ -148,7 +148,7 @@ test('selecting in either column copies that column’s text and translation cod
         assert.deepEqual(app.selectedVerseNumbers(), []);
     }));
 
-test('the selection card opens on either column, and its chips open the passage, still comparing', () =>
+test('the selection card opens on either column, and its chips’ Go to opens the passage, still comparing', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv', compare: true }, async (app) => {
         const web = app.verse(16, 'web');
         app.click(web);
@@ -157,8 +157,11 @@ test('the selection card opens on either column, and its chips open the passage,
         assert.equal(card.getAttribute('aria-label'), 'Selection: John 3:16 (WEB)');
         const citation = card.querySelector('.xref-citation');
         const [book, chapter, verse] = [citation.dataset.book, citation.dataset.chapter, citation.dataset.verse].map(Number);
-        const before = app.calls.length;
+        let before = app.calls.length;
         app.click(citation);
+        await app.idle(before, 'get_passage');
+        before = app.calls.length;
+        app.click(card.querySelector('.xref-preview-go'));
         await app.idle(before, 'get_compare');
         assert.ok(app.isComparing());
         const inner = app.document.getElementById('reading-pane-inner');

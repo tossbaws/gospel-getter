@@ -3526,3 +3526,88 @@ fn nothing_is_left_of_the_old_tour() {
         }
     }
 }
+
+/// A cross-reference previewed in the card: the chips control one preview
+/// region, labelled by its title, that nothing navigates to until its Go to
+/// button; and its colors are the card's tested ones, AA over its faint
+/// wash in every theme: the title and any notice in --text-dim, the verses
+/// in --text, their numbers and Go to in --accent-2. The pressed chip keeps
+/// its --accent-2 text, AA over the same wash, ringed at 3:1.
+#[test]
+fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
+    let render = function_body("renderCardReferences");
+    assert!(render.contains(r#"aria-expanded="false" aria-controls="xref-preview""#));
+    assert!(HTML.contains("xrefPreview.setAttribute('role', 'region');"));
+    assert!(HTML.contains("xrefPreview.setAttribute('aria-labelledby', 'xref-preview-title');"));
+    let toggle = function_body("toggleXrefPreview");
+    assert!(
+        toggle.contains("invoke('get_passage', { translationCode, bookId, chapter, start, end })")
+    );
+    assert!(
+        !toggle.contains("openPassage"),
+        "a chip previews; only Go to opens"
+    );
+    assert!(toggle.contains("verseHtml(v, { markers: false })"));
+    assert!(HTML.contains(r#"invoke('get_passage'"#));
+
+    let rules = rules();
+    for control in [".xref-citation", ".xref-preview-go"] {
+        let focus = format!("{control}:focus-visible");
+        assert!(
+            rules.iter().any(|r| r.at_rule.is_none()
+                && selectors(r).any(|s| s == focus)
+                && r.body.contains("outline: 2px solid var(--accent)")),
+            "{control} has the shared focus ring"
+        );
+    }
+    let wash = "background: rgba(var(--accent-rgb), 0.05)";
+    for selector in [".xref-preview", r#".xref-citation[aria-expanded="true"]"#] {
+        assert!(
+            screen_rule(&rules, selector).body.contains(wash),
+            "{selector}"
+        );
+    }
+    assert!(
+        screen_rule(&rules, r#".xref-citation[aria-expanded="true"]"#)
+            .body
+            .contains("box-shadow: 0 0 0 1px var(--accent-2)")
+    );
+    for (selector, color) in [
+        (".xref-preview-title", "--text-dim"),
+        (".xref-preview-notice", "--text-dim"),
+        (".xref-preview-text", "--text"),
+        (".xref-preview-num", "--accent-2"),
+        (".xref-preview-go", "--accent-2"),
+    ] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains(&format!("color: var({color})")),
+            "{selector}"
+        );
+    }
+    assert!(
+        screen_rule(&rules, ".xref-preview-text")
+            .body
+            .contains("font-family: var(--font-scripture)")
+    );
+    for (theme, props) in theme_palettes(&rules) {
+        let card = property(&props, "--option-bg");
+        let under = composite(
+            &format!("rgba({}, 0.05)", property(&props, "--accent-rgb")),
+            card,
+        );
+        for fg in ["--text", "--text-dim", "--accent-2"] {
+            let ratio = contrast_ratio(property(&props, fg), &under);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: {fg} on the preview's wash is {ratio:.2}:1"
+            );
+        }
+        let ring = contrast_ratio(property(&props, "--accent-2"), card);
+        assert!(
+            ring >= 3.0,
+            "theme `{theme}`: the pressed ring is {ring:.2}:1"
+        );
+    }
+}

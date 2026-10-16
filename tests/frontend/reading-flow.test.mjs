@@ -288,11 +288,12 @@ test('Esc or a click away closes the card and returns focus to the verse', () =>
         assert.equal(card(app), null);
     }));
 
-test('a chip reads that passage, selected', () =>
+test('a chip’s Go to reads that passage, selected', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
         await clickAndWait(app, app.verse(16), 'list_notes');
         const chip = [...card(app).querySelectorAll('.xref-citation')].find((c) => c.textContent === 'Romans 5:8');
-        await clickAndWait(app, chip, 'get_reading');
+        await clickAndWait(app, chip, 'get_passage');
+        await clickAndWait(app, card(app).querySelector('.xref-preview-go'), 'get_reading');
         assert.equal(app.heading(), 'Romans 5');
         assert.deepEqual(app.selectedVerseNumbers(), [8]);
         assert.equal(card(app).previousElementSibling, app.verse(8));
