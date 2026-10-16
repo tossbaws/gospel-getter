@@ -310,3 +310,61 @@ test('the keyboard: Enter and Space reach the chips and Go to, which act on clic
         await app.idle(before, 'get_reading');
         assert.deepEqual(where(app), ['Romans 5', [8]]);
     }));
+
+// ---- The chapter's Cross references list
+
+const listed = (app) => [...app.document.querySelectorAll('#xref-summary-list .xref-summary-chip')];
+const openList = (app) => app.click(app.document.querySelector('.disclosure-toggle[data-disclosure="xrefs"]'));
+
+test('a citation in the chapter’s Cross references opens its passage, selected', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
+        openList(app);
+        const range = listed(app).find((c) => c.textContent === '1 John 4:9-10');
+        assert.ok(range, 'fixture: John 3 lists 1 John 4:9-10');
+        assert.equal(range.tagName, 'BUTTON');
+        assert.equal(range.type, 'button');
+        assert.equal(range.tabIndex, 0);
+        await clickAndWait(app, range, 'get_reading');
+        assert.deepEqual(where(app), ['1 John 4', [9, 10]]);
+        assert.equal(card(app).previousElementSibling, app.verse(10));
+        assert.equal(shown(app), null, 'no preview there');
+
+        const before = app.calls.length;
+        app.window.dispatchEvent(new app.window.PopStateEvent('popstate', { state: { bookId: 43, chapter: 3 } }));
+        await app.idle(before, 'get_reading');
+        assert.equal(app.heading(), 'John 3');
+
+        openList(app);
+        const single = listed(app).find((c) => c.textContent === 'Romans 5:8');
+        await clickAndWait(app, single, 'get_reading');
+        assert.deepEqual(where(app), ['Romans 5', [8]]);
+    }));
+
+test('every citation in the list is a button named by its reference', () =>
+    withApp({ book: 'Psalms', chapter: 23, translation: 'kjv' }, async (app) => {
+        const all = listed(app);
+        const count = Number(/\((\d+)\)/.exec(app.document.querySelector('.disclosure-toggle[data-disclosure="xrefs"]').textContent)[1]);
+        assert.equal(all.length, count);
+        for (const el of all) {
+            assert.equal(el.tagName, 'BUTTON');
+            assert.match(el.textContent, /^(\d )?[A-Z][A-Za-z ]+ \d+:\d+(-\d+)?$/);
+            assert.equal(el.getAttribute('aria-label'), null, 'its name is its text');
+            assert.ok(el.dataset.book && el.dataset.chapter && el.dataset.verse);
+        }
+    }));
+
+test('the keyboard: Enter and Space reach the list’s citations, which act on click', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        openList(app);
+        const link = listed(app)[0];
+        link.focus();
+        assert.equal(app.document.activeElement, link);
+        for (const key of ['Enter', ' ']) {
+            assert.equal(app.key(key, {}, link).defaultPrevented, false, `${JSON.stringify(key)} on a citation`);
+        }
+        const verse = Number(link.dataset.verse);
+        const before = app.calls.length;
+        link.click();
+        await app.idle(before, 'get_reading');
+        assert.ok(app.selectedVerseNumbers().includes(verse));
+    }));

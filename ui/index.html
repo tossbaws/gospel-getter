@@ -2185,7 +2185,8 @@
         .reader-mode-btn:focus-visible,
         .reader-exit:focus-visible,
         .xref-citation:focus-visible,
-        .xref-preview-go:focus-visible {
+        .xref-preview-go:focus-visible,
+        .xref-summary-chip:focus-visible {
             outline: 2px solid var(--accent);
             outline-offset: 2px;
         }
@@ -3354,12 +3355,29 @@
             overflow-wrap: anywhere;
         }
 
+        /* A citation in the list opens its passage: quiet until hovered or
+           focused, when it's underlined like a link. */
         .xref-summary-chip {
-            color: var(--text-dim);
+            padding: 0;
+            font: inherit;
+            color: var(--accent-2);
+            background: none;
+            border: none;
+            border-radius: var(--radius-s);
+            text-align: start;
+            cursor: pointer;
         }
 
-        .xref-summary-chip:not(:last-child)::after {
+        .xref-summary-chip:hover,
+        .xref-summary-chip:focus-visible {
+            text-decoration: underline;
+            text-underline-offset: 0.15em;
+        }
+
+        /* Outside the link, so neither underlined nor ringed with it. */
+        .xref-summary-item:not(:last-child)::after {
             content: ',';
+            color: var(--text-dim);
         }
 
         .xref-credit {
@@ -7373,7 +7391,10 @@
                 const rows = dto.currentVerses
                     .filter((v) => v.xrefs.length > 0)
                     .map((v) => {
-                        const chips = v.xrefs.map((x) => `<span class="xref-summary-chip">${escapeHtml(x.citation)}</span>`).join('');
+                        const chips = v.xrefs.map((x) => {
+                            const end = x.endVerse != null ? ` data-end-verse="${x.endVerse}"` : '';
+                            return `<span class="xref-summary-item"><button type="button" class="xref-summary-chip" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${end}>${escapeHtml(x.citation)}</button></span>`;
+                        }).join('');
                         return `<div class="xref-summary-row">
                             <span class="xref-summary-verse">${dto.currentChapter}:${v.number}</span>
                             <span class="xref-summary-chips">${chips}</span>
@@ -7815,6 +7836,17 @@
                 const go = event.target.closest('#selection-card .xref-preview-go');
                 if (go) {
                     openPassage(go.dataset.book, go.dataset.chapter, Number(go.dataset.verse), Number(go.dataset.endVerse));
+                    return;
+                }
+                // So does a citation in the chapter's Cross references list.
+                const listed = event.target.closest('.xref-summary-chip');
+                if (listed) {
+                    openPassage(
+                        listed.dataset.book,
+                        listed.dataset.chapter,
+                        Number(listed.dataset.verse),
+                        Number(listed.dataset.endVerse || listed.dataset.verse),
+                    );
                     return;
                 }
                 // The rest of the card (its footnotes and notes, to read
