@@ -639,6 +639,8 @@ fn reading_presets_scale_only_reading_content() {
                 [
                     ".verse",
                     ".chapter-side .verse",
+                    r#":root[data-layout="flowing"] .chapter-text"#,
+                    r#":root[data-layout="flowing"] .chapter-side .chapter-text"#,
                     ".verse-num",
                     ".chapter-heading",
                     ".compare-gap",
@@ -3121,5 +3123,407 @@ fn the_bible_s_edges_have_a_quiet_card_in_the_neighbor_s_place() {
             !rule.body.contains('#') && !rule.body.contains("rgb"),
             "no new colors"
         );
+    }
+}
+
+/// Layout is a display setting in Aa, after Width: Verses (the default, a
+/// verse to a line as always) or Flowing. It's exported with the others.
+/// While comparing, its buttons are disabled and a note says why.
+#[test]
+fn layout_is_a_display_setting_in_aa() {
+    assert_eq!(
+        select_options("layout-select"),
+        [
+            ("verses".to_owned(), "Verses".to_owned()),
+            ("flowing".to_owned(), "Flowing".to_owned()),
+        ]
+    );
+    assert_eq!(script_preset("layout-select").1, "verses");
+    assert!(HTML.contains(r#"<span class="section-label" id="layout-label">Layout</span>"#));
+    assert!(HTML.contains(
+        r#"<div id="layout-choices" class="segmented" role="group" aria-labelledby="layout-label" aria-describedby="layout-note"></div>"#
+    ));
+    assert!(HTML.contains(
+        r#"<p id="layout-note" class="section-note layout-note" hidden>Compare always shows a verse to a row.</p>"#
+    ));
+    let width = HTML.find(r#"id="width-label""#).unwrap();
+    let layout = HTML.find(r#"id="layout-label""#).unwrap();
+    let theme = HTML.find(r#"id="theme-label""#).unwrap();
+    assert!(width < layout && layout < theme);
+    assert!(block_after(HTML, "var FILE_NAMES =").contains("layout: 'layout',"));
+    assert!(HTML.contains("btn.disabled = comparing;"));
+    assert!(HTML.contains("layoutNote.hidden = !comparing;"));
+
+    // A disabled segment is quiet but still AA: --text-dim on the
+    // segments' --panel-bg, over the popover's --option-bg.
+    let rules = rules();
+    let disabled = screen_rule(&rules, ".segment:disabled");
+    assert!(disabled.body.contains("color: var(--text-dim)"));
+    for (theme, props) in theme_palettes(&rules) {
+        let option_bg = property(&props, "--option-bg");
+        let panel = property(&props, "--panel-bg");
+        let behind = if panel.starts_with("rgba(") {
+            composite(panel, option_bg)
+        } else {
+            panel.to_owned()
+        };
+        let ratio = contrast_ratio(property(&props, "--text-dim"), &behind);
+        assert!(
+            ratio >= 4.5,
+            "theme `{theme}`: a disabled segment is {ratio:.2}:1"
+        );
+    }
+}
+
+/// Flowing runs each chapter's verses inline in one paragraph, in the
+/// chapter being read and the faded neighbors (and so reading mode and
+/// print, which show them). It keys off `.chapter-text`, which compare's
+/// grid doesn't have, so compare stays a verse to a row. The verse number
+/// is inline with no line height, so it can't open up its line.
+#[test]
+fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
+    let rules = rules();
+    let verse = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-text > .verse"#,
+    );
+    assert!(verse.body.contains("display: inline"));
+    assert!(verse.body.contains("margin: 0"));
+    let number = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-text > .verse > .verse-num"#,
+    );
+    for decl in ["display: inline", "min-width: 0", "line-height: 0"] {
+        assert!(number.body.contains(decl), "{decl}");
+    }
+    let text = screen_rule(&rules, r#":root[data-layout="flowing"] .chapter-text"#);
+    for decl in [
+        "font-family: var(--font-scripture)",
+        "font-size: calc(1.05rem * var(--reading-scale))",
+        "line-height: var(--reading-leading)",
+        "color: var(--text)",
+    ] {
+        assert!(text.body.contains(decl), "{decl}");
+    }
+    // The same size as a verse, in the center and the neighbors.
+    assert!(
+        screen_rule(&rules, ".verse")
+            .body
+            .contains("font-size: calc(1.05rem * var(--reading-scale))")
+    );
+    let side = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-side .chapter-text"#,
+    );
+    assert!(
+        side.body
+            .contains("font-size: calc(0.9rem * var(--reading-scale))")
+    );
+    // Only .chapter-text flows, and only the reading pane and the side
+    // chapters have one; compare's grid doesn't.
+    for rule in rules
+        .iter()
+        .filter(|r| r.selector.contains(r#"data-layout="flowing""#))
+    {
+        for selector in selectors(rule) {
+            assert!(selector.contains(".chapter-text"), "{selector}");
+            assert!(!selector.contains("compare"), "{selector}");
+        }
+    }
+    let pane = function_body("renderReadingPane");
+    assert!(pane.contains("? renderCompareGrid(dto, compare)"));
+    assert!(pane.contains(r#": `<div class="chapter-text">${dto.currentVerses.map("#));
+    assert!(!function_body("renderCompareGrid").contains("chapter-text"));
+    assert!(
+        function_body("renderSideChapter").contains(r#"<div class="chapter-text">${verses}</div>"#)
+    );
+    // Nothing in print touches the verses' display: printed, Flowing
+    // flows (and Verses stays a verse to a line).
+    for rule in rules
+        .iter()
+        .filter(|r| r.at_rule.as_deref() == Some("@media print"))
+    {
+        let names_a_verse = |selector: &str| {
+            selector
+                .split(|c: char| c.is_whitespace() || c == '>')
+                .any(|part| {
+                    part.starts_with(".chapter-text")
+                        || part.strip_prefix(".verse").is_some_and(|rest| {
+                            !rest.starts_with(|c: char| c.is_alphanumeric() || c == '-')
+                        })
+                })
+        };
+        let verses = selectors(rule).any(names_a_verse);
+        assert!(
+            !(verses && rule.body.contains("display")),
+            "print sets a verse's display: {}",
+            rule.selector
+        );
+    }
+}
+
+/// In Flowing, a verse shows where it starts and ends without boxes
+/// breaking up the text: a faint wash under the pointer and the selection
+/// tint, each on the verse's own lines. Over both, --text stays AA on every
+/// theme's background (each stop of a gradient one), and never less legible
+/// than on the bare page: Vaporwave's two lowest stops are under AA for its
+/// text already (3.93:1 on #bf5349), and the wash raises that.
+#[test]
+fn flowing_verses_wash_and_select_at_aa_in_every_theme() {
+    let rules = rules();
+    let hover = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-main .chapter-text > .verse:hover"#,
+    );
+    assert!(
+        hover
+            .body
+            .contains("background: rgba(var(--accent-rgb), 0.06)")
+    );
+    let selected = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-main .chapter-text > .verse.verse-selected"#,
+    );
+    assert!(
+        selected
+            .body
+            .contains("background: rgba(var(--accent-rgb), 0.12)")
+    );
+    assert!(selected.body.contains("box-shadow: none"));
+    let runs = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-main .chapter-text > .verse"#,
+    );
+    assert!(runs.body.contains("box-decoration-break: clone"));
+    for (theme, props) in theme_palettes(&rules) {
+        let accent_rgb = property(&props, "--accent-rgb");
+        for bg in backgrounds(&props) {
+            for alpha in ["0.06", "0.12"] {
+                let under = composite(&format!("rgba({accent_rgb}, {alpha})"), &bg);
+                let text = property(&props, "--text");
+                let ratio = contrast_ratio(text, &under);
+                let bare = contrast_ratio(text, &bg);
+                assert!(
+                    ratio >= 4.5_f64.min(bare),
+                    "theme `{theme}`: verse text over a {alpha} wash on {bg} is {ratio:.2}:1 \
+                     (on the bare page, {bare:.2}:1)"
+                );
+            }
+        }
+    }
+}
+
+/// The card's place in Flowing: under the last selected verse's last line
+/// and above the first one's first line (their line boxes, not the whole
+/// run's box), from the column's left edge. A new layout re-places it.
+#[test]
+fn the_selection_card_anchors_to_line_boxes_in_flowing() {
+    let place = function_body("placeCard");
+    assert!(place.contains("const firstRect = lineRect(first, 'first');"));
+    assert!(place.contains("const lastRect = lineRect(cardVerse, 'last');"));
+    assert!(place.contains("const left = flowing ? 0 :"));
+    let line = function_body("lineRect");
+    assert!(line.contains("verse.getClientRects()"));
+    assert!(HTML.contains("document.addEventListener('gospel-getter:layout-change', placeCard);"));
+    assert!(HTML.contains("keepReadingPlace(change);"));
+}
+
+/// The welcome is one card: a modal dialog labelled by its title and
+/// described by its one sentence, focusable itself (focus goes there on
+/// open), with × and Skip, "Pick a look" as a radio group of two real theme
+/// previews, and "Where to start" as a list the backend fills. No pages,
+/// no Next or Back, and no key lists.
+#[test]
+fn the_welcome_is_one_accessible_card() {
+    let start = HTML.find(r#"<div id="welcome-overlay""#).unwrap();
+    let end = start + HTML[start..].find("\n    </div>\n").unwrap();
+    let card = &HTML[start..end];
+    assert!(card.contains(
+        r#"<div id="welcome-panel" class="welcome-panel modal-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-intro" tabindex="-1">"#
+    ));
+    assert!(
+        card.contains(
+            r#"<h2 id="welcome-title" class="welcome-title">Welcome to Gospel Getter</h2>"#
+        )
+    );
+    assert!(card.contains(
+        r#"<p id="welcome-intro" class="welcome-intro">A quiet place to read the Bible on your computer, offline and with no account.</p>"#
+    ));
+    assert!(card.contains(
+        r#"<button type="button" id="welcome-close" class="panel-close" aria-label="Close" title="Close (Esc)">&times;</button>"#
+    ));
+    assert!(card.contains(
+        r#"<button type="button" id="welcome-skip" class="reader-mode-btn">Skip</button>"#
+    ));
+    assert!(card.contains(
+        r#"<div id="welcome-looks" class="welcome-looks" role="radiogroup" aria-labelledby="welcome-look-label">"#
+    ));
+    assert!(card.contains(r#"<h3 class="section-label" id="welcome-look-label">Pick a look</h3>"#));
+    assert!(card.contains(r#"<p class="welcome-hint">More themes in Aa.</p>"#));
+    assert!(
+        card.contains(r#"<h3 class="section-label" id="welcome-start-label">Where to start</h3>"#)
+    );
+    assert!(card.contains(
+        r#"<ul id="welcome-start" class="welcome-start" aria-labelledby="welcome-start-label"></ul>"#
+    ));
+    // The two looks: radios named by theme (as the theme list names them),
+    // each a preview of its own theme, hidden from assistive tech.
+    let themes = select_options("theme-select");
+    let mut looks = 0;
+    for (value, name) in [("chi-rho", "Chi Rho"), ("vellum", "Vellum")] {
+        assert!(themes.contains(&(value.to_owned(), name.to_owned())));
+        assert!(card.contains(&format!(
+            r#"<button type="button" class="welcome-look" role="radio" aria-checked="false" data-value="{value}"><span class="welcome-look-preview" data-theme-preview="{value}" aria-hidden="true">"#
+        )));
+        assert!(card.contains(&format!(
+            r#"<span class="welcome-look-name">{name}</span></button>"#
+        )));
+        looks += 1;
+    }
+    assert_eq!(card.matches(r#"role="radio""#).count(), looks);
+    for gone in [
+        "welcome-page",
+        "welcome-next",
+        "welcome-back",
+        "welcome-progress",
+        "<kbd>",
+        "<li>",
+    ] {
+        assert!(!card.contains(gone), "the card has no {gone}");
+    }
+    // Its own keyboard: Escape, the radios' arrows, and Tab kept inside.
+    let script = block_after(
+        HTML,
+        "            window.addEventListener('keydown', function (event) {\n                if (welcomeOverlay.hidden) return;",
+    );
+    assert!(script.contains("event.stopPropagation();"));
+    assert!(script.contains("closeWelcome();"));
+    assert!(script.contains("/^Arrow(Left|Right|Up|Down)$/"));
+    assert!(script.contains("event.key === 'Tab'"));
+    assert!(function_body("openWelcome").contains("welcomePanel.focus();"));
+    // The places to start are escaped text from the backend.
+    let rows = function_body("renderStartHere");
+    assert!(rows.contains("${escapeHtml(row.title)}"));
+    assert!(rows.contains("${escapeHtml(row.line)}"));
+    assert!(HTML.contains("renderStartHere(home.startHere);"));
+    // And the seen flag is the old tour's.
+    assert!(HTML.contains("const WELCOME_KEY = 'gospel-getter-welcome';"));
+}
+
+/// The card adds no colors of its own: --text, --text-dim and --accent on
+/// the modal's opaque --option-bg, all AA in every theme; a place to start
+/// under the pointer gets a 0.06 --accent wash, with its title (--accent)
+/// and line (--text-dim) still AA; a look's border and its checked ring are
+/// --accent-dim and --accent, and the checked ring is at least 3:1. Each
+/// look previews its theme's own --bg and --accent.
+#[test]
+fn the_welcome_uses_tested_theme_colors() {
+    let rules = rules();
+    for (selector, color) in [
+        (".welcome-title", "--accent"),
+        (".welcome-look", "--text"),
+        (".welcome-hint", "--text-dim"),
+        (".welcome-start-row", "--text"),
+        (".welcome-start-title", "--accent"),
+        (".welcome-start-line", "--text-dim"),
+        (".welcome-look-sample", "--accent"),
+    ] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains(&format!("color: var({color})")),
+            "{selector} should be {color}"
+        );
+    }
+    assert!(
+        screen_rule(&rules, ".welcome-start-row:hover")
+            .body
+            .contains("background: rgba(var(--accent-rgb), 0.06)")
+    );
+    let checked = screen_rule(&rules, r#".welcome-look[aria-checked="true"]"#);
+    assert!(checked.body.contains("border-color: var(--accent)"));
+    assert!(checked.body.contains("box-shadow: 0 0 0 1px var(--accent)"));
+    assert!(
+        screen_rule(&rules, ".welcome-look-preview")
+            .body
+            .contains("background: var(--bg)")
+    );
+    for (theme, props) in theme_palettes(&rules) {
+        let bg = property(&props, "--option-bg");
+        let wash = composite(
+            &format!("rgba({}, 0.06)", property(&props, "--accent-rgb")),
+            bg,
+        );
+        for (what, fg, under) in [
+            ("the title", "--accent", bg.to_owned()),
+            ("a look's name", "--text", bg.to_owned()),
+            ("the hint", "--text-dim", bg.to_owned()),
+            (
+                "a place's title under the pointer",
+                "--accent",
+                wash.clone(),
+            ),
+            (
+                "a place's line under the pointer",
+                "--text-dim",
+                wash.clone(),
+            ),
+        ] {
+            let ratio = contrast_ratio(property(&props, fg), &under);
+            assert!(ratio >= 4.5, "theme `{theme}`: {what} is {ratio:.2}:1");
+        }
+        let ring = contrast_ratio(property(&props, "--accent"), bg);
+        assert!(
+            ring >= 3.0,
+            "theme `{theme}`: the checked ring is {ring:.2}:1"
+        );
+    }
+    // The previews: each theme's large "Aa" on its own page background.
+    for theme in ["chi-rho", "vellum"] {
+        let props = theme_palettes(&rules)
+            .into_iter()
+            .find(|(name, _)| name == theme)
+            .unwrap()
+            .1;
+        let ratio = contrast_ratio(property(&props, "--accent"), property(&props, "--bg"));
+        assert!(ratio >= 3.0, "{theme}'s preview is {ratio:.2}:1");
+    }
+}
+
+/// The four-page tour is gone entirely: no markup, style or script of its
+/// own is left (its pages, Next and Back, the progress line, the icon and
+/// the key caps it styled), and nothing in the app refers to a tour.
+#[test]
+fn nothing_is_left_of_the_old_tour() {
+    for gone in [
+        "welcome-page",
+        "welcome-pages",
+        "welcome-next",
+        "welcome-back",
+        "welcome-progress",
+        "welcome-icon",
+        "welcome-text-",
+        "welcome-title-",
+        "showWelcomePage",
+        "Start reading",
+    ] {
+        assert!(!HTML.contains(gone), "`{gone}` is left of the tour");
+    }
+    // Every welcome class the stylesheet styles is used outside it, in the
+    // markup or the script.
+    let outside = &HTML[HTML.find("</style>").unwrap()..];
+    let rules = rules();
+    for rule in rules.iter().filter(|r| r.selector.contains("welcome")) {
+        for class in rule
+            .selector
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .filter(|word| word.starts_with("welcome"))
+        {
+            assert!(
+                outside.contains(class),
+                "`{class}` (in `{}`) styles nothing",
+                rule.selector
+            );
+        }
     }
 }

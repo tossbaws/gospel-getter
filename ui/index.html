@@ -580,6 +580,14 @@
             text-decoration: underline;
         }
 
+        /* A row that has no effect for now (Layout, while comparing): the
+           choice still shows, pressed; the others are quiet. */
+        .segment:disabled {
+            color: var(--text-dim);
+            text-decoration: none;
+            cursor: default;
+        }
+
         .segment[aria-pressed="true"] {
             background: var(--accent);
             color: var(--on-accent);
@@ -1334,61 +1342,160 @@
             }
         }
 
-        /* First-run welcome: a short tour, in a modal. Like the rest of the
-           UI it doesn't grow with the reading text size. */
-
-        .welcome-icon {
-            display: block;
-            width: 48px;
-            height: 48px;
-            margin-bottom: 0.8rem;
+        /* The welcome: one card over the open chapter, in the UI sans,
+           which (like the rest of the UI) doesn't grow with the reading
+           text size; its body scrolls inside the card on a small window.
+           Text is --text, --text-dim and --accent on --option-bg (AA in
+           every theme), and a place to start under the pointer gets a
+           faint 0.06 --accent wash, which keeps its --accent title at AA
+           (at the picker's 0.12, Classic Light's would be 4.37:1). */
+        .welcome-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1.1rem 1.4rem 0;
         }
 
-        .welcome-page h2 {
+        .welcome-panel:focus {
+            outline: none;
+        }
+
+        .welcome-title {
             font-size: 1.35rem;
             font-weight: normal;
             color: var(--accent);
-            margin-bottom: 0.7rem;
         }
 
-        .welcome-page p,
-        .welcome-page li {
+        .welcome-head .panel-close {
+            flex: 0 0 auto;
+        }
+
+        .welcome-body {
+            padding-top: 0.6rem;
+        }
+
+        .welcome-intro {
             font-size: 0.95rem;
-            margin-bottom: 0.6rem;
+            margin-bottom: 1rem;
         }
 
-        .welcome-page ul {
-            margin: 0 0 0.4rem 1.1rem;
+        .welcome-looks {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.6rem;
         }
 
-        .welcome-page li {
-            margin-bottom: 0.4rem;
-        }
-
-        .welcome-page kbd {
+        /* Each look previews its theme for real (data-theme-preview), as
+           Aa's swatches do: its background, its accent and its text. */
+        .welcome-look {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            padding: 0.4rem;
             font-family: inherit;
-            font-size: 0.9em;
-            padding: 0 0.35em;
+            font-size: 0.85rem;
+            text-align: left;
+            color: var(--text);
+            background: none;
             border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-m);
+            cursor: pointer;
+        }
+
+        .welcome-look:hover {
+            border-color: var(--accent);
+        }
+
+        .welcome-look[aria-checked="true"] {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px var(--accent);
+        }
+
+        .welcome-look-preview {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            height: 4.2rem;
+            padding: 0 0.8rem;
+            background: var(--bg);
             border-radius: var(--radius-s);
         }
 
-        .welcome-progress {
-            margin-right: auto;
-            font-size: 0.8rem;
+        .welcome-look-sample {
+            font-family: var(--font-scripture);
+            font-size: 1.6rem;
+            color: var(--accent);
+        }
+
+        .welcome-look-lines {
+            display: flex;
+            flex: 1 1 auto;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .welcome-look-lines span {
+            height: 0.3rem;
+            border-radius: var(--radius-s);
+            background: var(--text);
+        }
+
+        .welcome-look-lines span:last-child {
+            width: 60%;
+        }
+
+        .welcome-look-name {
+            padding: 0 0.15rem;
+        }
+
+        .welcome-hint {
+            font-size: 0.78rem;
+            color: var(--text-dim);
+            margin: 0.4rem 0 1.1rem;
+        }
+
+        .welcome-start {
+            margin: 0 0 0.6rem;
+            padding: 0;
+            list-style: none;
+            border-top: 1px solid var(--accent-dim);
+        }
+
+        .welcome-start li {
+            border-bottom: 1px solid var(--accent-dim);
+        }
+
+        .welcome-start-row {
+            display: block;
+            width: 100%;
+            padding: 0.5rem 0.4rem;
+            font-family: inherit;
+            text-align: left;
+            color: var(--text);
+            background: none;
+            border: none;
+            cursor: pointer;
+        }
+
+        .welcome-start-row:hover {
+            background: rgba(var(--accent-rgb), 0.06);
+        }
+
+        .welcome-start-title {
+            display: block;
+            font-size: 0.95rem;
+            color: var(--accent);
+        }
+
+        .welcome-start-line {
+            display: block;
+            font-size: 0.85rem;
             color: var(--text-dim);
         }
 
-        /* Back keeps its place on the first page, so the buttons don't
-           jump around between pages. */
-        .welcome-back:disabled {
-            visibility: hidden;
-        }
-
-        @media (max-height: 520px) {
-            .welcome-icon {
-                display: none;
-            }
+        .welcome-buttons {
+            justify-content: flex-end;
         }
 
         /* The note panel: one passage's text, quoted in the translation on
@@ -2571,7 +2678,7 @@
         /* Every verse of the chapter being read is selectable (click, then
            Shift-click to extend). The faded neighbors aren't: they stay
            plain text. */
-        .chapter-main > .verse {
+        .chapter-main .chapter-text > .verse {
             cursor: pointer;
         }
 
@@ -2581,6 +2688,59 @@
             background: rgba(var(--accent-rgb), 0.12);
             border-radius: var(--radius-s);
             box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
+        }
+
+        /* Flowing (Aa's Layout): the chapter runs on as prose, in the
+           chapter being read, its faded neighbors and reading mode, and
+           when printed. Each verse is an inline run of the one paragraph,
+           its number small and raised in the quiet --accent-2 (as
+           --verse-num-color), a space between verses. Presentation only:
+           the verses are the same elements, with the same text. Compare
+           has no .chapter-text (its grid is a verse to a row), so it's
+           untouched. */
+        :root[data-layout="flowing"] .chapter-text {
+            font-family: var(--font-scripture);
+            font-size: calc(1.05rem * var(--reading-scale));
+            line-height: var(--reading-leading);
+            color: var(--text);
+            margin-bottom: 0.5rem;
+        }
+
+        :root[data-layout="flowing"] .chapter-side .chapter-text {
+            font-size: calc(0.9rem * var(--reading-scale));
+            line-height: calc(var(--reading-leading) - 0.1);
+        }
+
+        :root[data-layout="flowing"] .chapter-text > .verse {
+            display: inline;
+            margin: 0;
+        }
+
+        /* Raised without raising the line: no line height of its own. */
+        :root[data-layout="flowing"] .chapter-text > .verse > .verse-num {
+            display: inline;
+            min-width: 0;
+            line-height: 0;
+            margin-right: 0.2em;
+        }
+
+        /* A verse's own runs, line by line: the selection tint, and on
+           hover a fainter wash, so where one verse ends is clear without
+           chopping up the text. Both keep --text at AA in every theme
+           (see the palette tests). */
+        :root[data-layout="flowing"] .chapter-main .chapter-text > .verse {
+            border-radius: var(--radius-s);
+            -webkit-box-decoration-break: clone;
+            box-decoration-break: clone;
+        }
+
+        :root[data-layout="flowing"] .chapter-main .chapter-text > .verse:hover {
+            background: rgba(var(--accent-rgb), 0.06);
+        }
+
+        :root[data-layout="flowing"] .chapter-main .chapter-text > .verse.verse-selected {
+            background: rgba(var(--accent-rgb), 0.12);
+            box-shadow: none;
         }
 
         /* Actions for the current verse selection. Shown under the last
@@ -3469,6 +3629,17 @@
                     values: ['narrow', 'normal', 'wide'],
                     renamed: {},
                 },
+                // How a chapter is set: a verse to a line, as it always
+                // was, or flowing on as prose. Compare keeps a verse to a
+                // row whichever is chosen (see .chapter-text).
+                layout: {
+                    key: 'gospel-getter-layout',
+                    attr: 'layout',
+                    select: 'layout-select',
+                    fallback: 'verses',
+                    values: ['verses', 'flowing'],
+                    renamed: {},
+                },
                 readerMode: {
                     key: 'gospel-getter-reader-mode',
                     attr: 'readerMode',
@@ -3940,6 +4111,9 @@
                 var lineSpacingChoices = byId('line-spacing-choices');
                 var widthSelect = byId('width-select');
                 var widthChoices = byId('width-choices');
+                var layoutSelect = byId('layout-select');
+                var layoutChoices = byId('layout-choices');
+                var layoutNote = byId('layout-note');
                 var themeChoices = byId('theme-choices');
                 var textSizeDown = byId('text-size-down');
                 var textSizeUp = byId('text-size-up');
@@ -3970,6 +4144,9 @@
                 });
                 optionsOf(widthSelect).forEach(function (option) {
                     widthChoices.appendChild(segmentButton(option, option.textContent));
+                });
+                optionsOf(layoutSelect).forEach(function (option) {
+                    layoutChoices.appendChild(segmentButton(option, option.textContent));
                 });
 
                 optionsOf(themeSelect).forEach(function (option) {
@@ -4011,7 +4188,15 @@
                     setPressed(translationChoices, translationSelect.value);
                     setPressed(lineSpacingChoices, lineSpacingSelect.value);
                     setPressed(widthChoices, widthSelect.value);
+                    setPressed(layoutChoices, layoutSelect.value);
                     setPressed(themeChoices, themeSelect.value);
+                    // While comparing, Layout is kept but has no effect, so
+                    // its buttons are disabled and a note says why.
+                    var comparing = root.dataset.compare === 'on';
+                    [].slice.call(layoutChoices.querySelectorAll('button')).forEach(function (btn) {
+                        btn.disabled = comparing;
+                    });
+                    layoutNote.hidden = !comparing;
                     var theme = themeSelect.options[themeSelect.selectedIndex];
                     byId('theme-name').textContent = theme ? theme.textContent : '';
                     var sizes = textSizeSelect.options;
@@ -4031,8 +4216,8 @@
                     if (option) choose(textSizeSelect, option.value);
                 }
 
-                [translationChoices, lineSpacingChoices, widthChoices, themeChoices].forEach(function (group) {
-                    var select = { 'translation-choices': translationSelect, 'line-spacing-choices': lineSpacingSelect, 'width-choices': widthSelect, 'theme-choices': themeSelect }[group.id];
+                [translationChoices, lineSpacingChoices, widthChoices, layoutChoices, themeChoices].forEach(function (group) {
+                    var select = { 'translation-choices': translationSelect, 'line-spacing-choices': lineSpacingSelect, 'width-choices': widthSelect, 'layout-choices': layoutSelect, 'theme-choices': themeSelect }[group.id];
                     group.addEventListener('click', function (event) {
                         var btn = event.target.closest('button');
                         if (btn) choose(select, btn.dataset.value);
@@ -4109,8 +4294,19 @@
                     var select = document.getElementById(pref.select);
                     select.value = load(pref);
                     select.addEventListener('change', function () {
-                        apply(pref, select.value);
-                        store(pref, select.value);
+                        // A new layout reflows the whole chapter: keep the
+                        // reader's place, and let the main script move the
+                        // selection's card to its verses' new place.
+                        var change = function () {
+                            apply(pref, select.value);
+                            store(pref, select.value);
+                        };
+                        if (pref === PREFS.layout) {
+                            keepReadingPlace(change);
+                            document.dispatchEvent(new CustomEvent('gospel-getter:layout-change'));
+                        } else {
+                            change();
+                        }
                     });
                 });
 
@@ -4136,19 +4332,21 @@
                     apply(PREFS.compare, value);
                     store(PREFS.compare, value);
                     compareBtn.setAttribute('aria-pressed', String(value === 'on'));
+                    syncAa();
                     document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
                 });
 
                 // All display preferences at once, for exporting and
                 // importing them (Export data… and Import data… in the ☰
                 // menu). Names and values are the export file's: theme,
-                // text_size, line_spacing and width as Aa's option values,
-                // reading_mode and compare as true/false.
+                // text_size, line_spacing, width and layout as Aa's option
+                // values, reading_mode and compare as true/false.
                 var FILE_NAMES = {
                     theme: 'theme',
                     text_size: 'textSize',
                     line_spacing: 'lineSpacing',
                     width: 'width',
+                    layout: 'layout',
                     reading_mode: 'readerMode',
                     compare: 'compare',
                 };
@@ -4199,6 +4397,7 @@
                         });
                         readerModeBtn.setAttribute('aria-pressed', String(isReaderMode()));
                         compareBtn.setAttribute('aria-pressed', String(root.dataset.compare === 'on'));
+                        syncAa();
                         syncPicker();
                         if (compareChanged) document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
                         return { persisted: persisted };
@@ -4271,6 +4470,15 @@
                         <option value="narrow">Narrow</option>
                         <option value="normal">Normal</option>
                         <option value="wide">Wide</option>
+                    </select>
+                </div>
+                <div class="aa-section">
+                    <span class="section-label" id="layout-label">Layout</span>
+                    <div id="layout-choices" class="segmented" role="group" aria-labelledby="layout-label" aria-describedby="layout-note"></div>
+                    <p id="layout-note" class="section-note layout-note" hidden>Compare always shows a verse to a row.</p>
+                    <select id="layout-select" hidden>
+                        <option value="verses">Verses</option>
+                        <option value="flowing">Flowing</option>
                     </select>
                 </div>
                 <div class="aa-section">
@@ -4397,49 +4605,23 @@
         </div>
     </div>
     <div id="welcome-overlay" class="welcome-overlay modal-overlay" hidden>
-        <div id="welcome-panel" class="welcome-panel modal-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title-1" aria-describedby="welcome-text-1">
-            <div class="welcome-pages modal-body" aria-live="polite">
-                <section class="welcome-page">
-                    <img class="welcome-icon" src="favicon.svg" alt="" width="48" height="48">
-                    <h2 id="welcome-title-1">Welcome to Gospel Getter</h2>
-                    <div id="welcome-text-1">
-                        <p>A quiet place to read the Bible on your computer. The King James Version and the World English Bible are built in, so it works offline, with no account.</p>
-                        <p>Here’s a quick look around, or choose Skip to start reading.</p>
-                    </div>
-                </section>
-                <section class="welcome-page" hidden>
-                    <h2 id="welcome-title-2">Read in context</h2>
-                    <ul id="welcome-text-2">
-                        <li>The chapter you’re reading sits in the middle, with the chapters before and after it faded on either side.</li>
-                        <li>Press <kbd>←</kbd> and <kbd>→</kbd> to turn chapters, right across the Bible.</li>
-                        <li>Choose a book and chapter from the reference at the top left, or press <kbd>G</kbd>. Random chapter is there too.</li>
-                        <li>Click a verse to see related passages.</li>
-                    </ul>
-                </section>
-                <section class="welcome-page" hidden>
-                    <h2 id="welcome-title-3">Find and keep</h2>
-                    <ul id="welcome-text-3">
-                        <li>Press <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> to search the text, or type a reference like John 3:16 to go straight there.</li>
-                        <li>Click a verse, and Shift-click another to select a range. Copy (or <kbd>Ctrl</kbd>+<kbd>C</kbd>) copies it with its reference, and ★ Bookmark saves it.</li>
-                        <li>Selected verses can also be highlighted in yellow, green, blue or pink.</li>
-                        <li>Press <kbd>N</kbd> or + Add note to write a note on them, which shows in every translation.</li>
-                        <li>To back up or move your bookmarks, highlights and notes, use Export data… and Import data… in the ☰ menu, top right.</li>
-                    </ul>
-                </section>
-                <section class="welcome-page" hidden>
-                    <h2 id="welcome-title-4">Make it yours</h2>
-                    <ul id="welcome-text-4">
-                        <li>Aa, top right, has nine themes, four text sizes, three line spacings, the translation and a distraction-free reading mode.</li>
-                        <li>Your bookmarks, highlights and notes are in the Library, the bookmark button beside Aa (or press <kbd>Ctrl</kbd>+<kbd>B</kbd>).</li>
-                        <li>Press <kbd>C</kbd> to compare the KJV and WEB side by side.</li>
-                        <li>Your chapter, bookmarks, highlights, notes and settings are remembered. To see this tour again, choose Show welcome in the ☰ menu.</li>
-                    </ul>
-                </section>
+        <div id="welcome-panel" class="welcome-panel modal-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-intro" tabindex="-1">
+            <div class="welcome-head">
+                <h2 id="welcome-title" class="welcome-title">Welcome to Gospel Getter</h2>
+                <button type="button" id="welcome-close" class="panel-close" aria-label="Close" title="Close (Esc)">&times;</button>
+            </div>
+            <div class="welcome-body modal-body">
+                <p id="welcome-intro" class="welcome-intro">A quiet place to read the Bible on your computer, offline and with no account.</p>
+                <h3 class="section-label" id="welcome-look-label">Pick a look</h3>
+                <div id="welcome-looks" class="welcome-looks" role="radiogroup" aria-labelledby="welcome-look-label">
+                    <button type="button" class="welcome-look" role="radio" aria-checked="false" data-value="chi-rho"><span class="welcome-look-preview" data-theme-preview="chi-rho" aria-hidden="true"><span class="welcome-look-sample">Aa</span><span class="welcome-look-lines"><span></span><span></span><span></span></span></span><span class="welcome-look-name">Chi Rho</span></button>
+                    <button type="button" class="welcome-look" role="radio" aria-checked="false" data-value="vellum"><span class="welcome-look-preview" data-theme-preview="vellum" aria-hidden="true"><span class="welcome-look-sample">Aa</span><span class="welcome-look-lines"><span></span><span></span><span></span></span></span><span class="welcome-look-name">Vellum</span></button>
+                </div>
+                <p class="welcome-hint">More themes in Aa.</p>
+                <h3 class="section-label" id="welcome-start-label">Where to start</h3>
+                <ul id="welcome-start" class="welcome-start" aria-labelledby="welcome-start-label"></ul>
             </div>
             <div class="welcome-buttons modal-buttons">
-                <button type="button" id="welcome-back" class="reader-mode-btn welcome-back" disabled>Back</button>
-                <p id="welcome-progress" class="welcome-progress">1 of 4</p>
-                <button type="button" id="welcome-next" class="import-confirm">Next</button>
                 <button type="button" id="welcome-skip" class="reader-mode-btn">Skip</button>
             </div>
         </div>
@@ -4847,21 +5029,35 @@
             // It never covers the selected verses unless docked, and stays
             // inside the reading column: as wide as it, up to CARD_WIDTH, at
             // the selected verse's left edge where there's room (the
-            // selected column, while comparing).
+            // selected column, while comparing). In the Flowing layout a
+            // verse is a run of lines that can start and end mid-line, so
+            // "under" is under the last selected verse's last line, "above"
+            // is above the first one's first line, and the card starts at
+            // the column's left edge.
             const CARD_GAP = 8;
             const CARD_MIN = 120;
             const CARD_WIDTH = 544;
+
+            // The box of a verse's first or last line (its whole box when
+            // it's a block, a verse to a line).
+            function lineRect(verse, which) {
+                const rects = [...verse.getClientRects()].filter((r) => r.width > 0 || r.height > 0);
+                if (rects.length < 2) return verse.getBoundingClientRect();
+                return which === 'first' ? rects[0] : rects[rects.length - 1];
+            }
 
             function placeCard() {
                 if (!selectionCard.isConnected || !cardVerse) return;
                 const column = selectionCard.closest('.chapter-main');
                 const first = document.querySelector(`${SELECTABLE}.verse-selected`) || cardVerse;
+                const flowing = document.documentElement.dataset.layout === 'flowing'
+                    && cardVerse.parentElement.classList.contains('chapter-text');
                 const columnRect = column.getBoundingClientRect();
-                const firstRect = first.getBoundingClientRect();
-                const lastRect = cardVerse.getBoundingClientRect();
+                const firstRect = lineRect(first, 'first');
+                const lastRect = lineRect(cardVerse, 'last');
                 const bar = document.getElementById('top-bar').getBoundingClientRect().bottom;
                 const width = Math.min(columnRect.width, CARD_WIDTH) || columnRect.width;
-                const left = Math.max(0, Math.min(firstRect.left - columnRect.left, columnRect.width - width));
+                const left = flowing ? 0 : Math.max(0, Math.min(firstRect.left - columnRect.left, columnRect.width - width));
                 selectionCard.classList.remove('is-docked', 'is-above');
                 selectionCard.style.maxHeight = '';
                 selectionCard.style.width = width ? `${width}px` : '';
@@ -4897,6 +5093,8 @@
             }
 
             window.addEventListener('resize', placeCard);
+            // A new layout moves the selected verses.
+            document.addEventListener('gospel-getter:layout-change', placeCard);
             // The card grows as its notes load or a status line shows.
             if (typeof ResizeObserver === 'function') {
                 let lastHeight = 0;
@@ -6164,6 +6362,7 @@
                 if (prefs.text_size) parts.push(`${optionText('text-size-select', prefs.text_size).toLowerCase()} text`);
                 if (prefs.line_spacing) parts.push(`${optionText('line-spacing-select', prefs.line_spacing).toLowerCase()} line spacing`);
                 if (prefs.width) parts.push(`${optionText('width-select', prefs.width).toLowerCase()} width`);
+                if (prefs.layout) parts.push(`${optionText('layout-select', prefs.layout).toLowerCase()} layout`);
                 if (prefs.compare != null) parts.push(`compare ${prefs.compare ? 'on' : 'off'}`);
                 if (prefs.reading_mode != null) parts.push(`reading mode ${prefs.reading_mode ? 'on' : 'off'}`);
                 return parts;
@@ -6442,45 +6641,64 @@
                 }
             });
 
-            // ---- First-run welcome: a four-page tour in a modal over the
-            // reader. It opens by itself only on a fresh install (see
-            // isFreshInstall), and whenever Show welcome is chosen in the
-            // ☰ menu. Closing it any way (Skip, Start reading, Escape)
+            // ---- The welcome: one card over the open chapter. It opens by
+            // itself only on a fresh install (see isFreshInstall), and
+            // whenever Show welcome is chosen in the ☰ menu. It offers a
+            // look (Chi Rho or Vellum, applied as Aa applies a theme) and a
+            // few places to start reading (the backend's startHere list).
+            // Closing it any way (Skip, ×, Escape, or a place to start)
             // records that it's been seen, in local storage beside the
-            // display preferences.
+            // display preferences, under the key the earlier four-page tour
+            // used: anyone who saw that never gets this on upgrade.
             const WELCOME_KEY = 'gospel-getter-welcome';
             const welcomeOverlay = document.getElementById('welcome-overlay');
             const welcomePanel = document.getElementById('welcome-panel');
-            const welcomePages = [...welcomePanel.querySelectorAll('.welcome-page')];
-            const welcomeBack = document.getElementById('welcome-back');
-            const welcomeNext = document.getElementById('welcome-next');
-            const welcomeSkip = document.getElementById('welcome-skip');
-            const welcomeProgress = document.getElementById('welcome-progress');
-            let welcomePage = 0;
+            const welcomeLooks = [...document.querySelectorAll('#welcome-looks [role="radio"]')];
+            const welcomeStart = document.getElementById('welcome-start');
+            const welcomeStartLabel = document.getElementById('welcome-start-label');
+            const themeSelect = document.getElementById('theme-select');
             let welcomeReturnFocus = null;
 
-            function showWelcomePage(index) {
-                welcomePage = Math.max(0, Math.min(index, welcomePages.length - 1));
-                welcomePages.forEach((page, i) => {
-                    page.hidden = i !== welcomePage;
+            // The places to start, from the backend: each a book (or a
+            // chapter) and a line about it. With none, the section hides.
+            function renderStartHere(rows) {
+                const list = Array.isArray(rows) ? rows : [];
+                welcomeStart.innerHTML = list
+                    .map((row) => `<li><button type="button" class="welcome-start-row" data-book="${row.bookId}" data-chapter="${row.chapter}"><span class="welcome-start-title">${escapeHtml(row.title)}</span> <span class="welcome-start-line">${escapeHtml(row.line)}</span></button></li>`)
+                    .join('');
+                welcomeStart.hidden = !list.length;
+                welcomeStartLabel.hidden = !list.length;
+            }
+
+            // The look in effect is checked (neither, for another theme),
+            // and is the radio group's one tab stop (the first, if neither).
+            function syncWelcomeLooks() {
+                const theme = themeSelect.value;
+                const checked = welcomeLooks.find((radio) => radio.dataset.value === theme);
+                welcomeLooks.forEach((radio) => {
+                    radio.setAttribute('aria-checked', String(radio === checked));
+                    radio.tabIndex = radio === (checked || welcomeLooks[0]) ? 0 : -1;
                 });
-                const number = welcomePage + 1;
-                welcomePanel.setAttribute('aria-labelledby', `welcome-title-${number}`);
-                welcomePanel.setAttribute('aria-describedby', `welcome-text-${number}`);
-                welcomeProgress.textContent = `${number} of ${welcomePages.length}`;
-                welcomeBack.disabled = welcomePage === 0;
-                welcomeNext.textContent = number === welcomePages.length ? 'Start reading' : 'Next';
-                // Back disappears on the first page; don't leave focus on it.
-                if (document.activeElement === welcomeBack && welcomeBack.disabled) welcomeNext.focus();
+            }
+
+            // Applies the look live, through Aa's own record of the theme.
+            function chooseLook(radio) {
+                if (themeSelect.value !== radio.dataset.value) {
+                    themeSelect.value = radio.dataset.value;
+                    themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                syncWelcomeLooks();
+                radio.focus();
             }
 
             function openWelcome(returnFocus) {
                 closeSurfaces(false);
                 if (!searchPanel.hidden) setSearchOpen(false);
                 welcomeReturnFocus = returnFocus || null;
-                showWelcomePage(0);
+                syncWelcomeLooks();
                 welcomeOverlay.hidden = false;
-                welcomeNext.focus();
+                welcomePanel.querySelector('.modal-body').scrollTop = 0;
+                welcomePanel.focus();
             }
 
             function closeWelcome() {
@@ -6520,12 +6738,21 @@
                 }
             }
 
-            welcomeBack.addEventListener('click', () => showWelcomePage(welcomePage - 1));
-            welcomeNext.addEventListener('click', function () {
-                if (welcomePage === welcomePages.length - 1) closeWelcome();
-                else showWelcomePage(welcomePage + 1);
+            welcomeLooks.forEach((radio) => {
+                radio.addEventListener('click', () => chooseLook(radio));
             });
-            welcomeSkip.addEventListener('click', closeWelcome);
+            // A place to start opens its chapter, from the top, and closes
+            // the card.
+            welcomeStart.addEventListener('click', function (event) {
+                const row = event.target.closest('.welcome-start-row');
+                if (!row) return;
+                closeWelcome();
+                loadReading(row.dataset.book, row.dataset.chapter).then((loaded) => {
+                    if (loaded) window.scrollTo(0, 0);
+                });
+            });
+            document.getElementById('welcome-skip').addEventListener('click', closeWelcome);
+            document.getElementById('welcome-close').addEventListener('click', closeWelcome);
             document.getElementById('welcome-btn').addEventListener('click', () => openWelcome(menuToggle));
 
             // Clicking the dimmed page behind the welcome does nothing, and
@@ -6534,30 +6761,42 @@
                 if (event.target === welcomeOverlay) event.preventDefault();
             });
 
+            // The card's tab stops, in order: ×, the checked look, the places
+            // to start and Skip.
+            function welcomeStops() {
+                return [...welcomePanel.querySelectorAll('button')]
+                    .filter((el) => !el.disabled && el.tabIndex >= 0 && !el.closest('[hidden]'));
+            }
+
             // While the welcome is open it has the keyboard, before any
             // other handler sees a key (this listens on window, capturing):
-            // Escape skips, ← and → change pages, Tab stays inside, and
-            // none of the reader's shortcuts run.
+            // Escape closes it, the arrow keys move between the looks (and
+            // choose, as radio buttons do), Tab stays inside, and none of
+            // the reader's shortcuts run.
             window.addEventListener('keydown', function (event) {
                 if (welcomeOverlay.hidden) return;
                 event.stopPropagation();
+                const radio = event.target.closest && event.target.closest('#welcome-looks [role="radio"]');
                 if (event.key === 'Escape') {
                     event.preventDefault();
                     closeWelcome();
-                } else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                } else if (radio && /^Arrow(Left|Right|Up|Down)$/.test(event.key)) {
                     event.preventDefault();
-                    showWelcomePage(welcomePage + (event.key === 'ArrowRight' ? 1 : -1));
+                    const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
+                    const index = welcomeLooks.indexOf(radio);
+                    chooseLook(welcomeLooks[(index + step + welcomeLooks.length) % welcomeLooks.length]);
                 } else if (event.key === 'Tab') {
-                    const focusable = [welcomeBack, welcomeNext, welcomeSkip].filter((el) => !el.disabled);
-                    const first = focusable[0];
-                    const last = focusable[focusable.length - 1];
-                    if (!welcomePanel.contains(document.activeElement)) {
+                    const stops = welcomeStops();
+                    const first = stops[0];
+                    const last = stops[stops.length - 1];
+                    const active = document.activeElement;
+                    if (!welcomePanel.contains(active) || (active === welcomePanel && event.shiftKey)) {
                         event.preventDefault();
                         (event.shiftKey ? last : first).focus();
-                    } else if (event.shiftKey && document.activeElement === first) {
+                    } else if (event.shiftKey && active === first) {
                         event.preventDefault();
                         last.focus();
-                    } else if (!event.shiftKey && document.activeElement === last) {
+                    } else if (!event.shiftKey && active === last) {
                         event.preventDefault();
                         first.focus();
                     }
@@ -6830,10 +7069,10 @@
                 if (!side) return '';
                 const verses = side.verses
                     .map((v) => `<p class="verse" data-book="${side.bookId}" data-chapter="${side.chapter}" data-verse="${v.number}"><span class="verse-num">${v.number}</span><span class="verse-text">${verseHtml(v, { markers: false })}</span></p>`)
-                    .join('');
+                    .join('\n');
                 return `<section>
                     <button type="button" class="chapter-heading-link" data-book="${side.bookId}" data-chapter="${side.chapter}">${escapeHtml(side.bookName)} ${side.chapter}</button>
-                    ${verses}
+                    <div class="chapter-text">${verses}</div>
                 </section>`;
             }
 
@@ -6858,9 +7097,7 @@
                 const hasXref = xrefs.length > 0;
                 const footnotes = v.footnotes || [];
                 const cue = footnotes.length ? '<span class="footnote-cue visually-hidden">(has footnotes) </span>' : '';
-                return `<p class="verse${hasXref ? ' has-xref' : ''}${footnotes.length ? ' has-footnotes' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}" data-translation="${escapeHtml(code)}" data-code="${escapeHtml(code.toUpperCase())}">
-                    <span class="verse-num">${v.number}</span>${cue}<span class="verse-text">${verseHtml(v)}</span>
-                </p>`;
+                return `<p class="verse${hasXref ? ' has-xref' : ''}${footnotes.length ? ' has-footnotes' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}" data-translation="${escapeHtml(code)}" data-code="${escapeHtml(code.toUpperCase())}"><span class="verse-num">${v.number}</span>${cue}<span class="verse-text">${verseHtml(v)}</span></p>`;
             }
 
             // A footnote's note as printed footnotes set it: the verse's
@@ -7010,9 +7247,13 @@
             function renderReadingPane(dto, compare) {
                 const prevAttrs = dto.prev ? ` data-prev-book="${dto.prev.bookId}" data-prev-chapter="${dto.prev.chapter}"` : '';
                 const nextAttrs = dto.next ? ` data-next-book="${dto.next.bookId}" data-next-chapter="${dto.next.chapter}"` : '';
+                // The verses, in .chapter-text: a verse to a line, or, in
+                // the Flowing layout, running on as prose, a space between
+                // verses (the newlines between them, which only show when
+                // they flow). Compare's grid is a verse to a row either way.
                 const body = compare
                     ? renderCompareGrid(dto, compare)
-                    : dto.currentVerses.map((v) => renderVerse(v, dto.currentBookId, dto.currentChapter, reading.translationCode, v.xrefs)).join('');
+                    : `<div class="chapter-text">${dto.currentVerses.map((v) => renderVerse(v, dto.currentBookId, dto.currentChapter, reading.translationCode, v.xrefs)).join('\n')}</div>`;
                 // While comparing, the columns take the place of the faded
                 // neighboring chapters; prev/next stay on the wrapper, so
                 // arrow keys work the same either way.
@@ -7629,6 +7870,7 @@
                     const home = await invoke('get_home');
                     renderBookLists(home);
                     renderTranslationOptions(home);
+                    renderStartHere(home.startHere);
                     await loadReading(home.currentBookId, home.currentChapter);
                     await refreshBookmarks();
                     await refreshHighlights();

@@ -1,0 +1,26 @@
+[
+    {
+        "book": 41,
+        "chapter": 1,
+        "title": "book",
+        "line": "The shortest Gospel, 16 chapters. A good first read."
+    },
+    {
+        "book": 43,
+        "chapter": 1,
+        "title": "book",
+        "line": "Who Jesus is, in his own words."
+    },
+    {
+        "book": 19,
+        "chapter": 1,
+        "title": "book",
+        "line": "Prayers for every mood. Read one a day."
+    },
+    {
+        "book": 1,
+        "chapter": 1,
+        "title": "chapter",
+        "line": "Start at the beginning."
+    }
+]

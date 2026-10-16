@@ -21,6 +21,7 @@ use crate::reader_data::{
     self, BookmarkRecord, HighlightRecord, NewBookmark, NewPosition, NoteRecord, PositionRecord,
     Preferences, ReaderData, ValidatedImport,
 };
+use crate::start_here::{StartHereDto, start_here};
 
 /// How many text-search results one `search` call returns.
 pub const SEARCH_PAGE_SIZE: i64 = 50;
@@ -146,6 +147,8 @@ pub struct HomeDto {
     /// when it hasn't. If the position couldn't be read, this is `true`,
     /// so an existing reader never gets the welcome by mistake.
     pub has_saved_position: bool,
+    /// The welcome card's places to start reading (see `start_here`).
+    pub start_here: Vec<StartHereDto>,
 }
 
 #[derive(Serialize)]
@@ -515,6 +518,7 @@ pub async fn home(state: &AppState) -> HomeDto {
         current_book_id: book_id,
         current_chapter: chapter,
         has_saved_position,
+        start_here: start_here(&state.books),
     }
 }
 
@@ -2270,6 +2274,30 @@ mod tests {
             .await
             .expect("search");
         serde_json::to_value(dto).expect("serialize")
+    }
+
+    /// The welcome's places to start come with the home screen, named from
+    /// the seeded books, and each opens a chapter that's really there.
+    #[tokio::test]
+    async fn home_lists_where_to_start_from_the_seeded_books() {
+        let (_db, state) = app_state("cmd_start_here").await;
+        let rows = home(&state).await.start_here;
+        let titles: Vec<&str> = rows.iter().map(|r| r.title.as_str()).collect();
+        assert_eq!(titles, ["Mark", "John", "Psalms", "Genesis 1"]);
+        for row in &rows {
+            let dto = reading(&state, row.book_id, row.chapter, Some("kjv"))
+                .await
+                .unwrap();
+            assert_eq!(
+                (dto.current_book_id, dto.current_chapter),
+                (row.book_id, row.chapter)
+            );
+            assert!(
+                row.title.starts_with(&dto.current_book_name),
+                "{}",
+                row.title
+            );
+        }
     }
 
     /// Only the first and last chapters of the Bible have an edge card, in
