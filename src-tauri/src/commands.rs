@@ -14,7 +14,7 @@ use crate::db::{
 };
 use crate::domain::Store;
 use crate::domain::bible::{self, ChapterRef};
-use crate::domain::kjv_markup::VerseText;
+use crate::domain::kjv_markup::{PartKind, VerseText};
 use crate::domain::query::{self, Interpretation};
 use crate::notes_export::NotesFilter;
 use crate::reader_data::{
@@ -189,7 +189,7 @@ pub struct VerseDto {
 }
 
 /// A verse as shown (see `VerseText`).
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimpleVerseDto {
     pub number: i64,
@@ -204,6 +204,16 @@ impl SimpleVerseDto {
             number: verse.verse,
             shown: VerseText::new(translation_code, &verse.text),
         }
+    }
+
+    /// The verse as shown, without its margin notes: no note parts and no
+    /// footnotes, the supplied words still marked. `text` is unchanged
+    /// (it never had the notes).
+    fn without_notes(translation_code: &str, verse: db::Verse) -> Self {
+        let mut dto = Self::new(translation_code, verse);
+        dto.shown.parts.retain(|p| p.kind != PartKind::Note);
+        dto.shown.footnotes.clear();
+        dto
     }
 }
 
@@ -574,59 +584,141 @@ pub async fn reading(
     }
 }
 
-/// The verse text a cross-reference citation expands to, fetched on click
-/// rather than embedded up front, since only a small fraction of citations
-/// actually get expanded in any given reading session.
-#[tauri::command]
-pub async fn get_xref_text(
-    state: tauri::State<'_, AppState>,
-    book_id: i64,
-    chapter: i64,
-    verse: i64,
-    end_verse: Option<i64>,
-    translation_code: Option<String>,
-) -> Result<Vec<SimpleVerseDto>, String> {
-    Ok(xref_text(
-        &state,
-        book_id,
-        chapter,
-        verse,
-        end_verse,
-        translation_code.as_deref(),
-    )
-    .await)
+/// A passage to read in place: a cross-reference previewed in the
+/// selection card. Its verses are the ones `translation_code` numbers in
+/// `start..=end`, shown as the reader shows them but without margin-note
+/// markers (a preview has no footnotes); `notice` says which of them it
+/// doesn't number, when any.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageDto {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub start: i64,
+    pub end: i64,
+    /// "1 John 4:9–10".
+    pub reference: String,
+    pub translation_code: String,
+    pub verses: Vec<SimpleVerseDto>,
+    /// e.g. "Romans 16:25–27 isn't numbered in the World English Bible —
+    /// Romans 16 ends at verse 24 there."; `None` when every verse is.
+    pub notice: Option<String>,
 }
 
-/// The logic behind `get_xref_text`.
-pub async fn xref_text(
-    state: &AppState,
+/// One passage of one translation, fetched when a cross-reference is
+/// previewed rather than embedded up front, since few are.
+#[tauri::command]
+pub async fn get_passage(
+    state: tauri::State<'_, AppState>,
+    translation_code: String,
     book_id: i64,
     chapter: i64,
-    verse: i64,
-    end_verse: Option<i64>,
-    translation_code: Option<&str>,
-) -> Vec<SimpleVerseDto> {
-    let translation_id = resolve_translation(state, translation_code);
-    let end_verse = end_verse.unwrap_or(verse);
-    match state
+    start: i64,
+    end: i64,
+) -> Result<PassageDto, String> {
+    passage_text(&state, &translation_code, book_id, chapter, start, end).await
+}
+
+/// The logic behind `get_passage`. A translation, book or chapter that
+/// doesn't exist, or verses that aren't a range from 1 up, are an error;
+/// verses past the chapter's end (in this translation) aren't, as they're
+/// numbered in another translation.
+pub async fn passage_text(
+    state: &AppState,
+    translation_code: &str,
+    book_id: i64,
+    chapter: i64,
+    start: i64,
+    end: i64,
+) -> Result<PassageDto, String> {
+    let translation = state
+        .translations
+        .iter()
+        .find(|t| t.code == translation_code)
+        .ok_or_else(|| format!("There's no translation \"{translation_code}\"."))?;
+    let book = state
+        .books
+        .iter()
+        .find(|b| b.id == book_id)
+        .ok_or_else(|| format!("There's no book {book_id}."))?;
+    if !(1..=book.chapter_count).contains(&chapter) {
+        return Err(format!("{} has no chapter {chapter}.", book.name));
+    }
+    if start < 1 || end < start {
+        return Err(format!("Verses {start} to {end} aren't a passage."));
+    }
+    let chapter_verses = state
         .store
-        .verse_range(translation_id, book_id, chapter, verse, end_verse)
+        .chapter_verses(translation.id, book_id, chapter)
         .await
-    {
-        Ok(verses) => {
-            let code = code_of(state, translation_id);
-            verses
-                .into_iter()
-                .map(|v| SimpleVerseDto::new(code, v))
-                .collect()
-        }
-        Err(e) => {
-            tracing::error!(
-                "Failed to fetch xref verse text for {book_id} {chapter}:{verse}-{end_verse}: {e}"
+        .map_err(|e| {
+            tracing::error!("Failed to read {} {chapter}: {e}", book.name);
+            format!("{} {chapter} couldn't be read.", book.name)
+        })?;
+    let last = chapter_verses.last().map_or(0, |v| v.verse);
+    let verses: Vec<SimpleVerseDto> = chapter_verses
+        .into_iter()
+        .filter(|v| (start..=end).contains(&v.verse))
+        .map(|v| SimpleVerseDto::without_notes(&translation.code, v))
+        .collect();
+    let numbered: Vec<i64> = verses.iter().map(|v| v.number).collect();
+    let missing: Vec<i64> = (start..=end).filter(|n| !numbered.contains(n)).collect();
+    let notice = (!missing.is_empty()).then(|| {
+        let what = passage_reference(&book.name, chapter, Some((start, end)));
+        if missing.iter().all(|&n| n > last) {
+            let missing = passage_reference(
+                &book.name,
+                chapter,
+                Some((missing[0], missing[missing.len() - 1])),
             );
-            Vec::new()
+            format!(
+                "{missing} isn't numbered in the {} — {} {chapter} ends at verse {last} there.",
+                translation.name, book.name
+            )
+        } else {
+            let (noun, verb) = if missing.len() == 1 {
+                ("verse", "isn't")
+            } else {
+                ("verses", "aren't")
+            };
+            format!(
+                "In {what}, {noun} {} {verb} numbered in the {}.",
+                verse_list(&missing),
+                translation.name
+            )
+        }
+    });
+    Ok(PassageDto {
+        book_id,
+        chapter,
+        start,
+        end,
+        reference: passage_reference(&book.name, chapter, Some((start, end))),
+        translation_code: translation.code.clone(),
+        verses,
+        notice,
+    })
+}
+
+/// "4", "4, 6" or "4–6, 9": verse numbers, in order, runs as ranges.
+fn verse_list(numbers: &[i64]) -> String {
+    let mut runs: Vec<(i64, i64)> = Vec::new();
+    for &n in numbers {
+        match runs.last_mut() {
+            Some((_, last)) if *last + 1 == n => *last = n,
+            _ => runs.push((n, n)),
         }
     }
+    runs.iter()
+        .map(|&(a, b)| {
+            if a == b {
+                a.to_string()
+            } else {
+                format!("{a}\u{2013}{b}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// "John 3", "John 3:16" or "John 3:16–18".
@@ -2300,6 +2392,141 @@ mod tests {
         }
     }
 
+    /// A previewed range is every verse in it, in order, with its
+    /// reference and translation, and nothing missing.
+    #[tokio::test]
+    async fn a_passage_is_every_verse_of_its_range() {
+        let (_db, state) = app_state("cmd_passage_range").await;
+        let dto = passage_text(&state, "web", 62, 4, 9, 10).await.unwrap();
+        assert_eq!(dto.reference, "1 John 4:9\u{2013}10");
+        assert_eq!(dto.translation_code, "web");
+        assert_eq!(
+            (dto.book_id, dto.chapter, dto.start, dto.end),
+            (62, 4, 9, 10)
+        );
+        let web = bundled("web");
+        let texts: Vec<(i64, &str)> = dto
+            .verses
+            .iter()
+            .map(|v| (v.number, v.shown.text.as_str()))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                (9, web[61].chapters[3][8].as_str()),
+                (10, web[61].chapters[3][9].as_str())
+            ]
+        );
+        assert_eq!(dto.notice, None);
+        let json = serde_json::to_value(&dto).unwrap();
+        for key in [
+            "bookId",
+            "chapter",
+            "start",
+            "end",
+            "reference",
+            "translationCode",
+            "verses",
+            "notice",
+        ] {
+            assert!(json.get(key).is_some(), "{key}");
+        }
+        assert_eq!(json["verses"][0]["parts"][0]["kind"], "text");
+    }
+
+    /// A KJV preview keeps the supplied words in italics' parts but drops
+    /// the margin notes, markers and footnotes alike; its plain text is the
+    /// reader's, and the stored verse is untouched.
+    #[tokio::test]
+    async fn a_kjv_passage_keeps_supplied_words_and_drops_margin_notes() {
+        let (_db, state) = app_state("cmd_passage_kjv").await;
+        // John 3:5 has supplied words, and 3:3 a margin note.
+        let dto = passage_text(&state, "kjv", 43, 3, 3, 5).await.unwrap();
+        let kjv = bundled("kjv");
+        for v in &dto.verses {
+            let stored = &kjv[42].chapters[2][(v.number - 1) as usize];
+            let shown = VerseText::new("kjv", stored);
+            assert_eq!(v.shown.text, shown.text, "{}", v.number);
+            assert!(v.shown.footnotes.is_empty());
+            assert!(v.shown.parts.iter().all(|p| p.kind != PartKind::Note));
+            let kept: Vec<_> = shown
+                .parts
+                .iter()
+                .filter(|p| p.kind != PartKind::Note)
+                .collect();
+            assert_eq!(v.shown.parts.iter().collect::<Vec<_>>(), kept);
+        }
+        assert!(
+            dto.verses[0].shown.footnotes.is_empty()
+                && VerseText::new("kjv", &kjv[42].chapters[2][2])
+                    .footnotes
+                    .len()
+                    == 1
+        );
+        assert!(
+            dto.verses[2]
+                .shown
+                .parts
+                .iter()
+                .any(|p| p.kind == PartKind::Supplied && p.text == "of")
+        );
+    }
+
+    /// Verses a translation doesn't number are left out, and the notice
+    /// says so, as opening the passage does; the rest still come.
+    #[tokio::test]
+    async fn a_passage_says_which_verses_a_translation_does_not_number() {
+        let (_db, state) = app_state("cmd_passage_missing").await;
+        // The WEB numbers Romans 14:24-26; the KJV ends the chapter at 23
+        // (it has those verses at 16:25-27).
+        let kjv = passage_text(&state, "kjv", 45, 14, 24, 26).await.unwrap();
+        assert!(kjv.verses.is_empty());
+        assert_eq!(
+            kjv.notice.as_deref(),
+            Some(
+                "Romans 14:24\u{2013}26 isn't numbered in the King James Version \u{2014} \
+                 Romans 14 ends at verse 23 there."
+            )
+        );
+        let partly = passage_text(&state, "kjv", 45, 14, 23, 25).await.unwrap();
+        assert_eq!(partly.verses.len(), 1);
+        assert_eq!(partly.verses[0].number, 23);
+        assert_eq!(
+            partly.notice.as_deref(),
+            Some(
+                "Romans 14:24\u{2013}25 isn't numbered in the King James Version \u{2014} \
+                 Romans 14 ends at verse 23 there."
+            )
+        );
+        let web = passage_text(&state, "web", 45, 14, 24, 26).await.unwrap();
+        assert_eq!(web.verses.len(), 3);
+        assert_eq!(web.notice, None);
+        assert_eq!(verse_list(&[4, 6, 7, 8, 11]), "4, 6\u{2013}8, 11");
+    }
+
+    /// A translation, book or chapter that doesn't exist, or verses that
+    /// aren't a range, are refused with a reason.
+    #[tokio::test]
+    async fn a_passage_refuses_what_is_not_one() {
+        let (_db, state) = app_state("cmd_passage_invalid").await;
+        for (code, book, chapter, start, end) in [
+            ("niv", 43, 3, 16, 16),
+            ("kjv", 0, 1, 1, 1),
+            ("kjv", 67, 1, 1, 1),
+            ("kjv", 43, 0, 1, 1),
+            ("kjv", 43, 22, 1, 1),
+            ("kjv", 43, 3, 0, 1),
+            ("kjv", 43, 3, 17, 16),
+        ] {
+            let result = passage_text(&state, code, book, chapter, start, end).await;
+            assert!(result.is_err(), "{code} {book} {chapter}:{start}-{end}");
+        }
+        assert_eq!(
+            passage_text(&state, "kjv", 43, 22, 1, 1).await.unwrap_err(),
+            "John has no chapter 22."
+        );
+    }
+
     /// Only the first and last chapters of the Bible have an edge card, in
     /// the place of the neighbor they lack; every other chapter, the book
     /// boundaries included, has both neighbors and no card.
@@ -3039,10 +3266,13 @@ mod tests {
             VerseText::new("kjv", &kjv[18].chapters[117][0])
         );
 
-        // A cross-reference expanded, and the comparison's KJV column.
-        let expanded = xref_text(&state, 19, 119, 105, None, Some("kjv")).await;
-        assert_eq!(expanded[0].shown.text, psalm_119_105);
-        assert_eq!(expanded[0].shown.footnotes.len(), 1);
+        // A cross-reference previewed (without its margin note), and the
+        // comparison's KJV column.
+        let previewed = passage_text(&state, "kjv", 19, 119, 105, 105)
+            .await
+            .unwrap();
+        assert_eq!(previewed.verses[0].shown.text, psalm_119_105);
+        assert!(previewed.verses[0].shown.footnotes.is_empty());
         let compare = compare_chapter(&state, 19, 119).await.unwrap().unwrap();
         assert_eq!(compare.columns[0].verses[104].shown.text, psalm_119_105);
 
@@ -3077,9 +3307,11 @@ mod tests {
         for (v, stored) in dto.current_verses.iter().zip(&web[18].chapters[118]) {
             assert_eq!(v.shown, VerseText::as_stored(stored));
         }
-        let expanded = xref_text(&state, 19, 119, 105, None, Some("web")).await;
+        let previewed = passage_text(&state, "web", 19, 119, 105, 105)
+            .await
+            .unwrap();
         assert_eq!(
-            expanded[0].shown,
+            previewed.verses[0].shown,
             VerseText::as_stored(&web[18].chapters[118][104])
         );
         let bookmarks = bookmarks_in(&state, Some("web")).await.unwrap();

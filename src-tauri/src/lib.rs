@@ -60,7 +60,7 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::get_home,
         commands::get_chapters,
         commands::get_reading,
-        commands::get_xref_text,
+        commands::get_passage,
         commands::list_bookmarks,
         commands::add_bookmark,
         commands::remove_bookmark,
@@ -283,13 +283,14 @@ mod ipc_tests {
             (&json!(43), &json!(3))
         );
 
-        let xref = invoke(
+        let passage = invoke(
             &webview,
-            "get_xref_text",
-            json!({ "bookId": 45, "chapter": 5, "verse": 8, "endVerse": null, "translationCode": "kjv" }),
+            "get_passage",
+            json!({ "translationCode": "kjv", "bookId": 45, "chapter": 5, "start": 8, "end": 8 }),
         )
         .unwrap();
-        assert_eq!(xref[0]["number"], 8);
+        assert_eq!(passage["verses"][0]["number"], 8);
+        assert_eq!(passage["reference"], "Romans 5:8");
 
         let id = invoke(
             &webview,

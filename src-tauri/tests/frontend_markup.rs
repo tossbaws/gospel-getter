@@ -203,8 +203,7 @@ fn frontend_uses_invoke_not_http() {
          bridge (app.withGlobalTauri), not an npm-bundled API import"
     );
     // The picker builds a book's chapters from its chapter count in
-    // `get_home`, so it doesn't call `get_chapters`; cross-references open
-    // their passage, so it doesn't call `get_xref_text`.
+    // `get_home`, so it doesn't call `get_chapters`.
     for command in ["get_home", "get_reading", "list_notes"] {
         assert!(
             HTML.contains(&format!("invoke('{command}'")),
