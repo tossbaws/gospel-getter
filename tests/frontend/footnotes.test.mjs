@@ -252,14 +252,15 @@ test('Copy and the note panel’s quote use the plain text and italics, with no 
         );
     }));
 
-test('a cross reference chip opens its passage, selected, with the KJV’s italics and no braces', () =>
+test('a cross reference chip’s Go to opens its passage, selected, with the KJV’s italics and no braces', () =>
     withApp({ book: 'John', chapter: 10, translation: 'kjv' }, async (app) => {
         // John 10:11 refers to Psalms 23:1.
         const verse = app.verse(11);
         await clickAndWait(app, verse, 'list_notes');
         const citation = [...visiblePopup(verse).querySelectorAll('.xref-citation')].find((c) => c.textContent === 'Psalms 23:1');
         assert.ok(citation, 'fixture: John 10:11 cites Psalms 23:1');
-        await clickAndWait(app, citation, 'get_reading');
+        await clickAndWait(app, citation, 'get_passage');
+        await clickAndWait(app, visiblePopup(verse).querySelector('.xref-preview-go'), 'get_reading');
         assert.equal(app.heading(), 'Psalms 23');
         assert.deepEqual(app.selectedVerseNumbers(), [1]);
         assert.deepEqual(supplied(app.verse(1)), ['is']);

@@ -2183,7 +2183,10 @@
         .highlight-filter-btn:focus-visible,
         .verse-bookmark-btn:focus-visible,
         .reader-mode-btn:focus-visible,
-        .reader-exit:focus-visible {
+        .reader-exit:focus-visible,
+        .xref-citation:focus-visible,
+        .xref-preview-go:focus-visible,
+        .xref-summary-chip:focus-visible {
             outline: 2px solid var(--accent);
             outline-offset: 2px;
         }
@@ -2838,6 +2841,73 @@
             color: var(--text-dim);
         }
 
+        /* The chip whose passage is showing: ringed, like a pressed key. */
+        .xref-citation[aria-expanded="true"] {
+            text-decoration: none;
+            border-radius: var(--radius-s);
+            box-shadow: 0 0 0 1px var(--accent-2);
+            background: rgba(var(--accent-rgb), 0.05);
+        }
+
+        /* A cross-reference read in place, under its chip's row: its
+           reference, its verses as prose in the reading font, and Go to. */
+        .xref-preview {
+            margin-top: 0.5rem;
+            padding: 0.5rem 0.6rem;
+            border-left: 2px solid var(--accent-2);
+            background: rgba(var(--accent-rgb), 0.05);
+            border-radius: 0 var(--radius-s) var(--radius-s) 0;
+        }
+
+        .xref-preview > * {
+            margin: 0;
+        }
+
+        .xref-preview > * + * {
+            margin-top: 0.4rem;
+        }
+
+        .xref-preview-title {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        .xref-preview-text {
+            font-family: var(--font-scripture);
+            font-size: 0.95rem;
+            line-height: 1.6;
+            color: var(--text);
+        }
+
+        .xref-preview-num {
+            font-size: 0.65em;
+            line-height: 0;
+            vertical-align: super;
+            margin-right: 0.2em;
+            color: var(--accent-2);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .xref-preview-notice {
+            font-style: italic;
+            color: var(--text-dim);
+        }
+
+        .xref-preview-go {
+            padding: 0;
+            font: inherit;
+            color: var(--accent-2);
+            background: none;
+            border: none;
+            cursor: pointer;
+            text-decoration: underline dotted;
+        }
+
+        .xref-preview-go:hover,
+        .xref-preview-go:focus-visible {
+            text-decoration: underline solid;
+        }
+
         .verse-copy-btn,
         .verse-bookmark-btn,
         .verse-note-btn,
@@ -3285,12 +3355,29 @@
             overflow-wrap: anywhere;
         }
 
+        /* A citation in the list opens its passage: quiet until hovered or
+           focused, when it's underlined like a link. */
         .xref-summary-chip {
-            color: var(--text-dim);
+            padding: 0;
+            font: inherit;
+            color: var(--accent-2);
+            background: none;
+            border: none;
+            border-radius: var(--radius-s);
+            text-align: start;
+            cursor: pointer;
         }
 
-        .xref-summary-chip:not(:last-child)::after {
+        .xref-summary-chip:hover,
+        .xref-summary-chip:focus-visible {
+            text-decoration: underline;
+            text-underline-offset: 0.15em;
+        }
+
+        /* Outside the link, so neither underlined nor ringed with it. */
+        .xref-summary-item:not(:last-child)::after {
             content: ',';
+            color: var(--text-dim);
         }
 
         .xref-credit {
@@ -4835,6 +4922,17 @@
             const cardXrefs = document.createElement('div');
             cardXrefs.className = 'selection-xrefs';
             selectionCard.append(verseActions, cardFootnotes, cardXrefs);
+            // A cross-reference read in place: one at a time, under the
+            // row of the chip that opened it (`previewChip`, pressed while
+            // it shows). Its "Go to" button opens the passage.
+            const xrefPreview = document.createElement('div');
+            xrefPreview.id = 'xref-preview';
+            xrefPreview.className = 'xref-preview';
+            xrefPreview.setAttribute('role', 'region');
+            xrefPreview.setAttribute('aria-labelledby', 'xref-preview-title');
+            xrefPreview.hidden = true;
+            let previewChip = null;
+            let previewToken = 0;
             // The verse the card belongs to (the last selected one), where
             // focus goes back to when it closes.
             let cardVerse = null;
@@ -4964,6 +5062,7 @@
                 showAllNotes = false;
                 notesSection.remove();
                 if (!last) {
+                    closeXrefPreview();
                     const verse = cardVerse;
                     cardVerse = null;
                     selectionCard.remove();
@@ -5009,10 +5108,85 @@
                             ${range ? `<span class="selection-xref-verse">${reading.chapter}:${row.number}</span>` : ''}
                             <ul class="xref-chips" aria-labelledby="selection-xrefs-title">${row.xrefs.map((x) => {
                                 const end = x.endVerse != null ? ` data-end-verse="${x.endVerse}"` : '';
-                                return `<li><button type="button" class="xref-citation" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${end}>${escapeHtml(x.citation)}</button></li>`;
+                                return `<li><button type="button" class="xref-citation" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${end} aria-expanded="false" aria-controls="xref-preview">${escapeHtml(x.citation)}</button></li>`;
                             }).join('')}</ul>
                         </div>`).join('')}`
                     : '';
+                closeXrefPreview();
+                cardXrefs.append(xrefPreview);
+            }
+
+            // The passage's text comes from the translation being read; while
+            // comparing, from the first (left) column's.
+            function previewTranslation() {
+                if (isComparing() && lastCompare && lastCompare.columns.length) return lastCompare.columns[0].code;
+                return reading.translationCode;
+            }
+
+            function closeXrefPreview({ focusChip = false } = {}) {
+                previewToken += 1;
+                const chip = previewChip;
+                previewChip = null;
+                xrefPreview.hidden = true;
+                xrefPreview.innerHTML = '';
+                if (!chip) return;
+                chip.setAttribute('aria-expanded', 'false');
+                if (focusChip && chip.isConnected) chip.focus({ preventScroll: true });
+            }
+
+            // A chip shows its passage under its row, replacing any other
+            // preview; the same chip again closes it. Nothing navigates.
+            async function toggleXrefPreview(chip) {
+                if (previewChip === chip) {
+                    closeXrefPreview();
+                    return;
+                }
+                closeXrefPreview();
+                previewChip = chip;
+                chip.setAttribute('aria-expanded', 'true');
+                chip.closest('.selection-xref-row').append(xrefPreview);
+                const bookId = Number(chip.dataset.book);
+                const chapter = Number(chip.dataset.chapter);
+                const start = Number(chip.dataset.verse);
+                const end = Number(chip.dataset.endVerse || chip.dataset.verse);
+                const translationCode = previewTranslation();
+                const token = previewToken;
+                let passage = null;
+                let failure = '';
+                try {
+                    passage = await invoke('get_passage', { translationCode, bookId, chapter, start, end });
+                } catch (e) {
+                    console.error('Failed to read a cross-reference', e);
+                    failure = (e && e.message) || String(e);
+                }
+                if (token !== previewToken) return;
+                // "1 John 4:9–10", as the backend names it (or, if it
+                // couldn't, the chip's citation with its dash).
+                const reference = passage ? passage.reference : chip.textContent.replace(/(\d)-(\d)/, '$1\u2013$2');
+                const verses = passage
+                    ? passage.verses.map((v) => `<span class="xref-preview-verse"><span class="xref-preview-num">${v.number}</span>${verseHtml(v, { markers: false })}</span>`).join(' ')
+                    : '';
+                const notice = failure ? `Couldn't read ${reference}: ${failure}` : (passage.notice || '');
+                xrefPreview.innerHTML = `<p class="xref-preview-title" id="xref-preview-title">${escapeHtml(reference)} (${escapeHtml(translationCode.toUpperCase())})</p>
+                    ${verses ? `<p class="xref-preview-text">${verses}</p>` : ''}
+                    ${notice ? `<p class="xref-preview-notice">${escapeHtml(notice)}</p>` : ''}
+                    <button type="button" class="xref-preview-go" data-book="${bookId}" data-chapter="${chapter}" data-verse="${start}" data-end-verse="${end}">Go to ${escapeHtml(reference)} <span aria-hidden="true">→</span></button>`;
+                xrefPreview.hidden = false;
+                placeCard();
+                revealXrefPreview();
+            }
+
+            // Scrolls the card, not the page, so the whole preview shows
+            // (or its top, when it's taller than the card).
+            function revealXrefPreview() {
+                const card = selectionCard.getBoundingClientRect();
+                const box = xrefPreview.getBoundingClientRect();
+                const inset = parseFloat(window.getComputedStyle(selectionCard).paddingBottom) || 0;
+                if (box.bottom + inset > card.bottom) {
+                    selectionCard.scrollTop += Math.min(box.bottom + inset - card.bottom, box.top - card.top);
+                } else if (box.top < card.top) {
+                    selectionCard.scrollTop -= card.top - box.top;
+                }
             }
 
             // Where the card goes, measured each time it opens or its
@@ -5048,6 +5222,13 @@
 
             function placeCard() {
                 if (!selectionCard.isConnected || !cardVerse) return;
+                // A preview opening or closing doesn't move the card to the
+                // other side: it grows (or scrolls) where it is.
+                const keep = previewChip
+                    ? (selectionCard.classList.contains('is-docked') && 'docked')
+                        || (selectionCard.classList.contains('is-above') ? 'above' : 'below')
+                    : null;
+                const scrolled = selectionCard.scrollTop;
                 const column = selectionCard.closest('.chapter-main');
                 const first = document.querySelector(`${SELECTABLE}.verse-selected`) || cardVerse;
                 const flowing = document.documentElement.dataset.layout === 'flowing'
@@ -5068,7 +5249,10 @@
                 const above = firstRect.top - bar - 2 * CARD_GAP;
                 let side = 'below';
                 let room = wanted;
-                if (below < wanted) {
+                if (keep === 'above' || keep === 'below') {
+                    side = keep;
+                    room = Math.min(wanted, Math.max(keep === 'above' ? above : below, CARD_MIN));
+                } else if (below < wanted) {
                     if (above >= wanted) {
                         side = 'above';
                     } else {
@@ -5076,11 +5260,12 @@
                         room = Math.max(above, below);
                     }
                 }
-                if (room < Math.min(wanted, CARD_MIN)) {
+                if (keep === 'docked' || (!keep && room < Math.min(wanted, CARD_MIN))) {
                     selectionCard.classList.add('is-docked');
                     selectionCard.style.left = `${columnRect.left}px`;
                     selectionCard.style.width = `${columnRect.width}px`;
                     selectionCard.style.top = '';
+                    selectionCard.scrollTop = scrolled;
                     return;
                 }
                 if (room < wanted) selectionCard.style.maxHeight = `${room}px`;
@@ -5090,6 +5275,7 @@
                     selectionCard.classList.add('is-above');
                     selectionCard.style.top = `${firstRect.top - columnRect.top - CARD_GAP - selectionCard.offsetHeight}px`;
                 }
+                selectionCard.scrollTop = scrolled;
             }
 
             window.addEventListener('resize', placeCard);
@@ -7205,7 +7391,10 @@
                 const rows = dto.currentVerses
                     .filter((v) => v.xrefs.length > 0)
                     .map((v) => {
-                        const chips = v.xrefs.map((x) => `<span class="xref-summary-chip">${escapeHtml(x.citation)}</span>`).join('');
+                        const chips = v.xrefs.map((x) => {
+                            const end = x.endVerse != null ? ` data-end-verse="${x.endVerse}"` : '';
+                            return `<span class="xref-summary-item"><button type="button" class="xref-summary-chip" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${end}>${escapeHtml(x.citation)}</button></span>`;
+                        }).join('');
                         return `<div class="xref-summary-row">
                             <span class="xref-summary-verse">${dto.currentChapter}:${v.number}</span>
                             <span class="xref-summary-chips">${chips}</span>
@@ -7636,15 +7825,27 @@
                     if (next) next.focus();
                     return;
                 }
-                // A cross-reference chip in the card reads that passage,
-                // selected (Back returns).
+                // A cross-reference chip in the card shows that passage in
+                // the card; its Go to button reads it, selected (Back
+                // returns).
                 const citation = event.target.closest('#selection-card .xref-citation');
                 if (citation) {
+                    toggleXrefPreview(citation);
+                    return;
+                }
+                const go = event.target.closest('#selection-card .xref-preview-go');
+                if (go) {
+                    openPassage(go.dataset.book, go.dataset.chapter, Number(go.dataset.verse), Number(go.dataset.endVerse));
+                    return;
+                }
+                // So does a citation in the chapter's Cross references list.
+                const listed = event.target.closest('.xref-summary-chip');
+                if (listed) {
                     openPassage(
-                        citation.dataset.book,
-                        citation.dataset.chapter,
-                        Number(citation.dataset.verse),
-                        Number(citation.dataset.endVerse || citation.dataset.verse),
+                        listed.dataset.book,
+                        listed.dataset.chapter,
+                        Number(listed.dataset.verse),
+                        Number(listed.dataset.endVerse || listed.dataset.verse),
                     );
                     return;
                 }
@@ -7766,12 +7967,16 @@
 
                 // Escape backs out one step at a time: the search panel,
                 // then an open popover or panel (closed by the preferences
-                // script), then a verse selection, then reading mode (also
-                // the preferences script, which skips an Escape already
-                // handled here).
+                // script), then a cross-reference previewed in the card,
+                // then a verse selection, then reading mode (also the
+                // preferences script, which skips an Escape already handled
+                // here).
                 if (event.key === 'Escape') {
                     if (!searchPanel.hidden) {
                         setSearchOpen(false);
+                        event.preventDefault();
+                    } else if (previewChip && !surfaceOpen()) {
+                        closeXrefPreview({ focusChip: selectionCard.contains(document.activeElement) });
                         event.preventDefault();
                     } else if (selection && !surfaceOpen()) {
                         clearSelection();
