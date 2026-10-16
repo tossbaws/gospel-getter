@@ -28,9 +28,11 @@ and the README's go to screenshots/.
 Without --readme, writes the site's raw PNGs (at 2x) to OUT_DIR; cropping
 and WebP conversion are separate (see site/README.md). With --readme, writes
 the README's screenshots at 1x, at their final names and sizes (OUT_DIR
-can be screenshots/ itself). Every scene uses the app's default layout for its
-window size: from 1200px wide the book and chapter picker is a sidebar on
+can be screenshots/ itself). Every scene shows the picker as the app does at
+its window size: from 1200px wide the book and chapter picker is a sidebar on
 the left, and narrower it's a popover from the reference button, closed.
+The verses are one to a line (Verses, the default), except in the README's
+flowing scene, which sets Flowing under Aa.
 Needs PyGObject with WebKit2 4.1 and a display (it never shows a window).
 """
 
@@ -339,6 +341,9 @@ def readme_scenes(theme):
         # John 3 in the KJV with John 2 and 4, the reference in the bar and
         # John's chapters open in the sidebar.
         dict(name="reading-neighboring-chapters", size=(1280, 850), prefs=look,
+             position=("John", 3, "kjv"), steps="window.scrollTo(0, 0);"),
+        # The same, in the Flowing layout: each chapter as prose.
+        dict(name="flowing", size=(1280, 850), prefs={**look, "gospel-getter-layout": "flowing"},
              position=("John", 3, "kjv"), steps="window.scrollTo(0, 0);"),
         # Searching the words of the text.
         dict(name="search-results", size=(1280, 1000), prefs=look, position=("John", 3, "web"),
