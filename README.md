@@ -49,7 +49,8 @@ needed.
   window) with **Copy**, **Copy as…**, **★ Bookmark**, **+ Add note** and
   the highlight colors, then the verses' footnotes, your notes on them
   and their cross-references. It floats over the text, so the text
-  doesn't move.
+  doesn't move. Hold Shift and the card fades and lets clicks through, so
+  you can Shift-click a verse it covers.
 - **Copy verses with their reference.** Select them, then **Copy** or
   Ctrl+C. You get the verse text (in the KJV, without its margin notes),
   followed by e.g. `— John 3:16–18 (WEB)`. **Copy as…** in the card (or
@@ -223,7 +224,7 @@ The main ones:
 | Ctrl+0 | Text size back to Medium |
 | Ctrl+B | Open or close the Library (bookmarks, highlights and notes) |
 | `N` | Write a note on the selected verses |
-| Shift-click | Extend the selection to a range within the chapter |
+| Shift-click | Extend the selection to a range within the chapter. Holding Shift lets the click through the selection card to a verse it covers |
 | Esc | Close search or the open panel or popover, then clear the selection, then leave reading mode |
 | `?` | All the keyboard shortcuts |
 
@@ -295,14 +296,14 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.15.0?** Each updates itself to 2.16.0: it
+**Coming from 2.6.0 through 2.16.0?** Each updates itself to 2.16.1: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
 update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.16.0 by hand once, from the
+Install 2.16.1 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -388,6 +389,9 @@ so it seeds again.
 - **Links:** the page never opens a web page itself. Release notes and the
   cross-references' credits open in your browser through the backend,
   which opens only addresses on its own fixed list.
+- **Content Security Policy:** the webview loads only the app's own
+  scripts, styles, fonts and images, and nothing in the page can reach
+  the network; only the app's backend can.
 
 ## Tests
 

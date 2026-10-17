@@ -4,6 +4,19 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.16.1] - 2026-10-17
+
+### Fixed
+- The selection card no longer stands in the way of extending a
+  selection: hold Shift and the card fades to a faint outline that clicks
+  go through, so you can Shift-click a verse it covers. Letting go of
+  Shift brings it back at once.
+
+### Security
+- A Content Security Policy for the app's webview: it loads only the
+  app's own scripts, styles, fonts and images, and nothing in the page
+  can reach the network.
+
 ## [2.16.0] - 2026-10-17
 
 ### Added
