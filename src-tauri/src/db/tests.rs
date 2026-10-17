@@ -14,7 +14,7 @@ use super::notes::{
 };
 use super::search::{SEARCH_CONTENT_VERSION, search_verses};
 use super::test_support::{
-    TempDb, bundled, fill_notes, fresh_database, other_tables_snapshot, table_names,
+    TempDb, bundled, bundled_bsb, fill_notes, fresh_database, other_tables_snapshot, table_names,
     verses_snapshot, write_v2_1_0_database,
 };
 use super::{
@@ -23,19 +23,42 @@ use super::{
 
 const KJV: i64 = 1;
 const WEB: i64 = 2;
+/// Seeded third (see `seed::SEED_ORDER`), on a new install or an upgrade.
+const BSB: i64 = 3;
 
 fn terms(words: &[&str]) -> Vec<String> {
     words.iter().map(|w| (*w).to_string()).collect()
 }
 
 /// `verses` must hold exactly the bundled text, byte for byte, numbered as
-/// the bundled files number it.
+/// the bundled files number it: every translation's.
 fn assert_verses_match_bundled(snapshot: &[(i64, i64, i64, i64, Vec<u8>)]) {
+    assert_verses_match(snapshot, &[(KJV, "kjv"), (WEB, "web"), (BSB, "bsb")]);
+}
+
+/// `verses` must hold exactly these translations' bundled text, byte for
+/// byte, and nothing else. A verse a translation doesn't number (`null` in
+/// its file) has no row.
+fn assert_verses_match(snapshot: &[(i64, i64, i64, i64, Vec<u8>)], translations: &[(i64, &str)]) {
     let mut expected = Vec::new();
-    for (translation_id, code) in [(KJV, "kjv"), (WEB, "web")] {
-        for (b, book) in bundled(code).into_iter().enumerate() {
-            for (c, verses) in book.chapters.into_iter().enumerate() {
+    for &(translation_id, code) in translations {
+        let books: Vec<Vec<Vec<Option<String>>>> = if code == "bsb" {
+            bundled_bsb().into_iter().map(|b| b.chapters).collect()
+        } else {
+            bundled(code)
+                .into_iter()
+                .map(|b| {
+                    b.chapters
+                        .into_iter()
+                        .map(|c| c.into_iter().map(Some).collect())
+                        .collect()
+                })
+                .collect()
+        };
+        for (b, chapters) in books.into_iter().enumerate() {
+            for (c, verses) in chapters.into_iter().enumerate() {
                 for (v, text) in verses.into_iter().enumerate() {
+                    let Some(text) = text else { continue };
                     expected.push((
                         translation_id,
                         b as i64 + 1,
@@ -47,6 +70,7 @@ fn assert_verses_match_bundled(snapshot: &[(i64, i64, i64, i64, Vec<u8>)]) {
             }
         }
     }
+    expected.sort();
     assert_eq!(snapshot.len(), expected.len(), "verse row count");
     assert!(snapshot == expected, "verses differ from the bundled text");
 }
@@ -60,6 +84,7 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
         "books",
         "translations",
         "verses",
+        "footnotes",
         "reading_position",
         "cross_references",
         "bookmarks",
@@ -78,7 +103,7 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
             .fetch_all(&pool)
             .await
             .unwrap();
-    assert_eq!(state, vec![(KJV, 31_100), (WEB, 31_103)]);
+    assert_eq!(state, vec![(KJV, 31_100), (WEB, 31_103), (BSB, 31_086)]);
 
     let bookmarks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bookmarks")
         .fetch_one(&pool)
@@ -114,13 +139,28 @@ async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_searc
 
     // Exactly what startup does.
     prepare(&pool).await.unwrap();
-    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![KJV, WEB]);
+    assert_eq!(
+        ensure_search_index(&pool).await.unwrap(),
+        vec![KJV, WEB, BSB]
+    );
 
-    assert_eq!(verses_snapshot(&pool).await, verses_before);
-    assert_eq!(other_tables_snapshot(&pool).await, others_before);
-    assert_verses_match_bundled(&verses_before);
+    // The KJV and WEB rows are untouched; the BSB, which 2.1.0 didn't
+    // have, is added after them, exactly as bundled.
+    assert_verses_match(&verses_before, &[(KJV, "kjv"), (WEB, "web")]);
+    let verses_after = verses_snapshot(&pool).await;
+    assert_eq!(verses_after[..verses_before.len()], verses_before[..]);
+    assert_verses_match_bundled(&verses_after);
+    // Every other row is as it was; the BSB is listed after the two.
+    let mut others_expected = others_before.clone();
+    let at = others_expected
+        .iter()
+        .position(|r| r.starts_with("reading_position"))
+        .unwrap();
+    others_expected.insert(at, "translations: 3|bsb|Berean Standard Bible".to_string());
+    assert_eq!(other_tables_snapshot(&pool).await, others_expected);
     let tables = table_names(&pool).await;
     for table in [
+        "footnotes",
         "bookmarks",
         "highlights",
         "notes",
@@ -145,8 +185,8 @@ async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_searc
     let pool = db.connect().await;
     prepare(&pool).await.unwrap();
     assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
-    assert_eq!(verses_snapshot(&pool).await, verses_before);
-    assert_eq!(other_tables_snapshot(&pool).await, others_before);
+    assert_eq!(verses_snapshot(&pool).await, verses_after);
+    assert_eq!(other_tables_snapshot(&pool).await, others_expected);
     assert_eq!(list_bookmarks(&pool, KJV).await.unwrap().len(), 1);
 }
 
@@ -156,12 +196,15 @@ async fn indexing_leaves_every_verse_byte_for_byte_unchanged() {
     let before = verses_snapshot(&pool).await;
     assert_verses_match_bundled(&before);
 
-    // Force a full rebuild of both translations.
+    // Force a full rebuild of every translation.
     sqlx::query("DELETE FROM search_index_state")
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![KJV, WEB]);
+    assert_eq!(
+        ensure_search_index(&pool).await.unwrap(),
+        vec![KJV, WEB, BSB]
+    );
 
     assert_eq!(verses_snapshot(&pool).await, before);
 
@@ -351,7 +394,10 @@ async fn an_index_of_stored_text_is_rebuilt_once() {
     // The first launch after upgrading rebuilds everything, once.
     prepare(&pool).await.unwrap();
     let started = Instant::now();
-    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![KJV, WEB]);
+    assert_eq!(
+        ensure_search_index(&pool).await.unwrap(),
+        vec![KJV, WEB, BSB]
+    );
     println!("rebuild after upgrading: {:?}", started.elapsed());
     assert_eq!(index_version(&pool).await, Some(SEARCH_CONTENT_VERSION));
     assert!(
@@ -371,7 +417,10 @@ async fn an_index_of_stored_text_is_rebuilt_once() {
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![KJV, WEB]);
+    assert_eq!(
+        ensure_search_index(&pool).await.unwrap(),
+        vec![KJV, WEB, BSB]
+    );
     assert_eq!(index_version(&pool).await, Some(SEARCH_CONTENT_VERSION));
     assert!(
         !found(&pool, KJV, &["candle"])
@@ -387,23 +436,37 @@ async fn an_index_of_stored_text_is_rebuilt_once() {
 #[tokio::test]
 async fn a_reseeded_translation_is_reindexed_on_its_own() {
     let (_db, pool) = fresh_database("reseed").await;
+    let footnotes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM footnotes")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
-    // As if WEB's rows were cleared and seeded again by a later launch.
-    sqlx::query("DELETE FROM verses WHERE translation_id = 2")
+    // As if the BSB's rows (its footnotes, verses and listing) were cleared
+    // and seeded again by a later launch.
+    sqlx::query("DELETE FROM footnotes WHERE translation_id = 3")
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("DELETE FROM translations WHERE id = 2")
+    sqlx::query("DELETE FROM verses WHERE translation_id = 3")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM translations WHERE id = 3")
         .execute(&pool)
         .await
         .unwrap();
     prepare(&pool).await.unwrap();
-    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![WEB]);
-    let (total, _) = search_verses(&pool, WEB, &terms(&["yahweh"]), 1, 0)
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![BSB]);
+    let (total, _) = search_verses(&pool, BSB, &terms(&["shepherd"]), 1, 0)
         .await
         .unwrap();
-    assert!(total > 1000);
+    assert!(total > 10);
     assert_verses_match_bundled(&verses_snapshot(&pool).await);
+    let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM footnotes")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!((footnotes, after), (4_854, 4_854));
 }
 
 #[tokio::test]
@@ -554,7 +617,35 @@ async fn search_timing() {
     prepare(&fresh).await.unwrap();
     let started = Instant::now();
     ensure_search_index(&fresh).await.unwrap();
-    println!("index build, both translations: {:?}", started.elapsed());
+    println!("index build, every translation: {:?}", started.elapsed());
+
+    // The first launch after upgrading to 2.15: the BSB is seeded and
+    // indexed; the KJV and WEB are already.
+    let upgrade = TempDb::new("timing_upgrade");
+    write_v2_1_0_database(&upgrade.path()).await;
+    let upgraded = upgrade.connect().await;
+    prepare(&upgraded).await.unwrap();
+    ensure_search_index(&upgraded).await.unwrap();
+    sqlx::query("DELETE FROM footnotes")
+        .execute(&upgraded)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM verses WHERE translation_id = 3")
+        .execute(&upgraded)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM translations WHERE id = 3")
+        .execute(&upgraded)
+        .await
+        .unwrap();
+    let started = Instant::now();
+    prepare(&upgraded).await.unwrap();
+    let seeded = started.elapsed();
+    assert_eq!(ensure_search_index(&upgraded).await.unwrap(), vec![BSB]);
+    println!(
+        "upgrade to the BSB: seeding {seeded:?}, then indexing {:?}",
+        started.elapsed() - seeded
+    );
 
     let mut worst = std::time::Duration::ZERO;
     for query in [

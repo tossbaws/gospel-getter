@@ -447,8 +447,8 @@ test('Export sends the translation and the filter, and reports the file', () =>
 test('in compare mode the verses come from the translation chosen in Aa, not the other column', () =>
     withNotes([[bookId('Matthew'), 2, 23, 23, 'Nazareth.']], { book: 'Matthew', chapter: 2, translation: 'web', compare: true }, async (app) => {
         assert.ok(app.isComparing());
-        // The columns keep their own order; the WEB, chosen, is the right one.
-        assert.deepEqual(app.compareColumns(), ['King James Version (KJV)', 'World English Bible (WEB)']);
+        // The WEB, chosen in Aa, is the left column; the KJV is beside it.
+        assert.deepEqual(app.compareColumns(), ['World English Bible (WEB)', 'King James Version (KJV)']);
         assert.equal(app.document.getElementById('translation-select').value, 'web');
         const path = join(dir, 'web.md');
         await app.pick(path);

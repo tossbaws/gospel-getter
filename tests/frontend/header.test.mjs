@@ -35,6 +35,7 @@ async function clickAndWait(app, el, cmd) {
 
 const segments = (app, id) => [...$(app, id).querySelectorAll('button')];
 const pressed = (app, id) => segments(app, id).filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.value);
+const checked = (app, id) => segments(app, id).filter((b) => b.getAttribute('aria-checked') === 'true').map((b) => b.dataset.value);
 
 // ---- Opening and closing
 
@@ -155,7 +156,10 @@ test('Aa changes the real preferences live, and they persist across a restart', 
         const order = [...dialog.querySelectorAll('.section-label')].map((l) => l.textContent);
         assert.deepEqual(order, ['Translation', 'Text size', 'Line spacing', 'Width', 'Layout', 'Theme']);
         assert.equal(dialog.lastElementChild.querySelector('button').id, 'reader-mode-btn');
-        assert.ok($(app, 'compare-btn').closest('.aa-row').contains($(app, 'translation-choices')), 'Compare beside the translations');
+        // Compare, with the translation to compare with, under the translations.
+        const compareRow = $(app, 'compare-btn').closest('.aa-row');
+        assert.ok(compareRow.contains($(app, 'compare-with-choices')), 'Compare beside its "with" choices');
+        assert.ok($(app, 'translation-choices').compareDocumentPosition(compareRow) & 4, 'under the translations');
 
         // Text size: A− / name / A+, each disabled at its end.
         const down = $(app, 'text-size-down');
@@ -266,10 +270,15 @@ test('Aa switches the translation through the existing path, from the list the a
         await backend('add_bookmark', { bookId: bookId('Psalms'), chapter: 23, verseStart: 1, verseEnd: 1 });
         app.open('aa');
         const home = await backend('get_home');
+        // One row per translation, in the app's order, as a radio group.
         const buttons = segments(app, 'translation-choices');
-        assert.deepEqual(buttons.map((b) => b.textContent), home.translations.map((t) => t.code.toUpperCase()));
-        assert.deepEqual(buttons.map((b) => b.title), home.translations.map((t) => t.name));
-        assert.deepEqual(pressed(app, 'translation-choices'), ['kjv']);
+        assert.deepEqual(
+            buttons.map((b) => b.textContent),
+            home.translations.map((t) => [t.code.toUpperCase(), t.name, t.date, t.licence].filter(Boolean).join(' · ')),
+        );
+        assert.equal($(app, 'translation-choices').getAttribute('role'), 'radiogroup');
+        assert.ok(buttons.every((b) => b.getAttribute('role') === 'radio'));
+        assert.deepEqual(checked(app, 'translation-choices'), ['kjv']);
 
         const before = app.calls.length;
         app.click(buttons.find((b) => b.dataset.value === 'web'));
@@ -277,7 +286,7 @@ test('Aa switches the translation through the existing path, from the list the a
         const cmds = app.calls.slice(before).map((c) => c.cmd);
         for (const cmd of ['get_reading', 'list_bookmarks', 'list_highlight_passages']) assert.ok(cmds.includes(cmd), cmd);
         assert.equal($(app, 'translation-select').value, 'web');
-        assert.deepEqual(pressed(app, 'translation-choices'), ['web']);
+        assert.deepEqual(checked(app, 'translation-choices'), ['web']);
         assert.equal(app.verse(16, 'web').querySelector('.verse-text').textContent, storedVerse('web', 'John', 3, 16));
         assert.equal(app.bookmarkItems()[0].preview, storedVerse('web', 'Psalms', 23, 1), 'the Library follows');
         assert.ok(isOpen(app, 'aa'));

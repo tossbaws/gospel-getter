@@ -91,12 +91,12 @@ test('the reference follows navigation, the translation and compare', () =>
         assert.equal(refText(app), 'Luke 1 · WEB');
         assert.equal(refBtn(app).getAttribute('aria-label'), 'Luke 1, World English Bible. Choose a book and chapter');
 
-        // Comparing: every translation on screen.
+        // Comparing: both translations on screen, the one being read first.
         app.key('Escape', {}, app.document.activeElement);
         await keyAndWait(app, 'c');
         assert.ok(app.isComparing());
-        assert.equal(refText(app), 'Luke 1 · KJV + WEB');
-        assert.equal(refBtn(app).getAttribute('aria-label'), 'Luke 1, King James Version and World English Bible. Choose a book and chapter');
+        assert.equal(refText(app), 'Luke 1 · WEB + KJV');
+        assert.equal(refBtn(app).getAttribute('aria-label'), 'Luke 1, World English Bible and King James Version. Choose a book and chapter');
         await keyAndWait(app, 'c');
         assert.equal(refText(app), 'Luke 1 · WEB');
 
@@ -128,10 +128,10 @@ test('the window title follows the reference: navigation, the translation and co
         // Comparing: what the reference button shows.
         app.key('Escape', {}, app.document.activeElement);
         await keyAndWait(app, 'c');
-        assert.equal(refText(app), 'Mark 16 · KJV + WEB');
-        assert.equal(title(), 'Mark 16 · KJV + WEB — Gospel Getter');
+        assert.equal(refText(app), 'Mark 16 · WEB + KJV');
+        assert.equal(title(), 'Mark 16 · WEB + KJV — Gospel Getter');
         await keyAndWait(app, 'ArrowLeft');
-        assert.equal(title(), 'Mark 15 · KJV + WEB — Gospel Getter');
+        assert.equal(title(), 'Mark 15 · WEB + KJV — Gospel Getter');
         await keyAndWait(app, 'c');
         assert.equal(title(), 'Mark 15 · WEB — Gospel Getter');
 

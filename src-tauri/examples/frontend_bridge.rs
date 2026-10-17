@@ -376,7 +376,13 @@ async fn dispatch(
             Ok(Value::Null)
         }
         "get_compare" => Ok(to_value(
-            commands::compare_chapter(state, arg(args, "bookId")?, arg(args, "chapter")?).await?,
+            commands::compare_chapter(
+                state,
+                arg(args, "bookId")?,
+                arg(args, "chapter")?,
+                &arg::<Vec<String>>(args, "translationCodes")?,
+            )
+            .await?,
         )?),
         // Test setup, not an app command: forget the reading position
         // (and bookmarks, highlights and notes, unless `keepBookmarks` — a restart

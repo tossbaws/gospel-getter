@@ -31,6 +31,8 @@ const HTML = read('ui/index.html');
 export const BIBLES = {
     kjv: JSON.parse(read('src-tauri/data/kjv.json')),
     web: JSON.parse(read('src-tauri/data/web.json')),
+    // A verse the BSB doesn't number is null; its footnotes are apart.
+    bsb: JSON.parse(read('src-tauri/data/bsb.json')),
 };
 const BOOK_NAMES = BIBLES.kjv.map((b) => b.name);
 

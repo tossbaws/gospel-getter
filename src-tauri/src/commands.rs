@@ -34,8 +34,9 @@ pub struct AppState {
     /// kept in memory rather than re-queried on every command — both for
     /// rendering the book list and for computing chapter navigation.
     pub books: Vec<Book>,
-    /// All bundled translations, loaded once at startup. `translations[0]`
-    /// is the default used when a command doesn't specify one.
+    /// All bundled translations, loaded once at startup, in the order Aa
+    /// lists them (`seed::TRANSLATIONS`). `translations[0]` (the KJV) is
+    /// the default used when a command doesn't specify one.
     pub translations: Vec<Translation>,
     /// Progress of the search index build, which runs in the background
     /// after startup (see `main.rs`) rather than holding up the window.
@@ -54,9 +55,10 @@ impl AppState {
         let books = db::get_all_books(&pool)
             .await
             .context("Failed to load books")?;
-        let translations = db::get_all_translations(&pool)
+        let mut translations = db::get_all_translations(&pool)
             .await
             .context("Failed to load translations")?;
+        translations.sort_by_key(|t| db::seed::rank(&t.code));
         Ok(Self {
             store: Store::new(pool),
             books,
@@ -122,13 +124,21 @@ impl From<&Book> for BookDto {
 pub struct TranslationDto {
     pub code: String,
     pub name: String,
+    /// When it was made, as Aa's chooser shows it ("1611/1769"); `None`
+    /// when there's no one date (see `seed::TRANSLATIONS`).
+    pub date: Option<String>,
+    /// "public domain".
+    pub licence: String,
 }
 
 impl From<&Translation> for TranslationDto {
     fn from(t: &Translation) -> Self {
+        let source = db::seed::source(&t.code);
         Self {
             code: t.code.clone(),
             name: t.name.clone(),
+            date: source.and_then(|s| s.date).map(str::to_string),
+            licence: source.map_or("", |s| s.licence).to_string(),
         }
     }
 }
@@ -1471,21 +1481,43 @@ pub struct CompareDto {
     pub columns: Vec<CompareColumnDto>,
 }
 
-/// One chapter in every bundled translation, for showing side by side.
-/// Unlike `get_reading`, it doesn't move the reading position.
+/// One chapter in the translations `codes`, in that order, for showing
+/// side by side: the one being read, then the one it's compared with.
+/// Unlike `get_reading`, it doesn't move the reading position. `None` for
+/// a book or chapter that doesn't exist; an error for a translation that
+/// doesn't, or one named twice.
 pub async fn compare_chapter(
     state: &AppState,
     book_id: i64,
     chapter: i64,
+    codes: &[String],
 ) -> anyhow::Result<Option<CompareDto>> {
+    let mut translations = Vec::with_capacity(codes.len());
+    for code in codes {
+        let t = state
+            .translations
+            .iter()
+            .find(|t| &t.code == code)
+            .ok_or_else(|| anyhow::anyhow!("There's no translation \"{code}\"."))?;
+        if translations
+            .iter()
+            .any(|seen: &&Translation| seen.id == t.id)
+        {
+            anyhow::bail!("{} is named twice.", t.name);
+        }
+        translations.push(t);
+    }
+    if translations.is_empty() {
+        anyhow::bail!("No translations to compare.");
+    }
     let Some(book) = state.books.iter().find(|b| b.id == book_id) else {
         return Ok(None);
     };
     if !(1..=book.chapter_count).contains(&chapter) {
         return Ok(None);
     }
-    let mut columns = Vec::with_capacity(state.translations.len());
-    for t in &state.translations {
+    let mut columns = Vec::with_capacity(translations.len());
+    for t in translations {
         let verses = state.store.chapter_verses(t.id, book_id, chapter).await?;
         columns.push(CompareColumnDto {
             code: t.code.clone(),
@@ -1508,8 +1540,9 @@ pub async fn get_compare(
     state: tauri::State<'_, AppState>,
     book_id: i64,
     chapter: i64,
+    translation_codes: Vec<String>,
 ) -> Result<Option<CompareDto>, String> {
-    compare_chapter(&state, book_id, chapter)
+    compare_chapter(&state, book_id, chapter, &translation_codes)
         .await
         .map_err(|e| {
             tracing::error!("Failed to load {book_id}:{chapter} for comparison: {e:#}");
@@ -1964,7 +1997,7 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
         notes_already_present: file_notes.len() - new_notes,
         current_notes: noted.len(),
         position: import.position.as_ref().map(PositionPreviewDto::from),
-        preferences: import.preferences,
+        preferences: import.preferences.clone(),
         skipped_preferences_notice: reader_data::skipped_preferences_notice(
             &import.skipped_preferences,
         ),
@@ -2363,7 +2396,7 @@ pub async fn export_notes<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::test_support::{bundled, fresh_database};
+    use crate::db::test_support::{bundled, bundled_bsb, fresh_database};
 
     async fn app_state(label: &str) -> (crate::db::test_support::TempDb, AppState) {
         let (db, pool) = fresh_database(label).await;
@@ -3284,7 +3317,11 @@ mod tests {
             .unwrap();
         assert_eq!(previewed.verses[0].shown.text, psalm_119_105);
         assert!(previewed.verses[0].shown.footnotes.is_empty());
-        let compare = compare_chapter(&state, 19, 119).await.unwrap().unwrap();
+        let codes = ["kjv".to_string(), "web".to_string()];
+        let compare = compare_chapter(&state, 19, 119, &codes)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(compare.columns[0].verses[104].shown.text, psalm_119_105);
 
         // Library previews.
@@ -3332,13 +3369,190 @@ mod tests {
         );
     }
 
+    /// The BSB: listed between the KJV and the WEB (the KJV still the
+    /// default), read with its footnotes kept apart from its text, and
+    /// working in every place a translation's verses are used, including
+    /// across the verses it doesn't number in mid-chapter.
+    #[tokio::test]
+    async fn the_bsb_is_a_translation_like_the_others_with_its_own_footnotes() {
+        use crate::notes_export::escape_block;
+        let (_db, state) = app_state("cmd_bsb").await;
+        let bsb = bundled_bsb();
+        let text = |b: usize, c: usize, v: usize| {
+            bsb[b - 1].chapters[c - 1][v - 1].clone().expect("numbered")
+        };
+
+        // The list, in order, with what Aa's chooser shows.
+        let home = home(&state).await;
+        let listed: Vec<_> = home
+            .translations
+            .iter()
+            .map(|t| {
+                (
+                    t.code.as_str(),
+                    t.name.as_str(),
+                    t.date.as_deref(),
+                    t.licence.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                (
+                    "kjv",
+                    "King James Version",
+                    Some("1611/1769"),
+                    "public domain"
+                ),
+                (
+                    "bsb",
+                    "Berean Standard Bible",
+                    Some("2023"),
+                    "public domain"
+                ),
+                ("web", "World English Bible", None, "public domain"),
+            ]
+        );
+        assert_eq!(home.current_translation_code, "kjv");
+
+        // Genesis 1: each verse is its stored text, and verse 3's note
+        // stands after “light,”, lettered, its words as Berean's.
+        let dto = reading(&state, 1, 1, Some("bsb")).await.unwrap();
+        for v in &dto.current_verses {
+            assert_eq!(v.shown.text, text(1, 1, v.number as usize));
+        }
+        let v3 = &dto.current_verses[2].shown;
+        let kinds: Vec<_> = v3.parts.iter().map(|p| (p.kind, p.text.as_str())).collect();
+        assert_eq!(
+            kinds,
+            [
+                (PartKind::Text, "And God said, “Let there be light,”"),
+                (PartKind::Note, "Cited in 2 Corinthians 4:6"),
+                (PartKind::Text, " and there was light."),
+            ]
+        );
+        assert_eq!(v3.footnotes[0].label, "a");
+        // Verse 6's note: its alternative readings in italics.
+        let v6 = &dto.current_verses[5].shown.footnotes[0];
+        assert_eq!(
+            v6.text,
+            "Or a canopy or a firmament or a vault; also in verses 7, 8, 14, 15, 17, and 20"
+        );
+        let segments = v6.segments.as_ref().unwrap();
+        assert_eq!(segments[1].kind, crate::domain::usfm_note::SegmentKind::Alt);
+        assert_eq!(segments[1].text, "a canopy ");
+        // The faded neighbours carry them too; the frontend leaves their
+        // markers out, as for the KJV.
+        assert!(
+            dto.next
+                .as_ref()
+                .unwrap()
+                .verses
+                .iter()
+                .any(|v| !v.shown.footnotes.is_empty())
+        );
+
+        // Matthew 17 in the BSB: no verse 21, and verse 20's note says so.
+        let dto = reading(&state, 40, 17, Some("bsb")).await.unwrap();
+        let numbers: Vec<i64> = dto.current_verses.iter().map(|v| v.number).collect();
+        assert_eq!(numbers, (1..=27).filter(|&n| n != 21).collect::<Vec<_>>());
+        assert!(
+            dto.current_verses[19].shown.footnotes[0]
+                .text
+                .starts_with("BYZ and TR include 21But")
+        );
+
+        // A preview: the verses it numbers, no notes, and which it doesn't.
+        let passage = passage_text(&state, "bsb", 40, 17, 20, 22).await.unwrap();
+        assert_eq!(
+            passage.verses.iter().map(|v| v.number).collect::<Vec<_>>(),
+            [20, 22]
+        );
+        assert!(passage.verses.iter().all(|v| v.shown.footnotes.is_empty()
+            && v.shown.parts.iter().all(|p| p.kind != PartKind::Note)));
+        assert_eq!(passage.verses[0].shown.text, text(40, 17, 20));
+        assert_eq!(
+            passage.notice.as_deref(),
+            Some(
+                "In Matthew 17:20\u{2013}22, verse 21 isn't numbered in the Berean Standard Bible."
+            )
+        );
+        let missing = passage_text(&state, "bsb", 40, 17, 21, 21).await.unwrap();
+        assert!(missing.verses.is_empty());
+        assert_eq!(
+            missing.notice.as_deref(),
+            Some("In Matthew 17:21, verse 21 isn't numbered in the Berean Standard Bible.")
+        );
+
+        // Search: the verse text, never the footnotes.
+        let v = search_in(&state, "shepherd want", "bsb").await;
+        let results = v["results"].as_array().unwrap();
+        let psalm = results
+            .iter()
+            .find(|r| r["reference"] == "Psalms 23:1")
+            .unwrap();
+        assert_eq!(psalm["text"], text(19, 23, 1));
+        let v = search_in(&state, "BYZ", "bsb").await;
+        assert_eq!(v["results"].as_array().map_or(0, Vec::len), 0, "{v}");
+
+        // Bookmarks belong to no translation: one across the gap is partly
+        // numbered in the BSB, one on the gap not at all.
+        bookmark_passage(&state, 40, 17, 20, 22).await.unwrap();
+        bookmark_passage(&state, 40, 17, 21, 21).await.unwrap();
+        let marks = bookmarks_in(&state, Some("bsb")).await.unwrap();
+        let across = marks.iter().find(|b| b.verse_start == 20).unwrap();
+        assert!(!across.complete);
+        assert_eq!(across.preview.as_deref(), Some(text(40, 17, 20).as_str()));
+        let on = marks.iter().find(|b| b.verse_start == 21).unwrap();
+        assert_eq!((on.complete, on.preview.as_deref()), (false, None));
+
+        // The notes export quotes the BSB, and says what it doesn't number.
+        note_add(&state, passage_at(40, 17, 20, 22), "The gap.")
+            .await
+            .unwrap();
+        let tz = chrono::FixedOffset::east_opt(0).unwrap();
+        let file = build_notes_export(
+            &state,
+            "bsb",
+            &NotesFilter::default(),
+            chrono::Utc::now(),
+            &tz,
+        )
+        .await
+        .unwrap();
+        assert!(file.contents.contains("Verse text: Berean Standard Bible"));
+        for verse in [20, 22] {
+            let quoted = format!("**{verse}** {}", escape_block(&text(40, 17, verse)));
+            assert!(file.contents.contains(&quoted), "{quoted}");
+        }
+        assert!(
+            file.contents
+                .contains("*Not all of it is numbered in the BSB.*")
+        );
+        assert!(!file.contents.contains("BYZ"));
+    }
+
+    fn passage_at(book_id: i64, chapter: i64, verse_start: i64, verse_end: i64) -> Passage {
+        Passage {
+            book_id,
+            chapter,
+            verse_start,
+            verse_end,
+        }
+    }
+
     #[tokio::test]
     async fn compare_returns_each_translations_own_numbering_and_text() {
         let (_db, state) = app_state("cmd_compare").await;
+        let pair = |a: &str, b: &str| vec![a.to_string(), b.to_string()];
 
         // Romans 14: 23 verses in the KJV, 26 in the WEB (which places the
         // doxology the KJV has at 16:25-27 here, as 14:24-26).
-        let dto = compare_chapter(&state, 45, 14).await.unwrap().unwrap();
+        let dto = compare_chapter(&state, 45, 14, &pair("kjv", "web"))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(dto.columns.len(), 2);
         for (column, code) in dto.columns.iter().zip(["kjv", "web"]) {
             assert_eq!(column.code, code);
@@ -3353,8 +3567,58 @@ mod tests {
         assert_eq!(dto.columns[0].verses.len(), 23);
         assert_eq!(dto.columns[1].verses.len(), 26);
 
-        assert!(compare_chapter(&state, 43, 22).await.unwrap().is_none());
-        assert!(compare_chapter(&state, 99, 1).await.unwrap().is_none());
+        // Any two, in the order asked: the one being read first. The BSB
+        // doesn't number Matthew 17:21, mid-chapter; its column skips it.
+        let dto = compare_chapter(&state, 40, 17, &pair("bsb", "kjv"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            dto.columns
+                .iter()
+                .map(|c| c.code.as_str())
+                .collect::<Vec<_>>(),
+            ["bsb", "kjv"]
+        );
+        let numbers = |c: &CompareColumnDto| c.verses.iter().map(|v| v.number).collect::<Vec<_>>();
+        assert_eq!(
+            numbers(&dto.columns[0]),
+            (1..=27).filter(|&n| n != 21).collect::<Vec<_>>()
+        );
+        assert_eq!(numbers(&dto.columns[1]), (1..=27).collect::<Vec<_>>());
+        let bsb = bundled_bsb();
+        for verse in &dto.columns[0].verses {
+            assert_eq!(
+                Some(&verse.shown.text),
+                bsb[39].chapters[16][verse.number as usize - 1].as_ref()
+            );
+        }
+        // The BSB's footnotes show in its column.
+        assert!(
+            dto.columns[0].verses[19].shown.footnotes[0]
+                .text
+                .contains("BYZ and TR include")
+        );
+
+        // Translations that aren't there, or one twice, are refused.
+        for codes in [pair("kjv", "niv"), pair("web", "web"), Vec::new()] {
+            assert!(
+                compare_chapter(&state, 45, 14, &codes).await.is_err(),
+                "{codes:?}"
+            );
+        }
+        assert!(
+            compare_chapter(&state, 43, 22, &pair("kjv", "web"))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            compare_chapter(&state, 99, 1, &pair("kjv", "web"))
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         // Comparing doesn't move the saved reading position.
         assert_eq!(state.store.reading_position().await.unwrap(), None);

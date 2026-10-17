@@ -66,9 +66,9 @@ pub const FILE_SUFFIX: &str = ".gospel-getter.json";
 ///   characters JSON would escape in 6, like `\u0001`, are refused — so
 ///   100,000,000 bytes;
 /// - the rest of the file (its header, reading position and every
-///   preference) takes 535 bytes.
+///   preference) takes 562 bytes.
 ///
-/// That's 113,660,535 bytes in all, 108.4 MiB: over 96 MiB, under 128.
+/// That's 113,660,562 bytes in all, 108.4 MiB: over 96 MiB, under 128.
 /// Format 2's limit was 16 MiB; it rose because the reader's notes can
 /// hold far more text than every other record together, and a backup of
 /// them must always import. The limit is still there to refuse a file
@@ -198,7 +198,7 @@ pub struct NoteRecord {
 /// names. The values are the ones Aa offers (and the
 /// `<head>` preferences script in `ui/index.html` accepts — a test keeps
 /// the two lists in step).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -220,11 +220,16 @@ pub struct Preferences {
     pub reading_mode: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compare: Option<bool>,
+    /// The translation compare shows beside the one being read, once the
+    /// reader has chosen one. Added in 2.15; 2.12 to 2.14 skip it, with
+    /// their notice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compare_with: Option<TranslationCode>,
 }
 
 impl Preferences {
     /// Every preference's name in the file.
-    pub const NAMES: [&'static str; 7] = [
+    pub const NAMES: [&'static str; 8] = [
         "theme",
         "text_size",
         "line_spacing",
@@ -232,6 +237,7 @@ impl Preferences {
         "layout",
         "reading_mode",
         "compare",
+        "compare_with",
     ];
 
     /// How many preferences are set.
@@ -244,10 +250,36 @@ impl Preferences {
             self.layout.is_some(),
             self.reading_mode.is_some(),
             self.compare.is_some(),
+            self.compare_with.is_some(),
         ]
         .into_iter()
         .filter(|&set| set)
         .count()
+    }
+}
+
+/// A bundled translation's code ("kjv", "bsb", "web"). Any other is
+/// refused, so a file naming one this version doesn't have skips it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct TranslationCode(String);
+
+impl TranslationCode {
+    /// `code`, if it's a bundled translation's.
+    pub fn new(code: &str) -> Option<Self> {
+        crate::db::seed::source(code).map(|t| Self(t.code.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for TranslationCode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let code = String::deserialize(deserializer)?;
+        Self::new(&code)
+            .ok_or_else(|| serde::de::Error::custom(format!("no translation \"{code}\"")))
     }
 }
 
@@ -1189,6 +1221,46 @@ mod tests {
         );
     }
 
+    /// Compare's partner is a bundled translation's code: one this version
+    /// has round-trips, any other (a translation from a later version, or
+    /// none at all) is skipped with the notice, as 2.12 to 2.14 skip the
+    /// setting itself.
+    #[test]
+    fn compare_with_is_a_bundled_translation_or_skipped() {
+        let file = |preferences: &str| {
+            format!(
+                r#"{{"format": "gospel-getter-reader-data", "format_version": 3,
+                     "exported_at": "x", "app_version": "9.0.0", "reading_position": null,
+                     "bookmarks": [], "preferences": {preferences}}}"#
+            )
+        };
+        for code in ["kjv", "bsb", "web"] {
+            let data = parse(file(&format!(r#"{{"compare_with": "{code}"}}"#)).as_bytes()).unwrap();
+            assert_eq!(
+                data.preferences
+                    .compare_with
+                    .as_ref()
+                    .map(TranslationCode::as_str),
+                Some(code)
+            );
+            assert!(data.skipped_preferences.is_empty());
+            let written = serde_json::to_value(&data.preferences).unwrap();
+            assert_eq!(written, serde_json::json!({ "compare_with": code }));
+        }
+        for (value, shown) in [
+            (r#""niv""#, "compare with “niv”"),
+            (r#""KJV""#, "compare with “KJV”"),
+            ("3", "compare with 3"),
+        ] {
+            let data =
+                parse(file(&format!(r#"{{"compare_with": {value}, "compare": true}}"#)).as_bytes())
+                    .unwrap();
+            assert_eq!(data.preferences.compare_with, None);
+            assert_eq!(data.preferences.compare, Some(true), "the rest imports");
+            assert_eq!(data.skipped_preferences, [shown]);
+        }
+    }
+
     /// A file from a later version, with display settings this one doesn't
     /// know, imports everything else: each unknown or invalid preference is
     /// skipped and named, and the valid ones still apply. Bookmarks,
@@ -1299,6 +1371,7 @@ mod tests {
             layout: Some(Layout::Flowing),
             reading_mode: Some(true),
             compare: Some(false),
+            compare_with: TranslationCode::new("bsb"),
         };
         let value = serde_json::to_value(all).unwrap();
         let mut names: Vec<&str> = value
@@ -1432,6 +1505,8 @@ mod tests {
                 layout: Some(Layout::Flowing),
                 reading_mode: Some(false),
                 compare: Some(false),
+                // Every code is three letters.
+                compare_with: TranslationCode::new("web"),
             },
             skipped_preferences: Vec::new(),
         };
@@ -1474,14 +1549,14 @@ mod tests {
         // As documented on `MAX_FILE_BYTES`.
         assert_eq!(
             (bookmark, highlight, note_record, rest),
-            (188, 231, 254, 535)
+            (188, 231, 254, 562)
         );
         let total = rest
             + MAX_BOOKMARKS * bookmark
             + MAX_HIGHLIGHTS * highlight
             + MAX_NOTES * note_record
             + 4 * MAX_TOTAL_NOTE_CHARS;
-        assert_eq!(total, 113_660_535);
+        assert_eq!(total, 113_660_562);
         assert!(
             total as u64 <= MAX_FILE_BYTES,
             "a maximal file is {total} bytes, over the {MAX_FILE_BYTES}-byte limit"

@@ -193,20 +193,21 @@ pub async fn add_bookmark(
 /// a passage row `p` (with `book_id`, `chapter`, `verse_start` and
 /// `verse_end`), `passage_preview_sql!(columns)` selects
 /// `first_verse_text` (the first verse's stored text, or NULL if the
-/// translation doesn't number it) and `complete` (whether it numbers the
-/// whole range; verse numbers within a chapter are contiguous, so the
-/// first and last are enough), from the verses `passage_preview_sql!(joins)`
-/// joins in.
+/// translation doesn't number it) and `complete` (whether it numbers every
+/// verse of the range: counted, as a translation can leave out a verse in
+/// mid-chapter, as the BSB does Matthew 17:21), from the verses
+/// `passage_preview_sql!(joins)` joins in.
 macro_rules! passage_preview_sql {
     (columns) => {
         "first.text AS first_verse_text, \
-         (first.verse IS NOT NULL AND last.verse IS NOT NULL) AS complete"
+         ((SELECT COUNT(*) FROM verses v WHERE v.translation_id = $1 \
+             AND v.book_id = p.book_id AND v.chapter = p.chapter \
+             AND v.verse BETWEEN p.verse_start AND p.verse_end) \
+          = p.verse_end - p.verse_start + 1) AS complete"
     };
     (joins) => {
         "LEFT JOIN verses first ON first.translation_id = $1 AND first.book_id = p.book_id \
-             AND first.chapter = p.chapter AND first.verse = p.verse_start \
-         LEFT JOIN verses last ON last.translation_id = $1 AND last.book_id = p.book_id \
-             AND last.chapter = p.chapter AND last.verse = p.verse_end"
+             AND first.chapter = p.chapter AND first.verse = p.verse_start"
     };
 }
 pub(crate) use passage_preview_sql;

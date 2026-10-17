@@ -242,7 +242,8 @@ test('switching translation keeps compare and re-renders it', () =>
         await app.idle(before, 'get_reading');
         assert.ok(app.isComparing());
         assert.deepEqual(app.selectedVerseNumbers(), [], 'selection cleared on switch');
-        assert.deepEqual(app.compareColumns(), ['King James Version (KJV)', 'World English Bible (WEB)']);
+        // The translation being read is the left column, the KJV beside it.
+        assert.deepEqual(app.compareColumns(), ['World English Bible (WEB)', 'King James Version (KJV)']);
     }));
 
 test('compare works in reading mode', () =>

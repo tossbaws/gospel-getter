@@ -519,7 +519,7 @@
            reading mode. Every control is --accent on --panel-bg, or
            --on-accent on --accent when chosen, both AA in every theme. */
         .aa-popover {
-            width: 20rem;
+            width: 24rem;
             padding: 0.9rem 1rem 1rem;
         }
 
@@ -606,6 +606,79 @@
             flex: 0 0 auto;
             width: auto;
             white-space: nowrap;
+        }
+
+        /* The translations: a radio group, one line each, "KJV · King
+           James Version · 1611/1769 · public domain". The code in
+           --accent, the name in --text, the rest --text-dim, on
+           --panel-bg; the chosen one --on-accent on --accent, all of it. */
+        .translation-list {
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-m);
+            overflow: hidden;
+            margin-bottom: 0.45rem;
+        }
+
+        .translation-choice {
+            display: block;
+            width: 100%;
+            font-family: inherit;
+            font-size: 0.8rem;
+            line-height: 1.35;
+            text-align: left;
+            color: var(--text);
+            background: var(--panel-bg);
+            border: none;
+            border-top: 1px solid var(--accent-dim);
+            padding: 0.42rem 0.6rem;
+            cursor: pointer;
+        }
+
+        .translation-choice:first-child {
+            border-top: none;
+        }
+
+        .translation-code {
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .translation-detail,
+        .translation-dot {
+            color: var(--text-dim);
+        }
+
+        .translation-choice:hover .translation-name {
+            text-decoration: underline;
+        }
+
+        .translation-choice[aria-checked="true"],
+        .translation-choice[aria-checked="true"] .translation-code,
+        .translation-choice[aria-checked="true"] .translation-detail,
+        .translation-choice[aria-checked="true"] .translation-dot {
+            background: var(--accent);
+            color: var(--on-accent);
+        }
+
+        .translation-choice:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -4px;
+        }
+
+        .translation-choice[aria-checked="true"]:focus-visible {
+            outline-color: var(--on-accent);
+        }
+
+        /* Compare (C) with [BSB] [WEB]: the other translations. */
+        .compare-row {
+            align-items: center;
+        }
+
+        .compare-with-label {
+            flex: 0 0 auto;
+            color: var(--text-dim);
         }
 
         .size-stepper {
@@ -3757,6 +3830,19 @@
                     values: ['off', 'on'],
                     renamed: {},
                 },
+                // The translation compare shows beside the one being read,
+                // once the reader has chosen one (Aa's "with" buttons). Its
+                // values are the bundled translations' codes, which the
+                // backend lists, so any short code is kept here and checked
+                // against them where it's used (see comparePartner).
+                compareWith: {
+                    key: 'gospel-getter-compare-with',
+                    attr: 'compareWith',
+                    select: null,
+                    fallback: '',
+                    values: null,
+                    renamed: {},
+                },
                 // Whether the book and chapter picker shows as a sidebar on
                 // a wide window (see applyPickerShape). Like updateCheck,
                 // it's for this computer's window, so it isn't exported.
@@ -3798,7 +3884,15 @@
                     value = pref.renamed[value];
                     store(pref, value);
                 }
-                return pref.values.indexOf(value) === -1 ? pref.fallback : value;
+                return isValue(pref, value) ? value : pref.fallback;
+            }
+
+            // A translation's code: a few lowercase letters or digits.
+            var CODE = /^[a-z0-9]{1,16}$/;
+
+            function isValue(pref, value) {
+                if (pref.values) return pref.values.indexOf(value) !== -1;
+                return typeof value === 'string' && CODE.test(value);
             }
 
             function apply(pref, value) {
@@ -4023,7 +4117,7 @@
                 function focusInto(name) {
                     var first;
                     if (name === 'aa') {
-                        first = aaPopover.querySelector('.segment[aria-pressed="true"]') || aaPopover.querySelector('button');
+                        first = aaPopover.querySelector('.translation-choice[aria-checked="true"]') || aaPopover.querySelector('button');
                     } else if (name === 'library') {
                         first = libraryPanel.querySelector('[role="tab"][aria-selected="true"]');
                     } else if (name === 'menu') {
@@ -4206,6 +4300,7 @@
                 var lineSpacingSelect = byId('line-spacing-select');
                 var themeSelect = byId('theme-select');
                 var translationChoices = byId('translation-choices');
+                var compareWithChoices = byId('compare-with-choices');
                 var lineSpacingChoices = byId('line-spacing-choices');
                 var widthSelect = byId('width-select');
                 var widthChoices = byId('width-choices');
@@ -4263,18 +4358,105 @@
                     themeChoices.appendChild(btn);
                 });
 
+                // The translation compare shows beside the one being read:
+                // the one the reader chose, if it's there and isn't the one
+                // being read; otherwise the one compare always showed, the
+                // KJV, or the WEB beside the KJV; failing those, the first
+                // other. Null when there's no other.
+                var COMPARE_DEFAULTS = ['kjv', 'web'];
+
+                function comparePartner() {
+                    var codes = optionsOf(translationSelect).map(function (o) { return o.value; });
+                    var current = translationSelect.value;
+                    var candidates = [root.dataset.compareWith].concat(COMPARE_DEFAULTS, codes);
+                    for (var i = 0; i < candidates.length; i++) {
+                        var code = candidates[i];
+                        if (code && code !== current && codes.indexOf(code) !== -1) return code;
+                    }
+                    return null;
+                }
+                window.gospelGetterComparePartner = comparePartner;
+
                 // The translations come from the backend (the main script
-                // fills the <select>), so their buttons are rebuilt each
-                // time Aa opens.
+                // fills the <select>), so their rows are rebuilt each time
+                // Aa opens: one line each, "KJV · King James Version ·
+                // 1611/1769 · public domain", a radio group. The dots are
+                // only seen; the words are the row's name.
                 function renderAa() {
                     translationChoices.textContent = '';
                     optionsOf(translationSelect).forEach(function (option) {
-                        var btn = segmentButton(option, option.value.toUpperCase());
-                        btn.title = option.textContent;
+                        var btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'translation-choice';
+                        btn.setAttribute('role', 'radio');
+                        btn.dataset.value = option.value;
+                        [
+                            ['translation-code', option.value.toUpperCase()],
+                            ['translation-name', option.textContent],
+                            ['translation-detail', option.dataset.date],
+                            ['translation-detail', option.dataset.licence],
+                        ].filter(function (part) { return part[1]; }).forEach(function (part, i) {
+                            if (i) {
+                                var dot = document.createElement('span');
+                                dot.className = 'translation-dot';
+                                dot.setAttribute('aria-hidden', 'true');
+                                dot.textContent = ' \u00b7 ';
+                                btn.appendChild(dot);
+                            }
+                            var span = document.createElement('span');
+                            span.className = part[0];
+                            span.textContent = part[1];
+                            btn.appendChild(span);
+                        });
                         translationChoices.appendChild(btn);
+                    });
+                    renderCompareWith();
+                }
+
+                // "Compare with": every translation but the one being read.
+                function renderCompareWith() {
+                    compareWithChoices.textContent = '';
+                    optionsOf(translationSelect).forEach(function (option) {
+                        if (option.value === translationSelect.value) return;
+                        var btn = segmentButton(option, option.value.toUpperCase());
+                        btn.title = 'Compare with the ' + option.textContent;
+                        compareWithChoices.appendChild(btn);
                     });
                     syncAa();
                 }
+                translationSelect.addEventListener('change', renderCompareWith);
+
+                function chooseComparePartner(code) {
+                    if (code === comparePartner() && root.dataset.compareWith === code) return;
+                    apply(PREFS.compareWith, code);
+                    store(PREFS.compareWith, code);
+                    syncAa();
+                    document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
+                }
+
+                compareWithChoices.addEventListener('click', function (event) {
+                    var btn = event.target.closest('button');
+                    if (btn) chooseComparePartner(btn.dataset.value);
+                });
+
+                // The translations are radio buttons: one tab stop, and the
+                // arrow keys (Home and End too) move and choose. They're
+                // not a chapter turn.
+                translationChoices.addEventListener('keydown', function (event) {
+                    var radios = [].slice.call(translationChoices.querySelectorAll('[role="radio"]'));
+                    var index = radios.indexOf(event.target.closest('[role="radio"]'));
+                    if (index === -1) return;
+                    var next = null;
+                    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = radios[(index + 1) % radios.length];
+                    else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') next = radios[(index - 1 + radios.length) % radios.length];
+                    else if (event.key === 'Home') next = radios[0];
+                    else if (event.key === 'End') next = radios[radios.length - 1];
+                    if (!next) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    choose(translationSelect, next.dataset.value);
+                    next.focus();
+                });
 
                 function setPressed(group, value) {
                     [].slice.call(group.querySelectorAll('button')).forEach(function (btn) {
@@ -4283,7 +4465,12 @@
                 }
 
                 function syncAa() {
-                    setPressed(translationChoices, translationSelect.value);
+                    [].slice.call(translationChoices.querySelectorAll('[role="radio"]')).forEach(function (radio) {
+                        var checked = radio.dataset.value === translationSelect.value;
+                        radio.setAttribute('aria-checked', String(checked));
+                        radio.tabIndex = checked ? 0 : -1;
+                    });
+                    setPressed(compareWithChoices, comparePartner());
                     setPressed(lineSpacingChoices, lineSpacingSelect.value);
                     setPressed(widthChoices, widthSelect.value);
                     setPressed(layoutChoices, layoutSelect.value);
@@ -4447,6 +4634,7 @@
                     layout: 'layout',
                     reading_mode: 'readerMode',
                     compare: 'compare',
+                    compare_with: 'compareWith',
                 };
                 var ON_OFF = { readerMode: true, compare: true };
 
@@ -4457,6 +4645,13 @@
                         Object.keys(FILE_NAMES).forEach(function (name) {
                             var key = FILE_NAMES[name];
                             var value = root.dataset[PREFS[key].attr] || PREFS[key].fallback;
+                            // Compare's partner only once chosen, and only
+                            // a translation this install has.
+                            if (key === 'compareWith') {
+                                var known = optionsOf(translationSelect).some(function (o) { return o.value === value; });
+                                if (known) out[name] = value;
+                                return;
+                            }
                             out[name] = ON_OFF[key] ? value === 'on' : value;
                         });
                         return out;
@@ -4472,7 +4667,7 @@
                             if (!key) throw new Error('Unknown display setting \u201c' + name + '\u201d.');
                             var raw = values[name];
                             var value = ON_OFF[key] && typeof raw === 'boolean' ? (raw ? 'on' : 'off') : raw;
-                            if (PREFS[key].values.indexOf(value) === -1) {
+                            if (!isValue(PREFS[key], value)) {
                                 throw new Error('\u201c' + raw + '\u201d isn\u2019t a valid ' + name.replace('_', ' ') + '.');
                             }
                             return { pref: PREFS[key], value: value };
@@ -4482,6 +4677,9 @@
                         changes.forEach(function (change) {
                             var pref = change.pref;
                             if (pref === PREFS.compare && (root.dataset.compare === 'on') !== (change.value === 'on')) {
+                                compareChanged = true;
+                            }
+                            if (pref === PREFS.compareWith && root.dataset.compareWith !== change.value) {
                                 compareChanged = true;
                             }
                             apply(pref, change.value);
@@ -4532,11 +4730,13 @@
             <div id="aa-popover" class="popover aa-popover" role="dialog" aria-label="Text and display" hidden>
                 <div class="aa-section">
                     <span class="section-label" id="translation-label">Translation</span>
-                    <div class="aa-row">
-                        <div id="translation-choices" class="segmented" role="group" aria-labelledby="translation-label"></div>
-                        <button type="button" id="compare-btn" class="reader-mode-btn compare-btn" aria-pressed="false" title="Compare the translations side by side (C)">Compare <span aria-hidden="true">(C)</span></button>
-                    </div>
+                    <div id="translation-choices" class="translation-list" role="radiogroup" aria-labelledby="translation-label"></div>
                     <select id="translation-select" hidden></select>
+                    <div class="aa-row compare-row">
+                        <button type="button" id="compare-btn" class="reader-mode-btn compare-btn" aria-pressed="false" title="Compare the translation you're reading with another, side by side (C)">Compare <span aria-hidden="true">(C)</span></button>
+                        <span class="compare-with-label" aria-hidden="true">with</span>
+                        <div id="compare-with-choices" class="segmented" role="group" aria-label="Compare with"></div>
+                    </div>
                 </div>
                 <div class="aa-section">
                     <span class="section-label" id="text-size-label">Text size</span>
@@ -5643,9 +5843,15 @@
                     if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
                     placeCard();
                 } else {
+                    // Past the chapter's end in this translation, or a verse
+                    // it leaves out in mid-chapter (as the BSB does
+                    // Matthew 17:21).
                     const verses = columnVerses(code);
                     const lastVerse = verses.length ? verses[verses.length - 1].number : 0;
-                    showNotice(`${reading.bookName} ${chapter}:${verseRange(start, end)} isn't numbered in the ${translationName(code)} — ${reading.bookName} ${chapter} ends at verse ${lastVerse} there. Showing the whole chapter.`);
+                    const where = start > lastVerse
+                        ? ` — ${reading.bookName} ${chapter} ends at verse ${lastVerse} there`
+                        : '';
+                    showNotice(`${reading.bookName} ${chapter}:${verseRange(start, end)} isn't numbered in the ${translationName(code)}${where}. Showing the whole chapter.`);
                 }
                 return loaded;
             }
@@ -6561,6 +6767,7 @@
                 if (prefs.width) parts.push(`${optionText('width-select', prefs.width).toLowerCase()} width`);
                 if (prefs.layout) parts.push(`${optionText('layout-select', prefs.layout).toLowerCase()} layout`);
                 if (prefs.compare != null) parts.push(`compare ${prefs.compare ? 'on' : 'off'}`);
+                if (prefs.compare_with) parts.push(`compare with the ${prefs.compare_with.toUpperCase()}`);
                 if (prefs.reading_mode != null) parts.push(`reading mode ${prefs.reading_mode ? 'on' : 'off'}`);
                 return parts;
             }
@@ -7237,7 +7444,8 @@
                 translationSelect.innerHTML = home.translations
                     .map((t) => {
                         const selected = t.code === home.currentTranslationCode ? ' selected' : '';
-                        return `<option value="${t.code}"${selected}>${escapeHtml(t.name)}</option>`;
+                        const date = t.date ? ` data-date="${escapeHtml(t.date)}"` : '';
+                        return `<option value="${escapeHtml(t.code)}"${selected}${date} data-licence="${escapeHtml(t.licence)}">${escapeHtml(t.name)}</option>`;
                     })
                     .join('');
             }
@@ -7493,10 +7701,7 @@
 
             // Puts lastDto (and lastCompare, while comparing) on screen.
             function renderCurrent() {
-                const compare = isComparing() && lastCompare
-                    && lastCompare.bookId === lastDto.currentBookId && lastCompare.chapter === lastDto.currentChapter
-                    ? lastCompare
-                    : null;
+                const compare = isComparing() && compareIsCurrent(lastCompare) ? lastCompare : null;
                 const columns = {};
                 columns[reading.translationCode] = { verses: lastDto.currentVerses };
                 if (compare) {
@@ -7514,10 +7719,30 @@
                 refreshChapterNotes();
             }
 
+            // The translations compare shows, left to right: the one being
+            // read, then the one beside it (see comparePartner in Aa's
+            // script), or just the one if there's no other.
+            function compareCodes() {
+                const partner = window.gospelGetterComparePartner ? window.gospelGetterComparePartner() : null;
+                return partner ? [currentTranslation(), partner] : [currentTranslation()];
+            }
+
+            // Whether `compare` is the chapter on screen in the
+            // translations compare shows now.
+            function compareIsCurrent(compare) {
+                return !!compare && !!lastDto
+                    && compare.bookId === lastDto.currentBookId && compare.chapter === lastDto.currentChapter
+                    && compare.columns.map((c) => c.code).join(' ') === compareCodes().join(' ');
+            }
+
             // Resolves to the comparison, or null after logging why not.
             async function loadCompare(bookId, chapter) {
                 try {
-                    return await invoke('get_compare', { bookId: Number(bookId), chapter: Number(chapter) });
+                    return await invoke('get_compare', {
+                        bookId: Number(bookId),
+                        chapter: Number(chapter),
+                        translationCodes: compareCodes(),
+                    });
                 } catch (e) {
                     console.error('Failed to load comparison', e);
                     return null;
@@ -7577,9 +7802,7 @@
             document.addEventListener('gospel-getter:compare-change', async function () {
                 if (!lastDto) return;
                 if (isComparing()) {
-                    const stale = !lastCompare || lastCompare.bookId !== lastDto.currentBookId
-                        || lastCompare.chapter !== lastDto.currentChapter;
-                    if (stale) {
+                    if (!compareIsCurrent(lastCompare)) {
                         const token = loadToken;
                         const compare = await loadCompare(lastDto.currentBookId, lastDto.currentChapter);
                         if (token !== loadToken) return;

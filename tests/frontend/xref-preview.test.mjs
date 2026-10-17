@@ -157,13 +157,14 @@ test('Esc closes the preview first, then the card', () =>
 
 test('while comparing, the preview is the first column’s translation, labelled', () =>
     withApp({ book: 'John', chapter: 3, translation: 'web', compare: true }, async (app) => {
-        assert.deepEqual(app.compareColumns(), ['King James Version (KJV)', 'World English Bible (WEB)']);
-        // Selected in the WEB column, previewed from the KJV, the left one.
-        await clickAndWait(app, app.verse(16, 'web'), 'list_notes');
+        // The first column is the translation being read, the WEB.
+        assert.deepEqual(app.compareColumns(), ['World English Bible (WEB)', 'King James Version (KJV)']);
+        // Selected in the KJV column, previewed from the WEB, the left one.
+        await clickAndWait(app, app.verse(16, 'kjv'), 'list_notes');
         await clickAndWait(app, chip(app, 'Romans 5:8'), 'get_passage');
-        assert.equal(shown(app).title, 'Romans 5:8 (KJV)');
-        const kjv = await shownVerse('kjv', 'Romans', 5, 8);
-        assert.equal(preview(app).querySelector('.xref-preview-text').textContent, `8${kjv.text}`);
+        assert.equal(shown(app).title, 'Romans 5:8 (WEB)');
+        const web = await shownVerse('web', 'Romans', 5, 8);
+        assert.equal(preview(app).querySelector('.xref-preview-text').textContent, `8${web.text}`);
         assert.ok(app.isComparing());
         await clickAndWait(app, preview(app).querySelector('.xref-preview-go'), 'get_compare');
         assert.ok(app.isComparing(), 'still comparing');
