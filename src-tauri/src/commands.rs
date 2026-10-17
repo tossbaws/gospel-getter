@@ -669,7 +669,10 @@ pub async fn get_passage(
 /// The logic behind `get_passage`. A translation, book or chapter that
 /// doesn't exist, or verses that aren't a range from 1 up, are an error;
 /// verses past the chapter's end (in this translation) aren't, as they're
-/// numbered in another translation.
+/// numbered in another translation. Nor are verses past the end in every
+/// translation (a few cross references reach past it): the notice names
+/// them like any others, but they're never counted one by one, so `end`
+/// sizes no loop and no list.
 pub async fn passage_text(
     state: &AppState,
     translation_code: &str,
@@ -694,14 +697,20 @@ pub async fn passage_text(
     if start < 1 || end < start {
         return Err(format!("Verses {start} to {end} aren't a passage."));
     }
+    let unreadable = |e: anyhow::Error| {
+        tracing::error!("Failed to read {} {chapter}: {e}", book.name);
+        format!("{} {chapter} couldn't be read.", book.name)
+    };
     let chapter_verses = state
         .store
         .chapter_verses(translation.id, book_id, chapter)
         .await
-        .map_err(|e| {
-            tracing::error!("Failed to read {} {chapter}: {e}", book.name);
-            format!("{} {chapter} couldn't be read.", book.name)
-        })?;
+        .map_err(unreadable)?;
+    let last_anywhere = state
+        .store
+        .chapter_last_verse(book_id, chapter)
+        .await
+        .map_err(unreadable)?;
     let last = chapter_verses.last().map_or(0, |v| v.verse);
     let verses: Vec<SimpleVerseDto> = chapter_verses
         .into_iter()
@@ -709,21 +718,20 @@ pub async fn passage_text(
         .map(|v| SimpleVerseDto::without_notes(&translation.code, v))
         .collect();
     let numbered: Vec<i64> = verses.iter().map(|v| v.number).collect();
-    let missing: Vec<i64> = (start..=end).filter(|n| !numbered.contains(n)).collect();
+    let missing = missing_runs(&numbered, start, end, last_anywhere);
     let notice = (!missing.is_empty()).then(|| {
         let what = passage_reference(&book.name, chapter, Some((start, end)));
-        if missing.iter().all(|&n| n > last) {
-            let missing = passage_reference(
-                &book.name,
-                chapter,
-                Some((missing[0], missing[missing.len() - 1])),
-            );
+        let (first_missing, _) = missing[0];
+        let (_, last_missing) = missing[missing.len() - 1];
+        if first_missing > last {
+            let missing =
+                passage_reference(&book.name, chapter, Some((first_missing, last_missing)));
             format!(
                 "{missing} isn't numbered in the {} — {} {chapter} ends at verse {last} there.",
                 translation.name, book.name
             )
         } else {
-            let (noun, verb) = if missing.len() == 1 {
+            let (noun, verb) = if first_missing == last_missing {
                 ("verse", "isn't")
             } else {
                 ("verses", "aren't")
@@ -850,15 +858,30 @@ pub async fn copy_text(
     })
 }
 
-/// "4", "4, 6" or "4–6, 9": verse numbers, in order, runs as ranges.
-fn verse_list(numbers: &[i64]) -> String {
+/// The verses from `start` to `end` that aren't in `numbered`, in order, as
+/// runs `(first, last)`. Only verses up to `last_anywhere` (the chapter's
+/// last verse in any translation) are looked at one by one; those past it,
+/// however far `end` goes, are one run.
+fn missing_runs(numbered: &[i64], start: i64, end: i64, last_anywhere: i64) -> Vec<(i64, i64)> {
     let mut runs: Vec<(i64, i64)> = Vec::new();
-    for &n in numbers {
-        match runs.last_mut() {
-            Some((_, last)) if *last + 1 == n => *last = n,
-            _ => runs.push((n, n)),
+    let mut add = |first: i64, last: i64| match runs.last_mut() {
+        Some((_, run_end)) if *run_end + 1 == first => *run_end = last,
+        _ => runs.push((first, last)),
+    };
+    for n in start..=end.min(last_anywhere) {
+        if !numbered.contains(&n) {
+            add(n, n);
         }
     }
+    if end > last_anywhere {
+        add(start.max(last_anywhere + 1), end);
+    }
+    runs
+}
+
+/// "4", "4, 6" or "4–6, 9": runs of verse numbers, a run of more than one
+/// as a range.
+fn verse_list(runs: &[(i64, i64)]) -> String {
     runs.iter()
         .map(|&(a, b)| {
             if a == b {
@@ -2674,7 +2697,62 @@ mod tests {
         let web = passage_text(&state, "web", 45, 14, 24, 26).await.unwrap();
         assert_eq!(web.verses.len(), 3);
         assert_eq!(web.notice, None);
-        assert_eq!(verse_list(&[4, 6, 7, 8, 11]), "4, 6\u{2013}8, 11");
+        assert_eq!(
+            verse_list(&missing_runs(&[5, 9, 10], 4, 11, 20)),
+            "4, 6\u{2013}8, 11"
+        );
+    }
+
+    /// However far past the chapter's end a passage reaches, it's answered
+    /// at once: the verses past the end in every translation are named as
+    /// one range, never counted out.
+    #[tokio::test]
+    async fn a_passage_past_the_end_everywhere_is_named_not_counted() {
+        let (_db, state) = app_state("cmd_passage_far").await;
+        let far = passage_text(&state, "kjv", 43, 3, 35, i64::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            far.verses.iter().map(|v| v.number).collect::<Vec<_>>(),
+            [35, 36]
+        );
+        assert_eq!(
+            far.notice.as_deref(),
+            Some(
+                "John 3:37\u{2013}9223372036854775807 isn't numbered in the King James \
+                 Version \u{2014} John 3 ends at verse 36 there."
+            )
+        );
+        let none = passage_text(&state, "kjv", 43, 3, i64::MAX, i64::MAX)
+            .await
+            .unwrap();
+        assert!(none.verses.is_empty());
+        assert_eq!(
+            none.notice.as_deref(),
+            Some(
+                "John 3:9223372036854775807 isn't numbered in the King James Version \
+                 \u{2014} John 3 ends at verse 36 there."
+            )
+        );
+        // A gap inside the chapter, and the end past it everywhere, are
+        // both named. The KJV ends Romans 14 at 23; the WEB at 26.
+        let web = passage_text(&state, "web", 45, 14, 25, 1_000_000)
+            .await
+            .unwrap();
+        assert_eq!(web.verses.len(), 2);
+        assert_eq!(
+            web.notice.as_deref(),
+            Some(
+                "Romans 14:27\u{2013}1000000 isn't numbered in the World English Bible \
+                 \u{2014} Romans 14 ends at verse 26 there."
+            )
+        );
+        assert_eq!(
+            missing_runs(&[2, 3], 1, i64::MAX, 3),
+            [(1, 1), (4, i64::MAX)]
+        );
+        assert_eq!(missing_runs(&[], 5, i64::MAX, 3), [(5, i64::MAX)]);
+        assert_eq!(missing_runs(&[1, 2, 3], 1, 3, 3), []);
     }
 
     /// A translation, book or chapter that doesn't exist, or verses that

@@ -20,6 +20,23 @@ pub async fn get_all_translations(pool: &SqlitePool) -> anyhow::Result<Vec<Trans
         .context("Failed to fetch translations")
 }
 
+/// The highest verse number any translation has in one chapter (0 if none
+/// has the chapter).
+pub async fn get_chapter_last_verse(
+    pool: &SqlitePool,
+    book_id: i64,
+    chapter: i64,
+) -> anyhow::Result<i64> {
+    let last: Option<i64> =
+        sqlx::query_scalar("SELECT MAX(verse) FROM verses WHERE book_id = $1 AND chapter = $2")
+            .bind(book_id)
+            .bind(chapter)
+            .fetch_one(pool)
+            .await
+            .context("Failed to look up the chapter's last verse")?;
+    Ok(last.unwrap_or(0))
+}
+
 /// Get every verse in one chapter of one translation, in verse order.
 pub async fn get_chapter_verses(
     pool: &SqlitePool,
