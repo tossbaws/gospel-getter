@@ -4068,3 +4068,65 @@ fn a_timed_out_update_check_says_the_backends_offline_message() {
     );
     assert!(HTML.contains("const UPDATE_CHECK_TIMEOUT_MS = 20000;"));
 }
+
+/// Under the Content Security Policy (see `tauri.conf.json`), only the
+/// page's own inline `<script>` and `<style>` run, by their build-time
+/// hashes: an inline event handler or a `style` attribute, in the page or
+/// in markup a script injects, is blocked without a sound. So the page has
+/// none, as far as a scan of its source can tell, and sets styles through
+/// the CSSOM (`el.style.setProperty`), which the policy allows.
+#[test]
+fn nothing_inline_that_the_content_security_policy_would_block() {
+    // Attributes, in the HTML or in a script's markup strings:
+    // ` onclick="…"`, ` style='…'`.
+    let attribute_at = |name_ok: &dyn Fn(&str) -> bool| -> Vec<String> {
+        let bytes = HTML.as_bytes();
+        let mut found = Vec::new();
+        for (i, _) in HTML.match_indices('=') {
+            if !matches!(bytes.get(i + 1), Some(b'"' | b'\'')) {
+                continue;
+            }
+            let start = HTML[..i]
+                .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                .map_or(0, |p| p + 1);
+            let name = &HTML[start..i];
+            let before = HTML[..start].chars().next_back();
+            if before.is_some_and(char::is_whitespace) && name_ok(name) {
+                let line = HTML[..i].lines().count();
+                found.push(format!("line {line}: {name}="));
+            }
+        }
+        found
+    };
+    let handlers = attribute_at(&|name: &str| {
+        name.len() > 2
+            && name.starts_with("on")
+            && name[2..].chars().all(|c| c.is_ascii_lowercase())
+    });
+    assert!(handlers.is_empty(), "inline event handlers: {handlers:?}");
+    let styles = attribute_at(&|name: &str| name.eq_ignore_ascii_case("style"));
+    assert!(styles.is_empty(), "style attributes: {styles:?}");
+
+    for blocked in [
+        "setAttribute('style'",
+        "setAttribute(\"style\"",
+        ".cssText",
+        "javascript:",
+        "eval(",
+        "new Function",
+        "<script src",
+        "<link rel=\"stylesheet\"",
+        "@import",
+    ] {
+        assert!(!HTML.contains(blocked), "{blocked}");
+    }
+    // The two inline scripts and the one stylesheet Tauri hashes.
+    assert_eq!(HTML.matches("<script>").count(), 2);
+    assert_eq!(HTML.matches("<script").count(), 2);
+    assert_eq!(HTML.matches("<style>").count(), 1);
+    assert_eq!(HTML.matches("<style").count(), 1);
+    // The one style the markup used to carry, the compare grid's column
+    // count, is set through the CSSOM.
+    assert!(HTML.contains("data-columns=\"${compare.columns.length}\""));
+    assert!(HTML.contains("grid.style.setProperty('--compare-columns', grid.dataset.columns);"));
+}

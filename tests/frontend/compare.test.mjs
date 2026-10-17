@@ -280,3 +280,14 @@ test('compare styles use only theme variables and stack on narrow windows', () =
         // Text size and spacing reach the gap cells too, so rows stay even.
         assert.match(css, /\.compare-gap \{[^}]*var\(--reading-scale\)[^}]*var\(--reading-leading\)/);
     }));
+
+// The grid's column count is set through the CSSOM after it's drawn, not
+// carried as a style attribute in the markup the Content Security Policy
+// would block.
+test('the compare grid gets its column count through the CSSOM', () =>
+    withApp({ book: 'John', chapter: 3, compare: true }, async (app) => {
+        const grid = app.document.querySelector('.compare-grid');
+        assert.equal(grid.dataset.columns, '2');
+        assert.equal(grid.style.getPropertyValue('--compare-columns'), '2');
+        assert.equal(app.document.querySelectorAll('.compare-head').length, 2);
+    }));
