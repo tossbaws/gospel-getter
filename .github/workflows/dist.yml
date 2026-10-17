@@ -3,9 +3,10 @@ name: Distribution Artifacts
 # Builds the actual installers — AppImage + .deb on Linux, an NSIS setup.exe
 # (and MSI, when the bundler produces one) on Windows — and smoke-tests
 # each one before uploading it as a workflow artifact. This is separate
-# from ci.yml (which only runs cargo fmt/clippy/test/build): bundling is
-# slow and installs system packages, so it only needs to run when someone
-# actually wants installers to inspect, not on every push.
+# from ci.yml (which only runs cargo fmt/clippy/test/build) because
+# bundling is slow and installs system packages. It runs on every push to
+# main (a release's installers come from the run on its release commit),
+# on every pull request, and by hand (workflow_dispatch).
 #
 # This workflow never creates a GitHub release, tag, or otherwise publishes
 # anything — it only produces downloadable workflow-run artifacts, so a
