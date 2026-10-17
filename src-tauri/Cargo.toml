@@ -52,3 +52,8 @@ tauri = { version = "2", features = ["test"] }
 reqwest = { version = "0.13", default-features = false }
 # The TLS provider the updater installs before its own requests.
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Only for the BSB's ingest (`examples/bsb_ingest.rs`, `tests/bsb_source.rs`):
+# reading Berean's USFM zip and checking the raw files' hashes. Both are
+# already in the lock file, through the updater.
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
+sha2 = "0.10"
