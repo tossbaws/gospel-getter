@@ -14,7 +14,7 @@ use crate::db::test_support::{
     TempDb, bundled, fill_notes, fresh_database, other_tables_snapshot, verses_snapshot,
 };
 use crate::reader_data::{
-    Layout, LineSpacing, Preferences, TextSize, Theme, TranslationCode, Width,
+    Layout, LineSpacing, MAX_SHOWN_FILE_CHARS, Preferences, TextSize, Theme, TranslationCode, Width,
 };
 
 async fn app(label: &str) -> (TempDb, AppState) {
@@ -1860,4 +1860,102 @@ async fn an_export_at_both_note_limits_imports_again() {
         .unwrap();
     assert_eq!(result.notes_added, MAX_NOTES);
     assert_eq!(note_rows(&b).await, before);
+}
+
+/// A string from the file (a book name, a translation code, a value the
+/// layout check quotes) is cut to 80 characters with "…" wherever a
+/// problem message shows it, so a huge one doesn't make a huge message.
+#[tokio::test]
+async fn strings_from_the_file_are_cut_short_in_problem_messages() {
+    let (db, state) = app("rd_long_strings").await;
+    let long = "x".repeat(10_000);
+    let cut = format!("{}…", "x".repeat(MAX_SHOWN_FILE_CHARS - 1));
+    let passage = r#""book": 43, "chapter": 3, "verse_start": 1, "verse_end": 1"#;
+    let cases: Vec<(&str, String, String)> = vec![
+        (
+            "bookmark book name",
+            file_with(&format!(r#"{{{passage}, "book_name": "{long}"}}"#), "null"),
+            format!("Bookmark 1: book 43 is John, not {cut}."),
+        ),
+        (
+            "highlight book name",
+            v2_file_with(
+                "",
+                &format!(
+                    r#"{{"book": 43, "book_name": "{long}", "chapter": 3, "verse": 1, "color": "blue"}}"#
+                ),
+            ),
+            format!("Highlight 1: book 43 is John, not {cut}."),
+        ),
+        (
+            "note book name",
+            v3_file_with(&format!(
+                r#"{{{passage}, "book_name": "{long}", "body": "A note."}}"#
+            )),
+            format!("Note 1: book 43 is John, not {cut}."),
+        ),
+        (
+            "position translation",
+            file_with(
+                "",
+                &format!(r#"{{"translation": "{long}", "book": 43, "chapter": 3}}"#),
+            ),
+            format!(
+                "Reading position: this install has no \u{201c}{cut}\u{201d} translation \
+                 (it has kjv, bsb, web)."
+            ),
+        ),
+        (
+            "position book name",
+            file_with(
+                "",
+                &format!(
+                    r#"{{"translation": "kjv", "book": 43, "book_name": "{long}", "chapter": 3}}"#
+                ),
+            ),
+            format!("Reading position: book 43 is John, not {cut}."),
+        ),
+        (
+            "highlight colour",
+            v2_file_with(
+                "",
+                &format!(r#"{{"book": 43, "chapter": 3, "verse": 1, "color": "{long}"}}"#),
+            ),
+            format!("unknown variant `{cut}`, expected one of"),
+        ),
+        (
+            "unknown field",
+            file_with(&format!(r#"{{{passage}, "{long}": 1}}"#), "null"),
+            format!("unknown field `{cut}`, expected one of"),
+        ),
+        (
+            "a string for a number, quotes and all",
+            file_with(
+                &format!(
+                    r#"{{"book": 43, "chapter": "\"{long}", "verse_start": 1, "verse_end": 1}}"#
+                ),
+                "null",
+            ),
+            format!("invalid type: string \"\\\"{}…\", expected", "x".repeat(77)),
+        ),
+    ];
+    for (label, contents, expected) in &cases {
+        let path = file(
+            &db,
+            &format!("{}.gospel-getter.json", label.replace(' ', "-")),
+        );
+        std::fs::write(&path, contents).unwrap();
+        let (message, problems) = invalid(&state, &path).await;
+        let all = format!("{message} {}", problems.join(" "));
+        assert!(all.contains(expected.as_str()), "{label}: {all}");
+        assert!(
+            !all.contains(&"x".repeat(MAX_SHOWN_FILE_CHARS)),
+            "{label}: {all}"
+        );
+        assert!(
+            all.chars().count() < 600,
+            "{label}: {} characters",
+            all.len()
+        );
+    }
 }

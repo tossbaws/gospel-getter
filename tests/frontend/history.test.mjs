@@ -289,3 +289,56 @@ test('the palette’s Back and Forward, disabled with a reason at the ends', () 
         await typeCommand(app, '>forward');
         assert.equal(reason('Forward'), 'Nothing later in this session');
     }));
+
+test('a chapter from the picker or Random chapter starts at its top, as [ and ] do; a verse jump goes to the verse; Back still restores', () =>
+    withApp({ book: 'John', chapter: 3 }, async (app) => {
+        const scroll = fakeScroll(app);
+        const centred = [];
+        app.window.Element.prototype.scrollIntoView = function () { centred.push(this); };
+
+        // The sidebar's chapter, from the top.
+        scroll.set(800);
+        await waitFor(app, () => app.click(pickerChapter(app, 'Psalms', 23)));
+        assert.deepEqual(where(app), ['Psalms 23', []]);
+        assert.equal(scroll.get(), 0);
+        // The chapter already on screen stays where the reader is in it.
+        scroll.set(500);
+        await waitFor(app, () => app.click(pickerChapter(app, 'Psalms', 23)));
+        assert.equal(scroll.get(), 500);
+
+        // Random chapter (the last book's last chapter), and [.
+        app.window.Math.random = () => 0.999999;
+        await waitFor(app, () => app.click(app.document.getElementById('random-chapter-btn')));
+        assert.deepEqual(where(app), ['Revelation 22', []]);
+        assert.equal(scroll.get(), 0);
+        scroll.set(700);
+        await waitFor(app, () => app.key('['));
+        assert.deepEqual(where(app), ['Jude 1', []]);
+        assert.equal(scroll.get(), 0);
+
+        // The popover's chapter, from the top too.
+        scroll.set(650);
+        app.resize(900);
+        app.click(app.document.getElementById('ref-btn'));
+        await waitFor(app, () => app.click(pickerChapter(app, 'Romans', 8)));
+        assert.deepEqual(where(app), ['Romans 8', []]);
+        assert.equal(scroll.get(), 0);
+
+        // A jump to a verse goes to the verse, not the top.
+        scroll.set(300);
+        await app.search('rom 5:8');
+        await waitFor(app, () => app.key('Enter', {}, app.searchInput()));
+        assert.deepEqual(where(app), ['Romans 5', [8]]);
+        assert.equal(scroll.get(), 300, 'not sent to the top');
+        assert.equal(centred.at(-1), app.verse(8));
+
+        // Back still returns to each place as it was left: Romans 8 at
+        // 300, then Jude 1 (where [ moved on to from Random's Revelation
+        // 22) at 650.
+        await back(app);
+        assert.deepEqual(where(app), ['Romans 8', []]);
+        assert.equal(scroll.get(), 300);
+        await back(app);
+        assert.deepEqual(where(app), ['Jude 1', []]);
+        assert.equal(scroll.get(), 650);
+    }));

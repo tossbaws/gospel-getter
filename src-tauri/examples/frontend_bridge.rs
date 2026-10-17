@@ -34,6 +34,7 @@ use std::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use gospel_getter_lib::commands::{self, AppState};
+use gospel_getter_lib::credit_links;
 use gospel_getter_lib::db::{self, Passage};
 use gospel_getter_lib::domain::kjv_markup::VerseText;
 use gospel_getter_lib::updater::{self, Problem, UpdateInfo};
@@ -381,6 +382,14 @@ async fn dispatch(
         // Opening a browser is the system's job; the call itself is what
         // the tests check.
         "open_download_page" | "open_release_notes" => Ok(Value::Null),
+        // The app's own table decides which keys open anything.
+        "open_credit_link" => {
+            let which: String = arg(args, "which")?;
+            match credit_links::credit_link_url(&which) {
+                Some(_) => Ok(Value::Null),
+                None => Err(credit_links::messages::UNKNOWN_LINK.to_string()),
+            }
+        }
         // Test setup: how updates behave from now on (see the module docs).
         "__set_update" => {
             *UPDATE

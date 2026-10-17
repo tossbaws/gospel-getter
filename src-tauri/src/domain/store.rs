@@ -41,6 +41,11 @@ impl Store {
         db::get_chapter_verses(&self.pool, translation_id, book_id, chapter).await
     }
 
+    /// The highest verse number any translation has in one chapter.
+    pub async fn chapter_last_verse(&self, book_id: i64, chapter: i64) -> anyhow::Result<i64> {
+        db::get_chapter_last_verse(&self.pool, book_id, chapter).await
+    }
+
     /// The last chapter read, if any.
     pub async fn reading_position(&self) -> anyhow::Result<Option<(i64, i64, i64)>> {
         db::get_reading_position(&self.pool).await

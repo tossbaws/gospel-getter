@@ -1,0 +1,63 @@
+# A weekly `cargo audit` of src-tauri/Cargo.lock against the RustSec
+# advisory database. It's kept out of the per-PR CI on purpose: a new
+# advisory is news about a dependency, not about the change in a PR, so it
+# shouldn't block one. Run it by hand from the Actions tab at any time.
+#
+# Every advisory known when this was added is ignored below, each with the
+# reason it doesn't need action. `--deny warnings` makes anything else go
+# red, including new "unmaintained", "unsound" and "yanked" notices.
+name: Audit
+
+on:
+  schedule:
+    # Mondays, 06:17 UTC.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cargo-audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit dependencies
+        run: |
+          ignored=(
+            # zip 4.6.1, three advisories, all about `extract`. zip is pinned
+            # at 4 by tauri-plugin-updater, which only extracts on Windows,
+            # only an update archive whose minisign signature has already
+            # been checked, and only a .zip one. Ours aren't zipped
+            # (`createUpdaterArtifacts: true` publishes the .exe and .msi
+            # as they are). Our own use, the BSB ingest, never extracts.
+            RUSTSEC-2026-0367
+            RUSTSEC-2026-0368
+            RUSTSEC-2026-0369
+            # proc-macro-error is unmaintained: a build-time macro crate,
+            # reached through Tauri's GTK bindings. Nothing of it ships.
+            RUSTSEC-2024-0370
+            # glib 0.18's VariantStrIter iterators are unsound. glib comes
+            # with Tauri's GTK stack on Linux, at the version Tauri pins;
+            # neither the app nor Tauri uses VariantStrIter.
+            RUSTSEC-2024-0429
+            # zbus_names, zvariant and zvariant_derive are unmaintained (no
+            # known vulnerability). They come with zbus 5, which
+            # tauri-plugin-opener pins, for D-Bus on Linux.
+            RUSTSEC-2026-0371
+            RUSTSEC-2026-0370
+            RUSTSEC-2026-0372
+          )
+          args=()
+          for id in "${ignored[@]}"; do args+=(--ignore "$id"); done
+          cargo audit --deny warnings "${args[@]}"

@@ -542,3 +542,100 @@ test('a build that can’t update itself offers the download page in About', () 
         assert.equal($(app, 'about-update-status').textContent, 'The releases page is open in your browser.');
         assert.equal(app.calls.filter((c) => c.cmd === 'install_update').length, 0);
     }));
+
+// Fake timers for the update check's 20-second limit: the page's timers of
+// 20 s or more wait until `fire` runs them; shorter ones run as usual.
+function longTimers() {
+    const waiting = [];
+    return {
+        waiting,
+        setUp(window) {
+            const { setTimeout: set, clearTimeout: clear } = window;
+            window.setTimeout = (fn, ms, ...args) => {
+                if (ms < 20000) return set.call(window, fn, ms, ...args);
+                waiting.push({ fn, ms, args });
+                return -waiting.length;
+            };
+            window.clearTimeout = (id) => {
+                if (id < 0) waiting[-id - 1].cleared = true;
+                else clear.call(window, id);
+            };
+        },
+        fire() {
+            for (const timer of waiting) {
+                if (timer.cleared || timer.fired) continue;
+                timer.fired = true;
+                timer.fn(...timer.args);
+            }
+        },
+    };
+}
+
+test('Check now gives up after 20 seconds with no answer, and says GitHub couldn’t be reached', () => {
+    const timers = longTimers();
+    return withApp({ update: { check: FOUND }, storage: { 'gospel-getter-update-check': 'off' }, setUp: timers.setUp }, async (app) => {
+        app.open('about');
+        const release = app.holdCommand('check_for_update');
+        const button = $(app, 'update-check-btn');
+        app.click(button);
+        assert.equal(checkStatus(app).textContent, 'Checking for updates…');
+        assert.deepEqual(timers.waiting.map((t) => t.ms), [20000]);
+        timers.fire();
+        await app.until(() => checkStatus(app).textContent === OFFLINE, 'the timeout');
+        assert.ok(checkStatus(app).classList.contains('is-error'));
+        assert.equal(button.disabled, false, 'Check now can be tried again');
+
+        // The answer coming after all changes nothing.
+        release();
+        await app.idle(0, 'check_for_update');
+        assert.equal(checkStatus(app).textContent, OFFLINE);
+        assert.equal(aboutUpdate(app).hidden, true);
+        assert.equal(banner(app).hidden, true);
+
+        // A check that answers in time clears its timer.
+        await click(app, button, 'check_for_update');
+        assert.equal(aboutUpdate(app).hidden, false);
+        assert.ok(timers.waiting.every((t) => t.cleared || t.fired));
+    });
+});
+
+test('the check at startup gives up after 20 seconds too, saying nothing', () => {
+    const timers = longTimers();
+    return withApp({ update: { check: FOUND }, hold: ['check_for_update'], setUp: timers.setUp }, async (app) => {
+        await app.until(() => timers.waiting.length === 1, 'the startup check');
+        timers.fire();
+        await app.idle();
+        app.release('check_for_update');
+        await app.idle(0, 'check_for_update');
+        assert.equal(banner(app).hidden, true, 'no banner from a check given up on');
+        assert.equal(checkStatus(app).textContent, '');
+        assert.deepEqual(app.consoleErrors, []);
+    });
+});
+
+test('Check now during an install from the banner leaves the banner and its progress showing', () =>
+    withApp({
+        update: {
+            check: UPDATE,
+            install: {
+                events: [
+                    { event: 'started', data: { contentLength: 1000 } },
+                    { event: 'progress', data: { chunkLength: 250 } },
+                ],
+            },
+        },
+    }, async (app) => {
+        const before = app.calls.length;
+        app.click($(app, 'update-install'));
+        await app.until(() => app.calls.slice(before).some((c) => c.cmd === 'install_update'), 'install_update');
+        await app.until(() => $(app, 'update-status').textContent.endsWith('25%'), 'progress');
+
+        await checkInAbout(app);
+        assert.equal(checkStatus(app).textContent, 'Gospel Getter 2.6.0 is already downloading.');
+        assert.equal(banner(app).hidden, false, 'the banner stays');
+        assert.equal($(app, 'update-progress').hidden, false);
+        assert.equal($(app, 'update-progress').value, 250);
+        assert.equal($(app, 'update-status').textContent, 'Downloading the update… 25%');
+        assert.equal(aboutUpdate(app).hidden, true, 'About doesn’t offer it a second time');
+        assert.equal(app.calls.filter((c) => c.cmd === 'install_update').length, 1);
+    }));

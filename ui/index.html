@@ -5368,11 +5368,13 @@
             // Whether the bookmark list has loaded at least once, so "no
             // bookmarks" can be told apart from "couldn't load them".
             let bookmarksLoaded = false;
+            let bookmarksToken = 0;
 
             // Every highlight, as "book:chapter:verse" → color. Highlights
             // belong to no one translation, like bookmarks.
             let highlights = new Map();
             let highlightsLoaded = false;
+            let highlightsToken = 0;
 
             // Every highlighted passage (consecutive verses in one color),
             // in Bible order, as list_highlight_passages returned it for the
@@ -5443,6 +5445,13 @@
             let actionStatusTimer = null;
             // What the status line's Undo does, while it shows one.
             let actionUndo = null;
+
+            // An error's text for the reader: its message, or what it was
+            // thrown as. Never empty (a command can fail with ''), so a
+            // failure always says so and is never taken for success.
+            function errorText(e) {
+                return String((e && e.message) || e || '').trim() || 'Something went wrong.';
+            }
 
             function escapeHtml(value) {
                 return String(value).replace(/[&<>"']/g, (c) => ({
@@ -5665,7 +5674,7 @@
                     passage = await invoke('get_passage', { translationCode, bookId, chapter, start, end });
                 } catch (e) {
                     console.error('Failed to read a cross-reference', e);
-                    failure = (e && e.message) || String(e);
+                    failure = errorText(e);
                 }
                 if (token !== previewToken) return;
                 // "1 John 4:9–10", as the backend names it (or, if it
@@ -5674,7 +5683,7 @@
                 const verses = passage
                     ? passage.verses.map((v) => `<span class="xref-preview-verse"><span class="xref-preview-num">${v.number}</span>${verseHtml(v, { markers: false })}</span>`).join(' ')
                     : '';
-                const notice = failure ? `Couldn't read ${reference}: ${failure}` : (passage.notice || '');
+                const notice = passage ? (passage.notice || '') : `Couldn't read ${reference}: ${failure}`;
                 xrefPreview.innerHTML = `<p class="xref-preview-title" id="xref-preview-title">${escapeHtml(reference)} (${escapeHtml(translationCode.toUpperCase())})</p>
                     ${verses ? `<p class="xref-preview-text">${verses}</p>` : ''}
                     ${notice ? `<p class="xref-preview-notice">${escapeHtml(notice)}</p>` : ''}
@@ -5874,7 +5883,7 @@
                     () => report(`Copied ${entry.value.reference}${status}`, false),
                     (e) => {
                         console.error('Failed to copy verses', e);
-                        report(`Couldn't copy: ${(e && e.message) || e}`, true);
+                        report(`Couldn't copy: ${errorText(e)}`, true);
                     },
                 );
             }
@@ -6001,12 +6010,17 @@
                 return `${bookId}:${chapter}:${verse}`;
             }
 
+            // Only the latest refresh is shown: an earlier one answering
+            // after it (a quick second change) is dropped.
             async function refreshHighlights() {
+                const token = ++highlightsToken;
                 try {
                     const list = await invoke('list_highlights');
+                    if (token !== highlightsToken) return;
                     highlights = new Map(list.map((h) => [highlightKey(h.bookId, h.chapter, h.verse), h.color]));
                     highlightsLoaded = true;
                 } catch (e) {
+                    if (token !== highlightsToken) return;
                     console.error('Failed to load highlights', e);
                 }
                 applyHighlightMarkers();
@@ -6075,7 +6089,7 @@
                 } catch (e) {
                     console.error('Failed to change the highlight', e);
                     if (attempt === actionAttempt) {
-                        setActionStatus(`Couldn't ${color ? 'highlight' : 'remove the highlight'}: ${(e && e.message) || e}`, true);
+                        setActionStatus(`Couldn't ${color ? 'highlight' : 'remove the highlight'}: ${errorText(e)}`, true);
                     }
                 }
             }
@@ -6169,7 +6183,7 @@
                 } catch (e) {
                     if (token !== highlightListToken) return;
                     console.error('Failed to load highlighted passages', e);
-                    renderHighlightList(`Highlights couldn't be loaded: ${(e && e.message) || e}`);
+                    renderHighlightList(`Highlights couldn't be loaded: ${errorText(e)}`);
                 }
             }
 
@@ -6211,14 +6225,21 @@
                     .join('');
             }
 
+            // Only the latest refresh is shown: an earlier one answering
+            // after it (two quick translation switches) would label the
+            // previews in the wrong translation.
             async function refreshBookmarks() {
+                const token = ++bookmarksToken;
                 try {
-                    bookmarks = await invoke('list_bookmarks', { translationCode: currentTranslation() });
+                    const list = await invoke('list_bookmarks', { translationCode: currentTranslation() });
+                    if (token !== bookmarksToken) return;
+                    bookmarks = list;
                     bookmarksLoaded = true;
                     renderBookmarkList();
                 } catch (e) {
+                    if (token !== bookmarksToken) return;
                     console.error('Failed to load bookmarks', e);
-                    renderBookmarkList(`Bookmarks couldn't be loaded: ${(e && e.message) || e}`);
+                    renderBookmarkList(`Bookmarks couldn't be loaded: ${errorText(e)}`);
                 }
                 applyBookmarkMarkers();
                 if (selection) updateBookmarkButton();
@@ -6246,7 +6267,7 @@
                 } catch (e) {
                     console.error('Failed to change bookmark', e);
                     if (attempt === actionAttempt) {
-                        setActionStatus(`Couldn't ${existing ? 'remove' : 'save'} bookmark: ${(e && e.message) || e}`, true);
+                        setActionStatus(`Couldn't ${existing ? 'remove' : 'save'} bookmark: ${errorText(e)}`, true);
                     }
                 }
             }
@@ -6295,7 +6316,7 @@
                     await invoke('remove_bookmark', { id: bookmark.id });
                 } catch (e) {
                     console.error('Failed to remove bookmark', e);
-                    renderBookmarkList(`Couldn't remove ${bookmark.reference}: ${(e && e.message) || e}`);
+                    renderBookmarkList(`Couldn't remove ${bookmark.reference}: ${errorText(e)}`);
                     return;
                 }
                 const index = bookmarks.indexOf(bookmark);
@@ -6326,7 +6347,7 @@
                     await invoke('remove_highlight', { bookId, chapter, verseStart, verseEnd });
                 } catch (e) {
                     console.error('Failed to remove highlight', e);
-                    renderHighlightList(`Couldn't remove ${passage.reference}: ${(e && e.message) || e}`);
+                    renderHighlightList(`Couldn't remove ${passage.reference}: ${errorText(e)}`);
                     return;
                 }
                 await refreshHighlights();
@@ -6867,7 +6888,6 @@
             let importPreview = null;
 
             const plural = (n, one, many = `${one}s`) => `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
-            const errorText = (e) => (e && e.message) || String(e);
 
             // Export and import say how it went in a toast at the foot of
             // the window, which fades after a while (errors stay longer).
@@ -7763,12 +7783,15 @@
                 if (!picker.contains(document.activeElement)) revealCurrentInPicker();
             }
 
-            // Reads a chapter chosen in the picker. The popover closes
-            // (focus going back to the reference button); the sidebar
-            // stays.
+            // Reads a chapter chosen in the picker (or Random chapter's),
+            // from its top, as the end-of-chapter buttons do. The chapter
+            // already on screen stays where the reader is in it. The
+            // popover closes (focus going back to the reference button);
+            // the sidebar stays.
             function choosePickerChapter(bookId, chapter) {
                 if (surfaces() && surfaces().current() === 'picker') closeSurfaces();
-                jumpTo(bookId, chapter);
+                const shown = reading && reading.bookId === Number(bookId) && reading.chapter === Number(chapter);
+                jumpTo(bookId, chapter, null, null, { top: !shown });
             }
 
             document.addEventListener('gospel-getter:picker-shown', function () {
@@ -8065,7 +8088,7 @@
                 return `<div class="xref-summary">
                     <h3 class="xref-summary-title">${disclosureToggle('xrefs', 'xref-summary-list', `Cross references (${count})`)}</h3>
                     <div class="xref-summary-list disclosure-body" id="xref-summary-list"${disclosureOpen('xrefs') ? '' : ' hidden'}>${rows}</div>
-                    <p class="xref-credit">Cross-reference data from <a href="https://www.openbible.info/labs/cross-references/" target="_blank" rel="noopener noreferrer">OpenBible.info</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
+                    <p class="xref-credit">Cross-reference data from <a class="credit-link" data-link="openbible" href="https://www.openbible.info/labs/cross-references/">OpenBible.info</a>, licensed under <a class="credit-link" data-link="cc-by" href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
                 </div>`;
             }
 
@@ -8159,6 +8182,12 @@
                 return partner ? [currentTranslation(), partner] : [currentTranslation()];
             }
 
+            // What a chapter is fetched for: compare off, or on with
+            // these translations.
+            function compareLayout() {
+                return isComparing() ? compareCodes().join(' ') : '';
+            }
+
             // Whether `compare` is the chapter on screen in the
             // translations compare shows now.
             function compareIsCurrent(compare) {
@@ -8196,6 +8225,7 @@
                 clearSelection();
                 try {
                     const translationCode = currentTranslation();
+                    const layout = compareLayout();
                     const [dto, compare] = await Promise.all([
                         invoke('get_reading', {
                             bookId: Number(bookId),
@@ -8206,6 +8236,10 @@
                     ]);
                     // A newer navigation has started; let it win.
                     if (token !== loadToken || !dto) return false;
+                    // Compare was switched (or its translations changed)
+                    // while this was on its way: what came back is for the
+                    // old layout, so the chapter is asked for again.
+                    if (compareLayout() !== layout) return loadReading(bookId, chapter);
                     lastDto = dto;
                     if (compare) lastCompare = compare;
                     reading = {
@@ -8765,7 +8799,7 @@
                     if (token !== searchToken) return null;
                     console.error('Search failed', e);
                     searchShown = null;
-                    setSearchStatus(`Search failed: ${(e && e.message) || e}`, true);
+                    setSearchStatus(`Search failed: ${errorText(e)}`, true);
                     renderPalette();
                     return null;
                 }
@@ -8878,6 +8912,18 @@
             // selecting verses. (The book and chapter picker has its own
             // handler, above.)
             document.body.addEventListener('click', function (event) {
+                // The cross references' credit links: the page never opens
+                // a browser itself. The backend opens the link's fixed page
+                // (its href, shown so it reads as a link). A key press on a
+                // link arrives here as a click too.
+                const credit = event.target.closest('a.credit-link');
+                if (credit) {
+                    event.preventDefault();
+                    invoke('open_credit_link', { which: credit.dataset.link })
+                        .catch((e) => setDataStatus(errorText(e), true));
+                    return;
+                }
+
                 // A click anywhere outside the search panel closes it.
                 if (!searchPanel.hidden && !event.target.closest('#search-panel, #search-toggle')) {
                     setSearchOpen(false);
@@ -9543,6 +9589,22 @@
 
             const aboutOpen = () => !aboutOverlay.hidden;
 
+            // A check that hasn't answered in 20 s is given up on, with the
+            // backend's own "couldn't reach GitHub" message (the same words
+            // as updater.rs's OFFLINE). Its answer, if it ever comes, is
+            // ignored. The download isn't limited: a slow one is still
+            // going somewhere.
+            const UPDATE_CHECK_TIMEOUT_MS = 20000;
+            const UPDATE_CHECK_OFFLINE = 'Couldn’t reach GitHub to check for updates. Check your internet connection and try again.';
+
+            function withinUpdateCheckTime(check) {
+                let timer;
+                const timeout = new Promise((resolve, reject) => {
+                    timer = setTimeout(() => reject(UPDATE_CHECK_OFFLINE), UPDATE_CHECK_TIMEOUT_MS);
+                });
+                return Promise.race([check, timeout]).finally(() => clearTimeout(timer));
+            }
+
             function setUpdateStatus(message, isError) {
                 for (const view of bothViews) {
                     view.status.textContent = message;
@@ -9618,10 +9680,16 @@
             }
 
             // About, showing the update in place of the banner.
+            // Not while an install is under way: wherever it's showing its
+            // progress (the banner, if it started there) keeps showing it,
+            // and Check now says so.
             function showInAbout(update) {
+                if (installing) {
+                    setCheckStatus(`Gospel Getter ${offered.version} is already downloading.`, false);
+                    return;
+                }
                 shownInAbout = true;
                 hideBanner();
-                if (installing) return;
                 aboutUpdateTitle.textContent = `Gospel Getter ${update.version} is available`;
                 renderNoteBlocks(aboutUpdateNotes, update.noteBlocks || []);
                 aboutUpdateNotes.hidden = !aboutUpdateNotes.childElementCount;
@@ -9642,6 +9710,11 @@
             }
 
             function offer(update) {
+                // The update being installed stays the one offered.
+                if (installing) {
+                    if (aboutOpen()) showInAbout(offered);
+                    return;
+                }
                 offered = update;
                 if (aboutOpen()) showInAbout(update);
                 else if (!shownInAbout) showBanner(update);
@@ -9654,7 +9727,7 @@
                     setCheckStatus('Checking for updates…', false);
                 }
                 try {
-                    const update = await invoke('check_for_update');
+                    const update = await withinUpdateCheckTime(invoke('check_for_update'));
                     if (update) {
                         offer(update);
                     } else if (!quiet) {
