@@ -13,11 +13,6 @@ on:
     # Mondays, 06:17 UTC.
     - cron: "17 6 * * 1"
   workflow_dispatch:
-  # TEMPORARY, removed in the next commit: one run on this PR's branch,
-  # since workflow_dispatch can't start a workflow the default branch
-  # doesn't have yet.
-  push:
-    branches: [fix/audit-a1-a2-b]
 
 env:
   CARGO_TERM_COLOR: always
