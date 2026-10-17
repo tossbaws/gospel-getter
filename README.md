@@ -32,21 +32,31 @@ needed.
   (`John 3 · KJV`) always says where you are. It, or `G`, opens the book
   and chapter picker: **Random chapter**, then the Old and New Testament
   books, each opening onto its chapters. On wide windows the picker is a
-  sidebar you can hide, and on narrow ones a popover.
-- **Search and go to a reference.** One search box (`/` or Ctrl+K) jumps to
-  references such as `John 3:16`, `jn 3:16-18`, `1 Cor 13` or `Psalm 23`,
-  and searches the text for anything else. Results show every verse in the
-  current translation containing all your words, in Bible order, with the
-  words highlighted.
+  sidebar you can hide, and on narrow ones a popover. A chapter you choose
+  there opens at its top.
+- **Search, go to a reference, or run a command.** One box (`/` or Ctrl+K)
+  jumps to references such as `John 3:16`, `jn 3:16-18`, `1 Cor 13` or
+  `Psalm 23`, and searches the text for anything else. Results show every
+  verse in the current translation containing all your words, in Bible
+  order, with the words highlighted. The same box runs commands: as you
+  type, it lists **Go to**, **Commands** and **Verses**, in that order, and
+  each command shows its key, if it has one. Start with `>` to list
+  commands only.
+
+  ![The search box as a command palette in the Chi Rho theme, with ">theme" typed: under a Commands heading, the nine theme commands from Theme: Chi Rho, marked "In use", to Theme: Hot Pink, open over John 3 in the KJV, with John's chapters open in the sidebar](screenshots/palette.png)
 - **Select verses.** Click a verse, or Shift-click another to select a
   range, and a card opens under them (or above, near the bottom of the
-  window) with **Copy**, **★ Bookmark**, **+ Add note** and the highlight
-  colors, then the verses' footnotes, your notes on them and their
-  cross-references. It floats over the text, so the text doesn't move.
+  window) with **Copy**, **Copy as…**, **★ Bookmark**, **+ Add note** and
+  the highlight colors, then the verses' footnotes, your notes on them
+  and their cross-references. It floats over the text, so the text
+  doesn't move.
 - **Copy verses with their reference.** Select them, then **Copy** or
-  Ctrl+C. You get the verse text (in
-  the KJV, without its margin notes), followed by e.g.
-  `— John 3:16–18 (WEB)`.
+  Ctrl+C. You get the verse text (in the KJV, without its margin notes),
+  followed by e.g. `— John 3:16–18 (WEB)`. **Copy as…** in the card (or
+  Ctrl+Shift+C) offers four formats: text with its reference, with verse
+  numbers, a Markdown quote, or plain text. **Copy chapter…**, at the end
+  of each chapter, copies the whole chapter in any of them. The status
+  line says what was copied.
 - **Bookmarks.** Save a verse or range with **★ Bookmark**. Bookmarked
   verses get a ★, and the Bookmarks list in the Library (the bookmark
   button at the top, or Ctrl+B) reopens any of them in whichever
@@ -73,7 +83,7 @@ needed.
   how many notes match. In the KJV, translator-supplied words appear in
   italics, as in printed KJVs, and the margin notes are left out.
 
-  ![John 3:16 to 21 selected in the WEB in the Chi Rho theme, with ✎ marks after verses 16, 17, 18 and 21. The card under verse 21 has Copy, Bookmark and + Add note buttons, four highlight color swatches and the citation "John 3:16–21 (WEB)", then a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and an Edit link. The card floats over the verses after the selection](screenshots/notes.png)
+  ![John 3:16 to 21 selected in the WEB in the Chi Rho theme, with ✎ marks after verses 16, 17, 18 and 21. The card under verse 21 has Copy, Copy as…, Bookmark and + Add note buttons, four highlight color swatches and the citation "John 3:16–21 (WEB)", then a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and an Edit link. The card floats over the verses after the selection](screenshots/notes.png)
 - **Compare any two translations.** Press `C` (or **Compare** under **Aa**)
   to see the translation you're reading beside another, one row per verse
   number. **Compare (C) with** under **Aa** chooses the other one, and it's
@@ -95,7 +105,7 @@ needed.
   open them, and stay open once you have. Copy and search use the verse
   text without the notes.
 
-  ![Psalm 23 in the KJV in the Chi Rho theme, with "art" in italics and small letters after verses 2, 5 and 6, and the Psalms' 150 chapters open in the sidebar, ten to a row. Verse 6 is selected, and the card under it has Copy, Bookmark and + Add note buttons and the highlight swatches, then its Footnotes, "a for ever: Heb. to length of days", and its cross-references. Below the chapter, the Cross references section is collapsed](screenshots/footnotes.png)
+  ![Psalm 23 in the KJV in the Chi Rho theme, with "art" in italics and small letters after verses 2, 5 and 6, and the Psalms' 150 chapters open in the sidebar, ten to a row. Verse 6 is selected, and the card under it has Copy, Copy as…, Bookmark and + Add note buttons and the highlight swatches, then its Footnotes, "a for ever: Heb. to length of days", and its cross-references. Below the chapter, the Cross references section is collapsed](screenshots/footnotes.png)
 - **Comfortable reading.** Scripture is set in Literata, bundled with the
   app. Nine themes: Chi Rho (the default), Vellum, System (which follows
   your computer's light or dark setting, as Vellum or Chi Rho), Vaporwave,
@@ -116,8 +126,16 @@ needed.
   the reference button (and, on wide windows, the button that hides or
   shows the sidebar), **Aa** (text and display), the **Library**
   (bookmarks, highlights and notes), search and the **☰** menu (export,
-  import, the welcome and **About Gospel Getter**). Only one panel or
-  popover opens at a time, and Esc closes it.
+  import, the welcome, the keyboard shortcuts and **About Gospel
+  Getter**). Only one panel or popover opens at a time, and Esc closes it.
+- **Back and forward through passages.** Alt+← and Alt+→ go back and
+  forward through the passages you jumped to (from the picker, search,
+  cross-references or the Library), each where you left it. Turning
+  chapters isn't a jump, and the list lasts until the app closes.
+- **Keys for verses and books.** `j` and `k` select the next or previous
+  verse, Shift+j and Shift+k extend the selection, and `[` and `]` go to
+  the previous or next book. `?` lists every shortcut (see
+  [Keyboard](#keyboard)).
 - **Picks up where you left off.** Your chapter, translation, bookmarks,
   highlights, notes and display settings are remembered between sessions.
 - **Back up or move your data.** In the ☰ menu, **Export data…** saves your
@@ -159,14 +177,14 @@ needed.
 
 ## A quick tour
 
-All nine screenshots in this README, including the one at the top, use
+All ten screenshots in this README, including the one at the top, use
 Chi Rho, the default theme, in a window wide enough for the picker's
 sidebar. The other eight themes are under **Aa**.
 
 **Search the text, or jump straight to a reference.** Matching words are
 highlighted, and clicking a result opens and selects that verse.
 
-![The search panel in the Chi Rho theme, listing World English Bible verses that contain "love one another", with the words highlighted](screenshots/search-results.png)
+![The search panel in the Chi Rho theme, listing under a Verses heading the World English Bible verses that contain "love one another", with the words highlighted](screenshots/search-results.png)
 
 **Compare two translations verse by verse.** Reading the KJV, compared with
 the WEB: in Romans 14 the WEB numbers three verses the KJV doesn't, and
@@ -177,21 +195,29 @@ the KJV column says so rather than shifting anything.
 **Select a range and copy it with its reference.** The citation in the
 card shows exactly what will be copied.
 
-![John 3:16 to 18 selected in the WEB in the Chi Rho theme. The card under verse 18 has Copy, Bookmark and + Add note buttons, four highlight color swatches and the citation "John 3:16–18 (WEB)", then the cross-references for verses 16, 17 and 18, floating over the verses that follow](screenshots/copy-verse-range.png)
+![John 3:16 to 18 selected in the WEB in the Chi Rho theme. The card under verse 18 has Copy, Copy as…, Bookmark and + Add note buttons, four highlight color swatches and the citation "John 3:16–18 (WEB)", then the cross-references for verses 16, 17 and 18, floating over the verses that follow](screenshots/copy-verse-range.png)
 
 **Bookmark passages and come back to them.** Bookmarked verses are starred
 in the text, and the Library (Ctrl+B) lists each one with a preview.
 
-![Psalm 23 in the KJV with verses 1 to 4 starred in the Chi Rho theme, ending with a button back to Psalm 22 and the collapsed Footnotes and Cross references, and the Library panel open on its Bookmarks tab, beside the Highlights and Notes tabs, listing Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
+![Psalm 23 in the KJV with verses 1 to 4 starred in the Chi Rho theme, ending with a button back to Psalm 22, the keys hint, Copy chapter… and the collapsed Footnotes and Cross references, and the Library panel open on its Bookmarks tab, beside the Highlights and Notes tabs, listing Psalms 23:1–4, Romans 8:28 and John 3:16](screenshots/bookmarks.png)
 
 ## Keyboard
+
+`?`, or **Keyboard shortcuts** in the ☰ menu, lists every key in the app.
+The main ones:
 
 | Key | Does |
 |---|---|
 | ← / → | Previous / next chapter, across books |
+| `[` / `]` | Previous / next book, at its first chapter |
+| Alt+← / Alt+→ | Back / forward through the passages you jumped to |
 | `G` | Open the book and chapter picker. The arrow keys, Home and End move through it; Enter opens a book or chapter |
-| `/` or Ctrl+K | Open search. Enter goes to a reference; ↓ / ↑ move through results |
+| `/` or Ctrl+K | Open the search box, which also runs commands; `>` typed first lists commands only. ↓ / ↑ move through what it lists, and Enter goes there or runs it |
+| `j` / `k` | Select the next / previous verse |
+| Shift+j / Shift+k | Extend the selection down / up a verse |
 | Ctrl+C | Copy the selected verses with their reference. If you've highlighted text yourself, that's copied instead, as usual |
+| Ctrl+Shift+C | Copy as…: the selected verses with verse numbers, as a Markdown quote, or as plain text |
 | `C` | Compare translations on/off |
 | Ctrl+= / Ctrl+- | Larger / smaller text, through the four sizes |
 | Ctrl+0 | Text size back to Medium |
@@ -199,6 +225,7 @@ in the text, and the Library (Ctrl+B) lists each one with a preview.
 | `N` | Write a note on the selected verses |
 | Shift-click | Extend the selection to a range within the chapter |
 | Esc | Close search or the open panel or popover, then clear the selection, then leave reading mode |
+| `?` | All the keyboard shortcuts |
 
 ## Installing
 
@@ -255,7 +282,8 @@ app starts. To stop it, turn off **Check for updates when Gospel Getter
 starts** in **About Gospel Getter**, from the ☰ menu; **Check now** there
 still checks when you ask. About also shows which version you have. It's a setting for this computer and isn't exported. If the
 check fails, for example because you're offline, the app says nothing and
-works as usual. **Later** hides the notice until the next start. When
+works as usual; **Check now** gives up after 20 seconds and says GitHub
+couldn't be reached. **Later** hides the notice until the next start. When
 **Check now** finds an update, About shows it in place, with its release
 notes, **Update now** (with the download's progress) and **Close**, and
 the banner doesn't open as well.
@@ -267,14 +295,14 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.14.0?** Each updates itself to 2.15.0: it
+**Coming from 2.6.0 through 2.15.0?** Each updates itself to 2.16.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
 update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.15.0 by hand once, from the
+Install 2.16.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -351,8 +379,13 @@ so it seeds again.
   written back. It indexes each verse's text as the reader shows it
   (without the KJV's margin notes or the BSB's footnotes), and results
   show that text.
-- **Copying:** uses the webview's own clipboard API, with no plugin or extra
-  permission.
+- **Copying:** one formatter in the backend makes the text for Copy, Copy
+  as…, Copy chapter and the notes export's quotes. The page fetches it
+  ahead and writes it with the webview's own clipboard API, with no plugin
+  or extra permission.
+- **Links:** the page never opens a web page itself. Release notes and the
+  cross-references' credits open in your browser through the backend,
+  which opens only addresses on its own fixed list.
 
 ## Tests
 
@@ -380,9 +413,12 @@ stored exactly as its source provides it.
   byte-order mark and reshaping the JSON. The stored text keeps the
   markup; the app only changes how it's shown. The reader, Copy, search
   and **Export notes…** present it as print does: supplied words in
-  italics (plain in Copy and search), and margin notes as lettered
-  footnotes in the reader, left out of Copy, search and the export. The
-  four verses with broken markup are shown as stored, braces and all.
+  italics (plain in Copy and search, italic in Copy as…'s Markdown quote),
+  and margin notes as lettered footnotes in the reader, left out of Copy,
+  search and the export. The four verses with broken markup are shown as
+  stored, braces and all. Copy as…'s formats change no words: they differ
+  only in the verse numbers, the reference and the punctuation around
+  them, and leave out the KJV's margin notes and the BSB's footnotes.
 - **WEB** comes from TehShrike/world-english-bible (public domain, via
   ebible.org). Verses the source splits into several entries, as in the
   Psalms' poetry, are joined back together in the source's own order, with
