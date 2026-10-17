@@ -3680,3 +3680,110 @@ fn chapter_end_cross_references_are_quiet_links() {
         );
     }
 }
+
+/// Aa's translations are a radio group, one line each ("KJV · King James
+/// Version · 1611/1769 · public domain"), and compare's partner a row of
+/// buttons beside Compare. The words are --text, the code --accent and the
+/// rest --text-dim, on --panel-bg; the chosen one all --on-accent on
+/// --accent. Each AA in every theme, the focus ring 3:1. About's credits
+/// are --text-dim on the panel, AA too.
+#[test]
+fn the_translation_chooser_and_credits_are_accessible_and_use_tested_theme_colors() {
+    assert!(HTML.contains(
+        r#"<div id="translation-choices" class="translation-list" role="radiogroup" aria-labelledby="translation-label"></div>"#
+    ));
+    assert!(HTML.contains(
+        r#"<div id="compare-with-choices" class="segmented" role="group" aria-label="Compare with"></div>"#
+    ));
+    let render = function_body("renderAa");
+    assert!(render.contains("btn.setAttribute('role', 'radio');"));
+    assert!(render.contains("dot.setAttribute('aria-hidden', 'true');"));
+    assert!(HTML.contains(r#"<ul id="about-credits" class="about-credits-list"></ul>"#));
+
+    let rules = rules();
+    // The screen rule naming `selector`, alone or in a list.
+    let naming = |selector: &str| -> &Rule {
+        rules
+            .iter()
+            .find(|r| r.at_rule.is_none() && selectors(r).any(|s| s == selector))
+            .unwrap_or_else(|| panic!("expected a rule naming `{selector}`"))
+    };
+    let choice = naming(".translation-choice");
+    for declaration in ["color: var(--text)", "background: var(--panel-bg)"] {
+        assert!(choice.body.contains(declaration), "{declaration}");
+    }
+    for (selector, color) in [
+        (".translation-code", "--accent"),
+        (".translation-detail", "--text-dim"),
+        (".translation-dot", "--text-dim"),
+        (".about-credits-list", "--text-dim"),
+    ] {
+        assert!(
+            naming(selector)
+                .body
+                .contains(&format!("color: var({color})")),
+            "{selector}"
+        );
+    }
+    let checked = naming(r#".translation-choice[aria-checked="true"] .translation-detail"#);
+    assert!(checked.body.contains("background: var(--accent)"));
+    assert!(checked.body.contains("color: var(--on-accent)"));
+    assert!(
+        naming(".translation-choice:focus-visible")
+            .body
+            .contains("outline: 2px solid var(--accent)")
+    );
+    for (theme, props) in theme_palettes(&rules) {
+        // --panel-bg is a translucent tint over Aa's opaque --option-bg.
+        let panel = &composite(
+            property(&props, "--panel-bg"),
+            property(&props, "--option-bg"),
+        );
+        for fg in ["--text", "--text-dim", "--accent"] {
+            let ratio = contrast_ratio(property(&props, fg), panel);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: {fg} on a translation is {ratio:.2}:1"
+            );
+        }
+        let chosen = contrast_ratio(
+            property(&props, "--on-accent"),
+            property(&props, "--accent"),
+        );
+        assert!(
+            chosen >= 4.5,
+            "theme `{theme}`: the chosen translation is {chosen:.2}:1"
+        );
+        let ring = contrast_ratio(property(&props, "--accent"), panel);
+        assert!(
+            ring >= 3.0,
+            "theme `{theme}`: the focus ring is {ring:.2}:1"
+        );
+        let credits = contrast_ratio(
+            property(&props, "--text-dim"),
+            property(&props, "--option-bg"),
+        );
+        assert!(
+            credits >= 4.5,
+            "theme `{theme}`: About's credits are {credits:.2}:1"
+        );
+    }
+}
+
+/// A USFM footnote's verse number (the BSB's "²¹But this kind") is small
+/// and raised without opening up its line.
+#[test]
+fn a_footnotes_verse_number_is_set_small() {
+    let rules = rules();
+    let rule = screen_rule(&rules, ".footnote-verse");
+    for declaration in [
+        "font-size: 0.75em",
+        "line-height: 0",
+        "vertical-align: super",
+    ] {
+        assert!(rule.body.contains(declaration), "{declaration}");
+    }
+    let footnote = function_body("footnoteHtml");
+    assert!(footnote.contains(r#"<em class="footnote-alt">"#));
+    assert!(footnote.contains(r#"<sup class="footnote-verse">"#));
+}

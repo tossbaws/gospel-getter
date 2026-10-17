@@ -118,6 +118,30 @@ pub fn bundled(code: &str) -> Vec<RawBook> {
     serde_json::from_str(json).expect("bundled translation JSON")
 }
 
+/// The bundled BSB's book: `RawBook`'s shape, with `None` for a verse it
+/// doesn't number, and its footnotes.
+#[derive(Deserialize)]
+pub struct RawBsbBook {
+    pub name: String,
+    pub testament: String,
+    pub chapters: Vec<Vec<Option<String>>>,
+    pub footnotes: Vec<RawBsbFootnote>,
+}
+
+/// One of the bundled BSB's footnotes (see `domain::usfm_note`).
+#[derive(Deserialize)]
+pub struct RawBsbFootnote {
+    pub chapter: i64,
+    pub verse: i64,
+    pub at: usize,
+    pub usfm: String,
+}
+
+/// The bundled BSB, parsed: the exact strings the seed step stores.
+pub fn bundled_bsb() -> Vec<RawBsbBook> {
+    serde_json::from_str(include_str!("../../data/bsb.json")).expect("bundled BSB JSON")
+}
+
 /// Write a database as v2.1.0 left it after some reading: v2.1.0's schema,
 /// both translations (seeded the way v2.1.0 seeded them), a saved reading
 /// position (WEB, Romans 8) and a few cross-references. Cross-references

@@ -463,9 +463,10 @@ mod ipc_tests {
         let compare = invoke(
             &webview,
             "get_compare",
-            json!({ "bookId": 45, "chapter": 14 }),
+            json!({ "bookId": 45, "chapter": 14, "translationCodes": ["bsb", "web"] }),
         )
         .unwrap();
+        assert_eq!(compare["columns"][0]["code"], "bsb");
         assert_eq!(
             compare["columns"][1]["verses"].as_array().map(Vec::len),
             Some(26)

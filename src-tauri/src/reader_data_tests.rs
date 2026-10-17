@@ -13,7 +13,9 @@ use crate::db::Passage;
 use crate::db::test_support::{
     TempDb, bundled, fill_notes, fresh_database, other_tables_snapshot, verses_snapshot,
 };
-use crate::reader_data::{Layout, LineSpacing, Preferences, TextSize, Theme, Width};
+use crate::reader_data::{
+    Layout, LineSpacing, Preferences, TextSize, Theme, TranslationCode, Width,
+};
 
 async fn app(label: &str) -> (TempDb, AppState) {
     let (db, pool) = fresh_database(label).await;
@@ -36,6 +38,7 @@ fn matrix_prefs() -> Preferences {
         layout: Some(Layout::Flowing),
         reading_mode: Some(false),
         compare: Some(true),
+        compare_with: TranslationCode::new("bsb"),
     }
 }
 
@@ -127,7 +130,7 @@ async fn export_round_trips_into_a_fresh_install() {
     else {
         panic!("expected saved")
     };
-    assert_eq!((bookmarks, has_position, preferences), (3, true, 7));
+    assert_eq!((bookmarks, has_position, preferences), (3, true, 8));
 
     // The file is readable JSON with exactly the reader's data.
     let text = std::fs::read_to_string(&path).unwrap();
@@ -145,7 +148,7 @@ async fn export_round_trips_into_a_fresh_install() {
         json["preferences"],
         serde_json::json!({"theme": "matrix", "text_size": "large", "line_spacing": "relaxed",
                            "width": "wide", "layout": "flowing", "reading_mode": false,
-                           "compare": true})
+                           "compare": true, "compare_with": "bsb"})
     );
     // Never Bible text, ids or anything internal.
     let john_3_16 = &bundled("kjv")[42].chapters[2][15];
@@ -453,7 +456,7 @@ async fn invalid_files_are_rejected_whole_and_change_nothing() {
         (
             "bad translation",
             file_with(ok, r#"{"translation": "niv", "book": 43, "chapter": 3}"#),
-            "no \u{201c}niv\u{201d} translation (it has kjv, web)",
+            "no \u{201c}niv\u{201d} translation (it has kjv, bsb, web)",
         ),
         (
             "bad position chapter",

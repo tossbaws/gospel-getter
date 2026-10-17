@@ -168,6 +168,28 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         .await
         .context("Failed to create notes index")?;
 
+    // A translation's footnotes, where it keeps them apart from its verse
+    // text (the BSB's): each exactly as its source has it (`usfm`), and
+    // where it stands, as a number of characters into its verse's `text`.
+    // The KJV's margin notes are in its text instead (`kjv_markup`).
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS footnotes (
+            translation_id INTEGER NOT NULL REFERENCES translations(id),
+            book_id INTEGER NOT NULL REFERENCES books(id),
+            chapter INTEGER NOT NULL,
+            verse INTEGER NOT NULL,
+            ordinal INTEGER NOT NULL,
+            position INTEGER NOT NULL CHECK (position >= 0),
+            usfm TEXT NOT NULL,
+            PRIMARY KEY (translation_id, book_id, chapter, verse, ordinal)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create footnotes table")?;
+
     // Full-text search index over `verses`. It's derived data only: built
     // from `verses` by `db::search`, never written back, and contentless —
     // it stores no copy of the text, only the tokens and a rowid encoding

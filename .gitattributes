@@ -1,0 +1,4 @@
+# The BSB's raw sources, byte for byte as Berean publishes them, CRLF
+# and all (see sources/bsb/README.md). Never convert their line endings.
+sources/bsb/bsb.txt -text
+sources/bsb/bsb_usfm.zip binary
