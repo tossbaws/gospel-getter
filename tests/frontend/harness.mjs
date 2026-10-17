@@ -480,11 +480,13 @@ export async function openApp({
             input.value = text;
             input.dispatchEvent(new window.Event('input', { bubbles: true }));
         },
+        /** Clicks Copy, and waits for the copy (its text may still be on its way). */
         async copyButton() {
             const btn = document.querySelector('.verse-actions .verse-copy-btn');
             if (!btn) throw new Error('no Copy button shown');
+            const before = calls.length;
             app.click(btn);
-            await settle();
+            await app.idle(Math.max(0, before - 1));
         },
         async waitForHeading(text) {
             await until(() => document.querySelector('.chapter-heading')?.textContent === text, `heading ${text}`);

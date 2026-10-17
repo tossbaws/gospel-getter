@@ -2998,6 +2998,7 @@
         }
 
         .verse-copy-btn,
+        .verse-copy-as-btn,
         .verse-bookmark-btn,
         .verse-note-btn,
         .highlight-remove {
@@ -3012,15 +3013,61 @@
         }
 
         .verse-copy-btn:hover,
+        .verse-copy-as-btn:hover,
         .verse-bookmark-btn:hover,
         .verse-note-btn:hover,
         .highlight-remove:hover {
             border-color: var(--accent);
         }
 
-        .verse-copy-btn:focus-visible {
+        .verse-copy-btn:focus-visible,
+        .verse-copy-as-btn:focus-visible {
             outline: 2px solid var(--accent);
             outline-offset: 2px;
+        }
+
+        /* Copy as…: the formats, a short list under the card's actions
+           (or under Copy chapter), opaque like the popovers. */
+        .copy-as-menu {
+            display: flex;
+            flex-direction: column;
+            width: max-content;
+            max-width: 100%;
+            margin: 0.5rem 0 0.25rem;
+            padding: 0.3rem 0;
+            font-family: var(--font-ui);
+            background: var(--option-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-m);
+        }
+
+        .copy-as-menu[hidden] {
+            display: none;
+        }
+
+        .chapter-copy + .copy-as-menu {
+            margin: 0.5rem auto 0;
+        }
+
+        .copy-as-item {
+            text-align: left;
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--text);
+            background: none;
+            border: none;
+            padding: 0.4rem 0.9rem;
+            cursor: pointer;
+        }
+
+        .copy-as-item:hover,
+        .copy-as-item:focus {
+            background: rgba(var(--accent-rgb), 0.15);
+        }
+
+        .copy-as-item:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
         }
 
         /* A small star after the number of every bookmarked verse. A
@@ -3615,6 +3662,34 @@
             stroke-linejoin: round;
         }
 
+        /* Copy chapter: one quiet line under the keys' hint, below the
+           next-chapter buttons rather than beside them. */
+        .chapter-copy {
+            text-align: center;
+            margin-top: 0.25rem;
+        }
+
+        .chapter-copy-btn {
+            font-family: var(--font-ui);
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            background: none;
+            border: none;
+            padding: 0.2rem 0.4rem;
+            cursor: pointer;
+            text-decoration: underline dotted;
+            text-underline-offset: 0.2em;
+        }
+
+        .chapter-copy-btn:hover {
+            color: var(--accent);
+        }
+
+        .chapter-copy-btn:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
         /* The chapter's Footnotes and Cross references are disclosures,
            closed until opened; each kind remembers being opened or closed
            for every chapter. Printing opens both. */
@@ -3713,6 +3788,8 @@
             .chapter-side,
             .nav-hint,
             .chapter-end,
+            .chapter-copy,
+            .copy-as-menu,
             .disclosure-chevron,
             .selection-card,
             .verse-actions,
@@ -5127,7 +5204,8 @@
 
             const verseActions = document.createElement('span');
             verseActions.className = 'verse-actions';
-            verseActions.innerHTML = `<button type="button" class="verse-copy-btn">Copy</button>
+            verseActions.innerHTML = `<button type="button" class="verse-copy-btn" title="Copy (Ctrl+C)">Copy</button>
+                <button type="button" class="verse-copy-as-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="copy-as-menu" title="Copy as… (Ctrl+Shift+C)" aria-keyshortcuts="Control+Shift+C">Copy as…</button>
                 <button type="button" class="verse-bookmark-btn">&#9733; Bookmark</button>
                 <button type="button" class="verse-note-btn" title="Add a note (N)" aria-keyshortcuts="N"><span aria-hidden="true">+</span> Add note</button>
                 <span class="verse-highlight" role="group" aria-label="Highlight">
@@ -5287,6 +5365,8 @@
                     el.classList.toggle('verse-selected', selected);
                     if (selected && number === selection.end) last = el;
                 });
+                closeCopyMenu();
+                copies.selection = null;
                 selectionNotesToken += 1;
                 selectionNotes = [];
                 selectionNotesError = '';
@@ -5304,6 +5384,13 @@
                     return;
                 }
                 cardVerse = last;
+                fetchCopy('selection', {
+                    translationCode: selection.translationCode,
+                    bookId: reading.bookId,
+                    chapter: reading.chapter,
+                    start: selection.start,
+                    end: selection.end,
+                });
                 const citation = selectionCitation();
                 selectionCard.setAttribute('aria-label', `Selection: ${citation}`);
                 verseActions.querySelector('.verse-actions-ref').textContent = citation;
@@ -5533,33 +5620,158 @@
                 renderSelection();
             }
 
-            // Must be called synchronously from the click or keydown that
-            // asked for it: WebKitGTK only allows writeText during a user
-            // gesture. Success or failure is always shown in the actions.
-            function copySelection() {
-                if (!selection || !reading) return;
+            // ---- Copying (GH-10), Copy as… and Copy chapter. The text
+            // comes from the backend (get_copy_text, one formatter for every
+            // format, and for the notes export's quotes), fetched as soon
+            // as verses are selected or a chapter is shown: WebKitGTK only
+            // allows writeText during the click or keydown that asked for
+            // it, so the text must already be here by then. Should it not
+            // be yet, the copy waits for it and tries anyway, and says so
+            // if that fails.
+
+            // The menu's formats, in order, and what the status line adds
+            // after "Copied John 3:16–18".
+            const COPY_FORMATS = [
+                { format: 'reference', label: 'Text with reference', status: '' },
+                { format: 'numbered', label: 'With verse numbers', status: ' with verse numbers' },
+                { format: 'markdown', label: 'Markdown quote', status: ' as a Markdown quote' },
+                { format: 'plain', label: 'Plain text', status: ' as plain text' },
+            ];
+
+            // The selection's and the chapter's text, each as
+            // { key, value, promise }: value is get_copy_text's answer
+            // once it's in.
+            const copies = { selection: null, chapter: null };
+
+            function fetchCopy(slot, args) {
+                const key = JSON.stringify(args);
+                if (copies[slot] && copies[slot].key === key) return;
+                const entry = { key, value: null };
+                entry.promise = invoke('get_copy_text', args).then((value) => {
+                    entry.value = value;
+                    return value;
+                });
+                // A failure is reported when a copy is asked for.
+                entry.promise.catch((e) => console.error('Failed to read the text to copy', e));
+                copies[slot] = entry;
+            }
+
+            // Copies the selection ('selection') or the chapter being read
+            // ('chapter') in `format`, and says so: in the card's status
+            // line for the selection, in the toast for the chapter.
+            function copyPassage(slot, format) {
+                if (!reading || (slot === 'selection' && !selection)) return;
+                const entry = copies[slot];
+                if (!entry) return;
                 const attempt = ++actionAttempt;
+                const report = (message, isError) => {
+                    if (slot === 'chapter') setDataStatus(message, isError);
+                    else if (attempt === actionAttempt) setActionStatus(message, isError);
+                };
+                const { status } = COPY_FORMATS.find((f) => f.format === format);
                 let write;
                 try {
                     if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
                         throw new Error('clipboard access is not available');
                     }
-                    write = Promise.resolve(navigator.clipboard.writeText(selectionClipboardText()));
+                    write = entry.value
+                        ? Promise.resolve(navigator.clipboard.writeText(entry.value.formats[format]))
+                        : entry.promise.then((value) => navigator.clipboard.writeText(value.formats[format]));
                 } catch (e) {
                     write = Promise.reject(e);
                 }
                 write.then(
-                    () => {
-                        if (attempt === actionAttempt) setActionStatus('Copied', false);
-                    },
+                    () => report(`Copied ${entry.value.reference}${status}`, false),
                     (e) => {
                         console.error('Failed to copy verses', e);
-                        if (attempt === actionAttempt) {
-                            setActionStatus(`Couldn't copy: ${(e && e.message) || e}`, true);
-                        }
+                        report(`Couldn't copy: ${(e && e.message) || e}`, true);
                     },
                 );
             }
+
+            // Must be called synchronously from the click or keydown that
+            // asked for it (see above).
+            function copySelection() {
+                copyPassage('selection', 'reference');
+            }
+
+            // Copy as…: a menu of the formats, under the card's actions
+            // for the selection, or under the chapter's Copy chapter
+            // control. One at a time; ↑ and ↓ (and Home and End) move,
+            // Enter or a click copies, Escape or Tab closes it, focus going
+            // back to the button that opened it.
+            const copyMenu = document.createElement('div');
+            copyMenu.id = 'copy-as-menu';
+            copyMenu.className = 'copy-as-menu';
+            copyMenu.setAttribute('role', 'menu');
+            copyMenu.hidden = true;
+            copyMenu.innerHTML = COPY_FORMATS
+                .map((f) => `<button type="button" class="copy-as-item" role="menuitem" tabindex="-1" data-format="${f.format}">${f.label}</button>`)
+                .join('');
+            let copyMenuFor = null;
+            let copyMenuOpener = null;
+
+            function openCopyMenu(slot, opener) {
+                closeCopyMenu();
+                if (!reading || (slot === 'selection' && !selection)) return;
+                copyMenuFor = slot;
+                copyMenuOpener = opener;
+                copyMenu.setAttribute('aria-label', slot === 'chapter'
+                    ? `Copy ${reading.bookName} ${reading.chapter} as`
+                    : `Copy ${selectionCitation()} as`);
+                if (slot === 'chapter') opener.closest('.chapter-copy').after(copyMenu);
+                else verseActions.after(copyMenu);
+                copyMenu.hidden = false;
+                opener.setAttribute('aria-expanded', 'true');
+                copyMenu.querySelector('.copy-as-item').focus({ preventScroll: slot === 'selection' });
+                if (slot === 'chapter' && copyMenu.scrollIntoView) copyMenu.scrollIntoView({ block: 'nearest' });
+            }
+
+            function closeCopyMenu({ focusOpener = false } = {}) {
+                if (!copyMenuFor) return;
+                const opener = copyMenuOpener;
+                copyMenuFor = null;
+                copyMenuOpener = null;
+                copyMenu.hidden = true;
+                copyMenu.remove();
+                opener.setAttribute('aria-expanded', 'false');
+                if (focusOpener && opener.isConnected) opener.focus({ preventScroll: true });
+            }
+
+            function chooseCopyFormat(item) {
+                const slot = copyMenuFor;
+                closeCopyMenu({ focusOpener: true });
+                copyPassage(slot, item.dataset.format);
+            }
+
+            // Enter and Space choose an item by clicking it, so the copy
+            // happens within that click (see the body's click handler).
+            copyMenu.addEventListener('keydown', function (event) {
+                const items = [...copyMenu.querySelectorAll('.copy-as-item')];
+                const index = items.indexOf(document.activeElement);
+                let next = null;
+                if (event.key === 'ArrowDown') next = items[(index + 1) % items.length];
+                else if (event.key === 'ArrowUp') next = items[(index - 1 + items.length) % items.length];
+                else if (event.key === 'Home') next = items[0];
+                else if (event.key === 'End') next = items[items.length - 1];
+                else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeCopyMenu({ focusOpener: true });
+                    return;
+                } else if (event.key === 'Tab') {
+                    event.preventDefault();
+                    closeCopyMenu({ focusOpener: true });
+                    return;
+                } else {
+                    // Not a chapter turn while in the menu.
+                    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') event.stopPropagation();
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                if (next) next.focus();
+            });
 
             function showNotice(message) {
                 readerNotice.textContent = message;
@@ -7612,7 +7824,8 @@
                     return `<button type="button" class="chapter-step chapter-step-${which}" data-book="${side.bookId}" data-chapter="${side.chapter}" aria-label="${label}">${text}</button>`;
                 };
                 return `<nav class="chapter-end" aria-label="Previous and next chapter">${step(dto.prev, 'prev')}${step(dto.next, 'next')}</nav>
-                    <p class="nav-hint">Use ${hintKey('Left arrow', ARROW_LEFT)} and ${hintKey('Right arrow', ARROW_RIGHT)} to move a chapter at a time, ${hintKey('/')} to search, ${hintKey('C')} to compare translations.</p>`;
+                    <p class="nav-hint">Use ${hintKey('Left arrow', ARROW_LEFT)} and ${hintKey('Right arrow', ARROW_RIGHT)} to move a chapter at a time, ${hintKey('/')} to search, ${hintKey('C')} to compare translations.</p>
+                    <p class="chapter-copy"><button type="button" class="chapter-copy-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="copy-as-menu">Copy chapter…</button></p>`;
             }
 
             // The footnotes of the chapter being read, one row each
@@ -7734,7 +7947,11 @@
                     compare.columns.forEach((c) => { columns[c.code] = { verses: c.verses }; });
                 }
                 reading.columns = columns;
+                closeCopyMenu();
                 readingPane.innerHTML = renderReadingPane(lastDto, compare);
+                // Copy chapter copies the translation being read (while
+                // comparing, the left column).
+                fetchCopy('chapter', { translationCode: reading.translationCode, bookId: reading.bookId, chapter: reading.chapter });
                 updateReference(compare);
                 markPickerCurrent();
                 selection = null;
@@ -8045,6 +8262,20 @@
                     copySelection();
                     return;
                 }
+                const copyItem = event.target.closest('.copy-as-item');
+                if (copyItem) {
+                    chooseCopyFormat(copyItem);
+                    return;
+                }
+                const copyAs = event.target.closest('.verse-copy-as-btn, .chapter-copy-btn');
+                if (copyAs) {
+                    const slot = copyAs.classList.contains('chapter-copy-btn') ? 'chapter' : 'selection';
+                    if (copyMenuFor === slot) closeCopyMenu({ focusOpener: true });
+                    else openCopyMenu(slot, copyAs);
+                    return;
+                }
+                // Any other click closes Copy as….
+                closeCopyMenu();
                 if (event.target.closest('.verse-bookmark-btn')) {
                     toggleSelectionBookmark();
                     return;
@@ -8227,8 +8458,8 @@
                 if (event.target && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) {
                     return;
                 }
-                // So do keys pressed on the search results.
-                if (event.target && event.target.closest && event.target.closest('#search-panel')) {
+                // So do keys pressed on the search results, and in Copy as….
+                if (event.target && event.target.closest && event.target.closest('#search-panel, #copy-as-menu')) {
                     return;
                 }
                 // And while the import preview, About, the note panel or
@@ -8275,6 +8506,16 @@
                     if (selection && (!textSelection || textSelection.isCollapsed)) {
                         event.preventDefault();
                         copySelection();
+                    }
+                    return;
+                }
+
+                // Ctrl+Shift+C (Cmd+Shift+C) opens Copy as… for the selected
+                // verses.
+                if (ctrl && !event.altKey && event.shiftKey && event.key.toLowerCase() === 'c') {
+                    if (selection) {
+                        event.preventDefault();
+                        openCopyMenu('selection', verseActions.querySelector('.verse-copy-as-btn'));
                     }
                     return;
                 }

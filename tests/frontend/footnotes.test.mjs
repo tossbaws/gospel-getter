@@ -330,6 +330,12 @@ test('footnotes and supplied words are rendered as text, never as markup (synthe
                     }
                     : v)),
             }),
+            // The text copied comes from the backend's formatter.
+            alter: {
+                get_copy_text: (copy) => (copy.reference === 'Psalms 23:1'
+                    ? { ...copy, formats: { ...copy.formats, reference: `SYNTHETIC <i>x</i> & y ${EM} Psalms 23:1 (KJV)` } }
+                    : copy),
+            },
         },
         async (app) => {
             const verse = app.verse(1);
