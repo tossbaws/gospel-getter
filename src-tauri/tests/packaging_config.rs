@@ -200,3 +200,85 @@ fn the_window_state_plugin_restores_a_hidden_window_before_showing_it() {
         serde_json::json!(["core:default"])
     );
 }
+
+/// The webview's Content Security Policy, as `tauri.conf.json` sets it.
+/// Tauri adds hashes for `ui/index.html`'s inline `<script>` and `<style>`
+/// at build time (asset CSP modification stays on), so the page's own code
+/// runs and nothing else inline does. A wrong policy fails silently in the
+/// built app, so its key directives are pinned here.
+fn csp_directives() -> Vec<(String, Vec<String>)> {
+    let conf: Value = serde_json::from_str(TAURI_CONF).expect("tauri.conf.json must be valid JSON");
+    let security = &conf["app"]["security"];
+    assert!(
+        security
+            .get("dangerousDisableAssetCspModification")
+            .is_none(),
+        "Tauri must keep hashing the inline script and style into the CSP"
+    );
+    assert!(
+        security.get("assetProtocol").is_none(),
+        "the asset protocol is off, so img-src needs no asset: source"
+    );
+    let csp = security["csp"]
+        .as_str()
+        .expect("app.security.csp is a policy string, not null");
+    csp.split(';')
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(|d| {
+            let mut parts = d.split_whitespace().map(str::to_string);
+            let name = parts.next().expect("a directive name");
+            (name, parts.collect())
+        })
+        .collect()
+}
+
+#[test]
+fn the_csp_allows_only_the_apps_own_code_and_the_ipc() {
+    let directives = csp_directives();
+    let get = |name: &str| -> Vec<&str> {
+        let found: Vec<_> = directives.iter().filter(|(n, _)| n == name).collect();
+        assert_eq!(found.len(), 1, "exactly one {name} directive");
+        found[0].1.iter().map(String::as_str).collect()
+    };
+    for (name, sources) in &directives {
+        assert!(
+            !sources
+                .iter()
+                .any(|s| s == "'unsafe-eval'" || s == "'unsafe-hashes'" || s == "*"),
+            "{name} must not allow eval, unsafe hashes or everything: {sources:?}"
+        );
+    }
+    assert_eq!(get("default-src"), ["'self'"]);
+    assert_eq!(
+        get("script-src"),
+        ["'self'"],
+        "no 'unsafe-inline' or remote scripts"
+    );
+    assert_eq!(
+        get("style-src"),
+        ["'self'"],
+        "no 'unsafe-inline' styles either"
+    );
+    assert_eq!(get("img-src"), ["'self'"]);
+    assert_eq!(get("font-src"), ["'self'"]);
+    assert_eq!(
+        get("connect-src"),
+        ["ipc:", "http://ipc.localhost"],
+        "only the IPC origins (Linux and macOS, Windows): the updater, \
+         dialogs and links all go through Rust"
+    );
+    for name in ["object-src", "base-uri", "form-action", "frame-ancestors"] {
+        assert_eq!(get(name), ["'none'"], "{name}");
+    }
+    assert_eq!(directives.len(), 10, "{directives:?}");
+}
+
+/// The release overlay (`tauri.updater.conf.json`) merges into the config
+/// for distribution builds; it must not loosen or drop the policy.
+#[test]
+fn the_release_overlay_leaves_the_csp_alone() {
+    let overlay: Value = serde_json::from_str(include_str!("../tauri.updater.conf.json"))
+        .expect("tauri.updater.conf.json must be valid JSON");
+    assert!(overlay["app"]["security"].is_null(), "{overlay}");
+}
