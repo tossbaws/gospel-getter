@@ -8133,7 +8133,7 @@
                         })
                         .join(''))
                     .join('');
-                return `<div class="compare-grid" style="--compare-columns: ${compare.columns.length}">${heads}${rows}</div>`;
+                return `<div class="compare-grid" data-columns="${compare.columns.length}">${heads}${rows}</div>`;
             }
 
             function renderReadingPane(dto, compare) {
@@ -8181,6 +8181,11 @@
                 reading.columns = columns;
                 closeCopyMenu();
                 readingPane.innerHTML = renderReadingPane(lastDto, compare);
+                // The grid's column count goes through the CSSOM, not a
+                // style attribute in the markup, which the Content Security
+                // Policy would block.
+                const grid = readingPane.querySelector('.compare-grid');
+                if (grid) grid.style.setProperty('--compare-columns', grid.dataset.columns);
                 // Copy chapter copies the translation being read (while
                 // comparing, the left column).
                 fetchCopy('chapter', { translationCode: reading.translationCode, bookId: reading.bookId, chapter: reading.chapter });
