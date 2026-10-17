@@ -307,6 +307,8 @@ Install 2.16.0 by hand once, from the
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
 
+**What changed in each version** is in [CHANGELOG.md](CHANGELOG.md).
+
 ## Your data
 
 - Everything (translations, cross-references, reading position, bookmarks,
