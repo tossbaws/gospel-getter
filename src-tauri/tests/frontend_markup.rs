@@ -3685,9 +3685,10 @@ fn chapter_end_cross_references_are_quiet_links() {
 /// Version · 1611/1769 · public domain"), and compare's partner a row of
 /// buttons beside Compare. The words are --text, the code --accent and the
 /// rest --text-dim, on --panel-bg; the chosen one all --on-accent on
-/// --accent. Each AA in every theme, the focus ring 3:1.
+/// --accent. Each AA in every theme, the focus ring 3:1. About's credits
+/// are --text-dim on the panel, AA too.
 #[test]
-fn the_translation_chooser_is_accessible_and_uses_tested_theme_colors() {
+fn the_translation_chooser_and_credits_are_accessible_and_use_tested_theme_colors() {
     assert!(HTML.contains(
         r#"<div id="translation-choices" class="translation-list" role="radiogroup" aria-labelledby="translation-label"></div>"#
     ));
@@ -3697,6 +3698,7 @@ fn the_translation_chooser_is_accessible_and_uses_tested_theme_colors() {
     let render = function_body("renderAa");
     assert!(render.contains("btn.setAttribute('role', 'radio');"));
     assert!(render.contains("dot.setAttribute('aria-hidden', 'true');"));
+    assert!(HTML.contains(r#"<ul id="about-credits" class="about-credits-list"></ul>"#));
 
     let rules = rules();
     // The screen rule naming `selector`, alone or in a list.
@@ -3714,6 +3716,7 @@ fn the_translation_chooser_is_accessible_and_uses_tested_theme_colors() {
         (".translation-code", "--accent"),
         (".translation-detail", "--text-dim"),
         (".translation-dot", "--text-dim"),
+        (".about-credits-list", "--text-dim"),
     ] {
         assert!(
             naming(selector)
@@ -3755,6 +3758,14 @@ fn the_translation_chooser_is_accessible_and_uses_tested_theme_colors() {
         assert!(
             ring >= 3.0,
             "theme `{theme}`: the focus ring is {ring:.2}:1"
+        );
+        let credits = contrast_ratio(
+            property(&props, "--text-dim"),
+            property(&props, "--option-bg"),
+        );
+        assert!(
+            credits >= 4.5,
+            "theme `{theme}`: About's credits are {credits:.2}:1"
         );
     }
 }

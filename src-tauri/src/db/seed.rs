@@ -12,6 +12,8 @@ pub struct TranslationSource {
     pub date: Option<&'static str>,
     /// Its licence, as the chooser shows it.
     pub licence: &'static str,
+    /// Where it comes from, as About credits it.
+    pub credit: &'static str,
     json: &'static str,
 }
 
@@ -34,6 +36,7 @@ pub const TRANSLATIONS: &[TranslationSource] = &[
         name: "King James Version",
         date: Some("1611/1769"),
         licence: "public domain",
+        credit: "King James Version (KJV), public domain, from the thiagobodruk/bible dataset",
         json: include_str!("../../data/kjv.json"),
     },
     TranslationSource {
@@ -41,6 +44,7 @@ pub const TRANSLATIONS: &[TranslationSource] = &[
         name: "Berean Standard Bible",
         date: Some("2023"),
         licence: "public domain",
+        credit: "Berean Standard Bible (BSB), public domain, berean.bible",
         json: include_str!("../../data/bsb.json"),
     },
     TranslationSource {
@@ -48,6 +52,7 @@ pub const TRANSLATIONS: &[TranslationSource] = &[
         name: "World English Bible",
         date: None,
         licence: "public domain",
+        credit: "World English Bible (WEB), public domain, from TehShrike/world-english-bible (via ebible.org)",
         json: include_str!("../../data/web.json"),
     },
 ];

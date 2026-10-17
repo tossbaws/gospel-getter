@@ -1060,6 +1060,22 @@
             outline-offset: 2px;
         }
 
+        /* The bundled texts' sources, as the README gives them: quiet, as
+           About's links are. */
+        .about-credits {
+            margin-top: 1rem;
+            padding-top: 0.8rem;
+            border-top: 1px solid var(--accent-dim);
+        }
+
+        .about-credits-list {
+            margin: 0;
+            padding-left: 1.1rem;
+            font-size: 0.8rem;
+            line-height: 1.45;
+            color: var(--text-dim);
+        }
+
         .about-links {
             margin-top: 1rem;
             padding-top: 0.8rem;
@@ -4899,6 +4915,10 @@
                     </div>
                 </div>
             </section>
+            <section class="about-credits" aria-labelledby="credits-label">
+                <h3 class="section-label" id="credits-label">Texts</h3>
+                <ul id="about-credits" class="about-credits-list"></ul>
+            </section>
             <p class="about-links"><a id="release-notes-link" href="https://github.com/tossbaws/gospel-getter/releases" hidden>Release notes</a> <span id="release-notes-status" class="data-status" role="status" aria-live="polite"></span></p>
         </div>
     </div>
@@ -7445,8 +7465,14 @@
                     .map((t) => {
                         const selected = t.code === home.currentTranslationCode ? ' selected' : '';
                         const date = t.date ? ` data-date="${escapeHtml(t.date)}"` : '';
-                        return `<option value="${escapeHtml(t.code)}"${selected}${date} data-licence="${escapeHtml(t.licence)}">${escapeHtml(t.name)}</option>`;
+                        return `<option value="${escapeHtml(t.code)}"${selected}${date} data-licence="${escapeHtml(t.licence)}" data-credit="${escapeHtml(t.credit)}">${escapeHtml(t.name)}</option>`;
                     })
+                    .join('');
+                // About credits each bundled text, in the same order, then
+                // the cross-references.
+                document.getElementById('about-credits').innerHTML = home.translations
+                    .map((t) => `<li>${escapeHtml(t.credit)}</li>`)
+                    .concat(['<li>Cross-references from OpenBible.info, CC BY 4.0</li>'])
                     .join('');
             }
 

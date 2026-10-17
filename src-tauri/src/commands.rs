@@ -129,6 +129,8 @@ pub struct TranslationDto {
     pub date: Option<String>,
     /// "public domain".
     pub licence: String,
+    /// Its line in About's credits.
+    pub credit: String,
 }
 
 impl From<&Translation> for TranslationDto {
@@ -139,6 +141,7 @@ impl From<&Translation> for TranslationDto {
             name: t.name.clone(),
             date: source.and_then(|s| s.date).map(str::to_string),
             licence: source.map_or("", |s| s.licence).to_string(),
+            credit: source.map_or_else(|| t.name.clone(), |s| s.credit.to_string()),
         }
     }
 }
@@ -3413,6 +3416,10 @@ mod tests {
                 ),
                 ("web", "World English Bible", None, "public domain"),
             ]
+        );
+        assert_eq!(
+            home.translations[1].credit,
+            "Berean Standard Bible (BSB), public domain, berean.bible"
         );
         assert_eq!(home.current_translation_code, "kjv");
 

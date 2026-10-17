@@ -3,7 +3,7 @@
 // apart from its text, lettered where Berean put them), compare with any
 // two translations (the one being read on the left, the chosen one beside
 // it, remembered and carried in a backup), the verses the BSB doesn't
-// number — against the real backend.
+// number, and About's credits — against the real backend.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -324,3 +324,16 @@ test('compare’s partner goes into a backup, and comes back from one', async ()
         assert.equal(app.storage()['gospel-getter-compare-with'], 'bsb');
     });
 });
+
+test('About credits every bundled text, and the cross-references', () =>
+    withApp({}, async (app) => {
+        const credits = [...el(app, 'about-credits').querySelectorAll('li')].map((li) => li.textContent);
+        assert.deepEqual(credits, [
+            'King James Version (KJV), public domain, from the thiagobodruk/bible dataset',
+            'Berean Standard Bible (BSB), public domain, berean.bible',
+            'World English Bible (WEB), public domain, from TehShrike/world-english-bible (via ebible.org)',
+            'Cross-references from OpenBible.info, CC BY 4.0',
+        ]);
+        assert.ok(el(app, 'about-panel').contains(el(app, 'about-credits')));
+        assert.equal(el(app, 'credits-label').textContent, 'Texts');
+    }));
