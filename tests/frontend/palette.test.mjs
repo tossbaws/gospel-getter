@@ -155,7 +155,7 @@ test('">" lists commands only, without searching', () =>
         await type(app, '> theme ma');
         assert.deepEqual(commandLabels(app), ['Theme: Matrix']);
         await type(app, '>');
-        assert.equal(commandLabels(app).length, 41);
+        assert.equal(commandLabels(app).length, 43);
         assert.equal(commandLabels(app)[0], 'Compare on');
         assert.equal(commandLabels(app).at(-1), 'Forward');
         await type(app, '>nothing like this');
@@ -179,7 +179,7 @@ test('commands match word prefixes, in any order, ignoring case', () =>
             ['open lib no', ['Open Library: Notes']],
             ['export', ['Export notes…', 'Export data…']],
             ['copy ch', ['Copy chapter', 'Copy chapter as…']],
-            ['next', ['Next chapter', 'Forward']],
+            ['next', ['Next chapter', 'Next book', 'Forward']],
             ['next ch', ['Next chapter']],
             ['translation bs', ['Translation: BSB']],
             // The translations' names are words too.

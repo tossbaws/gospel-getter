@@ -82,14 +82,16 @@ test('a picker jump records; Back and Forward return, and the webview’s own hi
         assert.equal(app.window.history.length, length);
     }));
 
-test('moving on isn’t a jump: ← and →, the end-of-chapter buttons, a neighbor’s heading, the translation and compare', () =>
+test('moving on isn’t a jump: ← and →, the end-of-chapter buttons, a neighbor’s heading, [ and ], the translation and compare', () =>
     withApp({ book: 'John', chapter: 3 }, async (app) => {
         await nothingThere(app, 'ArrowLeft', 'Nothing earlier in this session.');
         await waitFor(app, () => app.key('ArrowRight'));
         await waitFor(app, () => app.key('ArrowLeft'));
         await waitFor(app, () => app.click(app.document.querySelector('.chapter-step-next')));
         await waitFor(app, () => app.click(app.document.querySelector('.chapter-side-prev .chapter-heading-link')));
-        assert.equal(app.heading(), 'John 3');
+        await waitFor(app, () => app.key(']'));
+        await waitFor(app, () => app.key('['));
+        assert.equal(app.heading(), 'John 1');
         app.open('aa');
         await waitFor(app, () => app.click(app.document.querySelector('#translation-choices [data-value="web"]')));
         app.key('Escape', {}, app.document.activeElement);

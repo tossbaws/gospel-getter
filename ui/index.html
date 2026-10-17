@@ -8314,6 +8314,16 @@
                     reason: inner && inner.dataset.prevBook ? null : 'This is the Bible’s first chapter',
                     run: () => turnChapter('prev'),
                 });
+                add('next-book', 'Next book', {
+                    key: ']',
+                    reason: lastDto && lastDto.nextBook ? null : 'This is the Bible’s last book',
+                    run: () => stepBook('next'),
+                });
+                add('previous-book', 'Previous book', {
+                    key: '[',
+                    reason: lastDto && lastDto.prevBook ? null : 'This is the Bible’s first book',
+                    run: () => stepBook('prev'),
+                });
                 add('back', 'Back', {
                     key: 'Alt+←', keys: 'Alt+ArrowLeft', words: 'history previous passage',
                     reason: canGoHistory(-1) ? null : HISTORY_ENDS[-1],
@@ -8943,6 +8953,21 @@
                     return;
                 }
 
+                // j and k select the next and previous verse; with Shift,
+                // they extend the selection.
+                if (plain && (event.key === 'j' || event.key === 'J' || event.key === 'k' || event.key === 'K')) {
+                    event.preventDefault();
+                    stepSelection(event.key.toLowerCase() === 'j' ? 1 : -1, event.shiftKey);
+                    return;
+                }
+
+                // [ and ] go to the previous and next book, at chapter 1.
+                if (plain && (event.key === '[' || event.key === ']')) {
+                    event.preventDefault();
+                    stepBook(event.key === '[' ? 'prev' : 'next');
+                    return;
+                }
+
                 // C toggles compare, through Aa's own toggle.
                 if (plain && !event.shiftKey && (event.key === 'c' || event.key === 'C')) {
                     document.getElementById('compare-btn').click();
@@ -8963,6 +8988,79 @@
                 } else if (which === 'next' && inner.dataset.nextBook) {
                     loadReading(inner.dataset.nextBook, inner.dataset.nextChapter);
                 }
+            }
+
+            // [ and ]: chapter 1 of the book before or after, from the top
+            // (the backend names them; see prevBook and nextBook). Not a
+            // jump: like ← and →, it moves on from where the reader is.
+            function stepBook(which) {
+                if (!lastDto || !reading) return;
+                const book = which === 'prev' ? lastDto.prevBook : lastDto.nextBook;
+                if (!book) {
+                    setDataStatus(`${reading.bookName} is the Bible’s ${which === 'prev' ? 'first' : 'last'} book.`);
+                    return;
+                }
+                loadReading(book.bookId, book.chapter).then((loaded) => {
+                    if (loaded) window.scrollTo(0, 0);
+                });
+            }
+
+            // j and k: the verse after or before the selection, in the
+            // reading column (the left one while comparing), skipping any
+            // the translation doesn't number; never past the chapter's
+            // first or last verse. With no selection there, j takes the
+            // first verse in view and k the last. With `extend` (Shift),
+            // the selection's moving end goes instead, as Shift-click
+            // moves it. The page scrolls only as far as the verse needs.
+            function stepSelection(step, extend) {
+                if (!reading) return;
+                const code = reading.translationCode;
+                const numbers = columnVerses(code).map((v) => v.number).sort((a, b) => a - b);
+                if (!numbers.length) return;
+                if (!selection || selection.translationCode !== code) {
+                    const n = verseInView(code, step > 0 ? 'first' : 'last')
+                        ?? (step > 0 ? numbers[0] : numbers[numbers.length - 1]);
+                    selectVerses(code, n, n);
+                    revealVerse(code, n);
+                    return;
+                }
+                const moving = selection.anchor === selection.start ? selection.end : selection.start;
+                const from = extend ? moving : (step > 0 ? selection.end : selection.start);
+                const next = numbers[numbers.indexOf(from) + step];
+                if (next == null) return;
+                if (extend) selectVerses(code, selection.anchor, next);
+                else selectVerses(code, next, next);
+                revealVerse(code, next);
+            }
+
+            function viewTop() {
+                return document.getElementById('top-bar').getBoundingClientRect().bottom;
+            }
+
+            // At least this much of a verse shows for it to count as in
+            // view: a line, not the last few pixels of one under the bar.
+            const IN_VIEW = 24;
+
+            // The first or last verse of the column that's in view, or
+            // null when none is (or there's no layout to tell).
+            function verseInView(code, which) {
+                const top = viewTop();
+                const seen = [...document.querySelectorAll(`${SELECTABLE}[data-translation="${code}"]`)].filter((el) => {
+                    const r = el.getBoundingClientRect();
+                    return r.height > 0 && r.bottom >= top + IN_VIEW && r.top <= window.innerHeight - IN_VIEW;
+                });
+                const el = which === 'first' ? seen[0] : seen[seen.length - 1];
+                return el ? Number(el.dataset.verse) : null;
+            }
+
+            // Scrolls just enough to bring the verse's lines into view.
+            function revealVerse(code, number) {
+                const el = verseElement(code, number);
+                if (!el) return;
+                const r = el.getBoundingClientRect();
+                const top = viewTop() + CARD_GAP;
+                if (r.top < top) window.scrollBy(0, r.top - top);
+                else if (r.bottom > window.innerHeight - CARD_GAP) window.scrollBy(0, Math.min(r.bottom - window.innerHeight + CARD_GAP, r.top - top));
             }
 
             // ---- Passage history, for this session only. It records
