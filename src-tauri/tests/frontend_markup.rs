@@ -2976,6 +2976,87 @@ fn width_is_a_display_setting_in_aa() {
     );
 }
 
+/// `#rrggbb` with `rgb` ("242, 193, 78") laid over it at `alpha`.
+fn blend(under: &str, rgb: &str, alpha: f64) -> String {
+    let under = under.trim_start_matches('#');
+    let over: Vec<f64> = rgb.split(',').map(|c| c.trim().parse().unwrap()).collect();
+    (0..3)
+        .map(|i| {
+            let below = f64::from(u8::from_str_radix(&under[2 * i..2 * i + 2], 16).unwrap());
+            format!(
+                "{:02x}",
+                (alpha * over[i] + (1.0 - alpha) * below).round() as u8
+            )
+        })
+        .fold("#".to_owned(), |hex, c| hex + &c)
+}
+
+/// The command palette and Copy as… are AA in every theme: the options'
+/// `--text`, and the group headings', reasons' and keys' `--text-dim`, on
+/// the opaque `--option-bg`; and on the active option's tint (`--accent`
+/// at 12% over it), `--text` only, so a disabled command's name and
+/// reason turn `--text` there. Copy chapter… is the keys' hint's
+/// `--text-dim` on the page (AA on every stop, tested with the hint).
+#[test]
+fn the_palette_and_copy_as_are_aa_in_every_theme() {
+    let rules = rules();
+    for selector in [
+        ".palette-group-label",
+        ".palette-reason",
+        ".palette-key kbd",
+        ".chapter-copy-btn",
+    ] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains("color: var(--text-dim)"),
+            "{selector}"
+        );
+    }
+    for selector in [".search-command", ".copy-as-item"] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains("color: var(--text)"),
+            "{selector}"
+        );
+    }
+    assert!(
+        screen_rule(&rules, ".copy-as-menu")
+            .body
+            .contains("background: var(--option-bg)")
+    );
+    let tint = "rgba(var(--accent-rgb), 0.12)";
+    assert!(
+        screen_rule(&rules, ".search-command:hover,\n        .search-command.is-active,\n        .search-result.is-active")
+            .body
+            .contains(tint)
+    );
+    assert!(
+        screen_rule(&rules, ".search-command.is-active .palette-label,\n        .search-command.is-active .palette-reason")
+            .body
+            .contains("color: var(--text)")
+    );
+    for (theme, props) in theme_palettes(&rules) {
+        let get = |name: &str| property(&props, name).to_owned();
+        let panel = get("--option-bg");
+        let active = blend(&panel, &get("--accent-rgb"), 0.12);
+        for (what, fg, bg) in [
+            ("text on the panel", get("--text"), panel.clone()),
+            ("dim text on the panel", get("--text-dim"), panel.clone()),
+            ("text on the active option", get("--text"), active.clone()),
+        ] {
+            let ratio = contrast_ratio(&fg, &bg);
+            assert!(ratio >= 4.5, "{theme}: {what} is {ratio:.2}:1");
+        }
+        // Why the active option's dim text turns --text: it isn't AA there
+        // in every theme.
+        if theme == "matrix" {
+            assert!(contrast_ratio(&get("--text-dim"), &active) < 4.5);
+        }
+    }
+}
+
 /// Ctrl+= (and Ctrl++, numpad +) and Ctrl+- (numpad -) step the text size,
 /// Ctrl+0 resets it, through Aa's control; their default (the page zoom) is
 /// always prevented, and in a field they change nothing. A brief status
@@ -2994,15 +3075,20 @@ fn the_text_size_keys_step_aa_and_never_zoom_the_page() {
         assert!(keys.contains(key), "{key}");
     }
     let at = HTML.find("var step = sizeKey(event);").unwrap();
-    let body = &HTML[at..at + HTML[at..].find("showTextSize();").unwrap()];
+    let body = &HTML[at..at + HTML[at..].find("textSizeShortcut(step);").unwrap()];
     let prevent = body.find("event.preventDefault();").unwrap();
     let typing = body.find("INPUT|TEXTAREA|SELECT").unwrap();
     assert!(
         prevent < typing,
         "the page zoom is prevented even in a field"
     );
-    assert!(body.contains("choose(textSizeSelect, 'medium');"));
-    assert!(body.contains("stepTextSize(step);"));
+    // The keys' step, which the command palette's Text size commands run
+    // too (see gospelGetterControls).
+    let step = function_body("textSizeShortcut");
+    assert!(step.contains("choose(textSizeSelect, 'medium');"));
+    assert!(step.contains("stepTextSize(step);"));
+    assert!(step.contains("showTextSize();"));
+    assert!(HTML.contains("textSize: textSizeShortcut,"));
     assert!(HTML.contains(r#"<p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>"#));
 }
 

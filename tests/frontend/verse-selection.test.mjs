@@ -151,6 +151,12 @@ test('markup-like text is rendered as text and copied raw (synthetic DTO)', () =
                     return v.number === 1 ? { ...v, text, parts: [{ kind: 'text', text }] } : v;
                 }),
             }),
+            // The text copied comes from the backend's formatter.
+            alter: {
+                get_copy_text: (copy) => (copy.reference === 'John 3:1'
+                    ? { ...copy, formats: { ...copy.formats, reference: `SYNTHETIC <b>not bold</b> & "q" 'a' ${EM} John 3:1 (KJV)` } }
+                    : copy),
+            },
         },
         async (app) => {
             assert.equal(app.verse(1).querySelector('b'), null, 'verse text must be escaped, not parsed');
@@ -186,7 +192,7 @@ test('successful copy shows a brief confirmation', () =>
     withApp({ book: 'John', chapter: 3 }, async (app) => {
         app.click(app.verse(16));
         await app.copyButton();
-        assert.equal(app.status().textContent, 'Copied');
+        assert.equal(app.status().textContent, 'Copied John 3:16');
         assert.equal(app.status().getAttribute('role'), 'status');
         assert.ok(!app.status().classList.contains('is-error'));
         await new Promise((r) => setTimeout(r, 2600));
@@ -204,7 +210,7 @@ test('a rejected clipboard write shows an error instead of failing silently', ()
         // And recovers once the clipboard works again.
         app.setClipboard('ok');
         await app.copyButton();
-        assert.equal(app.status().textContent, 'Copied');
+        assert.equal(app.status().textContent, 'Copied John 3:16');
         assert.ok(!app.status().classList.contains('is-error'));
     }));
 
@@ -226,12 +232,13 @@ test('Ctrl+C copies the selection; without one it is left alone', () =>
 
         app.click(app.verse(16));
         app.click(app.verse(17), { shiftKey: true });
+        await app.idle(0);
         const copy = app.key('C', { ctrlKey: true });
         assert.ok(copy.defaultPrevented);
         await settle();
         const text = [16, 17].map((n) => storedVerse('web', 'John', 3, n)).join(' ');
         assertSameBytes(app.clipboardWrites[0], `${text} ${EM} John 3:16${EN}17 (WEB)`);
-        assert.equal(app.status().textContent, 'Copied');
+        assert.equal(app.status().textContent, `Copied John 3:16${EN}17`);
 
         // Other modifier combinations aren't a copy.
         app.key('c', { ctrlKey: true, shiftKey: true });

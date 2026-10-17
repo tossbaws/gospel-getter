@@ -256,17 +256,24 @@ test('arrow keys move through results without turning the chapter', () =>
     withApp({ book: 'John', chapter: 3 }, async (app) => {
         await app.search('shepherd');
         const [first, second] = app.searchResults();
-        app.key('ArrowDown', {}, app.searchInput());
-        assert.equal(app.document.activeElement, first);
-        app.key('ArrowDown', {}, first);
-        assert.equal(app.document.activeElement, second);
-        app.key('ArrowUp', {}, second);
-        assert.equal(app.document.activeElement, first);
-        app.key('ArrowRight', {}, first);
-        app.key('ArrowLeft', {}, first);
+        const input = app.searchInput();
+        const active = () => input.getAttribute('aria-activedescendant');
+        // Focus stays in the box; the active result is its active descendant.
+        assert.equal(active(), null, 'verses first: nothing is active until ↓');
+        app.key('ArrowDown', {}, input);
+        assert.equal(app.document.activeElement, input);
+        assert.equal(active(), first.id);
+        assert.equal(first.getAttribute('aria-selected'), 'true');
+        app.key('ArrowDown', {}, input);
+        assert.equal(active(), second.id);
+        assert.equal(first.getAttribute('aria-selected'), 'false');
+        app.key('ArrowUp', {}, input);
+        assert.equal(active(), first.id);
+        app.key('ArrowRight', {}, input);
+        app.key('ArrowLeft', {}, input);
         await app.idle(0);
         assert.equal(app.heading(), 'John 3');
-        app.key('Escape', {}, first);
+        app.key('Escape', {}, input);
         assert.equal(app.searchPanel().hidden, true);
     }));
 

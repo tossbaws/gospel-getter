@@ -6,6 +6,7 @@ pub mod commands;
 pub mod db;
 pub mod domain;
 pub mod notes_export;
+pub mod passage_copy;
 pub mod reader_data;
 #[cfg(test)]
 mod reader_data_tests;
@@ -61,6 +62,7 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::get_chapters,
         commands::get_reading,
         commands::get_passage,
+        commands::get_copy_text,
         commands::list_bookmarks,
         commands::add_bookmark,
         commands::remove_bookmark,
@@ -291,6 +293,27 @@ mod ipc_tests {
         .unwrap();
         assert_eq!(passage["verses"][0]["number"], 8);
         assert_eq!(passage["reference"], "Romans 5:8");
+
+        let copied = invoke(
+            &webview,
+            "get_copy_text",
+            json!({ "translationCode": "web", "bookId": 43, "chapter": 3, "start": 16, "end": 17 }),
+        )
+        .unwrap();
+        assert_eq!(copied["reference"], "John 3:16\u{2013}17");
+        assert!(
+            copied["formats"]["numbered"]
+                .as_str()
+                .unwrap()
+                .starts_with("16 ")
+        );
+        let chapter = invoke(
+            &webview,
+            "get_copy_text",
+            json!({ "translationCode": "kjv", "bookId": 19, "chapter": 23 }),
+        )
+        .unwrap();
+        assert_eq!(chapter["reference"], "Psalms 23");
 
         let id = invoke(
             &webview,
