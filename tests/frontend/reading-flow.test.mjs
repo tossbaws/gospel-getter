@@ -56,9 +56,9 @@ test('after the last verse come the chapters before and after, as buttons, then 
         assert.equal(end.previousElementSibling.lastElementChild, verses[verses.length - 1]);
         assert.ok(end.nextElementSibling.classList.contains('nav-hint'));
         const hint = end.nextElementSibling;
-        assert.equal(hint.textContent.replace(/\s+/g, ' '), 'Use Left arrow and Right arrow to move a chapter at a time, / to search, C to compare translations.');
-        // Four key caps alike; the arrows drawn, their names for screen readers.
-        assert.deepEqual([...hint.querySelectorAll('kbd')].map((k) => k.textContent), ['Left arrow', 'Right arrow', '/', 'C']);
+        assert.equal(hint.textContent.replace(/\s+/g, ' '), 'Use Left arrow and Right arrow to move a chapter at a time, and ? for all keyboard shortcuts.');
+        // Three key caps alike; the arrows drawn, their names for screen readers.
+        assert.deepEqual([...hint.querySelectorAll('kbd')].map((k) => k.textContent), ['Left arrow', 'Right arrow', '?']);
         assert.equal(hint.querySelectorAll('kbd svg[aria-hidden="true"]').length, 2);
         assert.ok([...hint.querySelectorAll('kbd .visually-hidden')].every((n) => n.nextElementSibling.tagName === 'svg'));
         assert.equal(app.document.querySelectorAll('.nav-hint').length, 1, 'one hint, in the chapter');

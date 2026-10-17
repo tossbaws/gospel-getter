@@ -1237,6 +1237,17 @@
             border-radius: var(--radius-s);
         }
 
+        .palette-key kbd svg {
+            width: 1em;
+            height: 1em;
+            vertical-align: -0.15em;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.6;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
         .search-command:hover,
         .search-command.is-active,
         .search-result.is-active {
@@ -1503,6 +1514,81 @@
             from {
                 opacity: 0;
                 transform: translateY(6px);
+            }
+        }
+
+        /* The keyboard shortcuts: a modal sheet of groups, each a list of
+           key caps (the chapter-end hint's) and what they do, in the UI
+           sans, scrolling inside on a small window. */
+        .shortcuts-panel {
+            width: min(40rem, 100%);
+            font-family: var(--font-ui);
+        }
+
+        .shortcuts-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1rem 1.1rem 0.6rem 1.4rem;
+            border-bottom: 1px solid var(--accent-dim);
+        }
+
+        .shortcuts-title {
+            font-size: 1.1rem;
+            font-weight: normal;
+            color: var(--accent);
+        }
+
+        .shortcuts-body {
+            padding-bottom: 1rem;
+        }
+
+        .shortcuts-body:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+        }
+
+        .shortcut-group + .shortcut-group {
+            margin-top: 1rem;
+        }
+
+        .shortcut-group-title {
+            font-size: 0.75rem;
+            font-weight: bold;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 0.35rem;
+        }
+
+        .shortcut-row {
+            display: grid;
+            grid-template-columns: minmax(9rem, auto) 1fr;
+            gap: 0.2rem 1rem;
+            align-items: baseline;
+            padding: 0.25rem 0;
+            font-size: 0.85rem;
+            border-bottom: 1px solid rgba(var(--accent-rgb), 0.12);
+        }
+
+        .shortcut-keys {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            white-space: nowrap;
+        }
+
+        .shortcut-does {
+            color: var(--text);
+        }
+
+        .key-plus {
+            margin: 0 0.1em;
+        }
+
+        @media (max-width: 480px) {
+            .shortcut-row {
+                grid-template-columns: 1fr;
             }
         }
 
@@ -3709,7 +3795,8 @@
             margin-top: 0.75rem;
         }
 
-        .nav-hint kbd {
+        .nav-hint kbd,
+        .shortcut-keys kbd {
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -3727,7 +3814,8 @@
             border-radius: var(--radius-s);
         }
 
-        .nav-hint kbd svg {
+        .nav-hint kbd svg,
+        .shortcut-keys kbd svg {
             width: 1em;
             height: 1em;
             fill: none;
@@ -4994,6 +5082,7 @@
                 <button type="button" id="import-data-btn" class="menu-item" role="menuitem" tabindex="-1">Import data…</button>
                 <div class="menu-separator" role="separator"></div>
                 <button type="button" id="welcome-btn" class="menu-item" role="menuitem" tabindex="-1">Show welcome</button>
+                <button type="button" id="shortcuts-btn" class="menu-item" role="menuitem" tabindex="-1" aria-keyshortcuts="?">Keyboard shortcuts</button>
                 <button type="button" id="about-btn" class="menu-item" role="menuitem" tabindex="-1">About Gospel Getter</button>
             </div>
         </div>
@@ -5111,6 +5200,15 @@
             <div class="welcome-buttons modal-buttons">
                 <button type="button" id="welcome-skip" class="reader-mode-btn">Skip</button>
             </div>
+        </div>
+    </div>
+    <div id="shortcuts-overlay" class="modal-overlay" hidden>
+        <div id="shortcuts-panel" class="modal-panel shortcuts-panel" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+            <div class="shortcuts-head">
+                <h2 id="shortcuts-title" class="shortcuts-title">Keyboard shortcuts</h2>
+                <button type="button" id="shortcuts-close" class="panel-close" aria-label="Close keyboard shortcuts" title="Close (Esc)">&times;</button>
+            </div>
+            <div id="shortcuts-body" class="modal-body shortcuts-body" tabindex="0" role="region" aria-labelledby="shortcuts-title"></div>
         </div>
     </div>
     <div id="note-overlay" class="modal-overlay" hidden>
@@ -7915,7 +8013,7 @@
                     return `<button type="button" class="chapter-step chapter-step-${which}" data-book="${side.bookId}" data-chapter="${side.chapter}" aria-label="${label}">${text}</button>`;
                 };
                 return `<nav class="chapter-end" aria-label="Previous and next chapter">${step(dto.prev, 'prev')}${step(dto.next, 'next')}</nav>
-                    <p class="nav-hint">Use ${hintKey('Left arrow', ARROW_LEFT)} and ${hintKey('Right arrow', ARROW_RIGHT)} to move a chapter at a time, ${hintKey('/')} to search, ${hintKey('C')} to compare translations.</p>
+                    <p class="nav-hint">Use ${hintKey('Left arrow', ARROW_LEFT)} and ${hintKey('Right arrow', ARROW_RIGHT)} to move a chapter at a time, and ${hintKey('?')} for all keyboard shortcuts.</p>
                     <p class="chapter-copy"><button type="button" class="chapter-copy-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="copy-as-menu">Copy chapter…</button></p>`;
             }
 
@@ -8145,6 +8243,128 @@
                 renderCurrent();
             });
 
+            // ---- Keyboard shortcuts: every key the app answers, in one
+            // table. The shortcuts sheet (?) lists it, the palette's
+            // commands show their keys from it (by `id`), and the key
+            // handlers' keys are each in some row's `handles` (the
+            // KeyboardEvent key or code values it covers; a test checks
+            // every one the handlers compare against is listed). `keys`
+            // are the ways to press it, each a list of key caps.
+            const SHORTCUT_GROUPS = ['Reading', 'Selection', 'Search & palette', 'Panels', 'Text & display', 'History'];
+            const SHORTCUTS = [
+                { id: 'previous-chapter', group: 'Reading', keys: [['←']], aria: 'ArrowLeft', does: 'Previous chapter', handles: ['ArrowLeft'] },
+                { id: 'next-chapter', group: 'Reading', keys: [['→']], aria: 'ArrowRight', does: 'Next chapter', handles: ['ArrowRight'] },
+                { id: 'previous-book', group: 'Reading', keys: [['[']], aria: '[', does: 'Previous book, at chapter 1', handles: ['['] },
+                { id: 'next-book', group: 'Reading', keys: [[']']], aria: ']', does: 'Next book, at chapter 1', handles: [']'] },
+                { id: 'picker', group: 'Reading', keys: [['G']], aria: 'G', does: 'Choose a book and chapter', handles: ['g', 'G'] },
+                { id: 'compare', group: 'Reading', keys: [['C']], aria: 'C', does: 'Compare translations, on or off', handles: ['c', 'C'] },
+                { id: 'next-verse', group: 'Selection', keys: [['j']], aria: 'J', does: 'Select the next verse', handles: ['j', 'J'] },
+                { id: 'previous-verse', group: 'Selection', keys: [['k']], aria: 'K', does: 'Select the previous verse', handles: ['k', 'K'] },
+                { id: 'extend-down', group: 'Selection', keys: [['Shift', 'j']], aria: 'Shift+J', does: 'Extend the selection down a verse', handles: [] },
+                { id: 'extend-up', group: 'Selection', keys: [['Shift', 'k']], aria: 'Shift+K', does: 'Extend the selection up a verse', handles: [] },
+                { id: 'copy', group: 'Selection', keys: [['Ctrl', 'C']], aria: 'Control+C', does: 'Copy the selected verses with their reference', handles: ['c'] },
+                { id: 'copy-as', group: 'Selection', keys: [['Ctrl', 'Shift', 'C']], aria: 'Control+Shift+C', does: 'Copy as…: with verse numbers, as Markdown, or plain', handles: ['c'] },
+                { id: 'note', group: 'Selection', keys: [['N']], aria: 'N', does: 'Add a note to the selected verses', handles: ['n', 'N'] },
+                { id: 'clear-selection', group: 'Selection', keys: [['Esc']], aria: 'Escape', does: 'Clear the selection', handles: ['Escape'] },
+                { id: 'search', group: 'Search & palette', keys: [['/'], ['Ctrl', 'K']], aria: '/ Control+K', does: 'Search, go to a reference, or run a command', handles: ['/', 'k'] },
+                { id: 'commands-only', group: 'Search & palette', keys: [['>']], aria: '>', does: 'Typed first in the box: commands only', handles: [] },
+                { id: 'palette-move', group: 'Search & palette', keys: [['↓'], ['↑']], aria: 'ArrowDown ArrowUp', does: 'Move through the results and commands', handles: [] },
+                { id: 'palette-run', group: 'Search & palette', keys: [['Enter']], aria: 'Enter', does: 'Go there, or run the command', handles: [] },
+                { id: 'library', group: 'Panels', keys: [['Ctrl', 'B']], aria: 'Control+B', does: 'Open or close the Library', handles: ['b'] },
+                { id: 'shortcuts', group: 'Panels', keys: [['?']], aria: '?', does: 'These keyboard shortcuts', handles: ['?'] },
+                { id: 'close', group: 'Panels', keys: [['Esc']], aria: 'Escape', does: 'Close the search box, a panel or a popover, one at a time', handles: ['Escape'] },
+                { id: 'text-larger', group: 'Text & display', keys: [['Ctrl', '=']], aria: 'Control+=', does: 'Larger text', handles: ['=', '+', 'NumpadAdd'] },
+                { id: 'text-smaller', group: 'Text & display', keys: [['Ctrl', '-']], aria: 'Control+-', does: 'Smaller text', handles: ['-', '_', 'NumpadSubtract'] },
+                { id: 'text-medium', group: 'Text & display', keys: [['Ctrl', '0']], aria: 'Control+0', does: 'Medium text', handles: ['0', 'Numpad0'] },
+                { id: 'reader-exit', group: 'Text & display', keys: [['Esc']], aria: 'Escape', does: 'Leave reading mode', handles: ['Escape'] },
+                { id: 'back', group: 'History', keys: [['Alt', '←']], aria: 'Alt+ArrowLeft', does: 'Back to the passage you jumped from', handles: ['ArrowLeft'] },
+                { id: 'forward', group: 'History', keys: [['Alt', '→']], aria: 'Alt+ArrowRight', does: 'Forward again', handles: ['ArrowRight'] },
+            ];
+            window.gospelGetterShortcuts = SHORTCUTS;
+
+            function shortcut(id) {
+                return SHORTCUTS.find((s) => s.id === id) || null;
+            }
+
+            // The arrows are drawn, as in the chapter-end hint (the UI
+            // sans's are tiny); screen readers hear the key's name.
+            const ARROW_UP = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 13V3M4 7l4-4 4 4"/></svg>';
+            const ARROW_DOWN = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 3v10M4 9l4 4 4-4"/></svg>';
+            const CAP_NAMES = { '←': ['Left arrow', () => ARROW_LEFT], '→': ['Right arrow', () => ARROW_RIGHT], '↑': ['Up arrow', () => ARROW_UP], '↓': ['Down arrow', () => ARROW_DOWN] };
+
+            function capsHtml(keys) {
+                return keys
+                    .map((combo) => combo
+                        .map((cap) => (CAP_NAMES[cap] ? hintKey(CAP_NAMES[cap][0], CAP_NAMES[cap][1]()) : hintKey(escapeHtml(cap))))
+                        .join('<span class="key-plus" aria-hidden="true">+</span>'))
+                    .join(' <span class="key-or">or</span> ');
+            }
+
+            const shortcutsOverlay = document.getElementById('shortcuts-overlay');
+            const shortcutsPanel = document.getElementById('shortcuts-panel');
+            const shortcutsBody = document.getElementById('shortcuts-body');
+            const shortcutsClose = document.getElementById('shortcuts-close');
+            let shortcutsReturn = null;
+
+            function renderShortcuts() {
+                shortcutsBody.innerHTML = SHORTCUT_GROUPS.map((group, i) => `<section class="shortcut-group" aria-labelledby="shortcut-group-${i}">
+                    <h3 class="shortcut-group-title" id="shortcut-group-${i}">${escapeHtml(group)}</h3>
+                    <dl class="shortcut-list">${SHORTCUTS.filter((s) => s.group === group).map((s) => `<div class="shortcut-row" data-shortcut="${s.id}">
+                        <dt class="shortcut-keys">${capsHtml(s.keys)}</dt>
+                        <dd class="shortcut-does">${escapeHtml(s.does)}</dd>
+                    </div>`).join('')}</dl>
+                </section>`).join('');
+            }
+
+            // The sheet is modal: Tab stays inside, Escape closes it, and
+            // focus goes back to where it was (or ☰, opened from there).
+            function openShortcuts(opener = null) {
+                if (!shortcutsOverlay.hidden) return;
+                const active = document.activeElement;
+                shortcutsReturn = opener || (active && active !== document.body ? active : null);
+                if (!searchPanel.hidden) setSearchOpen(false);
+                closeSurfaces(false);
+                renderShortcuts();
+                shortcutsOverlay.hidden = false;
+                shortcutsBody.scrollTop = 0;
+                shortcutsClose.focus();
+            }
+
+            function closeShortcuts() {
+                if (shortcutsOverlay.hidden) return;
+                shortcutsOverlay.hidden = true;
+                const back = shortcutsReturn;
+                shortcutsReturn = null;
+                if (back && back.isConnected && !back.closest('[hidden]')) back.focus({ preventScroll: true });
+            }
+
+            shortcutsClose.addEventListener('click', closeShortcuts);
+            document.getElementById('shortcuts-btn').addEventListener('click', () => openShortcuts(menuToggle));
+            // A click on the dimmed page behind it closes it.
+            shortcutsOverlay.addEventListener('click', function (event) {
+                if (event.target === shortcutsOverlay) closeShortcuts();
+            });
+
+            // While it's open it has the keyboard (on window, capturing,
+            // as the welcome does): none of the reader's shortcuts run.
+            window.addEventListener('keydown', function (event) {
+                if (shortcutsOverlay.hidden) return;
+                event.stopPropagation();
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeShortcuts();
+                } else if (event.key === 'Tab') {
+                    const stops = [shortcutsClose, shortcutsBody];
+                    const active = document.activeElement;
+                    const at = stops.indexOf(active);
+                    event.preventDefault();
+                    const next = at === -1
+                        ? stops[0]
+                        : stops[(at + (event.shiftKey ? -1 : 1) + stops.length) % stops.length];
+                    next.focus();
+                }
+            }, true);
+
             // ---- Search and go-to-reference (GH-12), and the command
             // palette, in one box. As the reader types, the results come
             // in three groups: "Go to" (the reference typed, as the
@@ -8188,10 +8408,13 @@
 
             function paletteCommands() {
                 const list = [];
-                // `key` is shown; `keys` is its aria-keyshortcuts; `words`
-                // are other words it's found by.
-                const add = (id, label, { key = '', keys = '', words = '', reason = null, run }) => {
-                    list.push({ id, label, key, keys: keys || key, words, reason, run });
+                // `shortcut` is its row in SHORTCUTS, whose first way to
+                // press it is shown (and all of it is its
+                // aria-keyshortcuts); `words` are other words it's found by.
+                const add = (id, label, { shortcut: shortcutId = '', words = '', reason = null, run }) => {
+                    const row = shortcutId ? shortcut(shortcutId) : null;
+                    const key = row ? row.keys[0].join('+') : '';
+                    list.push({ id, label, key, keys: row ? row.aria : '', words, reason, run });
                 };
                 const comparing = isComparing();
                 const readerMode = root.dataset.readerMode === 'on';
@@ -8200,12 +8423,12 @@
                 const partner = window.gospelGetterComparePartner ? window.gospelGetterComparePartner() : null;
 
                 add('compare', comparing ? 'Compare off' : 'Compare on', {
-                    key: 'C', words: 'translations side by side',
+                    shortcut: 'compare', words: 'translations side by side',
                     reason: !comparing && !partner ? 'There’s only one translation' : null,
                     run: clickControl('compare-btn'),
                 });
                 add('reader-mode', readerMode ? 'Exit reading mode' : 'Reading mode', {
-                    key: readerMode ? 'Esc' : '', keys: readerMode ? 'Escape' : '', words: 'distraction free focus',
+                    shortcut: readerMode ? 'reader-exit' : '', words: 'distraction free focus',
                     run: clickControl(readerMode ? 'reader-exit' : 'reader-mode-btn'),
                 });
                 optionsOf('layout-select').forEach((o) => add(`layout-${o.value}`, `Layout: ${o.textContent}`, {
@@ -8220,17 +8443,17 @@
                 const sizes = optionsOf('text-size-select');
                 const size = sizes.findIndex((o) => o.value === valueOf('text-size-select'));
                 add('text-larger', 'Text size: Larger', {
-                    key: 'Ctrl+=', keys: 'Control+=', words: 'bigger increase font',
+                    shortcut: 'text-larger', words: 'bigger increase font',
                     reason: size >= sizes.length - 1 ? 'Already the largest' : null,
                     run: () => controls().textSize(1),
                 });
                 add('text-smaller', 'Text size: Smaller', {
-                    key: 'Ctrl+-', keys: 'Control+-', words: 'decrease font',
+                    shortcut: 'text-smaller', words: 'decrease font',
                     reason: size <= 0 ? 'Already the smallest' : null,
                     run: () => controls().textSize(-1),
                 });
                 add('text-medium', 'Text size: Medium', {
-                    key: 'Ctrl+0', keys: 'Control+0', words: 'reset default font',
+                    shortcut: 'text-medium', words: 'reset default font',
                     reason: valueOf('text-size-select') === 'medium' ? IN_USE : null,
                     run: () => controls().textSize(0),
                 });
@@ -8258,7 +8481,7 @@
                     run: clickControl('sidebar-toggle'),
                 });
                 [['bookmarks', 'Bookmarks'], ['highlights', 'Highlights'], ['notes', 'Notes']].forEach(([tab, name]) => add(`library-${tab}`, `Open Library: ${name}`, {
-                    key: 'Ctrl+B', keys: 'Control+B',
+                    shortcut: 'library',
                     reason: readerMode ? 'Not in reading mode' : null,
                     run: () => {
                         if (surfaces().current() !== 'library') document.getElementById('library-toggle').click();
@@ -8305,34 +8528,38 @@
                 });
                 const inner = currentInner();
                 add('next-chapter', 'Next chapter', {
-                    key: '→', keys: 'ArrowRight',
+                    shortcut: 'next-chapter',
                     reason: inner && inner.dataset.nextBook ? null : 'This is the Bible’s last chapter',
                     run: () => turnChapter('next'),
                 });
                 add('previous-chapter', 'Previous chapter', {
-                    key: '←', keys: 'ArrowLeft',
+                    shortcut: 'previous-chapter',
                     reason: inner && inner.dataset.prevBook ? null : 'This is the Bible’s first chapter',
                     run: () => turnChapter('prev'),
                 });
                 add('next-book', 'Next book', {
-                    key: ']',
+                    shortcut: 'next-book',
                     reason: lastDto && lastDto.nextBook ? null : 'This is the Bible’s last book',
                     run: () => stepBook('next'),
                 });
                 add('previous-book', 'Previous book', {
-                    key: '[',
+                    shortcut: 'previous-book',
                     reason: lastDto && lastDto.prevBook ? null : 'This is the Bible’s first book',
                     run: () => stepBook('prev'),
                 });
                 add('back', 'Back', {
-                    key: 'Alt+←', keys: 'Alt+ArrowLeft', words: 'history previous passage',
+                    shortcut: 'back', words: 'history previous passage',
                     reason: canGoHistory(-1) ? null : HISTORY_ENDS[-1],
                     run: () => goHistory(-1),
                 });
                 add('forward', 'Forward', {
-                    key: 'Alt+→', keys: 'Alt+ArrowRight', words: 'history next passage',
+                    shortcut: 'forward', words: 'history next passage',
                     reason: canGoHistory(1) ? null : HISTORY_ENDS[1],
                     run: () => goHistory(1),
+                });
+                add('shortcuts', 'Keyboard shortcuts', {
+                    shortcut: 'shortcuts', words: 'keys help',
+                    run: () => openShortcuts(),
                 });
                 return list;
             }
@@ -8428,9 +8655,14 @@
                 renderPalette();
             }
 
+            // The arrows are drawn, as in the sheet (the UI sans's are
+            // tiny); the arrow itself stays in the key's text, unseen.
             function keyHtml(command) {
                 if (!command.key) return '';
-                return `<span class="palette-key"><span class="visually-hidden">, key </span><kbd>${escapeHtml(command.key)}</kbd></span>`;
+                const key = [...command.key]
+                    .map((c) => (CAP_NAMES[c] ? `<span class="visually-hidden">${c}</span>${CAP_NAMES[c][1]()}` : escapeHtml(c)))
+                    .join('');
+                return `<span class="palette-key"><span class="visually-hidden">, key </span><kbd>${key}</kbd></span>`;
             }
 
             // The listbox: each group a role="group" named by its heading,
@@ -8656,7 +8888,7 @@
                 // preferences script in <head> (and the lists' own
                 // handlers above); they're never navigation or a "click
                 // away" from a verse selection. Nor is the search panel.
-                if (event.target.closest('#top-bar, #picker, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-notes-overlay, #data-status')) {
+                if (event.target.closest('#top-bar, #picker, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-notes-overlay, #shortcuts-overlay, #data-status')) {
                     return;
                 }
 
@@ -8867,7 +9099,7 @@
                 // And while the import preview, About, the note panel or
                 // Export notes is open, nothing else responds to the
                 // keyboard (they handle their own keys).
-                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden || !exportNotesOverlay.hidden) {
+                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden || !exportNotesOverlay.hidden || !shortcutsOverlay.hidden) {
                     return;
                 }
 
@@ -8899,6 +9131,13 @@
                 if (event.altKey && !ctrl && !event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
                     event.preventDefault();
                     goHistory(event.key === 'ArrowLeft' ? -1 : 1);
+                    return;
+                }
+
+                // ? (Shift+/) opens the keyboard shortcuts; never search.
+                if (plain && event.key === '?') {
+                    event.preventDefault();
+                    openShortcuts();
                     return;
                 }
 

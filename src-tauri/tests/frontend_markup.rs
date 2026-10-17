@@ -2610,12 +2610,11 @@ fn the_chapter_ends_with_buttons_to_the_chapters_around_it() {
     assert!(end.contains(r#"class="chapter-step chapter-step-${which}""#));
     assert!(end.contains(r#"data-book="${side.bookId}" data-chapter="${side.chapter}""#));
     assert!(end.contains(r#"<p class="nav-hint">"#));
-    // Its four keys are caps alike; the arrows are drawn, and named.
+    // Its three keys are caps alike; the arrows are drawn, and named.
     for key in [
         "${hintKey('Left arrow', ARROW_LEFT)}",
         "${hintKey('Right arrow', ARROW_RIGHT)}",
-        "${hintKey('/')}",
-        "${hintKey('C')}",
+        "${hintKey('?')}",
     ] {
         assert!(end.contains(key), "{key}");
     }
@@ -2732,7 +2731,7 @@ fn footnotes_and_cross_references_are_disclosures_closed_by_default() {
 /// --accent on the opaque --option-bg (Vaporwave's --panel-bg lets its
 /// gradient through), the disclosure toggles --text on the page (their
 /// chevron, a mark, --accent, at least 3:1), and the hint one quiet line of
-/// --text-dim, its four keys as caps of --text-dim on their own opaque
+/// --text-dim, its keys as caps of --text-dim on their own opaque
 /// --option-bg (the arrows drawn, not a fallback font's).
 ///
 /// Over the page itself, --text-dim is AA on every stop of every theme's
@@ -2757,10 +2756,13 @@ fn the_chapter_end_uses_tested_theme_colors() {
         (".disclosure-chevron", &["color: var(--accent)"][..]),
         (".nav-hint", &["color: var(--text-dim)"][..]),
         (
-            ".nav-hint kbd",
+            ".nav-hint kbd,\n        .shortcut-keys kbd",
             &["color: var(--text-dim)", "background: var(--option-bg)"][..],
         ),
-        (".nav-hint kbd svg", &["stroke: currentColor"][..]),
+        (
+            ".nav-hint kbd svg,\n        .shortcut-keys kbd svg",
+            &["stroke: currentColor"][..],
+        ),
     ] {
         let rule = screen_rule(&rules, selector);
         for declaration in declarations {
@@ -3872,4 +3874,162 @@ fn a_footnotes_verse_number_is_set_small() {
     let footnote = function_body("footnoteHtml");
     assert!(footnote.contains(r#"<em class="footnote-alt">"#));
     assert!(footnote.contains(r#"<sup class="footnote-verse">"#));
+}
+
+/// The key values a handler compares against: `event.key === 'j'`,
+/// `key === '='`, `code === 'NumpadAdd'`, `toLowerCase() === 'k'`,
+/// `event.key !== 'Escape'`.
+fn compared_keys(handler: &str) -> Vec<String> {
+    let mut keys = Vec::new();
+    for marker in [
+        "key === '",
+        "key !== '",
+        "code === '",
+        "toLowerCase() === '",
+    ] {
+        let mut rest = handler;
+        while let Some(at) = rest.find(marker) {
+            let after = &rest[at + marker.len()..];
+            let end = after.find('\'').unwrap();
+            keys.push(after[..end].to_owned());
+            rest = &after[end..];
+        }
+    }
+    keys
+}
+
+/// The key values every row of the SHORTCUTS table says it handles.
+fn shortcut_table_handles() -> Vec<String> {
+    let start = HTML
+        .find("const SHORTCUTS = [")
+        .expect("the shortcuts table");
+    let table = &HTML[start..start + HTML[start..].find("\n            ];").unwrap()];
+    let mut handles = Vec::new();
+    for row in table.split("handles: [").skip(1) {
+        // Quoted values, until the list's closing bracket (outside quotes:
+        // `]` is a key itself).
+        let mut rest = row.trim_start();
+        while let Some(quoted) = rest.strip_prefix('\'') {
+            let end = quoted.find('\'').unwrap();
+            handles.push(quoted[..end].to_owned());
+            rest = quoted[end + 1..].trim_start_matches([',', ' ']);
+        }
+        assert!(rest.starts_with(']'), "a handles list ends: {rest}");
+    }
+    handles
+}
+
+/// One table of shortcuts: every key the app's key handlers answer (the
+/// main one, Aa's text-size keys and its Escape) is in some row's
+/// `handles`, so the shortcuts sheet, which lists the table, lists it.
+#[test]
+fn every_handled_key_is_in_the_shortcuts_table() {
+    let handled: Vec<String> = [
+        block_after(
+            HTML,
+            "document.addEventListener('keydown', function (event) {\n                // Keys typed into a form control",
+        ),
+        function_body("sizeKey"),
+        block_after(
+            HTML,
+            "document.addEventListener('keydown', function (event) {\n                    if (event.key !== 'Escape') return;",
+        ),
+    ]
+    .into_iter()
+    .flat_map(compared_keys)
+    .collect();
+    for key in [
+        "?",
+        "j",
+        "J",
+        "k",
+        "K",
+        "[",
+        "]",
+        "ArrowLeft",
+        "Escape",
+        "NumpadAdd",
+        "c",
+    ] {
+        assert!(handled.iter().any(|k| k == key), "the scan finds {key}");
+    }
+    let listed = shortcut_table_handles();
+    for key in &handled {
+        assert!(
+            listed.contains(key),
+            "`{key}` is handled but not in SHORTCUTS"
+        );
+    }
+    // And the sheet is that table, grouped.
+    let render = function_body("renderShortcuts");
+    assert!(render.contains("SHORTCUT_GROUPS.map("));
+    assert!(render.contains("SHORTCUTS.filter((s) => s.group === group)"));
+}
+
+/// The shortcuts sheet is a modal dialog named by its heading, reached
+/// from ☰ (a menu item that says its key), with a labelled close button
+/// and a body that scrolls by keyboard too. Its rows are `--text` and its
+/// key caps the chapter-end hint's (`--text-dim` on `--option-bg`), and
+/// its group headings `--text-dim`, on the panel's `--option-bg`: all AA
+/// in every theme.
+#[test]
+fn the_shortcuts_sheet_is_a_modal_dialog_aa_in_every_theme() {
+    let panel = tag_of("shortcuts-panel");
+    for attr in [
+        r#"role="dialog""#,
+        r#"aria-modal="true""#,
+        r#"aria-labelledby="shortcuts-title""#,
+        r#"class="modal-panel shortcuts-panel""#,
+    ] {
+        assert!(panel.contains(attr), "{attr}");
+    }
+    assert!(tag_of("shortcuts-title").starts_with("<h2"));
+    assert!(tag_of("shortcuts-close").contains(r#"aria-label="Close keyboard shortcuts""#));
+    let body = tag_of("shortcuts-body");
+    assert!(body.contains(r#"tabindex="0""#) && body.contains(r#"role="region""#));
+    assert!(tag_of("shortcuts-overlay").contains("modal-overlay"));
+    let item = tag_of("shortcuts-btn");
+    assert!(item.contains(r#"role="menuitem""#) && item.contains(r#"aria-keyshortcuts="?""#));
+
+    let rules = rules();
+    let caps = screen_rule(&rules, ".nav-hint kbd,\n        .shortcut-keys kbd");
+    for declaration in [
+        "color: var(--text-dim)",
+        "background: var(--option-bg)",
+        "border: 1px solid var(--accent-dim)",
+    ] {
+        assert!(caps.body.contains(declaration), "{declaration}");
+    }
+    assert!(
+        screen_rule(&rules, ".shortcut-does")
+            .body
+            .contains("color: var(--text)")
+    );
+    assert!(
+        screen_rule(&rules, ".shortcut-group-title")
+            .body
+            .contains("color: var(--text-dim)")
+    );
+    assert!(
+        screen_rule(&rules, ".shortcuts-title")
+            .body
+            .contains("color: var(--accent)")
+    );
+    assert!(
+        screen_rule(&rules, ".modal-panel")
+            .body
+            .contains("background: var(--option-bg)")
+    );
+    for (theme, props) in theme_palettes(&rules) {
+        let get = |name: &str| property(&props, name).to_owned();
+        let panel = get("--option-bg");
+        for (what, fg) in [
+            ("a row", get("--text")),
+            ("a key cap or heading", get("--text-dim")),
+            ("the title", get("--accent")),
+        ] {
+            let ratio = contrast_ratio(&fg, &panel);
+            assert!(ratio >= 4.5, "{theme}: {what} is {ratio:.2}:1");
+        }
+    }
 }
