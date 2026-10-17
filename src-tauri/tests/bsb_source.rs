@@ -9,6 +9,7 @@
 #[path = "../ingest/bsb.rs"]
 mod bsb;
 
+use gospel_getter_lib::domain::usfm_note::segments;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -355,6 +356,7 @@ fn each_footnote_is_bereans_usfm_exactly_and_stands_where_berean_put_it() {
                 note.verse
             );
             assert!(note.usfm.starts_with("\\f + \\fr ") && note.usfm.ends_with("\\f*"));
+            assert!(segments(&note.usfm).is_some(), "{}", note.usfm);
             // Its own reference is its verse's.
             assert!(
                 note.usfm

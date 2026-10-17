@@ -2991,6 +2991,16 @@
         }
 
         /* Two notes in a row read as "a b", not as one marker "ab". */
+        /* A verse number inside a footnote (the BSB's "²¹But this kind"):
+           small and raised, as the reader's are, without opening up its
+           line. */
+        .footnote-verse {
+            font-size: 0.75em;
+            line-height: 0;
+            vertical-align: super;
+            margin-right: 0.15em;
+        }
+
         .fn-marker + .fn-marker {
             margin-left: 0.3em;
         }
@@ -3391,8 +3401,9 @@
             color: var(--accent-2);
         }
 
-        /* The chapter's KJV footnotes, above its cross-references and
-           styled like them: "119:105a lamp: or, candle". */
+        /* The chapter's footnotes (the KJV's or the BSB's), above its
+           cross-references and styled like them: "119:105a lamp: or,
+           candle". */
         .footnote-summary {
             margin-top: 2rem;
             padding-top: 1rem;
@@ -7291,7 +7302,20 @@
             // stored, "*lamp*: or, candle". The backend splits it, so the
             // two are exactly the stored note; without a lemma, it's all
             // plain.
+            //
+            // A USFM note (the BSB's) comes in runs instead: its words, its
+            // alternative readings in italics, and verse numbers set small
+            // and raised, as the reader's are.
             function footnoteHtml(f) {
+                if (Array.isArray(f.segments)) {
+                    return f.segments
+                        .map((seg) => {
+                            if (seg.kind === 'alt') return `<em class="footnote-alt">${escapeHtml(seg.text)}</em>`;
+                            if (seg.kind === 'verse') return `<sup class="footnote-verse">${escapeHtml(seg.text)}</sup>`;
+                            return escapeHtml(seg.text);
+                        })
+                        .join('');
+                }
                 const lemma = f.lemma ? `<em class="footnote-lemma">${escapeHtml(f.lemma)}</em>` : '';
                 return lemma + escapeHtml(f.rest);
             }

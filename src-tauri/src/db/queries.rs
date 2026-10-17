@@ -2,6 +2,7 @@ use anyhow::Context;
 use sqlx::SqlitePool;
 
 use crate::db::models::{Book, CrossReference, Translation, Verse};
+use crate::domain::usfm_note::StoredFootnote;
 
 /// Get every book, in canonical order.
 pub async fn get_all_books(pool: &SqlitePool) -> anyhow::Result<Vec<Book>> {
@@ -26,7 +27,7 @@ pub async fn get_chapter_verses(
     book_id: i64,
     chapter: i64,
 ) -> anyhow::Result<Vec<Verse>> {
-    sqlx::query_as::<_, Verse>(
+    let mut verses = sqlx::query_as::<_, Verse>(
         "SELECT verse, text FROM verses \
          WHERE translation_id = $1 AND book_id = $2 AND chapter = $3 \
          ORDER BY verse",
@@ -36,7 +37,27 @@ pub async fn get_chapter_verses(
     .bind(chapter)
     .fetch_all(pool)
     .await
-    .context("Failed to fetch verses")
+    .context("Failed to fetch verses")?;
+    let notes: Vec<(i64, i64, String)> = sqlx::query_as(
+        "SELECT verse, position, usfm FROM footnotes \
+         WHERE translation_id = $1 AND book_id = $2 AND chapter = $3 \
+         ORDER BY verse, ordinal",
+    )
+    .bind(translation_id)
+    .bind(book_id)
+    .bind(chapter)
+    .fetch_all(pool)
+    .await
+    .context("Failed to fetch footnotes")?;
+    for (verse, position, usfm) in notes {
+        if let Some(v) = verses.iter_mut().find(|v| v.verse == verse) {
+            v.footnotes.push(StoredFootnote {
+                position: usize::try_from(position).unwrap_or(0),
+                usfm,
+            });
+        }
+    }
+    Ok(verses)
 }
 
 /// The last chapter read (translation, book, chapter), if the reader has

@@ -141,8 +141,13 @@ pub struct Footnote {
     /// together are always exactly `text`.
     pub rest: String,
     /// The note exactly as stored inside the braces, e.g.
-    /// "lamp: or, candle".
+    /// "lamp: or, candle". For a USFM note (see `usfm_note`), the note's
+    /// words as shown.
     pub text: String,
+    /// A USFM note's runs (see `usfm_note`): its words, alternative
+    /// readings and verse numbers. `None` for a KJV margin note.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segments: Option<Vec<crate::domain::usfm_note::Segment>>,
 }
 
 /// The most words a note's lemma has in the bundled KJV is six (Judges
@@ -167,6 +172,7 @@ impl Footnote {
             lemma: lemma.map(str::to_string),
             rest: text[lemma.map_or(0, str::len)..].to_string(),
             text: text.to_string(),
+            segments: None,
         }
     }
 }
@@ -395,7 +401,8 @@ mod tests {
                 label: "a".to_string(),
                 lemma: Some("lamp".to_string()),
                 rest: ": or, candle".to_string(),
-                text: "lamp: or, candle".to_string()
+                text: "lamp: or, candle".to_string(),
+                segments: None,
             }]
         );
         // Several notes after supplied words, lettered in order, each

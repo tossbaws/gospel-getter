@@ -3680,3 +3680,21 @@ fn chapter_end_cross_references_are_quiet_links() {
         );
     }
 }
+
+/// A USFM footnote's verse number (the BSB's "²¹But this kind") is small
+/// and raised without opening up its line.
+#[test]
+fn a_footnotes_verse_number_is_set_small() {
+    let rules = rules();
+    let rule = screen_rule(&rules, ".footnote-verse");
+    for declaration in [
+        "font-size: 0.75em",
+        "line-height: 0",
+        "vertical-align: super",
+    ] {
+        assert!(rule.body.contains(declaration), "{declaration}");
+    }
+    let footnote = function_body("footnoteHtml");
+    assert!(footnote.contains(r#"<em class="footnote-alt">"#));
+    assert!(footnote.contains(r#"<sup class="footnote-verse">"#));
+}

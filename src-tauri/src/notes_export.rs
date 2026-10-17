@@ -619,6 +619,7 @@ mod tests {
             .map(|verse| Verse {
                 verse,
                 text: format!("Verse {verse}."),
+                footnotes: Vec::new(),
             })
             .collect()
     }
@@ -798,10 +799,12 @@ mod tests {
             Verse {
                 verse: 1,
                 text: "In the beginning [was] the {Word}.".to_string(),
+                footnotes: Vec::new(),
             },
             Verse {
                 verse: 2,
                 text: "The same*was <in>\u{a0}the beginning.".to_string(),
+                footnotes: Vec::new(),
             },
         ];
         // Braces too: only the KJV's are markup.
@@ -878,16 +881,19 @@ mod tests {
                 verse: 1,
                 text: "[A Psalm of David.] The LORD {is} my shepherd; I shall not want."
                     .to_string(),
+                footnotes: Vec::new(),
             },
             Verse {
                 verse: 2,
                 text: "He leadeth me beside the still waters. {green...: Heb. pastures of tender \
                        grass} {still...: Heb. waters of quietness}"
                     .to_string(),
+                footnotes: Vec::new(),
             },
             Verse {
                 verse: 3,
                 text: "He restoreth my soul.".to_string(),
+                footnotes: Vec::new(),
             },
         ];
         let file = render(&notes, &[((19, 23), chapter)], Some(19));

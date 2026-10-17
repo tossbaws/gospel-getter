@@ -16,6 +16,11 @@ pub struct Book {
 pub struct Verse {
     pub verse: i64,
     pub text: String,
+    /// Its footnotes, where its translation keeps them apart from the text
+    /// (the BSB's; see `domain::usfm_note`), in order. Only a chapter's
+    /// verses (`get_chapter_verses`) carry them; empty otherwise.
+    #[sqlx(skip)]
+    pub footnotes: Vec<crate::domain::usfm_note::StoredFootnote>,
 }
 
 /// A Bible translation (e.g. King James Version, World English Bible).
