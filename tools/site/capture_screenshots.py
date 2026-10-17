@@ -360,6 +360,15 @@ def readme_scenes(theme):
                 await __gg.until(() => document.querySelector('#search-results .search-result'), 'results');
                 window.scrollTo(0, 0);
              """),
+        # The same box as a command palette: ">theme" lists the theme
+        # commands only, over John 3 in the KJV.
+        dict(name="palette", size=(1280, 850), prefs=look, position=("John", 3, "kjv"),
+             steps="""
+                __gg.click(document.getElementById('search-toggle'));
+                __gg.type(document.getElementById('search-input'), '>theme');
+                await __gg.until(() => document.querySelectorAll('#search-results [data-command^="theme"]').length >= 9, 'the theme commands');
+                window.scrollTo(0, 0);
+             """),
         # Romans 14 from verse 21 in compare mode, reading the KJV compared
         # with the WEB: the WEB numbers 24-26, the KJV doesn't.
         dict(name="compare-translations", size=(1280, 750),
