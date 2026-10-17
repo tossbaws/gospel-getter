@@ -1175,8 +1175,84 @@
             font-weight: bold;
         }
 
-        .search-results {
-            list-style: none;
+        /* The palette's groups: Go to, Commands, Verses, each under a
+           small heading. Focus stays in the box; the active option is
+           tinted and edged like a hovered one. */
+        .palette-group + .palette-group {
+            margin-top: 0.4rem;
+        }
+
+        .palette-group-label {
+            font-family: var(--font-ui);
+            font-size: 0.7rem;
+            font-weight: bold;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            padding: 0.4rem 0.6rem 0.2rem;
+        }
+
+        .search-command {
+            display: flex;
+            align-items: baseline;
+            gap: 0.6rem;
+            font-family: var(--font-ui);
+            font-size: 0.9rem;
+            line-height: 1.4;
+            color: var(--text);
+            padding: 0.35rem 0.6rem;
+            border-radius: var(--radius-s);
+            cursor: pointer;
+        }
+
+        .search-command.is-disabled {
+            cursor: default;
+        }
+
+        .search-command.is-disabled .palette-label {
+            color: var(--text-dim);
+        }
+
+        .palette-reason {
+            font-size: 0.78rem;
+            color: var(--text-dim);
+        }
+
+        .palette-key {
+            margin-left: auto;
+            flex-shrink: 0;
+        }
+
+        .palette-key kbd {
+            display: inline-block;
+            min-width: 1.6em;
+            padding: 0.05em 0.4em;
+            font-family: var(--font-ui);
+            font-size: 0.75rem;
+            line-height: 1.4;
+            text-align: center;
+            color: var(--text-dim);
+            background: var(--option-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-s);
+        }
+
+        .search-command:hover,
+        .search-command.is-active,
+        .search-result.is-active {
+            background: rgba(var(--accent-rgb), 0.12);
+        }
+
+        .search-command.is-active,
+        .search-result.is-active {
+            box-shadow: inset 3px 0 0 var(--accent);
+        }
+
+        /* On the tint, a disabled command's name and reason are --text,
+           which is AA there in every theme (--text-dim isn't, quite). */
+        .search-command.is-active .palette-label,
+        .search-command.is-active .palette-reason {
+            color: var(--text);
         }
 
         .search-result {
@@ -1190,12 +1266,11 @@
             background: none;
             border: none;
             border-bottom: 1px solid var(--accent-dim);
-            padding: 0.5rem 0.3rem;
+            padding: 0.5rem 0.6rem;
             cursor: pointer;
         }
 
-        .search-result:hover,
-        .search-result:focus-visible {
+        .search-result:hover {
             background: rgba(var(--accent-rgb), 0.12);
         }
 
@@ -4634,19 +4709,36 @@
                     return null;
                 }
 
-                document.addEventListener('keydown', function (event) {
-                    var step = sizeKey(event);
-                    if (step === null) return;
-                    event.preventDefault();
-                    var target = event.target;
-                    if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) return;
+                // A step larger (1) or smaller (-1), or back to Medium (0),
+                // and the size shown for a moment.
+                function textSizeShortcut(step) {
                     if (step === 0) {
                         choose(textSizeSelect, 'medium');
                     } else {
                         stepTextSize(step);
                     }
                     showTextSize();
+                }
+
+                document.addEventListener('keydown', function (event) {
+                    var step = sizeKey(event);
+                    if (step === null) return;
+                    event.preventDefault();
+                    var target = event.target;
+                    if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) return;
+                    textSizeShortcut(step);
                 });
+
+                // The command palette (in the main script) makes the choices
+                // whose controls aren't always on the page (the translation
+                // rows and Compare with are drawn when Aa opens) through the
+                // functions those controls call, and the text size through
+                // its keys' own.
+                window.gospelGetterControls = {
+                    chooseTranslation: function (code) { choose(translationSelect, code); },
+                    compareWith: chooseComparePartner,
+                    textSize: textSizeShortcut,
+                };
 
                 // ---- Preferences
 
@@ -4936,10 +5028,10 @@
         </div>
         <p class="library-hint">Ctrl+B opens and closes the library &middot; Esc closes it</p>
     </aside>
-    <div id="search-panel" class="search-panel" role="dialog" aria-label="Search" hidden>
-        <input type="search" id="search-input" class="search-input" placeholder="Words, or a reference like John 3:16" aria-label="Search the text, or go to a reference" aria-describedby="search-status" autocomplete="off" spellcheck="false">
+    <div id="search-panel" class="search-panel" role="dialog" aria-label="Search, go to or run a command" hidden>
+        <input type="search" id="search-input" class="search-input" role="combobox" aria-expanded="false" aria-controls="search-results" aria-autocomplete="list" placeholder="Words, a reference like John 3:16, or &gt; for commands" aria-label="Search the text, go to a reference, or run a command" aria-describedby="search-status" autocomplete="off" spellcheck="false">
         <p id="search-status" class="search-status" role="status" aria-live="polite"></p>
-        <ul id="search-results" class="search-results"></ul>
+        <div id="search-results" class="search-results" role="listbox" aria-label="Results"></div>
         <button type="button" id="search-more" class="search-more" hidden>Show more</button>
     </div>
     <div id="import-overlay" class="import-overlay" hidden>
@@ -8058,17 +8150,216 @@
                 renderCurrent();
             });
 
-            // ---- Search and go-to-reference (GH-12)
+            // ---- Search and go-to-reference (GH-12), and the command
+            // palette, in one box. As the reader types, the results come
+            // in three groups: "Go to" (the reference typed, as the
+            // backend reads it), "Commands" (the app's own actions) and
+            // "Verses" (the search's matches). A leading ">" lists
+            // commands only; the empty box suggests a few. Focus stays in
+            // the box, a combobox: ↓ and ↑ move through every group's
+            // options, Enter runs the one that's active, Escape closes it.
 
             let searchToken = 0;
             let searchTimer = null;
             let lastSearch = null;
+            // What the Go to and Verses groups show: the last search's
+            // answer, kept while the next one is on its way, as before.
+            let searchShown = null;
+            // The active option's key ("go", "cmd:compare",
+            // "verse:43:3:16"), or null; and whether the reader chose it
+            // with the arrows (otherwise it follows what's typed).
+            let paletteActive = null;
+            let paletteMoved = false;
+            // Where focus was when the box opened, for a command to give
+            // it back to.
+            let paletteReturnFocus = null;
+
+            // ---- Commands. Each runs the code its own control runs:
+            // mostly by clicking that control (Aa's buttons, the ☰ menu's
+            // items, the Library's tabs…); where the control isn't always
+            // on the page, through the function it calls (see
+            // gospelGetterControls in Aa's script), or the key's own.
+            // A command that can't run now is still listed, disabled, with
+            // the reason; one whose control toggles (Compare, Reading
+            // mode, the sidebar) is named for what it would do.
+
+            const IN_USE = 'In use';
+            const controls = () => window.gospelGetterControls;
+            const clickControl = (id) => () => document.getElementById(id).click();
+            const clickChoice = (groupId, value) => () => document.querySelector(`#${groupId} [data-value="${value}"]`).click();
+
+            // The commands the empty box suggests, in this order.
+            const SUGGESTED = ['compare', 'reader-mode', 'random-chapter', 'copy-chapter', 'export-notes'];
+
+            function paletteCommands() {
+                const list = [];
+                // `key` is shown; `keys` is its aria-keyshortcuts; `words`
+                // are other words it's found by.
+                const add = (id, label, { key = '', keys = '', words = '', reason = null, run }) => {
+                    list.push({ id, label, key, keys: keys || key, words, reason, run });
+                };
+                const comparing = isComparing();
+                const readerMode = root.dataset.readerMode === 'on';
+                const optionsOf = (id) => [...document.getElementById(id).options];
+                const valueOf = (id) => document.getElementById(id).value;
+                const partner = window.gospelGetterComparePartner ? window.gospelGetterComparePartner() : null;
+
+                add('compare', comparing ? 'Compare off' : 'Compare on', {
+                    key: 'C', words: 'translations side by side',
+                    reason: !comparing && !partner ? 'There’s only one translation' : null,
+                    run: clickControl('compare-btn'),
+                });
+                add('reader-mode', readerMode ? 'Exit reading mode' : 'Reading mode', {
+                    key: readerMode ? 'Esc' : '', keys: readerMode ? 'Escape' : '', words: 'distraction free focus',
+                    run: clickControl(readerMode ? 'reader-exit' : 'reader-mode-btn'),
+                });
+                optionsOf('layout-select').forEach((o) => add(`layout-${o.value}`, `Layout: ${o.textContent}`, {
+                    reason: comparing ? 'Compare always shows a verse to a row' : (o.value === valueOf('layout-select') ? IN_USE : null),
+                    run: clickChoice('layout-choices', o.value),
+                }));
+                optionsOf('width-select').forEach((o) => add(`width-${o.value}`, `Width: ${o.textContent}`, {
+                    words: 'column measure',
+                    reason: o.value === valueOf('width-select') ? IN_USE : null,
+                    run: clickChoice('width-choices', o.value),
+                }));
+                const sizes = optionsOf('text-size-select');
+                const size = sizes.findIndex((o) => o.value === valueOf('text-size-select'));
+                add('text-larger', 'Text size: Larger', {
+                    key: 'Ctrl+=', keys: 'Control+=', words: 'bigger increase font',
+                    reason: size >= sizes.length - 1 ? 'Already the largest' : null,
+                    run: () => controls().textSize(1),
+                });
+                add('text-smaller', 'Text size: Smaller', {
+                    key: 'Ctrl+-', keys: 'Control+-', words: 'decrease font',
+                    reason: size <= 0 ? 'Already the smallest' : null,
+                    run: () => controls().textSize(-1),
+                });
+                add('text-medium', 'Text size: Medium', {
+                    key: 'Ctrl+0', keys: 'Control+0', words: 'reset default font',
+                    reason: valueOf('text-size-select') === 'medium' ? IN_USE : null,
+                    run: () => controls().textSize(0),
+                });
+                optionsOf('theme-select').forEach((o) => add(`theme-${o.value}`, `Theme: ${o.textContent}`, {
+                    words: 'colours colors look',
+                    reason: o.value === valueOf('theme-select') ? IN_USE : null,
+                    run: clickChoice('theme-choices', o.value),
+                }));
+                const reading = currentTranslation();
+                optionsOf('translation-select').forEach((o) => add(`translation-${o.value}`, `Translation: ${o.value.toUpperCase()}`, {
+                    words: o.textContent,
+                    reason: o.value === reading ? IN_USE : null,
+                    run: () => controls().chooseTranslation(o.value),
+                }));
+                optionsOf('translation-select').filter((o) => o.value !== reading).forEach((o) => add(`compare-with-${o.value}`, `Compare with: ${o.value.toUpperCase()}`, {
+                    words: o.textContent,
+                    reason: !comparing ? 'Only while comparing' : (o.value === partner ? IN_USE : null),
+                    run: () => controls().compareWith(o.value),
+                }));
+                add('random-chapter', 'Random chapter', { words: 'surprise', run: clickControl('random-chapter-btn') });
+                const sidebar = root.dataset.picker === 'sidebar';
+                add('sidebar', sidebar ? 'Hide sidebar' : 'Show sidebar', {
+                    words: 'books chapters picker',
+                    reason: readerMode ? 'Not in reading mode' : (root.dataset.wide == null ? 'The window is too narrow for it' : null),
+                    run: clickControl('sidebar-toggle'),
+                });
+                [['bookmarks', 'Bookmarks'], ['highlights', 'Highlights'], ['notes', 'Notes']].forEach(([tab, name]) => add(`library-${tab}`, `Open Library: ${name}`, {
+                    key: 'Ctrl+B', keys: 'Control+B',
+                    reason: readerMode ? 'Not in reading mode' : null,
+                    run: () => {
+                        if (surfaces().current() !== 'library') document.getElementById('library-toggle').click();
+                        const button = document.getElementById(`library-tab-${tab}`);
+                        button.click();
+                        button.focus();
+                    },
+                }));
+                add('export-notes', 'Export notes…', {
+                    words: 'markdown file',
+                    reason: exportNotesBtn.disabled ? 'There are no notes yet' : null,
+                    run: clickControl('export-notes-btn'),
+                });
+                add('export-data', 'Export data…', {
+                    words: 'backup save file',
+                    reason: exportDataBtn.disabled ? 'Busy with an export or import' : null,
+                    run: clickControl('export-data-btn'),
+                });
+                add('import-data', 'Import data…', {
+                    words: 'restore backup file',
+                    reason: importDataBtn.disabled ? 'Busy with an export or import' : null,
+                    run: clickControl('import-data-btn'),
+                });
+                add('welcome', 'Show welcome', { words: 'start help', run: clickControl('welcome-btn') });
+                add('about', 'About Gospel Getter', { words: 'version credits', run: clickControl('about-btn') });
+                add('check-updates', 'Check for updates', {
+                    words: 'update version new',
+                    reason: updateCheckBtn.disabled ? 'Already checking' : null,
+                    // About, then its Check now.
+                    run: () => {
+                        document.getElementById('about-btn').click();
+                        updateCheckBtn.click();
+                    },
+                });
+                add('copy-chapter', 'Copy chapter', {
+                    words: 'clipboard text',
+                    reason: copies.chapter ? null : 'No chapter is shown',
+                    run: () => copyPassage('chapter', 'reference'),
+                });
+                add('copy-chapter-as', 'Copy chapter as…', {
+                    words: 'clipboard verse numbers markdown quote plain text',
+                    reason: document.querySelector('.chapter-copy-btn') ? null : 'No chapter is shown',
+                    run: () => openCopyMenu('chapter', document.querySelector('.chapter-copy-btn')),
+                });
+                const inner = currentInner();
+                add('next-chapter', 'Next chapter', {
+                    key: '→', keys: 'ArrowRight',
+                    reason: inner && inner.dataset.nextBook ? null : 'This is the Bible’s last chapter',
+                    run: () => turnChapter('next'),
+                });
+                add('previous-chapter', 'Previous chapter', {
+                    key: '←', keys: 'ArrowLeft',
+                    reason: inner && inner.dataset.prevBook ? null : 'This is the Bible’s first chapter',
+                    run: () => turnChapter('prev'),
+                });
+                return list;
+            }
+
+            // Matching is by words, in any order, ignoring case and
+            // accents: every word typed must begin a word of the
+            // command's name or its other words ("rea mo" is Reading mode,
+            // "theme ma" Theme: Matrix). The list keeps its own order.
+            const foldWord = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+            const wordsOf = (s) => foldWord(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+            function commandMatches(command, typed) {
+                const words = wordsOf(`${command.label} ${command.words}`);
+                return typed.every((t) => words.some((w) => w.startsWith(t)));
+            }
+
+            // What the box holds: commands only (after ">"), and the words.
+            function paletteQuery() {
+                const trimmed = searchInput.value.trim();
+                const commandsOnly = trimmed.startsWith('>');
+                const text = commandsOnly ? trimmed.slice(1) : trimmed;
+                return { empty: !trimmed, commandsOnly, words: wordsOf(text) };
+            }
+
+            function paletteCommandsShown(query) {
+                const all = paletteCommands();
+                if (query.commandsOnly) return query.words.length ? all.filter((c) => commandMatches(c, query.words)) : all;
+                if (query.empty) return SUGGESTED.map((id) => all.find((c) => c.id === id)).filter(Boolean);
+                return query.words.length ? all.filter((c) => commandMatches(c, query.words)) : [];
+            }
 
             function setSearchOpen(open) {
+                if (open && searchPanel.hidden) {
+                    const active = document.activeElement;
+                    paletteReturnFocus = active && active !== document.body ? active : null;
+                }
                 searchPanel.hidden = !open;
                 searchToggle.setAttribute('aria-expanded', String(open));
                 if (open) {
                     closeSurfaces(false);
+                    paletteMoved = false;
+                    renderPalette();
                     searchInput.focus();
                     searchInput.select();
                 }
@@ -8098,55 +8389,123 @@
                 return html + escapeHtml(text.slice(last));
             }
 
+            // The search's answer (appended to what's shown, for Show
+            // more), and its status line.
             function renderSearchResults(result, append) {
                 if (result.kind === 'passage') {
-                    searchResults.innerHTML = `<li><button type="button" class="search-result search-go" data-book="${result.bookId}" data-chapter="${result.chapter}"${result.verseStart != null ? ` data-verse-start="${result.verseStart}" data-verse-end="${result.verseEnd}"` : ''}>Go to <strong>${escapeHtml(result.reference)}</strong></button></li>`;
-                    searchMore.hidden = true;
+                    searchShown = { result, verses: [] };
                     setSearchStatus('Press Enter to go there.');
-                    return;
-                }
-                if (result.kind !== 'text') {
-                    searchResults.innerHTML = '';
-                    searchMore.hidden = true;
+                } else if (result.kind !== 'text') {
+                    searchShown = null;
                     setSearchStatus(result.message || '', result.kind === 'invalid' || result.kind === 'unavailable');
-                    return;
-                }
-                const items = result.results
-                    .map((r) => `<li><button type="button" class="search-result" data-book="${r.bookId}" data-chapter="${r.chapter}" data-verse-start="${r.verse}" data-verse-end="${r.verse}">
-                        <span class="search-ref">${escapeHtml(r.reference)}</span>
-                        <span class="search-text">${highlightTerms(r.text, result.terms)}</span>
-                    </button></li>`)
-                    .join('');
-                if (append) {
-                    searchResults.insertAdjacentHTML('beforeend', items);
                 } else {
-                    searchResults.innerHTML = items;
+                    const verses = append && searchShown ? searchShown.verses.concat(result.results) : result.results;
+                    searchShown = { result, verses };
+                    const shown = result.offset + result.results.length;
+                    const code = (lastSearch && lastSearch.translationCode || currentTranslation()).toUpperCase();
+                    if (result.total === 0) {
+                        setSearchStatus(`No verses in the ${code} contain all of: ${result.terms.join(', ')}.`);
+                    } else {
+                        const count = result.total === 1 ? '1 verse' : `${result.total.toLocaleString('en')} verses`;
+                        setSearchStatus(`${count} in the ${code}${shown < result.total ? `, showing ${shown.toLocaleString('en')}` : ''}.`);
+                    }
                 }
-                const shown = result.offset + result.results.length;
-                const code = (lastSearch && lastSearch.translationCode || currentTranslation()).toUpperCase();
-                if (result.total === 0) {
-                    setSearchStatus(`No verses in the ${code} contain all of: ${result.terms.join(', ')}.`);
+                renderPalette();
+            }
+
+            function keyHtml(command) {
+                if (!command.key) return '';
+                return `<span class="palette-key"><span class="visually-hidden">, key </span><kbd>${escapeHtml(command.key)}</kbd></span>`;
+            }
+
+            // The listbox: each group a role="group" named by its heading,
+            // its options in order. The active option is kept by key when
+            // the list is redrawn, unless the reader is typing: then the
+            // first option is active if it's a Go to or a command, so
+            // Enter goes or runs it, as Enter on a reference always has;
+            // with the empty box, or verses first, none is until ↓.
+            function renderPalette() {
+                const query = paletteQuery();
+                const commands = paletteCommandsShown(query);
+                const shown = !query.empty && !query.commandsOnly ? searchShown : null;
+                const goTo = shown && shown.result.kind === 'passage' ? shown.result : null;
+                const verses = shown ? shown.verses : [];
+                let n = 0;
+                const groups = [];
+                const group = (id, label, options) => {
+                    if (!options.length) return;
+                    groups.push(`<div class="palette-group" role="group" aria-labelledby="palette-group-${id}">
+                        <div class="palette-group-label" id="palette-group-${id}" role="presentation">${label}</div>
+                        ${options.join('')}
+                    </div>`);
+                };
+                const option = (key, groupId, className, attrs, html, disabled = false) => `<div role="option" id="palette-option-${n++}" class="${className}" data-key="${escapeHtml(key)}" aria-selected="false" aria-describedby="palette-group-${groupId}"${disabled ? ' aria-disabled="true"' : ''}${attrs}>${html}</div>`;
+                if (goTo) {
+                    const range = goTo.verseStart != null ? ` data-verse-start="${goTo.verseStart}" data-verse-end="${goTo.verseEnd}"` : '';
+                    group('goto', 'Go to', [option('go', 'goto', 'search-result search-go', ` data-book="${goTo.bookId}" data-chapter="${goTo.chapter}"${range}`, `Go to <strong>${escapeHtml(goTo.reference)}</strong>`)]);
+                }
+                group('commands', 'Commands', commands.map((c) => option(
+                    `cmd:${c.id}`, 'commands', `search-command${c.reason ? ' is-disabled' : ''}`,
+                    ` data-command="${c.id}"${c.keys ? ` aria-keyshortcuts="${escapeHtml(c.keys)}"` : ''}`,
+                    `<span class="palette-label">${escapeHtml(c.label)}</span>${c.reason ? `<span class="visually-hidden">, </span><span class="palette-reason">${escapeHtml(c.reason)}</span>` : ''}${keyHtml(c)}`,
+                    !!c.reason,
+                )));
+                group('verses', 'Verses', verses.map((r) => option(
+                    `verse:${r.bookId}:${r.chapter}:${r.verse}`, 'verses', 'search-result',
+                    ` data-book="${r.bookId}" data-chapter="${r.chapter}" data-verse-start="${r.verse}" data-verse-end="${r.verse}"`,
+                    `<span class="search-ref">${escapeHtml(r.reference)}</span>
+                        <span class="search-text">${highlightTerms(r.text, shown.result.terms)}</span>`,
+                )));
+                searchResults.innerHTML = groups.join('');
+                const options = paletteOptions();
+                searchInput.setAttribute('aria-expanded', String(options.length > 0));
+                searchMore.hidden = !(shown && shown.result.kind === 'text' && shown.result.offset + shown.result.results.length < shown.result.total);
+                if (shown && !searchMore.hidden) searchMore.dataset.offset = String(shown.result.offset + shown.result.results.length);
+                if (query.empty) {
+                    setSearchStatus('Type words to search, a reference to go there, or > for a command.');
+                } else if (query.commandsOnly) {
+                    setSearchStatus(commands.length ? '' : 'No commands match.');
+                }
+                let active = paletteMoved ? options.find((o) => o.dataset.key === paletteActive) : null;
+                if (!paletteMoved && !query.empty && options[0] && !options[0].dataset.key.startsWith('verse:')) {
+                    active = options[0];
+                }
+                setPaletteActive(active || null);
+            }
+
+            function paletteOptions() {
+                return [...searchResults.querySelectorAll('[role="option"]')];
+            }
+
+            function setPaletteActive(option) {
+                paletteOptions().forEach((o) => {
+                    o.setAttribute('aria-selected', String(o === option));
+                    o.classList.toggle('is-active', o === option);
+                });
+                paletteActive = option ? option.dataset.key : null;
+                if (option) {
+                    searchInput.setAttribute('aria-activedescendant', option.id);
+                    if (option.scrollIntoView) option.scrollIntoView({ block: 'nearest' });
                 } else {
-                    const count = result.total === 1 ? '1 verse' : `${result.total.toLocaleString('en')} verses`;
-                    setSearchStatus(`${count} in the ${code}${shown < result.total ? `, showing ${shown.toLocaleString('en')}` : ''}.`);
+                    searchInput.removeAttribute('aria-activedescendant');
                 }
-                searchMore.hidden = shown >= result.total;
-                searchMore.dataset.offset = String(shown);
             }
 
             // Runs the search box query in the selected translation.
             // Resolves to the result (or null if a newer search replaced
-            // it, or it failed).
+            // it, or it failed). Commands alone (">") and the empty box
+            // search nothing.
             async function runSearch(offset = 0) {
                 clearTimeout(searchTimer);
                 const token = ++searchToken;
                 const query = searchInput.value;
                 const translationCode = currentTranslation();
-                if (!query.trim()) {
+                const { empty, commandsOnly } = paletteQuery();
+                if (empty || commandsOnly) {
                     lastSearch = null;
-                    searchResults.innerHTML = '';
-                    searchMore.hidden = true;
-                    setSearchStatus('');
+                    searchShown = null;
+                    if (!commandsOnly) setSearchStatus('');
+                    renderPalette();
                     return null;
                 }
                 try {
@@ -8158,23 +8517,48 @@
                 } catch (e) {
                     if (token !== searchToken) return null;
                     console.error('Search failed', e);
-                    searchResults.innerHTML = '';
-                    searchMore.hidden = true;
+                    searchShown = null;
                     setSearchStatus(`Search failed: ${(e && e.message) || e}`, true);
+                    renderPalette();
                     return null;
                 }
             }
 
-            async function openSearchResult(button) {
-                const start = button.dataset.verseStart != null ? Number(button.dataset.verseStart) : null;
-                const end = button.dataset.verseEnd != null ? Number(button.dataset.verseEnd) : null;
+            async function openSearchResult(option) {
+                const start = option.dataset.verseStart != null ? Number(option.dataset.verseStart) : null;
+                const end = option.dataset.verseEnd != null ? Number(option.dataset.verseEnd) : null;
                 setSearchOpen(false);
-                await openPassage(button.dataset.book, button.dataset.chapter, start, end);
+                await openPassage(option.dataset.book, option.dataset.chapter, start, end);
+            }
+
+            // Runs an option: goes to its passage, or runs its command
+            // once the box has closed and focus is back where it was. A
+            // disabled command says why, and stays.
+            function runPaletteOption(option) {
+                if (!option.dataset.command) {
+                    openSearchResult(option);
+                    return;
+                }
+                const command = paletteCommands().find((c) => c.id === option.dataset.command);
+                if (!command || command.reason) {
+                    setSearchStatus(command ? `${command.label}: ${command.reason}.` : '');
+                    return;
+                }
+                setSearchOpen(false);
+                const back = paletteReturnFocus;
+                paletteReturnFocus = null;
+                if (back && back.isConnected && !back.closest('[hidden]')) back.focus({ preventScroll: true });
+                else searchToggle.focus();
+                command.run();
             }
 
             searchInput.addEventListener('input', function () {
                 clearTimeout(searchTimer);
-                searchTimer = setTimeout(() => runSearch(0), 150);
+                paletteMoved = false;
+                renderPalette();
+                const { empty, commandsOnly } = paletteQuery();
+                if (empty || commandsOnly) runSearch(0);
+                else searchTimer = setTimeout(() => runSearch(0), 150);
             });
 
             searchInput.addEventListener('keydown', async function (event) {
@@ -8182,31 +8566,43 @@
                     event.preventDefault();
                     setSearchOpen(false);
                     searchToggle.focus();
-                } else if (event.key === 'ArrowDown') {
-                    const first = searchResults.querySelector('.search-result');
-                    if (first) {
-                        event.preventDefault();
-                        first.focus();
-                    }
+                } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    const options = paletteOptions();
+                    if (!options.length) return;
+                    const index = options.findIndex((o) => o.dataset.key === paletteActive);
+                    const next = event.key === 'ArrowDown'
+                        ? Math.min(options.length - 1, index + 1)
+                        : Math.max(-1, index - 1);
+                    paletteMoved = true;
+                    setPaletteActive(options[next] || null);
                 } else if (event.key === 'Enter') {
                     event.preventDefault();
-                    const pending = lastSearch && lastSearch.query === searchInput.value
-                        && lastSearch.translationCode === currentTranslation();
-                    const result = pending ? lastSearch.result : await runSearch(0);
-                    if (result && result.kind === 'passage') {
-                        const go = searchResults.querySelector('.search-go');
-                        if (go) await openSearchResult(go);
-                    }
+                    // A search still on its way for what's typed (Enter
+                    // pressed straight after typing a reference) is waited
+                    // for, so Enter goes there, as it always has.
+                    const query = paletteQuery();
+                    const pending = !query.empty && !query.commandsOnly
+                        && !(lastSearch && lastSearch.query === searchInput.value && lastSearch.translationCode === currentTranslation());
+                    if (pending) await runSearch(0);
+                    const option = paletteOptions().find((o) => o.dataset.key === paletteActive);
+                    if (option) runPaletteOption(option);
                 }
             });
 
+            // Options are chosen by clicking too; the box keeps focus.
+            searchResults.addEventListener('mousedown', function (event) {
+                if (event.target.closest('[role="option"]')) event.preventDefault();
+            });
+
             searchPanel.addEventListener('click', function (event) {
-                const result = event.target.closest('.search-result');
-                if (result) {
-                    openSearchResult(result);
+                const option = event.target.closest('#search-results [role="option"]');
+                if (option) {
+                    runPaletteOption(option);
                     return;
                 }
                 if (event.target.closest('#search-more')) {
+                    paletteMoved = true;
                     runSearch(Number(searchMore.dataset.offset || 0));
                 }
             });
@@ -8220,23 +8616,14 @@
                 if (!searchPanel.hidden) setSearchOpen(false);
             });
 
-            // Up/Down move between the input and the results; Escape
-            // closes the panel from anywhere in it.
+            // Escape closes the panel from anywhere in it (Show more).
             searchPanel.addEventListener('keydown', function (event) {
                 if (event.target === searchInput) return;
                 if (event.key === 'Escape') {
                     event.preventDefault();
                     setSearchOpen(false);
                     searchToggle.focus();
-                    return;
                 }
-                if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-                const buttons = [searchInput, ...searchResults.querySelectorAll('.search-result')];
-                const index = buttons.indexOf(event.target);
-                if (index === -1) return;
-                event.preventDefault();
-                const next = buttons[Math.max(0, Math.min(buttons.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))];
-                next.focus();
             });
 
             // Clicks in the reading pane: the selected verses' actions,
@@ -8549,15 +8936,21 @@
                     return;
                 }
 
+                if (event.key === 'ArrowLeft') turnChapter('prev');
+                else if (event.key === 'ArrowRight') turnChapter('next');
+            });
+
+            // The chapter before ('prev') or after ('next') the one on
+            // screen, as ← and → (and the palette's commands) turn to it.
+            function turnChapter(which) {
                 const inner = currentInner();
                 if (!inner) return;
-
-                if (event.key === 'ArrowLeft' && inner.dataset.prevBook) {
+                if (which === 'prev' && inner.dataset.prevBook) {
                     loadReading(inner.dataset.prevBook, inner.dataset.prevChapter);
-                } else if (event.key === 'ArrowRight' && inner.dataset.nextBook) {
+                } else if (which === 'next' && inner.dataset.nextBook) {
                     loadReading(inner.dataset.nextBook, inner.dataset.nextChapter);
                 }
-            });
+            }
 
             window.addEventListener('popstate', function (event) {
                 if (event.state && event.state.bookId && event.state.chapter) {
