@@ -13,8 +13,8 @@ at commit `4e5f06dbb274a27ebe71ed54ea706b3ee40eabd9`, version 3.103:
 | `Literata-Italic[opsz,wght].ttf` | `d483dfaeba9cbf4ce71d32a52ee65df82f7e35b15fff8d1011cdb242d1fcd465` |
 
 Each file here is one static instance at the text optical size (`opsz=12`),
-cut to Google Fonts' "latin" range (the characters the KJV and WEB use) and
-saved as WOFF2 with fontTools 4.66:
+cut to Google Fonts' "latin" range (the characters the KJV's, BSB's and
+WEB's text use) and saved as WOFF2 with fontTools 4.66:
 
 | File | Instance |
 |---|---|

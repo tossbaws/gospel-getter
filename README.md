@@ -4,18 +4,25 @@
 [![Distribution Artifacts](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml/badge.svg)](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-c9a227.svg)](LICENSE)
 
-An offline Bible reader for Linux and Windows. Read the KJV or WEB a chapter
-at a time with the chapters before and after shown alongside, search the
-whole Bible, compare the two translations verse by verse, and copy,
-bookmark or write notes on passages. No account and no network needed.
+An offline Bible reader for Linux and Windows. Read the KJV, BSB or WEB a
+chapter at a time with the chapters before and after shown alongside,
+search the whole Bible, compare any two translations verse by verse, and
+copy, bookmark or write notes on passages. No account and no network
+needed.
 
 ![The reading view in the Chi Rho theme (parchment text on near-black, gold headings): John 3 in the KJV in the centre, with John 2 and John 4 faded on either side. The bar's reference button says "John 3 · KJV", and the sidebar on the left lists the books, with John's chapters open and 3 marked. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes](screenshots/reading-neighboring-chapters.png)
 
 ## Features
 
-- **Two complete translations, fully offline.** The King James Version and
-  World English Bible are built into the app, so reading needs no
-  downloads, API keys or network access.
+- **Three complete translations, fully offline.** The King James Version
+  (KJV), the Berean Standard Bible (BSB) and the World English Bible (WEB)
+  are built into the app, so reading needs no downloads, API keys or
+  network access. **Aa** → **Translation** lists them a line each, with
+  each one's date and licence; the KJV is the default, and the arrow keys
+  move through the list. **About Gospel Getter** credits where each text
+  comes from (see [Translations](#translations)).
+
+  ![John 3 in the Berean Standard Bible in the Chi Rho theme, with John 2 and John 4 faded on either side. The bar's reference button says "John 3 · BSB", and small letters after verses 3 and 7 mark the BSB's footnotes](screenshots/bsb.png)
 - **Read in context.** The chapter you're reading sits in the middle with
   the previous and next chapters faded on either side, scrolling with it.
   ← and → turn chapters across the whole Bible, from Genesis 50 into
@@ -67,23 +74,26 @@ bookmark or write notes on passages. No account and no network needed.
   italics, as in printed KJVs, and the margin notes are left out.
 
   ![John 3:16 to 21 selected in the WEB in the Chi Rho theme, with ✎ marks after verses 16, 17, 18 and 21. The card under verse 21 has Copy, Bookmark and + Add note buttons, four highlight color swatches and the citation "John 3:16–21 (WEB)", then a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and an Edit link. The card floats over the verses after the selection](screenshots/notes.png)
-- **Compare translations.** Press `C` (or **Compare** under **Aa**) to see
-  KJV and WEB side by side, one row per verse number. Where only one
-  translation numbers a verse, the other column says so instead of
-  shifting anything.
+- **Compare any two translations.** Press `C` (or **Compare** under **Aa**)
+  to see the translation you're reading beside another, one row per verse
+  number. **Compare (C) with** under **Aa** chooses the other one, and it's
+  remembered; until you choose, it's the KJV (or, beside the KJV, the
+  WEB). Where only one translation numbers a verse, the other column says
+  so instead of shifting anything.
 - **Cross-references.** Select a verse to see related passages in its
   card. Click one to read it right there in the card, a whole range at
   once, in the translation you're reading; click it again to close it, and
   **Go to** opens it. Only one shows at a time. The Cross references list
   at the end of each chapter links straight to each passage, selected.
-- **Footnotes (KJV).** Translator-supplied words are in italics, as in
-  printed KJVs, and the margin notes are moved out of the text into
-  lettered footnotes. Select a verse (or click its letter) to see its
-  footnotes in its card, and each chapter ends with a Footnotes list of
-  all of them, with the words each note is on in italics. That list and
-  the chapter's Cross references are collapsed until you open them, and
-  stay open once you have. Copy and search use the verse text without the
-  notes.
+- **Footnotes (KJV and BSB).** In the KJV, translator-supplied words are
+  in italics, as in printed KJVs, and the margin notes are moved out of
+  the text into lettered footnotes. The BSB's translators' footnotes are
+  lettered where the BSB places them, with alternative readings in
+  italics. Select a verse (or click its letter) to see its footnotes in
+  its card, and each chapter ends with a Footnotes list of all of them.
+  That list and the chapter's Cross references are collapsed until you
+  open them, and stay open once you have. Copy and search use the verse
+  text without the notes.
 
   ![Psalm 23 in the KJV in the Chi Rho theme, with "art" in italics and small letters after verses 2, 5 and 6, and the Psalms' 150 chapters open in the sidebar, ten to a row. Verse 6 is selected, and the card under it has Copy, Bookmark and + Add note buttons and the highlight swatches, then its Footnotes, "a for ever: Heb. to length of days", and its cross-references. Below the chapter, the Cross references section is collapsed](screenshots/footnotes.png)
 - **Comfortable reading.** Scripture is set in Literata, bundled with the
@@ -112,7 +122,7 @@ bookmark or write notes on passages. No account and no network needed.
   highlights, notes and display settings are remembered between sessions.
 - **Back up or move your data.** In the ☰ menu, **Export data…** saves your
   bookmarks, highlights, notes, reading position and display settings
-  (Width and Layout included) to a
+  (Width, Layout and compare's translation included) to a
   JSON file, and **Import data…** shows what a file contains before adding
   it (or, if you choose, replacing your bookmarks, highlights and notes).
   Only that personal data is exported, not Bible text or the app's
@@ -123,7 +133,8 @@ bookmark or write notes on passages. No account and no network needed.
   refuse a whole file whose theme they don't know. From 2.12 on, a display
   setting the app doesn't know is skipped, with a notice naming it, and
   the rest of the file imports: 2.12 skips a 2.13 backup's Width that way,
-  and 2.12 and 2.13 skip a 2.14 backup's Layout.
+  2.12 and 2.13 skip a 2.14 backup's Layout, and 2.12 to 2.14 skip a 2.15
+  backup's compare translation.
   **Export data…** is the backup, and its file imports again; **Export
   notes…** makes a readable copy of your notes, which isn't imported.
 - **A short welcome.** On a new install, one card opens over the
@@ -148,7 +159,7 @@ bookmark or write notes on passages. No account and no network needed.
 
 ## A quick tour
 
-All eight screenshots in this README, including the one at the top, use
+All nine screenshots in this README, including the one at the top, use
 Chi Rho, the default theme, in a window wide enough for the picker's
 sidebar. The other eight themes are under **Aa**.
 
@@ -157,9 +168,9 @@ highlighted, and clicking a result opens and selects that verse.
 
 ![The search panel in the Chi Rho theme, listing World English Bible verses that contain "love one another", with the words highlighted](screenshots/search-results.png)
 
-**Compare the KJV and WEB verse by verse.** In Romans 14 the WEB numbers
-three verses the KJV doesn't, and the KJV column says so rather than
-shifting anything.
+**Compare two translations verse by verse.** Reading the KJV, compared with
+the WEB: in Romans 14 the WEB numbers three verses the KJV doesn't, and
+the KJV column says so rather than shifting anything.
 
 ![Romans 14 from verse 21 in compare mode in the Chi Rho theme, with KJV and WEB columns side by side, the KJV's supplied words in italics, and verses 24 to 26 marked "Not numbered in the KJV"](screenshots/compare-translations.png)
 
@@ -256,14 +267,14 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.13.0?** Each updates itself to 2.14.0: it
+**Coming from 2.6.0 through 2.14.0?** Each updates itself to 2.15.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
 update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.14.0 by hand once, from the
+Install 2.15.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -281,7 +292,8 @@ Upgrading keeps your data.
   rebuilds the index once, by itself, so KJV search leaves out the margin
   notes. Moving back to an older
   version after upgrading hasn't been tested.
-- Theme, text size, line spacing, width, layout, compare and reading mode are
+- Theme, text size, line spacing, width, layout, compare (and which
+  translation it compares with) and reading mode are
   display settings stored in the app's web storage, not the database, as
   are whether the sidebar is shown and whether the chapter's Footnotes and
   Cross references are open (which aren't exported).
@@ -294,19 +306,34 @@ Upgrading keeps your data.
 
 ## Translations
 
-Both bundled translations are public domain, which is what allows them to
-ship offline. Copyrighted translations such as the NIV and ESV aren't
-bundled; including one would need a licence that permits an offline copy.
+Three translations are bundled, all public domain, which is what allows
+them to ship offline:
+
+| Translation | Date | Licence |
+|---|---|---|
+| King James Version (KJV), the default | 1611/1769 | public domain |
+| Berean Standard Bible (BSB) | 2023 | public domain (CC0) |
+| World English Bible (WEB) | | public domain |
+
+**Aa** → **Translation** chooses one; existing readers keep the one they
+had. The KJV's margin notes and the BSB's translators' footnotes are shown
+as lettered footnotes. **About Gospel Getter** credits each text's source,
+and the cross-references' (see [Data provenance](#data-provenance-and-textual-integrity)).
+Copyrighted translations such as the NIV and ESV aren't bundled; including
+one would need a licence that permits an offline copy.
 
 **Adding a translation** with a licence that allows an offline copy:
 
 1. Add a JSON file to `src-tauri/data/` shaped like `kjv.json`: 66 books in
    canonical order, each `{"name", "testament", "chapters": [[verse, ...], ...]}`.
+   A verse the translation doesn't number is `null`. Footnotes kept apart
+   from the text go in each book's `footnotes`, as in `bsb.json`.
 2. Add an entry to `TRANSLATIONS` in `src-tauri/src/db/seed.rs`.
 
 Existing installs seed only translations they don't already have. To
-correct the text of one that's already seeded, clear its rows (or the
-whole database) so it seeds again.
+correct the text of one that's already seeded, clear its rows (its
+footnotes, verses and its row in `translations`), or the whole database,
+so it seeds again.
 
 ## How it's put together
 
@@ -315,13 +342,15 @@ whole database) so it seeds again.
   JavaScript, with no framework or build step. The frontend calls typed
   Tauri commands, not HTTP.
 - **Data model:** book structure is shared between translations, but each
-  translation keeps its own verse text and numbering. KJV and WEB number a
-  few verses differently, which is expected.
+  translation keeps its own verse text and numbering. They number a few
+  verses differently, which is expected; the BSB leaves 16 verses
+  unnumbered in mid-chapter.
 - **Logic:** `domain/bible.rs` works out the previous and next chapter, and
   `domain/query.rs` decides whether search input is a reference or words.
 - **Search:** uses an SQLite FTS5 index derived from `verses`. It's never
-  written back. It indexes each verse's text as the reader shows it (for
-  the KJV, without the margin notes), and results show that text.
+  written back. It indexes each verse's text as the reader shows it
+  (without the KJV's margin notes or the BSB's footnotes), and results
+  show that text.
 - **Copying:** uses the webview's own clipboard API, with no plugin or extra
   permission.
 
@@ -340,8 +369,8 @@ plus `cargo fmt` and Clippy.
 
 ## Data provenance and textual integrity
 
-No verse text is altered, cleaned up or "corrected"; both translations are
-stored exactly as their sources provide them.
+No verse text is altered, cleaned up or "corrected"; every translation is
+stored exactly as its source provides it.
 
 - **KJV** comes from the public-domain dataset thiagobodruk/bible. That
   source marks translator-supplied words and marginal notes inline as
@@ -358,6 +387,29 @@ stored exactly as their sources provide them.
   ebible.org). Verses the source splits into several entries, as in the
   Psalms' poetry, are joined back together in the source's own order, with
   nothing added, removed or reworded.
+- **BSB** comes from Berean's own downloads
+  ([berean.bible](https://berean.bible/downloads.htm)). It's public domain
+  (CC0) since April 30, 2023, and Berean asks that only its verbatim text
+  carry its name. Two of their files are kept in
+  [`sources/bsb/`](sources/bsb/README.md), exactly as downloaded:
+  - `bsb.txt`, sha256 `2ac3af1d…ca96`, gives the verse text byte for byte.
+    Reading it only drops its byte-order mark and splits it at its CRLF
+    line endings.
+  - `bsb_usfm.zip`, sha256 `f0c56438…5f87`, gives the 4,854 footnotes,
+    each kept as its own USFM characters. Each is placed where the USFM
+    puts it, found by lining up the USFM's wording with the text's.
+
+  The USFM's wording differs from the text's in 1,375 verses (spaced
+  dashes, stray marks, spacing slips). The text's wording is used, and
+  the differences are listed in
+  [`sources/bsb/artifacts.tsv`](sources/bsb/artifacts.tsv), never shown.
+  The 16 verses the BSB doesn't number (Matthew 17:21, 18:11, 23:14;
+  Mark 7:16, 9:44, 9:46, 11:26, 15:28; Luke 17:36, 23:17; John 5:4;
+  Acts 8:37, 15:34, 24:7, 28:29; Romans 16:24) are left out where they
+  fall, and the footnote on the verse before each gives its wording. The
+  Psalm titles are in verse 1, as Berean has them, and section headings
+  aren't shown. A test derives the bundled BSB from these two files again
+  and fails on any difference.
 
 Cross-references are from [OpenBible.info](https://www.openbible.info/labs/cross-references/)
 under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).

@@ -54,7 +54,7 @@ version bump: until a release has those names, the links 404.
 - The icons (favicon, header) are the Chi Rho Code LLC mark; see
   "Brand" below.
 - The screenshots are the real app (`ui/index.html`) showing the real
-  bundled KJV and WEB text, in WebKitGTK, the engine the Linux app uses.
+  bundled KJV, BSB and WEB text, in WebKitGTK, the engine the Linux app uses.
   The feature screenshots (hero, search, copy, bookmark and note, compare, and
   `og-image.jpg`) are in Chi Rho, the app's default theme, in a 1280×800
   window, where the book and chapter picker is a sidebar; the "Make it
