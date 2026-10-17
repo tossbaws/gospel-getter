@@ -17,6 +17,7 @@ use crate::domain::bible::{self, ChapterRef};
 use crate::domain::kjv_markup::{PartKind, VerseText};
 use crate::domain::query::{self, Interpretation};
 use crate::notes_export::NotesFilter;
+use crate::passage_copy::{self, CopyFormat};
 use crate::reader_data::{
     self, BookmarkRecord, HighlightRecord, NewBookmark, NewPosition, NoteRecord, PositionRecord,
     Preferences, ReaderData, ValidatedImport,
@@ -721,6 +722,109 @@ pub async fn passage_text(
         translation_code: translation.code.clone(),
         verses,
         notice,
+    })
+}
+
+/// A passage in every Copy as… format (see `passage_copy`), fetched
+/// whenever verses are selected or a chapter shown, so a copy can be
+/// written at once, within the click or key that asked for it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyTextDto {
+    /// "John 3:16–18", or "John 3" for a whole chapter: what the status
+    /// line says was copied.
+    pub reference: String,
+    pub translation_code: String,
+    pub formats: CopyFormatsDto,
+}
+
+/// The passage as each format of `passage_copy::CopyFormat` has it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyFormatsDto {
+    pub reference: String,
+    pub numbered: String,
+    pub markdown: String,
+    pub plain: String,
+}
+
+/// A passage to copy: verses `start..=end` of a chapter, or, without them,
+/// the whole chapter, in `translation_code`.
+#[tauri::command]
+pub async fn get_copy_text(
+    state: tauri::State<'_, AppState>,
+    translation_code: String,
+    book_id: i64,
+    chapter: i64,
+    start: Option<i64>,
+    end: Option<i64>,
+) -> Result<CopyTextDto, String> {
+    copy_text(&state, &translation_code, book_id, chapter, start, end).await
+}
+
+/// The logic behind `get_copy_text`. A translation, book or chapter that
+/// doesn't exist, verses that aren't a range from 1 up, or a passage with
+/// no verse the translation numbers, is an error. Verses it doesn't number
+/// inside the range are skipped, and the reference still names the range.
+pub async fn copy_text(
+    state: &AppState,
+    translation_code: &str,
+    book_id: i64,
+    chapter: i64,
+    start: Option<i64>,
+    end: Option<i64>,
+) -> Result<CopyTextDto, String> {
+    let translation = state
+        .translations
+        .iter()
+        .find(|t| t.code == translation_code)
+        .ok_or_else(|| format!("There's no translation \"{translation_code}\"."))?;
+    let book = state
+        .books
+        .iter()
+        .find(|b| b.id == book_id)
+        .ok_or_else(|| format!("There's no book {book_id}."))?;
+    if !(1..=book.chapter_count).contains(&chapter) {
+        return Err(format!("{} has no chapter {chapter}.", book.name));
+    }
+    let range = match (start, end) {
+        (None, None) => None,
+        (Some(start), Some(end)) if start >= 1 && end >= start => Some((start, end)),
+        _ => return Err("Those verses aren't a passage.".to_string()),
+    };
+    let verses: Vec<db::Verse> = state
+        .store
+        .chapter_verses(translation.id, book_id, chapter)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to read {} {chapter}: {e}", book.name);
+            format!("{} {chapter} couldn't be read.", book.name)
+        })?
+        .into_iter()
+        .filter(|v| range.is_none_or(|(start, end)| (start..=end).contains(&v.verse)))
+        .collect();
+    let reference = passage_reference(&book.name, chapter, range);
+    if verses.is_empty() {
+        return Err(format!(
+            "{reference} isn't numbered in the {}.",
+            translation.name
+        ));
+    }
+    let citation = format!("{reference} ({})", translation.code.to_uppercase());
+    let passage = passage_copy::Passage {
+        translation_code: &translation.code,
+        citation: &citation,
+        verses: &verses,
+    };
+    Ok(CopyTextDto {
+        reference,
+        translation_code: translation.code.clone(),
+        formats: CopyFormatsDto {
+            reference: passage.render(CopyFormat::Reference),
+            numbered: passage.render(CopyFormat::Numbered),
+            markdown: passage.render(CopyFormat::Markdown),
+            plain: passage.render(CopyFormat::Plain),
+        },
     })
 }
 
@@ -2571,6 +2675,199 @@ mod tests {
         assert_eq!(
             passage_text(&state, "kjv", 43, 22, 1, 1).await.unwrap_err(),
             "John has no chapter 22."
+        );
+    }
+
+    /// Copy as…'s four formats, from the database, for the passages the
+    /// release notes show: John 3:16–17 in the WEB and Psalm 23:1 in the
+    /// KJV (its title, brackets and all, and its supplied word).
+    #[tokio::test]
+    async fn copy_text_has_every_format_of_a_passage() {
+        let (_db, state) = app_state("cmd_copy_formats").await;
+        let dto = copy_text(&state, "web", 43, 3, Some(16), Some(17))
+            .await
+            .unwrap();
+        let web = bundled("web");
+        let (v16, v17) = (&web[42].chapters[2][15], &web[42].chapters[2][16]);
+        assert_eq!(dto.reference, "John 3:16\u{2013}17");
+        assert_eq!(dto.translation_code, "web");
+        assert_eq!(
+            dto.formats.reference,
+            format!("{v16} {v17} \u{2014} John 3:16\u{2013}17 (WEB)")
+        );
+        assert_eq!(
+            dto.formats.numbered,
+            format!("16 {v16}\n17 {v17}\n\u{2014} John 3:16\u{2013}17 (WEB)")
+        );
+        assert_eq!(
+            dto.formats.markdown,
+            format!("> **16** {v16} **17** {v17}\n>\n> \u{2014} John 3:16\u{2013}17 (WEB)")
+        );
+        assert_eq!(dto.formats.plain, format!("{v16} {v17}"));
+
+        let psalm = copy_text(&state, "kjv", 19, 23, Some(1), Some(1))
+            .await
+            .unwrap();
+        let one = "[A Psalm of David.] The LORD is my shepherd; I shall not want.";
+        assert_eq!(
+            psalm.formats.reference,
+            format!("{one} \u{2014} Psalms 23:1 (KJV)")
+        );
+        assert_eq!(
+            psalm.formats.numbered,
+            format!("1 {one}\n\u{2014} Psalms 23:1 (KJV)")
+        );
+        assert_eq!(
+            psalm.formats.markdown,
+            "> **1** \\[A Psalm of David.\\] The LORD *is* my shepherd; I shall not want.\n>\n\
+             > \u{2014} Psalms 23:1 (KJV)"
+        );
+        assert_eq!(psalm.formats.plain, one);
+
+        let json = serde_json::to_value(&dto).unwrap();
+        for key in ["reference", "numbered", "markdown", "plain"] {
+            assert!(json["formats"][key].is_string(), "{key}");
+        }
+        assert_eq!(json["translationCode"], "web");
+    }
+
+    /// Copy (and Ctrl+C) copies what it always has: the verses' plain text
+    /// as the reader shows it, joined by spaces, then the citation.
+    #[tokio::test]
+    async fn copy_text_with_a_reference_is_what_copy_always_copied() {
+        let (_db, state) = app_state("cmd_copy_as_before").await;
+        for (code, book, chapter, start, end, citation) in [
+            ("web", 43, 3, 16, 18, "John 3:16\u{2013}18 (WEB)"),
+            ("kjv", 19, 119, 105, 106, "Psalms 119:105\u{2013}106 (KJV)"),
+            ("bsb", 40, 17, 20, 22, "Matthew 17:20\u{2013}22 (BSB)"),
+        ] {
+            let shown = reading(&state, book, chapter, Some(code)).await.unwrap();
+            let text = shown
+                .current_verses
+                .iter()
+                .filter(|v| (start..=end).contains(&v.number))
+                .map(|v| v.shown.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let dto = copy_text(&state, code, book, chapter, Some(start), Some(end))
+                .await
+                .unwrap();
+            assert_eq!(dto.formats.reference, format!("{text} \u{2014} {citation}"));
+        }
+    }
+
+    /// The KJV's margin notes and the BSB's footnotes are in no format:
+    /// Psalm 119:105 ("lamp: or, candle") and Matthew 17:20 (whose note
+    /// gives verse 21's wording).
+    #[tokio::test]
+    async fn copy_text_never_has_a_footnote() {
+        let (_db, state) = app_state("cmd_copy_footnotes").await;
+        let kjv = copy_text(&state, "kjv", 19, 119, Some(105), Some(105))
+            .await
+            .unwrap();
+        let bsb = copy_text(&state, "bsb", 40, 17, Some(20), Some(20))
+            .await
+            .unwrap();
+        let stored = bundled_bsb()[39].chapters[16][19].clone().unwrap();
+        assert_eq!(bsb.formats.plain, stored);
+        for (dto, note) in [(&kjv, "candle"), (&bsb, "fasting")] {
+            let f = &dto.formats;
+            for text in [&f.reference, &f.numbered, &f.markdown, &f.plain] {
+                assert!(!text.contains(note), "{text}");
+                assert!(!text.contains('{') && !text.contains("\\f"), "{text}");
+            }
+        }
+        // The section's letter is the verse's own, as stored.
+        assert_eq!(
+            kjv.formats.plain,
+            "NUN. Thy word is a lamp unto my feet, and a light unto my path."
+        );
+    }
+
+    /// A verse the translation doesn't number is skipped without comment,
+    /// in a range and in a whole chapter, which is every verse it numbers,
+    /// a verse to a line with numbers, named "Matthew 17".
+    #[tokio::test]
+    async fn copy_text_skips_unnumbered_verses_and_copies_whole_chapters() {
+        let (_db, state) = app_state("cmd_copy_chapter").await;
+        let bsb = bundled_bsb();
+        let text = |n: usize| bsb[39].chapters[16][n - 1].clone().unwrap();
+        let range = copy_text(&state, "bsb", 40, 17, Some(20), Some(22))
+            .await
+            .unwrap();
+        assert_eq!(range.reference, "Matthew 17:20\u{2013}22");
+        assert_eq!(
+            range.formats.numbered,
+            format!(
+                "20 {}\n22 {}\n\u{2014} Matthew 17:20\u{2013}22 (BSB)",
+                text(20),
+                text(22)
+            )
+        );
+
+        let chapter = copy_text(&state, "bsb", 40, 17, None, None).await.unwrap();
+        assert_eq!(chapter.reference, "Matthew 17");
+        let numbers: Vec<usize> = (1..=27).filter(|&n| n != 21).collect();
+        let lines: Vec<String> = numbers
+            .iter()
+            .map(|&n| format!("{n} {}", text(n)))
+            .collect();
+        assert_eq!(
+            chapter.formats.numbered,
+            format!("{}\n\u{2014} Matthew 17 (BSB)", lines.join("\n"))
+        );
+        let all: Vec<String> = numbers.iter().map(|&n| text(n)).collect();
+        assert_eq!(chapter.formats.plain, all.join(" "));
+        assert_eq!(
+            chapter.formats.reference,
+            format!("{} \u{2014} Matthew 17 (BSB)", all.join(" "))
+        );
+        assert!(chapter.formats.markdown.starts_with("> **1** "));
+        assert!(chapter.formats.markdown.contains(" **22** "));
+        assert!(!chapter.formats.markdown.contains("**21**"));
+        assert!(
+            chapter
+                .formats
+                .markdown
+                .ends_with("\n>\n> \u{2014} Matthew 17 (BSB)")
+        );
+
+        // A whole KJV chapter: every verse, as the reader shows it.
+        let kjv = copy_text(&state, "kjv", 19, 23, None, None).await.unwrap();
+        let shown = reading(&state, 19, 23, Some("kjv")).await.unwrap();
+        let lines: Vec<String> = shown
+            .current_verses
+            .iter()
+            .map(|v| format!("{} {}", v.number, v.shown.text))
+            .collect();
+        assert_eq!(lines.len(), 6);
+        assert_eq!(
+            kjv.formats.numbered,
+            format!("{}\n\u{2014} Psalms 23 (KJV)", lines.join("\n"))
+        );
+    }
+
+    /// What isn't a passage, or has no verse the translation numbers, is
+    /// refused with a reason.
+    #[tokio::test]
+    async fn copy_text_refuses_what_is_not_a_passage() {
+        let (_db, state) = app_state("cmd_copy_invalid").await;
+        for (code, book, chapter, start, end) in [
+            ("niv", 43, 3, Some(16), Some(16)),
+            ("kjv", 67, 1, None, None),
+            ("kjv", 43, 22, None, None),
+            ("kjv", 43, 3, Some(0), Some(1)),
+            ("kjv", 43, 3, Some(17), Some(16)),
+            ("kjv", 43, 3, Some(16), None),
+        ] {
+            let result = copy_text(&state, code, book, chapter, start, end).await;
+            assert!(result.is_err(), "{code} {book} {chapter}:{start:?}-{end:?}");
+        }
+        assert_eq!(
+            copy_text(&state, "bsb", 40, 17, Some(21), Some(21))
+                .await
+                .unwrap_err(),
+            "Matthew 17:21 isn't numbered in the Berean Standard Bible."
         );
     }
 

@@ -166,6 +166,19 @@ async fn dispatch(
             Ok(dto) => Ok(to_value(dto)?),
             Err(e) => Err(e),
         },
+        "get_copy_text" => match commands::copy_text(
+            state,
+            code.unwrap_or_default(),
+            arg(args, "bookId")?,
+            arg(args, "chapter")?,
+            arg(args, "start")?,
+            arg(args, "end")?,
+        )
+        .await
+        {
+            Ok(dto) => Ok(to_value(dto)?),
+            Err(e) => Err(e),
+        },
         "list_bookmarks" => match commands::bookmarks_in(state, code).await {
             Ok(list) => Ok(to_value(list)?),
             Err(e) => Err(format!("Bookmarks couldn't be loaded: {e:#}")),

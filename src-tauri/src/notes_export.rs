@@ -17,7 +17,8 @@
 //! could read as structure is escaped, so the file shows exactly the
 //! characters written (and stored), never markup. The one exception is the
 //! KJV's own `{…}` markup, which the file shows as a printed KJV would
-//! (see `domain::kjv_markup`).
+//! (see `domain::kjv_markup`). The verses are quoted by
+//! `passage_copy::markdown_quote`, as Copy as… quotes them.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -27,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::notes::{grouped, in_bible_order};
 use crate::db::{Book, Note, Verse};
-use crate::domain::kjv_markup::{self, PartKind};
+use crate::passage_copy;
 
 /// Which notes an export holds. Each part narrows it; the default (no
 /// part set) is every note.
@@ -277,21 +278,11 @@ impl NotesExport<'_> {
             })
             .unwrap_or_default();
         if !quoted.is_empty() {
-            let text = quoted
-                .iter()
-                .map(|v| {
-                    format!(
-                        "**{}** {}",
-                        v.verse,
-                        verse_markdown(self.translation_code, &v.text)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            out.push('\n');
-            for line in text.split('\n') {
-                let _ = writeln!(out, "> {line}");
-            }
+            let _ = writeln!(
+                out,
+                "\n{}",
+                passage_copy::markdown_quote(self.translation_code, &quoted)
+            );
         }
         let wanted = note.verse_end - note.verse_start + 1;
         if (quoted.len() as i64) < wanted {
@@ -317,37 +308,6 @@ impl NotesExport<'_> {
         }
         out.push_str("*\n");
     }
-}
-
-/// One verse's stored text as Markdown. The KJV's `{…}` markup becomes
-/// italics for supplied words, and its margin notes are left out (see
-/// `domain::kjv_markup`); any other translation's text, and a KJV verse
-/// whose markup isn't well formed, is quoted exactly, escaped.
-fn verse_markdown(translation_code: &str, text: &str) -> String {
-    (translation_code == kjv_markup::KJV)
-        .then(|| kjv_markdown(text))
-        .flatten()
-        .unwrap_or_else(|| escape_block(text))
-}
-
-/// A KJV verse as escaped Markdown, with supplied words in italics and
-/// margin notes (and the space before each) left out, or `None` when it
-/// should be quoted exactly as stored instead (see `kjv_markup::marked`).
-fn kjv_markdown(text: &str) -> Option<String> {
-    let verse = kjv_markup::marked(text)?;
-    Some(
-        verse
-            .parts
-            .iter()
-            .map(|part| match part.kind {
-                PartKind::Text => escape_inline(&part.text),
-                // Escaped first, so the words can't form other Markdown;
-                // the asterisks are the only markup added.
-                PartKind::Supplied => format!("*{}*", escape_inline(&part.text)),
-                PartKind::Note => String::new(),
-            })
-            .collect(),
-    )
 }
 
 /// "John 3:16" or "John 3:16–18", as the app writes a passage.
@@ -579,6 +539,7 @@ pub fn escape_block(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::passage_copy::{kjv_markdown, verse_markdown};
     use chrono::FixedOffset;
 
     const JOHN: i64 = 43;
