@@ -2,8 +2,9 @@
 
 The product page for Gospel Getter: plain HTML and CSS, with no JavaScript,
 framework, build step, web fonts, analytics or cookies.
-`.github/workflows/pages.yml` publishes this folder to GitHub Pages on every
-push to `main` that changes it.
+`.github/workflows/pages.yml` publishes this folder to GitHub Pages, but
+only once the version it shows is a published release (see "Downloads and
+releases").
 
 The page is served first at `https://tossbaws.github.io/gospel-getter/` and
 later at the root of a domain, so **every internal URL is relative**
@@ -46,8 +47,20 @@ page shows matches. It also fails if any of the five stable links is
 missing, or if any download or release link names a version. CI runs it on
 every pull request.
 
-Publish the release (with the stable asset names) when you merge the
-version bump: until a release has those names, the links 404.
+The site deploys itself when the release is published, so the page
+never shows a version before its downloads exist:
+
+- The release-prep merge bumps the version; its push deploys nothing (the
+  Website run says it's waiting for the release).
+- Publishing the release starts the Website workflow on `main`, which
+  waits until `releases/latest/download/` serves the new version, then
+  deploys.
+- A site-only fix pushed to `main` while its version is released deploys
+  at once.
+
+`tools/release/site_version_gate.py` makes the call (its tests run in CI);
+**Run workflow** on the Website workflow, on `main`, deploys under the
+same rule.
 
 ## Where the assets come from
 

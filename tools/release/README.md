@@ -38,4 +38,18 @@ requires the version inside each signature to match the manifest's
 (`requireSignedVersion`), which stops an old, validly signed build from
 being passed off as a new one.
 
+## `site_version_gate.py`: when the website deploys
+
+`.github/workflows/pages.yml` deploys `site/` only when the version the
+site shows (`Version X.Y.Z` in `site/index.html`) is at or below the newest
+published release, so a release-prep merge doesn't put a new version on
+the site over the old downloads. Publishing the release starts the deploy
+(see `site/README.md`):
+
+```sh
+python3 tools/release/site_version_gate.py --site site/index.html --published v2.16.0
+```
+
+prints `deploy=true` or `deploy=false`, with the reason on stderr.
+
 Tests: `python3 -m unittest discover -s tools/release` (run in CI).

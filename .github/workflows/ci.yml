@@ -17,8 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The release manifest generator (stdlib-only Python).
-      - name: Test make_latest_json.py
+      # The release tools: the update manifest generator and the website's
+      # deploy gate (stdlib-only Python).
+      - name: Test the release tools
         working-directory: .
         env:
           PYTHONDONTWRITEBYTECODE: "1"
