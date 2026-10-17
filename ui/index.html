@@ -6154,7 +6154,8 @@
             }
 
             // Opens a chapter and selects a verse range in it, in the
-            // selected translation — for bookmarks and search results.
+            // selected translation — for every jump (see jumpTo), and for
+            // going back and forward to one.
             // If that translation doesn't number the verses, it opens the
             // chapter and says so, rather than selecting other verses.
             async function openPassage(bookId, chapter, start, end) {
@@ -6189,7 +6190,7 @@
                 if (!bookmark) return;
                 if (open) {
                     closeSurfaces();
-                    await openPassage(bookmark.bookId, bookmark.chapter, bookmark.verseStart, bookmark.verseEnd);
+                    await jumpTo(bookmark.bookId, bookmark.chapter, bookmark.verseStart, bookmark.verseEnd);
                     return;
                 }
                 try {
@@ -6219,7 +6220,7 @@
                 const { bookId, chapter, verseStart, verseEnd } = passage;
                 if (open) {
                     closeSurfaces();
-                    await openPassage(bookId, chapter, verseStart, verseEnd);
+                    await jumpTo(bookId, chapter, verseStart, verseEnd);
                     return;
                 }
                 const position = [...highlightList.querySelectorAll('.bookmark-remove')].indexOf(target);
@@ -6455,7 +6456,7 @@
                 const note = allNotes.find((n) => String(n.id) === target.dataset.noteId);
                 if (!note) return;
                 closeSurfaces(!edit);
-                await openPassage(note.bookId, note.chapter, note.verseStart, note.verseEnd);
+                await jumpTo(note.bookId, note.chapter, note.verseStart, note.verseEnd);
                 if (edit && reading) {
                     openNotePanel({ mode: 'edit', note, code: selection ? selection.translationCode : reading.translationCode });
                 }
@@ -7475,9 +7476,7 @@
                 const row = event.target.closest('.welcome-start-row');
                 if (!row) return;
                 closeWelcome();
-                loadReading(row.dataset.book, row.dataset.chapter).then((loaded) => {
-                    if (loaded) window.scrollTo(0, 0);
-                });
+                jumpTo(row.dataset.book, row.dataset.chapter, null, null, { top: true });
             });
             document.getElementById('welcome-skip').addEventListener('click', closeWelcome);
             document.getElementById('welcome-close').addEventListener('click', closeWelcome);
@@ -7671,7 +7670,7 @@
             // stays.
             function choosePickerChapter(bookId, chapter) {
                 if (surfaces() && surfaces().current() === 'picker') closeSurfaces();
-                loadReading(bookId, chapter);
+                jumpTo(bookId, chapter);
             }
 
             document.addEventListener('gospel-getter:picker-shown', function () {
@@ -8120,10 +8119,6 @@
                     };
                     showNotice(isComparing() && !compare ? COMPARE_FAILED : '');
                     renderCurrent();
-
-                    if (window.history && window.history.pushState) {
-                        window.history.pushState({ bookId, chapter }, '', `#${bookId}/${chapter}`);
-                    }
                     return true;
                 } catch (e) {
                     console.error('Failed to load reading pane', e);
@@ -8318,6 +8313,16 @@
                     key: '←', keys: 'ArrowLeft',
                     reason: inner && inner.dataset.prevBook ? null : 'This is the Bible’s first chapter',
                     run: () => turnChapter('prev'),
+                });
+                add('back', 'Back', {
+                    key: 'Alt+←', keys: 'Alt+ArrowLeft', words: 'history previous passage',
+                    reason: canGoHistory(-1) ? null : HISTORY_ENDS[-1],
+                    run: () => goHistory(-1),
+                });
+                add('forward', 'Forward', {
+                    key: 'Alt+→', keys: 'Alt+ArrowRight', words: 'history next passage',
+                    reason: canGoHistory(1) ? null : HISTORY_ENDS[1],
+                    run: () => goHistory(1),
                 });
                 return list;
             }
@@ -8528,7 +8533,7 @@
                 const start = option.dataset.verseStart != null ? Number(option.dataset.verseStart) : null;
                 const end = option.dataset.verseEnd != null ? Number(option.dataset.verseEnd) : null;
                 setSearchOpen(false);
-                await openPassage(option.dataset.book, option.dataset.chapter, start, end);
+                await jumpTo(option.dataset.book, option.dataset.chapter, start, end);
             }
 
             // Runs an option: goes to its passage, or runs its command
@@ -8726,13 +8731,13 @@
                 }
                 const go = event.target.closest('#selection-card .xref-preview-go');
                 if (go) {
-                    openPassage(go.dataset.book, go.dataset.chapter, Number(go.dataset.verse), Number(go.dataset.endVerse));
+                    jumpTo(go.dataset.book, go.dataset.chapter, Number(go.dataset.verse), Number(go.dataset.endVerse));
                     return;
                 }
                 // So does a citation in the chapter's Cross references list.
                 const listed = event.target.closest('.xref-summary-chip');
                 if (listed) {
-                    openPassage(
+                    jumpTo(
                         listed.dataset.book,
                         listed.dataset.chapter,
                         Number(listed.dataset.verse),
@@ -8879,6 +8884,14 @@
                 const ctrl = event.ctrlKey || event.metaKey;
                 const plain = !ctrl && !event.altKey;
 
+                // Alt+← and Alt+→ go back and forward through the passages
+                // jumped to (not a chapter turn).
+                if (event.altKey && !ctrl && !event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+                    event.preventDefault();
+                    goHistory(event.key === 'ArrowLeft' ? -1 : 1);
+                    return;
+                }
+
                 // `/` or Ctrl+K (Cmd+K) opens search.
                 if ((plain && event.key === '/') || (ctrl && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k')) {
                     event.preventDefault();
@@ -8952,10 +8965,124 @@
                 }
             }
 
-            window.addEventListener('popstate', function (event) {
-                if (event.state && event.state.bookId && event.state.chapter) {
-                    loadReading(event.state.bookId, event.state.chapter);
+            // ---- Passage history, for this session only. It records
+            // jumps: going somewhere by choosing it (a chapter in the
+            // picker, Random chapter, a search result or Go to, a
+            // cross-reference, a Library row, the welcome's places to
+            // start), all through jumpTo. Moving on from where you are
+            // isn't a jump: ← and →, [ and ], the end-of-chapter buttons
+            // and a neighbor's heading, switching translation or compare,
+            // or scrolling. Alt+← goes back and Alt+→ forward (and the
+            // palette's Back and Forward, and a mouse's back and forward
+            // buttons).
+            //
+            // Each entry is a place: a chapter, the verses a jump landed on
+            // (if it selected any), and where the page was scrolled when
+            // the reader left it, so going back returns to where they were
+            // reading. Stepping on from a place (→ to the next chapter, say)
+            // moves the entry with them, so Back returns to where they
+            // actually left. A jump after going back drops the places
+            // ahead, as a browser does; the oldest go past 50.
+            //
+            // It's kept here, in memory, not in the webview's History API:
+            // nothing else is in that history (so its own Back does
+            // nothing), and the 50-place limit and restoring the scroll
+            // need a list this page owns.
+            const HISTORY_LIMIT = 50;
+            const places = [];
+            let placeIndex = -1;
+            // Whether places[placeIndex] is what's on screen: not while a
+            // jump, or a step back or forward, is on its way.
+            let placeShown = false;
+            let historyToken = 0;
+
+            function startHistory() {
+                places.length = 0;
+                places.push({ bookId: reading.bookId, chapter: reading.chapter, start: null, end: null, scrollY: null });
+                placeIndex = 0;
+                placeShown = true;
+            }
+
+            // Brings the place on screen up to date as the reader leaves
+            // it: the chapter they're on now, and how far down they are.
+            function rememberLeaving() {
+                if (!placeShown || placeIndex < 0 || !reading) return;
+                const place = places[placeIndex];
+                if (place.bookId !== reading.bookId || place.chapter !== reading.chapter) {
+                    Object.assign(place, { bookId: reading.bookId, chapter: reading.chapter, start: null, end: null });
                 }
+                place.scrollY = window.scrollY;
+            }
+
+            // A jump: opens the chapter (selecting `start`–`end`, if given
+            // and numbered; from the top, with `top`) and records it.
+            async function jumpTo(bookId, chapter, start = null, end = null, { top = false } = {}) {
+                rememberLeaving();
+                placeShown = false;
+                historyToken += 1;
+                const loaded = await openPassage(bookId, chapter, start, end);
+                if (loaded) {
+                    if (top) window.scrollTo(0, 0);
+                    const landed = start != null && selection && selection.start === Number(start) && selection.end === Number(end);
+                    const place = {
+                        bookId: reading.bookId,
+                        chapter: reading.chapter,
+                        start: landed ? selection.start : null,
+                        end: landed ? selection.end : null,
+                        scrollY: null,
+                    };
+                    const here = places[placeIndex];
+                    const same = here && here.bookId === place.bookId && here.chapter === place.chapter
+                        && here.start === place.start && here.end === place.end;
+                    if (!same) {
+                        places.splice(placeIndex + 1);
+                        places.push(place);
+                        if (places.length > HISTORY_LIMIT) places.splice(0, places.length - HISTORY_LIMIT);
+                        placeIndex = places.length - 1;
+                    }
+                }
+                placeShown = true;
+                return loaded;
+            }
+
+            function canGoHistory(step) {
+                const target = placeIndex + step;
+                return target >= 0 && target < places.length;
+            }
+
+            const HISTORY_ENDS = {
+                '-1': 'Nothing earlier in this session',
+                1: 'Nothing later in this session',
+            };
+
+            // Back (-1) or forward (1): the place, its verses selected, and
+            // the page scrolled where the reader left it.
+            async function goHistory(step) {
+                if (!canGoHistory(step)) {
+                    setDataStatus(`${HISTORY_ENDS[step]}.`);
+                    return false;
+                }
+                rememberLeaving();
+                placeIndex += step;
+                placeShown = false;
+                const token = ++historyToken;
+                const place = places[placeIndex];
+                const loaded = await openPassage(place.bookId, place.chapter, place.start, place.end);
+                // A newer Back, Forward or jump has taken over.
+                if (token !== historyToken) return false;
+                if (loaded) {
+                    if (place.scrollY != null) window.scrollTo(0, place.scrollY);
+                    else if (place.start == null) window.scrollTo(0, 0);
+                }
+                placeShown = true;
+                return loaded;
+            }
+
+            // A mouse's back and forward buttons.
+            window.addEventListener('mouseup', function (event) {
+                if (event.button !== 3 && event.button !== 4) return;
+                event.preventDefault();
+                goHistory(event.button === 3 ? -1 : 1);
             });
 
             // Switching translations re-reads whatever chapter is currently
@@ -8984,6 +9111,7 @@
                     renderTranslationOptions(home);
                     renderStartHere(home.startHere);
                     await loadReading(home.currentBookId, home.currentChapter);
+                    if (reading) startHistory();
                     await refreshBookmarks();
                     await refreshHighlights();
                     await refreshNoteList();
