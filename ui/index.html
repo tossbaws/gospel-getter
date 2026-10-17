@@ -3047,6 +3047,26 @@
             max-height: min(45vh, 20rem);
         }
 
+        /* Holding Shift turns the card into a faint ghost that clicks go
+           through, so a Shift-click reaches the verse under it (see
+           syncCardGhost). Only opacity and pointer-events change: the
+           card neither moves nor resizes, and it stays in the
+           accessibility tree. */
+        .selection-card.is-ghost,
+        .selection-card.is-ghost * {
+            pointer-events: none;
+        }
+
+        .selection-card.is-ghost {
+            opacity: 0.18;
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            .selection-card {
+                transition: opacity 0.1s ease;
+            }
+        }
+
         .selection-card > * + * {
             margin-top: 0.6rem;
         }
@@ -9124,6 +9144,61 @@
                 if (event.shiftKey && event.target.closest(SELECTABLE)) {
                     event.preventDefault();
                 }
+            });
+
+            // Holding Shift makes the selection card a ghost: faint, and
+            // clicks go through it, so a Shift-click reaches a verse it
+            // covers and extends the selection. Shift is followed from the
+            // keyboard (keydown and keyup), and let go of on blur or when
+            // the window is hidden, so a Shift released elsewhere never
+            // leaves the card a ghost. It's only visual: the card stays in
+            // the accessibility tree and focus doesn't move.
+            let shiftHeld = false;
+
+            // Whether Shift may ghost the card now. Not while Shift is for
+            // something else: typing in a field, the search box or palette,
+            // a dialog or sheet, Copy as… or another menu or popover, or
+            // focus in the card itself (Shift+Tab moves through it).
+            function cardGhostAllowed() {
+                if (!selectionCard.isConnected) return false;
+                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden
+                    || !exportNotesOverlay.hidden || !shortcutsOverlay.hidden || !welcomeOverlay.hidden) {
+                    return false;
+                }
+                if (!searchPanel.hidden || !copyMenu.hidden) return false;
+                const active = document.activeElement;
+                if (!active || active === document.body) return true;
+                if (selectionCard.contains(active)) return false;
+                if (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable) return false;
+                return !active.closest('[role="dialog"], [role="menu"], .popover');
+            }
+
+            function syncCardGhost() {
+                selectionCard.classList.toggle('is-ghost', shiftHeld && cardGhostAllowed());
+            }
+
+            window.addEventListener('keydown', function (event) {
+                shiftHeld = event.shiftKey || event.key === 'Shift';
+                syncCardGhost();
+            }, true);
+            window.addEventListener('keyup', function (event) {
+                shiftHeld = event.key === 'Shift' ? false : event.shiftKey;
+                syncCardGhost();
+            }, true);
+            function releaseShift() {
+                shiftHeld = false;
+                syncCardGhost();
+            }
+            window.addEventListener('blur', releaseShift);
+            document.addEventListener('visibilitychange', function () {
+                if (document.hidden) releaseShift();
+            });
+            // Focus moving (into a sheet Shift+? opened, Copy as… from
+            // Ctrl+Shift+C, a field) can end the ghost while Shift is
+            // still held, or allow it again.
+            document.addEventListener('focusin', syncCardGhost);
+            document.addEventListener('focusout', function () {
+                setTimeout(syncCardGhost, 0);
             });
 
             // Keyboard: arrow keys leaf through the whole Bible a chapter
