@@ -278,8 +278,9 @@ impl TranslationCode {
 impl<'de> Deserialize<'de> for TranslationCode {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let code = String::deserialize(deserializer)?;
-        Self::new(&code)
-            .ok_or_else(|| serde::de::Error::custom(format!("no translation \"{code}\"")))
+        Self::new(&code).ok_or_else(|| {
+            serde::de::Error::custom(format!("no translation \"{}\"", from_file(&code)))
+        })
     }
 }
 
@@ -440,7 +441,10 @@ pub fn parse(bytes: &[u8]) -> Result<ReaderData, ImportError> {
         .map(drop_unknown_preferences)
         .unwrap_or_default();
     let mut data: ReaderData = serde_json::from_value(value).map_err(|e| {
-        ImportError::Malformed(format!("The file doesn't have the expected layout: {e}."))
+        ImportError::Malformed(format!(
+            "The file doesn't have the expected layout: {}.",
+            shorten_quoted(&e.to_string())
+        ))
     })?;
     data.skipped_preferences = skipped_preferences;
     Ok(data)
@@ -449,6 +453,64 @@ pub fn parse(bytes: &[u8]) -> Result<ReaderData, ImportError> {
 /// The longest a skipped preference's name or value is shown, in
 /// characters, before it's cut short with "…".
 const MAX_SHOWN_PREFERENCE_CHARS: usize = 40;
+
+/// The longest any other string from the file (a book name, a translation
+/// code, a value the layout check quotes) is shown in a problem message, in
+/// characters, before it's cut short with "…".
+pub const MAX_SHOWN_FILE_CHARS: usize = 80;
+
+/// The longest the layout check's whole message is shown, in characters,
+/// even after each string in it is cut short (a string can be full of the
+/// quote marks the cutting goes by).
+const MAX_LAYOUT_DETAIL_CHARS: usize = 400;
+
+/// `text`, or, if it's longer than `max` characters, its first `max - 1`
+/// and "…".
+fn shorten(text: &str, max: usize) -> String {
+    if text.chars().count() > max {
+        let cut: String = text.chars().take(max - 1).collect();
+        format!("{cut}…")
+    } else {
+        text.to_owned()
+    }
+}
+
+/// A string from the file, as a problem message shows it.
+fn from_file(text: &str) -> String {
+    shorten(text, MAX_SHOWN_FILE_CHARS)
+}
+
+/// serde's description of what's wrong with the file's layout, with each
+/// string it quotes from the file (an `unknown variant` or field in
+/// backticks, a `string "…"` in Rust's escaped quotes) cut short, then the
+/// whole message.
+fn shorten_quoted(message: &str) -> String {
+    let mut out = String::new();
+    let mut chars = message.chars();
+    while let Some(open) = chars.next() {
+        out.push(open);
+        if open != '`' && open != '"' {
+            continue;
+        }
+        // Up to the matching mark (in "…", one not escaped with \).
+        let mut quoted = String::new();
+        let mut closed = false;
+        let mut escaped = false;
+        for q in chars.by_ref() {
+            if q == open && !escaped {
+                closed = true;
+                break;
+            }
+            escaped = open == '"' && q == '\\' && !escaped;
+            quoted.push(q);
+        }
+        out.push_str(&from_file(&quoted));
+        if closed {
+            out.push(open);
+        }
+    }
+    shorten(&out, MAX_LAYOUT_DETAIL_CHARS)
+}
 
 /// Removes from a file's `preferences` object every entry this version
 /// can't apply: a name it doesn't have, or a value it doesn't offer for
@@ -482,14 +544,7 @@ fn drop_unknown_preferences(preferences: &mut Value) -> Vec<String> {
 /// version doesn't offer; `“font” (not a setting in this version)` for a
 /// name it doesn't have.
 fn describe_skipped_preference(name: &str, value: &Value) -> String {
-    let shown = |text: &str| -> String {
-        if text.chars().count() > MAX_SHOWN_PREFERENCE_CHARS {
-            let cut: String = text.chars().take(MAX_SHOWN_PREFERENCE_CHARS - 1).collect();
-            format!("{cut}…")
-        } else {
-            text.to_owned()
-        }
-    };
+    let shown = |text: &str| shorten(text, MAX_SHOWN_PREFERENCE_CHARS);
     if !Preferences::NAMES.contains(&name) {
         return format!("“{}” (not a setting in this version)", shown(name));
     }
@@ -653,7 +708,7 @@ fn check_passage_record<'a>(
         return Err(format!(
             "{label}: book {book_number} is {}, not {}.",
             found.name,
-            book_name.as_deref().unwrap_or_default()
+            from_file(book_name.as_deref().unwrap_or_default())
         ));
     }
     if !(1..=found.chapter_count).contains(&chapter) {
@@ -791,7 +846,7 @@ pub fn validate(
                 "{label}: book {} is {}, not {}.",
                 h.book,
                 found.name,
-                h.book_name.as_deref().unwrap_or_default()
+                from_file(h.book_name.as_deref().unwrap_or_default())
             ));
             continue;
         }
@@ -913,7 +968,7 @@ pub fn validate(
                     problems.push(format!(
                         "Reading position: this install has no \u{201c}{}\u{201d} translation \
                          (it has {}).",
-                        p.translation,
+                        from_file(&p.translation),
                         codes.join(", ")
                     ));
                     None
@@ -931,7 +986,7 @@ pub fn validate(
                             "Reading position: book {} is {}, not {}.",
                             p.book,
                             found.name,
-                            p.book_name.as_deref().unwrap_or_default()
+                            from_file(p.book_name.as_deref().unwrap_or_default())
                         ));
                         None
                     } else if !(1..=found.chapter_count).contains(&p.chapter) {
@@ -1091,6 +1146,44 @@ mod tests {
         assert_eq!(
             names(&[Layout::Verses, Layout::Flowing]),
             select_options("layout-select")
+        );
+    }
+
+    #[test]
+    fn the_layout_checks_quotes_from_the_file_are_cut_short() {
+        let long = "y".repeat(200);
+        let cut = format!("{}…", "y".repeat(MAX_SHOWN_FILE_CHARS - 1));
+        // Short quotes, and the words around them, are left as they are.
+        let short = "unknown variant `teal`, expected one of `yellow`, `green`";
+        assert_eq!(shorten_quoted(short), short);
+        assert_eq!(
+            shorten_quoted(&format!("unknown field `{long}`, expected `book`")),
+            format!("unknown field `{cut}`, expected `book`")
+        );
+        // Rust's escaped quotes: an escaped " doesn't end the string.
+        assert_eq!(
+            shorten_quoted(&format!(
+                r#"invalid type: string "a\"{long}", expected i64"#
+            )),
+            format!(
+                r#"invalid type: string "a\"{}…", expected i64"#,
+                "y".repeat(MAX_SHOWN_FILE_CHARS - 4)
+            )
+        );
+        assert_eq!(
+            shorten_quoted(r#"string "a\\", then `b`"#),
+            r#"string "a\\", then `b`"#
+        );
+        // A quote that never closes isn't closed for it.
+        assert_eq!(
+            shorten_quoted(&format!("unknown variant `{long}")),
+            format!("unknown variant `{cut}")
+        );
+        // However the quotes fall, the whole message is bounded.
+        let many = format!("unknown variant `{}`", "y`".repeat(5_000));
+        assert_eq!(
+            shorten_quoted(&many).chars().count(),
+            MAX_LAYOUT_DETAIL_CHARS
         );
     }
 
