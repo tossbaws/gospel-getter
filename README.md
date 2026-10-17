@@ -407,8 +407,8 @@ plus `cargo fmt` and Clippy.
 No verse text is altered, cleaned up or "corrected"; every translation is
 stored exactly as its source provides it.
 
-- **KJV** comes from the public-domain dataset thiagobodruk/bible. That
-  source marks translator-supplied words and marginal notes inline as
+- **KJV** comes from the dataset thiagobodruk/bible, which is
+  MIT-licensed; the KJV text itself is public domain. That source marks translator-supplied words and marginal notes inline as
   `{...}`, in about 56% of verses. These are kept verbatim, including a
   few places where the source's own markup is broken (Hebrews 10:34 has an
   unmatched `}`). The only changes are structural: removing the file's
@@ -421,8 +421,9 @@ stored exactly as its source provides it.
   stored, braces and all. Copy as…'s formats change no words: they differ
   only in the verse numbers, the reference and the punctuation around
   them, and leave out the KJV's margin notes and the BSB's footnotes.
-- **WEB** comes from TehShrike/world-english-bible (public domain, via
-  ebible.org). Verses the source splits into several entries, as in the
+- **WEB** comes from TehShrike/world-english-bible, which has no licence
+  file of its own; the WEB text it carries is public domain, via
+  ebible.org. Verses the source splits into several entries, as in the
   Psalms' poetry, are joined back together in the source's own order, with
   nothing added, removed or reworded.
 - **BSB** comes from Berean's own downloads
