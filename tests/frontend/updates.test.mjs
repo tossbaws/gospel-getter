@@ -612,3 +612,30 @@ test('the check at startup gives up after 20 seconds too, saying nothing', () =>
         assert.deepEqual(app.consoleErrors, []);
     });
 });
+
+test('Check now during an install from the banner leaves the banner and its progress showing', () =>
+    withApp({
+        update: {
+            check: UPDATE,
+            install: {
+                events: [
+                    { event: 'started', data: { contentLength: 1000 } },
+                    { event: 'progress', data: { chunkLength: 250 } },
+                ],
+            },
+        },
+    }, async (app) => {
+        const before = app.calls.length;
+        app.click($(app, 'update-install'));
+        await app.until(() => app.calls.slice(before).some((c) => c.cmd === 'install_update'), 'install_update');
+        await app.until(() => $(app, 'update-status').textContent.endsWith('25%'), 'progress');
+
+        await checkInAbout(app);
+        assert.equal(checkStatus(app).textContent, 'Gospel Getter 2.6.0 is already downloading.');
+        assert.equal(banner(app).hidden, false, 'the banner stays');
+        assert.equal($(app, 'update-progress').hidden, false);
+        assert.equal($(app, 'update-progress').value, 250);
+        assert.equal($(app, 'update-status').textContent, 'Downloading the update… 25%');
+        assert.equal(aboutUpdate(app).hidden, true, 'About doesn’t offer it a second time');
+        assert.equal(app.calls.filter((c) => c.cmd === 'install_update').length, 1);
+    }));

@@ -215,7 +215,7 @@ export async function openApp({
 
     const calls = [];
     const clipboardWrites = [];
-    const state = { failReading: false, clipboard, failing: new Map(Object.entries(failing)), held: new Map() };
+    const state = { failReading: false, clipboard, failing: new Map(Object.entries(failing)), held: new Map(), heldAnswers: [] };
     const releases = new Map();
     for (const cmd of hold) {
         state.held.set(cmd, new Promise((resolve) => releases.set(cmd, resolve)));
@@ -242,6 +242,8 @@ export async function openApp({
         }
         const channels = Object.fromEntries(Object.entries(args).filter(([, v]) => v instanceof Channel));
         const result = await backend(cmd, JSON.parse(JSON.stringify(args)), channels);
+        const late = state.heldAnswers.findIndex((h) => h.cmd === cmd);
+        if (late !== -1) await state.heldAnswers.splice(late, 1)[0].until;
         if (cmd === 'get_reading' && result) return alterReading(result);
         return alter[cmd] ? alter[cmd](result) : result;
     };
@@ -351,6 +353,16 @@ export async function openApp({
                 state.held.delete(cmd);
                 release();
             };
+        },
+        /**
+         * Answers the next `cmd` call at once, but holds the answer back
+         * until the returned function is called: what it says is then out
+         * of date, as an answer overtaken by a later one is.
+         */
+        holdAnswer(cmd) {
+            let release;
+            state.heldAnswers.push({ cmd, until: new Promise((resolve) => { release = resolve; }) });
+            return () => release();
         },
         /** The answer the next native file dialog gives: a path, or null (cancelled). */
         async pick(path) {
