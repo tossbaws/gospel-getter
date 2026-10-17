@@ -4,6 +4,19 @@ name: Website
 # set to deploy from "GitHub Actions" in the repository settings; until
 # then the deploy job fails and nothing is published. The site is plain
 # static files, so there's no build step: site/ is uploaded as it is.
+#
+# The site never shows a version before its downloads exist. Its download
+# links serve the latest published release, so a deploy only goes ahead
+# when the version the site shows is published
+# (tools/release/site_version_gate.py):
+# - A push to main that changes the site deploys a site-only fix at once.
+#   The release-prep merge's push, which bumps the version, deploys nothing
+#   (its run says why) until the release is published.
+# - Publishing a release starts this workflow on main, which deploys main's
+#   site/, now with its version released. It's started as a dispatch from
+#   the release's run because the github-pages environment only deploys
+#   from main, and a release's run is on its tag.
+# - workflow_dispatch on main deploys under the same rule.
 
 on:
   push:
@@ -11,27 +24,105 @@ on:
     paths:
       - "site/**"
       - ".github/workflows/pages.yml"
+      - "tools/release/site_version_gate.py"
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "A release just published, such as v2.16.0 (set when a release starts this run)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-# One deployment at a time; a newer push waits rather than cancelling one
-# that's already publishing.
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
-  deploy:
+  # A release was published: deploy from main, in a run of its own.
+  from-release:
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Start the deploy on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          MAIN: ${{ github.event.repository.default_branch }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref "$MAIN" -f release_tag="$TAG"
+
+  check:
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.gate.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Is the site's version published?
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          published=(--published "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)")
+          # The release that started this run counts too, if it's published:
+          # the latest-release answer can lag a moment behind it.
+          if [ -n "$RELEASE_TAG" ]; then
+            if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "release_tag isn't a version tag: $RELEASE_TAG" >&2
+              exit 1
+            fi
+            state=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '"\(.draft) \(.prerelease)"')
+            if [ "$state" = "false false" ]; then
+              published+=(--published "$RELEASE_TAG")
+            fi
+          fi
+          python3 tools/release/site_version_gate.py --site site/index.html "${published[@]}" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: check
+    if: needs.check.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    # One deployment at a time; a newer one waits rather than cancelling one
+    # that's already publishing.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      # releases/latest/download/... can take a few minutes to follow a
+      # newly published release. Wait until it serves the site's version,
+      # so the page and its download buttons agree.
+      - name: Wait for the downloads to serve the site's version
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          want=$(python3 tools/release/site_version_gate.py --site site/index.html --site-version)
+          url="https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
+          for _ in $(seq 1 30); do
+            got=$(curl -sfL "$url" | python3 -c 'import json, sys; print(json.load(sys.stdin)["version"])' || true)
+            if [ "$got" = "$want" ]; then
+              echo "The downloads serve $want."
+              exit 0
+            fi
+            echo "The downloads serve ${got:-nothing yet}, not $want; waiting."
+            sleep 30
+          done
+          echo "The downloads still don't serve $want after 15 minutes." >&2
+          exit 1
 
       - name: Configure Pages
         uses: actions/configure-pages@v6
