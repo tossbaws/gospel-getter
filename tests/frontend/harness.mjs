@@ -205,6 +205,8 @@ export async function openApp({
     width = 1280,
     alterReading = (dto) => dto,
     alter = {},
+    // Called with the page's window before its scripts run (fake timers).
+    setUp = () => {},
 } = {}) {
     await backend('__reset', fresh
         ? { translationCode: translation, keepBookmarks }
@@ -261,6 +263,7 @@ export async function openApp({
             for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, value);
             if (readerMode) window.localStorage.setItem('gospel-getter-reader-mode', 'on');
             if (compare) window.localStorage.setItem('gospel-getter-compare', 'on');
+            setUp(window);
             window.__TAURI__ = { core: { invoke, Channel } };
             window.matchMedia = (query) => {
                 const matches = widthQuery(query);

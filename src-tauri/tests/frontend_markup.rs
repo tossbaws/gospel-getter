@@ -4056,3 +4056,15 @@ fn every_link_out_of_the_app_is_opened_by_the_backend() {
     assert!(HTML.contains("invoke('open_release_notes')"));
     assert!(HTML.contains("invoke('open_credit_link', { which: credit.dataset.link })"));
 }
+
+/// A Check now that times out in the page says what the backend says when
+/// GitHub can't be reached, word for word.
+#[test]
+fn a_timed_out_update_check_says_the_backends_offline_message() {
+    let offline = gospel_getter_lib::updater::messages::OFFLINE;
+    assert!(
+        HTML.contains(&format!("const UPDATE_CHECK_OFFLINE = '{offline}';")),
+        "{offline}"
+    );
+    assert!(HTML.contains("const UPDATE_CHECK_TIMEOUT_MS = 20000;"));
+}

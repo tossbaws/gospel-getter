@@ -9555,6 +9555,22 @@
 
             const aboutOpen = () => !aboutOverlay.hidden;
 
+            // A check that hasn't answered in 20 s is given up on, with the
+            // backend's own "couldn't reach GitHub" message (the same words
+            // as updater.rs's OFFLINE). Its answer, if it ever comes, is
+            // ignored. The download isn't limited: a slow one is still
+            // going somewhere.
+            const UPDATE_CHECK_TIMEOUT_MS = 20000;
+            const UPDATE_CHECK_OFFLINE = 'Couldn’t reach GitHub to check for updates. Check your internet connection and try again.';
+
+            function withinUpdateCheckTime(check) {
+                let timer;
+                const timeout = new Promise((resolve, reject) => {
+                    timer = setTimeout(() => reject(UPDATE_CHECK_OFFLINE), UPDATE_CHECK_TIMEOUT_MS);
+                });
+                return Promise.race([check, timeout]).finally(() => clearTimeout(timer));
+            }
+
             function setUpdateStatus(message, isError) {
                 for (const view of bothViews) {
                     view.status.textContent = message;
@@ -9666,7 +9682,7 @@
                     setCheckStatus('Checking for updates…', false);
                 }
                 try {
-                    const update = await invoke('check_for_update');
+                    const update = await withinUpdateCheckTime(invoke('check_for_update'));
                     if (update) {
                         offer(update);
                     } else if (!quiet) {
