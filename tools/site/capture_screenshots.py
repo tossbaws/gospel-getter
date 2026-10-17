@@ -3,7 +3,7 @@
 
 Loads the real ui/index.html in WebKitGTK (the engine the Linux app uses),
 offscreen, and answers its Tauri `invoke` calls with the app's real command
-code and the real bundled KJV/WEB text, through the same test-only bridge
+code and the real bundled KJV, BSB and WEB text, through the same test-only bridge
 the frontend tests use (src-tauri/examples/frontend_bridge.rs, against a
 throwaway database). Each scene sets the display preferences the app keeps
 in local storage, then drives the page's own controls with DOM events, as
@@ -32,7 +32,9 @@ can be screenshots/ itself). Every scene shows the picker as the app does at
 its window size: from 1200px wide the book and chapter picker is a sidebar on
 the left, and narrower it's a popover from the reference button, closed.
 The verses are one to a line (Verses, the default), except in the README's
-flowing scene, which sets Flowing under Aa.
+flowing scene, which sets Flowing under Aa. Scenes read the KJV or the WEB,
+except the README's bsb scene; the compare scenes read the KJV, compared with
+the WEB.
 Needs PyGObject with WebKit2 4.1 and a display (it never shows a window).
 """
 
@@ -314,9 +316,10 @@ def feature_scenes(theme):
                 await __gg.until(() => document.querySelector('#search-results .search-result'), 'results');
                 window.scrollTo(0, 0);
              """),
-        # KJV and WEB side by side.
+        # KJV and WEB side by side: reading the KJV, compared with the WEB.
         dict(name="compare", size=(1280, 800),
-             prefs={**look, "gospel-getter-compare": "on"}, position=("Psalms", 23, "web"),
+             prefs={**look, "gospel-getter-compare": "on", "gospel-getter-compare-with": "web"},
+             position=("Psalms", 23, "kjv"),
              steps="""
                 await __gg.until(() => document.querySelector('.compare-grid'), 'compare grid');
              """ + SCROLL_TO % ("document.querySelector('.chapter-heading')", 40)),
@@ -345,6 +348,10 @@ def readme_scenes(theme):
         # The same, in the Flowing layout: each chapter as prose.
         dict(name="flowing", size=(1280, 850), prefs={**look, "gospel-getter-layout": "flowing"},
              position=("John", 3, "kjv"), steps="window.scrollTo(0, 0);"),
+        # The same chapter in the Berean Standard Bible, with its footnote
+        # markers (John 3:3's is in view).
+        dict(name="bsb", size=(1280, 850), prefs=look,
+             position=("John", 3, "bsb"), steps="window.scrollTo(0, 0);"),
         # Searching the words of the text.
         dict(name="search-results", size=(1280, 1000), prefs=look, position=("John", 3, "web"),
              steps="""
@@ -353,10 +360,11 @@ def readme_scenes(theme):
                 await __gg.until(() => document.querySelector('#search-results .search-result'), 'results');
                 window.scrollTo(0, 0);
              """),
-        # Romans 14 from verse 21 in compare mode: the WEB numbers 24-26, the
-        # KJV doesn't.
+        # Romans 14 from verse 21 in compare mode, reading the KJV compared
+        # with the WEB: the WEB numbers 24-26, the KJV doesn't.
         dict(name="compare-translations", size=(1280, 750),
-             prefs={**look, "gospel-getter-compare": "on"}, position=("Romans", 14, "web"),
+             prefs={**look, "gospel-getter-compare": "on", "gospel-getter-compare-with": "web"},
+             position=("Romans", 14, "kjv"),
              steps="""
                 await __gg.until(() => document.querySelector('.compare-grid'), 'compare grid');
              """ + SCROLL_TO % ("__gg.verse(21, 'kjv')", 16)),
