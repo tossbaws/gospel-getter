@@ -126,9 +126,9 @@ test('Go to opens the passage, selected, and Back returns', () =>
         // The new card's chips start closed.
         assert.deepEqual(pressed(app), []);
         assert.equal(shown(app), null);
-        // Back, as the picker's tests do it.
+        // Back (Alt+←): John 3 again, as it was left.
         const before = app.calls.length;
-        app.window.dispatchEvent(new app.window.PopStateEvent('popstate', { state: { bookId: 43, chapter: 3 } }));
+        app.key('ArrowLeft', { altKey: true });
         await app.idle(before, 'get_reading');
         assert.equal(app.heading(), 'John 3');
     }));
@@ -331,7 +331,7 @@ test('a citation in the chapter’s Cross references opens its passage, selected
         assert.equal(shown(app), null, 'no preview there');
 
         const before = app.calls.length;
-        app.window.dispatchEvent(new app.window.PopStateEvent('popstate', { state: { bookId: 43, chapter: 3 } }));
+        app.key('ArrowLeft', { altKey: true });
         await app.idle(before, 'get_reading');
         assert.equal(app.heading(), 'John 3');
 

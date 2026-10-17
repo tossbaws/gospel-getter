@@ -307,7 +307,20 @@ pub struct ReadingPaneDto {
     /// Genesis 1), and in the next's (at Revelation 22).
     pub prev_edge: Option<BibleEdgeDto>,
     pub next_edge: Option<BibleEdgeDto>,
+    /// Chapter 1 of the books before and after, where `[` and `]` go;
+    /// `None` in Genesis and in Revelation.
+    pub prev_book: Option<BookStartDto>,
+    pub next_book: Option<BookStartDto>,
     pub has_chapter_xrefs: bool,
+}
+
+/// A book's first chapter, named.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookStartDto {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub book_name: String,
 }
 
 fn book_name(state: &AppState, book_id: i64) -> Option<&str> {
@@ -435,6 +448,13 @@ async fn build_reading_pane_dto(
         .find(|b| b.id == book_id)
         .ok_or_else(|| anyhow::anyhow!("unknown book id in navigation"))?;
     let current_book_name = current_book.name.clone();
+    let book_start = |r: ChapterRef| BookStartDto {
+        book_id: r.book_id,
+        chapter: r.chapter,
+        book_name: book_name(state, r.book_id).unwrap_or("?").to_owned(),
+    };
+    let prev_book = bible::previous_book(&state.books, current).map(book_start);
+    let next_book = bible::next_book(&state.books, current).map(book_start);
     let prev_edge = prev.is_none().then(|| BibleEdgeDto::start(current_book));
     let next_edge = next.is_none().then(BibleEdgeDto::end);
 
@@ -482,6 +502,8 @@ async fn build_reading_pane_dto(
         next,
         prev_edge,
         next_edge,
+        prev_book,
+        next_book,
         has_chapter_xrefs,
     })
 }
@@ -2869,6 +2891,32 @@ mod tests {
                 .unwrap_err(),
             "Matthew 17:21 isn't numbered in the Berean Standard Bible."
         );
+    }
+
+    /// `[` and `]` go to chapter 1 of the book before and after, named;
+    /// Genesis has none before and Revelation none after.
+    #[tokio::test]
+    async fn the_books_before_and_after_are_named_at_chapter_one() {
+        let (_db, state) = app_state("cmd_book_steps").await;
+        let start = |id, name: &str| {
+            Some(BookStartDto {
+                book_id: id,
+                chapter: 1,
+                book_name: name.to_owned(),
+            })
+        };
+        let psalm = reading(&state, 19, 23, Some("kjv")).await.unwrap();
+        assert_eq!(psalm.prev_book, start(18, "Job"));
+        assert_eq!(psalm.next_book, start(20, "Proverbs"));
+        let genesis = reading(&state, 1, 50, Some("kjv")).await.unwrap();
+        assert_eq!(genesis.prev_book, None);
+        assert_eq!(genesis.next_book, start(2, "Exodus"));
+        let revelation = reading(&state, 66, 1, Some("web")).await.unwrap();
+        assert_eq!(revelation.prev_book, start(65, "Jude"));
+        assert_eq!(revelation.next_book, None);
+        let json = serde_json::to_value(&psalm).unwrap();
+        assert_eq!(json["nextBook"]["bookName"], "Proverbs");
+        assert_eq!(json["prevBook"]["chapter"], 1);
     }
 
     /// Only the first and last chapters of the Bible have an edge card, in

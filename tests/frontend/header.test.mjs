@@ -496,7 +496,7 @@ test('☰ is a menu: arrows, Home and End move, Tab and Escape close, and arrows
         assert.equal(menu.getAttribute('aria-label'), 'Menu');
         assert.equal(toggle(app, 'menu').getAttribute('aria-label'), 'Menu');
         const items = [...menu.querySelectorAll('[role="menuitem"]')];
-        assert.deepEqual(items.map((i) => i.textContent), ['Export data…', 'Import data…', 'Show welcome', 'About Gospel Getter']);
+        assert.deepEqual(items.map((i) => i.textContent), ['Export data…', 'Import data…', 'Show welcome', 'Keyboard shortcuts', 'About Gospel Getter']);
         assert.equal(menu.querySelector('[role="separator"]').previousElementSibling, items[1], 'a divider after Import');
         assert.ok(items.every((i) => i.tabIndex === -1), 'one tab stop: arrows move within');
 
@@ -508,11 +508,11 @@ test('☰ is a menu: arrows, Home and End move, Tab and Escape close, and arrows
         assert.equal(app.document.activeElement, items[1]);
         move('ArrowUp');
         move('ArrowUp');
-        assert.equal(app.document.activeElement, items[3], 'wraps');
+        assert.equal(app.document.activeElement, items.at(-1), 'wraps');
         move('Home');
         assert.equal(app.document.activeElement, items[0]);
         move('End');
-        assert.equal(app.document.activeElement, items[3]);
+        assert.equal(app.document.activeElement, items.at(-1));
         move('ArrowLeft');
         move('ArrowRight');
         await app.idle(0);
@@ -522,7 +522,7 @@ test('☰ is a menu: arrows, Home and End move, Tab and Escape close, and arrows
         assert.ok(!isOpen(app, 'menu'));
         assert.equal(app.document.activeElement, toggle(app, 'menu'));
         app.key('ArrowUp', {}, toggle(app, 'menu'));
-        assert.equal(app.document.activeElement, items[3]);
+        assert.equal(app.document.activeElement, items.at(-1));
         move('Escape');
         assert.ok(!isOpen(app, 'menu'));
         assert.equal(app.document.activeElement, toggle(app, 'menu'));

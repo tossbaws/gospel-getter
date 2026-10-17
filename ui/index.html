@@ -1237,6 +1237,17 @@
             border-radius: var(--radius-s);
         }
 
+        .palette-key kbd svg {
+            width: 1em;
+            height: 1em;
+            vertical-align: -0.15em;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.6;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
         .search-command:hover,
         .search-command.is-active,
         .search-result.is-active {
@@ -1503,6 +1514,81 @@
             from {
                 opacity: 0;
                 transform: translateY(6px);
+            }
+        }
+
+        /* The keyboard shortcuts: a modal sheet of groups, each a list of
+           key caps (the chapter-end hint's) and what they do, in the UI
+           sans, scrolling inside on a small window. */
+        .shortcuts-panel {
+            width: min(40rem, 100%);
+            font-family: var(--font-ui);
+        }
+
+        .shortcuts-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1rem 1.1rem 0.6rem 1.4rem;
+            border-bottom: 1px solid var(--accent-dim);
+        }
+
+        .shortcuts-title {
+            font-size: 1.1rem;
+            font-weight: normal;
+            color: var(--accent);
+        }
+
+        .shortcuts-body {
+            padding-bottom: 1rem;
+        }
+
+        .shortcuts-body:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+        }
+
+        .shortcut-group + .shortcut-group {
+            margin-top: 1rem;
+        }
+
+        .shortcut-group-title {
+            font-size: 0.75rem;
+            font-weight: bold;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 0.35rem;
+        }
+
+        .shortcut-row {
+            display: grid;
+            grid-template-columns: minmax(9rem, auto) 1fr;
+            gap: 0.2rem 1rem;
+            align-items: baseline;
+            padding: 0.25rem 0;
+            font-size: 0.85rem;
+            border-bottom: 1px solid rgba(var(--accent-rgb), 0.12);
+        }
+
+        .shortcut-keys {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            white-space: nowrap;
+        }
+
+        .shortcut-does {
+            color: var(--text);
+        }
+
+        .key-plus {
+            margin: 0 0.1em;
+        }
+
+        @media (max-width: 480px) {
+            .shortcut-row {
+                grid-template-columns: 1fr;
             }
         }
 
@@ -3709,7 +3795,8 @@
             margin-top: 0.75rem;
         }
 
-        .nav-hint kbd {
+        .nav-hint kbd,
+        .shortcut-keys kbd {
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -3727,7 +3814,8 @@
             border-radius: var(--radius-s);
         }
 
-        .nav-hint kbd svg {
+        .nav-hint kbd svg,
+        .shortcut-keys kbd svg {
             width: 1em;
             height: 1em;
             fill: none;
@@ -4994,6 +5082,7 @@
                 <button type="button" id="import-data-btn" class="menu-item" role="menuitem" tabindex="-1">Import data…</button>
                 <div class="menu-separator" role="separator"></div>
                 <button type="button" id="welcome-btn" class="menu-item" role="menuitem" tabindex="-1">Show welcome</button>
+                <button type="button" id="shortcuts-btn" class="menu-item" role="menuitem" tabindex="-1" aria-keyshortcuts="?">Keyboard shortcuts</button>
                 <button type="button" id="about-btn" class="menu-item" role="menuitem" tabindex="-1">About Gospel Getter</button>
             </div>
         </div>
@@ -5111,6 +5200,15 @@
             <div class="welcome-buttons modal-buttons">
                 <button type="button" id="welcome-skip" class="reader-mode-btn">Skip</button>
             </div>
+        </div>
+    </div>
+    <div id="shortcuts-overlay" class="modal-overlay" hidden>
+        <div id="shortcuts-panel" class="modal-panel shortcuts-panel" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+            <div class="shortcuts-head">
+                <h2 id="shortcuts-title" class="shortcuts-title">Keyboard shortcuts</h2>
+                <button type="button" id="shortcuts-close" class="panel-close" aria-label="Close keyboard shortcuts" title="Close (Esc)">&times;</button>
+            </div>
+            <div id="shortcuts-body" class="modal-body shortcuts-body" tabindex="0" role="region" aria-labelledby="shortcuts-title"></div>
         </div>
     </div>
     <div id="note-overlay" class="modal-overlay" hidden>
@@ -6154,7 +6252,8 @@
             }
 
             // Opens a chapter and selects a verse range in it, in the
-            // selected translation — for bookmarks and search results.
+            // selected translation — for every jump (see jumpTo), and for
+            // going back and forward to one.
             // If that translation doesn't number the verses, it opens the
             // chapter and says so, rather than selecting other verses.
             async function openPassage(bookId, chapter, start, end) {
@@ -6189,7 +6288,7 @@
                 if (!bookmark) return;
                 if (open) {
                     closeSurfaces();
-                    await openPassage(bookmark.bookId, bookmark.chapter, bookmark.verseStart, bookmark.verseEnd);
+                    await jumpTo(bookmark.bookId, bookmark.chapter, bookmark.verseStart, bookmark.verseEnd);
                     return;
                 }
                 try {
@@ -6219,7 +6318,7 @@
                 const { bookId, chapter, verseStart, verseEnd } = passage;
                 if (open) {
                     closeSurfaces();
-                    await openPassage(bookId, chapter, verseStart, verseEnd);
+                    await jumpTo(bookId, chapter, verseStart, verseEnd);
                     return;
                 }
                 const position = [...highlightList.querySelectorAll('.bookmark-remove')].indexOf(target);
@@ -6455,7 +6554,7 @@
                 const note = allNotes.find((n) => String(n.id) === target.dataset.noteId);
                 if (!note) return;
                 closeSurfaces(!edit);
-                await openPassage(note.bookId, note.chapter, note.verseStart, note.verseEnd);
+                await jumpTo(note.bookId, note.chapter, note.verseStart, note.verseEnd);
                 if (edit && reading) {
                     openNotePanel({ mode: 'edit', note, code: selection ? selection.translationCode : reading.translationCode });
                 }
@@ -7475,9 +7574,7 @@
                 const row = event.target.closest('.welcome-start-row');
                 if (!row) return;
                 closeWelcome();
-                loadReading(row.dataset.book, row.dataset.chapter).then((loaded) => {
-                    if (loaded) window.scrollTo(0, 0);
-                });
+                jumpTo(row.dataset.book, row.dataset.chapter, null, null, { top: true });
             });
             document.getElementById('welcome-skip').addEventListener('click', closeWelcome);
             document.getElementById('welcome-close').addEventListener('click', closeWelcome);
@@ -7671,7 +7768,7 @@
             // stays.
             function choosePickerChapter(bookId, chapter) {
                 if (surfaces() && surfaces().current() === 'picker') closeSurfaces();
-                loadReading(bookId, chapter);
+                jumpTo(bookId, chapter);
             }
 
             document.addEventListener('gospel-getter:picker-shown', function () {
@@ -7916,7 +8013,7 @@
                     return `<button type="button" class="chapter-step chapter-step-${which}" data-book="${side.bookId}" data-chapter="${side.chapter}" aria-label="${label}">${text}</button>`;
                 };
                 return `<nav class="chapter-end" aria-label="Previous and next chapter">${step(dto.prev, 'prev')}${step(dto.next, 'next')}</nav>
-                    <p class="nav-hint">Use ${hintKey('Left arrow', ARROW_LEFT)} and ${hintKey('Right arrow', ARROW_RIGHT)} to move a chapter at a time, ${hintKey('/')} to search, ${hintKey('C')} to compare translations.</p>
+                    <p class="nav-hint">Use ${hintKey('Left arrow', ARROW_LEFT)} and ${hintKey('Right arrow', ARROW_RIGHT)} to move a chapter at a time, and ${hintKey('?')} for all keyboard shortcuts.</p>
                     <p class="chapter-copy"><button type="button" class="chapter-copy-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="copy-as-menu">Copy chapter…</button></p>`;
             }
 
@@ -8120,10 +8217,6 @@
                     };
                     showNotice(isComparing() && !compare ? COMPARE_FAILED : '');
                     renderCurrent();
-
-                    if (window.history && window.history.pushState) {
-                        window.history.pushState({ bookId, chapter }, '', `#${bookId}/${chapter}`);
-                    }
                     return true;
                 } catch (e) {
                     console.error('Failed to load reading pane', e);
@@ -8149,6 +8242,128 @@
                 }
                 renderCurrent();
             });
+
+            // ---- Keyboard shortcuts: every key the app answers, in one
+            // table. The shortcuts sheet (?) lists it, the palette's
+            // commands show their keys from it (by `id`), and the key
+            // handlers' keys are each in some row's `handles` (the
+            // KeyboardEvent key or code values it covers; a test checks
+            // every one the handlers compare against is listed). `keys`
+            // are the ways to press it, each a list of key caps.
+            const SHORTCUT_GROUPS = ['Reading', 'Selection', 'Search & palette', 'Panels', 'Text & display', 'History'];
+            const SHORTCUTS = [
+                { id: 'previous-chapter', group: 'Reading', keys: [['←']], aria: 'ArrowLeft', does: 'Previous chapter', handles: ['ArrowLeft'] },
+                { id: 'next-chapter', group: 'Reading', keys: [['→']], aria: 'ArrowRight', does: 'Next chapter', handles: ['ArrowRight'] },
+                { id: 'previous-book', group: 'Reading', keys: [['[']], aria: '[', does: 'Previous book, at chapter 1', handles: ['['] },
+                { id: 'next-book', group: 'Reading', keys: [[']']], aria: ']', does: 'Next book, at chapter 1', handles: [']'] },
+                { id: 'picker', group: 'Reading', keys: [['G']], aria: 'G', does: 'Choose a book and chapter', handles: ['g', 'G'] },
+                { id: 'compare', group: 'Reading', keys: [['C']], aria: 'C', does: 'Compare translations, on or off', handles: ['c', 'C'] },
+                { id: 'next-verse', group: 'Selection', keys: [['j']], aria: 'J', does: 'Select the next verse', handles: ['j', 'J'] },
+                { id: 'previous-verse', group: 'Selection', keys: [['k']], aria: 'K', does: 'Select the previous verse', handles: ['k', 'K'] },
+                { id: 'extend-down', group: 'Selection', keys: [['Shift', 'j']], aria: 'Shift+J', does: 'Extend the selection down a verse', handles: [] },
+                { id: 'extend-up', group: 'Selection', keys: [['Shift', 'k']], aria: 'Shift+K', does: 'Extend the selection up a verse', handles: [] },
+                { id: 'copy', group: 'Selection', keys: [['Ctrl', 'C']], aria: 'Control+C', does: 'Copy the selected verses with their reference', handles: ['c'] },
+                { id: 'copy-as', group: 'Selection', keys: [['Ctrl', 'Shift', 'C']], aria: 'Control+Shift+C', does: 'Copy as…: with verse numbers, as Markdown, or plain', handles: ['c'] },
+                { id: 'note', group: 'Selection', keys: [['N']], aria: 'N', does: 'Add a note to the selected verses', handles: ['n', 'N'] },
+                { id: 'clear-selection', group: 'Selection', keys: [['Esc']], aria: 'Escape', does: 'Clear the selection', handles: ['Escape'] },
+                { id: 'search', group: 'Search & palette', keys: [['/'], ['Ctrl', 'K']], aria: '/ Control+K', does: 'Search, go to a reference, or run a command', handles: ['/', 'k'] },
+                { id: 'commands-only', group: 'Search & palette', keys: [['>']], aria: '>', does: 'Typed first in the box: commands only', handles: [] },
+                { id: 'palette-move', group: 'Search & palette', keys: [['↓'], ['↑']], aria: 'ArrowDown ArrowUp', does: 'Move through the results and commands', handles: [] },
+                { id: 'palette-run', group: 'Search & palette', keys: [['Enter']], aria: 'Enter', does: 'Go there, or run the command', handles: [] },
+                { id: 'library', group: 'Panels', keys: [['Ctrl', 'B']], aria: 'Control+B', does: 'Open or close the Library', handles: ['b'] },
+                { id: 'shortcuts', group: 'Panels', keys: [['?']], aria: '?', does: 'These keyboard shortcuts', handles: ['?'] },
+                { id: 'close', group: 'Panels', keys: [['Esc']], aria: 'Escape', does: 'Close the search box, a panel or a popover, one at a time', handles: ['Escape'] },
+                { id: 'text-larger', group: 'Text & display', keys: [['Ctrl', '=']], aria: 'Control+=', does: 'Larger text', handles: ['=', '+', 'NumpadAdd'] },
+                { id: 'text-smaller', group: 'Text & display', keys: [['Ctrl', '-']], aria: 'Control+-', does: 'Smaller text', handles: ['-', '_', 'NumpadSubtract'] },
+                { id: 'text-medium', group: 'Text & display', keys: [['Ctrl', '0']], aria: 'Control+0', does: 'Medium text', handles: ['0', 'Numpad0'] },
+                { id: 'reader-exit', group: 'Text & display', keys: [['Esc']], aria: 'Escape', does: 'Leave reading mode', handles: ['Escape'] },
+                { id: 'back', group: 'History', keys: [['Alt', '←']], aria: 'Alt+ArrowLeft', does: 'Back to the passage you jumped from', handles: ['ArrowLeft'] },
+                { id: 'forward', group: 'History', keys: [['Alt', '→']], aria: 'Alt+ArrowRight', does: 'Forward again', handles: ['ArrowRight'] },
+            ];
+            window.gospelGetterShortcuts = SHORTCUTS;
+
+            function shortcut(id) {
+                return SHORTCUTS.find((s) => s.id === id) || null;
+            }
+
+            // The arrows are drawn, as in the chapter-end hint (the UI
+            // sans's are tiny); screen readers hear the key's name.
+            const ARROW_UP = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 13V3M4 7l4-4 4 4"/></svg>';
+            const ARROW_DOWN = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 3v10M4 9l4 4 4-4"/></svg>';
+            const CAP_NAMES = { '←': ['Left arrow', () => ARROW_LEFT], '→': ['Right arrow', () => ARROW_RIGHT], '↑': ['Up arrow', () => ARROW_UP], '↓': ['Down arrow', () => ARROW_DOWN] };
+
+            function capsHtml(keys) {
+                return keys
+                    .map((combo) => combo
+                        .map((cap) => (CAP_NAMES[cap] ? hintKey(CAP_NAMES[cap][0], CAP_NAMES[cap][1]()) : hintKey(escapeHtml(cap))))
+                        .join('<span class="key-plus" aria-hidden="true">+</span>'))
+                    .join(' <span class="key-or">or</span> ');
+            }
+
+            const shortcutsOverlay = document.getElementById('shortcuts-overlay');
+            const shortcutsPanel = document.getElementById('shortcuts-panel');
+            const shortcutsBody = document.getElementById('shortcuts-body');
+            const shortcutsClose = document.getElementById('shortcuts-close');
+            let shortcutsReturn = null;
+
+            function renderShortcuts() {
+                shortcutsBody.innerHTML = SHORTCUT_GROUPS.map((group, i) => `<section class="shortcut-group" aria-labelledby="shortcut-group-${i}">
+                    <h3 class="shortcut-group-title" id="shortcut-group-${i}">${escapeHtml(group)}</h3>
+                    <dl class="shortcut-list">${SHORTCUTS.filter((s) => s.group === group).map((s) => `<div class="shortcut-row" data-shortcut="${s.id}">
+                        <dt class="shortcut-keys">${capsHtml(s.keys)}</dt>
+                        <dd class="shortcut-does">${escapeHtml(s.does)}</dd>
+                    </div>`).join('')}</dl>
+                </section>`).join('');
+            }
+
+            // The sheet is modal: Tab stays inside, Escape closes it, and
+            // focus goes back to where it was (or ☰, opened from there).
+            function openShortcuts(opener = null) {
+                if (!shortcutsOverlay.hidden) return;
+                const active = document.activeElement;
+                shortcutsReturn = opener || (active && active !== document.body ? active : null);
+                if (!searchPanel.hidden) setSearchOpen(false);
+                closeSurfaces(false);
+                renderShortcuts();
+                shortcutsOverlay.hidden = false;
+                shortcutsBody.scrollTop = 0;
+                shortcutsClose.focus();
+            }
+
+            function closeShortcuts() {
+                if (shortcutsOverlay.hidden) return;
+                shortcutsOverlay.hidden = true;
+                const back = shortcutsReturn;
+                shortcutsReturn = null;
+                if (back && back.isConnected && !back.closest('[hidden]')) back.focus({ preventScroll: true });
+            }
+
+            shortcutsClose.addEventListener('click', closeShortcuts);
+            document.getElementById('shortcuts-btn').addEventListener('click', () => openShortcuts(menuToggle));
+            // A click on the dimmed page behind it closes it.
+            shortcutsOverlay.addEventListener('click', function (event) {
+                if (event.target === shortcutsOverlay) closeShortcuts();
+            });
+
+            // While it's open it has the keyboard (on window, capturing,
+            // as the welcome does): none of the reader's shortcuts run.
+            window.addEventListener('keydown', function (event) {
+                if (shortcutsOverlay.hidden) return;
+                event.stopPropagation();
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeShortcuts();
+                } else if (event.key === 'Tab') {
+                    const stops = [shortcutsClose, shortcutsBody];
+                    const active = document.activeElement;
+                    const at = stops.indexOf(active);
+                    event.preventDefault();
+                    const next = at === -1
+                        ? stops[0]
+                        : stops[(at + (event.shiftKey ? -1 : 1) + stops.length) % stops.length];
+                    next.focus();
+                }
+            }, true);
 
             // ---- Search and go-to-reference (GH-12), and the command
             // palette, in one box. As the reader types, the results come
@@ -8193,10 +8408,13 @@
 
             function paletteCommands() {
                 const list = [];
-                // `key` is shown; `keys` is its aria-keyshortcuts; `words`
-                // are other words it's found by.
-                const add = (id, label, { key = '', keys = '', words = '', reason = null, run }) => {
-                    list.push({ id, label, key, keys: keys || key, words, reason, run });
+                // `shortcut` is its row in SHORTCUTS, whose first way to
+                // press it is shown (and all of it is its
+                // aria-keyshortcuts); `words` are other words it's found by.
+                const add = (id, label, { shortcut: shortcutId = '', words = '', reason = null, run }) => {
+                    const row = shortcutId ? shortcut(shortcutId) : null;
+                    const key = row ? row.keys[0].join('+') : '';
+                    list.push({ id, label, key, keys: row ? row.aria : '', words, reason, run });
                 };
                 const comparing = isComparing();
                 const readerMode = root.dataset.readerMode === 'on';
@@ -8205,12 +8423,12 @@
                 const partner = window.gospelGetterComparePartner ? window.gospelGetterComparePartner() : null;
 
                 add('compare', comparing ? 'Compare off' : 'Compare on', {
-                    key: 'C', words: 'translations side by side',
+                    shortcut: 'compare', words: 'translations side by side',
                     reason: !comparing && !partner ? 'There’s only one translation' : null,
                     run: clickControl('compare-btn'),
                 });
                 add('reader-mode', readerMode ? 'Exit reading mode' : 'Reading mode', {
-                    key: readerMode ? 'Esc' : '', keys: readerMode ? 'Escape' : '', words: 'distraction free focus',
+                    shortcut: readerMode ? 'reader-exit' : '', words: 'distraction free focus',
                     run: clickControl(readerMode ? 'reader-exit' : 'reader-mode-btn'),
                 });
                 optionsOf('layout-select').forEach((o) => add(`layout-${o.value}`, `Layout: ${o.textContent}`, {
@@ -8225,17 +8443,17 @@
                 const sizes = optionsOf('text-size-select');
                 const size = sizes.findIndex((o) => o.value === valueOf('text-size-select'));
                 add('text-larger', 'Text size: Larger', {
-                    key: 'Ctrl+=', keys: 'Control+=', words: 'bigger increase font',
+                    shortcut: 'text-larger', words: 'bigger increase font',
                     reason: size >= sizes.length - 1 ? 'Already the largest' : null,
                     run: () => controls().textSize(1),
                 });
                 add('text-smaller', 'Text size: Smaller', {
-                    key: 'Ctrl+-', keys: 'Control+-', words: 'decrease font',
+                    shortcut: 'text-smaller', words: 'decrease font',
                     reason: size <= 0 ? 'Already the smallest' : null,
                     run: () => controls().textSize(-1),
                 });
                 add('text-medium', 'Text size: Medium', {
-                    key: 'Ctrl+0', keys: 'Control+0', words: 'reset default font',
+                    shortcut: 'text-medium', words: 'reset default font',
                     reason: valueOf('text-size-select') === 'medium' ? IN_USE : null,
                     run: () => controls().textSize(0),
                 });
@@ -8263,7 +8481,7 @@
                     run: clickControl('sidebar-toggle'),
                 });
                 [['bookmarks', 'Bookmarks'], ['highlights', 'Highlights'], ['notes', 'Notes']].forEach(([tab, name]) => add(`library-${tab}`, `Open Library: ${name}`, {
-                    key: 'Ctrl+B', keys: 'Control+B',
+                    shortcut: 'library',
                     reason: readerMode ? 'Not in reading mode' : null,
                     run: () => {
                         if (surfaces().current() !== 'library') document.getElementById('library-toggle').click();
@@ -8310,14 +8528,38 @@
                 });
                 const inner = currentInner();
                 add('next-chapter', 'Next chapter', {
-                    key: '→', keys: 'ArrowRight',
+                    shortcut: 'next-chapter',
                     reason: inner && inner.dataset.nextBook ? null : 'This is the Bible’s last chapter',
                     run: () => turnChapter('next'),
                 });
                 add('previous-chapter', 'Previous chapter', {
-                    key: '←', keys: 'ArrowLeft',
+                    shortcut: 'previous-chapter',
                     reason: inner && inner.dataset.prevBook ? null : 'This is the Bible’s first chapter',
                     run: () => turnChapter('prev'),
+                });
+                add('next-book', 'Next book', {
+                    shortcut: 'next-book',
+                    reason: lastDto && lastDto.nextBook ? null : 'This is the Bible’s last book',
+                    run: () => stepBook('next'),
+                });
+                add('previous-book', 'Previous book', {
+                    shortcut: 'previous-book',
+                    reason: lastDto && lastDto.prevBook ? null : 'This is the Bible’s first book',
+                    run: () => stepBook('prev'),
+                });
+                add('back', 'Back', {
+                    shortcut: 'back', words: 'history previous passage',
+                    reason: canGoHistory(-1) ? null : HISTORY_ENDS[-1],
+                    run: () => goHistory(-1),
+                });
+                add('forward', 'Forward', {
+                    shortcut: 'forward', words: 'history next passage',
+                    reason: canGoHistory(1) ? null : HISTORY_ENDS[1],
+                    run: () => goHistory(1),
+                });
+                add('shortcuts', 'Keyboard shortcuts', {
+                    shortcut: 'shortcuts', words: 'keys help',
+                    run: () => openShortcuts(),
                 });
                 return list;
             }
@@ -8413,9 +8655,14 @@
                 renderPalette();
             }
 
+            // The arrows are drawn, as in the sheet (the UI sans's are
+            // tiny); the arrow itself stays in the key's text, unseen.
             function keyHtml(command) {
                 if (!command.key) return '';
-                return `<span class="palette-key"><span class="visually-hidden">, key </span><kbd>${escapeHtml(command.key)}</kbd></span>`;
+                const key = [...command.key]
+                    .map((c) => (CAP_NAMES[c] ? `<span class="visually-hidden">${c}</span>${CAP_NAMES[c][1]()}` : escapeHtml(c)))
+                    .join('');
+                return `<span class="palette-key"><span class="visually-hidden">, key </span><kbd>${key}</kbd></span>`;
             }
 
             // The listbox: each group a role="group" named by its heading,
@@ -8528,7 +8775,7 @@
                 const start = option.dataset.verseStart != null ? Number(option.dataset.verseStart) : null;
                 const end = option.dataset.verseEnd != null ? Number(option.dataset.verseEnd) : null;
                 setSearchOpen(false);
-                await openPassage(option.dataset.book, option.dataset.chapter, start, end);
+                await jumpTo(option.dataset.book, option.dataset.chapter, start, end);
             }
 
             // Runs an option: goes to its passage, or runs its command
@@ -8641,7 +8888,7 @@
                 // preferences script in <head> (and the lists' own
                 // handlers above); they're never navigation or a "click
                 // away" from a verse selection. Nor is the search panel.
-                if (event.target.closest('#top-bar, #picker, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-notes-overlay, #data-status')) {
+                if (event.target.closest('#top-bar, #picker, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-notes-overlay, #shortcuts-overlay, #data-status')) {
                     return;
                 }
 
@@ -8726,13 +8973,13 @@
                 }
                 const go = event.target.closest('#selection-card .xref-preview-go');
                 if (go) {
-                    openPassage(go.dataset.book, go.dataset.chapter, Number(go.dataset.verse), Number(go.dataset.endVerse));
+                    jumpTo(go.dataset.book, go.dataset.chapter, Number(go.dataset.verse), Number(go.dataset.endVerse));
                     return;
                 }
                 // So does a citation in the chapter's Cross references list.
                 const listed = event.target.closest('.xref-summary-chip');
                 if (listed) {
-                    openPassage(
+                    jumpTo(
                         listed.dataset.book,
                         listed.dataset.chapter,
                         Number(listed.dataset.verse),
@@ -8852,7 +9099,7 @@
                 // And while the import preview, About, the note panel or
                 // Export notes is open, nothing else responds to the
                 // keyboard (they handle their own keys).
-                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden || !exportNotesOverlay.hidden) {
+                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden || !exportNotesOverlay.hidden || !shortcutsOverlay.hidden) {
                     return;
                 }
 
@@ -8878,6 +9125,21 @@
 
                 const ctrl = event.ctrlKey || event.metaKey;
                 const plain = !ctrl && !event.altKey;
+
+                // Alt+← and Alt+→ go back and forward through the passages
+                // jumped to (not a chapter turn).
+                if (event.altKey && !ctrl && !event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+                    event.preventDefault();
+                    goHistory(event.key === 'ArrowLeft' ? -1 : 1);
+                    return;
+                }
+
+                // ? (Shift+/) opens the keyboard shortcuts; never search.
+                if (plain && event.key === '?') {
+                    event.preventDefault();
+                    openShortcuts();
+                    return;
+                }
 
                 // `/` or Ctrl+K (Cmd+K) opens search.
                 if ((plain && event.key === '/') || (ctrl && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k')) {
@@ -8930,6 +9192,21 @@
                     return;
                 }
 
+                // j and k select the next and previous verse; with Shift,
+                // they extend the selection.
+                if (plain && (event.key === 'j' || event.key === 'J' || event.key === 'k' || event.key === 'K')) {
+                    event.preventDefault();
+                    stepSelection(event.key.toLowerCase() === 'j' ? 1 : -1, event.shiftKey);
+                    return;
+                }
+
+                // [ and ] go to the previous and next book, at chapter 1.
+                if (plain && (event.key === '[' || event.key === ']')) {
+                    event.preventDefault();
+                    stepBook(event.key === '[' ? 'prev' : 'next');
+                    return;
+                }
+
                 // C toggles compare, through Aa's own toggle.
                 if (plain && !event.shiftKey && (event.key === 'c' || event.key === 'C')) {
                     document.getElementById('compare-btn').click();
@@ -8952,10 +9229,197 @@
                 }
             }
 
-            window.addEventListener('popstate', function (event) {
-                if (event.state && event.state.bookId && event.state.chapter) {
-                    loadReading(event.state.bookId, event.state.chapter);
+            // [ and ]: chapter 1 of the book before or after, from the top
+            // (the backend names them; see prevBook and nextBook). Not a
+            // jump: like ← and →, it moves on from where the reader is.
+            function stepBook(which) {
+                if (!lastDto || !reading) return;
+                const book = which === 'prev' ? lastDto.prevBook : lastDto.nextBook;
+                if (!book) {
+                    setDataStatus(`${reading.bookName} is the Bible’s ${which === 'prev' ? 'first' : 'last'} book.`);
+                    return;
                 }
+                loadReading(book.bookId, book.chapter).then((loaded) => {
+                    if (loaded) window.scrollTo(0, 0);
+                });
+            }
+
+            // j and k: the verse after or before the selection, in the
+            // reading column (the left one while comparing), skipping any
+            // the translation doesn't number; never past the chapter's
+            // first or last verse. With no selection there, j takes the
+            // first verse in view and k the last. With `extend` (Shift),
+            // the selection's moving end goes instead, as Shift-click
+            // moves it. The page scrolls only as far as the verse needs.
+            function stepSelection(step, extend) {
+                if (!reading) return;
+                const code = reading.translationCode;
+                const numbers = columnVerses(code).map((v) => v.number).sort((a, b) => a - b);
+                if (!numbers.length) return;
+                if (!selection || selection.translationCode !== code) {
+                    const n = verseInView(code, step > 0 ? 'first' : 'last')
+                        ?? (step > 0 ? numbers[0] : numbers[numbers.length - 1]);
+                    selectVerses(code, n, n);
+                    revealVerse(code, n);
+                    return;
+                }
+                const moving = selection.anchor === selection.start ? selection.end : selection.start;
+                const from = extend ? moving : (step > 0 ? selection.end : selection.start);
+                const next = numbers[numbers.indexOf(from) + step];
+                if (next == null) return;
+                if (extend) selectVerses(code, selection.anchor, next);
+                else selectVerses(code, next, next);
+                revealVerse(code, next);
+            }
+
+            function viewTop() {
+                return document.getElementById('top-bar').getBoundingClientRect().bottom;
+            }
+
+            // At least this much of a verse shows for it to count as in
+            // view: a line, not the last few pixels of one under the bar.
+            const IN_VIEW = 24;
+
+            // The first or last verse of the column that's in view, or
+            // null when none is (or there's no layout to tell).
+            function verseInView(code, which) {
+                const top = viewTop();
+                const seen = [...document.querySelectorAll(`${SELECTABLE}[data-translation="${code}"]`)].filter((el) => {
+                    const r = el.getBoundingClientRect();
+                    return r.height > 0 && r.bottom >= top + IN_VIEW && r.top <= window.innerHeight - IN_VIEW;
+                });
+                const el = which === 'first' ? seen[0] : seen[seen.length - 1];
+                return el ? Number(el.dataset.verse) : null;
+            }
+
+            // Scrolls just enough to bring the verse's lines into view.
+            function revealVerse(code, number) {
+                const el = verseElement(code, number);
+                if (!el) return;
+                const r = el.getBoundingClientRect();
+                const top = viewTop() + CARD_GAP;
+                if (r.top < top) window.scrollBy(0, r.top - top);
+                else if (r.bottom > window.innerHeight - CARD_GAP) window.scrollBy(0, Math.min(r.bottom - window.innerHeight + CARD_GAP, r.top - top));
+            }
+
+            // ---- Passage history, for this session only. It records
+            // jumps: going somewhere by choosing it (a chapter in the
+            // picker, Random chapter, a search result or Go to, a
+            // cross-reference, a Library row, the welcome's places to
+            // start), all through jumpTo. Moving on from where you are
+            // isn't a jump: ← and →, [ and ], the end-of-chapter buttons
+            // and a neighbor's heading, switching translation or compare,
+            // or scrolling. Alt+← goes back and Alt+→ forward (and the
+            // palette's Back and Forward, and a mouse's back and forward
+            // buttons).
+            //
+            // Each entry is a place: a chapter, the verses a jump landed on
+            // (if it selected any), and where the page was scrolled when
+            // the reader left it, so going back returns to where they were
+            // reading. Stepping on from a place (→ to the next chapter, say)
+            // moves the entry with them, so Back returns to where they
+            // actually left. A jump after going back drops the places
+            // ahead, as a browser does; the oldest go past 50.
+            //
+            // It's kept here, in memory, not in the webview's History API:
+            // nothing else is in that history (so its own Back does
+            // nothing), and the 50-place limit and restoring the scroll
+            // need a list this page owns.
+            const HISTORY_LIMIT = 50;
+            const places = [];
+            let placeIndex = -1;
+            // Whether places[placeIndex] is what's on screen: not while a
+            // jump, or a step back or forward, is on its way.
+            let placeShown = false;
+            let historyToken = 0;
+
+            function startHistory() {
+                places.length = 0;
+                places.push({ bookId: reading.bookId, chapter: reading.chapter, start: null, end: null, scrollY: null });
+                placeIndex = 0;
+                placeShown = true;
+            }
+
+            // Brings the place on screen up to date as the reader leaves
+            // it: the chapter they're on now, and how far down they are.
+            function rememberLeaving() {
+                if (!placeShown || placeIndex < 0 || !reading) return;
+                const place = places[placeIndex];
+                if (place.bookId !== reading.bookId || place.chapter !== reading.chapter) {
+                    Object.assign(place, { bookId: reading.bookId, chapter: reading.chapter, start: null, end: null });
+                }
+                place.scrollY = window.scrollY;
+            }
+
+            // A jump: opens the chapter (selecting `start`–`end`, if given
+            // and numbered; from the top, with `top`) and records it.
+            async function jumpTo(bookId, chapter, start = null, end = null, { top = false } = {}) {
+                rememberLeaving();
+                placeShown = false;
+                historyToken += 1;
+                const loaded = await openPassage(bookId, chapter, start, end);
+                if (loaded) {
+                    if (top) window.scrollTo(0, 0);
+                    const landed = start != null && selection && selection.start === Number(start) && selection.end === Number(end);
+                    const place = {
+                        bookId: reading.bookId,
+                        chapter: reading.chapter,
+                        start: landed ? selection.start : null,
+                        end: landed ? selection.end : null,
+                        scrollY: null,
+                    };
+                    const here = places[placeIndex];
+                    const same = here && here.bookId === place.bookId && here.chapter === place.chapter
+                        && here.start === place.start && here.end === place.end;
+                    if (!same) {
+                        places.splice(placeIndex + 1);
+                        places.push(place);
+                        if (places.length > HISTORY_LIMIT) places.splice(0, places.length - HISTORY_LIMIT);
+                        placeIndex = places.length - 1;
+                    }
+                }
+                placeShown = true;
+                return loaded;
+            }
+
+            function canGoHistory(step) {
+                const target = placeIndex + step;
+                return target >= 0 && target < places.length;
+            }
+
+            const HISTORY_ENDS = {
+                '-1': 'Nothing earlier in this session',
+                1: 'Nothing later in this session',
+            };
+
+            // Back (-1) or forward (1): the place, its verses selected, and
+            // the page scrolled where the reader left it.
+            async function goHistory(step) {
+                if (!canGoHistory(step)) {
+                    setDataStatus(`${HISTORY_ENDS[step]}.`);
+                    return false;
+                }
+                rememberLeaving();
+                placeIndex += step;
+                placeShown = false;
+                const token = ++historyToken;
+                const place = places[placeIndex];
+                const loaded = await openPassage(place.bookId, place.chapter, place.start, place.end);
+                // A newer Back, Forward or jump has taken over.
+                if (token !== historyToken) return false;
+                if (loaded) {
+                    if (place.scrollY != null) window.scrollTo(0, place.scrollY);
+                    else if (place.start == null) window.scrollTo(0, 0);
+                }
+                placeShown = true;
+                return loaded;
+            }
+
+            // A mouse's back and forward buttons.
+            window.addEventListener('mouseup', function (event) {
+                if (event.button !== 3 && event.button !== 4) return;
+                event.preventDefault();
+                goHistory(event.button === 3 ? -1 : 1);
             });
 
             // Switching translations re-reads whatever chapter is currently
@@ -8984,6 +9448,7 @@
                     renderTranslationOptions(home);
                     renderStartHere(home.startHere);
                     await loadReading(home.currentBookId, home.currentChapter);
+                    if (reading) startHistory();
                     await refreshBookmarks();
                     await refreshHighlights();
                     await refreshNoteList();

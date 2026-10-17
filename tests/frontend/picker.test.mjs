@@ -100,11 +100,12 @@ test('the reference follows navigation, the translation and compare', () =>
         await keyAndWait(app, 'c');
         assert.equal(refText(app), 'Luke 1 · WEB');
 
-        // Back and forward in history.
+        // Back (Alt+←): to John 2, where the reader left for Mark 16 (the
+        // picker's jump), in the translation now chosen.
         const before = app.calls.length;
-        app.window.dispatchEvent(new app.window.PopStateEvent('popstate', { state: { bookId: 43, chapter: 3 } }));
+        app.key('ArrowLeft', { altKey: true });
         await app.idle(before, 'get_reading');
-        assert.equal(refText(app), 'John 3 · WEB');
+        assert.equal(refText(app), 'John 2 · WEB');
         assert.deepEqual(app.consoleErrors, []);
     }));
 
@@ -135,11 +136,11 @@ test('the window title follows the reference: navigation, the translation and co
         await keyAndWait(app, 'c');
         assert.equal(title(), 'Mark 15 · WEB — Gospel Getter');
 
-        // History.
+        // Back (Alt+←): to John 4, where the reader left for Mark 16.
         const before = app.calls.length;
-        app.window.dispatchEvent(new app.window.PopStateEvent('popstate', { state: { bookId: 43, chapter: 3 } }));
+        app.key('ArrowLeft', { altKey: true });
         await app.idle(before, 'get_reading');
-        assert.equal(title(), 'John 3 · WEB — Gospel Getter');
+        assert.equal(title(), 'John 4 · WEB — Gospel Getter');
     }));
 
 test('before a chapter is read the window title is the app’s name', () => {

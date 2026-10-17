@@ -48,6 +48,32 @@ pub fn next_chapter(books: &[Book], at: ChapterRef) -> Option<ChapterRef> {
     })
 }
 
+/// Chapter 1 of the book before `at`'s, as `[` goes to it; `None` in
+/// Genesis.
+pub fn previous_book(books: &[Book], at: ChapterRef) -> Option<ChapterRef> {
+    let book = books
+        .iter()
+        .filter(|b| b.id < at.book_id)
+        .max_by_key(|b| b.id)?;
+    Some(ChapterRef {
+        book_id: book.id,
+        chapter: 1,
+    })
+}
+
+/// Chapter 1 of the book after `at`'s, as `]` goes to it; `None` in
+/// Revelation.
+pub fn next_book(books: &[Book], at: ChapterRef) -> Option<ChapterRef> {
+    let book = books
+        .iter()
+        .filter(|b| b.id > at.book_id)
+        .min_by_key(|b| b.id)?;
+    Some(ChapterRef {
+        book_id: book.id,
+        chapter: 1,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +183,18 @@ mod tests {
             chapter: 1,
         };
         assert_eq!(previous_chapter(&books, at), None);
+    }
+
+    #[test]
+    fn book_steps_go_to_chapter_one_of_the_book_beside() {
+        let books = sample_books();
+        let at = |book_id, chapter| ChapterRef { book_id, chapter };
+        assert_eq!(next_book(&books, at(1, 37)), Some(at(2, 1)));
+        assert_eq!(next_book(&books, at(2, 1)), Some(at(3, 1)));
+        assert_eq!(next_book(&books, at(3, 27)), None);
+        assert_eq!(previous_book(&books, at(3, 5)), Some(at(2, 1)));
+        assert_eq!(previous_book(&books, at(2, 40)), Some(at(1, 1)));
+        assert_eq!(previous_book(&books, at(1, 1)), None);
+        assert_eq!(previous_book(&books, at(1, 50)), None);
     }
 }

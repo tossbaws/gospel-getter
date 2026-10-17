@@ -155,9 +155,9 @@ test('">" lists commands only, without searching', () =>
         await type(app, '> theme ma');
         assert.deepEqual(commandLabels(app), ['Theme: Matrix']);
         await type(app, '>');
-        assert.equal(commandLabels(app).length, 39);
+        assert.equal(commandLabels(app).length, 44);
         assert.equal(commandLabels(app)[0], 'Compare on');
-        assert.equal(commandLabels(app).at(-1), 'Previous chapter');
+        assert.equal(commandLabels(app).at(-1), 'Keyboard shortcuts');
         await type(app, '>nothing like this');
         assert.deepEqual(groupLabels(app), []);
         assert.equal(app.searchStatus(), 'No commands match.');
@@ -179,7 +179,8 @@ test('commands match word prefixes, in any order, ignoring case', () =>
             ['open lib no', ['Open Library: Notes']],
             ['export', ['Export notes…', 'Export data…']],
             ['copy ch', ['Copy chapter', 'Copy chapter as…']],
-            ['next', ['Next chapter']],
+            ['next', ['Next chapter', 'Next book', 'Forward']],
+            ['next ch', ['Next chapter']],
             ['translation bs', ['Translation: BSB']],
             // The translations' names are words too.
             ['translation berean', ['Translation: BSB']],
@@ -208,6 +209,10 @@ test('commands show their keys', () =>
             assert.equal(o.getAttribute('aria-keyshortcuts'), keys, label);
         }
         assert.equal(option(app, 'Random chapter').querySelector('kbd'), null);
+        // Arrows are drawn, the arrow itself kept in the text, unseen.
+        const arrow = option(app, 'Next chapter').querySelector('kbd');
+        assert.equal(arrow.querySelector('svg').getAttribute('aria-hidden'), 'true');
+        assert.equal(arrow.querySelector('.visually-hidden').textContent, '→');
     }));
 
 test('Enter runs a command through its own control, and the box closes', () =>
