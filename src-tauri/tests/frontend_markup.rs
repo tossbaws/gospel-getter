@@ -4033,3 +4033,26 @@ fn the_shortcuts_sheet_is_a_modal_dialog_aa_in_every_theme() {
         }
     }
 }
+
+/// The page never opens a web page itself: no anchor opens a new window,
+/// and each link out of the app (Release notes, the cross references'
+/// credits) is one the backend opens, through a click handler.
+#[test]
+fn every_link_out_of_the_app_is_opened_by_the_backend() {
+    assert!(!HTML.contains("target=\"_blank\""));
+    assert!(!HTML.contains("window.open("));
+    let anchors: Vec<&str> = HTML
+        .match_indices("<a ")
+        .map(|(at, _)| &HTML[at..at + HTML[at..].find('>').unwrap()])
+        .collect();
+    assert_eq!(anchors.len(), 3, "{anchors:#?}");
+    for anchor in anchors {
+        assert!(
+            anchor.contains("id=\"release-notes-link\"")
+                || anchor.contains("class=\"credit-link\" data-link="),
+            "{anchor}"
+        );
+    }
+    assert!(HTML.contains("invoke('open_release_notes')"));
+    assert!(HTML.contains("invoke('open_credit_link', { which: credit.dataset.link })"));
+}

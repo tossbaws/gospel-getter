@@ -3,6 +3,7 @@
 //! (`examples/frontend_bridge.rs`) can drive the same command logic.
 
 pub mod commands;
+pub mod credit_links;
 pub mod db;
 pub mod domain;
 pub mod notes_export;
@@ -36,8 +37,9 @@ pub fn run() {
         // `commands::export_reader_data`); the webview gets no dialog or
         // file-system permission.
         .plugin(tauri_plugin_dialog::init())
-        // Updates and the releases page, likewise used only from Rust (see
-        // `updater`). The opener doesn't take over link clicks in the page.
+        // Updates, the releases page and the credit links, likewise used
+        // only from Rust (see `updater` and `credit_links`). The opener
+        // doesn't take over link clicks in the page.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_opener::Builder::new()
@@ -89,6 +91,7 @@ fn invoke_handler<R: tauri::Runtime>()
         updater::install_update,
         updater::open_download_page,
         updater::open_release_notes,
+        credit_links::open_credit_link,
     ]
 }
 

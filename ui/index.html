@@ -8065,7 +8065,7 @@
                 return `<div class="xref-summary">
                     <h3 class="xref-summary-title">${disclosureToggle('xrefs', 'xref-summary-list', `Cross references (${count})`)}</h3>
                     <div class="xref-summary-list disclosure-body" id="xref-summary-list"${disclosureOpen('xrefs') ? '' : ' hidden'}>${rows}</div>
-                    <p class="xref-credit">Cross-reference data from <a href="https://www.openbible.info/labs/cross-references/" target="_blank" rel="noopener noreferrer">OpenBible.info</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
+                    <p class="xref-credit">Cross-reference data from <a class="credit-link" data-link="openbible" href="https://www.openbible.info/labs/cross-references/">OpenBible.info</a>, licensed under <a class="credit-link" data-link="cc-by" href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
                 </div>`;
             }
 
@@ -8878,6 +8878,18 @@
             // selecting verses. (The book and chapter picker has its own
             // handler, above.)
             document.body.addEventListener('click', function (event) {
+                // The cross references' credit links: the page never opens
+                // a browser itself. The backend opens the link's fixed page
+                // (its href, shown so it reads as a link). A key press on a
+                // link arrives here as a click too.
+                const credit = event.target.closest('a.credit-link');
+                if (credit) {
+                    event.preventDefault();
+                    invoke('open_credit_link', { which: credit.dataset.link })
+                        .catch((e) => setDataStatus(errorText(e), true));
+                    return;
+                }
+
                 // A click anywhere outside the search panel closes it.
                 if (!searchPanel.hidden && !event.target.closest('#search-panel, #search-toggle')) {
                     setSearchOpen(false);
