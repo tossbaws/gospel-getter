@@ -7783,12 +7783,15 @@
                 if (!picker.contains(document.activeElement)) revealCurrentInPicker();
             }
 
-            // Reads a chapter chosen in the picker. The popover closes
-            // (focus going back to the reference button); the sidebar
-            // stays.
+            // Reads a chapter chosen in the picker (or Random chapter's),
+            // from its top, as the end-of-chapter buttons do. The chapter
+            // already on screen stays where the reader is in it. The
+            // popover closes (focus going back to the reference button);
+            // the sidebar stays.
             function choosePickerChapter(bookId, chapter) {
                 if (surfaces() && surfaces().current() === 'picker') closeSurfaces();
-                jumpTo(bookId, chapter);
+                const shown = reading && reading.bookId === Number(bookId) && reading.chapter === Number(chapter);
+                jumpTo(bookId, chapter, null, null, { top: !shown });
             }
 
             document.addEventListener('gospel-getter:picker-shown', function () {
