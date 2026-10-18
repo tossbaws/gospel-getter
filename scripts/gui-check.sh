@@ -32,7 +32,9 @@
 # its own log reaches app.log, and windows-timeline.log follows the app's
 # processes while the checks run. If a check fails, the out-dir also gets
 # processes.txt, windows.txt, webview2-devtools.txt (what the WebView2
-# debugging port answers) and screenshots/desktop.png.
+# debugging port answers), devtools-active-port.txt (where the browser's
+# DevToolsActivePort file is, and Edge WebDriver's user-data folders) and
+# screenshots/desktop.png.
 #
 # Settings, for CI or a slow machine: GUI_CHECK_BUDGET (seconds for the whole
 # run, default 180), GUI_CHECK_STEP_TIMEOUT (seconds per step, default 10),
@@ -395,6 +397,9 @@ fi
     echo "native driver: $native_driver (${native_version:-version unknown})"
     echo "display: ${xvfb_display:-desktop (Windows)}"
     echo "budget: ${budget}s, step timeout: ${step_timeout}s, session timeout: ${GUI_CHECK_SESSION_TIMEOUT:-30}s"
+    if [[ $platform == windows ]]; then
+        echo "TEMP: $(cygpath -w "${TEMP:-}" 2>/dev/null), TMP: $(cygpath -w "${TMP:-}" 2>/dev/null)"
+    fi
 } >"$out/environment.txt"
 
 "${run_env[@]}" "$tauri_driver" --port "$port" --native-port "$native_port" "${driver_args[@]}" \
@@ -414,6 +419,8 @@ log "tauri-driver on 127.0.0.1:$port (native driver on $native_port)"
 # while the checks run.
 windows_timeline() {
     local image
+    # Diagnostics only: nothing here may stop the run.
+    set +e +o pipefail
     while :; do
         echo "== $(date +%T)"
         for image in gui-launch.exe "$(basename "$app")" msedgewebview2.exe msedgedriver.exe; do
@@ -452,6 +459,22 @@ $ports = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
         }
     }
 } | Out-File -Width 4096 (Join-Path $OutDir 'webview2-devtools.txt')
+# Where Edge WebDriver waits for the browser's DevToolsActivePort (its
+# scoped user-data folders), and where any such file actually is.
+& {
+    $roots = @((Join-Path $env:SystemRoot 'SystemTemp'), $env:TEMP, $env:LOCALAPPDATA, $env:APPDATA) |
+        Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Sort-Object -Unique
+    "searched: $($roots -join '; ')"
+    Get-ChildItem -LiteralPath $roots -Recurse -Depth 5 -Force -Filter DevToolsActivePort -ErrorAction SilentlyContinue |
+        ForEach-Object { "$($_.FullName) [$($_.LastWriteTime.ToString('HH:mm:ss'))]: $((Get-Content -LiteralPath $_.FullName -Raw) -replace "`r?`n", ' | ')" }
+    foreach ($root in $roots) {
+        Get-ChildItem -LiteralPath $root -Directory -Filter 'scoped_dir*' -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            "== $($_.FullName)"
+            Get-ChildItem -LiteralPath $_.FullName -Recurse -Depth 1 -Force -ErrorAction SilentlyContinue |
+                ForEach-Object { "   $($_.FullName.Substring($root.Length))" }
+        }
+    }
+} | Out-File -Width 4096 (Join-Path $OutDir 'devtools-active-port.txt')
 try {
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -496,7 +519,7 @@ fi
 status=0
 wait "$!" || status=$?
 if [[ $platform == windows ]]; then
-    kill "$timeline_pid" 2>/dev/null
+    kill "$timeline_pid" 2>/dev/null || true
     timeline_pid=""
     ((status == 0)) || windows_diagnostics
 fi
