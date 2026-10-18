@@ -352,12 +352,30 @@ port="$(free_port)" || setup_failed "no free port for tauri-driver"
 native_port="$(free_port)" || setup_failed "no free port for the native driver"
 while [[ $native_port == "$port" ]]; do native_port="$(free_port)"; done
 
+# Which package a file comes from, with its version, where the system can
+# say (neither tauri-driver nor WebKitWebDriver reports its own version).
+package_of() {
+    local package
+    if command -v pacman >/dev/null; then
+        pacman -Qo "$1" 2>/dev/null | sed 's/.* is owned by //'
+    elif command -v dpkg >/dev/null; then
+        package="$(dpkg -S "$1" 2>/dev/null | head -1 | cut -d: -f1)"
+        [[ -n $package ]] && echo "$package $(dpkg-query -W -f='${Version}' "$package")"
+    fi
+    return 0
+}
+
+if [[ $platform == linux ]]; then
+    native_version="$(package_of "$native_driver")"
+else
+    native_version="$("$native_driver" --version 2>&1 | head -1 || true)"
+fi
 {
     echo "platform: $platform"
     echo "app: $app"
     echo "launched as: $launch"
-    echo "tauri-driver: $tauri_driver ($("$tauri_driver" --version 2>&1 | head -1 || true))"
-    echo "native driver: $native_driver ($("$native_driver" --version 2>&1 | head -1 || true))"
+    echo "tauri-driver: $tauri_driver"
+    echo "native driver: $native_driver (${native_version:-version unknown})"
     echo "display: ${xvfb_display:-desktop (Windows)}"
     echo "budget: ${budget}s, step timeout: ${step_timeout}s"
 } >"$out/environment.txt"
