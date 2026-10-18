@@ -1,10 +1,13 @@
 //! Gospel Getter's Leptos pieces: Rust compiled to WebAssembly, loaded by
 //! `ui/index.html` beside its JavaScript (Trunk builds the page; see
-//! `Trunk.toml` and `README.md`). The first piece is the Export notes
-//! dialog (`export_notes`); the page talks to it only as `bridge` says.
+//! `Trunk.toml` and `README.md`). The pieces so far are the page's modal
+//! dialogs: Export notes (`export_notes`), the keyboard shortcuts sheet
+//! (`shortcuts`), the welcome (`welcome`), the import preview
+//! (`import_preview`) and the note editor (`note_editor`). The page talks
+//! to them only as `bridge` says.
 //!
 //! If this module fails to load, the page works as before, except that
-//! Export notes… says it is unavailable (see `bridge`).
+//! those five say they are unavailable when asked for (see `bridge`).
 
 mod bridge;
 mod dom;
@@ -32,10 +35,10 @@ pub fn start() {
     else {
         return;
     };
-    // The dialog is a modal overlay (position: fixed, above the page's
+    // Each dialog is a modal overlay (position: fixed, above the page's
     // toast and banner by z-index), so where it sits in the body does not
-    // matter; it goes at the end. The handle is forgotten on purpose: the
-    // dialog lives as long as the page.
+    // matter; they go at the end. The handles are forgotten on purpose:
+    // the dialogs live as long as the page.
     leptos::mount::mount_to(body.clone(), export_notes::ExportNotes).forget();
     leptos::mount::mount_to(body.clone(), shortcuts::Shortcuts).forget();
     leptos::mount::mount_to(body.clone(), welcome::WelcomeCard).forget();

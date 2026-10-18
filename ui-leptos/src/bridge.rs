@@ -1,31 +1,80 @@
 //! The whole bridge between this crate and the page's JavaScript
 //! (`ui/index.html`), in one place. Everything the two sides share is
-//! listed here; nothing else crosses.
+//! listed here; nothing else crosses. The model is custom events on
+//! `document`, with what the other side needs as a snapshot in their
+//! `detail`, so neither reads the other's variables. The page's half is
+//! the short blocks in `ui/index.html` that dispatch and listen for these
+//! names, each pointing here.
 //!
-//! JavaScript to Rust:
-//! - [`OPEN_EVENT`], a cancelable `CustomEvent` on `document`. The page's
-//!   click handler on `#export-notes-btn` (the Library's Notes tab; the
-//!   command palette clicks the same button) dispatches it with an
-//!   [`OpenRequest`] as its `detail`: a snapshot of what the dialog needs
-//!   to know, so it reads none of the page's variables. The dialog cancels
-//!   the event to say it handled it; if nobody does (the WebAssembly did
-//!   not load), the page tells the reader Export notes is unavailable.
+//! Page to Rust (requests to open; each is cancelable, and the piece
+//! cancels it to say it has it; if nothing does, the WebAssembly didn't
+//! load, and the page says that piece isn't available):
+//! - [`OPEN_EVENT`] (`gospel-getter:export-notes`): Export notes…, with an
+//!   [`OpenRequest`].
+//! - [`SHORTCUTS_EVENT`] (`gospel-getter:shortcuts`): the keyboard
+//!   shortcuts sheet, with the page's one table ([`ShortcutsRequest`]).
+//! - [`WELCOME_EVENT`] (`gospel-getter:welcome`): the welcome, asked at the
+//!   end of boot (with what the fresh-install rule needs) or opened from
+//!   ☰, with the places to start ([`WelcomeRequest`]). A startup request
+//!   nobody answered (boot beat the module) is sent again on
+//!   [`READY_EVENT`].
+//! - [`IMPORT_EVENT`] (`gospel-getter:import`): Import data…, no detail.
+//! - [`NOTE_EVENT`] (`gospel-getter:note`): the note editor, with a
+//!   [`NoteRequest`] (the passage quoted as markup the page rendered) and
+//!   the note itself. [`NOTE_OTHERS_EVENT`] (`gospel-getter:note-others`)
+//!   follows the selection's notes while it may be open.
+//! - `detail.returnFocus` on the sheet's, welcome's and editor's requests:
+//!   the element focus goes back to ([`return_focus`]).
 //!
-//! Rust to JavaScript:
-//! - [`TOAST_EVENT`], a `CustomEvent` on `document` with
-//!   `{ message, isError }` as its `detail`; the page shows it in its toast
-//!   (`setDataStatus`), where the export reported before.
-//! - `#export-notes-overlay`'s `hidden` attribute, which this crate keeps
-//!   truthful: the page's keyboard dispatcher and its Shift-ghost check
-//!   read it to know a modal is open.
-//! - Focus: closing hands focus back to `#export-notes-btn` while it is on
-//!   the page, shown and enabled; otherwise to the page's focus home, Aa
-//!   (`#aa-toggle`) in reading mode (`html[data-reader-mode="on"]`) or the
-//!   menu (`#menu-toggle`), as the page's own `focusHome` does.
+//! Rust to page:
+//! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): the module has loaded
+//!   and every piece is listening.
+//! - [`TOAST_EVENT`] (`gospel-getter:toast`): `{ message, isError }` for
+//!   the page's toast (`setDataStatus`).
+//! - [`MODAL_OPENING_EVENT`] (`gospel-getter:modal-opening`): a piece is
+//!   about to open on its own (the welcome at startup, the import preview
+//!   once a file is chosen): popovers and panels go, and the search box
+//!   with `closeSearch`.
+//! - [`JUMP_EVENT`] (`gospel-getter:jump`): `{ bookId, chapter, top }`,
+//!   opened as the page's own jumps are (the welcome's places to start).
+//! - [`DATA_BUSY_EVENT`] (`gospel-getter:data-busy`): `{ busy }`, the ☰
+//!   Export and Import items disabled while an import runs.
+//! - [`IMPORTED_EVENT`] (`gospel-getter:imported`): `{ position, message }`
+//!   after an import: the page reloads the position, bookmarks, highlights
+//!   and notes, then says `message`.
+//! - [`NOTE_DONE_EVENT`] (`gospel-getter:note-done`): `{ action, note }`
+//!   after the editor added, saved or deleted a note: the page's status
+//!   line, and a deletion's Undo (`restoreNote`, which stays the page's
+//!   under its shared `actionAttempt` guard).
 //!
-//! Shared with the backend, not the page: the three commands this dialog
-//! invokes, through the same `window.__TAURI__.core.invoke` the page uses
-//! (see `ipc.rs`).
+//! Page globals this crate calls (small, named, existing or exposed for it):
+//! - `window.gospelGetterPreferences.apply(values)` (the head script's):
+//!   an import's display settings ([`apply_preferences`]).
+//! - `window.gospelGetterRefreshNotes()` (the page's `refreshNotes`, a
+//!   promise): the editor waits for it before closing ([`refresh_notes`]).
+//!
+//! Page controls this crate uses as a reader would: `#theme-select`, Aa's
+//! record of the theme, read and changed (with a `change` event) for the
+//! welcome's looks ([`theme`], [`choose_theme`]); Aa's `<select>` options'
+//! labels, read to name an import file's settings; the page's focus home
+//! (`#aa-toggle` in reading mode, else `#menu-toggle`, [`focus_home`]);
+//! `#export-notes-btn`; and, for the editor's focus going back, the
+//! selection card's `.verse-notes .note-edit[data-note-id]`,
+//! `.verse-actions .verse-note-btn` and `.chapter-main .chapter-heading`.
+//!
+//! The pieces' overlays (`#export-notes-overlay`, `#shortcuts-overlay`,
+//! `#welcome-overlay`, `#import-overlay`, `#note-overlay`) keep their
+//! `hidden` truthful: the page's keyboard dispatcher and its Shift-ghost
+//! check read them, looked up by id when asked, to know a modal is open.
+//! Each piece has the keyboard while it's open: a capturing `keydown` on
+//! `window` that stops every other handler.
+//!
+//! Local storage: the welcome reads the `gospel-getter-*` keys (the
+//! fresh-install rule) and writes [`WELCOME_KEY`].
+//!
+//! Shared with the backend, not the page: the commands the pieces invoke,
+//! through the same `window.__TAURI__.core.invoke` the page uses (see
+//! `ipc.rs`; their shapes are in `dto.rs`).
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
