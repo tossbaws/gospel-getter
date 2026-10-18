@@ -116,3 +116,46 @@ pub fn focus_home() {
 pub fn open_request(event: &CustomEvent) -> Result<OpenRequest, JsValue> {
     serde_wasm_bindgen::from_value(event.detail()).map_err(|e| JsValue::from(e.to_string()))
 }
+
+/// The page asks the shortcuts sheet to open (`?`, ☰ → Keyboard shortcuts,
+/// the palette's command): a cancelable `CustomEvent` whose `detail` is a
+/// [`ShortcutsRequest`] plus `returnFocus` (see [`return_focus`]).
+pub const SHORTCUTS_EVENT: &str = "gospel-getter:shortcuts";
+
+/// The page's one table of shortcuts, as the sheet lists it: the group
+/// names in order, and the rows (`SHORTCUTS` in `ui/index.html`; the sheet
+/// reads only these fields of each).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+pub struct ShortcutsRequest {
+    pub groups: Vec<String>,
+    pub shortcuts: Vec<ShortcutRow>,
+}
+
+/// One shortcut: its id, its group, the ways to press it (each a list of
+/// key caps) and what it does.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ShortcutRow {
+    pub id: String,
+    pub group: String,
+    pub keys: Vec<Vec<String>>,
+    pub does: String,
+}
+
+/// Reads an event's `detail` as `T`, or says what was wrong with it.
+pub fn detail<T: serde::de::DeserializeOwned>(event: &CustomEvent) -> Result<T, JsValue> {
+    serde_wasm_bindgen::from_value(event.detail()).map_err(|e| JsValue::from(e.to_string()))
+}
+
+pub fn shortcuts_request(event: &CustomEvent) -> Result<ShortcutsRequest, JsValue> {
+    detail(event)
+}
+
+/// `detail.returnFocus`: the element focus goes back to when a modal the
+/// page opened closes (what had focus, or the button it was opened from),
+/// or none. An element, so it travels as itself, not in the snapshot.
+pub fn return_focus(event: &CustomEvent) -> Option<HtmlElement> {
+    js_sys::Reflect::get(&event.detail(), &JsValue::from_str("returnFocus"))
+        .ok()?
+        .dyn_into::<HtmlElement>()
+        .ok()
+}

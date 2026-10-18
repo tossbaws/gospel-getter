@@ -7,9 +7,11 @@
 //! Export notes… says it is unavailable (see `bridge`).
 
 mod bridge;
+mod dom;
 mod dto;
 mod export_notes;
 mod ipc;
+mod shortcuts;
 mod text;
 
 use wasm_bindgen::prelude::*;
@@ -28,5 +30,6 @@ pub fn start() {
     // toast and banner by z-index), so where it sits in the body does not
     // matter; it goes at the end. The handle is forgotten on purpose: the
     // dialog lives as long as the page.
-    leptos::mount::mount_to(body, export_notes::ExportNotes).forget();
+    leptos::mount::mount_to(body.clone(), export_notes::ExportNotes).forget();
+    leptos::mount::mount_to(body, shortcuts::Shortcuts).forget();
 }

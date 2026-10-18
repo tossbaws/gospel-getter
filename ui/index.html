@@ -5229,15 +5229,6 @@
             </div>
         </div>
     </div>
-    <div id="shortcuts-overlay" class="modal-overlay" hidden>
-        <div id="shortcuts-panel" class="modal-panel shortcuts-panel" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
-            <div class="shortcuts-head">
-                <h2 id="shortcuts-title" class="shortcuts-title">Keyboard shortcuts</h2>
-                <button type="button" id="shortcuts-close" class="panel-close" aria-label="Close keyboard shortcuts" title="Close (Esc)">&times;</button>
-            </div>
-            <div id="shortcuts-body" class="modal-body shortcuts-body" tabindex="0" role="region" aria-labelledby="shortcuts-title"></div>
-        </div>
-    </div>
     <div id="note-overlay" class="modal-overlay" hidden>
         <div id="note-panel" class="modal-panel note-panel" role="dialog" aria-modal="true" aria-labelledby="note-title" aria-describedby="note-passage">
             <div class="modal-body">
@@ -8095,78 +8086,36 @@
             const ARROW_DOWN = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 3v10M4 9l4 4 4-4"/></svg>';
             const CAP_NAMES = { '←': ['Left arrow', () => ARROW_LEFT], '→': ['Right arrow', () => ARROW_RIGHT], '↑': ['Up arrow', () => ARROW_UP], '↓': ['Down arrow', () => ARROW_DOWN] };
 
-            function capsHtml(keys) {
-                return keys
-                    .map((combo) => combo
-                        .map((cap) => (CAP_NAMES[cap] ? hintKey(CAP_NAMES[cap][0], CAP_NAMES[cap][1]()) : hintKey(escapeHtml(cap))))
-                        .join('<span class="key-plus" aria-hidden="true">+</span>'))
-                    .join(' <span class="key-or">or</span> ');
-            }
-
-            const shortcutsOverlay = document.getElementById('shortcuts-overlay');
-            const shortcutsPanel = document.getElementById('shortcuts-panel');
-            const shortcutsBody = document.getElementById('shortcuts-body');
-            const shortcutsClose = document.getElementById('shortcuts-close');
-            let shortcutsReturn = null;
-
-            function renderShortcuts() {
-                shortcutsBody.innerHTML = SHORTCUT_GROUPS.map((group, i) => `<section class="shortcut-group" aria-labelledby="shortcut-group-${i}">
-                    <h3 class="shortcut-group-title" id="shortcut-group-${i}">${escapeHtml(group)}</h3>
-                    <dl class="shortcut-list">${SHORTCUTS.filter((s) => s.group === group).map((s) => `<div class="shortcut-row" data-shortcut="${s.id}">
-                        <dt class="shortcut-keys">${capsHtml(s.keys)}</dt>
-                        <dd class="shortcut-does">${escapeHtml(s.does)}</dd>
-                    </div>`).join('')}</dl>
-                </section>`).join('');
-            }
-
-            // The sheet is modal: Tab stays inside, Escape closes it, and
-            // focus goes back to where it was (or ☰, opened from there).
+            // ---- The keyboard shortcuts sheet is one of the page's pieces
+            // written in Rust (ui-leptos/src/shortcuts.rs); what crosses is
+            // documented in ui-leptos/src/bridge.rs. It lists the table above,
+            // which stays here, the one table: the palette's key hints and the
+            // key handlers read it at once, whatever has loaded. A request to
+            // open carries the table and where focus goes back to (what had
+            // it, or the button it was opened from); the sheet cancels the
+            // event to say it has it.
             function openShortcuts(opener = null) {
-                if (!shortcutsOverlay.hidden) return;
+                if (shortcutsOpen()) return;
                 const active = document.activeElement;
-                shortcutsReturn = opener || (active && active !== document.body ? active : null);
+                const returnFocus = opener || (active && active !== document.body ? active : null);
                 if (!searchPanel.hidden) setSearchOpen(false);
                 closeSurfaces(false);
-                renderShortcuts();
-                shortcutsOverlay.hidden = false;
-                shortcutsBody.scrollTop = 0;
-                shortcutsClose.focus();
+                const request = new CustomEvent('gospel-getter:shortcuts', {
+                    cancelable: true,
+                    detail: { groups: SHORTCUT_GROUPS, shortcuts: SHORTCUTS, returnFocus },
+                });
+                if (!document.dispatchEvent(request)) return;
+                setDataStatus('Keyboard shortcuts aren’t available.', true);
             }
 
-            function closeShortcuts() {
-                if (shortcutsOverlay.hidden) return;
-                shortcutsOverlay.hidden = true;
-                const back = shortcutsReturn;
-                shortcutsReturn = null;
-                if (back && back.isConnected && !back.closest('[hidden]')) back.focus({ preventScroll: true });
+            // The sheet's overlay is the Rust side's, made when its code
+            // loads: looked up when asked, as Export notes' is.
+            function shortcutsOpen() {
+                const overlay = document.getElementById('shortcuts-overlay');
+                return !!overlay && !overlay.hidden;
             }
 
-            shortcutsClose.addEventListener('click', closeShortcuts);
             document.getElementById('shortcuts-btn').addEventListener('click', () => openShortcuts(menuToggle));
-            // A click on the dimmed page behind it closes it.
-            shortcutsOverlay.addEventListener('click', function (event) {
-                if (event.target === shortcutsOverlay) closeShortcuts();
-            });
-
-            // While it's open it has the keyboard (on window, capturing,
-            // as the welcome does): none of the reader's shortcuts run.
-            window.addEventListener('keydown', function (event) {
-                if (shortcutsOverlay.hidden) return;
-                event.stopPropagation();
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    closeShortcuts();
-                } else if (event.key === 'Tab') {
-                    const stops = [shortcutsClose, shortcutsBody];
-                    const active = document.activeElement;
-                    const at = stops.indexOf(active);
-                    event.preventDefault();
-                    const next = at === -1
-                        ? stops[0]
-                        : stops[(at + (event.shiftKey ? -1 : 1) + stops.length) % stops.length];
-                    next.focus();
-                }
-            }, true);
 
             // ---- Search and go-to-reference (GH-12), and the command
             // palette, in one box. As the reader types, the results come
@@ -8911,7 +8860,7 @@
             function cardGhostAllowed() {
                 if (!selectionCard.isConnected) return false;
                 if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden
-                    || exportNotesOpen() || !shortcutsOverlay.hidden || !welcomeOverlay.hidden) {
+                    || exportNotesOpen() || shortcutsOpen() || !welcomeOverlay.hidden) {
                     return false;
                 }
                 if (!searchPanel.hidden || !copyMenu.hidden) return false;
@@ -8969,7 +8918,7 @@
                 // And while the import preview, About, the note panel or
                 // Export notes is open, nothing else responds to the
                 // keyboard (they handle their own keys).
-                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden || exportNotesOpen() || !shortcutsOverlay.hidden) {
+                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden || exportNotesOpen() || shortcutsOpen()) {
                     return;
                 }
 
