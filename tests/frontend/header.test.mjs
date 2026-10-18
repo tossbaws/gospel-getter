@@ -546,7 +546,7 @@ test('the menu items export, import, show the welcome and open About', () =>
         assert.equal(app.document.activeElement, toggle(app, 'menu'));
 
         app.open('menu');
-        app.click(item('welcome-btn'));
+        await app.click(item('welcome-btn'));
         assert.ok(!isOpen(app, 'menu'));
         assert.equal($(app, 'welcome-overlay').hidden, false);
         assert.equal(app.document.activeElement, $(app, 'welcome-panel'), 'the menu doesn’t take focus back');

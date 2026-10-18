@@ -38,18 +38,7 @@ pub fn active_element() -> Option<Element> {
     web_sys::window()?.document()?.active_element()
 }
 
-/// `document.getElementById(id)` as an `HtmlElement`.
-#[allow(dead_code)] // TEMP until the note editor
-pub fn by_id(id: &str) -> Option<HtmlElement> {
-    web_sys::window()?
-        .document()?
-        .get_element_by_id(id)?
-        .dyn_into::<HtmlElement>()
-        .ok()
-}
-
 /// `document.querySelector(selector)` as an `HtmlElement`.
-#[allow(dead_code)] // TEMP until the note editor
 pub fn query(selector: &str) -> Option<HtmlElement> {
     web_sys::window()?
         .document()?

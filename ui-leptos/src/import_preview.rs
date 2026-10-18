@@ -202,6 +202,10 @@ impl Import {
         self.open.set(true);
         spawn_local(async move {
             tick().await;
+            // Closed again before it was on screen: focus stays put.
+            if !self.open.get_untracked() {
+                return;
+            }
             if let Some(button) = button.get() {
                 let _ = button.focus();
             }

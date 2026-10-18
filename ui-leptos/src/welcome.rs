@@ -65,6 +65,10 @@ impl Welcome {
         self.open.set(true);
         spawn_local(async move {
             tick().await;
+            // Closed again before it was on screen: focus stays put.
+            if !self.open.get_untracked() {
+                return;
+            }
             if let Some(body) = self.body.get() {
                 body.set_scroll_top(0);
             }

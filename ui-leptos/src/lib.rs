@@ -14,6 +14,8 @@ mod import_preview;
 mod import_text;
 mod install;
 mod ipc;
+mod note_editor;
+mod note_text;
 mod shortcuts;
 mod text;
 mod welcome;
@@ -37,7 +39,8 @@ pub fn start() {
     leptos::mount::mount_to(body.clone(), export_notes::ExportNotes).forget();
     leptos::mount::mount_to(body.clone(), shortcuts::Shortcuts).forget();
     leptos::mount::mount_to(body.clone(), welcome::WelcomeCard).forget();
-    leptos::mount::mount_to(body, import_preview::ImportDialog).forget();
+    leptos::mount::mount_to(body.clone(), import_preview::ImportDialog).forget();
+    leptos::mount::mount_to(body, note_editor::NoteEditor).forget();
     // Everything is listening: the page may send again what it asked
     // before the module had loaded.
     bridge::ready();

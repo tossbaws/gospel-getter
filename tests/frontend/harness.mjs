@@ -218,6 +218,11 @@ export async function openApp({
     alter = {},
     // Called with the page's window before its scripts run (fake timers).
     setUp = () => {},
+    // The page's Rust pieces: loaded at once (as the app usually has them
+    // by the end of boot), not until the test calls `app.loadPieces()`
+    // ('late': after boot, as on a slow start), or never (false: as when
+    // the WebAssembly fails to load).
+    leptos = true,
 } = {}) {
     await backend('__reset', fresh
         ? { translationCode: translation, keepBookmarks }
@@ -312,7 +317,7 @@ export async function openApp({
     });
     const { window } = dom;
     const document = window.document;
-    await loadLeptos(window);
+    if (leptos === true) await loadLeptos(window);
     const SELECTABLE = '.chapter-main .verse[data-translation]';
 
     const app = {
@@ -321,6 +326,11 @@ export async function openApp({
         calls,
         clipboardWrites,
         consoleErrors: errors,
+        /** Loads the page's Rust pieces now (with `leptos: 'late'`). */
+        async loadPieces() {
+            await loadLeptos(window);
+            await settle();
+        },
         /** The page's local storage, to carry into the next openApp (a restart). */
         storage() {
             const out = {};

@@ -5185,33 +5185,6 @@
             <p class="about-links"><a id="release-notes-link" href="https://github.com/tossbaws/gospel-getter/releases" hidden>Release notes</a> <span id="release-notes-status" class="data-status" role="status" aria-live="polite"></span></p>
         </div>
     </div>
-    <div id="note-overlay" class="modal-overlay" hidden>
-        <div id="note-panel" class="modal-panel note-panel" role="dialog" aria-modal="true" aria-labelledby="note-title" aria-describedby="note-passage">
-            <div class="modal-body">
-                <h2 id="note-title" class="note-title"></h2>
-                <blockquote id="note-passage" class="note-passage"></blockquote>
-                <p id="note-text-shown" class="note-text-shown"></p>
-                <details id="note-others" class="note-others" hidden>
-                    <summary id="note-others-summary"></summary>
-                    <ul id="note-others-list"></ul>
-                </details>
-                <label id="note-label" class="note-label" for="note-input"></label>
-                <textarea id="note-input" class="note-input" rows="5" aria-describedby="note-length note-error" spellcheck="true"></textarea>
-                <p id="note-length" class="note-length" aria-live="polite"></p>
-                <p id="note-error" class="note-error" role="alert"></p>
-            </div>
-            <div id="note-buttons" class="modal-buttons note-buttons">
-                <button type="button" id="note-save" class="import-confirm note-save" disabled>Save</button>
-                <button type="button" id="note-cancel" class="reader-mode-btn">Cancel</button>
-                <button type="button" id="note-delete" class="reader-mode-btn note-delete" hidden>Delete</button>
-            </div>
-            <div id="note-discard" class="modal-buttons note-buttons" hidden>
-                <p id="note-discard-question" class="note-discard-question" role="alert">Discard this note?</p>
-                <button type="button" id="note-discard-yes" class="import-confirm">Discard</button>
-                <button type="button" id="note-keep" class="reader-mode-btn" aria-describedby="note-discard-question">Keep editing</button>
-            </div>
-        </div>
-    </div>
     <p id="data-status" class="toast is-hidden" role="status" aria-live="polite"></p>
     <p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>
 
@@ -6295,7 +6268,6 @@
             // markers, the selection's Notes section and the Library — so
             // none of them goes stale.
 
-            const NOTE_MAX_CHARS = 10000;
             const NOTES_SHOWN = 3;
             const UNDO_MS = 8000;
             const noteList = document.getElementById('note-list');
@@ -6390,7 +6362,8 @@
                     selectionNotesError = `Notes couldn’t be loaded: ${errorText(e)}`;
                 }
                 renderNotesSection();
-                if (noteSession && noteSession.mode === 'add') renderNoteOthers();
+                // The note editor, if it's open and adding, lists them too.
+                document.dispatchEvent(new CustomEvent('gospel-getter:note-others', { detail: { others: noteOthers() } }));
             }
 
             // The selection's Notes section, under its actions: shown only
@@ -6481,6 +6454,9 @@
             async function refreshNotes() {
                 await Promise.all([refreshChapterNotes(), refreshSelectionNotes(), refreshNoteList()]);
             }
+            // The note editor (ui-leptos) refreshes them after a save or a
+            // delete, and waits; see ui-leptos/src/bridge.rs.
+            window.gospelGetterRefreshNotes = refreshNotes;
 
             // A Library row is one link to its passage: a click anywhere on
             // it, outside its own buttons, is a click on the row's open
@@ -6510,69 +6486,17 @@
                 }
             });
 
-            // ---- The note panel: a modal, like the welcome. It has the
-            // keyboard while open; closing it returns focus to whatever
-            // opened it (or, if that's gone, to the selection's actions).
+            // ---- The note editor is one of the page's pieces written in
+            // Rust (ui-leptos/src/note_editor.rs); what crosses is documented
+            // in ui-leptos/src/bridge.rs. These open it, with the passage as
+            // it's read here and, when adding, the other notes on it; it
+            // saves and deletes, has the notes refreshed, closes, and then
+            // says what it did (below): the status line, and a deleted
+            // note's Undo, stay here, in the selection card.
 
-            const noteOverlay = document.getElementById('note-overlay');
-            const notePanel = document.getElementById('note-panel');
-            const noteTitle = document.getElementById('note-title');
-            const notePassageEl = document.getElementById('note-passage');
-            const noteTextShown = document.getElementById('note-text-shown');
-            const noteOthers = document.getElementById('note-others');
-            const noteOthersSummary = document.getElementById('note-others-summary');
-            const noteOthersList = document.getElementById('note-others-list');
-            const noteLabel = document.getElementById('note-label');
-            const noteInput = document.getElementById('note-input');
-            const noteLength = document.getElementById('note-length');
-            const noteError = document.getElementById('note-error');
-            const noteButtons = document.getElementById('note-buttons');
-            const noteSave = document.getElementById('note-save');
-            const noteCancel = document.getElementById('note-cancel');
-            const noteDelete = document.getElementById('note-delete');
-            const noteDiscard = document.getElementById('note-discard');
-            const noteKeep = document.getElementById('note-keep');
-
-            // { mode: 'add' or 'edit', note (when editing), passage, code,
-            // initial text } while the panel is open.
-            let noteSession = null;
-            let noteReturn = null;
-            let noteBusy = false;
-
-            const charCount = (text) => [...text].length;
-
-            function noteChanged() {
-                return !!noteSession && noteInput.value.trim() !== noteSession.initial.trim();
-            }
-
-            function updateNoteControls() {
-                const text = noteInput.value.trim();
-                const length = charCount(text);
-                noteSave.disabled = noteBusy || !text || length > NOTE_MAX_CHARS;
-                noteDelete.disabled = noteBusy;
-                if (length > NOTE_MAX_CHARS) {
-                    noteLength.textContent = `${length.toLocaleString('en')} characters: a note can hold up to ${NOTE_MAX_CHARS.toLocaleString('en')}.`;
-                } else if (length > NOTE_MAX_CHARS - 500) {
-                    noteLength.textContent = `${length.toLocaleString('en')} of ${NOTE_MAX_CHARS.toLocaleString('en')} characters`;
-                } else {
-                    noteLength.textContent = '';
-                }
-            }
-
-            // When adding, the other notes on the passage, read-only.
-            function renderNoteOthers() {
-                const others = noteSession && noteSession.mode === 'add' ? selectionNotes : [];
-                noteOthers.hidden = !others.length;
-                noteOthersSummary.textContent = `Other notes on these verses (${others.length})`;
-                noteOthersList.innerHTML = others
-                    .map((n) => `<li><span class="note-others-ref">${escapeHtml(n.reference)} · ${escapeHtml(noteDate(n.createdAt))}</span><span class="note-others-body">${escapeHtml(n.body)}</span></li>`)
-                    .join('');
-            }
-
-            function showDiscardPrompt(show) {
-                noteButtons.hidden = show;
-                noteDiscard.hidden = !show;
-                if (show) noteKeep.focus({ preventScroll: true });
+            // The selection's notes, as the editor lists the others.
+            function noteOthers() {
+                return selectionNotes.map((n) => ({ reference: n.reference, date: noteDate(n.createdAt), body: n.body }));
             }
 
             // `passage` defaults to the note's own; `code` is the
@@ -6582,9 +6506,6 @@
                 closeSurfaces(false);
                 if (!searchPanel.hidden) setSearchOpen(false);
                 const reference = passageReference(passage.bookName, passage.chapter, passage.start, passage.end);
-                noteSession = { mode, note, passage, code, initial: note ? note.body : '' };
-                noteReturn = { el: opener, noteId: note ? note.id : null };
-                noteTitle.textContent = reference;
                 // The verses as this translation numbers and shows them (KJV
                 // supplied words in italics, no note markers); any it
                 // doesn't number are said to be missing.
@@ -6592,29 +6513,25 @@
                     ? columnVerses(code).filter((v) => v.number >= passage.start && v.number <= passage.end).sort((a, b) => a.number - b.number)
                     : [];
                 const missing = passage.end - passage.start + 1 - verses.length;
-                notePassageEl.innerHTML = verses
+                const passageHtml = verses
                     .map((v) => `<span class="note-passage-num">${v.number}</span>${verseHtml(v, { markers: false })}`)
                     .join(' ')
                     + (missing > 0 ? ` <em>${verses.length ? 'Not all of it is' : 'It isn’t'} numbered in the ${escapeHtml(code.toUpperCase())}.</em>` : '');
-                noteTextShown.textContent = `Text shown: ${code.toUpperCase()}`;
-                noteOthers.open = false;
-                renderNoteOthers();
-                noteLabel.textContent = `Your note on ${reference}`;
-                noteInput.value = noteSession.initial;
-                noteError.textContent = '';
-                noteDelete.hidden = mode !== 'edit';
-                noteBusy = false;
-                showDiscardPrompt(false);
-                updateNoteControls();
-                noteOverlay.hidden = false;
-                notePanel.querySelector('.modal-body').scrollTop = 0;
-                // Focus never scrolls the page behind; in a short window the
-                // panel's own body scrolls to show the whole of the note.
-                noteInput.focus({ preventScroll: true });
-                noteInput.setSelectionRange(noteInput.value.length, noteInput.value.length);
-                const body = notePanel.querySelector('.modal-body');
-                const below = noteInput.getBoundingClientRect().bottom - body.getBoundingClientRect().bottom;
-                if (below > 0) body.scrollTop += below + 8;
+                const request = new CustomEvent('gospel-getter:note', {
+                    cancelable: true,
+                    detail: {
+                        mode,
+                        note,
+                        passage: { bookId: passage.bookId, chapter: passage.chapter, start: passage.start, end: passage.end },
+                        reference,
+                        code,
+                        passageHtml,
+                        others: mode === 'add' ? noteOthers() : [],
+                        returnFocus: opener,
+                    },
+                });
+                if (!document.dispatchEvent(request)) return;
+                setDataStatus('The note editor isn’t available.', true);
             }
 
             function openAddNote(opener) {
@@ -6627,93 +6544,25 @@
                 });
             }
 
-            function closeNotePanel() {
-                noteOverlay.hidden = true;
-                showDiscardPrompt(false);
-                const back = noteReturn;
-                noteSession = null;
-                noteReturn = null;
-                const usable = (el) => el && el.isConnected && !el.closest('[hidden]');
-                let target = back && usable(back.el) ? back.el : null;
-                if (!target && back && back.noteId != null) {
-                    const edit = notesSection.querySelector(`.note-edit[data-note-id="${back.noteId}"]`);
-                    if (usable(edit)) target = edit;
-                }
-                if (!target && usable(noteAddBtn)) target = noteAddBtn;
-                if (!target) {
-                    target = document.querySelector('.chapter-main .chapter-heading');
-                    if (target) target.tabIndex = -1;
-                }
-                if (target) target.focus({ preventScroll: true });
+            // The editor's overlay is the Rust side's: looked up when asked.
+            function noteOpen() {
+                const overlay = document.getElementById('note-overlay');
+                return !!overlay && !overlay.hidden;
             }
 
-            // Cancel, or Escape: closes at once if nothing changed, and
-            // otherwise asks first.
-            function requestCloseNote() {
-                if (noteBusy) return;
-                if (noteChanged()) showDiscardPrompt(true);
-                else closeNotePanel();
-            }
-
-            // A note that can't be saved stays in the panel, with why.
-            async function saveNote() {
-                const session = noteSession;
-                if (!session || noteSave.disabled) return;
-                const body = noteInput.value;
-                noteBusy = true;
-                noteError.textContent = '';
-                updateNoteControls();
-                try {
-                    if (session.mode === 'edit') {
-                        await invoke('update_note', { id: session.note.id, body });
+            // What the editor did, its notes already refreshed.
+            document.addEventListener('gospel-getter:note-done', function (event) {
+                const { action, note } = event.detail;
+                if (action === 'deleted') {
+                    if (verseActions.isConnected) {
+                        setActionStatus('Note deleted · ', false, { undo: () => restoreNote(note), duration: UNDO_MS });
                     } else {
-                        const { bookId, chapter, start, end } = session.passage;
-                        await invoke('add_note', { bookId, chapter, verseStart: start, verseEnd: end, body });
+                        setDataStatus(`Deleted the note on ${note.reference}.`);
                     }
-                } catch (e) {
-                    console.error('Failed to save the note', e);
-                    noteBusy = false;
-                    if (noteSession === session) {
-                        noteError.textContent = `The note wasn’t saved: ${errorText(e)} Your text is still here.`;
-                        updateNoteControls();
-                        noteInput.focus({ preventScroll: true });
-                    }
-                    return;
+                } else if (verseActions.isConnected) {
+                    setActionStatus(action === 'saved' ? 'Note saved' : 'Note added', false);
                 }
-                noteBusy = false;
-                await refreshNotes();
-                if (noteSession === session) closeNotePanel();
-                if (verseActions.isConnected) setActionStatus(session.mode === 'edit' ? 'Note saved' : 'Note added', false);
-            }
-
-            async function deleteNote() {
-                const session = noteSession;
-                if (!session || session.mode !== 'edit' || noteBusy) return;
-                noteBusy = true;
-                noteError.textContent = '';
-                updateNoteControls();
-                let deleted;
-                try {
-                    deleted = await invoke('delete_note', { id: session.note.id });
-                } catch (e) {
-                    console.error('Failed to delete the note', e);
-                    noteBusy = false;
-                    if (noteSession === session) {
-                        noteError.textContent = `The note wasn’t deleted: ${errorText(e)}`;
-                        updateNoteControls();
-                    }
-                    return;
-                }
-                noteBusy = false;
-                await refreshNotes();
-                if (noteSession === session) closeNotePanel();
-                const gone = deleted || session.note;
-                if (verseActions.isConnected) {
-                    setActionStatus('Note deleted · ', false, { undo: () => restoreNote(gone), duration: UNDO_MS });
-                } else {
-                    setDataStatus(`Deleted the note on ${gone.reference}.`);
-                }
-            }
+            });
 
             // Undo: the same passage, text and dates.
             async function restoreNote(note) {
@@ -6736,59 +6585,6 @@
                 await refreshNotes();
                 if (attempt === actionAttempt) setActionStatus('Note restored', false);
             }
-
-            noteInput.addEventListener('input', updateNoteControls);
-            noteSave.addEventListener('click', saveNote);
-            noteCancel.addEventListener('click', requestCloseNote);
-            noteDelete.addEventListener('click', deleteNote);
-            document.getElementById('note-discard-yes').addEventListener('click', closeNotePanel);
-            noteKeep.addEventListener('click', function () {
-                showDiscardPrompt(false);
-                noteInput.focus({ preventScroll: true });
-            });
-
-            // Clicking the dimmed page behind the panel does nothing, and
-            // leaves focus where it was.
-            noteOverlay.addEventListener('mousedown', function (event) {
-                if (event.target === noteOverlay) event.preventDefault();
-            });
-
-            // While the panel is open it has the keyboard, before any other
-            // handler sees a key (this listens on window, capturing): none
-            // of the reader's shortcuts run. Escape closes (or asks first,
-            // or, while asking, keeps editing); Ctrl+Enter (Cmd+Enter)
-            // saves; Tab stays inside.
-            window.addEventListener('keydown', function (event) {
-                if (noteOverlay.hidden) return;
-                event.stopPropagation();
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    if (!noteDiscard.hidden) {
-                        showDiscardPrompt(false);
-                        noteInput.focus({ preventScroll: true });
-                    } else {
-                        requestCloseNote();
-                    }
-                } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && noteDiscard.hidden) {
-                    event.preventDefault();
-                    saveNote();
-                } else if (event.key === 'Tab') {
-                    const focusable = [...notePanel.querySelectorAll('textarea, button, summary')]
-                        .filter((el) => !el.disabled && !el.closest('[hidden]'));
-                    const first = focusable[0];
-                    const last = focusable[focusable.length - 1];
-                    if (!notePanel.contains(document.activeElement)) {
-                        event.preventDefault();
-                        (event.shiftKey ? last : first).focus();
-                    } else if (event.shiftKey && document.activeElement === first) {
-                        event.preventDefault();
-                        last.focus();
-                    } else if (!event.shiftKey && document.activeElement === last) {
-                        event.preventDefault();
-                        first.focus();
-                    }
-                }
-            }, true);
 
             // ---- Back up or move your data: export and import bookmarks,
             // highlights, notes, reading position and display settings. The native file
@@ -8456,7 +8252,7 @@
             // focus in the card itself (Shift+Tab moves through it).
             function cardGhostAllowed() {
                 if (!selectionCard.isConnected) return false;
-                if (importOpen() || !aboutOverlay.hidden || !noteOverlay.hidden
+                if (importOpen() || !aboutOverlay.hidden || noteOpen()
                     || exportNotesOpen() || shortcutsOpen() || welcomeOpen()) {
                     return false;
                 }
@@ -8515,7 +8311,7 @@
                 // And while the import preview, About, the note panel or
                 // Export notes is open, nothing else responds to the
                 // keyboard (they handle their own keys).
-                if (importOpen() || !aboutOverlay.hidden || !noteOverlay.hidden || exportNotesOpen() || shortcutsOpen()) {
+                if (importOpen() || !aboutOverlay.hidden || noteOpen() || exportNotesOpen() || shortcutsOpen()) {
                     return;
                 }
 

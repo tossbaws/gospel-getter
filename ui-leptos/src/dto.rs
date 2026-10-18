@@ -217,3 +217,27 @@ pub struct ImportResult {
     pub notes_removed: u64,
     pub position: Option<PositionPreview>,
 }
+
+/// `add_note`'s arguments.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddNoteArgs<'a> {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    pub body: &'a str,
+}
+
+/// `update_note`'s arguments.
+#[derive(Debug, Serialize)]
+pub struct UpdateNoteArgs<'a> {
+    pub id: i64,
+    pub body: &'a str,
+}
+
+/// `delete_note`'s arguments.
+#[derive(Debug, Serialize)]
+pub struct DeleteNoteArgs {
+    pub id: i64,
+}

@@ -138,7 +138,7 @@ test('a note is added, edited, deleted and restored, and every view keeps up', (
 
         await select(app, 16, 18);
         const add = addNoteButton(app);
-        app.click(add);
+        await app.click(add);
         assert.ok(panelOpen(app));
         const panel = el(app, 'note-panel');
         assert.equal(panel.getAttribute('role'), 'dialog');
@@ -307,7 +307,7 @@ test('N opens the panel only with a selection, and never while typing or with a 
         assert.ok(!panelOpen(app));
         app.key('Escape', {}, search);
 
-        const event = app.key('n');
+        const event = await app.key('n');
         assert.ok(event.defaultPrevented);
         assert.ok(panelOpen(app));
         assert.equal(el(app, 'note-title').textContent, 'John 3:16');
@@ -410,7 +410,7 @@ test('notes are translation-independent: one section in compare mode, markers in
         await select(app, 16, 17, 'web');
         assert.equal(app.document.querySelectorAll('.verse-notes').length, 1);
         assert.deepEqual(cards(app), [{ reference: 'John 3:16–17', body: 'Both translations.' }]);
-        app.click(addNoteButton(app));
+        await app.click(addNoteButton(app));
         assert.equal(el(app, 'note-text-shown').textContent, 'Text shown: WEB');
         assert.ok(el(app, 'note-passage').textContent.includes(storedVerse('web', 'John', 3, 16)));
         // Adding lists the notes already on the passage, folded away.

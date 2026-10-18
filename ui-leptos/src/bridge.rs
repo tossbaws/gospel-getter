@@ -390,3 +390,127 @@ pub fn apply_preferences(values: &JsValue) -> Result<bool, JsValue> {
             .unwrap_or(false),
     )
 }
+
+/// The page opens the note editor (the selection card's + Add note and
+/// Edit, N, the Library's Edit): a cancelable `CustomEvent` whose `detail`
+/// is a [`NoteRequest`] plus `note` (the note being edited, as the page has
+/// it, or `null`; handed back with [`NOTE_DONE_EVENT`]) and `returnFocus`.
+/// The page puts its popovers and the search box away first.
+pub const NOTE_EVENT: &str = "gospel-getter:note";
+
+/// What the editor needs from the page to open.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteRequest {
+    /// `add` or `edit`.
+    pub mode: String,
+    /// The note being edited.
+    pub note: Option<NoteRef>,
+    /// The verses the note is on.
+    pub passage: Passage,
+    /// The passage's reference, e.g. "John 3:16–18" (the title).
+    pub reference: String,
+    /// The translation whose text is quoted.
+    pub code: String,
+    /// The passage quoted, as markup the page rendered with its own
+    /// `verseHtml` (KJV supplied words in italics, no note markers; text
+    /// escaped by the page), with what the translation doesn't number said
+    /// at the end. Shown as it is.
+    pub passage_html: String,
+    /// When adding, the other notes on these verses, read-only.
+    pub others: Vec<OtherNote>,
+}
+
+/// The note being edited: its id and text (the rest stays the page's).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct NoteRef {
+    pub id: i64,
+    pub body: String,
+}
+
+/// The verses a note is on.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Passage {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub start: i64,
+    pub end: i64,
+}
+
+/// Another note on the passage, as the editor lists it: its reference,
+/// the date it was written (as the page shows dates) and its text.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct OtherNote {
+    pub reference: String,
+    pub date: String,
+    pub body: String,
+}
+
+pub fn note_request(event: &CustomEvent) -> Result<NoteRequest, JsValue> {
+    detail(event)
+}
+
+/// The page's notes on the selection have changed while the editor may be
+/// open (adding): a `CustomEvent` whose `detail` is `{ others }`, the
+/// [`OtherNote`]s now. The editor shows them if it's adding.
+pub const NOTE_OTHERS_EVENT: &str = "gospel-getter:note-others";
+
+#[derive(Debug, Deserialize)]
+struct Others {
+    others: Vec<OtherNote>,
+}
+
+pub fn note_others(event: &CustomEvent) -> Result<Vec<OtherNote>, JsValue> {
+    detail::<Others>(event).map(|o| o.others)
+}
+
+/// Refreshes the page's notes after the editor has saved or deleted one:
+/// the markers, the selection card's Notes section and the Library, through
+/// `window.gospelGetterRefreshNotes()` (the page's `refreshNotes`, which
+/// reports its own failures), waiting for it, so the editor can close onto
+/// the note's refreshed Edit.
+pub async fn refresh_notes() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let refresh = js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterRefreshNotes"))
+        .ok()
+        .and_then(|f| f.dyn_into::<js_sys::Function>().ok());
+    let Some(refresh) = refresh else {
+        return;
+    };
+    if let Ok(promise) = refresh
+        .call0(&JsValue::NULL)
+        .and_then(|p| p.dyn_into::<js_sys::Promise>())
+    {
+        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+    }
+}
+
+/// The editor has added, saved or deleted a note (and the page's notes are
+/// refreshed): a `CustomEvent` whose `detail` is `{ action, note }`,
+/// `action` being `added`, `saved` or `deleted`, and `note` the deleted
+/// note as the backend returned it (else `null`). The page says so in the
+/// selection card's status line, a deletion with its Undo (the page's
+/// `restoreNote`), or in its toast when the card is gone.
+pub const NOTE_DONE_EVENT: &str = "gospel-getter:note-done";
+
+/// Says [`NOTE_DONE_EVENT`].
+pub fn note_done(action: &str, note: &JsValue) {
+    let Some(document) = document() else {
+        return;
+    };
+    let detail = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &detail,
+        &JsValue::from_str("action"),
+        &JsValue::from_str(action),
+    );
+    let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("note"), note);
+    let init = CustomEventInit::new();
+    init.set_detail(&detail);
+    if let Ok(event) = CustomEvent::new_with_event_init_dict(NOTE_DONE_EVENT, &init) {
+        let _ = document.dispatch_event(&event);
+    }
+}
