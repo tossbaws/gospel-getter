@@ -19,12 +19,12 @@ pub fn thousands(n: u64) -> String {
 
 /// "1 note", "3 notes", "1,234 notes".
 pub fn plural(n: u64, one: &str) -> String {
-    let word = if n == 1 {
-        one.to_string()
-    } else {
-        format!("{one}s")
-    };
-    format!("{} {word}", thousands(n))
+    plural_as(n, one, &format!("{one}s"))
+}
+
+/// As [`plural`], with the plural spelled out: "2 repeated entries".
+pub fn plural_as(n: u64, one: &str, many: &str) -> String {
+    format!("{} {}", thousands(n), if n == 1 { one } else { many })
 }
 
 /// The match line for a count: "No notes match", "1 note matches",

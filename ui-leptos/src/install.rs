@@ -65,10 +65,22 @@ mod tests {
     #[test]
     fn any_saved_data_is_not() {
         let cases = [
-            Install { has_saved_position: true, ..empty() },
-            Install { bookmarks: 1, ..empty() },
-            Install { highlights: 2, ..empty() },
-            Install { notes: 3, ..empty() },
+            Install {
+                has_saved_position: true,
+                ..empty()
+            },
+            Install {
+                bookmarks: 1,
+                ..empty()
+            },
+            Install {
+                highlights: 2,
+                ..empty()
+            },
+            Install {
+                notes: 3,
+                ..empty()
+            },
         ];
         for install in cases {
             assert!(!is_fresh(&install, Some(&[])), "{install:?}");
@@ -78,9 +90,18 @@ mod tests {
     #[test]
     fn a_list_that_did_not_load_counts_as_data() {
         let cases = [
-            Install { bookmarks_loaded: false, ..empty() },
-            Install { highlights_loaded: false, ..empty() },
-            Install { notes_loaded: false, ..empty() },
+            Install {
+                bookmarks_loaded: false,
+                ..empty()
+            },
+            Install {
+                highlights_loaded: false,
+                ..empty()
+            },
+            Install {
+                notes_loaded: false,
+                ..empty()
+            },
         ];
         for install in cases {
             assert!(!is_fresh(&install, Some(&[])), "{install:?}");
@@ -89,7 +110,11 @@ mod tests {
 
     #[test]
     fn a_stored_setting_or_the_welcome_seen_is_not_fresh() {
-        for key in ["gospel-getter-welcome", "gospel-getter-theme", "gospel-getter-compare"] {
+        for key in [
+            "gospel-getter-welcome",
+            "gospel-getter-theme",
+            "gospel-getter-compare",
+        ] {
             assert!(!is_fresh(&empty(), Some(&[key.to_string()])), "{key}");
         }
     }

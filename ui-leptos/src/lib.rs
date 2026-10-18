@@ -10,6 +10,8 @@ mod bridge;
 mod dom;
 mod dto;
 mod export_notes;
+mod import_preview;
+mod import_text;
 mod install;
 mod ipc;
 mod shortcuts;
@@ -34,7 +36,8 @@ pub fn start() {
     // dialog lives as long as the page.
     leptos::mount::mount_to(body.clone(), export_notes::ExportNotes).forget();
     leptos::mount::mount_to(body.clone(), shortcuts::Shortcuts).forget();
-    leptos::mount::mount_to(body, welcome::WelcomeCard).forget();
+    leptos::mount::mount_to(body.clone(), welcome::WelcomeCard).forget();
+    leptos::mount::mount_to(body, import_preview::ImportDialog).forget();
     // Everything is listening: the page may send again what it asked
     // before the module had loaded.
     bridge::ready();

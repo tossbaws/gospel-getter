@@ -219,7 +219,14 @@ struct Jump {
 
 /// Says [`JUMP_EVENT`].
 pub fn jump(book_id: i64, chapter: i64, top: bool) {
-    dispatch(JUMP_EVENT, &Jump { book_id, chapter, top });
+    dispatch(
+        JUMP_EVENT,
+        &Jump {
+            book_id,
+            chapter,
+            top,
+        },
+    );
 }
 
 /// The page asks the welcome to open: a cancelable `CustomEvent` whose
@@ -294,9 +301,10 @@ pub fn choose_theme(value: &str) {
 pub fn stored_keys() -> Option<Vec<String>> {
     let storage = web_sys::window()?.local_storage().ok()??;
     let length = storage.length().ok()?;
-    (0..length).map(|i| storage.key(i).ok()).collect::<Option<Vec<_>>>().map(
-        |keys| keys.into_iter().flatten().collect(),
-    )
+    (0..length)
+        .map(|i| storage.key(i).ok())
+        .collect::<Option<Vec<_>>>()
+        .map(|keys| keys.into_iter().flatten().collect())
 }
 
 /// The welcome's key in local storage, beside the display settings: set to
@@ -310,4 +318,75 @@ pub fn welcome_seen() {
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
         let _ = storage.set_item(WELCOME_KEY, "seen");
     }
+}
+
+/// The page asks the import to begin (its ☰ → Import data…): a cancelable
+/// `CustomEvent`, no `detail`. The import cancels it to say it has it.
+pub const IMPORT_EVENT: &str = "gospel-getter:import";
+
+/// Import or export is under way, or done: a `CustomEvent` whose `detail`
+/// is `{ busy }`. The page disables (or enables) its two ☰ items for it
+/// (`setDataBusy`), as it does for its own export.
+pub const DATA_BUSY_EVENT: &str = "gospel-getter:data-busy";
+
+#[derive(Debug, Serialize)]
+struct DataBusy {
+    busy: bool,
+}
+
+/// Says [`DATA_BUSY_EVENT`].
+pub fn data_busy(busy: bool) {
+    dispatch(DATA_BUSY_EVENT, &DataBusy { busy });
+}
+
+/// An import has changed the reader's data: a `CustomEvent` whose `detail`
+/// is `{ position, message }`. The page reloads what it shows of it, in
+/// order: the chapter at `position` (`{ translationCode, bookId, chapter }`,
+/// or `null` to stay put), then the bookmarks, highlights and notes; then
+/// it says `message` in its notice and its toast.
+pub const IMPORTED_EVENT: &str = "gospel-getter:imported";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportedPosition<'a> {
+    translation_code: &'a str,
+    book_id: i64,
+    chapter: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct Imported<'a> {
+    position: Option<ImportedPosition<'a>>,
+    message: &'a str,
+}
+
+/// Says [`IMPORTED_EVENT`].
+pub fn imported(position: Option<&crate::dto::PositionPreview>, message: &str) {
+    let position = position.map(|p| ImportedPosition {
+        translation_code: &p.translation_code,
+        book_id: p.book_id,
+        chapter: p.chapter,
+    });
+    dispatch(IMPORTED_EVENT, &Imported { position, message });
+}
+
+/// Applies display settings from an import file through the page's own
+/// `window.gospelGetterPreferences.apply(values)` (the head script's
+/// global; the only way to set them in bulk): `values` as the backend sent
+/// them. `Ok(persisted)` says whether they could also be saved; an error is
+/// what `apply` threw.
+pub fn apply_preferences(values: &JsValue) -> Result<bool, JsValue> {
+    let window: JsValue = web_sys::window()
+        .ok_or_else(|| JsValue::from_str("no window"))?
+        .into();
+    let preferences = js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterPreferences"))?;
+    let apply = js_sys::Reflect::get(&preferences, &JsValue::from_str("apply"))?
+        .dyn_into::<js_sys::Function>()
+        .map_err(|_| JsValue::from_str("The display settings can’t be applied here."))?;
+    let applied = apply.call1(&preferences, values)?;
+    Ok(
+        js_sys::Reflect::get(&applied, &JsValue::from_str("persisted"))?
+            .as_bool()
+            .unwrap_or(false),
+    )
 }

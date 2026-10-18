@@ -138,12 +138,19 @@ impl Welcome {
             .target()
             .and_then(|t| t.dyn_into::<Element>().ok())
             .and_then(|t| t.closest("#welcome-looks [role=\"radio\"]").ok().flatten())
-            .and_then(|radio| self.radios().iter().position(|r| dom::same(Some(&radio), r)));
+            .and_then(|radio| {
+                self.radios()
+                    .iter()
+                    .position(|r| dom::same(Some(&radio), r))
+            });
         if key == "Escape" {
             event.prevent_default();
             self.close();
         } else if let Some(index) = on_radio
-            && matches!(key.as_str(), "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown")
+            && matches!(
+                key.as_str(),
+                "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown"
+            )
         {
             event.prevent_default();
             let back = key == "ArrowLeft" || key == "ArrowUp";
