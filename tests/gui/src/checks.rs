@@ -1,0 +1,788 @@
+//! The four checks, in the order a person would meet them: the app starts
+//! and its page boots (1); the Leptos piece mounted and the Content
+//! Security Policy blocked nothing (2, judged at the end of the run);
+//! Export notes end to end (3); screenshots in Chi Rho and Vellum (4, two
+//! of them taken while check 3 has the dialog open).
+
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result, bail};
+use serde_json::{Value, json};
+use thirtyfour::prelude::*;
+
+use crate::config::Config;
+use crate::native;
+use crate::report::{Check, Report};
+use crate::ui::{Ui, log_line};
+
+/// Starting the app (a cold start seeds its database) may take longer than
+/// an ordinary step.
+const SESSION_START: Duration = Duration::from_secs(30);
+
+/// How long the app's first-run search index build may take (3 to 4
+/// seconds on a desktop; CI runners are slower).
+const INDEX_BUILD: Duration = Duration::from_secs(60);
+
+/// Asks the app, through the page's own IPC, whether its search index is
+/// built: `search` answers `unavailable` until it is. One call in flight at
+/// a time; each poll reports the last answer. Read-only.
+const INDEX_READY_JS: &str = "
+    const s = window.__guiCheckIndex || (window.__guiCheckIndex = {});
+    if (s.kind === 'text') return [true, 'ready'];
+    if (!s.pending) {
+        s.pending = true;
+        window.__TAURI__.core.invoke('search', { query: 'beginning', translationCode: null, offset: 0 })
+            .then((r) => { s.kind = r.kind; s.message = r.message || null; },
+                  (e) => { s.kind = 'error'; s.message = String(e); })
+            .finally(() => { s.pending = false; });
+    }
+    return [false, { kind: s.kind || 'asking', message: s.message || null }];
+";
+
+/// The note check 3 writes, and looks for in the exported file.
+const NOTE_TEXT: &str = "gui-check smoke note: In the beginning";
+
+/// Where the exported file goes, in the run's own folder.
+const EXPORT_FILE: &str = "gui-check-notes.md";
+
+/// The save dialog's title (`commands::export_notes`).
+const SAVE_DIALOG_TITLE: &str = "Export notes";
+
+/// Whether an element is shown: not hidden itself or inside something
+/// hidden, and laid out. Prepended to the scripts below.
+const VISIBLE_JS: &str = "const visible = (el) => !!el && !el.hidden && !el.closest('[hidden]') \
+    && el.getClientRects().length > 0;";
+
+/// A short description of an element, for logs and failures.
+const DESCRIBE_JS: &str = "const describe = (el) => !el ? null : el.id ? '#' + el.id \
+    : el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).split(' ').join('.') : '') \
+    + (el.textContent ? ' \"' + el.textContent.trim().slice(0, 30) + '\"' : '');";
+
+/// Installs the `securitypolicyviolation` listener on the app's own page,
+/// the moment WebDriver can first see it (the wait polls this). Not on
+/// about:blank or an earlier document, whose listener would be lost.
+const CSP_LISTENER_JS: &str = "
+    const href = String(location.href);
+    if (!/^(tauri:\\/\\/localhost|https?:\\/\\/tauri\\.localhost)/.test(href)) return [false, href];
+    if (!window.__guiCheckCsp) {
+        const seen = [];
+        window.__guiCheckCsp = seen;
+        document.addEventListener('securitypolicyviolation', (e) => seen.push(
+            `${e.effectiveDirective} blocked ${e.blockedURI || '(inline)'} at ${e.sourceFile || '?'}:${e.lineNumber}`
+            + (e.sample ? ` (${e.sample})` : '')));
+        window.__guiCheckCspAt = document.readyState;
+    }
+    return [true, { href, readyState: window.__guiCheckCspAt }];
+";
+
+/// The screenshots check 4 asks for, by file name.
+const SHOTS: [&str; 4] = [
+    "1-reading-chi-rho.png",
+    "2-export-dialog-chi-rho.png",
+    "3-reading-vellum.png",
+    "4-export-dialog-vellum.png",
+];
+
+/// The screenshots taken so far, and why any is missing.
+#[derive(Debug, Default)]
+struct Shots {
+    taken: Vec<(&'static str, Result<u64, String>)>,
+}
+
+impl Shots {
+    fn note(&mut self, name: &'static str, outcome: Result<u64>) {
+        self.taken
+            .push((name, outcome.map_err(|e| format!("{e:#}"))));
+    }
+
+    fn verdict(&self) -> Result<String> {
+        let mut done = Vec::new();
+        let mut missing = Vec::new();
+        for name in SHOTS {
+            match self.taken.iter().find(|(n, _)| *n == name) {
+                Some((_, Ok(bytes))) => done.push(format!("{name} ({} KB)", bytes / 1024)),
+                Some((_, Err(why))) => missing.push(format!("{name}: {why}")),
+                None => missing.push(format!("{name}: not taken (an earlier step failed)")),
+            }
+        }
+        if missing.is_empty() {
+            Ok(format!("screenshots/ {}", done.join(", ")))
+        } else {
+            bail!("{}", missing.join("; "))
+        }
+    }
+}
+
+/// Everything the checks share.
+struct Run<'a> {
+    config: &'a Config,
+    ui: Ui,
+    shots: Shots,
+}
+
+pub async fn run(config: &Config, report: &mut Report) {
+    let started = Instant::now();
+    log_line(
+        started,
+        &format!(
+            "budget {}s, step timeout {}s",
+            config.budget.as_secs(),
+            config.step_timeout.as_secs()
+        ),
+    );
+
+    // Check 1 starts with the session; without one nothing else can run.
+    let driver = match start_session(config, started).await {
+        Ok(driver) => driver,
+        Err(e) => {
+            log_line(started, &format!("FAILED: {e:#}"));
+            report.record(Check::Driver, Err(e)).await;
+            report
+                .fail_the_rest("not run: no WebDriver session (check 1)")
+                .await;
+            return;
+        }
+    };
+    let mut run = Run {
+        config,
+        ui: Ui::new(driver, started, config.budget, config.step_timeout),
+        shots: Shots::default(),
+    };
+
+    // Before anything else, so it sees as much of the run as it can.
+    let listener = run
+        .ui
+        .wait(
+            "the app's page, to listen for CSP violations on it",
+            CSP_LISTENER_JS,
+        )
+        .await;
+
+    let boot = run.boot().await;
+    let booted = boot.is_ok();
+    report.record(Check::Driver, boot).await;
+    if !booted {
+        run.failure_screenshot(Check::Driver).await;
+    }
+
+    let mounted = run.leptos_mounted().await;
+
+    if booted {
+        let theme = run.expect_theme("chi-rho").await;
+        let shot = match theme {
+            Ok(()) => {
+                run.ui
+                    .screenshot(
+                        "screenshot: reading view, Chi Rho",
+                        &run.shot_path(SHOTS[0]),
+                    )
+                    .await
+            }
+            Err(e) => Err(e),
+        };
+        run.shots.note(SHOTS[0], shot);
+
+        let export = run.export_notes().await;
+        if export.is_err() {
+            run.failure_screenshot(Check::ExportNotes).await;
+        }
+        report.record(Check::ExportNotes, export).await;
+
+        if let Err(e) = run.vellum_screenshots().await {
+            run.failure_screenshot(Check::Screenshots).await;
+            for name in &SHOTS[2..] {
+                if !run.shots.taken.iter().any(|(n, _)| n == name) {
+                    run.shots.note(name, Err(anyhow::anyhow!("{e:#}")));
+                }
+            }
+        }
+        report.record(Check::Screenshots, run.shots.verdict()).await;
+    }
+
+    let csp = run.csp_verdict(listener, mounted).await;
+    report.record(Check::Csp, csp).await;
+    report
+        .fail_the_rest("not run: the page did not boot (check 1)")
+        .await;
+
+    log_line(started, "close the app (end the WebDriver session)");
+    let driver = run.ui.into_driver();
+    match tokio::time::timeout(Duration::from_secs(10), driver.quit()).await {
+        Ok(Ok(())) => log_line(started, "session ended, app closed"),
+        Ok(Err(e)) => log_line(started, &format!("ending the session failed: {e}")),
+        Err(_) => log_line(started, "ending the session timed out after 10s"),
+    }
+    log_line(
+        started,
+        &format!("done in {:.1}s", started.elapsed().as_secs_f64()),
+    );
+}
+
+/// Starts the app through tauri-driver: a WebDriver session whose browser
+/// is the app.
+async fn start_session(config: &Config, started: Instant) -> Result<WebDriver> {
+    log_line(
+        started,
+        &format!("start the app through tauri-driver ({})", config.app),
+    );
+    let mut caps = Capabilities::new();
+    caps.set("tauri:options", json!({ "application": config.app }))?;
+    let limit = SESSION_START.min(config.budget);
+    let session = WebDriver::builder(config.webdriver_url.as_str(), caps).request_timeout(limit);
+    let driver = tokio::time::timeout(limit, session)
+        .await
+        .with_context(|| {
+            format!(
+                "starting the app through tauri-driver timed out after {}s",
+                limit.as_secs()
+            )
+        })?
+        .context("tauri-driver could not start a session on the app")?;
+    log_line(started, "  ok: session started");
+    Ok(driver)
+}
+
+impl Run<'_> {
+    fn shot_path(&self, name: &str) -> PathBuf {
+        self.config.out_dir.join("screenshots").join(name)
+    }
+
+    /// A screenshot of how things looked when `check` failed, if one can
+    /// still be taken.
+    async fn failure_screenshot(&self, check: Check) {
+        let name = format!("fail-{}-{}.png", check.number(), check.name());
+        if let Err(e) = self
+            .ui
+            .screenshot(
+                &format!("failure screenshot {name}"),
+                &self.shot_path(&name),
+            )
+            .await
+        {
+            self.ui.log(&format!("no failure screenshot: {e:#}"));
+        }
+    }
+
+    /// Check 1: the page booted: the chapter heading is shown, the window
+    /// title carries the reference (on Linux, the native X window's too),
+    /// and boot ran to the end (a fresh install's welcome, skipped).
+    async fn boot(&self) -> Result<String> {
+        let ui = &self.ui;
+        let seen = ui
+            .wait(
+                "the chapter heading, and the reference in the title",
+                "const heading = document.querySelector('.chapter-main .chapter-heading');
+                 const reference = (document.getElementById('ref-text') || {}).textContent || '';
+                 const text = heading ? heading.textContent.trim() : '';
+                 const ok = !!text && !!reference && reference.startsWith(text)
+                     && document.title === `${reference} — Gospel Getter`;
+                 return [ok, { heading: text, reference, title: document.title, href: String(location.href) }];",
+            )
+            .await?;
+        let title = seen["title"].as_str().unwrap_or_default().to_owned();
+        let heading = seen["heading"].as_str().unwrap_or_default().to_owned();
+
+        let window = match &self.config.xvfb {
+            Some(xvfb) => {
+                let xvfb = xvfb.clone();
+                let wanted = title.clone();
+                ui.step(
+                    "the native window's title says the same (on the private display)",
+                    async move {
+                        loop {
+                            let windows = xvfb.windows_named("Gospel Getter").await?;
+                            if windows.iter().any(|(_, name)| *name == wanted) {
+                                return Ok(format!("X window \"{wanted}\" on {}", xvfb.display()));
+                            }
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                    },
+                )
+                .await?
+            }
+            None => {
+                let driver_title = ui.driver().title().await?;
+                if driver_title != title {
+                    bail!("WebDriver's title {driver_title:?} is not the page's {title:?}");
+                }
+                format!(
+                    "title \"{driver_title}\" (WebDriver; the native window title isn't read on Windows)"
+                )
+            }
+        };
+
+        ui.wait(
+            "boot to finish (a fresh install shows the welcome)",
+            &format!(
+                "{VISIBLE_JS} const panel = document.getElementById('welcome-panel');
+                 return [visible(panel), {{ welcomeHidden: document.getElementById('welcome-overlay').hidden }}];"
+            ),
+        )
+        .await?;
+        ui.click("skip the welcome", "#welcome-skip").await?;
+        ui.wait(
+            "the welcome to close",
+            "return [document.getElementById('welcome-overlay').hidden, null];",
+        )
+        .await?;
+
+        Ok(format!(
+            "session on {}; heading \"{heading}\"; {window}; boot finished (first-run welcome shown, skipped)",
+            seen["href"].as_str().unwrap_or("?")
+        ))
+    }
+
+    /// Check 2's first half: the Leptos piece mounted its dialog (closed).
+    async fn leptos_mounted(&self) -> Result<String> {
+        self.ui
+            .wait(
+                "the Leptos piece to mount #export-notes-overlay",
+                "const overlay = document.getElementById('export-notes-overlay');
+                 return [!!overlay && !!document.getElementById('export-notes-panel') && overlay.hidden,
+                     overlay ? { hidden: overlay.hidden } : 'no #export-notes-overlay'];",
+            )
+            .await?;
+        Ok("the Leptos piece mounted (#export-notes-overlay, closed)".to_owned())
+    }
+
+    /// Check 2: the Leptos piece mounted and no CSP violation was reported
+    /// on the page, from the listener's install to the end of the run.
+    async fn csp_verdict(
+        &self,
+        listener: Result<Value>,
+        mounted: Result<String>,
+    ) -> Result<String> {
+        let installed = listener.context("the CSP listener could not be installed")?;
+        let mounted = mounted?;
+        let seen = self
+            .ui
+            .step("read the CSP violations the page reported", async {
+                self.ui
+                    .js(
+                        "return window.__guiCheckCsp ? { violations: window.__guiCheckCsp } : null;",
+                        Vec::new(),
+                    )
+                    .await
+            })
+            .await?;
+        if seen.is_null() {
+            bail!(
+                "the CSP listener is gone: the page reloaded during the run, so violations before that aren't known"
+            );
+        }
+        let violations: Vec<String> = seen["violations"]
+            .as_array()
+            .map(|v| {
+                v.iter()
+                    .map(|x| x.as_str().unwrap_or_default().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !violations.is_empty() {
+            bail!(
+                "{} CSP violation(s): {}",
+                violations.len(),
+                violations.join(" | ")
+            );
+        }
+        Ok(format!(
+            "{mounted}; no CSP violations reported from the listener's install (document readyState \"{}\") \
+             to the end of the run",
+            installed["readyState"].as_str().unwrap_or("?")
+        ))
+    }
+
+    /// Fails unless the page shows `theme` (Chi Rho is the default, so it
+    /// has no data-theme attribute).
+    async fn expect_theme(&self, theme: &str) -> Result<()> {
+        self.ui
+            .wait_with(
+                &format!("the {theme} theme to be on"),
+                "const want = arguments[0];
+                 const select = document.getElementById('theme-select').value;
+                 const attr = document.documentElement.dataset.theme || null;
+                 return [select === want && attr === (want === 'chi-rho' ? null : want), { select, attr }];",
+                vec![json!(theme)],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Opens the Library at its Notes tab, if it isn't already.
+    async fn open_library_notes(&self) -> Result<()> {
+        let ui = &self.ui;
+        let open = ui
+            .js(
+                "return !document.getElementById('library-panel').hidden;",
+                Vec::new(),
+            )
+            .await?;
+        if open != Value::Bool(true) {
+            ui.click("open the Library", "#library-toggle").await?;
+            ui.wait(
+                "the Library to show",
+                &format!(
+                    "{VISIBLE_JS} return [visible(document.getElementById('library-panel')), null];"
+                ),
+            )
+            .await?;
+        }
+        ui.click("the Library's Notes tab", "#library-tab-notes")
+            .await?;
+        ui.wait(
+            "Export notes… to be shown and enabled",
+            &format!(
+                "{VISIBLE_JS} const button = document.getElementById('export-notes-btn');
+                 return [visible(button) && !button.disabled,
+                     {{ shown: visible(button), disabled: button.disabled }}];"
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Clicks Export notes… and waits for the dialog, with focus in it.
+    async fn open_export_dialog(&self) -> Result<Value> {
+        let ui = &self.ui;
+        ui.click("click Export notes…", "#export-notes-btn").await?;
+        ui.wait(
+            "the Export notes dialog to show, with focus inside it",
+            &format!(
+                "{VISIBLE_JS} {DESCRIBE_JS}
+                 const panel = document.getElementById('export-notes-panel');
+                 const confirm = document.getElementById('export-notes-confirm');
+                 return [visible(panel) && panel.contains(document.activeElement) && !confirm.disabled,
+                     {{ title: (document.getElementById('export-notes-title') || {{}}).textContent,
+                        count: (document.getElementById('export-notes-count') || {{}}).textContent,
+                        focus: describe(document.activeElement) }}];"
+            ),
+        )
+        .await
+    }
+
+    /// Escape closes the dialog and focus goes back to Export notes….
+    async fn escape_export_dialog(&self) -> Result<()> {
+        let ui = &self.ui;
+        ui.press("press Escape in the dialog", Key::Escape).await?;
+        ui.wait(
+            "the dialog to close, focus back on #export-notes-btn",
+            &format!(
+                "{DESCRIBE_JS}
+                 const overlay = document.getElementById('export-notes-overlay');
+                 return [overlay.hidden && document.activeElement && document.activeElement.id === 'export-notes-btn',
+                     {{ hidden: overlay.hidden, focus: describe(document.activeElement) }}];"
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Check 3: a note added through the page, then exported through the
+    /// dialog and the native save dialog.
+    async fn export_notes(&mut self) -> Result<String> {
+        let mut said = Vec::new();
+
+        // A note on the first verse: select it, N, type, Save. Not until
+        // the app has built its search index, which a fresh install does
+        // in the background on its first start: a note saved meanwhile
+        // fails ("database is locked").
+        {
+            let ui = &self.ui;
+            ui.wait_within(
+                "the first-run search index build to finish (asked through the page's IPC)",
+                INDEX_READY_JS,
+                Vec::new(),
+                Some(INDEX_BUILD),
+            )
+            .await?;
+            let verse = ".chapter-main .verse[data-translation][data-verse=\"1\"]";
+            ui.click("select verse 1", verse).await?;
+            ui.wait(
+                "verse 1 to be selected",
+                "const v = document.querySelector('.chapter-main .verse[data-translation][data-verse=\"1\"]');
+                 return [!!v && v.classList.contains('verse-selected'), null];",
+            )
+            .await?;
+            ui.press("press N (write a note)", "n").await?;
+            ui.wait(
+                "the note dialog to show, focus in its text box",
+                &format!(
+                    "{VISIBLE_JS} {DESCRIBE_JS}
+                     return [visible(document.getElementById('note-panel'))
+                         && document.activeElement && document.activeElement.id === 'note-input',
+                         {{ title: document.getElementById('note-title').textContent,
+                            focus: describe(document.activeElement) }}];"
+                ),
+            )
+            .await?;
+            ui.type_into("type the note", "#note-input", NOTE_TEXT)
+                .await?;
+            ui.wait(
+                "Save to be enabled",
+                "return [!document.getElementById('note-save').disabled, null];",
+            )
+            .await?;
+            ui.click("click Save", "#note-save").await?;
+            ui.wait(
+                "the note dialog to close",
+                "return [document.getElementById('note-overlay').hidden, null];",
+            )
+            .await?;
+        }
+        said.push(
+            "note added (verse 1, N, Save, after the first-run search index build)".to_owned(),
+        );
+
+        self.open_library_notes().await?;
+        let shown = self.open_export_dialog().await?;
+        said.push(format!(
+            "dialog opened from Library → Notes (\"{}\", \"{}\")",
+            shown["title"].as_str().unwrap_or_default(),
+            shown["count"].as_str().unwrap_or_default().trim()
+        ));
+        let theme = self.expect_theme("chi-rho").await;
+        let shot = match theme {
+            Ok(()) => {
+                self.ui
+                    .screenshot(
+                        "screenshot: Export notes dialog, Chi Rho",
+                        &self.shot_path(SHOTS[1]),
+                    )
+                    .await
+            }
+            Err(e) => Err(e),
+        };
+        self.shots.note(SHOTS[1], shot);
+
+        self.escape_export_dialog().await?;
+        said.push("Escape closed it, focus back on #export-notes-btn".to_owned());
+
+        self.open_export_dialog().await?;
+        said.push(self.tab_cycle().await?);
+
+        // Export…: the dialog closes and the native save dialog opens.
+        let ui = &self.ui;
+        ui.click("click Export…", "#export-notes-confirm").await?;
+        ui.wait(
+            "the Export notes dialog to close for the save dialog",
+            "return [document.getElementById('export-notes-overlay').hidden, null];",
+        )
+        .await?;
+
+        match &self.config.xvfb {
+            Some(xvfb) => {
+                let window = ui
+                    .step(
+                        "the GTK save dialog to appear on the private display",
+                        async {
+                            loop {
+                                let windows = xvfb.windows_named(SAVE_DIALOG_TITLE).await?;
+                                if let Some((id, _)) =
+                                    windows.iter().find(|(_, name)| name == SAVE_DIALOG_TITLE)
+                                {
+                                    return Ok(id.clone());
+                                }
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                            }
+                        },
+                    )
+                    .await?;
+                let path = self.config.export_dir.join(EXPORT_FILE);
+                ui.step(
+                    "type the file's path into the save dialog and press Enter (xdotool)",
+                    async { xvfb.save_as(&window, &path).await },
+                )
+                .await?;
+                let bytes = ui
+                    .step("the exported file, with the note in it", async {
+                        loop {
+                            if let Ok(text) = tokio::fs::read_to_string(&path).await
+                                && text.contains(NOTE_TEXT)
+                            {
+                                return Ok(text.len());
+                            }
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                    })
+                    .await?;
+                let toast = ui
+                    .wait(
+                        "the toast \"Exported 1 note\"",
+                        "const toast = document.getElementById('data-status');
+                         const text = toast.textContent;
+                         return [text.startsWith('Exported 1 note') && !toast.classList.contains('is-hidden')
+                             && !toast.classList.contains('is-error'), text];",
+                    )
+                    .await?;
+                ui.step("the save dialog to be gone", async {
+                    while !xvfb.windows_named(SAVE_DIALOG_TITLE).await?.is_empty() {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    Ok(())
+                })
+                .await?;
+                said.push(format!(
+                    "GTK save dialog on {} took the path from xdotool; {EXPORT_FILE} has the note ({bytes} bytes); \
+                     toast \"{}\"",
+                    xvfb.display(),
+                    toast.as_str().unwrap_or_default()
+                ));
+            }
+            None => {
+                let limit = self.config.step_timeout;
+                let class = ui
+                    .step(
+                        "the save dialog to appear (UI Automation), then close it",
+                        async {
+                            native::windows_find_and_close(
+                                SAVE_DIALOG_TITLE,
+                                limit,
+                                &self.config.export_dir,
+                            )
+                            .await
+                        },
+                    )
+                    .await?;
+                said.push(format!(
+                    "the native save dialog appeared (window class {class}) and was closed; \
+                     on Windows the check stops there"
+                ));
+            }
+        }
+        Ok(said.join("; "))
+    }
+
+    /// Tab, pressed once more than the dialog has controls, keeps focus
+    /// inside the dialog and comes back round.
+    async fn tab_cycle(&self) -> Result<String> {
+        let ui = &self.ui;
+        let state = format!(
+            "{DESCRIBE_JS}
+             const panel = document.getElementById('export-notes-panel');
+             const controls = [...panel.querySelectorAll('button, input, select, textarea, a[href], [tabindex]')]
+                 .filter((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length > 0);
+             return {{ inside: panel.contains(document.activeElement), focus: describe(document.activeElement),
+                       controls: controls.length }};"
+        );
+        let start = ui.js(&state, Vec::new()).await?;
+        let controls = start["controls"].as_u64().unwrap_or(0);
+        if controls < 2 {
+            bail!("the dialog has {controls} focusable control(s); expected several");
+        }
+        let mut focus = vec![start["focus"].clone()];
+        for press in 1..=controls + 1 {
+            ui.press(&format!("Tab {press} of {}", controls + 1), Key::Tab)
+                .await?;
+            let now = ui.js(&state, Vec::new()).await?;
+            if now["inside"] != Value::Bool(true) {
+                bail!(
+                    "Tab {press} moved focus out of the dialog, to {}",
+                    now["focus"]
+                );
+            }
+            focus.push(now["focus"].clone());
+        }
+        let wrapped = focus
+            .iter()
+            .enumerate()
+            .any(|(i, f)| focus[i + 1..].contains(f));
+        if !wrapped {
+            bail!(
+                "Tab didn't come back round in {} presses: {focus:?}",
+                controls + 1
+            );
+        }
+        Ok(format!(
+            "Tab stayed inside and cycled ({controls} controls)"
+        ))
+    }
+
+    /// Check 4's second half: switch to Vellum through the Aa panel, then
+    /// the reading view and the dialog again.
+    async fn vellum_screenshots(&mut self) -> Result<()> {
+        {
+            let ui = &self.ui;
+            // Back to plain reading: no Library, no selection, no toast.
+            let library_open = ui
+                .js(
+                    "return !document.getElementById('library-panel').hidden;",
+                    Vec::new(),
+                )
+                .await?;
+            if library_open == Value::Bool(true) {
+                ui.click("close the Library", "#library-close").await?;
+                ui.wait(
+                    "the Library to close",
+                    "return [document.getElementById('library-panel').hidden, null];",
+                )
+                .await?;
+            }
+            let selected = ui
+                .js(
+                    "return !!document.querySelector('.verse-selected');",
+                    Vec::new(),
+                )
+                .await?;
+            if selected == Value::Bool(true) {
+                ui.press("press Escape (clear the verse selection)", Key::Escape)
+                    .await?;
+                ui.wait(
+                    "the verse selection to clear",
+                    "return [!document.querySelector('.verse-selected'), null];",
+                )
+                .await?;
+            }
+            ui.wait(
+                "the toast to go",
+                "return [document.getElementById('data-status').classList.contains('is-hidden'), null];",
+            )
+            .await?;
+
+            ui.click("open Aa", "#aa-toggle").await?;
+            ui.wait(
+                "the Aa panel to show",
+                &format!(
+                    "{VISIBLE_JS} return [visible(document.getElementById('aa-popover')), null];"
+                ),
+            )
+            .await?;
+            ui.click(
+                "choose the Vellum theme",
+                "#theme-choices .theme-swatch[data-value=\"vellum\"]",
+            )
+            .await?;
+        }
+        self.expect_theme("vellum").await?;
+        {
+            let ui = &self.ui;
+            ui.press("press Escape (close Aa)", Key::Escape).await?;
+            ui.wait(
+                "the Aa panel to close",
+                "return [document.getElementById('aa-popover').hidden, null];",
+            )
+            .await?;
+        }
+        let shot = self
+            .ui
+            .screenshot(
+                "screenshot: reading view, Vellum",
+                &self.shot_path(SHOTS[2]),
+            )
+            .await;
+        self.shots.note(SHOTS[2], shot);
+
+        self.open_library_notes().await?;
+        self.open_export_dialog().await?;
+        let shot = self
+            .ui
+            .screenshot(
+                "screenshot: Export notes dialog, Vellum",
+                &self.shot_path(SHOTS[3]),
+            )
+            .await;
+        self.shots.note(SHOTS[3], shot);
+        self.escape_export_dialog().await?;
+        Ok(())
+    }
+}
