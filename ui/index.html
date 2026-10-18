@@ -7,6 +7,13 @@
     <!-- Generated from packaging/icon.svg by packaging/generate-icons.sh. -->
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
+    <!-- Built by Trunk (Trunk.toml): the page's Rust pieces, compiled to
+         WebAssembly (see ui-leptos/), and the files the page serves beside
+         itself. These links are Trunk's; they do nothing in a browser. -->
+    <link data-trunk rel="rust" href="../ui-leptos/Cargo.toml" data-bindgen-target="no-modules" data-wasm-opt="z" />
+    <link data-trunk rel="copy-dir" href="fonts" />
+    <link data-trunk rel="copy-file" href="favicon.svg" />
+    <link data-trunk rel="copy-file" href="favicon.png" />
     <style>
         /* Literata (TypeTogether, SIL Open Font License, see
            fonts/OFL.txt), bundled so scripture reads the same on every
@@ -5258,51 +5265,6 @@
             </div>
         </div>
     </div>
-    <div id="export-notes-overlay" class="modal-overlay" hidden>
-        <div id="export-notes-panel" class="modal-panel export-notes-panel" role="dialog" aria-modal="true" aria-labelledby="export-notes-title" aria-describedby="export-notes-text">
-            <div class="modal-body">
-                <h2 id="export-notes-title" class="note-title">Export notes</h2>
-                <p id="export-notes-text" class="export-notes-text">A Markdown file of your notes, each with its verses quoted in the <span id="export-notes-translation"></span>.</p>
-                <fieldset class="export-notes-group">
-                    <legend class="export-notes-legend">Books</legend>
-                    <div class="export-notes-tools">
-                        <button type="button" id="export-notes-all" class="reader-mode-btn" aria-label="Tick every book">All</button>
-                        <button type="button" id="export-notes-none" class="reader-mode-btn" aria-label="Untick every book">None</button>
-                    </div>
-                    <div id="export-notes-books" class="export-notes-books"></div>
-                </fieldset>
-                <fieldset id="export-notes-chapters" class="export-notes-group" hidden>
-                    <legend class="export-notes-legend">Chapters</legend>
-                    <div class="export-notes-range">
-                        <label>From <input type="number" id="export-notes-chapter-from" class="export-notes-field" inputmode="numeric" min="1" step="1" aria-describedby="export-notes-error"></label>
-                        <label>to <input type="number" id="export-notes-chapter-to" class="export-notes-field" inputmode="numeric" min="1" step="1" aria-describedby="export-notes-error"></label>
-                    </div>
-                </fieldset>
-                <fieldset class="export-notes-group">
-                    <legend id="export-notes-when-legend" class="export-notes-legend">Written</legend>
-                    <div>
-                        <select id="export-notes-when" class="export-notes-select" aria-labelledby="export-notes-when-legend">
-                            <option value="all">All time</option>
-                            <option value="last7Days">Last 7 days</option>
-                            <option value="last30Days">Last 30 days</option>
-                            <option value="thisYear">This year</option>
-                            <option value="custom">Custom</option>
-                        </select>
-                        <div id="export-notes-custom" class="export-notes-range export-notes-dates" hidden>
-                            <label>From <input type="date" id="export-notes-from" class="export-notes-field" aria-describedby="export-notes-error"></label>
-                            <label>To <input type="date" id="export-notes-to" class="export-notes-field" aria-describedby="export-notes-error"></label>
-                        </div>
-                    </div>
-                </fieldset>
-                <p id="export-notes-error" class="note-error" role="alert"></p>
-                <p id="export-notes-count" class="export-notes-count" aria-live="polite"></p>
-            </div>
-            <div class="modal-buttons">
-                <button type="button" id="export-notes-confirm" class="import-confirm">Export…</button>
-                <button type="button" id="export-notes-cancel" class="reader-mode-btn">Cancel</button>
-            </div>
-        </div>
-    </div>
     <p id="data-status" class="toast is-hidden" role="status" aria-live="polite"></p>
     <p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>
 
@@ -6957,264 +6919,46 @@
                 }
             });
 
-            // ---- Export notes: the notes chosen by book, chapters and when
-            // they were written, as a readable Markdown file with each
-            // note's verses quoted in the translation being read: the one
-            // chosen in Aa, in compare mode too (whichever column that is).
-            // The backend works out the choices when the dialog opens (the
-            // books with notes, and date presets in local days), counts
-            // the notes the choices match as they change, builds the file,
-            // asks where to save it and writes it, all by one filter; this
-            // only shows them. A small modal, like the note panel: it has
-            // the keyboard while open, and closing it gives focus back to
-            // the button. It opens fresh every time: nothing is kept.
-
-            const exportNotesOverlay = document.getElementById('export-notes-overlay');
-            const exportNotesPanel = document.getElementById('export-notes-panel');
-            const exportNotesBooks = document.getElementById('export-notes-books');
-            const exportNotesChapters = document.getElementById('export-notes-chapters');
-            const exportNotesChapterFrom = document.getElementById('export-notes-chapter-from');
-            const exportNotesChapterTo = document.getElementById('export-notes-chapter-to');
-            const exportNotesWhen = document.getElementById('export-notes-when');
-            const exportNotesCustom = document.getElementById('export-notes-custom');
-            const exportNotesFrom = document.getElementById('export-notes-from');
-            const exportNotesTo = document.getElementById('export-notes-to');
-            const exportNotesError = document.getElementById('export-notes-error');
-            const exportNotesCount = document.getElementById('export-notes-count');
-            const exportNotesConfirm = document.getElementById('export-notes-confirm');
-            const exportNotesTranslation = document.getElementById('export-notes-translation');
-            let exportingNotes = false;
-            let openingExportNotes = false;
-            // What the backend offered when the dialog opened.
-            let exportOptions = null;
-            // The book the chapter fields are set for.
-            let exportChapterBook = null;
-            // Only the latest count gets to show.
-            let exportCountToken = 0;
-            let exportMatches = null;
-
-            const exportBoxes = () => [...exportNotesBooks.querySelectorAll('input[type="checkbox"]')];
-            const tickedBooks = () => exportBoxes()
-                .filter((box) => box.checked)
-                .map((box) => exportOptions.books.find((b) => b.id === Number(box.value)));
-
-            // A chapter field's number, held to the book's chapters; an
-            // empty or unreadable one is the book's first (or last)
-            // chapter with notes.
-            function chapterValue(input, book, fallback) {
-                const n = Math.round(Number(input.value));
-                if (input.value.trim() === '' || !Number.isFinite(n)) return fallback;
-                return Math.min(Math.max(n, 1), book.chapterCount);
-            }
-
-            // The chapter fields show only while exactly one book is
-            // ticked, starting on its chapters with notes, and only when
-            // there are two such chapters to choose between.
-            function syncExportChapters() {
-                const ticked = tickedBooks();
-                const book = ticked.length === 1 ? ticked[0] : null;
-                exportNotesChapters.hidden = !book || book.notedChapters < 2;
-                if (book && book.id !== exportChapterBook) {
-                    for (const input of [exportNotesChapterFrom, exportNotesChapterTo]) input.max = String(book.chapterCount);
-                    exportNotesChapterFrom.value = String(book.firstChapter);
-                    exportNotesChapterTo.value = String(book.lastChapter);
-                }
-                exportChapterBook = book ? book.id : null;
-            }
-
-            // The filter the backend reads: every book is no book list,
-            // and a chapter range around all of a book's notes is none.
-            function exportFilter() {
-                const ticked = tickedBooks();
-                let chapters = null;
-                if (ticked.length === 1) {
-                    const [book] = ticked;
-                    const range = [
-                        chapterValue(exportNotesChapterFrom, book, book.firstChapter),
-                        chapterValue(exportNotesChapterTo, book, book.lastChapter),
-                    ];
-                    if (range[0] !== book.firstChapter || range[1] !== book.lastChapter) chapters = range;
-                }
-                const every = ticked.length === exportOptions.books.length && !chapters;
-                let writtenFrom = null;
-                let writtenTo = null;
-                if (exportNotesWhen.value === 'custom') {
-                    writtenFrom = exportNotesFrom.value || null;
-                    writtenTo = exportNotesTo.value || null;
-                } else if (exportNotesWhen.value !== 'all') {
-                    ({ from: writtenFrom, to: writtenTo } = exportOptions.dates[exportNotesWhen.value]);
-                }
-                return { books: every ? [] : ticked.map((b) => b.id), chapters, writtenFrom, writtenTo };
-            }
-
-            function showExportCount(count, error) {
-                exportMatches = error ? null : count;
-                exportNotesError.textContent = error || '';
-                exportNotesCount.textContent = error ? '' : count === 0
-                    ? 'No notes match'
-                    : `${count.toLocaleString('en')} ${count === 1 ? 'note matches' : 'notes match'}`;
-                exportNotesConfirm.disabled = !exportMatches;
-            }
-
-            // Asks the backend how many notes the choices match. No book
-            // ticked matches nothing, without asking (an empty book list
-            // would be every book).
-            async function refreshExportCount() {
-                const token = ++exportCountToken;
-                exportMatches = null;
-                exportNotesConfirm.disabled = true;
-                if (!tickedBooks().length) {
-                    showExportCount(0, null);
-                    return;
-                }
-                try {
-                    const count = await invoke('count_notes_export', { filter: exportFilter() });
-                    if (token === exportCountToken) showExportCount(count, null);
-                } catch (e) {
-                    if (token === exportCountToken) showExportCount(null, errorText(e));
-                }
-            }
-
-            function exportChoicesChanged() {
-                syncExportChapters();
-                refreshExportCount();
-            }
-
-            // Starts on just the book being read if it has notes, otherwise
-            // on every book, and on All time.
-            async function openExportNotes() {
-                if (exportNotesBtn.disabled || exportingNotes || openingExportNotes || !allNotes.length) return;
-                openingExportNotes = true;
-                let options;
-                try {
-                    options = await invoke('get_notes_export_options');
-                } catch (e) {
-                    console.error('Failed to prepare the notes export', e);
-                    setDataStatus(`Export failed: ${errorText(e)}`, true);
-                    return;
-                } finally {
-                    openingExportNotes = false;
-                }
-                if (!options.books.length) return;
-                exportOptions = options;
-                const current = reading ? options.books.find((b) => b.id === reading.bookId) : null;
-                exportNotesBooks.innerHTML = options.books
-                    .map((b) => `<label class="export-notes-book-option"><input type="checkbox" value="${b.id}"${!current || b.id === current.id ? ' checked' : ''}><span>${escapeHtml(b.name)}</span> <span class="export-notes-book-count">(${b.notes.toLocaleString('en')})</span></label>`)
-                    .join('');
-                exportChapterBook = null;
-                exportNotesWhen.value = 'all';
-                exportNotesCustom.hidden = true;
-                exportNotesFrom.value = '';
-                exportNotesTo.value = '';
-                exportNotesError.textContent = '';
-                exportNotesCount.textContent = '';
-                syncExportChapters();
-                exportNotesTranslation.textContent = translationName(currentTranslation());
-                exportNotesOverlay.hidden = false;
-                const first = exportBoxes().find((box) => box.checked) || exportBoxes()[0];
-                // The list scrolls to it (only the list: preventScroll
-                // keeps everything else still).
-                exportNotesBooks.scrollTop = 0;
-                exportNotesBooks.scrollTop = first.closest('label').offsetTop - exportNotesBooks.clientHeight / 2;
-                first.focus({ preventScroll: true });
-                refreshExportCount();
-            }
-
-            function closeExportNotes() {
-                exportNotesOverlay.hidden = true;
-                exportCountToken++;
-                if (exportNotesBtn.isConnected && !exportNotesBtn.closest('[hidden]') && !exportNotesBtn.disabled) {
-                    exportNotesBtn.focus({ preventScroll: true });
-                } else {
-                    focusHome();
-                }
-            }
-
-            // Cancelling the save dialog says nothing; nothing was saved.
-            async function exportNotes() {
-                if (exportNotesOverlay.hidden || exportingNotes || !exportMatches) return;
-                const filter = exportFilter();
-                const ticked = tickedBooks();
-                const book = ticked.length === 1 ? ticked[0] : null;
-                const translationCode = currentTranslation();
-                closeExportNotes();
-                exportingNotes = true;
-                try {
-                    const outcome = await invoke('export_notes', { translationCode, filter });
-                    if (outcome.status === 'saved') {
-                        setDataStatus(`Exported ${plural(outcome.notes, 'note')}${book ? ` on ${book.name}` : ''} to ${outcome.path}.`);
-                    }
-                } catch (e) {
-                    console.error('Notes export failed', e);
-                    setDataStatus(`Export failed: ${errorText(e)}`, true);
-                } finally {
-                    exportingNotes = false;
-                }
-            }
-
-            exportNotesBtn.addEventListener('click', openExportNotes);
-            exportNotesConfirm.addEventListener('click', exportNotes);
-            document.getElementById('export-notes-cancel').addEventListener('click', closeExportNotes);
-            exportNotesBooks.addEventListener('change', exportChoicesChanged);
-            for (const [id, checked] of [['export-notes-all', true], ['export-notes-none', false]]) {
-                document.getElementById(id).addEventListener('click', function () {
-                    for (const box of exportBoxes()) box.checked = checked;
-                    exportChoicesChanged();
+            // ---- Export notes… is the first piece of the page written in Rust
+            // (ui-leptos/, compiled to WebAssembly and loaded beside this
+            // script). This is the page's whole side of that bridge; the Rust
+            // side, and what crosses it, is documented in ui-leptos/src/bridge.rs.
+            //
+            // The button stays here, at the top of the Library's Notes tab
+            // (the command palette clicks the same button). A click asks the
+            // dialog to open, as a cancelable event carrying a snapshot of what
+            // it needs to know; the dialog cancels the event to say it has it.
+            // If nothing does (the WebAssembly didn't load), the reader is told,
+            // and the rest of the app is as it was.
+            exportNotesBtn.addEventListener('click', function () {
+                if (exportNotesBtn.disabled || !allNotes.length) return;
+                const code = currentTranslation();
+                const request = new CustomEvent('gospel-getter:export-notes', {
+                    cancelable: true,
+                    detail: {
+                        noteCount: allNotes.length,
+                        bookId: reading ? reading.bookId : null,
+                        translationCode: code,
+                        translationName: translationName(code),
+                    },
                 });
-            }
-            for (const input of [exportNotesChapterFrom, exportNotesChapterTo]) {
-                input.addEventListener('input', refreshExportCount);
-                // Once it's left, a field shows the chapter it counts as.
-                input.addEventListener('change', function () {
-                    const [book] = tickedBooks();
-                    if (!book || exportNotesChapters.hidden) return;
-                    const fallback = input === exportNotesChapterFrom ? book.firstChapter : book.lastChapter;
-                    input.value = String(chapterValue(input, book, fallback));
-                    refreshExportCount();
-                });
-            }
-            exportNotesWhen.addEventListener('change', function () {
-                exportNotesCustom.hidden = exportNotesWhen.value !== 'custom';
-                refreshExportCount();
-            });
-            for (const input of [exportNotesFrom, exportNotesTo]) {
-                input.addEventListener('input', refreshExportCount);
-                input.addEventListener('change', refreshExportCount);
-            }
-
-            // Clicking the dimmed page behind does nothing, and leaves focus
-            // where it was.
-            exportNotesOverlay.addEventListener('mousedown', function (event) {
-                if (event.target === exportNotesOverlay) event.preventDefault();
+                if (!document.dispatchEvent(request)) return;
+                setDataStatus('Export notes isn’t available.', true);
             });
 
-            // While it's open it has the keyboard, before any other handler
-            // sees a key (this listens on window, capturing): none of the
-            // reader's shortcuts run, Escape closes it (and only it, not
-            // the Library), and Tab stays inside.
-            window.addEventListener('keydown', function (event) {
-                if (exportNotesOverlay.hidden) return;
-                event.stopPropagation();
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    closeExportNotes();
-                } else if (event.key === 'Tab') {
-                    const focusable = [...exportNotesPanel.querySelectorAll('input, select, button')]
-                        .filter((el) => !el.disabled && !el.closest('[hidden]'));
-                    const first = focusable[0];
-                    const last = focusable[focusable.length - 1];
-                    if (!exportNotesPanel.contains(document.activeElement)) {
-                        event.preventDefault();
-                        (event.shiftKey ? last : first).focus({ preventScroll: true });
-                    } else if (event.shiftKey && document.activeElement === first) {
-                        event.preventDefault();
-                        last.focus({ preventScroll: true });
-                    } else if (!event.shiftKey && document.activeElement === last) {
-                        event.preventDefault();
-                        first.focus({ preventScroll: true });
-                    }
-                }
-            }, true);
+            // What the Rust side has to say goes through the same toast.
+            document.addEventListener('gospel-getter:toast', function (event) {
+                setDataStatus(String(event.detail.message), !!event.detail.isError);
+            });
+
+            // The dialog's overlay is the Rust side's element, made when its
+            // code loads, so it is looked up when asked, never kept: the
+            // keyboard dispatcher and the card's Shift ghost need to know
+            // when it's open.
+            function exportNotesOpen() {
+                const overlay = document.getElementById('export-notes-overlay');
+                return !!overlay && !overlay.hidden;
+            }
 
             // Readable names for display settings, taken from Aa's own
             // options.
@@ -9167,7 +8911,7 @@
             function cardGhostAllowed() {
                 if (!selectionCard.isConnected) return false;
                 if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden
-                    || !exportNotesOverlay.hidden || !shortcutsOverlay.hidden || !welcomeOverlay.hidden) {
+                    || exportNotesOpen() || !shortcutsOverlay.hidden || !welcomeOverlay.hidden) {
                     return false;
                 }
                 if (!searchPanel.hidden || !copyMenu.hidden) return false;
@@ -9225,7 +8969,7 @@
                 // And while the import preview, About, the note panel or
                 // Export notes is open, nothing else responds to the
                 // keyboard (they handle their own keys).
-                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden || !exportNotesOverlay.hidden || !shortcutsOverlay.hidden) {
+                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden || exportNotesOpen() || !shortcutsOverlay.hidden) {
                     return;
                 }
 
@@ -9917,5 +9661,9 @@
             });
         })();
     </script>
+    <!-- The page's Rust pieces (ui-leptos/, compiled to WebAssembly by Trunk):
+         Trunk inlines the loader here, so it runs once the scripts above have
+         set up what the pieces talk to. See ui-leptos/README.md. -->
+    <link data-trunk rel="inline" href="leptos-loader.js" type="js" />
 </body>
 </html>

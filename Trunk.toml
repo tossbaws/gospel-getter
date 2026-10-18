@@ -1,0 +1,18 @@
+# Trunk builds the page: ui/index.html with its Rust pieces (ui-leptos/)
+# compiled to WebAssembly, into dist/, which Tauri embeds (frontendDist in
+# src-tauri/tauri.conf.json). Tauri runs it (beforeDevCommand and
+# beforeBuildCommand); `npm test` in tests/frontend runs it too, since the
+# frontend tests load the built .wasm. See ui-leptos/README.md.
+[build]
+target = "ui/index.html"
+dist = "dist"
+# Stable names (ui-leptos.js, ui-leptos_bg.wasm): the page's own loader and
+# the test harness name them.
+filehash = false
+# The page's two inline scripts and its stylesheet are hashed into the
+# Content Security Policy as they are; keep them as they are.
+minify = "never"
+# Trunk's loader is an ES module import, which the no-modules glue the test
+# harness needs can't be loaded by; the page inlines its own loader instead
+# (ui/leptos-loader.js).
+inject_scripts = false

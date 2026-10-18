@@ -29,6 +29,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          # The page's Rust pieces (ui-leptos/) compile to WebAssembly.
+          targets: wasm32-unknown-unknown
+
+      # Trunk builds the page (ui/index.html with ui-leptos) into dist/,
+      # which the app crate embeds, so it runs before anything that builds
+      # the app crate (cargo, and `npm test`, which builds the test bridge).
+      - name: Install Trunk
+        uses: jetli/trunk-action@v0.5.1
+        with:
+          version: "v0.21.14"
 
       # Tauri's Linux runtime (webkit2gtk/gtk3) isn't preinstalled on the
       # runner image, and both building and even just `cargo check`/`cargo
@@ -41,7 +51,27 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            ui-leptos
+
+      - name: Check formatting (ui-leptos)
+        working-directory: ui-leptos
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (ui-leptos, no warnings allowed)
+        working-directory: ui-leptos
+        run: cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings
+
+      # The dialog's pure logic (words, numbers, the filter) is tested on
+      # the host; the component itself is tested through the page, below.
+      - name: Test (ui-leptos)
+        working-directory: ui-leptos
+        run: cargo test
+
+      - name: Build the page (Trunk)
+        working-directory: .
+        run: trunk build --release
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -55,9 +85,10 @@ jobs:
       - name: Test
         run: cargo test --all-targets
 
-      # Behavior tests for ui/index.html (selection, copy, bookmarks,
-      # search, compare), run in jsdom against the real command logic and
-      # database through examples/frontend_bridge.rs — built above.
+      # Behavior tests for ui/index.html and its Rust pieces (selection,
+      # copy, bookmarks, search, compare, the notes export), run in jsdom
+      # against the real command logic and database through
+      # examples/frontend_bridge.rs — built above, as is the page.
       - name: Install Node
         uses: actions/setup-node@v4
         with:
