@@ -14,14 +14,22 @@ pub enum Check {
     Csp = 2,
     ExportNotes = 3,
     Screenshots = 4,
+    Welcome = 5,
+    NoteEditor = 6,
+    Shortcuts = 7,
+    ImportPreview = 8,
 }
 
 impl Check {
-    pub const ALL: [Check; 4] = [
+    pub const ALL: [Check; 8] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
         Check::Screenshots,
+        Check::Welcome,
+        Check::NoteEditor,
+        Check::Shortcuts,
+        Check::ImportPreview,
     ];
 
     pub fn name(self) -> &'static str {
@@ -30,6 +38,10 @@ impl Check {
             Check::Csp => "csp",
             Check::ExportNotes => "export-notes",
             Check::Screenshots => "screenshots",
+            Check::Welcome => "welcome",
+            Check::NoteEditor => "note-editor",
+            Check::Shortcuts => "shortcuts",
+            Check::ImportPreview => "import-preview",
         }
     }
 

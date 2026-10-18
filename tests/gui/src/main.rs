@@ -5,9 +5,12 @@
 //!
 //! A handful of smoke checks, not a second test suite (the jsdom tests in
 //! tests/frontend are the behaviour suite): the page boots, nothing is
-//! blocked by the Content Security Policy, Export notes works end to end
-//! through the real UI and the native save dialog, and screenshots of the
-//! reading view and the dialog in Chi Rho and Vellum.
+//! blocked by the Content Security Policy, and each dialog the Rust pieces
+//! (ui-leptos) own works through the real UI: Export notes end to end with
+//! the native save dialog, the welcome on a fresh install, the note editor,
+//! the keyboard shortcuts sheet, and the import preview after Export data…
+//! and Import data… through the native dialogs; with screenshots of the
+//! reading view and each dialog.
 
 mod checks;
 mod config;

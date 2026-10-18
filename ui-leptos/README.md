@@ -102,6 +102,11 @@ loads the pieces only when the test calls `app.loadPieces()`, and
 `src/dto.rs` in full: `NotedBook`, `DaySpan`, `DatePresets`,
 `ExportOptions` (`commands::NotesExportOptions`), `Filter`
 (`notes_export::NotesFilter`) and `ExportOutcome`
-(`commands::NotesExportOutcome`). The backend's types carry `chrono` dates
+(`commands::NotesExportOutcome`); for the import, `ImportChoice`,
+`ImportPreview` (`commands::ImportPreviewDto`), `PositionPreview`
+(`commands::PositionPreviewDto`), `ImportResult`
+(`commands::ImportResultDto`) and `Preferences` (`reader_data::Preferences`,
+whose enums travel as their kebab-case names); and the commands' argument
+objects. The backend's types carry `chrono` dates
 and `deny_unknown_fields`; the shared crate would keep them serde-only with
 the dates as `YYYY-MM-DD` strings, as the page always sent and received them.
