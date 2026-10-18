@@ -510,9 +510,14 @@ jobs:
             Where-Object { $_.DisplayName -like "*Gospel Getter*" } |
             Select-Object -First 1
           if (-not $entry) { Write-Error "Gospel Getter isn't registered after a silent install"; exit 1 }
-          $exe = Get-ChildItem -Path $entry.InstallLocation -Filter *.exe |
+          # NSIS writes InstallLocation in quotes.
+          $location = "$($entry.InstallLocation)".Trim('"')
+          if (-not $location -or -not (Test-Path -LiteralPath $location -PathType Container)) {
+            Write-Error "the install location '$($entry.InstallLocation)' isn't a folder"; exit 1
+          }
+          $exe = Get-ChildItem -LiteralPath $location -Filter *.exe |
             Where-Object { $_.Name -notlike "uninstall*" } | Select-Object -First 1
-          if (-not $exe) { Write-Error "no app .exe in $($entry.InstallLocation)"; exit 1 }
+          if (-not $exe) { Write-Error "no app .exe in $location"; exit 1 }
           Write-Host "Installed: $($exe.FullName)"
           "exe=$($exe.FullName)" >> $env:GITHUB_OUTPUT
 
