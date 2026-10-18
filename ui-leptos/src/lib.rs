@@ -1,7 +1,7 @@
 //! Gospel Getter's Leptos pieces: Rust compiled to WebAssembly, loaded by
 //! `ui/index.html` beside its JavaScript (Trunk builds the page; see
 //! `Trunk.toml` and `README.md`). The first piece is the Export notes
-//! dialog ([`export_notes`]); the page talks to it only as [`bridge`] says.
+//! dialog (`export_notes`); the page talks to it only as `bridge` says.
 //!
 //! If this module fails to load, the page works as before, except that
 //! Export notes… says it is unavailable (see `bridge`).
