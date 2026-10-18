@@ -27,12 +27,25 @@
 # Windows: there is no private display. The app runs on the runner's
 # desktop with its usual data folders (Windows resolves them from the
 # account, not the environment), which is fine on a throwaway CI runner and
-# is why this runs there only.
+# is why this runs there only. Edge WebDriver runs with --verbose (its log
+# goes to driver.log), the app is started through tests/gui's gui-launch so
+# its own log reaches app.log, and windows-timeline.log follows the app's
+# processes while the checks run.
+# Since WebView2 Runtime 150 an elevated app ignores the variable Edge
+# WebDriver opens the app's debugging port with, so CI sets the HKLM policy
+# for it (see the gui-windows job in dist.yml); this script never changes
+# machine policy. If a check fails, the out-dir also gets
+# processes.txt, windows.txt, webview2-devtools.txt (what the WebView2
+# debugging port answers), devtools-active-port.txt (where the browser's
+# DevToolsActivePort file is, and Edge WebDriver's user-data folders) and
+# screenshots/desktop.png.
 #
 # Settings, for CI or a slow machine: GUI_CHECK_BUDGET (seconds for the whole
 # run, default 180), GUI_CHECK_STEP_TIMEOUT (seconds per step, default 10),
+# GUI_CHECK_SESSION_TIMEOUT (seconds to start the app, default 30),
 # GUI_CHECK_RUNNER (a prebuilt gui-check binary instead of building
-# tests/gui), TAURI_DRIVER and NATIVE_DRIVER (paths, if not on PATH).
+# tests/gui; gui-launch must be beside it), TAURI_DRIVER and NATIVE_DRIVER
+# (paths, if not on PATH).
 
 set -euo pipefail
 
@@ -105,6 +118,7 @@ xvfb_pid=""
 bus_pid=""
 bus_dir=""
 driver_pid=""
+timeline_pid=""
 
 # Every process started on Linux carries this in its environment
 # (XDG_RUNTIME_DIR is the run's own), however it was spawned: tauri-driver,
@@ -163,8 +177,10 @@ cleanup() {
             log "no processes left from this run"
         fi
     else
+        [[ -n $timeline_pid ]] && kill "$timeline_pid" 2>/dev/null
         [[ -n $driver_pid ]] && kill "$driver_pid" 2>/dev/null
         taskkill //F //IM msedgedriver.exe >/dev/null 2>&1
+        taskkill //F //IM gui-launch.exe >/dev/null 2>&1
         taskkill //F //IM "$(basename "$app")" >/dev/null 2>&1
     fi
     rm -rf "$work"
@@ -341,11 +357,18 @@ EOF
 else
     native_driver="${NATIVE_DRIVER:-$(command -v msedgedriver.exe || command -v msedgedriver || true)}"
     [[ -n $native_driver ]] || setup_failed "msedgedriver is not installed"
-    driver_args+=(--native-driver "$(cygpath -w "$native_driver")")
-    launch="$(cygpath -w "$app")"
+    # tauri-driver passes the native driver only --port and --host; this
+    # wrapper adds --verbose. Its log goes to driver.log with tauri-driver's.
+    printf '@"%s" --verbose %%*\r\n' "$(cygpath -w "$native_driver")" >"$work/msedgedriver-verbose.cmd"
+    driver_args+=(--native-driver "$(cygpath -w "$work/msedgedriver-verbose.cmd")")
+    # Edge WebDriver starts gui-launch, which starts the app with its
+    # output going to app.log (see tests/gui/src/bin/gui-launch.rs).
+    launcher="$(dirname "$runner")/gui-launch.exe"
+    [[ -x $launcher ]] || setup_failed "no gui-launch.exe beside $runner"
+    launch="$(cygpath -w "$launcher")"
     mkdir -p "$work/export"
     export_dir="$(cygpath -w "$work/export")"
-    run_env=(env)
+    run_env=(env GUI_LAUNCH_TARGET="$(cygpath -w "$app")" GUI_LAUNCH_LOG="$(cygpath -w "$out/app.log")")
 fi
 
 port="$(free_port)" || setup_failed "no free port for tauri-driver"
@@ -377,7 +400,15 @@ fi
     echo "tauri-driver: $tauri_driver"
     echo "native driver: $native_driver (${native_version:-version unknown})"
     echo "display: ${xvfb_display:-desktop (Windows)}"
-    echo "budget: ${budget}s, step timeout: ${step_timeout}s"
+    echo "budget: ${budget}s, step timeout: ${step_timeout}s, session timeout: ${GUI_CHECK_SESSION_TIMEOUT:-30}s"
+    if [[ $platform == windows ]]; then
+        echo "TEMP: $(cygpath -w "${TEMP:-}" 2>/dev/null), TMP: $(cygpath -w "${TMP:-}" 2>/dev/null)"
+        # WebView2 (Runtime 150 and later) ignores Edge WebDriver's
+        # WEBVIEW2_* variables in an elevated app; see dist.yml.
+        echo "integrity: $("$(cygpath -u "$SYSTEMROOT")/System32/whoami.exe" //groups 2>/dev/null \
+            | grep -o 'Mandatory Label\\[A-Za-z ]*Level' | head -1)"
+        echo "WebView2 HKLM policy: $(reg query 'HKLM\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments' 2>&1 | tr -s '\r\n ' ' ')"
+    fi
 } >"$out/environment.txt"
 
 "${run_env[@]}" "$tauri_driver" --port "$port" --native-port "$native_port" "${driver_args[@]}" \
@@ -392,6 +423,85 @@ until curl -fsS --max-time 1 "http://127.0.0.1:$port/status" >/dev/null 2>&1; do
     sleep 0.1
 done
 log "tauri-driver on 127.0.0.1:$port (native driver on $native_port)"
+
+# Windows: what the app's processes and windows were doing, every 2s,
+# while the checks run.
+windows_timeline() {
+    local image
+    # Diagnostics only: nothing here may stop the run.
+    set +e +o pipefail
+    while :; do
+        echo "== $(date +%T)"
+        for image in gui-launch.exe "$(basename "$app")" msedgewebview2.exe msedgedriver.exe; do
+            tasklist //v //fo csv //nh //fi "imagename eq $image" 2>&1 | grep -v '^INFO:'
+        done
+        sleep 2
+    done >>"$out/windows-timeline.log"
+}
+
+# Windows, after a failure: the app's processes (with their command lines),
+# the windows on the desktop, what any WebView2 debugging port answers,
+# and a screenshot of the desktop.
+windows_diagnostics() {
+    log "collecting Windows diagnostics"
+    cat >"$work/diagnostics.ps1" <<'PS1'
+param([Parameter(Mandatory)][string]$OutDir)
+$ErrorActionPreference = 'Continue'
+$names = 'gui-launch|gospel_getter|msedgewebview2|msedgedriver|tauri-driver'
+$processes = Get-CimInstance Win32_Process | Where-Object { $_.Name -match $names }
+$processes | Select-Object ProcessId, ParentProcessId, Name, CreationDate, CommandLine |
+    Format-List | Out-File -Width 4096 (Join-Path $OutDir 'processes.txt')
+Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } |
+    Select-Object Id, ProcessName, MainWindowTitle, Responding |
+    Format-Table -AutoSize | Out-File -Width 4096 (Join-Path $OutDir 'windows.txt')
+$webview = @($processes | Where-Object { $_.Name -eq 'msedgewebview2.exe' } | ForEach-Object { $_.ProcessId })
+$ports = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+    Where-Object { $webview -contains $_.OwningProcess } | ForEach-Object { $_.LocalPort } | Sort-Object -Unique)
+& {
+    "WebView2 processes: $($webview -join ', ')"
+    "ports they listen on: $($ports -join ', ')"
+    foreach ($port in $ports) {
+        foreach ($path in '/json/version', '/json/list') {
+            "== http://127.0.0.1:$port$path"
+            try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 "http://127.0.0.1:$port$path").Content }
+            catch { "no answer: $_" }
+        }
+    }
+} | Out-File -Width 4096 (Join-Path $OutDir 'webview2-devtools.txt')
+# Where Edge WebDriver waits for the browser's DevToolsActivePort (its
+# scoped user-data folders), and where any such file actually is.
+& {
+    $roots = @((Join-Path $env:SystemRoot 'SystemTemp'), $env:TEMP, $env:LOCALAPPDATA, $env:APPDATA) |
+        Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Sort-Object -Unique
+    "searched: $($roots -join '; ')"
+    Get-ChildItem -LiteralPath $roots -Recurse -Depth 5 -Force -Filter DevToolsActivePort -ErrorAction SilentlyContinue |
+        ForEach-Object { "$($_.FullName) [$($_.LastWriteTime.ToString('HH:mm:ss'))]: $((Get-Content -LiteralPath $_.FullName -Raw) -replace "`r?`n", ' | ')" }
+    foreach ($root in $roots) {
+        Get-ChildItem -LiteralPath $root -Directory -Filter 'scoped_dir*' -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            "== $($_.FullName)"
+            Get-ChildItem -LiteralPath $_.FullName -Recurse -Depth 1 -Force -ErrorAction SilentlyContinue |
+                ForEach-Object { "   $($_.FullName.Substring($root.Length))" }
+        }
+    }
+} | Out-File -Width 4096 (Join-Path $OutDir 'devtools-active-port.txt')
+try {
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($screen.Left, $screen.Top, 0, 0, $bitmap.Size)
+    $bitmap.Save((Join-Path $OutDir 'screenshots\desktop.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+} catch { "desktop screenshot failed: $_" | Out-File (Join-Path $OutDir 'webview2-devtools.txt') -Append }
+PS1
+    powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+        -File "$(cygpath -w "$work/diagnostics.ps1")" -OutDir "$(cygpath -w "$out")" \
+        >>"$out/steps.log" 2>&1 || log "the Windows diagnostics failed (see steps.log)"
+}
+
+if [[ $platform == windows ]]; then
+    windows_timeline &
+    timeline_pid=$!
+fi
 
 remaining=$((budget - (SECONDS - started)))
 # A backstop in case the checks hang past their own budget. GNU timeout
@@ -410,12 +520,18 @@ fi
     GUI_EXPORT_DIR="$export_dir" \
     GUI_BUDGET_SECS="$remaining" \
     GUI_STEP_TIMEOUT_SECS="$step_timeout" \
+    GUI_SESSION_TIMEOUT_SECS="${GUI_CHECK_SESSION_TIMEOUT:-30}" \
     GUI_XVFB_DISPLAY="$xvfb_display" \
     GUI_XVFB_PID="$xvfb_pid" \
     "${backstop[@]}" "$runner" \
     2> >(tee -a "$out/steps.log" >&2) &
 status=0
 wait "$!" || status=$?
+if [[ $platform == windows ]]; then
+    kill "$timeline_pid" 2>/dev/null || true
+    timeline_pid=""
+    ((status == 0)) || windows_diagnostics
+fi
 
 # Whatever happened, results.txt names all four checks.
 if ((status == 124 || status == 137)); then

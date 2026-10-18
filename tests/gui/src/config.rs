@@ -22,9 +22,16 @@ pub struct Config {
     pub budget: Duration,
     /// The longest any one step may take.
     pub step_timeout: Duration,
+    /// How long starting the app (the WebDriver session) may take: the app
+    /// seeds its database and builds its window first.
+    pub session_timeout: Duration,
     /// Linux: the private X display, the only one xdotool may touch.
     pub xvfb: Option<Xvfb>,
 }
+
+/// Starting the app (a cold start seeds its database) may take longer than
+/// an ordinary step.
+const DEFAULT_SESSION_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn var(name: &str) -> Result<String> {
     std::env::var(name)
@@ -53,6 +60,11 @@ impl Config {
             export_dir: PathBuf::from(var("GUI_EXPORT_DIR")?),
             budget: seconds("GUI_BUDGET_SECS")?,
             step_timeout: seconds("GUI_STEP_TIMEOUT_SECS")?,
+            session_timeout: if std::env::var_os("GUI_SESSION_TIMEOUT_SECS").is_some() {
+                seconds("GUI_SESSION_TIMEOUT_SECS")?
+            } else {
+                DEFAULT_SESSION_TIMEOUT
+            },
             xvfb,
         })
     }

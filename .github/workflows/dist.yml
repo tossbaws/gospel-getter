@@ -465,6 +465,8 @@ jobs:
     env:
       GUI_CHECK_BUDGET: "300"
       GUI_CHECK_STEP_TIMEOUT: "20"
+      # The app's window comes up about 10s after launch on a cold runner.
+      GUI_CHECK_SESSION_TIMEOUT: "60"
     steps:
       - uses: actions/checkout@v4
 
@@ -520,6 +522,27 @@ jobs:
           if (-not $exe) { Write-Error "no app .exe in $location"; exit 1 }
           Write-Host "Installed: $($exe.FullName)"
           "exe=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+
+      # Edge WebDriver asks WebView2 for a debugging port through
+      # WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS. Since WebView2 Runtime 150 an
+      # elevated host app (as everything on this runner is) ignores that
+      # variable and the HKCU policy; only the HKLM policy and the app's own
+      # arguments count (MicrosoftEdge/WebView2Feedback#5645). Without the
+      # port the session never starts ("DevToolsActivePort file doesn't
+      # exist"). Port 0: the browser picks one and writes it to
+      # DevToolsActivePort in Edge WebDriver's user-data folder, where the
+      # driver looks. Machine policy, so here on the throwaway runner only.
+      - name: Let WebView2 open a debugging port for the app (HKLM policy)
+        shell: pwsh
+        env:
+          APP_EXE: ${{ steps.install.outputs.exe }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $key = "HKLM:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments"
+          New-Item -Path $key -Force | Out-Null
+          $name = Split-Path -Leaf $env:APP_EXE
+          New-ItemProperty -Path $key -Name $name -Value "--remote-debugging-port=0" -PropertyType String -Force | Out-Null
+          Get-ItemProperty -Path $key | Format-List
 
       - name: Run the GUI checks on the installed app
         shell: bash
