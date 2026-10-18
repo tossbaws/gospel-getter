@@ -4,7 +4,9 @@
   "version": "2.16.1",
   "identifier": "com.tossbaws.gospel-getter",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../dist",
+    "beforeDevCommand": "trunk build",
+    "beforeBuildCommand": "trunk build --release"
   },
   "app": {
     "withGlobalTauri": true,
@@ -23,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     }
   },
   "plugins": {

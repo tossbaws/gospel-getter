@@ -1,7 +1,8 @@
-// Loads the real ui/index.html into jsdom, runs its scripts, and answers
-// its Tauri `invoke` calls with the app's real command logic and a real
-// SQLite database, through `src-tauri/examples/frontend_bridge.rs` (built
-// by `npm test` before the tests run). Each test file gets one bridge
+// Loads the real ui/index.html into jsdom, runs its scripts and its Rust
+// pieces (ui-leptos/, compiled to WebAssembly by Trunk, see `loadLeptos`),
+// and answers its Tauri `invoke` calls with the app's real command logic
+// and a real SQLite database, through `src-tauri/examples/frontend_bridge.rs`
+// (both built by `npm test` before the tests run). Each test file gets one bridge
 // process and its own disposable database; each test resets the bookmarks
 // and reading position first. The clipboard is a stub that can succeed,
 // fail, or be missing; get_reading can be made to fail, or (for escaping
@@ -24,6 +25,16 @@ const root = new URL('../../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
 
 const HTML = read('ui/index.html');
+
+// The page's Rust pieces, as Trunk built them into dist/ (`npm test` runs
+// `trunk build` first): the wasm-bindgen glue, a classic script
+// (no-modules), and the module. jsdom runs no module scripts and has no
+// fetch, so the page's own loader (ui/leptos-loader.js) can't run here; the
+// harness runs the glue itself and hands it the bytes, where the loader
+// hands it a URL. The same files the app serves, so the tests see what it
+// ships.
+const LEPTOS_GLUE = read('dist/ui-leptos.js');
+const LEPTOS_WASM = readFileSync(new URL('dist/ui-leptos_bg.wasm', root));
 
 // The bundled translation files: the exact strings the seed step stores.
 // Tests compare what the page shows and copies against these, so they're
@@ -301,6 +312,7 @@ export async function openApp({
     });
     const { window } = dom;
     const document = window.document;
+    await loadLeptos(window);
     const SELECTABLE = '.chapter-main .verse[data-translation]';
 
     const app = {
@@ -478,18 +490,23 @@ export async function openApp({
         heading() {
             return document.querySelector('.chapter-heading').textContent;
         },
+        /**
+         * Clicks `el` (mousedown, mouseup, click). Returns the mousedown
+         * event, which can also be awaited: see `flushed`.
+         */
         click(el, opts = {}) {
             const init = { bubbles: true, cancelable: true, button: 0, ...opts };
             const down = new window.MouseEvent('mousedown', init);
             el.dispatchEvent(down);
             el.dispatchEvent(new window.MouseEvent('mouseup', init));
             el.dispatchEvent(new window.MouseEvent('click', init));
-            return down;
+            return flushed(down);
         },
+        /** Presses `key` on `target`. Returns the keydown event, which can also be awaited: see `flushed`. */
         key(key, opts = {}, target = document.body) {
             const event = new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...opts });
             target.dispatchEvent(event);
-            return event;
+            return flushed(event);
         },
         type(input, text) {
             input.value = text;
@@ -518,6 +535,36 @@ export async function openApp({
     await until(() => document.querySelector('#bookmark-list li'), 'bookmark list');
     await app.idle();
     return app;
+}
+
+/**
+ * Runs the page's Rust pieces in `window`, as the page's loader does in the
+ * app: the glue as a classic script, then the module, which mounts them.
+ * `wasm_bindgen` is the glue's top-level binding, and the options object
+ * has to be the window's own (the glue tells it from the bytes by its
+ * prototype), so the call is made from inside the window.
+ */
+async function loadLeptos(window) {
+    const script = window.document.createElement('script');
+    script.textContent = LEPTOS_GLUE;
+    window.document.head.append(script);
+    await window.eval('(bytes) => wasm_bindgen({ module_or_path: bytes })')(LEPTOS_WASM);
+}
+
+/**
+ * The event `app.click` or `app.key` dispatched, which can also be awaited:
+ * `await app.click(el)` resolves to it once the page's pending DOM updates
+ * have flushed. The page's scripts update the DOM within the click or key
+ * itself; its Rust pieces update it after the current task, so a test that
+ * looks at them right after a click or key awaits it. Not awaited, it is
+ * the event, as before.
+ */
+function flushed(event) {
+    event.then = (resolve, reject) => {
+        delete event.then;
+        settle().then(() => resolve(event), reject);
+    };
+    return event;
 }
 
 export async function settle() {

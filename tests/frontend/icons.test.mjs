@@ -216,9 +216,13 @@ test('the webview favicon is the same art, served from the frontend', () => {
         '<link rel="icon" type="image/svg+xml" href="favicon.svg">',
         '<link rel="icon" type="image/png" sizes="64x64" href="favicon.png">',
     ]);
-    // Tauri serves frontendDist (../ui) as the app's root.
-    assert.equal(JSON.parse(text('src-tauri/tauri.conf.json')).build.frontendDist, '../ui');
+    // Tauri serves frontendDist as the app's root: dist/, the page as Trunk
+    // built it from ui/ (Trunk.toml), with the favicons copied beside it
+    // (`npm test` builds it before the tests run).
+    assert.equal(JSON.parse(text('src-tauri/tauri.conf.json')).build.frontendDist, '../dist');
     assert.deepEqual(bytes('ui/favicon.svg'), bytes('packaging/icon.svg'));
     assertIconRaster('ui/favicon.png', decodePng(bytes('ui/favicon.png')), 64);
+    assert.deepEqual(bytes('dist/favicon.svg'), bytes('ui/favicon.svg'), 'Trunk copies the SVG favicon as it is');
+    assert.deepEqual(bytes('dist/favicon.png'), bytes('ui/favicon.png'), 'Trunk copies the PNG favicon as it is');
     assert.ok(!existsSync(new URL('ui/favicon.ico', root)), 'no separate, possibly stale favicon.ico');
 });

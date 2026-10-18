@@ -1,0 +1,45 @@
+[package]
+name = "ui-leptos"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Gospel Getter's Leptos pieces: Rust compiled to WebAssembly, living beside the page's JavaScript"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+leptos = { version = "0.8.22", features = ["csr"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "console",
+    "CustomEvent",
+    "CustomEventInit",
+    "Document",
+    "Element",
+    "Event",
+    "EventTarget",
+    "FocusOptions",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlSelectElement",
+    "KeyboardEvent",
+    "MouseEvent",
+    "Node",
+    "NodeList",
+    "Window",
+] }
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"
+
+# Size first: the .wasm ships inside the app and is fetched on every launch.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"

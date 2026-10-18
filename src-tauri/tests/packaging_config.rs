@@ -202,10 +202,13 @@ fn the_window_state_plugin_restores_a_hidden_window_before_showing_it() {
 }
 
 /// The webview's Content Security Policy, as `tauri.conf.json` sets it.
-/// Tauri adds hashes for `ui/index.html`'s inline `<script>` and `<style>`
-/// at build time (asset CSP modification stays on), so the page's own code
-/// runs and nothing else inline does. A wrong policy fails silently in the
-/// built app, so its key directives are pinned here.
+/// Tauri adds hashes for the page's inline `<script>`s and `<style>` at
+/// build time (asset CSP modification stays on), so the page's own code
+/// runs and nothing else inline does. The page's Rust pieces (ui-leptos,
+/// WebAssembly) are the app's own files too: `'self'` covers the glue
+/// script and the fetch of the module, and `'wasm-unsafe-eval'` lets it be
+/// compiled, which `'self'` alone does not. A wrong policy fails silently
+/// in the built app, so its key directives are pinned here.
 fn csp_directives() -> Vec<(String, Vec<String>)> {
     let conf: Value = serde_json::from_str(TAURI_CONF).expect("tauri.conf.json must be valid JSON");
     let security = &conf["app"]["security"];
@@ -252,8 +255,9 @@ fn the_csp_allows_only_the_apps_own_code_and_the_ipc() {
     assert_eq!(get("default-src"), ["'self'"]);
     assert_eq!(
         get("script-src"),
-        ["'self'"],
-        "no 'unsafe-inline' or remote scripts"
+        ["'self'", "'wasm-unsafe-eval'"],
+        "no 'unsafe-inline' or remote scripts; WebAssembly compiles, and \
+         nothing else is evaluated"
     );
     assert_eq!(
         get("style-src"),
@@ -264,9 +268,10 @@ fn the_csp_allows_only_the_apps_own_code_and_the_ipc() {
     assert_eq!(get("font-src"), ["'self'"]);
     assert_eq!(
         get("connect-src"),
-        ["ipc:", "http://ipc.localhost"],
-        "only the IPC origins (Linux and macOS, Windows): the updater, \
-         dialogs and links all go through Rust"
+        ["'self'", "ipc:", "http://ipc.localhost"],
+        "the app's own files (the WebAssembly module is fetched) and the \
+         IPC origins (Linux and macOS, Windows): the updater, dialogs and \
+         links all go through Rust"
     );
     for name in ["object-src", "base-uri", "form-action", "frame-ancestors"] {
         assert_eq!(get(name), ["'none'"], "{name}");

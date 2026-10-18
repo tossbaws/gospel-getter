@@ -357,7 +357,7 @@ test('it opens fresh every time: just the book being read, All time, nothing kep
         await clickAndWait(app, el(app, 'export-notes-all'), 'count_notes_export');
         await setField(app, 'export-notes-when', 'custom');
         await setField(app, 'export-notes-from', '2026-01-01');
-        app.click(el(app, 'export-notes-cancel'));
+        await app.click(el(app, 'export-notes-cancel'));
         assert.ok(!dialogOpen(app));
 
         await clickAndWait(app, button(app), 'count_notes_export');
@@ -486,7 +486,7 @@ test('cancelling the save dialog says nothing; a failure says why', () =>
 test('Escape and Cancel close it and give focus back; it keeps the keyboard while open', () =>
     withNotes(SAMPLE, {}, async (app) => {
         await openDialog(app);
-        app.click(el(app, 'export-notes-cancel'));
+        await app.click(el(app, 'export-notes-cancel'));
         assert.ok(!dialogOpen(app));
         assert.equal(app.document.activeElement, button(app));
 
@@ -525,7 +525,7 @@ test('Escape and Cancel close it and give focus back; it keeps the keyboard whil
         assert.ok(dialogOpen(app));
 
         // Escape closes it, and only it: the Library stays open.
-        app.key('Escape', {}, target);
+        await app.key('Escape', {}, target);
         assert.ok(!dialogOpen(app));
         assert.ok(!app.surface('library').hidden);
         assert.equal(app.document.activeElement, button(app));
