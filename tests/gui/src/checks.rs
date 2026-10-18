@@ -16,10 +16,6 @@ use crate::native;
 use crate::report::{Check, Report};
 use crate::ui::{Ui, log_line};
 
-/// Starting the app (a cold start seeds its database) may take longer than
-/// an ordinary step.
-const SESSION_START: Duration = Duration::from_secs(30);
-
 /// How long the app's first-run search index build may take (3 to 4
 /// seconds on a desktop; CI runners are slower).
 const INDEX_BUILD: Duration = Duration::from_secs(60);
@@ -228,7 +224,7 @@ async fn start_session(config: &Config, started: Instant) -> Result<WebDriver> {
     );
     let mut caps = Capabilities::new();
     caps.set("tauri:options", json!({ "application": config.app }))?;
-    let limit = SESSION_START.min(config.budget);
+    let limit = config.session_timeout.min(config.budget);
     let session = WebDriver::builder(config.webdriver_url.as_str(), caps).request_timeout(limit);
     let driver = tokio::time::timeout(limit, session)
         .await

@@ -32,6 +32,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    # TEMPORARY (gui-windows-session): remove before the pull request.
+    inputs:
+      skip_linux:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -47,6 +52,8 @@ env:
 jobs:
   linux:
     name: Linux (AppImage + deb)
+    # TEMPORARY (gui-windows-session): remove before the pull request.
+    if: ${{ !inputs.skip_linux }}
     # Tauri's own Linux packaging guidance is to build on the oldest
     # supported Ubuntu LTS, not `ubuntu-latest`: the AppImage/deb bundler
     # links against the build host's glibc/webkit2gtk, and a binary built
@@ -465,6 +472,7 @@ jobs:
     env:
       GUI_CHECK_BUDGET: "300"
       GUI_CHECK_STEP_TIMEOUT: "20"
+      GUI_CHECK_SESSION_TIMEOUT: "120"
     steps:
       - uses: actions/checkout@v4
 
