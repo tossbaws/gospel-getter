@@ -30,7 +30,11 @@
 # is why this runs there only. Edge WebDriver runs with --verbose (its log
 # goes to driver.log), the app is started through tests/gui's gui-launch so
 # its own log reaches app.log, and windows-timeline.log follows the app's
-# processes while the checks run. If a check fails, the out-dir also gets
+# processes while the checks run.
+# Since WebView2 Runtime 150 an elevated app ignores the variable Edge
+# WebDriver opens the app's debugging port with, so CI sets the HKLM policy
+# for it (see the gui-windows job in dist.yml); this script never changes
+# machine policy. If a check fails, the out-dir also gets
 # processes.txt, windows.txt, webview2-devtools.txt (what the WebView2
 # debugging port answers), devtools-active-port.txt (where the browser's
 # DevToolsActivePort file is, and Edge WebDriver's user-data folders) and
@@ -399,6 +403,10 @@ fi
     echo "budget: ${budget}s, step timeout: ${step_timeout}s, session timeout: ${GUI_CHECK_SESSION_TIMEOUT:-30}s"
     if [[ $platform == windows ]]; then
         echo "TEMP: $(cygpath -w "${TEMP:-}" 2>/dev/null), TMP: $(cygpath -w "${TMP:-}" 2>/dev/null)"
+        # WebView2 (Runtime 150 and later) ignores Edge WebDriver's
+        # WEBVIEW2_* variables in an elevated app; see dist.yml.
+        echo "integrity: $(whoami //groups 2>/dev/null | grep -o 'Mandatory Label\\[A-Za-z ]*Level' | head -1)"
+        echo "WebView2 HKLM policy: $(reg query 'HKLM\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments' 2>&1 | tr -s '\r\n ' ' ')"
     fi
 } >"$out/environment.txt"
 
