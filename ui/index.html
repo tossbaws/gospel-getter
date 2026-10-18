@@ -5207,28 +5207,6 @@
             <p class="about-links"><a id="release-notes-link" href="https://github.com/tossbaws/gospel-getter/releases" hidden>Release notes</a> <span id="release-notes-status" class="data-status" role="status" aria-live="polite"></span></p>
         </div>
     </div>
-    <div id="welcome-overlay" class="welcome-overlay modal-overlay" hidden>
-        <div id="welcome-panel" class="welcome-panel modal-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-intro" tabindex="-1">
-            <div class="welcome-head">
-                <h2 id="welcome-title" class="welcome-title">Welcome to Gospel Getter</h2>
-                <button type="button" id="welcome-close" class="panel-close" aria-label="Close" title="Close (Esc)">&times;</button>
-            </div>
-            <div class="welcome-body modal-body">
-                <p id="welcome-intro" class="welcome-intro">A quiet place to read the Bible on your computer, offline and with no account.</p>
-                <h3 class="section-label" id="welcome-look-label">Pick a look</h3>
-                <div id="welcome-looks" class="welcome-looks" role="radiogroup" aria-labelledby="welcome-look-label">
-                    <button type="button" class="welcome-look" role="radio" aria-checked="false" data-value="chi-rho"><span class="welcome-look-preview" data-theme-preview="chi-rho" aria-hidden="true"><span class="welcome-look-sample">Aa</span><span class="welcome-look-lines"><span></span><span></span><span></span></span></span><span class="welcome-look-name">Chi Rho</span></button>
-                    <button type="button" class="welcome-look" role="radio" aria-checked="false" data-value="vellum"><span class="welcome-look-preview" data-theme-preview="vellum" aria-hidden="true"><span class="welcome-look-sample">Aa</span><span class="welcome-look-lines"><span></span><span></span><span></span></span></span><span class="welcome-look-name">Vellum</span></button>
-                </div>
-                <p class="welcome-hint">More themes in Aa.</p>
-                <h3 class="section-label" id="welcome-start-label">Where to start</h3>
-                <ul id="welcome-start" class="welcome-start" aria-labelledby="welcome-start-label"></ul>
-            </div>
-            <div class="welcome-buttons modal-buttons">
-                <button type="button" id="welcome-skip" class="reader-mode-btn">Skip</button>
-            </div>
-        </div>
-    </div>
     <div id="note-overlay" class="modal-overlay" hidden>
         <div id="note-panel" class="modal-panel note-panel" role="dialog" aria-modal="true" aria-labelledby="note-title" aria-describedby="note-passage">
             <div class="modal-body">
@@ -6942,6 +6920,20 @@
                 setDataStatus(String(event.detail.message), !!event.detail.isError);
             });
 
+            // A Rust modal about to open: popovers and panels go (focus left
+            // alone, the modal takes it), and the search box if asked.
+            document.addEventListener('gospel-getter:modal-opening', function (event) {
+                closeSurfaces(false);
+                if (event.detail && event.detail.closeSearch && !searchPanel.hidden) setSearchOpen(false);
+            });
+
+            // A Rust piece opens a chapter (the welcome's places to start):
+            // a jump, as the page's own are, recorded in its history.
+            document.addEventListener('gospel-getter:jump', function (event) {
+                const { bookId, chapter, top } = event.detail;
+                jumpTo(String(bookId), String(chapter), null, null, { top: !!top });
+            });
+
             // The dialog's overlay is the Rust side's element, made when its
             // code loads, so it is looked up when asked, never kept: the
             // keyboard dispatcher and the card's Shift ghost need to know
@@ -7243,165 +7235,63 @@
                 }
             });
 
-            // ---- The welcome: one card over the open chapter. It opens by
-            // itself only on a fresh install (see isFreshInstall), and
-            // whenever Show welcome is chosen in the ☰ menu. It offers a
-            // look (Chi Rho or Vellum, applied as Aa applies a theme) and a
-            // few places to start reading (the backend's startHere list).
-            // Closing it any way (Skip, ×, Escape, or a place to start)
-            // records that it's been seen, in local storage beside the
-            // display preferences, under the key the earlier four-page tour
-            // used: anyone who saw that never gets this on upgrade.
-            const WELCOME_KEY = 'gospel-getter-welcome';
-            const welcomeOverlay = document.getElementById('welcome-overlay');
-            const welcomePanel = document.getElementById('welcome-panel');
-            const welcomeLooks = [...document.querySelectorAll('#welcome-looks [role="radio"]')];
-            const welcomeStart = document.getElementById('welcome-start');
-            const welcomeStartLabel = document.getElementById('welcome-start-label');
-            const themeSelect = document.getElementById('theme-select');
-            let welcomeReturnFocus = null;
+            // ---- The welcome is one of the page's pieces written in Rust
+            // (ui-leptos/src/welcome.rs); what crosses is documented in
+            // ui-leptos/src/bridge.rs. It opens by itself only on a fresh
+            // install, which it decides from what boot loaded (asked at the
+            // end of boot, below), and whenever Show welcome is chosen in the
+            // ☰ menu. Its places to start are the backend's startHere list,
+            // kept here from boot and handed over with each request; one
+            // opens its chapter through the page's own jump.
+            let startHere = [];
 
-            // The places to start, from the backend: each a book (or a
-            // chapter) and a line about it. With none, the section hides.
-            function renderStartHere(rows) {
-                const list = Array.isArray(rows) ? rows : [];
-                welcomeStart.innerHTML = list
-                    .map((row) => `<li><button type="button" class="welcome-start-row" data-book="${row.bookId}" data-chapter="${row.chapter}"><span class="welcome-start-title">${escapeHtml(row.title)}</span> <span class="welcome-start-line">${escapeHtml(row.line)}</span></button></li>`)
-                    .join('');
-                welcomeStart.hidden = !list.length;
-                welcomeStartLabel.hidden = !list.length;
-            }
+            // A request the welcome hasn't had yet: boot can finish before
+            // the Rust pieces have loaded, so the startup question waits for
+            // them to say they're ready.
+            let welcomeWaiting = null;
 
-            // The look in effect is checked (neither, for another theme),
-            // and is the radio group's one tab stop (the first, if neither).
-            function syncWelcomeLooks() {
-                const theme = themeSelect.value;
-                const checked = welcomeLooks.find((radio) => radio.dataset.value === theme);
-                welcomeLooks.forEach((radio) => {
-                    radio.setAttribute('aria-checked', String(radio === checked));
-                    radio.tabIndex = radio === (checked || welcomeLooks[0]) ? 0 : -1;
-                });
-            }
-
-            // Applies the look live, through Aa's own record of the theme.
-            function chooseLook(radio) {
-                if (themeSelect.value !== radio.dataset.value) {
-                    themeSelect.value = radio.dataset.value;
-                    themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-                syncWelcomeLooks();
-                radio.focus();
+            function askWelcome(detail) {
+                const request = new CustomEvent('gospel-getter:welcome', { cancelable: true, detail });
+                return !document.dispatchEvent(request);
             }
 
             function openWelcome(returnFocus) {
-                closeSurfaces(false);
-                if (!searchPanel.hidden) setSearchOpen(false);
-                welcomeReturnFocus = returnFocus || null;
-                syncWelcomeLooks();
-                welcomeOverlay.hidden = false;
-                welcomePanel.querySelector('.modal-body').scrollTop = 0;
-                welcomePanel.focus();
+                if (askWelcome({ startup: false, startHere, returnFocus: returnFocus || null })) return;
+                setDataStatus('The welcome isn’t available.', true);
             }
 
-            function closeWelcome() {
-                welcomeOverlay.hidden = true;
-                try {
-                    localStorage.setItem(WELCOME_KEY, 'seen');
-                } catch (e) {}
-                const target = welcomeReturnFocus;
-                welcomeReturnFocus = null;
-                if (target && target.isConnected && !target.closest('[hidden]')) {
-                    target.focus();
-                } else if (welcomeOverlay.contains(document.activeElement)) {
-                    // Opened at startup: give the keyboard back to the page,
-                    // where the reader's shortcuts work.
-                    document.activeElement.blur();
-                }
+            // What the welcome's fresh-install rule needs, from boot.
+            function askWelcomeAtStartup(home) {
+                const detail = {
+                    startup: true,
+                    install: {
+                        hasSavedPosition: !!home.hasSavedPosition,
+                        bookmarksLoaded,
+                        bookmarks: bookmarks.length,
+                        highlightsLoaded,
+                        highlights: highlights.size,
+                        notesLoaded,
+                        notes: allNotes.length,
+                    },
+                    startHere,
+                    returnFocus: null,
+                };
+                if (!askWelcome(detail)) welcomeWaiting = detail;
             }
 
-            // A fresh install: nothing read, bookmarked, highlighted, noted
-            // or customised yet,
-            // and the welcome never closed before. An upgrade always has a
-            // saved reading position (reading any chapter saves one), so it
-            // never qualifies. Anything that can't be checked counts as
-            // existing data, so the welcome errs towards not appearing.
-            function isFreshInstall(home) {
-                if (home.hasSavedPosition || !bookmarksLoaded || bookmarks.length) return false;
-                if (!highlightsLoaded || highlights.size) return false;
-                if (!notesLoaded || allNotes.length) return false;
-                try {
-                    for (let i = 0; i < localStorage.length; i++) {
-                        const key = localStorage.key(i);
-                        if (key && key.startsWith('gospel-getter-')) return false;
-                    }
-                    return true;
-                } catch (e) {
-                    return false;
-                }
-            }
-
-            welcomeLooks.forEach((radio) => {
-                radio.addEventListener('click', () => chooseLook(radio));
+            document.addEventListener('gospel-getter:pieces-ready', function () {
+                const detail = welcomeWaiting;
+                welcomeWaiting = null;
+                if (detail) askWelcome(detail);
             });
-            // A place to start opens its chapter, from the top, and closes
-            // the card.
-            welcomeStart.addEventListener('click', function (event) {
-                const row = event.target.closest('.welcome-start-row');
-                if (!row) return;
-                closeWelcome();
-                jumpTo(row.dataset.book, row.dataset.chapter, null, null, { top: true });
-            });
-            document.getElementById('welcome-skip').addEventListener('click', closeWelcome);
-            document.getElementById('welcome-close').addEventListener('click', closeWelcome);
+
+            // The welcome's overlay is the Rust side's: looked up when asked.
+            function welcomeOpen() {
+                const overlay = document.getElementById('welcome-overlay');
+                return !!overlay && !overlay.hidden;
+            }
+
             document.getElementById('welcome-btn').addEventListener('click', () => openWelcome(menuToggle));
-
-            // Clicking the dimmed page behind the welcome does nothing, and
-            // leaves focus where it was.
-            welcomeOverlay.addEventListener('mousedown', function (event) {
-                if (event.target === welcomeOverlay) event.preventDefault();
-            });
-
-            // The card's tab stops, in order: ×, the checked look, the places
-            // to start and Skip.
-            function welcomeStops() {
-                return [...welcomePanel.querySelectorAll('button')]
-                    .filter((el) => !el.disabled && el.tabIndex >= 0 && !el.closest('[hidden]'));
-            }
-
-            // While the welcome is open it has the keyboard, before any
-            // other handler sees a key (this listens on window, capturing):
-            // Escape closes it, the arrow keys move between the looks (and
-            // choose, as radio buttons do), Tab stays inside, and none of
-            // the reader's shortcuts run.
-            window.addEventListener('keydown', function (event) {
-                if (welcomeOverlay.hidden) return;
-                event.stopPropagation();
-                const radio = event.target.closest && event.target.closest('#welcome-looks [role="radio"]');
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    closeWelcome();
-                } else if (radio && /^Arrow(Left|Right|Up|Down)$/.test(event.key)) {
-                    event.preventDefault();
-                    const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
-                    const index = welcomeLooks.indexOf(radio);
-                    chooseLook(welcomeLooks[(index + step + welcomeLooks.length) % welcomeLooks.length]);
-                } else if (event.key === 'Tab') {
-                    const stops = welcomeStops();
-                    const first = stops[0];
-                    const last = stops[stops.length - 1];
-                    const active = document.activeElement;
-                    if (!welcomePanel.contains(active) || (active === welcomePanel && event.shiftKey)) {
-                        event.preventDefault();
-                        (event.shiftKey ? last : first).focus();
-                    } else if (event.shiftKey && active === first) {
-                        event.preventDefault();
-                        last.focus();
-                    } else if (!event.shiftKey && active === last) {
-                        event.preventDefault();
-                        first.focus();
-                    }
-                }
-            }, true);
 
             // ---- Rendering: builds the same markup the old server-rendered
             // Askama templates produced, from the plain data the Tauri
@@ -8860,7 +8750,7 @@
             function cardGhostAllowed() {
                 if (!selectionCard.isConnected) return false;
                 if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden
-                    || exportNotesOpen() || shortcutsOpen() || !welcomeOverlay.hidden) {
+                    || exportNotesOpen() || shortcutsOpen() || welcomeOpen()) {
                     return false;
                 }
                 if (!searchPanel.hidden || !copyMenu.hidden) return false;
@@ -9265,13 +9155,13 @@
                     const home = await invoke('get_home');
                     renderBookLists(home);
                     renderTranslationOptions(home);
-                    renderStartHere(home.startHere);
+                    startHere = Array.isArray(home.startHere) ? home.startHere : [];
                     await loadReading(home.currentBookId, home.currentChapter);
                     if (reading) startHistory();
                     await refreshBookmarks();
                     await refreshHighlights();
                     await refreshNoteList();
-                    if (isFreshInstall(home)) openWelcome();
+                    askWelcomeAtStartup(home);
                 } catch (e) {
                     console.error('Failed to load Gospel Getter', e);
                 }

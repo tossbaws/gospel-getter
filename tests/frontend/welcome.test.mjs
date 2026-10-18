@@ -176,7 +176,7 @@ for (const [title, , heading] of START_HERE) {
         withFreshApp({}, async (app) => {
             const row = rows(app).find((r) => r.querySelector('.welcome-start-title').textContent === title);
             const before = app.calls.length;
-            app.click(row);
+            await app.click(row);
             assert.equal(isOpen(app), false);
             await app.idle(before, 'get_reading');
             assert.equal(app.heading(), heading);
@@ -189,7 +189,7 @@ test('a look applies its theme live, as Aa does, and the arrow keys move between
     withFreshApp({}, async (app) => {
         const root = app.document.documentElement;
         const [chiRho, vellum] = looks(app);
-        app.click(vellum);
+        await app.click(vellum);
         assert.equal(root.dataset.theme, 'vellum');
         assert.equal(app.storage()['gospel-getter-theme'], 'vellum');
         assert.equal($(app, 'theme-select').value, 'vellum', 'the record Aa and the export read');
@@ -199,13 +199,13 @@ test('a look applies its theme live, as Aa does, and the arrow keys move between
         assert.ok(isOpen(app), 'choosing a look keeps the card open');
 
         // ← and → (↑ and ↓ too) move and choose, wrapping.
-        app.key('ArrowRight', {}, vellum);
+        await app.key('ArrowRight', {}, vellum);
         assert.equal(app.document.activeElement, chiRho);
         assert.deepEqual(checked(app), ['chi-rho']);
         assert.equal(root.dataset.theme, undefined, 'Chi Rho is the default: no attribute');
-        app.key('ArrowUp', {}, chiRho);
+        await app.key('ArrowUp', {}, chiRho);
         assert.deepEqual(checked(app), ['vellum']);
-        app.key('ArrowDown', {}, vellum);
+        await app.key('ArrowDown', {}, vellum);
         assert.deepEqual(checked(app), ['chi-rho']);
 
         // Aa agrees.
@@ -267,7 +267,7 @@ test('the reader\'s shortcuts don\'t run while the welcome is open', () =>
         assert.ok(panel(app).contains(app.document.activeElement));
 
         // Escape closes only the welcome; then the shortcuts work again.
-        app.key('Escape', {}, app.document.body);
+        await app.key('Escape', {}, app.document.body);
         assert.equal(isOpen(app), false);
         app.key('/');
         assert.equal(app.searchPanel().hidden, false);
@@ -280,19 +280,19 @@ test('Show welcome in the ☰ menu opens the card, and focus returns to ☰', ()
         app.open('menu');
         const show = $(app, 'welcome-btn');
         assert.equal(show.textContent, 'Show welcome');
-        app.click(show);
+        await app.click(show);
         assert.equal(isOpen(app), true);
         assert.equal(app.surface('menu').hidden, true);
         assert.equal(app.document.activeElement, panel(app));
 
-        app.click($(app, 'welcome-close'));
+        await app.click($(app, 'welcome-close'));
         assert.equal(isOpen(app), false);
         assert.equal(app.document.activeElement, $(app, 'menu-toggle'));
 
         // Escape returns focus to ☰ as well, and the reader stays put.
         app.open('menu');
-        app.click(show);
-        app.key('Escape', {}, app.document.activeElement);
+        await app.click(show);
+        await app.key('Escape', {}, app.document.activeElement);
         assert.equal(isOpen(app), false);
         assert.equal(app.document.activeElement, $(app, 'menu-toggle'));
         assert.equal(app.surface('menu').hidden, true);
@@ -300,9 +300,9 @@ test('Show welcome in the ☰ menu opens the card, and focus returns to ☰', ()
 
         // A place to start, from the menu, reads it.
         app.open('menu');
-        app.click(show);
+        await app.click(show);
         const before = app.calls.length;
-        app.click(rows(app)[2]);
+        await app.click(rows(app)[2]);
         await app.idle(before, 'get_reading');
         assert.equal(app.heading(), 'Psalms 1');
         assert.equal(isOpen(app), false);

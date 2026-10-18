@@ -159,3 +159,155 @@ pub fn return_focus(event: &CustomEvent) -> Option<HtmlElement> {
         .dyn_into::<HtmlElement>()
         .ok()
 }
+
+/// Sends the page `name` as a `CustomEvent` on `document`, with `detail`.
+pub fn dispatch(name: &str, detail: &impl Serialize) {
+    let Some(document) = document() else {
+        return;
+    };
+    let Ok(detail) = serde_wasm_bindgen::to_value(detail) else {
+        return;
+    };
+    let init = CustomEventInit::new();
+    init.set_detail(&detail);
+    if let Ok(event) = CustomEvent::new_with_event_init_dict(name, &init) {
+        let _ = document.dispatch_event(&event);
+    }
+}
+
+/// This module has loaded and every piece is listening: a `CustomEvent`
+/// on `document`, no `detail`. The page then sends again any request it
+/// made before (the welcome's, at the end of a boot that beat the module).
+pub const READY_EVENT: &str = "gospel-getter:pieces-ready";
+
+/// Says [`READY_EVENT`].
+pub fn ready() {
+    if let (Some(document), Ok(event)) = (document(), CustomEvent::new(READY_EVENT)) {
+        let _ = document.dispatch_event(&event);
+    }
+}
+
+/// A modal of this crate is about to open: put the page's popovers and
+/// panels away (`closeSurfaces(false)`, focus left alone) and, with
+/// `closeSearch`, the search box. A `CustomEvent` on `document`; the page
+/// does it at once, before the modal takes focus.
+pub const MODAL_OPENING_EVENT: &str = "gospel-getter:modal-opening";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModalOpening {
+    close_search: bool,
+}
+
+/// Says [`MODAL_OPENING_EVENT`].
+pub fn modal_opening(close_search: bool) {
+    dispatch(MODAL_OPENING_EVENT, &ModalOpening { close_search });
+}
+
+/// Open a chapter, as a jump the page's history records (the page's
+/// `jumpTo`): a `CustomEvent` on `document` whose `detail` is
+/// `{ bookId, chapter, top }`; with `top`, from the top of the chapter.
+pub const JUMP_EVENT: &str = "gospel-getter:jump";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Jump {
+    book_id: i64,
+    chapter: i64,
+    top: bool,
+}
+
+/// Says [`JUMP_EVENT`].
+pub fn jump(book_id: i64, chapter: i64, top: bool) {
+    dispatch(JUMP_EVENT, &Jump { book_id, chapter, top });
+}
+
+/// The page asks the welcome to open: a cancelable `CustomEvent` whose
+/// `detail` is a [`WelcomeRequest`] plus `returnFocus`. At the end of boot
+/// it is a question (`startup`, with the facts the fresh-install rule needs;
+/// the welcome opens only for a fresh install); from ☰ → Show welcome it
+/// opens. Either way the welcome cancels it to say it has it.
+pub const WELCOME_EVENT: &str = "gospel-getter:welcome";
+
+/// What the welcome needs from the page.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WelcomeRequest {
+    /// Asked at the end of boot: open only for a fresh install.
+    pub startup: bool,
+    /// What boot loaded, for the rule (with `startup`).
+    pub install: Option<crate::install::Install>,
+    /// The places to start, the backend's `startHere` list.
+    pub start_here: Vec<StartRow>,
+}
+
+/// One place to start: a book (or a chapter) and a line about it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartRow {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub title: String,
+    pub line: String,
+}
+
+pub fn welcome_request(event: &CustomEvent) -> Result<WelcomeRequest, JsValue> {
+    detail(event)
+}
+
+/// Aa's record of the theme: `#theme-select`, a hidden `<select>`. The
+/// welcome reads it to know which look is in use, and picks a look the way
+/// Aa does: setting its value and sending it a `change` event, which the
+/// page's preference script applies, stores and shows.
+const THEME_SELECT: &str = "theme-select";
+
+/// The theme in use, as `#theme-select` has it.
+pub fn theme() -> String {
+    document()
+        .and_then(|d| d.get_element_by_id(THEME_SELECT))
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+        .map(|select| select.value())
+        .unwrap_or_default()
+}
+
+/// Uses the theme `value`, through Aa's own control (see [`theme`]).
+pub fn choose_theme(value: &str) {
+    let Some(select) = document()
+        .and_then(|d| d.get_element_by_id(THEME_SELECT))
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+    else {
+        return;
+    };
+    if select.value() == value {
+        return;
+    }
+    select.set_value(value);
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    if let Ok(change) = web_sys::Event::new_with_event_init_dict("change", &init) {
+        let _ = select.dispatch_event(&change);
+    }
+}
+
+/// The page's local storage keys, or `None` if it can't be read (it can
+/// throw in the webview, so every use is guarded, as the page's are).
+pub fn stored_keys() -> Option<Vec<String>> {
+    let storage = web_sys::window()?.local_storage().ok()??;
+    let length = storage.length().ok()?;
+    (0..length).map(|i| storage.key(i).ok()).collect::<Option<Vec<_>>>().map(
+        |keys| keys.into_iter().flatten().collect(),
+    )
+}
+
+/// The welcome's key in local storage, beside the display settings: set to
+/// `seen` when it closes. The earlier four-page tour used the same key, so
+/// anyone who saw that never gets the welcome on upgrade.
+pub const WELCOME_KEY: &str = "gospel-getter-welcome";
+
+/// Records that the welcome has been seen; quietly not, if local storage
+/// can't be written.
+pub fn welcome_seen() {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(WELCOME_KEY, "seen");
+    }
+}

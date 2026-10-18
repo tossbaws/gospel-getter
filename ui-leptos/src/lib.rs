@@ -10,9 +10,11 @@ mod bridge;
 mod dom;
 mod dto;
 mod export_notes;
+mod install;
 mod ipc;
 mod shortcuts;
 mod text;
+mod welcome;
 
 use wasm_bindgen::prelude::*;
 
@@ -31,5 +33,9 @@ pub fn start() {
     // matter; it goes at the end. The handle is forgotten on purpose: the
     // dialog lives as long as the page.
     leptos::mount::mount_to(body.clone(), export_notes::ExportNotes).forget();
-    leptos::mount::mount_to(body, shortcuts::Shortcuts).forget();
+    leptos::mount::mount_to(body.clone(), shortcuts::Shortcuts).forget();
+    leptos::mount::mount_to(body, welcome::WelcomeCard).forget();
+    // Everything is listening: the page may send again what it asked
+    // before the module had loaded.
+    bridge::ready();
 }

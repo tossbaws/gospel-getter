@@ -39,7 +39,7 @@ pub fn active_element() -> Option<Element> {
 }
 
 /// `document.getElementById(id)` as an `HtmlElement`.
-#[allow(dead_code)] // TEMP until the welcome
+#[allow(dead_code)] // TEMP until the note editor
 pub fn by_id(id: &str) -> Option<HtmlElement> {
     web_sys::window()?
         .document()?
@@ -49,7 +49,7 @@ pub fn by_id(id: &str) -> Option<HtmlElement> {
 }
 
 /// `document.querySelector(selector)` as an `HtmlElement`.
-#[allow(dead_code)] // TEMP until the welcome
+#[allow(dead_code)] // TEMP until the note editor
 pub fn query(selector: &str) -> Option<HtmlElement> {
     web_sys::window()?
         .document()?
@@ -80,7 +80,6 @@ pub fn focusable(root: &Element, selector: &str) -> Vec<HtmlElement> {
 
 /// As [`focusable`], leaving out what is taken out of the tab order
 /// (`tabindex="-1"`).
-#[allow(dead_code)] // TEMP until the welcome
 pub fn tab_stops(root: &Element, selector: &str) -> Vec<HtmlElement> {
     focusable(root, selector)
         .into_iter()
