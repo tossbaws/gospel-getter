@@ -38,15 +38,10 @@ pub fn run() {
         // `commands::export_reader_data`); the webview gets no dialog or
         // file-system permission.
         .plugin(tauri_plugin_dialog::init())
-        // Updates, the releases page and the credit links, likewise used
-        // only from Rust (see `updater` and `credit_links`). The opener
-        // doesn't take over link clicks in the page.
+        // Updates, likewise used only from Rust (see `updater`). The
+        // releases page and the credit links open through the `open` crate,
+        // also only from Rust, so nothing takes over link clicks in the page.
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(
-            tauri_plugin_opener::Builder::new()
-                .open_js_links_on_click(false)
-                .build(),
-        )
         .manage(updater::PendingUpdate::default())
         .setup(|app| {
             setup_app(app).map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })
