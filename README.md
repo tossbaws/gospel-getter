@@ -300,14 +300,14 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.16.1?** Each updates itself to 2.16.2: it
+**Coming from 2.6.0 through 2.16.2?** Each updates itself to 2.16.3: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
 update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.16.2 by hand once, from the
+Install 2.16.3 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -390,9 +390,12 @@ so it seeds again.
   show that text.
 - **Database:** every connection uses SQLite's write-ahead logging, so
   reads and a write don't wait for each other, and the first launch's
-  search index build, in the background, doesn't hold up the page. A
-  transaction that writes takes the write lock as it begins
-  (`BEGIN IMMEDIATE`), waiting up to 5 seconds for it. If the index build
+  search index build, in the background, doesn't hold up the page. Every
+  write goes through one connection, so the app's own writes take turns,
+  first come, first served, instead of racing for the write lock; reading
+  uses its own connections, which can't write. A transaction that writes
+  takes the write lock as it begins (`BEGIN IMMEDIATE`), waiting up to 5
+  seconds for it if something outside the app holds it. If the index build
   fails anyway, it's tried again after 1, 2 and 4 seconds before search
   says it's unavailable.
 - **Copying:** one formatter in the backend makes the text for Copy, Copy

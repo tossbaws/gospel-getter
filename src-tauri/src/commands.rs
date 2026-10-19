@@ -1,6 +1,5 @@
 use anyhow::Context;
 use serde::Serialize;
-use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
@@ -52,16 +51,16 @@ pub struct AppState {
 impl AppState {
     /// Load the books and translations that stay in memory for the life of
     /// the app. The database must already be migrated and seeded.
-    pub async fn load(pool: SqlitePool) -> anyhow::Result<Self> {
-        let books = db::get_all_books(&pool)
+    pub async fn load(database: db::Db) -> anyhow::Result<Self> {
+        let books = db::get_all_books(database.read())
             .await
             .context("Failed to load books")?;
-        let mut translations = db::get_all_translations(&pool)
+        let mut translations = db::get_all_translations(database.read())
             .await
             .context("Failed to load translations")?;
         translations.sort_by_key(|t| db::seed::rank(&t.code));
         Ok(Self {
-            store: Store::new(pool),
+            store: Store::new(database),
             books,
             translations,
             search_index: Arc::default(),
@@ -3496,7 +3495,7 @@ mod tests {
                 .bind(written)
                 .bind(written)
                 .bind(&body)
-                .execute(&pool)
+                .execute(pool.write().pool())
                 .await
                 .unwrap();
         }

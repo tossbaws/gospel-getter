@@ -17,6 +17,7 @@
 use anyhow::{Context, bail};
 use sqlx::{FromRow, SqlitePool};
 
+use crate::db::{Db, WritePool};
 use crate::domain::kjv_markup::{KJV, VerseText};
 
 /// What `verse_search` holds, recorded in `search_index_version`. A
@@ -52,11 +53,11 @@ pub struct SearchHit {
 /// indexed in its own transaction, so the database stays usable in
 /// between. Returns the ids of the translations it (re)indexed — none at
 /// all on a normal launch.
-pub async fn ensure_search_index(pool: &SqlitePool) -> anyhow::Result<Vec<i64>> {
-    forget_outdated_index(pool).await?;
+pub async fn ensure_search_index(db: &Db) -> anyhow::Result<Vec<i64>> {
+    forget_outdated_index(db).await?;
 
     let translations: Vec<i64> = sqlx::query_scalar("SELECT id FROM translations ORDER BY id")
-        .fetch_all(pool)
+        .fetch_all(db.read())
         .await
         .context("Failed to list translations to index")?;
 
@@ -65,20 +66,20 @@ pub async fn ensure_search_index(pool: &SqlitePool) -> anyhow::Result<Vec<i64>> 
         let verse_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM verses WHERE translation_id = $1")
                 .bind(translation_id)
-                .fetch_one(pool)
+                .fetch_one(db.read())
                 .await
                 .context("Failed to count verses to index")?;
         let indexed_count: Option<i64> = sqlx::query_scalar(
             "SELECT verse_count FROM search_index_state WHERE translation_id = $1",
         )
         .bind(translation_id)
-        .fetch_optional(pool)
+        .fetch_optional(db.read())
         .await
         .context("Failed to read search index state")?;
         if indexed_count == Some(verse_count) {
             continue;
         }
-        index_translation(pool, translation_id, verse_count).await?;
+        index_translation(db, translation_id, verse_count).await?;
         indexed.push(translation_id);
     }
     Ok(indexed)
@@ -89,16 +90,16 @@ pub async fn ensure_search_index(pool: &SqlitePool) -> anyhow::Result<Vec<i64>> 
 /// Both happen in one transaction: if the app quits part-way through the
 /// rebuild, the translations already done stay done, and the rest are
 /// indexed on the next launch.
-async fn forget_outdated_index(pool: &SqlitePool) -> anyhow::Result<()> {
+async fn forget_outdated_index(db: &Db) -> anyhow::Result<()> {
     let version: Option<i64> =
         sqlx::query_scalar("SELECT version FROM search_index_version WHERE id = 1")
-            .fetch_optional(pool)
+            .fetch_optional(db.read())
             .await
             .context("Failed to read search index version")?;
     if version == Some(SEARCH_CONTENT_VERSION) {
         return Ok(());
     }
-    let mut tx = crate::db::begin_write(pool)
+    let mut tx = crate::db::begin_write(db.write())
         .await
         .context("Failed to start search index version transaction")?;
     sqlx::query("DELETE FROM search_index_state")
@@ -124,21 +125,19 @@ async fn forget_outdated_index(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 /// (Re)index one translation. It's done a book at a time, each in its own
-/// short transaction, so the reader's own queries never wait long behind
-/// it. The translation only counts as indexed once the last book is in; if
-/// the app quits part-way, the next launch starts that translation over.
-async fn index_translation(
-    pool: &SqlitePool,
-    translation_id: i64,
-    verse_count: i64,
-) -> anyhow::Result<()> {
+/// short transaction, so a write of the reader's own waits its turn behind
+/// one book at most (reads don't wait at all); what's indexed is read on
+/// the read pool, between the writes. The translation only counts as
+/// indexed once the last book is in; if the app quits part-way, the next
+/// launch starts that translation over.
+async fn index_translation(db: &Db, translation_id: i64, verse_count: i64) -> anyhow::Result<()> {
     // The rowid encoding needs every coordinate to fit its field.
     let (max_book, max_chapter, max_verse): (Option<i64>, Option<i64>, Option<i64>) =
         sqlx::query_as(
             "SELECT MAX(book_id), MAX(chapter), MAX(verse) FROM verses WHERE translation_id = $1",
         )
         .bind(translation_id)
-        .fetch_one(pool)
+        .fetch_one(db.read())
         .await
         .context("Failed to check verse coordinates")?;
     if translation_id < 1
@@ -149,7 +148,7 @@ async fn index_translation(
         bail!("translation {translation_id} has coordinates too large to index for search");
     }
 
-    let mut tx = crate::db::begin_write(pool)
+    let mut tx = crate::db::begin_write(db.write())
         .await
         .context("Failed to start search index transaction")?;
     sqlx::query("DELETE FROM search_index_state WHERE translation_id = $1")
@@ -170,21 +169,21 @@ async fn index_translation(
 
     let code: String = sqlx::query_scalar("SELECT code FROM translations WHERE id = $1")
         .bind(translation_id)
-        .fetch_one(pool)
+        .fetch_one(db.read())
         .await
         .context("Failed to read the translation to index")?;
     let books: Vec<i64> = sqlx::query_scalar(
         "SELECT DISTINCT book_id FROM verses WHERE translation_id = $1 ORDER BY book_id",
     )
     .bind(translation_id)
-    .fetch_all(pool)
+    .fetch_all(db.read())
     .await
     .context("Failed to list books to index")?;
     for book_id in books {
         if code == KJV {
-            index_book_as_shown(pool, translation_id, book_id).await
+            index_book_as_shown(db, translation_id, book_id).await
         } else {
-            index_book_as_stored(pool, translation_id, book_id).await
+            index_book_as_stored(db.write(), translation_id, book_id).await
         }
         .with_context(|| format!("Failed to index book {book_id} for search"))?;
     }
@@ -195,7 +194,7 @@ async fn index_translation(
     )
     .bind(translation_id)
     .bind(verse_count)
-    .execute(pool)
+    .execute(db.write().pool())
     .await
     .context("Failed to record search index state")?;
 
@@ -207,11 +206,11 @@ async fn index_translation(
 /// with the write lock (see `begin_write`: a write into the full-text table
 /// reads before it writes).
 async fn index_book_as_stored(
-    pool: &SqlitePool,
+    writer: &WritePool,
     translation_id: i64,
     book_id: i64,
 ) -> anyhow::Result<()> {
-    let mut tx = crate::db::begin_write(pool).await?;
+    let mut tx = crate::db::begin_write(writer).await?;
     sqlx::query(
         "INSERT INTO verse_search (rowid, text) \
          SELECT translation_id * $3 + book_id * $4 + chapter * $5 + verse, text \
@@ -230,20 +229,16 @@ async fn index_book_as_stored(
 
 /// Index one KJV book's plain text as the app shows it (see `VerseText`),
 /// in one transaction that starts with the write lock.
-async fn index_book_as_shown(
-    pool: &SqlitePool,
-    translation_id: i64,
-    book_id: i64,
-) -> anyhow::Result<()> {
+async fn index_book_as_shown(db: &Db, translation_id: i64, book_id: i64) -> anyhow::Result<()> {
     let verses: Vec<(i64, i64, String)> = sqlx::query_as(
         "SELECT chapter, verse, text FROM verses \
          WHERE translation_id = $1 AND book_id = $2 ORDER BY chapter, verse",
     )
     .bind(translation_id)
     .bind(book_id)
-    .fetch_all(pool)
+    .fetch_all(db.read())
     .await?;
-    let mut tx = crate::db::begin_write(pool).await?;
+    let mut tx = crate::db::begin_write(db.write()).await?;
     for (chapter, verse, stored) in verses {
         sqlx::query("INSERT INTO verse_search (rowid, text) VALUES ($1, $2)")
             .bind(
