@@ -10,8 +10,8 @@ use sqlx::{FromRow, SqlitePool};
 use std::cmp::Ordering;
 use std::fmt;
 
-use super::BookmarkError;
 use super::bookmarks::check_passage;
+use super::{BookmarkError, WritePool};
 
 /// The most characters (Unicode scalar values, as SQLite's `length()`
 /// counts them) one note may hold, after trimming. The `notes` table's
@@ -318,13 +318,13 @@ macro_rules! note_columns {
 /// keep, already in the database's format — for restoring a deleted note
 /// — or `None` for "now".
 pub async fn add_note(
-    pool: &SqlitePool,
+    writer: &WritePool,
     passage: &Passage,
     body: &str,
     dates: Option<(&str, &str)>,
 ) -> Result<Note, NoteError> {
     let body = normalize_body(body)?;
-    let mut tx = crate::db::begin_write(pool)
+    let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start note transaction")?;
     check_passage(
@@ -372,9 +372,9 @@ pub async fn add_note(
 /// `updated_at` only if the text did. Text that grows must keep all the
 /// notes within `MAX_TOTAL_NOTE_CHARS`; text that doesn't grow is always
 /// allowed, so a note can be shortened even past the limit.
-pub async fn update_note(pool: &SqlitePool, id: i64, body: &str) -> Result<Note, NoteError> {
+pub async fn update_note(writer: &WritePool, id: i64, body: &str) -> Result<Note, NoteError> {
     let body = normalize_body(body)?;
-    let mut tx = crate::db::begin_write(pool)
+    let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start note transaction")?;
     let old_chars: Option<i64> = sqlx::query_scalar("SELECT length(body) FROM notes WHERE id = $1")
@@ -412,13 +412,13 @@ pub async fn update_note(pool: &SqlitePool, id: i64, body: &str) -> Result<Note,
 
 /// Delete a note, returning it as it was (so it can be restored with
 /// `add_note`), or `None` if there was no such note.
-pub async fn delete_note(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<Note>> {
+pub async fn delete_note(writer: &WritePool, id: i64) -> anyhow::Result<Option<Note>> {
     sqlx::query_as::<_, Note>(concat!(
         "DELETE FROM notes WHERE id = $1 RETURNING ",
         note_columns!()
     ))
     .bind(id)
-    .fetch_optional(pool)
+    .fetch_optional(writer.pool())
     .await
     .context("Failed to delete note")
 }

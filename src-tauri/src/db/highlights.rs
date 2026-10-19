@@ -9,8 +9,8 @@ use sqlx::{FromRow, SqlitePool};
 use std::fmt;
 use std::str::FromStr;
 
-use super::BookmarkError;
 use super::bookmarks::{check_passage, passage_preview_sql};
+use super::{BookmarkError, WritePool};
 
 /// The highlighter colors. The database's CHECK and the frontend's
 /// swatches list the same four.
@@ -112,14 +112,14 @@ impl TryFrom<HighlightRow> for Highlight {
 /// bookmarks: the verses must exist in at least one bundled translation).
 /// A verse that already has `color` is left exactly as it is.
 pub async fn set_highlights(
-    pool: &SqlitePool,
+    writer: &WritePool,
     book_id: i64,
     chapter: i64,
     verse_start: i64,
     verse_end: i64,
     color: HighlightColor,
 ) -> Result<(), BookmarkError> {
-    let mut tx = crate::db::begin_write(pool)
+    let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start highlight transaction")?;
     check_passage(&mut tx, book_id, chapter, verse_start, verse_end).await?;
@@ -148,7 +148,7 @@ pub async fn set_highlights(
 /// Remove the highlight from every verse in a passage. Returns how many
 /// verses had one.
 pub async fn remove_highlights(
-    pool: &SqlitePool,
+    writer: &WritePool,
     book_id: i64,
     chapter: i64,
     verse_start: i64,
@@ -161,7 +161,7 @@ pub async fn remove_highlights(
     .bind(chapter)
     .bind(verse_start)
     .bind(verse_end)
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to remove highlights")?;
     Ok(result.rows_affected() as usize)

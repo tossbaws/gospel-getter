@@ -28,14 +28,13 @@
 use anyhow::{Context, bail};
 use chrono::{DateTime, FixedOffset, Local, Offset, Utc};
 use serde_json::{Value, json};
-use sqlx::SqlitePool;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use gospel_getter_lib::commands::{self, AppState};
 use gospel_getter_lib::credit_links;
-use gospel_getter_lib::db::{self, Passage};
+use gospel_getter_lib::db::{self, Passage, WritePool};
 use gospel_getter_lib::domain::kjv_markup::VerseText;
 use gospel_getter_lib::updater::{self, Problem, UpdateInfo};
 
@@ -137,7 +136,7 @@ fn passage(args: &Value) -> anyhow::Result<Passage> {
 /// `Err` is a command error (what `invoke` would reject with).
 async fn dispatch(
     state: &AppState,
-    pool: &SqlitePool,
+    writer: &WritePool,
     cmd: &str,
     args: &Value,
 ) -> anyhow::Result<Result<Value, String>> {
@@ -346,7 +345,7 @@ async fn dispatch(
                     .bind(&at)
                     .bind(&at)
                     .bind(&body)
-                    .execute(pool)
+                    .execute(writer.pool())
                     .await?;
             if done.rows_affected() == 0 {
                 bail!("no note says {body:?}");
@@ -425,12 +424,18 @@ async fn dispatch(
                 .lock()
                 .map_err(|_| anyhow::anyhow!("clock lock poisoned"))? = None;
             if !arg::<Option<bool>>(args, "keepBookmarks")?.unwrap_or(false) {
-                sqlx::query("DELETE FROM bookmarks").execute(pool).await?;
-                sqlx::query("DELETE FROM highlights").execute(pool).await?;
-                sqlx::query("DELETE FROM notes").execute(pool).await?;
+                sqlx::query("DELETE FROM bookmarks")
+                    .execute(writer.pool())
+                    .await?;
+                sqlx::query("DELETE FROM highlights")
+                    .execute(writer.pool())
+                    .await?;
+                sqlx::query("DELETE FROM notes")
+                    .execute(writer.pool())
+                    .await?;
             }
             sqlx::query("DELETE FROM reading_position")
-                .execute(pool)
+                .execute(writer.pool())
                 .await?;
             if let Some(book_id) = arg::<Option<i64>>(args, "bookId")? {
                 let translation_id = state
@@ -455,7 +460,7 @@ async fn main() -> anyhow::Result<()> {
         .nth(1)
         .context("usage: frontend_bridge <database path>")?;
     let pool = db::create_pool(&format!("sqlite:{path}")).await?;
-    db::prepare(&pool).await?;
+    db::prepare(pool.write()).await?;
     db::ensure_search_index(&pool).await?;
     let state = AppState::load(pool.clone()).await?;
     state.search_index.set_ready();
@@ -480,7 +485,7 @@ async fn main() -> anyhow::Result<()> {
             stdout.flush().await?;
             continue;
         }
-        let response = match dispatch(&state, &pool, cmd, &args).await {
+        let response = match dispatch(&state, pool.write(), cmd, &args).await {
             Ok(Ok(value)) => json!({ "id": id, "ok": value }),
             Ok(Err(message)) => json!({ "id": id, "err": message }),
             Err(e) => json!({ "id": id, "err": format!("bridge error: {e:#}") }),
