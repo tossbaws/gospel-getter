@@ -3,8 +3,11 @@
 Gospel Getter's page (`ui/index.html`) is being moved to Rust a piece at a
 time. This crate holds the pieces so far, written with [Leptos] and compiled
 to WebAssembly; they run inside the same Tauri app, next to the page's
-JavaScript, which stays as it is everywhere else. The first piece is the
-Export notes dialog (`src/export_notes.rs`).
+JavaScript, which stays as it is everywhere else. The pieces are the page's
+modal dialogs: Export notes (`src/export_notes.rs`, the first), the
+keyboard shortcuts sheet (`src/shortcuts.rs`), the welcome
+(`src/welcome.rs`), the import preview (`src/import_preview.rs`) and the
+note editor (`src/note_editor.rs`).
 
 [Leptos]: https://leptos.dev
 
@@ -12,19 +15,26 @@ Export notes dialog (`src/export_notes.rs`).
 
 - `ui-leptos/` is its own crate (Rust 2024, `cdylib`), separate from
   `src-tauri/`: one targets `wasm32-unknown-unknown`, the other the desktop.
-  They share no code yet; `src/dto.rs` mirrors the DTOs of the three commands
-  the dialog calls, with camelCase serde names, and says what a shared crate
+  They share no code yet; `src/dto.rs` mirrors the DTOs of the commands the
+  pieces call, with the names the JSON carries, and says what a shared crate
   would replace later.
 - `src/ipc.rs`: Tauri commands through the same global the page uses,
   `window.__TAURI__.core.invoke` (a `wasm_bindgen` extern plus
   `serde-wasm-bindgen`), with the same command names and argument objects.
 - `src/bridge.rs`: everything the Rust side and the page share, in one
-  place. The page's half is the short block in `ui/index.html` that
-  dispatches `gospel-getter:export-notes` and listens for
-  `gospel-getter:toast`.
-- `src/text.rs`: the dialog's words, numbers and filter, free of the DOM,
-  unit-tested natively (`cargo test`).
-- `src/lib.rs`: mounts the pieces when the module loads.
+  place: the custom events each way (requests to open with a snapshot in
+  their `detail`; toasts, jumps, refreshes back), the two page globals it
+  calls, and the page controls it uses. The page's half is the short
+  blocks in `ui/index.html` that dispatch and listen for those names.
+- `src/dom.rs`: the DOM helpers the pieces share (focus that never
+  scrolls, the modals' Tab trap, listening).
+- `src/text.rs`, `src/import_text.rs`, `src/note_text.rs`,
+  `src/install.rs`: the pieces' words, numbers and rules (Export notes'
+  filter, the import's sentences, the note's length rule, the welcome's
+  fresh-install rule), free of the DOM, unit-tested natively
+  (`cargo test`).
+- `src/lib.rs`: mounts the pieces when the module loads, then tells the
+  page they're listening (`gospel-getter:pieces-ready`).
 
 ## Building and running
 
@@ -47,8 +57,10 @@ The page loads the pieces itself: Trunk inlines `ui/leptos-loader.js` at the
 end of `<body>`, which loads the glue (`ui-leptos.js`) and the module
 (`ui-leptos_bg.wasm`). Trunk's own loader is an ES module import, which the
 `no-modules` glue cannot be loaded by, so `Trunk.toml` turns it off. If the
-module fails to load, the page is as it was without it: only Export notes…
-is unavailable, and says so.
+module fails to load, the page is as it was without it, except that the
+five dialogs are unavailable, and say so when asked for. The module may
+also load after the page has booted: the welcome's startup question waits
+for `gospel-getter:pieces-ready`.
 
 The Content Security Policy allows exactly what this needs beyond the page's
 own code: `'wasm-unsafe-eval'` in `script-src` (compiling WebAssembly) and
@@ -63,26 +75,38 @@ runs wasm-opt `-Oz`.
 ## Tests
 
 The frontend tests (`tests/frontend/`) drive the real page in jsdom against
-the real backend, and the dialog with it, as a black box: the same ids,
+the real backend, and the dialogs with it, as a black box: the same ids,
 classes, ARIA, `hidden` and `disabled`, text and focus order as the
-JavaScript version, so the dialog's tests (`notes-export.test.mjs`) are the
-ones it had. jsdom runs no module scripts and has no `fetch`, so the test
-harness runs the glue as a classic script and hands it the `.wasm` bytes
-itself (`loadLeptos` in `harness.mjs`), the same files the app ships.
+JavaScript version, so the dialogs' tests (`notes-export.test.mjs`,
+`shortcuts.test.mjs`, `welcome.test.mjs`, `reader-data.test.mjs`,
+`notes.test.mjs` and others) are the ones they had. jsdom runs no module
+scripts and has no `fetch`, so the test harness runs the glue as a classic
+script and hands it the `.wasm` bytes itself (`loadLeptos` in
+`harness.mjs`), the same files the app ships.
 `npm test` builds `dist/` first.
 
 Leptos updates the DOM after the current task, where the page's scripts
 update it within the click or key itself, so the harness's `app.click` and
 `app.key` return the event as before and can also be awaited:
 `await app.click(el)` resolves once pending DOM updates have flushed. Tests
-that look at the dialog right after a click or key await it; assertions did
-not change.
+that look at a dialog right after a click or key await it; assertions did
+not change. Where the page answered within the event itself and a test
+looks at once with nothing to await (typing in the note editor, its discard
+prompt, the import's add-or-replace choice), the piece writes to those
+elements within the event, as the page did. `openApp({ leptos: 'late' })`
+loads the pieces only when the test calls `app.loadPieces()`, and
+`leptos: false` never (`pieces.test.mjs`).
 
 ## What a shared crate would replace
 
 `src/dto.rs` in full: `NotedBook`, `DaySpan`, `DatePresets`,
 `ExportOptions` (`commands::NotesExportOptions`), `Filter`
 (`notes_export::NotesFilter`) and `ExportOutcome`
-(`commands::NotesExportOutcome`). The backend's types carry `chrono` dates
+(`commands::NotesExportOutcome`); for the import, `ImportChoice`,
+`ImportPreview` (`commands::ImportPreviewDto`), `PositionPreview`
+(`commands::PositionPreviewDto`), `ImportResult`
+(`commands::ImportResultDto`) and `Preferences` (`reader_data::Preferences`,
+whose enums travel as their kebab-case names); and the commands' argument
+objects. The backend's types carry `chrono` dates
 and `deny_unknown_fields`; the shared crate would keep them serde-only with
 the dates as `YYYY-MM-DD` strings, as the page always sent and received them.

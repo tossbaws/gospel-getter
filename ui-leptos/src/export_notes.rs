@@ -22,13 +22,10 @@ use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
-use wasm_bindgen::prelude::Closure;
-use web_sys::{
-    CustomEvent, Element, FocusOptions, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent,
-    NodeList,
-};
+use web_sys::{CustomEvent, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent, NodeList};
 
 use crate::bridge::{self, OpenRequest};
+use crate::dom::{self, focus, inside_hidden};
 use crate::dto::{CountArgs, ExportArgs, ExportOptions, ExportOutcome, Filter, NotedBook};
 use crate::ipc;
 use crate::text::{Fields, build_filter, chapter_value, count_line, plural, thousands};
@@ -391,55 +388,23 @@ impl Dialog {
         let Some(panel) = self.panel.get() else {
             return;
         };
-        let Ok(found) = panel.query_selector_all("input, select, button") else {
-            return;
-        };
-        let focusable: Vec<HtmlElement> = elements(&found)
-            .into_iter()
-            .filter(|el| !el.has_attribute("disabled") && !inside_hidden(el))
-            .collect();
-        let (Some(first), Some(last)) = (focusable.first(), focusable.last()) else {
-            return;
-        };
-        let active = bridge::document().and_then(|d| d.active_element());
-        let inside = active
-            .as_ref()
-            .is_some_and(|active| panel.contains(Some(active)));
-        if !inside {
-            event.prevent_default();
-            focus(if event.shift_key() { last } else { first });
-        } else if event.shift_key() && same(active.as_ref(), first) {
-            event.prevent_default();
-            focus(last);
-        } else if !event.shift_key() && same(active.as_ref(), last) {
-            event.prevent_default();
-            focus(first);
-        }
+        let stops = dom::focusable(&panel, "input, select, button");
+        dom::trap_tab(event, &panel, &stops);
     }
 
     /// Clicking the dimmed page behind the panel does nothing, and leaves
     /// focus where it was.
     fn on_backdrop_mousedown(self, event: MouseEvent) {
-        let overlay = self.overlay.get();
-        let target = event.target();
-        if let (Some(overlay), Some(target)) = (overlay, target) {
-            let overlay: &JsValue = overlay.as_ref();
-            let target: &JsValue = target.as_ref();
-            if overlay == target {
-                event.prevent_default();
-            }
+        if let Some(overlay) = self.overlay.get()
+            && dom::targets(&event, &overlay)
+        {
+            event.prevent_default();
         }
     }
 
     /// Listens for the page's request to open, and for the keyboard.
     fn listen(self) {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let Some(document) = window.document() else {
-            return;
-        };
-        let on_open = Closure::<dyn FnMut(CustomEvent)>::new(move |event: CustomEvent| {
+        dom::on_document_event(bridge::OPEN_EVENT, move |event: CustomEvent| {
             // Handled, whatever happens next: the dialog is here.
             event.prevent_default();
             match bridge::open_request(&event) {
@@ -447,48 +412,8 @@ impl Dialog {
                 Err(e) => ipc::log_error("The export-notes request couldn't be read", &e),
             }
         });
-        let _ = document
-            .add_event_listener_with_callback(bridge::OPEN_EVENT, on_open.as_ref().unchecked_ref());
-        on_open.forget();
-
-        let on_keydown = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
-            self.on_keydown(event);
-        });
-        let _ = window.add_event_listener_with_callback_and_bool(
-            "keydown",
-            on_keydown.as_ref().unchecked_ref(),
-            true,
-        );
-        on_keydown.forget();
+        dom::on_window_keydown(move |event: KeyboardEvent| self.on_keydown(event));
     }
-}
-
-/// `el.focus({ preventScroll: true })`: focus never scrolls the page.
-fn focus(el: &HtmlElement) {
-    let options = FocusOptions::new();
-    options.set_prevent_scroll(true);
-    let _ = el.focus_with_options(&options);
-}
-
-/// Inside something `hidden`?
-fn inside_hidden(el: &Element) -> bool {
-    matches!(el.closest("[hidden]"), Ok(Some(_)))
-}
-
-/// The same element?
-fn same(active: Option<&Element>, el: &HtmlElement) -> bool {
-    active.is_some_and(|active| {
-        let active: &JsValue = active.as_ref();
-        let el: &JsValue = el.as_ref();
-        active == el
-    })
-}
-
-fn elements(list: &NodeList) -> Vec<HtmlElement> {
-    (0..list.length())
-        .filter_map(|i| list.item(i))
-        .filter_map(|node| node.dyn_into::<HtmlElement>().ok())
-        .collect()
 }
 
 fn inputs(list: &NodeList) -> Vec<HtmlInputElement> {

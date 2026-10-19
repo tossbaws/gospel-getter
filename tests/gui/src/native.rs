@@ -145,6 +145,53 @@ impl Xvfb {
     }
 }
 
+impl Xvfb {
+    /// Saves a picture of the whole private display as `path` (ImageMagick's
+    /// `import`, if it's installed), for a failure: what WebDriver can't
+    /// see, the native dialogs. Only ever this display.
+    pub async fn screenshot_root(&self, path: &Path) -> Result<()> {
+        self.confirm()?;
+        let path = path.to_str().context("the path is not UTF-8")?;
+        let output = Command::new("import")
+            .args(["-window", "root", &format!("png:{path}")])
+            .env_clear()
+            .env("DISPLAY", &self.display)
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await
+            .context("running ImageMagick's import (not installed?)")?;
+        if !output.status.success() {
+            bail!(
+                "import failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
+    /// Types `path` into the GTK open dialog `window`: focuses it, opens its
+    /// location entry (Ctrl+L) and types the full path. Enter is
+    /// [`Xvfb::press_enter`].
+    pub async fn type_location(&self, window: &str, path: &Path) -> Result<()> {
+        let path = path.to_str().context("the path is not UTF-8")?;
+        self.xdotool(&["windowfocus", "--sync", window]).await?;
+        self.xdotool(&["key", "--clearmodifiers", "ctrl+l"]).await?;
+        self.xdotool(&["type", "--delay", "5", "--clearmodifiers", path])
+            .await?;
+        Ok(())
+    }
+
+    /// Presses Enter in `window`.
+    pub async fn press_enter(&self, window: &str) -> Result<()> {
+        self.xdotool(&["windowfocus", "--sync", window]).await?;
+        self.xdotool(&["key", "--clearmodifiers", "Return"]).await?;
+        Ok(())
+    }
+}
+
 /// The inodes of the Unix sockets listening for X display `n`.
 fn listening_inodes(n: u32) -> Result<Vec<u64>> {
     let table = std::fs::read_to_string("/proc/net/unix").context("reading /proc/net/unix")?;

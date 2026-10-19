@@ -82,6 +82,8 @@ fi
 mkdir -p "$out/screenshots"
 out="$(realpath "$out")"
 results="$out/results.txt"
+# The checks, as results.txt numbers and names them (tests/gui report.rs).
+checks=("1 driver" "2 csp" "3 export-notes" "4 screenshots" "5 welcome" "6 note-editor" "7 shortcuts" "8 import-preview")
 : >"$results"
 work="$(mktemp -d "${TMPDIR:-/tmp}/gui-check.XXXXXXXX")"
 started=$SECONDS
@@ -94,12 +96,10 @@ log() {
 # says so, one FAIL per check.
 setup_failed() {
     log "setup failed: $*"
-    {
-        echo "FAIL 1 driver: not run: setup failed: $*"
-        echo "FAIL 2 csp: not run: setup failed: $*"
-        echo "FAIL 3 export-notes: not run: setup failed: $*"
-        echo "FAIL 4 screenshots: not run: setup failed: $*"
-    } >"$results"
+    local check
+    for check in "${checks[@]}"; do
+        echo "FAIL $check: not run: setup failed: $*"
+    done >"$results"
     exit 1
 }
 
@@ -107,7 +107,7 @@ setup_failed() {
 # saying why.
 complete_results() {
     local check
-    for check in "1 driver" "2 csp" "3 export-notes" "4 screenshots"; do
+    for check in "${checks[@]}"; do
         grep -qE "^(PASS|FAIL) ${check%% *} " "$results" || echo "FAIL $check: $1" >>"$results"
     done
 }
@@ -533,7 +533,7 @@ if [[ $platform == windows ]]; then
     ((status == 0)) || windows_diagnostics
 fi
 
-# Whatever happened, results.txt names all four checks.
+# Whatever happened, results.txt names every check.
 if ((status == 124 || status == 137)); then
     why="no result: the checks hung and were stopped $((remaining + 20))s in (see steps.log)"
 else

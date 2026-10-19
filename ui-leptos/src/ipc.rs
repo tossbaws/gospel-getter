@@ -25,6 +25,12 @@ pub async fn invoke<T: DeserializeOwned>(cmd: &str, args: JsValue) -> Result<T, 
     serde_wasm_bindgen::from_value(answer).map_err(|e| JsValue::from(e.to_string()))
 }
 
+/// Calls `cmd` with `args` and hands back its answer as it came, for an
+/// answer part of which goes back to the page unchanged.
+pub async fn invoke_value(cmd: &str, args: JsValue) -> Result<JsValue, JsValue> {
+    invoke_js(cmd, args).await
+}
+
 /// A command's argument object as the page's JavaScript builds it: a plain
 /// object, with `null` (not a missing key) where the page passed `null`.
 pub fn args(value: &impl Serialize) -> Result<JsValue, JsValue> {

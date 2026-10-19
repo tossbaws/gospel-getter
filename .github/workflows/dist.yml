@@ -407,10 +407,12 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install Xvfb, xdotool and WebKitWebDriver
+      # ImageMagick: a picture of the private display when a check fails
+      # (the native dialogs, which WebDriver can't see).
+      - name: Install Xvfb, xdotool, WebKitWebDriver and ImageMagick
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb xdotool webkit2gtk-driver dbus
+          sudo apt-get install -y xvfb xdotool webkit2gtk-driver dbus imagemagick
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

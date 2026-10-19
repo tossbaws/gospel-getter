@@ -1,31 +1,80 @@
 //! The whole bridge between this crate and the page's JavaScript
 //! (`ui/index.html`), in one place. Everything the two sides share is
-//! listed here; nothing else crosses.
+//! listed here; nothing else crosses. The model is custom events on
+//! `document`, with what the other side needs as a snapshot in their
+//! `detail`, so neither reads the other's variables. The page's half is
+//! the short blocks in `ui/index.html` that dispatch and listen for these
+//! names, each pointing here.
 //!
-//! JavaScript to Rust:
-//! - [`OPEN_EVENT`], a cancelable `CustomEvent` on `document`. The page's
-//!   click handler on `#export-notes-btn` (the Library's Notes tab; the
-//!   command palette clicks the same button) dispatches it with an
-//!   [`OpenRequest`] as its `detail`: a snapshot of what the dialog needs
-//!   to know, so it reads none of the page's variables. The dialog cancels
-//!   the event to say it handled it; if nobody does (the WebAssembly did
-//!   not load), the page tells the reader Export notes is unavailable.
+//! Page to Rust (requests to open; each is cancelable, and the piece
+//! cancels it to say it has it; if nothing does, the WebAssembly didn't
+//! load, and the page says that piece isn't available):
+//! - [`OPEN_EVENT`] (`gospel-getter:export-notes`): Export notes…, with an
+//!   [`OpenRequest`].
+//! - [`SHORTCUTS_EVENT`] (`gospel-getter:shortcuts`): the keyboard
+//!   shortcuts sheet, with the page's one table ([`ShortcutsRequest`]).
+//! - [`WELCOME_EVENT`] (`gospel-getter:welcome`): the welcome, asked at the
+//!   end of boot (with what the fresh-install rule needs) or opened from
+//!   ☰, with the places to start ([`WelcomeRequest`]). A startup request
+//!   nobody answered (boot beat the module) is sent again on
+//!   [`READY_EVENT`].
+//! - [`IMPORT_EVENT`] (`gospel-getter:import`): Import data…, no detail.
+//! - [`NOTE_EVENT`] (`gospel-getter:note`): the note editor, with a
+//!   [`NoteRequest`] (the passage quoted as markup the page rendered) and
+//!   the note itself. [`NOTE_OTHERS_EVENT`] (`gospel-getter:note-others`)
+//!   follows the selection's notes while it may be open.
+//! - `detail.returnFocus` on the sheet's, welcome's and editor's requests:
+//!   the element focus goes back to ([`return_focus`]).
 //!
-//! Rust to JavaScript:
-//! - [`TOAST_EVENT`], a `CustomEvent` on `document` with
-//!   `{ message, isError }` as its `detail`; the page shows it in its toast
-//!   (`setDataStatus`), where the export reported before.
-//! - `#export-notes-overlay`'s `hidden` attribute, which this crate keeps
-//!   truthful: the page's keyboard dispatcher and its Shift-ghost check
-//!   read it to know a modal is open.
-//! - Focus: closing hands focus back to `#export-notes-btn` while it is on
-//!   the page, shown and enabled; otherwise to the page's focus home, Aa
-//!   (`#aa-toggle`) in reading mode (`html[data-reader-mode="on"]`) or the
-//!   menu (`#menu-toggle`), as the page's own `focusHome` does.
+//! Rust to page:
+//! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): the module has loaded
+//!   and every piece is listening.
+//! - [`TOAST_EVENT`] (`gospel-getter:toast`): `{ message, isError }` for
+//!   the page's toast (`setDataStatus`).
+//! - [`MODAL_OPENING_EVENT`] (`gospel-getter:modal-opening`): a piece is
+//!   about to open on its own (the welcome at startup, the import preview
+//!   once a file is chosen): popovers and panels go, and the search box
+//!   with `closeSearch`.
+//! - [`JUMP_EVENT`] (`gospel-getter:jump`): `{ bookId, chapter, top }`,
+//!   opened as the page's own jumps are (the welcome's places to start).
+//! - [`DATA_BUSY_EVENT`] (`gospel-getter:data-busy`): `{ busy }`, the ☰
+//!   Export and Import items disabled while an import runs.
+//! - [`IMPORTED_EVENT`] (`gospel-getter:imported`): `{ position, message }`
+//!   after an import: the page reloads the position, bookmarks, highlights
+//!   and notes, then says `message`.
+//! - [`NOTE_DONE_EVENT`] (`gospel-getter:note-done`): `{ action, note }`
+//!   after the editor added, saved or deleted a note: the page's status
+//!   line, and a deletion's Undo (`restoreNote`, which stays the page's
+//!   under its shared `actionAttempt` guard).
 //!
-//! Shared with the backend, not the page: the three commands this dialog
-//! invokes, through the same `window.__TAURI__.core.invoke` the page uses
-//! (see `ipc.rs`).
+//! Page globals this crate calls (small, named, existing or exposed for it):
+//! - `window.gospelGetterPreferences.apply(values)` (the head script's):
+//!   an import's display settings ([`apply_preferences`]).
+//! - `window.gospelGetterRefreshNotes()` (the page's `refreshNotes`, a
+//!   promise): the editor waits for it before closing ([`refresh_notes`]).
+//!
+//! Page controls this crate uses as a reader would: `#theme-select`, Aa's
+//! record of the theme, read and changed (with a `change` event) for the
+//! welcome's looks ([`theme`], [`choose_theme`]); Aa's `<select>` options'
+//! labels, read to name an import file's settings; the page's focus home
+//! (`#aa-toggle` in reading mode, else `#menu-toggle`, [`focus_home`]);
+//! `#export-notes-btn`; and, for the editor's focus going back, the
+//! selection card's `.verse-notes .note-edit[data-note-id]`,
+//! `.verse-actions .verse-note-btn` and `.chapter-main .chapter-heading`.
+//!
+//! The pieces' overlays (`#export-notes-overlay`, `#shortcuts-overlay`,
+//! `#welcome-overlay`, `#import-overlay`, `#note-overlay`) keep their
+//! `hidden` truthful: the page's keyboard dispatcher and its Shift-ghost
+//! check read them, looked up by id when asked, to know a modal is open.
+//! Each piece has the keyboard while it's open: a capturing `keydown` on
+//! `window` that stops every other handler.
+//!
+//! Local storage: the welcome reads the `gospel-getter-*` keys (the
+//! fresh-install rule) and writes [`WELCOME_KEY`].
+//!
+//! Shared with the backend, not the page: the commands the pieces invoke,
+//! through the same `window.__TAURI__.core.invoke` the page uses (see
+//! `ipc.rs`; their shapes are in `dto.rs`).
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
@@ -115,4 +164,402 @@ pub fn focus_home() {
 /// `detail` as an [`OpenRequest`], or says what was wrong with it.
 pub fn open_request(event: &CustomEvent) -> Result<OpenRequest, JsValue> {
     serde_wasm_bindgen::from_value(event.detail()).map_err(|e| JsValue::from(e.to_string()))
+}
+
+/// The page asks the shortcuts sheet to open (`?`, ☰ → Keyboard shortcuts,
+/// the palette's command): a cancelable `CustomEvent` whose `detail` is a
+/// [`ShortcutsRequest`] plus `returnFocus` (see [`return_focus`]).
+pub const SHORTCUTS_EVENT: &str = "gospel-getter:shortcuts";
+
+/// The page's one table of shortcuts, as the sheet lists it: the group
+/// names in order, and the rows (`SHORTCUTS` in `ui/index.html`; the sheet
+/// reads only these fields of each).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+pub struct ShortcutsRequest {
+    pub groups: Vec<String>,
+    pub shortcuts: Vec<ShortcutRow>,
+}
+
+/// One shortcut: its id, its group, the ways to press it (each a list of
+/// key caps) and what it does.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ShortcutRow {
+    pub id: String,
+    pub group: String,
+    pub keys: Vec<Vec<String>>,
+    pub does: String,
+}
+
+/// Reads an event's `detail` as `T`, or says what was wrong with it.
+pub fn detail<T: serde::de::DeserializeOwned>(event: &CustomEvent) -> Result<T, JsValue> {
+    serde_wasm_bindgen::from_value(event.detail()).map_err(|e| JsValue::from(e.to_string()))
+}
+
+pub fn shortcuts_request(event: &CustomEvent) -> Result<ShortcutsRequest, JsValue> {
+    detail(event)
+}
+
+/// `detail.returnFocus`: the element focus goes back to when a modal the
+/// page opened closes (what had focus, or the button it was opened from),
+/// or none. An element, so it travels as itself, not in the snapshot.
+pub fn return_focus(event: &CustomEvent) -> Option<HtmlElement> {
+    js_sys::Reflect::get(&event.detail(), &JsValue::from_str("returnFocus"))
+        .ok()?
+        .dyn_into::<HtmlElement>()
+        .ok()
+}
+
+/// Sends the page `name` as a `CustomEvent` on `document`, with `detail`.
+pub fn dispatch(name: &str, detail: &impl Serialize) {
+    let Some(document) = document() else {
+        return;
+    };
+    let Ok(detail) = serde_wasm_bindgen::to_value(detail) else {
+        return;
+    };
+    let init = CustomEventInit::new();
+    init.set_detail(&detail);
+    if let Ok(event) = CustomEvent::new_with_event_init_dict(name, &init) {
+        let _ = document.dispatch_event(&event);
+    }
+}
+
+/// This module has loaded and every piece is listening: a `CustomEvent`
+/// on `document`, no `detail`. The page then sends again any request it
+/// made before (the welcome's, at the end of a boot that beat the module).
+pub const READY_EVENT: &str = "gospel-getter:pieces-ready";
+
+/// Says [`READY_EVENT`].
+pub fn ready() {
+    if let (Some(document), Ok(event)) = (document(), CustomEvent::new(READY_EVENT)) {
+        let _ = document.dispatch_event(&event);
+    }
+}
+
+/// A modal of this crate is about to open: put the page's popovers and
+/// panels away (`closeSurfaces(false)`, focus left alone) and, with
+/// `closeSearch`, the search box. A `CustomEvent` on `document`; the page
+/// does it at once, before the modal takes focus.
+pub const MODAL_OPENING_EVENT: &str = "gospel-getter:modal-opening";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModalOpening {
+    close_search: bool,
+}
+
+/// Says [`MODAL_OPENING_EVENT`].
+pub fn modal_opening(close_search: bool) {
+    dispatch(MODAL_OPENING_EVENT, &ModalOpening { close_search });
+}
+
+/// Open a chapter, as a jump the page's history records (the page's
+/// `jumpTo`): a `CustomEvent` on `document` whose `detail` is
+/// `{ bookId, chapter, top }`; with `top`, from the top of the chapter.
+pub const JUMP_EVENT: &str = "gospel-getter:jump";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Jump {
+    book_id: i64,
+    chapter: i64,
+    top: bool,
+}
+
+/// Says [`JUMP_EVENT`].
+pub fn jump(book_id: i64, chapter: i64, top: bool) {
+    dispatch(
+        JUMP_EVENT,
+        &Jump {
+            book_id,
+            chapter,
+            top,
+        },
+    );
+}
+
+/// The page asks the welcome to open: a cancelable `CustomEvent` whose
+/// `detail` is a [`WelcomeRequest`] plus `returnFocus`. At the end of boot
+/// it is a question (`startup`, with the facts the fresh-install rule needs;
+/// the welcome opens only for a fresh install); from ☰ → Show welcome it
+/// opens. Either way the welcome cancels it to say it has it.
+pub const WELCOME_EVENT: &str = "gospel-getter:welcome";
+
+/// What the welcome needs from the page.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WelcomeRequest {
+    /// Asked at the end of boot: open only for a fresh install.
+    pub startup: bool,
+    /// What boot loaded, for the rule (with `startup`).
+    pub install: Option<crate::install::Install>,
+    /// The places to start, the backend's `startHere` list.
+    pub start_here: Vec<StartRow>,
+}
+
+/// One place to start: a book (or a chapter) and a line about it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartRow {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub title: String,
+    pub line: String,
+}
+
+pub fn welcome_request(event: &CustomEvent) -> Result<WelcomeRequest, JsValue> {
+    detail(event)
+}
+
+/// Aa's record of the theme: `#theme-select`, a hidden `<select>`. The
+/// welcome reads it to know which look is in use, and picks a look the way
+/// Aa does: setting its value and sending it a `change` event, which the
+/// page's preference script applies, stores and shows.
+const THEME_SELECT: &str = "theme-select";
+
+/// The theme in use, as `#theme-select` has it.
+pub fn theme() -> String {
+    document()
+        .and_then(|d| d.get_element_by_id(THEME_SELECT))
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+        .map(|select| select.value())
+        .unwrap_or_default()
+}
+
+/// Uses the theme `value`, through Aa's own control (see [`theme`]).
+pub fn choose_theme(value: &str) {
+    let Some(select) = document()
+        .and_then(|d| d.get_element_by_id(THEME_SELECT))
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+    else {
+        return;
+    };
+    if select.value() == value {
+        return;
+    }
+    select.set_value(value);
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    if let Ok(change) = web_sys::Event::new_with_event_init_dict("change", &init) {
+        let _ = select.dispatch_event(&change);
+    }
+}
+
+/// The page's local storage keys, or `None` if it can't be read (it can
+/// throw in the webview, so every use is guarded, as the page's are).
+pub fn stored_keys() -> Option<Vec<String>> {
+    let storage = web_sys::window()?.local_storage().ok()??;
+    let length = storage.length().ok()?;
+    (0..length)
+        .map(|i| storage.key(i).ok())
+        .collect::<Option<Vec<_>>>()
+        .map(|keys| keys.into_iter().flatten().collect())
+}
+
+/// The welcome's key in local storage, beside the display settings: set to
+/// `seen` when it closes. The earlier four-page tour used the same key, so
+/// anyone who saw that never gets the welcome on upgrade.
+pub const WELCOME_KEY: &str = "gospel-getter-welcome";
+
+/// Records that the welcome has been seen; quietly not, if local storage
+/// can't be written.
+pub fn welcome_seen() {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(WELCOME_KEY, "seen");
+    }
+}
+
+/// The page asks the import to begin (its ☰ → Import data…): a cancelable
+/// `CustomEvent`, no `detail`. The import cancels it to say it has it.
+pub const IMPORT_EVENT: &str = "gospel-getter:import";
+
+/// Import or export is under way, or done: a `CustomEvent` whose `detail`
+/// is `{ busy }`. The page disables (or enables) its two ☰ items for it
+/// (`setDataBusy`), as it does for its own export.
+pub const DATA_BUSY_EVENT: &str = "gospel-getter:data-busy";
+
+#[derive(Debug, Serialize)]
+struct DataBusy {
+    busy: bool,
+}
+
+/// Says [`DATA_BUSY_EVENT`].
+pub fn data_busy(busy: bool) {
+    dispatch(DATA_BUSY_EVENT, &DataBusy { busy });
+}
+
+/// An import has changed the reader's data: a `CustomEvent` whose `detail`
+/// is `{ position, message }`. The page reloads what it shows of it, in
+/// order: the chapter at `position` (`{ translationCode, bookId, chapter }`,
+/// or `null` to stay put), then the bookmarks, highlights and notes; then
+/// it says `message` in its notice and its toast.
+pub const IMPORTED_EVENT: &str = "gospel-getter:imported";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportedPosition<'a> {
+    translation_code: &'a str,
+    book_id: i64,
+    chapter: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct Imported<'a> {
+    position: Option<ImportedPosition<'a>>,
+    message: &'a str,
+}
+
+/// Says [`IMPORTED_EVENT`].
+pub fn imported(position: Option<&crate::dto::PositionPreview>, message: &str) {
+    let position = position.map(|p| ImportedPosition {
+        translation_code: &p.translation_code,
+        book_id: p.book_id,
+        chapter: p.chapter,
+    });
+    dispatch(IMPORTED_EVENT, &Imported { position, message });
+}
+
+/// Applies display settings from an import file through the page's own
+/// `window.gospelGetterPreferences.apply(values)` (the head script's
+/// global; the only way to set them in bulk): `values` as the backend sent
+/// them. `Ok(persisted)` says whether they could also be saved; an error is
+/// what `apply` threw.
+pub fn apply_preferences(values: &JsValue) -> Result<bool, JsValue> {
+    let window: JsValue = web_sys::window()
+        .ok_or_else(|| JsValue::from_str("no window"))?
+        .into();
+    let preferences = js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterPreferences"))?;
+    let apply = js_sys::Reflect::get(&preferences, &JsValue::from_str("apply"))?
+        .dyn_into::<js_sys::Function>()
+        .map_err(|_| JsValue::from_str("The display settings can’t be applied here."))?;
+    let applied = apply.call1(&preferences, values)?;
+    Ok(
+        js_sys::Reflect::get(&applied, &JsValue::from_str("persisted"))?
+            .as_bool()
+            .unwrap_or(false),
+    )
+}
+
+/// The page opens the note editor (the selection card's + Add note and
+/// Edit, N, the Library's Edit): a cancelable `CustomEvent` whose `detail`
+/// is a [`NoteRequest`] plus `note` (the note being edited, as the page has
+/// it, or `null`; handed back with [`NOTE_DONE_EVENT`]) and `returnFocus`.
+/// The page puts its popovers and the search box away first.
+pub const NOTE_EVENT: &str = "gospel-getter:note";
+
+/// What the editor needs from the page to open.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteRequest {
+    /// `add` or `edit`.
+    pub mode: String,
+    /// The note being edited.
+    pub note: Option<NoteRef>,
+    /// The verses the note is on.
+    pub passage: Passage,
+    /// The passage's reference, e.g. "John 3:16–18" (the title).
+    pub reference: String,
+    /// The translation whose text is quoted.
+    pub code: String,
+    /// The passage quoted, as markup the page rendered with its own
+    /// `verseHtml` (KJV supplied words in italics, no note markers; text
+    /// escaped by the page), with what the translation doesn't number said
+    /// at the end. Shown as it is.
+    pub passage_html: String,
+    /// When adding, the other notes on these verses, read-only.
+    pub others: Vec<OtherNote>,
+}
+
+/// The note being edited: its id and text (the rest stays the page's).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct NoteRef {
+    pub id: i64,
+    pub body: String,
+}
+
+/// The verses a note is on.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Passage {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub start: i64,
+    pub end: i64,
+}
+
+/// Another note on the passage, as the editor lists it: its reference,
+/// the date it was written (as the page shows dates) and its text.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct OtherNote {
+    pub reference: String,
+    pub date: String,
+    pub body: String,
+}
+
+pub fn note_request(event: &CustomEvent) -> Result<NoteRequest, JsValue> {
+    detail(event)
+}
+
+/// The page's notes on the selection have changed while the editor may be
+/// open (adding): a `CustomEvent` whose `detail` is `{ others }`, the
+/// [`OtherNote`]s now. The editor shows them if it's adding.
+pub const NOTE_OTHERS_EVENT: &str = "gospel-getter:note-others";
+
+#[derive(Debug, Deserialize)]
+struct Others {
+    others: Vec<OtherNote>,
+}
+
+pub fn note_others(event: &CustomEvent) -> Result<Vec<OtherNote>, JsValue> {
+    detail::<Others>(event).map(|o| o.others)
+}
+
+/// Refreshes the page's notes after the editor has saved or deleted one:
+/// the markers, the selection card's Notes section and the Library, through
+/// `window.gospelGetterRefreshNotes()` (the page's `refreshNotes`, which
+/// reports its own failures), waiting for it, so the editor can close onto
+/// the note's refreshed Edit.
+pub async fn refresh_notes() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let refresh = js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterRefreshNotes"))
+        .ok()
+        .and_then(|f| f.dyn_into::<js_sys::Function>().ok());
+    let Some(refresh) = refresh else {
+        return;
+    };
+    if let Ok(promise) = refresh
+        .call0(&JsValue::NULL)
+        .and_then(|p| p.dyn_into::<js_sys::Promise>())
+    {
+        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+    }
+}
+
+/// The editor has added, saved or deleted a note (and the page's notes are
+/// refreshed): a `CustomEvent` whose `detail` is `{ action, note }`,
+/// `action` being `added`, `saved` or `deleted`, and `note` the deleted
+/// note as the backend returned it (else `null`). The page says so in the
+/// selection card's status line, a deletion with its Undo (the page's
+/// `restoreNote`), or in its toast when the card is gone.
+pub const NOTE_DONE_EVENT: &str = "gospel-getter:note-done";
+
+/// Says [`NOTE_DONE_EVENT`].
+pub fn note_done(action: &str, note: &JsValue) {
+    let Some(document) = document() else {
+        return;
+    };
+    let detail = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &detail,
+        &JsValue::from_str("action"),
+        &JsValue::from_str(action),
+    );
+    let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("note"), note);
+    let init = CustomEventInit::new();
+    init.set_detail(&detail);
+    if let Ok(event) = CustomEvent::new_with_event_init_dict(NOTE_DONE_EVENT, &init) {
+        let _ = document.dispatch_event(&event);
+    }
 }

@@ -149,7 +149,7 @@ test('no ghost once Shift+? opens the shortcuts sheet', () =>
         app.click(app.verse(16));
         shiftDown(app);
         assert.ok(ghost(app));
-        app.key('?', { shiftKey: true });
+        await app.key('?', { shiftKey: true });
         assert.ok(!app.document.getElementById('shortcuts-overlay').hidden);
         assert.ok(!ghost(app), 'the sheet took focus, so the card is solid again');
     }));

@@ -5150,28 +5150,6 @@
         <div id="search-results" class="search-results" role="listbox" aria-label="Results"></div>
         <button type="button" id="search-more" class="search-more" hidden>Show more</button>
     </div>
-    <div id="import-overlay" class="import-overlay" hidden>
-        <div id="import-panel" class="import-panel" role="dialog" aria-modal="true" aria-labelledby="import-title" aria-describedby="import-summary">
-            <h2 id="import-title" class="import-title">Import bookmarks, highlights, notes and settings</h2>
-            <p id="import-file" class="import-file"></p>
-            <p id="import-invalid" class="import-invalid" hidden></p>
-            <ul id="data-problems" class="data-problems"></ul>
-            <ul id="import-summary" class="import-summary"></ul>
-            <fieldset id="import-bookmark-choice" class="import-choices">
-                <legend id="import-choice-legend">Bookmarks</legend>
-                <label><input type="radio" name="import-mode" value="merge" checked> <span id="import-merge-label">Add them to my bookmarks</span></label>
-                <label><input type="radio" name="import-mode" value="replace"> <span id="import-replace-label">Replace all my bookmarks with these</span></label>
-            </fieldset>
-            <p id="import-replace-warning" class="import-warning" hidden></p>
-            <label id="import-position-option" class="import-option"><input type="checkbox" id="import-position" checked> <span id="import-position-label"></span></label>
-            <label id="import-prefs-option" class="import-option"><input type="checkbox" id="import-prefs" checked> <span id="import-prefs-label"></span></label>
-            <p id="import-error" class="import-error" role="alert"></p>
-            <div class="import-buttons">
-                <button type="button" id="import-confirm" class="import-confirm">Import</button>
-                <button type="button" id="import-cancel" class="reader-mode-btn">Cancel</button>
-            </div>
-        </div>
-    </div>
     <div id="about-overlay" class="import-overlay" hidden>
         <div id="about-panel" class="import-panel about-panel" role="dialog" aria-modal="true" aria-labelledby="about-title" aria-describedby="app-version">
             <button type="button" id="about-close" class="panel-close about-close" aria-label="Close" title="Close (Esc)">&times;</button>
@@ -5205,64 +5183,6 @@
                 <ul id="about-credits" class="about-credits-list"></ul>
             </section>
             <p class="about-links"><a id="release-notes-link" href="https://github.com/tossbaws/gospel-getter/releases" hidden>Release notes</a> <span id="release-notes-status" class="data-status" role="status" aria-live="polite"></span></p>
-        </div>
-    </div>
-    <div id="welcome-overlay" class="welcome-overlay modal-overlay" hidden>
-        <div id="welcome-panel" class="welcome-panel modal-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-intro" tabindex="-1">
-            <div class="welcome-head">
-                <h2 id="welcome-title" class="welcome-title">Welcome to Gospel Getter</h2>
-                <button type="button" id="welcome-close" class="panel-close" aria-label="Close" title="Close (Esc)">&times;</button>
-            </div>
-            <div class="welcome-body modal-body">
-                <p id="welcome-intro" class="welcome-intro">A quiet place to read the Bible on your computer, offline and with no account.</p>
-                <h3 class="section-label" id="welcome-look-label">Pick a look</h3>
-                <div id="welcome-looks" class="welcome-looks" role="radiogroup" aria-labelledby="welcome-look-label">
-                    <button type="button" class="welcome-look" role="radio" aria-checked="false" data-value="chi-rho"><span class="welcome-look-preview" data-theme-preview="chi-rho" aria-hidden="true"><span class="welcome-look-sample">Aa</span><span class="welcome-look-lines"><span></span><span></span><span></span></span></span><span class="welcome-look-name">Chi Rho</span></button>
-                    <button type="button" class="welcome-look" role="radio" aria-checked="false" data-value="vellum"><span class="welcome-look-preview" data-theme-preview="vellum" aria-hidden="true"><span class="welcome-look-sample">Aa</span><span class="welcome-look-lines"><span></span><span></span><span></span></span></span><span class="welcome-look-name">Vellum</span></button>
-                </div>
-                <p class="welcome-hint">More themes in Aa.</p>
-                <h3 class="section-label" id="welcome-start-label">Where to start</h3>
-                <ul id="welcome-start" class="welcome-start" aria-labelledby="welcome-start-label"></ul>
-            </div>
-            <div class="welcome-buttons modal-buttons">
-                <button type="button" id="welcome-skip" class="reader-mode-btn">Skip</button>
-            </div>
-        </div>
-    </div>
-    <div id="shortcuts-overlay" class="modal-overlay" hidden>
-        <div id="shortcuts-panel" class="modal-panel shortcuts-panel" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
-            <div class="shortcuts-head">
-                <h2 id="shortcuts-title" class="shortcuts-title">Keyboard shortcuts</h2>
-                <button type="button" id="shortcuts-close" class="panel-close" aria-label="Close keyboard shortcuts" title="Close (Esc)">&times;</button>
-            </div>
-            <div id="shortcuts-body" class="modal-body shortcuts-body" tabindex="0" role="region" aria-labelledby="shortcuts-title"></div>
-        </div>
-    </div>
-    <div id="note-overlay" class="modal-overlay" hidden>
-        <div id="note-panel" class="modal-panel note-panel" role="dialog" aria-modal="true" aria-labelledby="note-title" aria-describedby="note-passage">
-            <div class="modal-body">
-                <h2 id="note-title" class="note-title"></h2>
-                <blockquote id="note-passage" class="note-passage"></blockquote>
-                <p id="note-text-shown" class="note-text-shown"></p>
-                <details id="note-others" class="note-others" hidden>
-                    <summary id="note-others-summary"></summary>
-                    <ul id="note-others-list"></ul>
-                </details>
-                <label id="note-label" class="note-label" for="note-input"></label>
-                <textarea id="note-input" class="note-input" rows="5" aria-describedby="note-length note-error" spellcheck="true"></textarea>
-                <p id="note-length" class="note-length" aria-live="polite"></p>
-                <p id="note-error" class="note-error" role="alert"></p>
-            </div>
-            <div id="note-buttons" class="modal-buttons note-buttons">
-                <button type="button" id="note-save" class="import-confirm note-save" disabled>Save</button>
-                <button type="button" id="note-cancel" class="reader-mode-btn">Cancel</button>
-                <button type="button" id="note-delete" class="reader-mode-btn note-delete" hidden>Delete</button>
-            </div>
-            <div id="note-discard" class="modal-buttons note-buttons" hidden>
-                <p id="note-discard-question" class="note-discard-question" role="alert">Discard this note?</p>
-                <button type="button" id="note-discard-yes" class="import-confirm">Discard</button>
-                <button type="button" id="note-keep" class="reader-mode-btn" aria-describedby="note-discard-question">Keep editing</button>
-            </div>
         </div>
     </div>
     <p id="data-status" class="toast is-hidden" role="status" aria-live="polite"></p>
@@ -6348,7 +6268,6 @@
             // markers, the selection's Notes section and the Library — so
             // none of them goes stale.
 
-            const NOTE_MAX_CHARS = 10000;
             const NOTES_SHOWN = 3;
             const UNDO_MS = 8000;
             const noteList = document.getElementById('note-list');
@@ -6443,7 +6362,8 @@
                     selectionNotesError = `Notes couldn’t be loaded: ${errorText(e)}`;
                 }
                 renderNotesSection();
-                if (noteSession && noteSession.mode === 'add') renderNoteOthers();
+                // The note editor, if it's open and adding, lists them too.
+                document.dispatchEvent(new CustomEvent('gospel-getter:note-others', { detail: { others: noteOthers() } }));
             }
 
             // The selection's Notes section, under its actions: shown only
@@ -6534,6 +6454,9 @@
             async function refreshNotes() {
                 await Promise.all([refreshChapterNotes(), refreshSelectionNotes(), refreshNoteList()]);
             }
+            // The note editor (ui-leptos) refreshes them after a save or a
+            // delete, and waits; see ui-leptos/src/bridge.rs.
+            window.gospelGetterRefreshNotes = refreshNotes;
 
             // A Library row is one link to its passage: a click anywhere on
             // it, outside its own buttons, is a click on the row's open
@@ -6563,69 +6486,17 @@
                 }
             });
 
-            // ---- The note panel: a modal, like the welcome. It has the
-            // keyboard while open; closing it returns focus to whatever
-            // opened it (or, if that's gone, to the selection's actions).
+            // ---- The note editor is one of the page's pieces written in
+            // Rust (ui-leptos/src/note_editor.rs); what crosses is documented
+            // in ui-leptos/src/bridge.rs. These open it, with the passage as
+            // it's read here and, when adding, the other notes on it; it
+            // saves and deletes, has the notes refreshed, closes, and then
+            // says what it did (below): the status line, and a deleted
+            // note's Undo, stay here, in the selection card.
 
-            const noteOverlay = document.getElementById('note-overlay');
-            const notePanel = document.getElementById('note-panel');
-            const noteTitle = document.getElementById('note-title');
-            const notePassageEl = document.getElementById('note-passage');
-            const noteTextShown = document.getElementById('note-text-shown');
-            const noteOthers = document.getElementById('note-others');
-            const noteOthersSummary = document.getElementById('note-others-summary');
-            const noteOthersList = document.getElementById('note-others-list');
-            const noteLabel = document.getElementById('note-label');
-            const noteInput = document.getElementById('note-input');
-            const noteLength = document.getElementById('note-length');
-            const noteError = document.getElementById('note-error');
-            const noteButtons = document.getElementById('note-buttons');
-            const noteSave = document.getElementById('note-save');
-            const noteCancel = document.getElementById('note-cancel');
-            const noteDelete = document.getElementById('note-delete');
-            const noteDiscard = document.getElementById('note-discard');
-            const noteKeep = document.getElementById('note-keep');
-
-            // { mode: 'add' or 'edit', note (when editing), passage, code,
-            // initial text } while the panel is open.
-            let noteSession = null;
-            let noteReturn = null;
-            let noteBusy = false;
-
-            const charCount = (text) => [...text].length;
-
-            function noteChanged() {
-                return !!noteSession && noteInput.value.trim() !== noteSession.initial.trim();
-            }
-
-            function updateNoteControls() {
-                const text = noteInput.value.trim();
-                const length = charCount(text);
-                noteSave.disabled = noteBusy || !text || length > NOTE_MAX_CHARS;
-                noteDelete.disabled = noteBusy;
-                if (length > NOTE_MAX_CHARS) {
-                    noteLength.textContent = `${length.toLocaleString('en')} characters: a note can hold up to ${NOTE_MAX_CHARS.toLocaleString('en')}.`;
-                } else if (length > NOTE_MAX_CHARS - 500) {
-                    noteLength.textContent = `${length.toLocaleString('en')} of ${NOTE_MAX_CHARS.toLocaleString('en')} characters`;
-                } else {
-                    noteLength.textContent = '';
-                }
-            }
-
-            // When adding, the other notes on the passage, read-only.
-            function renderNoteOthers() {
-                const others = noteSession && noteSession.mode === 'add' ? selectionNotes : [];
-                noteOthers.hidden = !others.length;
-                noteOthersSummary.textContent = `Other notes on these verses (${others.length})`;
-                noteOthersList.innerHTML = others
-                    .map((n) => `<li><span class="note-others-ref">${escapeHtml(n.reference)} · ${escapeHtml(noteDate(n.createdAt))}</span><span class="note-others-body">${escapeHtml(n.body)}</span></li>`)
-                    .join('');
-            }
-
-            function showDiscardPrompt(show) {
-                noteButtons.hidden = show;
-                noteDiscard.hidden = !show;
-                if (show) noteKeep.focus({ preventScroll: true });
+            // The selection's notes, as the editor lists the others.
+            function noteOthers() {
+                return selectionNotes.map((n) => ({ reference: n.reference, date: noteDate(n.createdAt), body: n.body }));
             }
 
             // `passage` defaults to the note's own; `code` is the
@@ -6635,9 +6506,6 @@
                 closeSurfaces(false);
                 if (!searchPanel.hidden) setSearchOpen(false);
                 const reference = passageReference(passage.bookName, passage.chapter, passage.start, passage.end);
-                noteSession = { mode, note, passage, code, initial: note ? note.body : '' };
-                noteReturn = { el: opener, noteId: note ? note.id : null };
-                noteTitle.textContent = reference;
                 // The verses as this translation numbers and shows them (KJV
                 // supplied words in italics, no note markers); any it
                 // doesn't number are said to be missing.
@@ -6645,29 +6513,25 @@
                     ? columnVerses(code).filter((v) => v.number >= passage.start && v.number <= passage.end).sort((a, b) => a.number - b.number)
                     : [];
                 const missing = passage.end - passage.start + 1 - verses.length;
-                notePassageEl.innerHTML = verses
+                const passageHtml = verses
                     .map((v) => `<span class="note-passage-num">${v.number}</span>${verseHtml(v, { markers: false })}`)
                     .join(' ')
                     + (missing > 0 ? ` <em>${verses.length ? 'Not all of it is' : 'It isn’t'} numbered in the ${escapeHtml(code.toUpperCase())}.</em>` : '');
-                noteTextShown.textContent = `Text shown: ${code.toUpperCase()}`;
-                noteOthers.open = false;
-                renderNoteOthers();
-                noteLabel.textContent = `Your note on ${reference}`;
-                noteInput.value = noteSession.initial;
-                noteError.textContent = '';
-                noteDelete.hidden = mode !== 'edit';
-                noteBusy = false;
-                showDiscardPrompt(false);
-                updateNoteControls();
-                noteOverlay.hidden = false;
-                notePanel.querySelector('.modal-body').scrollTop = 0;
-                // Focus never scrolls the page behind; in a short window the
-                // panel's own body scrolls to show the whole of the note.
-                noteInput.focus({ preventScroll: true });
-                noteInput.setSelectionRange(noteInput.value.length, noteInput.value.length);
-                const body = notePanel.querySelector('.modal-body');
-                const below = noteInput.getBoundingClientRect().bottom - body.getBoundingClientRect().bottom;
-                if (below > 0) body.scrollTop += below + 8;
+                const request = new CustomEvent('gospel-getter:note', {
+                    cancelable: true,
+                    detail: {
+                        mode,
+                        note,
+                        passage: { bookId: passage.bookId, chapter: passage.chapter, start: passage.start, end: passage.end },
+                        reference,
+                        code,
+                        passageHtml,
+                        others: mode === 'add' ? noteOthers() : [],
+                        returnFocus: opener,
+                    },
+                });
+                if (!document.dispatchEvent(request)) return;
+                setDataStatus('The note editor isn’t available.', true);
             }
 
             function openAddNote(opener) {
@@ -6680,93 +6544,25 @@
                 });
             }
 
-            function closeNotePanel() {
-                noteOverlay.hidden = true;
-                showDiscardPrompt(false);
-                const back = noteReturn;
-                noteSession = null;
-                noteReturn = null;
-                const usable = (el) => el && el.isConnected && !el.closest('[hidden]');
-                let target = back && usable(back.el) ? back.el : null;
-                if (!target && back && back.noteId != null) {
-                    const edit = notesSection.querySelector(`.note-edit[data-note-id="${back.noteId}"]`);
-                    if (usable(edit)) target = edit;
-                }
-                if (!target && usable(noteAddBtn)) target = noteAddBtn;
-                if (!target) {
-                    target = document.querySelector('.chapter-main .chapter-heading');
-                    if (target) target.tabIndex = -1;
-                }
-                if (target) target.focus({ preventScroll: true });
+            // The editor's overlay is the Rust side's: looked up when asked.
+            function noteOpen() {
+                const overlay = document.getElementById('note-overlay');
+                return !!overlay && !overlay.hidden;
             }
 
-            // Cancel, or Escape: closes at once if nothing changed, and
-            // otherwise asks first.
-            function requestCloseNote() {
-                if (noteBusy) return;
-                if (noteChanged()) showDiscardPrompt(true);
-                else closeNotePanel();
-            }
-
-            // A note that can't be saved stays in the panel, with why.
-            async function saveNote() {
-                const session = noteSession;
-                if (!session || noteSave.disabled) return;
-                const body = noteInput.value;
-                noteBusy = true;
-                noteError.textContent = '';
-                updateNoteControls();
-                try {
-                    if (session.mode === 'edit') {
-                        await invoke('update_note', { id: session.note.id, body });
+            // What the editor did, its notes already refreshed.
+            document.addEventListener('gospel-getter:note-done', function (event) {
+                const { action, note } = event.detail;
+                if (action === 'deleted') {
+                    if (verseActions.isConnected) {
+                        setActionStatus('Note deleted · ', false, { undo: () => restoreNote(note), duration: UNDO_MS });
                     } else {
-                        const { bookId, chapter, start, end } = session.passage;
-                        await invoke('add_note', { bookId, chapter, verseStart: start, verseEnd: end, body });
+                        setDataStatus(`Deleted the note on ${note.reference}.`);
                     }
-                } catch (e) {
-                    console.error('Failed to save the note', e);
-                    noteBusy = false;
-                    if (noteSession === session) {
-                        noteError.textContent = `The note wasn’t saved: ${errorText(e)} Your text is still here.`;
-                        updateNoteControls();
-                        noteInput.focus({ preventScroll: true });
-                    }
-                    return;
+                } else if (verseActions.isConnected) {
+                    setActionStatus(action === 'saved' ? 'Note saved' : 'Note added', false);
                 }
-                noteBusy = false;
-                await refreshNotes();
-                if (noteSession === session) closeNotePanel();
-                if (verseActions.isConnected) setActionStatus(session.mode === 'edit' ? 'Note saved' : 'Note added', false);
-            }
-
-            async function deleteNote() {
-                const session = noteSession;
-                if (!session || session.mode !== 'edit' || noteBusy) return;
-                noteBusy = true;
-                noteError.textContent = '';
-                updateNoteControls();
-                let deleted;
-                try {
-                    deleted = await invoke('delete_note', { id: session.note.id });
-                } catch (e) {
-                    console.error('Failed to delete the note', e);
-                    noteBusy = false;
-                    if (noteSession === session) {
-                        noteError.textContent = `The note wasn’t deleted: ${errorText(e)}`;
-                        updateNoteControls();
-                    }
-                    return;
-                }
-                noteBusy = false;
-                await refreshNotes();
-                if (noteSession === session) closeNotePanel();
-                const gone = deleted || session.note;
-                if (verseActions.isConnected) {
-                    setActionStatus('Note deleted · ', false, { undo: () => restoreNote(gone), duration: UNDO_MS });
-                } else {
-                    setDataStatus(`Deleted the note on ${gone.reference}.`);
-                }
-            }
+            });
 
             // Undo: the same passage, text and dates.
             async function restoreNote(note) {
@@ -6790,59 +6586,6 @@
                 if (attempt === actionAttempt) setActionStatus('Note restored', false);
             }
 
-            noteInput.addEventListener('input', updateNoteControls);
-            noteSave.addEventListener('click', saveNote);
-            noteCancel.addEventListener('click', requestCloseNote);
-            noteDelete.addEventListener('click', deleteNote);
-            document.getElementById('note-discard-yes').addEventListener('click', closeNotePanel);
-            noteKeep.addEventListener('click', function () {
-                showDiscardPrompt(false);
-                noteInput.focus({ preventScroll: true });
-            });
-
-            // Clicking the dimmed page behind the panel does nothing, and
-            // leaves focus where it was.
-            noteOverlay.addEventListener('mousedown', function (event) {
-                if (event.target === noteOverlay) event.preventDefault();
-            });
-
-            // While the panel is open it has the keyboard, before any other
-            // handler sees a key (this listens on window, capturing): none
-            // of the reader's shortcuts run. Escape closes (or asks first,
-            // or, while asking, keeps editing); Ctrl+Enter (Cmd+Enter)
-            // saves; Tab stays inside.
-            window.addEventListener('keydown', function (event) {
-                if (noteOverlay.hidden) return;
-                event.stopPropagation();
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    if (!noteDiscard.hidden) {
-                        showDiscardPrompt(false);
-                        noteInput.focus({ preventScroll: true });
-                    } else {
-                        requestCloseNote();
-                    }
-                } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && noteDiscard.hidden) {
-                    event.preventDefault();
-                    saveNote();
-                } else if (event.key === 'Tab') {
-                    const focusable = [...notePanel.querySelectorAll('textarea, button, summary')]
-                        .filter((el) => !el.disabled && !el.closest('[hidden]'));
-                    const first = focusable[0];
-                    const last = focusable[focusable.length - 1];
-                    if (!notePanel.contains(document.activeElement)) {
-                        event.preventDefault();
-                        (event.shiftKey ? last : first).focus();
-                    } else if (event.shiftKey && document.activeElement === first) {
-                        event.preventDefault();
-                        last.focus();
-                    } else if (!event.shiftKey && document.activeElement === last) {
-                        event.preventDefault();
-                        first.focus();
-                    }
-                }
-            }, true);
-
             // ---- Back up or move your data: export and import bookmarks,
             // highlights, notes, reading position and display settings. The native file
             // dialogs, file access and validation are all in the backend;
@@ -6851,23 +6594,6 @@
             const exportDataBtn = document.getElementById('export-data-btn');
             const importDataBtn = document.getElementById('import-data-btn');
             const dataStatus = document.getElementById('data-status');
-            const dataProblems = document.getElementById('data-problems');
-            const importTitle = document.getElementById('import-title');
-            const importInvalid = document.getElementById('import-invalid');
-            const importSummary = document.getElementById('import-summary');
-            const IMPORT_TITLE = importTitle.textContent;
-            const importOverlay = document.getElementById('import-overlay');
-            const importPanel = document.getElementById('import-panel');
-            const importConfirm = document.getElementById('import-confirm');
-            const importCancel = document.getElementById('import-cancel');
-            const importError = document.getElementById('import-error');
-            const importPositionOption = document.getElementById('import-position-option');
-            const importPosition = document.getElementById('import-position');
-            const importPrefsOption = document.getElementById('import-prefs-option');
-            const importPrefs = document.getElementById('import-prefs');
-            const importBookmarkChoice = document.getElementById('import-bookmark-choice');
-            const importReplaceWarning = document.getElementById('import-replace-warning');
-            let importPreview = null;
 
             const plural = (n, one, many = `${one}s`) => `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
 
@@ -6951,6 +6677,20 @@
                 setDataStatus(String(event.detail.message), !!event.detail.isError);
             });
 
+            // A Rust modal about to open: popovers and panels go (focus left
+            // alone, the modal takes it), and the search box if asked.
+            document.addEventListener('gospel-getter:modal-opening', function (event) {
+                closeSurfaces(false);
+                if (event.detail && event.detail.closeSearch && !searchPanel.hidden) setSearchOpen(false);
+            });
+
+            // A Rust piece opens a chapter (the welcome's places to start):
+            // a jump, as the page's own are, recorded in its history.
+            document.addEventListener('gospel-getter:jump', function (event) {
+                const { bookId, chapter, top } = event.detail;
+                jumpTo(String(bookId), String(chapter), null, null, { top: !!top });
+            });
+
             // The dialog's overlay is the Rust side's element, made when its
             // code loads, so it is looked up when asked, never kept: the
             // keyboard dispatcher and the card's Shift ghost need to know
@@ -6960,457 +6700,101 @@
                 return !!overlay && !overlay.hidden;
             }
 
-            // Readable names for display settings, taken from Aa's own
-            // options.
-            function describePreferences(prefs) {
-                const optionText = (selectId, value) => {
-                    const option = [...document.getElementById(selectId).options].find((o) => o.value === value);
-                    return option ? option.textContent : value;
-                };
-                const parts = [];
-                if (prefs.theme) parts.push(`${optionText('theme-select', prefs.theme)} theme`);
-                if (prefs.text_size) parts.push(`${optionText('text-size-select', prefs.text_size).toLowerCase()} text`);
-                if (prefs.line_spacing) parts.push(`${optionText('line-spacing-select', prefs.line_spacing).toLowerCase()} line spacing`);
-                if (prefs.width) parts.push(`${optionText('width-select', prefs.width).toLowerCase()} width`);
-                if (prefs.layout) parts.push(`${optionText('layout-select', prefs.layout).toLowerCase()} layout`);
-                if (prefs.compare != null) parts.push(`compare ${prefs.compare ? 'on' : 'off'}`);
-                if (prefs.compare_with) parts.push(`compare with the ${prefs.compare_with.toUpperCase()}`);
-                if (prefs.reading_mode != null) parts.push(`reading mode ${prefs.reading_mode ? 'on' : 'off'}`);
-                return parts;
-            }
-
-            function updateImportMode() {
-                const replace = importPanel.querySelector('input[name="import-mode"][value="replace"]').checked;
-                const current = importPreview ? importPreview.currentBookmarks : 0;
-                importReplaceWarning.hidden = !replace;
-                if (importPreview && importPreview.hasNotes) {
-                    importReplaceWarning.textContent = `This deletes your ${plural(current, 'current bookmark')}, ${plural(importPreview.currentHighlights, 'highlighted verse')} and ${plural(importPreview.currentNotes, 'note')} and keeps only the file’s. If you might want yours back, cancel and export them first.`;
-                    importConfirm.textContent = replace ? 'Replace bookmarks, highlights and notes and import' : 'Import';
-                } else if (importPreview && importPreview.hasHighlights) {
-                    importReplaceWarning.textContent = `This deletes your ${plural(current, 'current bookmark')} and ${plural(importPreview.currentHighlights, 'highlighted verse')} and keeps only the file’s. If you might want yours back, cancel and export them first.`;
-                    importConfirm.textContent = replace ? 'Replace bookmarks and highlights and import' : 'Import';
-                } else {
-                    importReplaceWarning.textContent = `This deletes your ${plural(current, 'current bookmark')} and keeps only the file’s. If you might want yours back, cancel and export them first.`;
-                    importConfirm.textContent = replace ? 'Replace bookmarks and import' : 'Import';
-                }
-            }
-
-            // Shows the import dialog in one of its two forms: a preview
-            // to confirm (`invalid` false), or why a file can't be
-            // imported, with each problem found in it.
-            function setImportMode(invalid) {
-                importTitle.textContent = invalid ? 'This file can’t be imported' : IMPORT_TITLE;
-                importInvalid.hidden = !invalid;
-                importSummary.hidden = invalid;
-                importConfirm.hidden = invalid;
-                importCancel.textContent = invalid ? 'Close' : 'Cancel';
-                importPanel.setAttribute('aria-describedby', invalid ? 'import-invalid data-problems' : 'import-summary');
-                if (invalid) {
-                    importBookmarkChoice.hidden = true;
-                    importReplaceWarning.hidden = true;
-                    importPositionOption.hidden = true;
-                    importPrefsOption.hidden = true;
-                    importError.textContent = '';
-                } else {
-                    dataProblems.innerHTML = '';
-                }
-            }
-
-            function showImportProblems(choice) {
-                importPreview = null;
-                setImportMode(true);
-                document.getElementById('import-file').textContent = choice.fileName;
-                importInvalid.textContent = `${choice.message} Nothing was changed.`;
-                dataProblems.innerHTML = (choice.problems || []).map((p) => `<li>${escapeHtml(p)}</li>`).join('');
-                closeSurfaces(false);
-                importOverlay.hidden = false;
-                importCancel.focus();
-            }
-
-            function openImportPreview(preview) {
-                importPreview = preview;
-                setImportMode(false);
-                const exported = (preview.exportedAt || '').slice(0, 10);
-                document.getElementById('import-file').textContent =
-                    `${preview.fileName} — exported ${exported || 'at an unknown time'} by Gospel Getter ${preview.appVersion}`;
-
-                const summary = [];
-                if (preview.bookmarksInFile) {
-                    let line = `${plural(preview.bookmarksInFile, 'bookmark')}: ${preview.newBookmarks} new, ${preview.alreadyPresent} you already have.`;
-                    if (preview.duplicatesInFile) line += ` (${plural(preview.duplicatesInFile, 'repeated entry', 'repeated entries')} in the file will be skipped.)`;
-                    summary.push(line);
-                    const more = preview.bookmarksInFile > preview.sample.length ? ', …' : '';
-                    summary.push(`Including ${preview.sample.join(', ')}${more}`);
-                } else {
-                    summary.push('No bookmarks.');
-                }
-                // Format 2 files can carry highlights; format 1 files can't,
-                // and leave the reader's highlights alone.
-                if (preview.hasHighlights) {
-                    if (preview.highlightsInFile) {
-                        let line = `${plural(preview.highlightsInFile, 'highlighted verse')}: ${preview.newHighlights} new, ${preview.alreadyHighlighted} you’ve already highlighted (those keep your colors).`;
-                        if (preview.highlightDuplicatesInFile) line += ` (${plural(preview.highlightDuplicatesInFile, 'repeated entry', 'repeated entries')} in the file will be skipped.)`;
-                        summary.push(line);
-                    } else {
-                        summary.push('No highlights.');
-                    }
-                }
-                // Format 3 files can carry notes; older ones can't, and
-                // leave the reader's notes alone.
-                if (preview.hasNotes) {
-                    if (preview.notesInFile) {
-                        let line = `${plural(preview.notesInFile, 'note')}: ${preview.newNotes} new, ${preview.notesAlreadyPresent} you already have.`;
-                        if (preview.noteDuplicatesInFile) line += ` (${plural(preview.noteDuplicatesInFile, 'repeated entry', 'repeated entries')} in the file will be skipped.)`;
-                        summary.push(line);
-                    } else {
-                        summary.push('No notes.');
-                    }
-                }
-                if (!preview.position) summary.push('No reading position.');
-                if (!describePreferences(preview.preferences).length) summary.push('No display settings.');
-                // Settings from a later version (a theme this one doesn't
-                // have, say) are skipped; the backend names them.
-                if (preview.skippedPreferencesNotice) summary.push(preview.skippedPreferencesNotice);
-                document.getElementById('import-summary').innerHTML = summary.map((s) => `<li>${escapeHtml(s)}</li>`).join('');
-
-                importBookmarkChoice.hidden = !(preview.bookmarksInFile || preview.highlightsInFile || preview.notesInFile);
-                importPanel.querySelector('input[name="import-mode"][value="merge"]').checked = true;
-                if (preview.hasNotes) {
-                    document.getElementById('import-choice-legend').textContent = 'Bookmarks, highlights and notes';
-                    document.getElementById('import-merge-label').textContent =
-                        `Add them to mine (${plural(preview.newBookmarks, 'new bookmark')}, ${plural(preview.newHighlights, 'new highlighted verse')}, ${plural(preview.newNotes, 'new note')}; anything I already have stays as it is)`;
-                    document.getElementById('import-replace-label').textContent =
-                        `Replace all my bookmarks, highlights and notes with the file’s (removes my ${plural(preview.currentBookmarks, 'current bookmark')}, ${plural(preview.currentHighlights, 'highlighted verse')} and ${plural(preview.currentNotes, 'note')})`;
-                } else if (preview.hasHighlights) {
-                    document.getElementById('import-choice-legend').textContent = 'Bookmarks and highlights';
-                    document.getElementById('import-merge-label').textContent =
-                        `Add them to mine (${plural(preview.newBookmarks, 'new bookmark')}, ${plural(preview.newHighlights, 'new highlighted verse')}; anything I already have stays as it is)`;
-                    document.getElementById('import-replace-label').textContent =
-                        `Replace all my bookmarks and highlights with the file’s (removes my ${plural(preview.currentBookmarks, 'current bookmark')} and ${plural(preview.currentHighlights, 'highlighted verse')})`;
-                } else {
-                    document.getElementById('import-choice-legend').textContent = 'Bookmarks';
-                    document.getElementById('import-merge-label').textContent =
-                        `Add them to my bookmarks (${preview.newBookmarks} new; any I already have stay as they are)`;
-                    document.getElementById('import-replace-label').textContent =
-                        `Replace all my bookmarks with the file’s (removes my ${plural(preview.currentBookmarks, 'current bookmark')})`;
-                }
-
-                importPositionOption.hidden = !preview.position;
-                importPosition.checked = !!preview.position;
-                document.getElementById('import-position-label').textContent = preview.position
-                    ? `Go to the file’s reading position: ${preview.position.reference}`
-                    : '';
-
-                const prefs = describePreferences(preview.preferences);
-                importPrefsOption.hidden = !prefs.length;
-                importPrefs.checked = prefs.length > 0;
-                document.getElementById('import-prefs-label').textContent = prefs.length
-                    ? `Use the file’s display settings: ${prefs.join(', ')}`
-                    : '';
-
-                importError.textContent = '';
-                importConfirm.disabled = false;
-                updateImportMode();
-                closeSurfaces(false);
-                importOverlay.hidden = false;
-                importConfirm.focus();
-            }
-
-            function closeImportPreview() {
-                importOverlay.hidden = true;
-                importPreview = null;
-            }
-
-            // Cancel (or Close, for a file that can't be imported). Focus
-            // goes back to ☰, where Import data… was chosen.
-            function cancelImportPreview() {
-                if (importOverlay.hidden) return;
-                if (importPreview) {
-                    invoke('cancel_import', { token: importPreview.token }).catch((e) => console.error('Failed to discard import', e));
-                    setDataStatus('Import cancelled. Nothing was changed.');
-                }
-                closeImportPreview();
-                focusHome();
-            }
-
-            importDataBtn.addEventListener('click', async function () {
-                setDataBusy(true);
-                setDataStatus('Choose a file to import…');
-                try {
-                    const choice = await invoke('choose_import_file');
-                    if (choice.status === 'cancelled') {
-                        setDataStatus('Import cancelled. Nothing was changed.');
-                    } else if (choice.status === 'invalid') {
-                        setDataStatus('');
-                        showImportProblems(choice);
-                    } else {
-                        setDataStatus('');
-                        openImportPreview(choice.preview);
-                    }
-                } catch (e) {
-                    console.error('Import failed', e);
-                    setDataStatus(`Import failed: ${errorText(e)} Nothing was changed.`, true);
-                } finally {
-                    setDataBusy(false);
-                }
+            // ---- The import preview is one of the page's pieces written in
+            // Rust (ui-leptos/src/import_preview.rs); what crosses is
+            // documented in ui-leptos/src/bridge.rs. Import data… asks it to
+            // begin; it runs the native open dialog, the preview and the
+            // import, says how it's going in the toast and keeps the two ☰
+            // items disabled meanwhile, and after an import has the page
+            // reload what it shows (below).
+            importDataBtn.addEventListener('click', function () {
+                const request = new CustomEvent('gospel-getter:import', { cancelable: true });
+                if (!document.dispatchEvent(request)) return;
+                setDataStatus('Import isn’t available.', true);
             });
 
-            importPanel.addEventListener('change', function (event) {
-                if (event.target.name === 'import-mode') updateImportMode();
+            document.addEventListener('gospel-getter:data-busy', function (event) {
+                setDataBusy(!!event.detail.busy);
             });
 
-            importCancel.addEventListener('click', cancelImportPreview);
-
-            importConfirm.addEventListener('click', async function () {
-                const preview = importPreview;
-                if (!preview) return;
-                const replace = !importBookmarkChoice.hidden
-                    && importPanel.querySelector('input[name="import-mode"][value="replace"]').checked;
-                const restorePosition = !!preview.position && importPosition.checked;
-                const usePrefs = !importPrefsOption.hidden && importPrefs.checked;
-                importConfirm.disabled = true;
-                importError.textContent = '';
-                let result;
-                try {
-                    result = await invoke('apply_import', { token: preview.token, replace, restorePosition });
-                } catch (e) {
-                    // The database import is all-or-nothing, so nothing
-                    // changed; the preview stays open to retry or cancel.
-                    console.error('Import failed', e);
-                    importError.textContent = `${errorText(e)} You can try again, or cancel.`;
-                    importConfirm.disabled = false;
-                    return;
-                }
-                closeImportPreview();
-                focusHome();
-
-                const parts = [];
-                if (preview.bookmarksInFile) {
-                    parts.push(replace
-                        ? `Replaced ${plural(result.removed, 'bookmark')} with the file’s ${plural(result.added, 'bookmark')}.`
-                        : `Added ${plural(result.added, 'bookmark')}${result.alreadyPresent ? ` (${result.alreadyPresent} you already had)` : ''}.`);
-                }
-                if (preview.hasHighlights && (preview.highlightsInFile || (replace && result.highlightsRemoved))) {
-                    parts.push(replace
-                        ? `Replaced ${plural(result.highlightsRemoved, 'highlighted verse')} with the file’s ${plural(result.highlightsAdded, 'highlighted verse')}.`
-                        : `Added ${plural(result.highlightsAdded, 'highlighted verse')}${result.highlightsAlreadyPresent ? ` (${result.highlightsAlreadyPresent} you’d already highlighted kept your colors)` : ''}.`);
-                }
-                if (preview.hasNotes && (preview.notesInFile || (replace && result.notesRemoved))) {
-                    parts.push(replace
-                        ? `Replaced ${plural(result.notesRemoved, 'note')} with the file’s ${plural(result.notesAdded, 'note')}.`
-                        : `Added ${plural(result.notesAdded, 'note')}${result.notesAlreadyPresent ? ` (${result.notesAlreadyPresent} you already had)` : ''}.`);
-                }
-                if (result.position) parts.push(`Went to ${result.position.reference}.`);
-                if (preview.skippedPreferencesNotice) parts.push(preview.skippedPreferencesNotice);
-
-                // Display settings live in the webview's own storage, not
-                // the database, so they're applied after the database part
-                // has succeeded; a failure here is reported, not hidden.
-                if (usePrefs) {
-                    try {
-                        const applied = window.gospelGetterPreferences.apply(preview.preferences);
-                        parts.push(applied.persisted
-                            ? 'Display settings applied.'
-                            : 'Display settings applied, but they couldn’t be saved here, so they’ll reset when the app restarts.');
-                    } catch (e) {
-                        console.error('Failed to apply display settings', e);
-                        parts.push(`Display settings weren’t applied: ${errorText(e)}`);
-                    }
-                }
-
-                if (result.position) {
-                    translationSelect.value = result.position.translationCode;
-                    await loadReading(result.position.bookId, result.position.chapter);
+            // After an import: the file's reading position (if chosen), then
+            // the bookmarks, highlights and notes, then the result.
+            document.addEventListener('gospel-getter:imported', async function (event) {
+                const { position, message } = event.detail;
+                if (position) {
+                    translationSelect.value = position.translationCode;
+                    await loadReading(position.bookId, position.chapter);
                 }
                 await refreshBookmarks();
                 await refreshHighlights();
                 await refreshNotes();
-                const message = `Import complete. ${parts.join(' ')}`;
                 showNotice(message);
                 setDataStatus(message);
             });
 
-            // While the preview is open it has the keyboard: Escape
-            // cancels, and Tab stays inside it.
-            importOverlay.addEventListener('keydown', function (event) {
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    cancelImportPreview();
-                    return;
-                }
-                if (event.key !== 'Tab') return;
-                const focusable = [...importPanel.querySelectorAll('input, button')].filter((el) => !el.disabled && !el.closest('[hidden]'));
-                if (!focusable.length) return;
-                const first = focusable[0];
-                const last = focusable[focusable.length - 1];
-                if (event.shiftKey && document.activeElement === first) {
-                    event.preventDefault();
-                    last.focus();
-                } else if (!event.shiftKey && document.activeElement === last) {
-                    event.preventDefault();
-                    first.focus();
-                }
-            });
-
-            // ---- The welcome: one card over the open chapter. It opens by
-            // itself only on a fresh install (see isFreshInstall), and
-            // whenever Show welcome is chosen in the ☰ menu. It offers a
-            // look (Chi Rho or Vellum, applied as Aa applies a theme) and a
-            // few places to start reading (the backend's startHere list).
-            // Closing it any way (Skip, ×, Escape, or a place to start)
-            // records that it's been seen, in local storage beside the
-            // display preferences, under the key the earlier four-page tour
-            // used: anyone who saw that never gets this on upgrade.
-            const WELCOME_KEY = 'gospel-getter-welcome';
-            const welcomeOverlay = document.getElementById('welcome-overlay');
-            const welcomePanel = document.getElementById('welcome-panel');
-            const welcomeLooks = [...document.querySelectorAll('#welcome-looks [role="radio"]')];
-            const welcomeStart = document.getElementById('welcome-start');
-            const welcomeStartLabel = document.getElementById('welcome-start-label');
-            const themeSelect = document.getElementById('theme-select');
-            let welcomeReturnFocus = null;
-
-            // The places to start, from the backend: each a book (or a
-            // chapter) and a line about it. With none, the section hides.
-            function renderStartHere(rows) {
-                const list = Array.isArray(rows) ? rows : [];
-                welcomeStart.innerHTML = list
-                    .map((row) => `<li><button type="button" class="welcome-start-row" data-book="${row.bookId}" data-chapter="${row.chapter}"><span class="welcome-start-title">${escapeHtml(row.title)}</span> <span class="welcome-start-line">${escapeHtml(row.line)}</span></button></li>`)
-                    .join('');
-                welcomeStart.hidden = !list.length;
-                welcomeStartLabel.hidden = !list.length;
+            // The preview's overlay is the Rust side's: looked up when asked.
+            function importOpen() {
+                const overlay = document.getElementById('import-overlay');
+                return !!overlay && !overlay.hidden;
             }
 
-            // The look in effect is checked (neither, for another theme),
-            // and is the radio group's one tab stop (the first, if neither).
-            function syncWelcomeLooks() {
-                const theme = themeSelect.value;
-                const checked = welcomeLooks.find((radio) => radio.dataset.value === theme);
-                welcomeLooks.forEach((radio) => {
-                    radio.setAttribute('aria-checked', String(radio === checked));
-                    radio.tabIndex = radio === (checked || welcomeLooks[0]) ? 0 : -1;
-                });
-            }
+            // ---- The welcome is one of the page's pieces written in Rust
+            // (ui-leptos/src/welcome.rs); what crosses is documented in
+            // ui-leptos/src/bridge.rs. It opens by itself only on a fresh
+            // install, which it decides from what boot loaded (asked at the
+            // end of boot, below), and whenever Show welcome is chosen in the
+            // ☰ menu. Its places to start are the backend's startHere list,
+            // kept here from boot and handed over with each request; one
+            // opens its chapter through the page's own jump.
+            let startHere = [];
 
-            // Applies the look live, through Aa's own record of the theme.
-            function chooseLook(radio) {
-                if (themeSelect.value !== radio.dataset.value) {
-                    themeSelect.value = radio.dataset.value;
-                    themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-                syncWelcomeLooks();
-                radio.focus();
+            // A request the welcome hasn't had yet: boot can finish before
+            // the Rust pieces have loaded, so the startup question waits for
+            // them to say they're ready.
+            let welcomeWaiting = null;
+
+            function askWelcome(detail) {
+                const request = new CustomEvent('gospel-getter:welcome', { cancelable: true, detail });
+                return !document.dispatchEvent(request);
             }
 
             function openWelcome(returnFocus) {
-                closeSurfaces(false);
-                if (!searchPanel.hidden) setSearchOpen(false);
-                welcomeReturnFocus = returnFocus || null;
-                syncWelcomeLooks();
-                welcomeOverlay.hidden = false;
-                welcomePanel.querySelector('.modal-body').scrollTop = 0;
-                welcomePanel.focus();
+                if (askWelcome({ startup: false, startHere, returnFocus: returnFocus || null })) return;
+                setDataStatus('The welcome isn’t available.', true);
             }
 
-            function closeWelcome() {
-                welcomeOverlay.hidden = true;
-                try {
-                    localStorage.setItem(WELCOME_KEY, 'seen');
-                } catch (e) {}
-                const target = welcomeReturnFocus;
-                welcomeReturnFocus = null;
-                if (target && target.isConnected && !target.closest('[hidden]')) {
-                    target.focus();
-                } else if (welcomeOverlay.contains(document.activeElement)) {
-                    // Opened at startup: give the keyboard back to the page,
-                    // where the reader's shortcuts work.
-                    document.activeElement.blur();
-                }
+            // What the welcome's fresh-install rule needs, from boot.
+            function askWelcomeAtStartup(home) {
+                const detail = {
+                    startup: true,
+                    install: {
+                        hasSavedPosition: !!home.hasSavedPosition,
+                        bookmarksLoaded,
+                        bookmarks: bookmarks.length,
+                        highlightsLoaded,
+                        highlights: highlights.size,
+                        notesLoaded,
+                        notes: allNotes.length,
+                    },
+                    startHere,
+                    returnFocus: null,
+                };
+                if (!askWelcome(detail)) welcomeWaiting = detail;
             }
 
-            // A fresh install: nothing read, bookmarked, highlighted, noted
-            // or customised yet,
-            // and the welcome never closed before. An upgrade always has a
-            // saved reading position (reading any chapter saves one), so it
-            // never qualifies. Anything that can't be checked counts as
-            // existing data, so the welcome errs towards not appearing.
-            function isFreshInstall(home) {
-                if (home.hasSavedPosition || !bookmarksLoaded || bookmarks.length) return false;
-                if (!highlightsLoaded || highlights.size) return false;
-                if (!notesLoaded || allNotes.length) return false;
-                try {
-                    for (let i = 0; i < localStorage.length; i++) {
-                        const key = localStorage.key(i);
-                        if (key && key.startsWith('gospel-getter-')) return false;
-                    }
-                    return true;
-                } catch (e) {
-                    return false;
-                }
-            }
-
-            welcomeLooks.forEach((radio) => {
-                radio.addEventListener('click', () => chooseLook(radio));
+            document.addEventListener('gospel-getter:pieces-ready', function () {
+                const detail = welcomeWaiting;
+                welcomeWaiting = null;
+                if (detail) askWelcome(detail);
             });
-            // A place to start opens its chapter, from the top, and closes
-            // the card.
-            welcomeStart.addEventListener('click', function (event) {
-                const row = event.target.closest('.welcome-start-row');
-                if (!row) return;
-                closeWelcome();
-                jumpTo(row.dataset.book, row.dataset.chapter, null, null, { top: true });
-            });
-            document.getElementById('welcome-skip').addEventListener('click', closeWelcome);
-            document.getElementById('welcome-close').addEventListener('click', closeWelcome);
+
+            // The welcome's overlay is the Rust side's: looked up when asked.
+            function welcomeOpen() {
+                const overlay = document.getElementById('welcome-overlay');
+                return !!overlay && !overlay.hidden;
+            }
+
             document.getElementById('welcome-btn').addEventListener('click', () => openWelcome(menuToggle));
-
-            // Clicking the dimmed page behind the welcome does nothing, and
-            // leaves focus where it was.
-            welcomeOverlay.addEventListener('mousedown', function (event) {
-                if (event.target === welcomeOverlay) event.preventDefault();
-            });
-
-            // The card's tab stops, in order: ×, the checked look, the places
-            // to start and Skip.
-            function welcomeStops() {
-                return [...welcomePanel.querySelectorAll('button')]
-                    .filter((el) => !el.disabled && el.tabIndex >= 0 && !el.closest('[hidden]'));
-            }
-
-            // While the welcome is open it has the keyboard, before any
-            // other handler sees a key (this listens on window, capturing):
-            // Escape closes it, the arrow keys move between the looks (and
-            // choose, as radio buttons do), Tab stays inside, and none of
-            // the reader's shortcuts run.
-            window.addEventListener('keydown', function (event) {
-                if (welcomeOverlay.hidden) return;
-                event.stopPropagation();
-                const radio = event.target.closest && event.target.closest('#welcome-looks [role="radio"]');
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    closeWelcome();
-                } else if (radio && /^Arrow(Left|Right|Up|Down)$/.test(event.key)) {
-                    event.preventDefault();
-                    const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
-                    const index = welcomeLooks.indexOf(radio);
-                    chooseLook(welcomeLooks[(index + step + welcomeLooks.length) % welcomeLooks.length]);
-                } else if (event.key === 'Tab') {
-                    const stops = welcomeStops();
-                    const first = stops[0];
-                    const last = stops[stops.length - 1];
-                    const active = document.activeElement;
-                    if (!welcomePanel.contains(active) || (active === welcomePanel && event.shiftKey)) {
-                        event.preventDefault();
-                        (event.shiftKey ? last : first).focus();
-                    } else if (event.shiftKey && active === first) {
-                        event.preventDefault();
-                        last.focus();
-                    } else if (!event.shiftKey && active === last) {
-                        event.preventDefault();
-                        first.focus();
-                    }
-                }
-            }, true);
 
             // ---- Rendering: builds the same markup the old server-rendered
             // Askama templates produced, from the plain data the Tauri
@@ -8095,78 +7479,36 @@
             const ARROW_DOWN = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 3v10M4 9l4 4 4-4"/></svg>';
             const CAP_NAMES = { '←': ['Left arrow', () => ARROW_LEFT], '→': ['Right arrow', () => ARROW_RIGHT], '↑': ['Up arrow', () => ARROW_UP], '↓': ['Down arrow', () => ARROW_DOWN] };
 
-            function capsHtml(keys) {
-                return keys
-                    .map((combo) => combo
-                        .map((cap) => (CAP_NAMES[cap] ? hintKey(CAP_NAMES[cap][0], CAP_NAMES[cap][1]()) : hintKey(escapeHtml(cap))))
-                        .join('<span class="key-plus" aria-hidden="true">+</span>'))
-                    .join(' <span class="key-or">or</span> ');
-            }
-
-            const shortcutsOverlay = document.getElementById('shortcuts-overlay');
-            const shortcutsPanel = document.getElementById('shortcuts-panel');
-            const shortcutsBody = document.getElementById('shortcuts-body');
-            const shortcutsClose = document.getElementById('shortcuts-close');
-            let shortcutsReturn = null;
-
-            function renderShortcuts() {
-                shortcutsBody.innerHTML = SHORTCUT_GROUPS.map((group, i) => `<section class="shortcut-group" aria-labelledby="shortcut-group-${i}">
-                    <h3 class="shortcut-group-title" id="shortcut-group-${i}">${escapeHtml(group)}</h3>
-                    <dl class="shortcut-list">${SHORTCUTS.filter((s) => s.group === group).map((s) => `<div class="shortcut-row" data-shortcut="${s.id}">
-                        <dt class="shortcut-keys">${capsHtml(s.keys)}</dt>
-                        <dd class="shortcut-does">${escapeHtml(s.does)}</dd>
-                    </div>`).join('')}</dl>
-                </section>`).join('');
-            }
-
-            // The sheet is modal: Tab stays inside, Escape closes it, and
-            // focus goes back to where it was (or ☰, opened from there).
+            // ---- The keyboard shortcuts sheet is one of the page's pieces
+            // written in Rust (ui-leptos/src/shortcuts.rs); what crosses is
+            // documented in ui-leptos/src/bridge.rs. It lists the table above,
+            // which stays here, the one table: the palette's key hints and the
+            // key handlers read it at once, whatever has loaded. A request to
+            // open carries the table and where focus goes back to (what had
+            // it, or the button it was opened from); the sheet cancels the
+            // event to say it has it.
             function openShortcuts(opener = null) {
-                if (!shortcutsOverlay.hidden) return;
+                if (shortcutsOpen()) return;
                 const active = document.activeElement;
-                shortcutsReturn = opener || (active && active !== document.body ? active : null);
+                const returnFocus = opener || (active && active !== document.body ? active : null);
                 if (!searchPanel.hidden) setSearchOpen(false);
                 closeSurfaces(false);
-                renderShortcuts();
-                shortcutsOverlay.hidden = false;
-                shortcutsBody.scrollTop = 0;
-                shortcutsClose.focus();
+                const request = new CustomEvent('gospel-getter:shortcuts', {
+                    cancelable: true,
+                    detail: { groups: SHORTCUT_GROUPS, shortcuts: SHORTCUTS, returnFocus },
+                });
+                if (!document.dispatchEvent(request)) return;
+                setDataStatus('Keyboard shortcuts aren’t available.', true);
             }
 
-            function closeShortcuts() {
-                if (shortcutsOverlay.hidden) return;
-                shortcutsOverlay.hidden = true;
-                const back = shortcutsReturn;
-                shortcutsReturn = null;
-                if (back && back.isConnected && !back.closest('[hidden]')) back.focus({ preventScroll: true });
+            // The sheet's overlay is the Rust side's, made when its code
+            // loads: looked up when asked, as Export notes' is.
+            function shortcutsOpen() {
+                const overlay = document.getElementById('shortcuts-overlay');
+                return !!overlay && !overlay.hidden;
             }
 
-            shortcutsClose.addEventListener('click', closeShortcuts);
             document.getElementById('shortcuts-btn').addEventListener('click', () => openShortcuts(menuToggle));
-            // A click on the dimmed page behind it closes it.
-            shortcutsOverlay.addEventListener('click', function (event) {
-                if (event.target === shortcutsOverlay) closeShortcuts();
-            });
-
-            // While it's open it has the keyboard (on window, capturing,
-            // as the welcome does): none of the reader's shortcuts run.
-            window.addEventListener('keydown', function (event) {
-                if (shortcutsOverlay.hidden) return;
-                event.stopPropagation();
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    closeShortcuts();
-                } else if (event.key === 'Tab') {
-                    const stops = [shortcutsClose, shortcutsBody];
-                    const active = document.activeElement;
-                    const at = stops.indexOf(active);
-                    event.preventDefault();
-                    const next = at === -1
-                        ? stops[0]
-                        : stops[(at + (event.shiftKey ? -1 : 1) + stops.length) % stops.length];
-                    next.focus();
-                }
-            }, true);
 
             // ---- Search and go-to-reference (GH-12), and the command
             // palette, in one box. As the reader types, the results come
@@ -8910,8 +8252,8 @@
             // focus in the card itself (Shift+Tab moves through it).
             function cardGhostAllowed() {
                 if (!selectionCard.isConnected) return false;
-                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden
-                    || exportNotesOpen() || !shortcutsOverlay.hidden || !welcomeOverlay.hidden) {
+                if (importOpen() || !aboutOverlay.hidden || noteOpen()
+                    || exportNotesOpen() || shortcutsOpen() || welcomeOpen()) {
                     return false;
                 }
                 if (!searchPanel.hidden || !copyMenu.hidden) return false;
@@ -8969,7 +8311,7 @@
                 // And while the import preview, About, the note panel or
                 // Export notes is open, nothing else responds to the
                 // keyboard (they handle their own keys).
-                if (!importOverlay.hidden || !aboutOverlay.hidden || !noteOverlay.hidden || exportNotesOpen() || !shortcutsOverlay.hidden) {
+                if (importOpen() || !aboutOverlay.hidden || noteOpen() || exportNotesOpen() || shortcutsOpen()) {
                     return;
                 }
 
@@ -9316,13 +8658,13 @@
                     const home = await invoke('get_home');
                     renderBookLists(home);
                     renderTranslationOptions(home);
-                    renderStartHere(home.startHere);
+                    startHere = Array.isArray(home.startHere) ? home.startHere : [];
                     await loadReading(home.currentBookId, home.currentChapter);
                     if (reading) startHistory();
                     await refreshBookmarks();
                     await refreshHighlights();
                     await refreshNoteList();
-                    if (isFreshInstall(home)) openWelcome();
+                    askWelcomeAtStartup(home);
                 } catch (e) {
                     console.error('Failed to load Gospel Getter', e);
                 }

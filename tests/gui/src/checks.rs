@@ -1,8 +1,12 @@
-//! The four checks, in the order a person would meet them: the app starts
-//! and its page boots (1); the Leptos piece mounted and the Content
-//! Security Policy blocked nothing (2, judged at the end of the run);
-//! Export notes end to end (3); screenshots in Chi Rho and Vellum (4, two
-//! of them taken while check 3 has the dialog open).
+//! The checks, in the order a person would meet them: the app starts and
+//! its page boots (1), and on a fresh install the welcome greets them (5);
+//! the Leptos pieces mounted and the Content Security Policy blocked
+//! nothing (2, judged at the end of the run); Export notes end to end (3);
+//! the note editor editing and asking before discarding (6); the keyboard
+//! shortcuts sheet (7); Export data… then Import data… to the preview (8);
+//! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
+
+mod dialogs;
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -20,12 +24,16 @@ use crate::ui::{Ui, log_line};
 /// seconds on a desktop; CI runners are slower).
 const INDEX_BUILD: Duration = Duration::from_secs(60);
 
-/// Asks the app, through the page's own IPC, whether its search index is
-/// built: `search` answers `unavailable` until it is. One call in flight at
-/// a time; each poll reports the last answer. Read-only.
+/// Asks the app, through the page's own IPC, whether its first-run search
+/// index build has ended: `search` answers `unavailable` while it runs,
+/// and after it failed ("couldn't be built"). Ready once it answers with
+/// results, or says it failed (an app fault the check reports, and the
+/// build no longer competes for the database). One call in flight at a
+/// time; each poll reports the last answer. Read-only.
 const INDEX_READY_JS: &str = "
     const s = window.__guiCheckIndex || (window.__guiCheckIndex = {});
     if (s.kind === 'text') return [true, 'ready'];
+    if (s.kind === 'unavailable' && /couldn.t be built/.test(s.message || '')) return [true, 'failed: ' + s.message];
     if (!s.pending) {
         s.pending = true;
         window.__TAURI__.core.invoke('search', { query: 'beginning', translationCode: null, offset: 0 })
@@ -73,12 +81,20 @@ const CSP_LISTENER_JS: &str = "
 ";
 
 /// The screenshots check 4 asks for, by file name.
-const SHOTS: [&str; 4] = [
+const SHOTS: [&str; 8] = [
     "1-reading-chi-rho.png",
     "2-export-dialog-chi-rho.png",
     "3-reading-vellum.png",
     "4-export-dialog-vellum.png",
+    "5-welcome-vellum.png",
+    "6-note-editor-chi-rho.png",
+    "7-shortcuts-chi-rho.png",
+    "8-import-preview-chi-rho.png",
 ];
+
+/// The import preview's screenshot: on Windows the native open dialog is
+/// only seen to appear, so no preview opens there.
+const IMPORT_SHOT: &str = SHOTS[7];
 
 /// The screenshots taken so far, and why any is missing.
 #[derive(Debug, Default)]
@@ -92,10 +108,10 @@ impl Shots {
             .push((name, outcome.map_err(|e| format!("{e:#}"))));
     }
 
-    fn verdict(&self) -> Result<String> {
+    fn verdict(&self, expected: &[&'static str]) -> Result<String> {
         let mut done = Vec::new();
         let mut missing = Vec::new();
-        for name in SHOTS {
+        for &name in expected {
             match self.taken.iter().find(|(n, _)| *n == name) {
                 Some((_, Ok(bytes))) => done.push(format!("{name} ({} KB)", bytes / 1024)),
                 Some((_, Err(why))) => missing.push(format!("{name}: {why}")),
@@ -162,6 +178,15 @@ pub async fn run(config: &Config, report: &mut Report) {
         run.failure_screenshot(Check::Driver).await;
     }
 
+    // The welcome is open over the page once boot is done: it goes first.
+    if booted {
+        let welcome = run.welcome().await;
+        if welcome.is_err() {
+            run.failure_screenshot(Check::Welcome).await;
+        }
+        report.record(Check::Welcome, welcome).await;
+    }
+
     let mounted = run.leptos_mounted().await;
 
     if booted {
@@ -185,15 +210,39 @@ pub async fn run(config: &Config, report: &mut Report) {
         }
         report.record(Check::ExportNotes, export).await;
 
+        let editor = run.note_editor().await;
+        if editor.is_err() {
+            run.failure_screenshot(Check::NoteEditor).await;
+        }
+        report.record(Check::NoteEditor, editor).await;
+
+        let sheet = run.shortcuts().await;
+        if sheet.is_err() {
+            run.failure_screenshot(Check::Shortcuts).await;
+        }
+        report.record(Check::Shortcuts, sheet).await;
+
+        let import = run.import_preview().await;
+        if import.is_err() {
+            run.failure_screenshot(Check::ImportPreview).await;
+        }
+        report.record(Check::ImportPreview, import).await;
+
         if let Err(e) = run.vellum_screenshots().await {
             run.failure_screenshot(Check::Screenshots).await;
-            for name in &SHOTS[2..] {
+            for name in &SHOTS[2..4] {
                 if !run.shots.taken.iter().any(|(n, _)| n == name) {
                     run.shots.note(name, Err(anyhow::anyhow!("{e:#}")));
                 }
             }
         }
-        report.record(Check::Screenshots, run.shots.verdict()).await;
+        let expected: Vec<&'static str> = SHOTS
+            .into_iter()
+            .filter(|name| config.xvfb.is_some() || *name != IMPORT_SHOT)
+            .collect();
+        report
+            .record(Check::Screenshots, run.shots.verdict(&expected))
+            .await;
     }
 
     let csp = run.csp_verdict(listener, mounted).await;
@@ -258,11 +307,22 @@ impl Run<'_> {
         {
             self.ui.log(&format!("no failure screenshot: {e:#}"));
         }
+        // Linux: the whole private display too, native dialogs and all.
+        if let Some(xvfb) = &self.config.xvfb {
+            let name = format!("fail-{}-{}-display.png", check.number(), check.name());
+            let path = self.shot_path(&name);
+            match tokio::time::timeout(Duration::from_secs(10), xvfb.screenshot_root(&path)).await {
+                Ok(Ok(())) => self.ui.log(&format!("display screenshot {name}")),
+                Ok(Err(e)) => self.ui.log(&format!("no display screenshot: {e:#}")),
+                Err(_) => self.ui.log("no display screenshot: timed out"),
+            }
+        }
     }
 
     /// Check 1: the page booted: the chapter heading is shown, the window
     /// title carries the reference (on Linux, the native X window's too),
-    /// and boot ran to the end (a fresh install's welcome, skipped).
+    /// and boot ran to the end (a fresh install's welcome is up; check 5
+    /// takes it from there).
     async fn boot(&self) -> Result<String> {
         let ui = &self.ui;
         let seen = ui
@@ -308,38 +368,41 @@ impl Run<'_> {
             }
         };
 
+        // The welcome is the Rust pieces' (ui-leptos), which may load just
+        // after the page: its overlay may not exist yet.
         ui.wait(
             "boot to finish (a fresh install shows the welcome)",
             &format!(
-                "{VISIBLE_JS} const panel = document.getElementById('welcome-panel');
-                 return [visible(panel), {{ welcomeHidden: document.getElementById('welcome-overlay').hidden }}];"
+                "{VISIBLE_JS} const overlay = document.getElementById('welcome-overlay');
+                 return [visible(document.getElementById('welcome-panel')),
+                     {{ welcome: overlay ? (overlay.hidden ? 'hidden' : 'shown') : 'not loaded yet' }}];"
             ),
-        )
-        .await?;
-        ui.click("skip the welcome", "#welcome-skip").await?;
-        ui.wait(
-            "the welcome to close",
-            "return [document.getElementById('welcome-overlay').hidden, null];",
         )
         .await?;
 
         Ok(format!(
-            "session on {}; heading \"{heading}\"; {window}; boot finished (first-run welcome shown, skipped)",
+            "session on {}; heading \"{heading}\"; {window}; boot finished (the first-run welcome is up)",
             seen["href"].as_str().unwrap_or("?")
         ))
     }
 
-    /// Check 2's first half: the Leptos piece mounted its dialog (closed).
+    /// Check 2's first half: the Leptos pieces mounted their dialogs (all
+    /// closed by now).
     async fn leptos_mounted(&self) -> Result<String> {
         self.ui
             .wait(
-                "the Leptos piece to mount #export-notes-overlay",
-                "const overlay = document.getElementById('export-notes-overlay');
-                 return [!!overlay && !!document.getElementById('export-notes-panel') && overlay.hidden,
-                     overlay ? { hidden: overlay.hidden } : 'no #export-notes-overlay'];",
+                "the Leptos pieces to mount their five dialogs",
+                "const ids = ['export-notes-overlay', 'shortcuts-overlay', 'welcome-overlay', 'import-overlay', 'note-overlay'];
+                 const state = Object.fromEntries(ids.map((id) => {
+                     const el = document.getElementById(id);
+                     return [id, el ? (el.hidden ? 'closed' : 'open') : 'missing'];
+                 }));
+                 return [Object.values(state).every((s) => s === 'closed'), state];",
             )
             .await?;
-        Ok("the Leptos piece mounted (#export-notes-overlay, closed)".to_owned())
+        Ok("the Leptos pieces mounted their five dialogs (#export-notes-overlay, #shortcuts-overlay, \
+            #welcome-overlay, #import-overlay, #note-overlay; all closed)"
+            .to_owned())
     }
 
     /// Check 2: the Leptos piece mounted and no CSP violation was reported
@@ -483,15 +546,16 @@ impl Run<'_> {
         // the app has built its search index, which a fresh install does
         // in the background on its first start: a note saved meanwhile
         // fails ("database is locked").
-        {
+        let index = {
             let ui = &self.ui;
-            ui.wait_within(
-                "the first-run search index build to finish (asked through the page's IPC)",
-                INDEX_READY_JS,
-                Vec::new(),
-                Some(INDEX_BUILD),
-            )
-            .await?;
+            let index = ui
+                .wait_within(
+                    "the first-run search index build to end (asked through the page's IPC)",
+                    INDEX_READY_JS,
+                    Vec::new(),
+                    Some(INDEX_BUILD),
+                )
+                .await?;
             let verse = ".chapter-main .verse[data-translation][data-verse=\"1\"]";
             ui.click("select verse 1", verse).await?;
             ui.wait(
@@ -525,10 +589,15 @@ impl Run<'_> {
                 "return [document.getElementById('note-overlay').hidden, null];",
             )
             .await?;
-        }
-        said.push(
-            "note added (verse 1, N, Save, after the first-run search index build)".to_owned(),
-        );
+            index
+        };
+        said.push(match index.as_str() {
+            Some(failed) if failed.starts_with("failed") => format!(
+                "note added (verse 1, N, Save) after the first-run search index build ended; THE APP'S \
+                 INDEX BUILD FAILED ({failed}), an app fault outside this check"
+            ),
+            _ => "note added (verse 1, N, Save, after the first-run search index build)".to_owned(),
+        });
 
         self.open_library_notes().await?;
         let shown = self.open_export_dialog().await?;
