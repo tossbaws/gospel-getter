@@ -585,7 +585,7 @@ async fn a_failed_import_rolls_back_completely() {
         "CREATE TRIGGER fail_import BEFORE INSERT ON bookmarks \
          WHEN NEW.chapter = 2 BEGIN SELECT RAISE(ABORT, 'simulated failure'); END",
     )
-    .execute(&pool)
+    .execute(pool.write().pool())
     .await
     .unwrap();
 
@@ -599,7 +599,7 @@ async fn a_failed_import_rolls_back_completely() {
     // The preview is still pending, so the reader can retry once the
     // problem is gone.
     sqlx::query("DROP TRIGGER fail_import")
-        .execute(&pool)
+        .execute(pool.write().pool())
         .await
         .unwrap();
     let retry = commands::apply_pending_import(&state, p.token, true, true)
@@ -612,15 +612,15 @@ async fn a_failed_import_rolls_back_completely() {
 async fn import_never_touches_bundled_data() {
     let (db, pool) = fresh_database("rd_bundled").await;
     let state = AppState::load(pool.clone()).await.unwrap();
-    let verses_before = verses_snapshot(&pool).await;
-    let tables_before: Vec<String> = other_tables_snapshot(&pool)
+    let verses_before = verses_snapshot(pool.read()).await;
+    let tables_before: Vec<String> = other_tables_snapshot(pool.read())
         .await
         .into_iter()
         .filter(|r| !r.starts_with("reading_position"))
         .collect();
     let index_before: Vec<(i64, i64)> =
         sqlx::query_as("SELECT translation_id, verse_count FROM search_index_state ORDER BY 1")
-            .fetch_all(&pool)
+            .fetch_all(pool.read())
             .await
             .unwrap();
 
@@ -635,8 +635,8 @@ async fn import_never_touches_bundled_data() {
     .unwrap();
     import(&state, &path, true).await;
 
-    assert_eq!(verses_snapshot(&pool).await, verses_before);
-    let tables_after: Vec<String> = other_tables_snapshot(&pool)
+    assert_eq!(verses_snapshot(pool.read()).await, verses_before);
+    let tables_after: Vec<String> = other_tables_snapshot(pool.read())
         .await
         .into_iter()
         .filter(|r| !r.starts_with("reading_position"))
@@ -644,7 +644,7 @@ async fn import_never_touches_bundled_data() {
     assert_eq!(tables_after, tables_before);
     let index_after: Vec<(i64, i64)> =
         sqlx::query_as("SELECT translation_id, verse_count FROM search_index_state ORDER BY 1")
-            .fetch_all(&pool)
+            .fetch_all(pool.read())
             .await
             .unwrap();
     assert_eq!(index_after, index_before);
@@ -1225,7 +1225,7 @@ async fn a_failed_highlight_import_rolls_back_bookmarks_too() {
         "CREATE TRIGGER fail_highlight BEFORE INSERT ON highlights \
          WHEN NEW.chapter = 2 BEGIN SELECT RAISE(ABORT, 'simulated failure'); END",
     )
-    .execute(&pool)
+    .execute(pool.write().pool())
     .await
     .unwrap();
 
@@ -1696,7 +1696,7 @@ async fn a_failed_note_import_rolls_back_everything() {
         "CREATE TRIGGER fail_note BEFORE INSERT ON notes \
          WHEN NEW.chapter = 2 BEGIN SELECT RAISE(ABORT, 'simulated failure'); END",
     )
-    .execute(&pool)
+    .execute(pool.write().pool())
     .await
     .unwrap();
 
@@ -1715,7 +1715,7 @@ use crate::db::notes::{MAX_NOTE_CHARS, MAX_NOTES, MAX_TOTAL_NOTE_CHARS};
 /// A database (and app) with `count` notes of `chars` characters each.
 async fn app_with_notes(label: &str, count: usize, chars: usize) -> (TempDb, AppState) {
     let (db, pool) = fresh_database(label).await;
-    fill_notes(&pool, count, chars).await;
+    fill_notes(pool.write(), count, chars).await;
     let state = AppState::load(pool).await.expect("load state");
     (db, state)
 }

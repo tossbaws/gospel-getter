@@ -7,8 +7,8 @@ use anyhow::Context;
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 
-use crate::db::Bookmark;
 use crate::db::notes::{NoteLimit, NoteTotals, note_totals};
+use crate::db::{Bookmark, WritePool};
 use crate::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
 
 pub use crate::reader_data::NoteKey;
@@ -164,14 +164,14 @@ pub struct ImportCounts {
 /// checked against `MAX_NOTES` and `MAX_TOTAL_NOTE_CHARS`; an import that
 /// would go past either changes nothing.
 pub async fn apply_import(
-    pool: &SqlitePool,
+    writer: &WritePool,
     bookmarks: &[NewBookmark],
     highlights: Option<&[NewHighlight]>,
     notes: Option<&[NewNote]>,
     replace: bool,
     position: Option<&NewPosition>,
 ) -> Result<ImportCounts, ApplyImportError> {
-    let mut tx = crate::db::begin_write(pool)
+    let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start the import")?;
 

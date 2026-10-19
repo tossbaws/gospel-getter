@@ -6,6 +6,8 @@ use anyhow::Context;
 use sqlx::{FromRow, SqlitePool};
 use std::fmt;
 
+use super::WritePool;
+
 /// A saved passage.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct Bookmark {
@@ -145,13 +147,13 @@ pub(crate) async fn check_passage(
 /// translation numbers can still be bookmarked). Bookmarking a passage
 /// that's already bookmarked returns the existing bookmark unchanged.
 pub async fn add_bookmark(
-    pool: &SqlitePool,
+    writer: &WritePool,
     book_id: i64,
     chapter: i64,
     verse_start: i64,
     verse_end: i64,
 ) -> Result<Bookmark, BookmarkError> {
-    let mut tx = crate::db::begin_write(pool)
+    let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start bookmark transaction")?;
     check_passage(&mut tx, book_id, chapter, verse_start, verse_end).await?;
@@ -231,10 +233,10 @@ pub async fn list_bookmarks(
 }
 
 /// Remove a bookmark. Returns whether there was one to remove.
-pub async fn remove_bookmark(pool: &SqlitePool, id: i64) -> anyhow::Result<bool> {
+pub async fn remove_bookmark(writer: &WritePool, id: i64) -> anyhow::Result<bool> {
     let result = sqlx::query("DELETE FROM bookmarks WHERE id = $1")
         .bind(id)
-        .execute(pool)
+        .execute(writer.pool())
         .await
         .context("Failed to delete bookmark")?;
     Ok(result.rows_affected() > 0)

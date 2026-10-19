@@ -1,6 +1,7 @@
 use anyhow::Context;
 use serde::Deserialize;
-use sqlx::SqlitePool;
+
+use crate::db::WritePool;
 
 /// One bundled translation's raw text, embedded into the binary so the app
 /// is fully self-contained and works offline, and how the app lists it.
@@ -102,8 +103,8 @@ struct RawFootnote {
 /// not gated by a single "is the database empty" flag. Editing the text of
 /// a translation that's already seeded still requires clearing its rows
 /// (or the whole database) first — this only fills in what's absent.
-pub async fn seed_missing(pool: &SqlitePool) -> anyhow::Result<()> {
-    let mut tx = crate::db::begin_write(pool)
+pub async fn seed_missing(writer: &WritePool) -> anyhow::Result<()> {
+    let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start seed transaction")?;
 
@@ -270,9 +271,9 @@ struct RawCrossRef {
 
 /// Populate `cross_references` from the bundled dataset, but only if it's
 /// currently empty.
-pub async fn seed_cross_references_if_empty(pool: &SqlitePool) -> anyhow::Result<()> {
+pub async fn seed_cross_references_if_empty(writer: &WritePool) -> anyhow::Result<()> {
     let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM cross_references")
-        .fetch_one(pool)
+        .fetch_one(writer.pool())
         .await
         .context("Failed to check cross-reference count")?;
     if count > 0 {
@@ -282,7 +283,7 @@ pub async fn seed_cross_references_if_empty(pool: &SqlitePool) -> anyhow::Result
     let books: Vec<RawCrossRefBook> = serde_json::from_str(CROSS_REFERENCES_JSON)
         .context("Failed to parse bundled cross-reference data")?;
 
-    let mut tx = crate::db::begin_write(pool)
+    let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start cross-reference seed transaction")?;
 
