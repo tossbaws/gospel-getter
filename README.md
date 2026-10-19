@@ -296,14 +296,14 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.16.0?** Each updates itself to 2.16.1: it
+**Coming from 2.6.0 through 2.16.1?** Each updates itself to 2.16.2: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
 update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.16.1 by hand once, from the
+Install 2.16.2 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -316,12 +316,14 @@ Upgrading keeps your data.
   highlights, notes and the search index) lives in one SQLite database in the per-app data
   folder. On Linux that's
   `~/.local/share/com.tossbaws.gospel-getter/gospel_getter.db`; on Windows
-  it's under `%APPDATA%\com.tossbaws.gospel-getter\`.
+  it's under `%APPDATA%\com.tossbaws.gospel-getter\`. SQLite may keep
+  `-wal` and `-shm` files beside it; they belong with the database.
 - **Upgrades keep your data.** A new version adds any new tables and builds
   the search index once, in the background, without changing scripture
   text, your reading position, bookmarks, highlights or notes. 2.10.0
   rebuilds the index once, by itself, so KJV search leaves out the margin
-  notes. Moving back to an older
+  notes. 2.16.2 switches the database to write-ahead logging when it first
+  opens it. Moving back to an older
   version after upgrading hasn't been tested.
 - Theme, text size, line spacing, width, layout, compare (and which
   translation it compares with) and reading mode are
@@ -382,6 +384,13 @@ so it seeds again.
   written back. It indexes each verse's text as the reader shows it
   (without the KJV's margin notes or the BSB's footnotes), and results
   show that text.
+- **Database:** every connection uses SQLite's write-ahead logging, so
+  reads and a write don't wait for each other, and the first launch's
+  search index build, in the background, doesn't hold up the page. A
+  transaction that writes takes the write lock as it begins
+  (`BEGIN IMMEDIATE`), waiting up to 5 seconds for it. If the index build
+  fails anyway, it's tried again after 1, 2 and 4 seconds before search
+  says it's unavailable.
 - **Copying:** one formatter in the backend makes the text for Copy, Copy
   as…, Copy chapter and the notes export's quotes. The page fetches it
   ahead and writes it with the webview's own clipboard API, with no plugin
