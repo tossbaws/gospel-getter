@@ -98,8 +98,7 @@ async fn forget_outdated_index(pool: &SqlitePool) -> anyhow::Result<()> {
     if version == Some(SEARCH_CONTENT_VERSION) {
         return Ok(());
     }
-    let mut tx = pool
-        .begin()
+    let mut tx = crate::db::begin_write(pool)
         .await
         .context("Failed to start search index version transaction")?;
     sqlx::query("DELETE FROM search_index_state")
@@ -150,8 +149,7 @@ async fn index_translation(
         bail!("translation {translation_id} has coordinates too large to index for search");
     }
 
-    let mut tx = pool
-        .begin()
+    let mut tx = crate::db::begin_write(pool)
         .await
         .context("Failed to start search index transaction")?;
     sqlx::query("DELETE FROM search_index_state WHERE translation_id = $1")
@@ -205,12 +203,15 @@ async fn index_translation(
     Ok(())
 }
 
-/// Index one book's stored text, as is.
+/// Index one book's stored text, as is, in one transaction that starts
+/// with the write lock (see `begin_write`: a write into the full-text table
+/// reads before it writes).
 async fn index_book_as_stored(
     pool: &SqlitePool,
     translation_id: i64,
     book_id: i64,
 ) -> anyhow::Result<()> {
+    let mut tx = crate::db::begin_write(pool).await?;
     sqlx::query(
         "INSERT INTO verse_search (rowid, text) \
          SELECT translation_id * $3 + book_id * $4 + chapter * $5 + verse, text \
@@ -221,13 +222,14 @@ async fn index_book_as_stored(
     .bind(TRANSLATION_STRIDE)
     .bind(BOOK_STRIDE)
     .bind(CHAPTER_STRIDE)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(())
 }
 
 /// Index one KJV book's plain text as the app shows it (see `VerseText`),
-/// in one transaction.
+/// in one transaction that starts with the write lock.
 async fn index_book_as_shown(
     pool: &SqlitePool,
     translation_id: i64,
@@ -241,7 +243,7 @@ async fn index_book_as_shown(
     .bind(book_id)
     .fetch_all(pool)
     .await?;
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     for (chapter, verse, stored) in verses {
         sqlx::query("INSERT INTO verse_search (rowid, text) VALUES ($1, $2)")
             .bind(

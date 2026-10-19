@@ -103,8 +103,7 @@ struct RawFootnote {
 /// a translation that's already seeded still requires clearing its rows
 /// (or the whole database) first — this only fills in what's absent.
 pub async fn seed_missing(pool: &SqlitePool) -> anyhow::Result<()> {
-    let mut tx = pool
-        .begin()
+    let mut tx = crate::db::begin_write(pool)
         .await
         .context("Failed to start seed transaction")?;
 
@@ -283,8 +282,7 @@ pub async fn seed_cross_references_if_empty(pool: &SqlitePool) -> anyhow::Result
     let books: Vec<RawCrossRefBook> = serde_json::from_str(CROSS_REFERENCES_JSON)
         .context("Failed to parse bundled cross-reference data")?;
 
-    let mut tx = pool
-        .begin()
+    let mut tx = crate::db::begin_write(pool)
         .await
         .context("Failed to start cross-reference seed transaction")?;
 
