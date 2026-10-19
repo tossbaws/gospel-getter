@@ -4,6 +4,16 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.16.3] - 2026-10-19
+
+### Fixed
+- Saving could still fail with "database is locked" on a busy or slow
+  computer: your reading position, a bookmark, a highlight, a note, an
+  import, or a book of the first launch's search index. The app's saves
+  raced each other for the database, and one that kept losing gave up
+  after 5 seconds. Now they take turns, one at a time, so none of them
+  gives up, and reading never waits for a save. (#96)
+
 ## [2.16.2] - 2026-10-18
 
 ### Fixed
