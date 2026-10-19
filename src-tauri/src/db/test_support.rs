@@ -8,7 +8,7 @@ use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::db::{create_pool, ensure_search_index, prepare};
+use crate::db::{Db, WritePool, begin_write, create_pool, ensure_search_index, prepare};
 
 /// A database file that's deleted (with any journal) on drop.
 pub struct TempDb {
@@ -32,8 +32,9 @@ impl TempDb {
         self.dir.join("gospel_getter.db")
     }
 
-    /// Open (creating if needed) a pool on this database, as the app does.
-    pub async fn connect(&self) -> SqlitePool {
+    /// Open (creating if needed) this database's connections, as the app
+    /// does: the read pool and the one writer.
+    pub async fn connect(&self) -> Db {
         create_pool(&format!("sqlite:{}", self.path().display()))
             .await
             .expect("connect to test database")
@@ -48,10 +49,10 @@ impl Drop for TempDb {
 
 /// A database prepared exactly as the app prepares one at startup, with
 /// the search index built.
-pub async fn fresh_database(label: &str) -> (TempDb, SqlitePool) {
+pub async fn fresh_database(label: &str) -> (TempDb, Db) {
     let db = TempDb::new(label);
     let pool = db.connect().await;
-    prepare(&pool).await.expect("prepare database");
+    prepare(pool.write()).await.expect("prepare database");
     ensure_search_index(&pool)
         .await
         .expect("build search index");
@@ -153,12 +154,12 @@ pub async fn write_v2_1_0_database(path: &Path) {
         .expect("create v2.1.0 database");
     for statement in V2_1_0_SCHEMA {
         sqlx::query(*statement)
-            .execute(&pool)
+            .execute(pool.write().pool())
             .await
             .expect("v2.1.0 schema");
     }
 
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = begin_write(pool.write()).await.expect("begin");
     for (translation_id, code, name) in [
         (1_i64, "kjv", "King James Version"),
         (2, "web", "World English Bible"),
@@ -285,7 +286,7 @@ pub async fn table_names(pool: &SqlitePool) -> Vec<String> {
 /// Add `count` distinct notes of exactly `chars` characters each (at least
 /// 7), spread over chapter 1, verse 1 of every book, in one statement —
 /// for filling a database up to the notes' limits quickly.
-pub async fn fill_notes(pool: &SqlitePool, count: usize, chars: usize) {
+pub async fn fill_notes(writer: &WritePool, count: usize, chars: usize) {
     assert!(chars >= 7, "each note starts with a 6-digit number");
     sqlx::query(
         "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < $1) \
@@ -296,7 +297,7 @@ pub async fn fill_notes(pool: &SqlitePool, count: usize, chars: usize) {
     )
     .bind(count as i64)
     .bind(chars as i64)
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .expect("fill notes");
 }

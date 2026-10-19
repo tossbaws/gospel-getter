@@ -1,6 +1,7 @@
 use anyhow::Context;
 use sqlx::SqlitePool;
 
+use crate::db::WritePool;
 use crate::db::models::{Book, CrossReference, Translation, Verse};
 use crate::domain::usfm_note::StoredFootnote;
 
@@ -88,7 +89,7 @@ pub async fn get_reading_position(pool: &SqlitePool) -> anyhow::Result<Option<(i
 
 /// Remember the last chapter read, overwriting whatever was there before.
 pub async fn save_reading_position(
-    pool: &SqlitePool,
+    writer: &WritePool,
     translation_id: i64,
     book_id: i64,
     chapter: i64,
@@ -104,7 +105,7 @@ pub async fn save_reading_position(
     .bind(translation_id)
     .bind(book_id)
     .bind(chapter)
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to save reading position")?;
     Ok(())

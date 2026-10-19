@@ -1,8 +1,9 @@
 use anyhow::Context;
-use sqlx::SqlitePool;
+
+use crate::db::WritePool;
 
 /// Create the schema if it doesn't already exist.
-pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
+pub async fn migrate(writer: &WritePool) -> anyhow::Result<()> {
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS books (
@@ -13,7 +14,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create books table")?;
 
@@ -26,7 +27,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create translations table")?;
 
@@ -44,7 +45,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create verses table")?;
 
@@ -61,7 +62,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create reading_position table")?;
 
@@ -83,7 +84,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create cross_references table")?;
 
@@ -93,7 +94,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
             ON cross_references (book_id, chapter, verse)
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create cross_references index")?;
 
@@ -114,7 +115,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create bookmarks table")?;
 
@@ -136,7 +137,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create highlights table")?;
 
@@ -159,12 +160,12 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create notes table")?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_notes_chapter ON notes (book_id, chapter)")
-        .execute(pool)
+        .execute(writer.pool())
         .await
         .context("Failed to create notes index")?;
 
@@ -186,7 +187,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create footnotes table")?;
 
@@ -204,7 +205,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create verse_search index")?;
 
@@ -221,7 +222,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create search_index_state table")?;
 
@@ -237,7 +238,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         "#,
     )
-    .execute(pool)
+    .execute(writer.pool())
     .await
     .context("Failed to create search_index_version table")?;
 

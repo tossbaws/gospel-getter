@@ -147,13 +147,13 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
 /// Connect to the database, run migrations/seeding, and load the books and
 /// translations that stay in memory for the life of the app.
 async fn init_state(database_url: &str) -> anyhow::Result<AppState> {
-    let pool = create_pool(database_url)
+    let database = create_pool(database_url)
         .await
         .context("Failed to connect to database")?;
 
-    db::prepare(&pool).await?;
+    db::prepare(database.write()).await?;
 
-    let state = AppState::load(pool).await?;
+    let state = AppState::load(database).await?;
     info!("Loaded {} books", state.books.len());
     info!(
         "Loaded {} translations: {}",

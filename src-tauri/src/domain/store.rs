@@ -1,10 +1,8 @@
-use sqlx::SqlitePool;
-
 use std::collections::{HashMap, HashSet};
 
 use crate::db::reader_data::{ApplyImportError, ImportCounts};
 use crate::db::{
-    self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Highlight,
+    self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Db, Highlight,
     HighlightColor, HighlightPassageInTranslation, Note, NoteError, Passage, SearchHit, Verse,
 };
 use crate::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
@@ -14,21 +12,22 @@ use crate::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
 /// are loaded once at startup directly via
 /// `db::get_all_books`/`db::get_all_translations` (see `AppState::load`)
 /// and cached in `AppState`, so `Store` itself doesn't need methods for
-/// those. Cloning is cheap: it shares the same connection pool.
+/// those. Every write goes through the database's one writing connection
+/// (see `db::Db`). Cloning is cheap: it shares the same connections.
 #[derive(Clone)]
 pub struct Store {
-    pool: SqlitePool,
+    db: Db,
 }
 
 impl Store {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(db: Db) -> Self {
+        Self { db }
     }
 
     /// Close every connection, waiting for any in use to be returned. Run
     /// before the app exits to install an update or restarts.
     pub async fn close(&self) {
-        self.pool.close().await;
+        self.db.close().await;
     }
 
     /// Get every verse in one chapter of one translation, in verse order.
@@ -38,17 +37,17 @@ impl Store {
         book_id: i64,
         chapter: i64,
     ) -> anyhow::Result<Vec<Verse>> {
-        db::get_chapter_verses(&self.pool, translation_id, book_id, chapter).await
+        db::get_chapter_verses(self.db.read(), translation_id, book_id, chapter).await
     }
 
     /// The highest verse number any translation has in one chapter.
     pub async fn chapter_last_verse(&self, book_id: i64, chapter: i64) -> anyhow::Result<i64> {
-        db::get_chapter_last_verse(&self.pool, book_id, chapter).await
+        db::get_chapter_last_verse(self.db.read(), book_id, chapter).await
     }
 
     /// The last chapter read, if any.
     pub async fn reading_position(&self) -> anyhow::Result<Option<(i64, i64, i64)>> {
-        db::get_reading_position(&self.pool).await
+        db::get_reading_position(self.db.read()).await
     }
 
     /// Remember the last chapter read.
@@ -58,7 +57,7 @@ impl Store {
         book_id: i64,
         chapter: i64,
     ) -> anyhow::Result<()> {
-        db::save_reading_position(&self.pool, translation_id, book_id, chapter).await
+        db::save_reading_position(self.db.write(), translation_id, book_id, chapter).await
     }
 
     /// Cross-references for every verse in one chapter, ordered by verse
@@ -68,7 +67,7 @@ impl Store {
         book_id: i64,
         chapter: i64,
     ) -> anyhow::Result<Vec<CrossReference>> {
-        db::get_chapter_cross_references(&self.pool, book_id, chapter).await
+        db::get_chapter_cross_references(self.db.read(), book_id, chapter).await
     }
 
     /// The text of a verse or verse range, for expanding a cross-reference.
@@ -81,7 +80,7 @@ impl Store {
         end_verse: i64,
     ) -> anyhow::Result<Vec<Verse>> {
         db::get_verse_range(
-            &self.pool,
+            self.db.read(),
             translation_id,
             book_id,
             chapter,
@@ -99,7 +98,7 @@ impl Store {
         verse_start: i64,
         verse_end: i64,
     ) -> Result<Bookmark, BookmarkError> {
-        db::bookmarks::add_bookmark(&self.pool, book_id, chapter, verse_start, verse_end).await
+        db::bookmarks::add_bookmark(self.db.write(), book_id, chapter, verse_start, verse_end).await
     }
 
     /// Every bookmark, newest first, as it reads in one translation.
@@ -107,12 +106,12 @@ impl Store {
         &self,
         translation_id: i64,
     ) -> anyhow::Result<Vec<BookmarkInTranslation>> {
-        db::bookmarks::list_bookmarks(&self.pool, translation_id).await
+        db::bookmarks::list_bookmarks(self.db.read(), translation_id).await
     }
 
     /// Remove a bookmark; returns whether it existed.
     pub async fn remove_bookmark(&self, id: i64) -> anyhow::Result<bool> {
-        db::bookmarks::remove_bookmark(&self.pool, id).await
+        db::bookmarks::remove_bookmark(self.db.write(), id).await
     }
 
     /// Highlight every verse of a passage in `color` (see
@@ -125,8 +124,15 @@ impl Store {
         verse_end: i64,
         color: HighlightColor,
     ) -> Result<(), BookmarkError> {
-        db::highlights::set_highlights(&self.pool, book_id, chapter, verse_start, verse_end, color)
-            .await
+        db::highlights::set_highlights(
+            self.db.write(),
+            book_id,
+            chapter,
+            verse_start,
+            verse_end,
+            color,
+        )
+        .await
     }
 
     /// Remove the highlight from every verse of a passage; returns how
@@ -138,13 +144,13 @@ impl Store {
         verse_start: i64,
         verse_end: i64,
     ) -> anyhow::Result<usize> {
-        db::highlights::remove_highlights(&self.pool, book_id, chapter, verse_start, verse_end)
+        db::highlights::remove_highlights(self.db.write(), book_id, chapter, verse_start, verse_end)
             .await
     }
 
     /// Every highlight, in Bible order.
     pub async fn highlights(&self) -> anyhow::Result<Vec<Highlight>> {
-        db::highlights::list_highlights(&self.pool).await
+        db::highlights::list_highlights(self.db.read()).await
     }
 
     /// Every highlighted passage (consecutive verses in one color), in
@@ -153,12 +159,12 @@ impl Store {
         &self,
         translation_id: i64,
     ) -> anyhow::Result<Vec<HighlightPassageInTranslation>> {
-        db::highlights::list_highlight_passages(&self.pool, translation_id).await
+        db::highlights::list_highlight_passages(self.db.read(), translation_id).await
     }
 
     /// The coordinates of every highlighted verse.
     pub async fn highlight_coordinates(&self) -> anyhow::Result<HashSet<(i64, i64, i64)>> {
-        db::reader_data::highlight_coordinates(&self.pool).await
+        db::reader_data::highlight_coordinates(self.db.read()).await
     }
 
     /// Save a new note on a passage (see `db::notes::add_note`); `dates`
@@ -169,32 +175,32 @@ impl Store {
         body: &str,
         dates: Option<(&str, &str)>,
     ) -> Result<Note, NoteError> {
-        db::notes::add_note(&self.pool, passage, body, dates).await
+        db::notes::add_note(self.db.write(), passage, body, dates).await
     }
 
     /// Change a note's text.
     pub async fn update_note(&self, id: i64, body: &str) -> Result<Note, NoteError> {
-        db::notes::update_note(&self.pool, id, body).await
+        db::notes::update_note(self.db.write(), id, body).await
     }
 
     /// Delete a note, returning it as it was, if it existed.
     pub async fn delete_note(&self, id: i64) -> anyhow::Result<Option<Note>> {
-        db::notes::delete_note(&self.pool, id).await
+        db::notes::delete_note(self.db.write(), id).await
     }
 
     /// Every note overlapping a passage, in the order they're shown.
     pub async fn notes_overlapping(&self, passage: &Passage) -> anyhow::Result<Vec<Note>> {
-        db::notes::notes_overlapping(&self.pool, passage).await
+        db::notes::notes_overlapping(self.db.read(), passage).await
     }
 
     /// Every note, in Bible order.
     pub async fn notes(&self) -> anyhow::Result<Vec<Note>> {
-        db::notes::list_notes(&self.pool).await
+        db::notes::list_notes(self.db.read()).await
     }
 
     /// Build whatever part of the search index is missing or stale.
     pub async fn ensure_search_index(&self) -> anyhow::Result<Vec<i64>> {
-        db::ensure_search_index(&self.pool).await
+        db::ensure_search_index(&self.db).await
     }
 
     /// One page of verses matching every term, in Bible order, and the
@@ -206,32 +212,32 @@ impl Store {
         limit: i64,
         offset: i64,
     ) -> anyhow::Result<(i64, Vec<SearchHit>)> {
-        db::search::search_verses(&self.pool, translation_id, terms, limit, offset).await
+        db::search::search_verses(self.db.read(), translation_id, terms, limit, offset).await
     }
 
     /// Every bookmark, oldest first, for export.
     pub async fn all_bookmarks(&self) -> anyhow::Result<Vec<Bookmark>> {
-        db::reader_data::all_bookmarks(&self.pool).await
+        db::reader_data::all_bookmarks(self.db.read()).await
     }
 
     /// The coordinates of every bookmark.
     pub async fn bookmark_coordinates(&self) -> anyhow::Result<HashSet<(i64, i64, i64, i64)>> {
-        db::reader_data::bookmark_coordinates(&self.pool).await
+        db::reader_data::bookmark_coordinates(self.db.read()).await
     }
 
     /// The passage and text of every note.
     pub async fn note_keys(&self) -> anyhow::Result<HashSet<db::reader_data::NoteKey>> {
-        db::reader_data::note_keys(&self.pool).await
+        db::reader_data::note_keys(self.db.read()).await
     }
 
     /// The highest verse number any translation has, per (book, chapter).
     pub async fn last_verses(&self) -> anyhow::Result<HashMap<(i64, i64), i64>> {
-        db::reader_data::last_verses(&self.pool).await
+        db::reader_data::last_verses(self.db.read()).await
     }
 
     /// The current time, in the database's timestamp format.
     pub async fn now(&self) -> anyhow::Result<String> {
-        db::reader_data::now(&self.pool).await
+        db::reader_data::now(self.db.read()).await
     }
 
     /// Apply a validated import, all or nothing.
@@ -243,7 +249,14 @@ impl Store {
         replace: bool,
         position: Option<&NewPosition>,
     ) -> Result<ImportCounts, ApplyImportError> {
-        db::reader_data::apply_import(&self.pool, bookmarks, highlights, notes, replace, position)
-            .await
+        db::reader_data::apply_import(
+            self.db.write(),
+            bookmarks,
+            highlights,
+            notes,
+            replace,
+            position,
+        )
+        .await
     }
 }

@@ -11,7 +11,7 @@ pub mod search;
 pub mod seed;
 
 pub use bookmarks::{Bookmark, BookmarkError, BookmarkInTranslation};
-pub use connect::{BUSY_TIMEOUT, begin_write, create_pool};
+pub use connect::{BUSY_TIMEOUT, Db, WRITE_QUEUE_TIMEOUT, WritePool, begin_write, create_pool};
 pub use highlights::{Highlight, HighlightColor, HighlightPassage, HighlightPassageInTranslation};
 pub use legacy::migrate_legacy_db_if_needed;
 pub use migrate::migrate;
@@ -33,15 +33,15 @@ mod tests;
 /// is missing. Safe to run on every launch, against a fresh database or
 /// one from any earlier version. The search index is built separately
 /// (`ensure_search_index`), in the background.
-pub async fn prepare(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
+pub async fn prepare(writer: &WritePool) -> anyhow::Result<()> {
     use anyhow::Context;
-    migrate(pool)
+    migrate(writer)
         .await
         .context("Failed to run database migrations")?;
-    seed_missing(pool)
+    seed_missing(writer)
         .await
         .context("Failed to seed Bible data")?;
-    seed_cross_references_if_empty(pool)
+    seed_cross_references_if_empty(writer)
         .await
         .context("Failed to seed cross-reference data")?;
     Ok(())
