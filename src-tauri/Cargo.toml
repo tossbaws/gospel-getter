@@ -1,6 +1,6 @@
 [package]
 name = "gospel_getter"
-version = "2.16.1"
+version = "2.16.2"
 description = "Read the Bible, book by book, chapter by chapter"
 license = "MIT"
 repository = "https://github.com/tossbaws/gospel-getter"
@@ -18,7 +18,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# `time`: the search index build's pauses between tries (`retry.rs`).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "macros"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -36,8 +37,14 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 # Desktop only: the in-app updater, and opening the releases page in the
 # system browser for builds that can't update themselves. See `updater.rs`.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "~2.13"
-tauri-plugin-opener = "~2.7"
+# The plugin's defaults without `zip`, which only unpacks Tauri v1's zipped
+# (Windows) and .tar.gz (AppImage) update bundles. Ours are published as they
+# are (`createUpdaterArtifacts: true`): the .exe, .msi, .AppImage and .deb.
+tauri-plugin-updater = { version = "~2.13", default-features = false, features = ["rustls-tls", "system-proxy"] }
+# Opens a fixed URL in the system browser, as tauri-plugin-opener's
+# `open_url` does on the desktop (with the same feature), without the
+# plugin's D-Bus dependency for revealing files, which the app never does.
+open = { version = "5", features = ["shellexecute-on-windows"] }
 # The window comes back where it was (see `window.rs`).
 tauri-plugin-window-state = "~2.5"
 
@@ -53,7 +60,8 @@ reqwest = { version = "0.13", default-features = false }
 # The TLS provider the updater installs before its own requests.
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # Only for the BSB's ingest (`examples/bsb_ingest.rs`, `tests/bsb_source.rs`):
-# reading Berean's USFM zip and checking the raw files' hashes. Both are
-# already in the lock file, through the updater.
-zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
+# reading Berean's USFM zip and checking the raw files' hashes. zip turns
+# off flate2's defaults, so its pure-Rust backend is named here.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 sha2 = "0.10"

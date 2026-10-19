@@ -4,6 +4,24 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.16.2] - 2026-10-18
+
+### Fixed
+- On a fresh install, search could stay unavailable until you restarted
+  the app: building the search index ran into the app's first saves (your
+  reading position) and failed with "database is locked". It no longer
+  does, it's tried again if it ever fails, and the first launch's index
+  build is faster.
+
+### Security
+- The Windows app no longer contains the zip library the updater carried,
+  with its three known advisories (RUSTSEC-2026-0367 to 0369): updates
+  are the installers, published as they are, so there's nothing to unzip.
+- The Linux app no longer carries the D-Bus libraries that came with the
+  link opener, which three advisories mark as unmaintained
+  (RUSTSEC-2026-0370 to 0372). Links (the credits, the release notes and
+  the download page) still open in your browser as before.
+
 ## [2.16.1] - 2026-10-17
 
 ### Fixed

@@ -1,11 +1,13 @@
-# A weekly `cargo audit` of src-tauri/Cargo.lock against the RustSec
-# advisory database. It's kept out of the per-PR CI on purpose: a new
+# A weekly `cargo audit` of each lock file, src-tauri/ (the app),
+# ui-leptos/ (its WebAssembly UI) and tests/gui/ (the GUI checks), against
+# the RustSec advisory database. It's kept out of the per-PR CI on purpose: a new
 # advisory is news about a dependency, not about the change in a PR, so it
 # shouldn't block one. Run it by hand from the Actions tab at any time.
 #
-# Every advisory known when this was added is ignored below, each with the
-# reason it doesn't need action. `--deny warnings` makes anything else go
-# red, including new "unmaintained", "unsound" and "yanked" notices.
+# The only advisories ignored below are ones nothing in the app can remove
+# yet, each with the reason it doesn't need action now and when to look
+# again. `--deny warnings` makes anything else go red, including new
+# "unmaintained", "unsound" and "yanked" notices.
 name: Audit
 
 on:
@@ -20,9 +22,6 @@ env:
 jobs:
   cargo-audit:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src-tauri
     steps:
       - uses: actions/checkout@v4
 
@@ -32,32 +31,52 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
-      - name: Audit dependencies
+      - name: Audit the app (src-tauri)
+        working-directory: src-tauri
         run: |
           ignored=(
-            # zip 4.6.1, three advisories, all about `extract`. zip is pinned
-            # at 4 by tauri-plugin-updater, which only extracts on Windows,
-            # only an update archive whose minisign signature has already
-            # been checked, and only a .zip one. Ours aren't zipped
-            # (`createUpdaterArtifacts: true` publishes the .exe and .msi
-            # as they are). Our own use, the BSB ingest, never extracts.
-            RUSTSEC-2026-0367
-            RUSTSEC-2026-0368
-            RUSTSEC-2026-0369
-            # proc-macro-error is unmaintained: a build-time macro crate,
-            # reached through Tauri's GTK bindings. Nothing of it ships.
-            RUSTSEC-2024-0370
-            # glib 0.18's VariantStrIter iterators are unsound. glib comes
-            # with Tauri's GTK stack on Linux, at the version Tauri pins;
-            # neither the app nor Tauri uses VariantStrIter.
+            # glib 0.18's VariantStrIter iterators are unsound (fixed in
+            # 0.20). glib comes with Tauri's GTK3 stack on Linux: every
+            # stable tauri 2.x (2.12.4 included), tauri-runtime-wry, wry
+            # and tao require gtk 0.18, and glib 0.18 has no patched
+            # release. Nothing reaches the bug: in the whole dependency
+            # tree, only glib's own tests call array_iter_str, the one way
+            # to get a VariantStrIter, and the app doesn't use glib.
+            # Revisit when Tauri moves to GTK4 (tauri-apps/tauri#7335,
+            # tauri-apps/wry#1474).
             RUSTSEC-2024-0429
-            # zbus_names, zvariant and zvariant_derive are unmaintained (no
-            # known vulnerability). They come with zbus 5, which
-            # tauri-plugin-opener pins, for D-Bus on Linux.
-            RUSTSEC-2026-0371
-            RUSTSEC-2026-0370
-            RUSTSEC-2026-0372
+            # proc-macro-error is unmaintained (no known vulnerability): a
+            # build-time macro crate, through glib-macros 0.18, from the
+            # same GTK3 stack. Nothing of it ships. Revisit with glib above
+            # (tauri-apps/wry#1355, closed as "will be fixed with the move
+            # to gtk4").
+            RUSTSEC-2024-0370
           )
           args=()
           for id in "${ignored[@]}"; do args+=(--ignore "$id"); done
           cargo audit --deny warnings "${args[@]}"
+
+      # Each lock file is audited even if one before it went red, so a run
+      # reports all three.
+      - name: Audit the Leptos UI (ui-leptos)
+        if: ${{ !cancelled() }}
+        working-directory: ui-leptos
+        run: |
+          ignored=(
+            # paste is unmaintained (no known vulnerability): a proc-macro
+            # crate, run by the compiler while building leptos (0.8.22),
+            # reactive_graph, tachys, reactive_stores and either_of. Nothing
+            # of it is in the WebAssembly the app ships. leptos 0.9.0-rc0
+            # still uses it; a move to its fork, pastey, was closed unmerged
+            # while leptos waits to see where the ecosystem lands
+            # (leptos-rs/leptos#4118). Revisit when leptos drops paste.
+            RUSTSEC-2024-0436
+          )
+          args=()
+          for id in "${ignored[@]}"; do args+=(--ignore "$id"); done
+          cargo audit --deny warnings "${args[@]}"
+
+      - name: Audit the GUI checks (tests/gui)
+        if: ${{ !cancelled() }}
+        working-directory: tests/gui
+        run: cargo audit --deny warnings

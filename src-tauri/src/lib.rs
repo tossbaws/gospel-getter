@@ -12,6 +12,7 @@ pub mod reader_data;
 #[cfg(test)]
 mod reader_data_tests;
 pub mod release_notes;
+pub mod retry;
 pub mod start_here;
 pub mod updater;
 pub mod window;
@@ -37,15 +38,10 @@ pub fn run() {
         // `commands::export_reader_data`); the webview gets no dialog or
         // file-system permission.
         .plugin(tauri_plugin_dialog::init())
-        // Updates, the releases page and the credit links, likewise used
-        // only from Rust (see `updater` and `credit_links`). The opener
-        // doesn't take over link clicks in the page.
+        // Updates, likewise used only from Rust (see `updater`). The
+        // releases page and the credit links open through the `open` crate,
+        // also only from Rust, so nothing takes over link clicks in the page.
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(
-            tauri_plugin_opener::Builder::new()
-                .open_js_links_on_click(false)
-                .build(),
-        )
         .manage(updater::PendingUpdate::default())
         .setup(|app| {
             setup_app(app).map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })
@@ -172,16 +168,30 @@ async fn init_state(database_url: &str) -> anyhow::Result<AppState> {
     Ok(state)
 }
 
+/// The pauses before the search index build is tried again, if it fails
+/// (each time it picks up where it stopped: finished translations stay
+/// done). Only the last try's failure leaves search unavailable.
+const SEARCH_INDEX_RETRIES: [std::time::Duration; 3] = [
+    std::time::Duration::from_secs(1),
+    std::time::Duration::from_secs(2),
+    std::time::Duration::from_secs(4),
+];
+
 /// Build whatever part of the search index is missing — all of it on the
 /// first launch after installing or upgrading, nothing on later launches —
 /// in the background, so the window doesn't wait on it. Searching reports
-/// that it's still being prepared until this finishes.
+/// that it's still being prepared until this finishes, tries again
+/// included.
 fn spawn_search_index_build(state: &AppState) {
     let store = state.store.clone();
     let status = state.search_index.clone();
     tauri::async_runtime::spawn(async move {
         let started = std::time::Instant::now();
-        match store.ensure_search_index().await {
+        let built = retry::with_retries("Building the search index", &SEARCH_INDEX_RETRIES, || {
+            store.ensure_search_index()
+        })
+        .await;
+        match built {
             Ok(indexed) => {
                 if !indexed.is_empty() {
                     info!(
