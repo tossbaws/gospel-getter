@@ -1,0 +1,18 @@
+# CI's cargo config (ci.yml copies it to ~/.cargo/config.toml): debug and
+# test builds optimize the four dependencies the tests spend their time in.
+# Nearly every Rust unit test and every frontend test file seeds whole
+# Bibles into a fresh SQLite database, and unoptimized, parsing the JSON
+# and writing it out is most of the run. Only these crates' code generation
+# changes; gospel_getter itself still builds as a plain debug build, with
+# its debug assertions and overflow checks. Release builds are unaffected.
+[profile.dev.package.serde_json]
+opt-level = 3
+
+[profile.dev.package.sqlx-core]
+opt-level = 3
+
+[profile.dev.package.sqlx-sqlite]
+opt-level = 3
+
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3

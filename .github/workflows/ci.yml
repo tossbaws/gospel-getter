@@ -1,8 +1,17 @@
 name: CI
 
+# Two jobs, in parallel: build-and-test (the Rust checks: formatting,
+# Clippy, the backend's build and tests, the page's Rust pieces) and
+# frontend-tests (the frontend behavior tests, split across two runners).
+# build-and-test is a required check on main; keep its name.
+#
+# It runs on pushes to leptos too, so a pull request into leptos starts
+# from leptos's caches: a pull request can only restore caches saved on
+# its own ref, its base branch, or main.
+
 on:
   push:
-    branches: [main]
+    branches: [main, leptos]
   pull_request:
 
 env:
@@ -34,7 +43,7 @@ jobs:
 
       # Trunk builds the page (ui/index.html with ui-leptos) into dist/,
       # which the app crate embeds, so it runs before anything that builds
-      # the app crate (cargo, and `npm test`, which builds the test bridge).
+      # the app crate.
       - name: Install Trunk
         uses: jetli/trunk-action@v0.5.1
         with:
@@ -48,9 +57,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf build-essential libssl-dev
 
+      # Optimized builds of the few dependencies the tests spend their time
+      # in; see the file.
+      - name: Configure cargo
+        working-directory: .
+        run: cat .github/ci/cargo-config.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
+          key: ${{ hashFiles('.github/ci/cargo-config.toml') }}
           workspaces: |
             src-tauri
             ui-leptos
@@ -64,7 +80,8 @@ jobs:
         run: cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings
 
       # The dialog's pure logic (words, numbers, the filter) is tested on
-      # the host; the component itself is tested through the page, below.
+      # the host; the component itself is tested through the page, in
+      # frontend-tests.
       - name: Test (ui-leptos)
         working-directory: ui-leptos
         run: cargo test
@@ -85,10 +102,58 @@ jobs:
       - name: Test
         run: cargo test --all-targets
 
-      # Behavior tests for ui/index.html and its Rust pieces (selection,
-      # copy, bookmarks, search, compare, the notes export), run in jsdom
-      # against the real command logic and database through
-      # examples/frontend_bridge.rs — built above, as is the page.
+  # Behavior tests for ui/index.html and its Rust pieces (selection, copy,
+  # bookmarks, search, compare, the notes export), run in jsdom against the
+  # real command logic and database through examples/frontend_bridge.rs.
+  # Each test file starts its own bridge, which seeds a fresh database, so
+  # the files are split across two runners.
+  frontend-tests:
+    name: frontend-tests (${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Trunk
+        uses: jetli/trunk-action@v0.5.1
+        with:
+          version: "v0.21.14"
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf build-essential libssl-dev
+
+      - name: Configure cargo
+        run: cat .github/ci/cargo-config.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
+
+      # Both shards build the same thing; one saves it.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ hashFiles('.github/ci/cargo-config.toml') }}
+          save-if: ${{ matrix.shard == 1 }}
+          workspaces: |
+            src-tauri
+            ui-leptos
+
+      # What `npm test` builds before it runs the tests (`npm run build`),
+      # as steps of their own.
+      - name: Build the page (Trunk)
+        run: trunk build --release
+
+      - name: Build the frontend bridge
+        working-directory: src-tauri
+        run: cargo build --example frontend_bridge
+
       - name: Install Node
         uses: actions/setup-node@v4
         with:
@@ -100,4 +165,4 @@ jobs:
         working-directory: tests/frontend
         run: |
           npm ci
-          npm test
+          npm run test:built -- --test-shard=${{ matrix.shard }}/2
