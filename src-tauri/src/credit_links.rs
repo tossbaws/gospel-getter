@@ -34,20 +34,17 @@ pub use desktop::*;
 
 #[cfg(desktop)]
 mod desktop {
-    use tauri::{AppHandle, Runtime};
-    use tauri_plugin_opener::OpenerExt;
-
     use super::{credit_link_url, messages};
 
     /// Open credit link `which` ("openbible" or "cc-by") in the system
     /// browser. Any other key is refused.
     #[tauri::command]
-    pub fn open_credit_link<R: Runtime>(app: AppHandle<R>, which: String) -> Result<(), String> {
+    pub fn open_credit_link(which: String) -> Result<(), String> {
         let Some(url) = credit_link_url(&which) else {
             tracing::error!("Refused to open an unknown credit link: {which:?}");
             return Err(messages::UNKNOWN_LINK.to_string());
         };
-        app.opener().open_url(url, None::<&str>).map_err(|e| {
+        open::that_detached(url).map_err(|e| {
             tracing::error!("Failed to open {url}: {e}");
             messages::OPEN_FAILED.to_string()
         })
