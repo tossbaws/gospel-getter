@@ -1,5 +1,6 @@
-# A weekly `cargo audit` of src-tauri/Cargo.lock against the RustSec
-# advisory database. It's kept out of the per-PR CI on purpose: a new
+# A weekly `cargo audit` of each lock file, src-tauri/ (the app),
+# ui-leptos/ (its WebAssembly UI) and tests/gui/ (the GUI checks), against
+# the RustSec advisory database. It's kept out of the per-PR CI on purpose: a new
 # advisory is news about a dependency, not about the change in a PR, so it
 # shouldn't block one. Run it by hand from the Actions tab at any time.
 #
@@ -21,9 +22,6 @@ env:
 jobs:
   cargo-audit:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src-tauri
     steps:
       - uses: actions/checkout@v4
 
@@ -33,7 +31,8 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
-      - name: Audit dependencies
+      - name: Audit the app (src-tauri)
+        working-directory: src-tauri
         run: |
           ignored=(
             # glib 0.18's VariantStrIter iterators are unsound (fixed in
@@ -56,3 +55,28 @@ jobs:
           args=()
           for id in "${ignored[@]}"; do args+=(--ignore "$id"); done
           cargo audit --deny warnings "${args[@]}"
+
+      # Each lock file is audited even if one before it went red, so a run
+      # reports all three.
+      - name: Audit the Leptos UI (ui-leptos)
+        if: ${{ !cancelled() }}
+        working-directory: ui-leptos
+        run: |
+          ignored=(
+            # paste is unmaintained (no known vulnerability): a proc-macro
+            # crate, run by the compiler while building leptos (0.8.22),
+            # reactive_graph, tachys, reactive_stores and either_of. Nothing
+            # of it is in the WebAssembly the app ships. leptos 0.9.0-rc0
+            # still uses it; a move to its fork, pastey, was closed unmerged
+            # while leptos waits to see where the ecosystem lands
+            # (leptos-rs/leptos#4118). Revisit when leptos drops paste.
+            RUSTSEC-2024-0436
+          )
+          args=()
+          for id in "${ignored[@]}"; do args+=(--ignore "$id"); done
+          cargo audit --deny warnings "${args[@]}"
+
+      - name: Audit the GUI checks (tests/gui)
+        if: ${{ !cancelled() }}
+        working-directory: tests/gui
+        run: cargo audit --deny warnings
