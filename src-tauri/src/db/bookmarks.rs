@@ -151,8 +151,7 @@ pub async fn add_bookmark(
     verse_start: i64,
     verse_end: i64,
 ) -> Result<Bookmark, BookmarkError> {
-    let mut tx = pool
-        .begin()
+    let mut tx = crate::db::begin_write(pool)
         .await
         .context("Failed to start bookmark transaction")?;
     check_passage(&mut tx, book_id, chapter, verse_start, verse_end).await?;

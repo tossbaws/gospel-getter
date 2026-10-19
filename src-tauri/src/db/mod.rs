@@ -11,7 +11,7 @@ pub mod search;
 pub mod seed;
 
 pub use bookmarks::{Bookmark, BookmarkError, BookmarkInTranslation};
-pub use connect::create_pool;
+pub use connect::{BUSY_TIMEOUT, begin_write, create_pool};
 pub use highlights::{Highlight, HighlightColor, HighlightPassage, HighlightPassageInTranslation};
 pub use legacy::migrate_legacy_db_if_needed;
 pub use migrate::migrate;
@@ -21,6 +21,8 @@ pub use queries::*;
 pub use search::{SearchHit, ensure_search_index};
 pub use seed::{seed_cross_references_if_empty, seed_missing};
 
+#[cfg(test)]
+mod contention_tests;
 #[cfg(test)]
 pub mod test_support;
 #[cfg(test)]

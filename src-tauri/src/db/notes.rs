@@ -324,8 +324,7 @@ pub async fn add_note(
     dates: Option<(&str, &str)>,
 ) -> Result<Note, NoteError> {
     let body = normalize_body(body)?;
-    let mut tx = pool
-        .begin()
+    let mut tx = crate::db::begin_write(pool)
         .await
         .context("Failed to start note transaction")?;
     check_passage(
@@ -375,8 +374,7 @@ pub async fn add_note(
 /// allowed, so a note can be shortened even past the limit.
 pub async fn update_note(pool: &SqlitePool, id: i64, body: &str) -> Result<Note, NoteError> {
     let body = normalize_body(body)?;
-    let mut tx = pool
-        .begin()
+    let mut tx = crate::db::begin_write(pool)
         .await
         .context("Failed to start note transaction")?;
     let old_chars: Option<i64> = sqlx::query_scalar("SELECT length(body) FROM notes WHERE id = $1")

@@ -171,7 +171,9 @@ pub async fn apply_import(
     replace: bool,
     position: Option<&NewPosition>,
 ) -> Result<ImportCounts, ApplyImportError> {
-    let mut tx = pool.begin().await.context("Failed to start the import")?;
+    let mut tx = crate::db::begin_write(pool)
+        .await
+        .context("Failed to start the import")?;
 
     if let Some(notes) = notes
         && let Some(limit) = notes_after_import(&mut tx, notes, replace)
