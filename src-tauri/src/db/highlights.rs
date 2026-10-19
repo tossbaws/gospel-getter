@@ -119,8 +119,7 @@ pub async fn set_highlights(
     verse_end: i64,
     color: HighlightColor,
 ) -> Result<(), BookmarkError> {
-    let mut tx = pool
-        .begin()
+    let mut tx = crate::db::begin_write(pool)
         .await
         .context("Failed to start highlight transaction")?;
     check_passage(&mut tx, book_id, chapter, verse_start, verse_end).await?;

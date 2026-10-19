@@ -15,11 +15,11 @@
 //! build (packaging/install.sh, the AUR recipe, `cargo build`) only says
 //! that a new version exists and links to the releases page.
 //!
-//! The webview gets no updater, process or opener permission: it calls the
-//! commands here, and only two of them open a URL: `open_download_page`,
-//! always [`RELEASES_PAGE`], and `open_release_notes`, always this
-//! version's page ([`release_notes_page`]). Neither takes a URL from the
-//! page.
+//! The webview gets no updater or process permission (and there's no opener
+//! plugin to grant): it calls the commands here, and only two of them open
+//! a URL: `open_download_page`, always [`RELEASES_PAGE`], and
+//! `open_release_notes`, always this version's page
+//! ([`release_notes_page`]). Neither takes a URL from the page.
 
 use serde::Serialize;
 
@@ -210,7 +210,6 @@ mod desktop {
 
     use tauri::ipc::Channel;
     use tauri::{AppHandle, Manager, Runtime, State};
-    use tauri_plugin_opener::OpenerExt;
     use tauri_plugin_updater::{Error, Update, UpdaterExt};
 
     use super::{
@@ -385,21 +384,19 @@ mod desktop {
     /// Open the releases page in the system browser (for builds that can't
     /// update themselves).
     #[tauri::command]
-    pub fn open_download_page<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
-        app.opener()
-            .open_url(RELEASES_PAGE, None::<&str>)
-            .map_err(|e| {
-                tracing::error!("Failed to open {RELEASES_PAGE}: {e}");
-                messages::OPEN_FAILED.to_string()
-            })
+    pub fn open_download_page() -> Result<(), String> {
+        open::that_detached(RELEASES_PAGE).map_err(|e| {
+            tracing::error!("Failed to open {RELEASES_PAGE}: {e}");
+            messages::OPEN_FAILED.to_string()
+        })
     }
 
     /// Open this version's release page in the system browser (About's
     /// Release notes link). The version is the app's own, never the page's.
     #[tauri::command]
-    pub fn open_release_notes<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    pub fn open_release_notes() -> Result<(), String> {
         let url = release_notes_page(crate::commands::app_version());
-        app.opener().open_url(&url, None::<&str>).map_err(|e| {
+        open::that_detached(&url).map_err(|e| {
             tracing::error!("Failed to open {url}: {e}");
             messages::NOTES_OPEN_FAILED.to_string()
         })
@@ -487,8 +484,11 @@ mod tests {
     /// The updater reads the release's `latest.json`, checks every download
     /// against the committed public key and the version it was signed for,
     /// and is only signed for in dist.yml (through the overlay), so local
-    /// and install.sh builds need no private key. The webview gets no
-    /// updater, process or opener permission.
+    /// and install.sh builds need no private key. The overlay publishes the
+    /// installers as they are, not zipped as for Tauri v1
+    /// (`"v1Compatible"`), which the updater, built without its `zip`
+    /// feature, couldn't unpack. The webview gets no updater or process
+    /// permission.
     #[test]
     fn updater_config_and_permissions() {
         let config: serde_json::Value =
