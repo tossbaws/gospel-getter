@@ -5,6 +5,39 @@
 
 const HTML: &str = include_str!("../../ui/index.html");
 
+/// The page's pieces written in Rust (`ui-leptos/src`), which own the
+/// modal dialogs' markup and keyboard handling: checks of those read them
+/// where they now live.
+const PIECES: [(&str, &str); 6] = [
+    (
+        "export_notes.rs",
+        include_str!("../../ui-leptos/src/export_notes.rs"),
+    ),
+    (
+        "shortcuts.rs",
+        include_str!("../../ui-leptos/src/shortcuts.rs"),
+    ),
+    ("welcome.rs", include_str!("../../ui-leptos/src/welcome.rs")),
+    (
+        "import_preview.rs",
+        include_str!("../../ui-leptos/src/import_preview.rs"),
+    ),
+    (
+        "note_editor.rs",
+        include_str!("../../ui-leptos/src/note_editor.rs"),
+    ),
+    ("bridge.rs", include_str!("../../ui-leptos/src/bridge.rs")),
+];
+
+/// One piece's source, by file name.
+fn piece(name: &str) -> &'static str {
+    PIECES
+        .iter()
+        .find(|(file, _)| *file == name)
+        .map(|(_, source)| *source)
+        .unwrap_or_else(|| panic!("no piece {name}"))
+}
+
 /// Walk forward from a `{` at `start`, tracking nesting depth, to find the
 /// index of the brace that closes that same block (not just the first
 /// nested selector/statement inside it).
@@ -757,12 +790,17 @@ fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
     }
 }
 
-/// The opening tag of the element with `id`.
+/// The opening tag of the element with `id`: in the page's markup, or, for
+/// the dialogs the Rust pieces own, in their `view!` markup (the same
+/// attributes, one to a line).
 fn tag_of(id: &str) -> &'static str {
-    let at = HTML
-        .find(&format!(r#"id="{id}""#))
+    let needle = format!(r#"id="{id}""#);
+    let source = std::iter::once(HTML)
+        .chain(PIECES.iter().map(|(_, source)| *source))
+        .find(|source| source.contains(&needle))
         .unwrap_or_else(|| panic!("expected an element #{id}"));
-    let tag = &HTML[HTML[..at].rfind('<').unwrap()..];
+    let at = source.find(&needle).unwrap();
+    let tag = &source[source[..at].rfind('<').unwrap()..];
     &tag[..tag.find('>').unwrap()]
 }
 
@@ -1432,9 +1470,17 @@ fn notes_use_tested_theme_colors() {
     // The welcome and the note panel share one modal style; the welcome
     // keeps its own ids and classes.
     for class in ["welcome-overlay modal-overlay", "welcome-panel modal-panel"] {
-        assert!(HTML.contains(&format!(r#"class="{class}""#)), "{class}");
+        assert!(
+            piece("welcome.rs").contains(&format!(r#"class="{class}""#)),
+            "{class}"
+        );
     }
-    assert!(HTML.contains(r#"<div id="note-overlay" class="modal-overlay" hidden>"#));
+    let note_overlay = tag_of("note-overlay");
+    assert!(note_overlay.contains(r#"class="modal-overlay""#));
+    assert!(
+        note_overlay.lines().any(|line| line.trim() == "hidden"),
+        "hidden until opened"
+    );
     assert_eq!(
         rules
             .iter()
@@ -3422,79 +3468,103 @@ fn the_selection_card_anchors_to_line_boxes_in_flowing() {
 /// no Next or Back, and no key lists.
 #[test]
 fn the_welcome_is_one_accessible_card() {
-    let start = HTML.find(r#"<div id="welcome-overlay""#).unwrap();
-    let end = start + HTML[start..].find("\n    </div>\n").unwrap();
-    let card = &HTML[start..end];
+    // The card is the welcome piece's (ui-leptos/src/welcome.rs).
+    let card = piece("welcome.rs");
+    let panel = tag_of("welcome-panel");
+    for attr in [
+        r#"class="welcome-panel modal-panel""#,
+        r#"role="dialog""#,
+        r#"aria-modal="true""#,
+        r#"aria-labelledby="welcome-title""#,
+        r#"aria-describedby="welcome-intro""#,
+        r#"tabindex="-1""#,
+    ] {
+        assert!(panel.contains(attr), "{attr}");
+    }
     assert!(card.contains(
-        r#"<div id="welcome-panel" class="welcome-panel modal-panel" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-intro" tabindex="-1">"#
+        r#"<h2 id="welcome-title" class="welcome-title">"Welcome to Gospel Getter"</h2>"#
     ));
+    assert!(tag_of("welcome-intro").contains(r#"class="welcome-intro""#));
+    assert!(card.contains(
+        r#""A quiet place to read the Bible on your computer, offline and with no account.""#
+    ));
+    let close = tag_of("welcome-close");
+    for attr in [
+        r#"type="button""#,
+        r#"class="panel-close""#,
+        r#"aria-label="Close""#,
+        r#"title="Close (Esc)""#,
+    ] {
+        assert!(close.contains(attr), "{attr}");
+    }
+    let skip = tag_of("welcome-skip");
+    assert!(skip.contains(r#"type="button""#) && skip.contains(r#"class="reader-mode-btn""#));
+    assert!(card.contains(r#""Skip""#));
+    let looks = tag_of("welcome-looks");
+    for attr in [
+        r#"class="welcome-looks""#,
+        r#"role="radiogroup""#,
+        r#"aria-labelledby="welcome-look-label""#,
+    ] {
+        assert!(looks.contains(attr), "{attr}");
+    }
     assert!(
-        card.contains(
-            r#"<h2 id="welcome-title" class="welcome-title">Welcome to Gospel Getter</h2>"#
-        )
+        card.contains(r#"<h3 class="section-label" id="welcome-look-label">"Pick a look"</h3>"#)
     );
-    assert!(card.contains(
-        r#"<p id="welcome-intro" class="welcome-intro">A quiet place to read the Bible on your computer, offline and with no account.</p>"#
-    ));
-    assert!(card.contains(
-        r#"<button type="button" id="welcome-close" class="panel-close" aria-label="Close" title="Close (Esc)">&times;</button>"#
-    ));
-    assert!(card.contains(
-        r#"<button type="button" id="welcome-skip" class="reader-mode-btn">Skip</button>"#
-    ));
-    assert!(card.contains(
-        r#"<div id="welcome-looks" class="welcome-looks" role="radiogroup" aria-labelledby="welcome-look-label">"#
-    ));
-    assert!(card.contains(r#"<h3 class="section-label" id="welcome-look-label">Pick a look</h3>"#));
-    assert!(card.contains(r#"<p class="welcome-hint">More themes in Aa.</p>"#));
-    assert!(
-        card.contains(r#"<h3 class="section-label" id="welcome-start-label">Where to start</h3>"#)
-    );
-    assert!(card.contains(
-        r#"<ul id="welcome-start" class="welcome-start" aria-labelledby="welcome-start-label"></ul>"#
-    ));
+    assert!(card.contains(r#"<p class="welcome-hint">"More themes in Aa."</p>"#));
+    assert!(tag_of("welcome-start-label").contains(r#"class="section-label""#));
+    assert!(card.contains(r#""Where to start""#));
+    let start = tag_of("welcome-start");
+    assert!(start.contains(r#"class="welcome-start""#));
+    assert!(start.contains(r#"aria-labelledby="welcome-start-label""#));
     // The two looks: radios named by theme (as the theme list names them),
-    // each a preview of its own theme, hidden from assistive tech.
+    // each a preview of its own theme, hidden from assistive tech: one
+    // radio's markup, made for each of the two.
     let themes = select_options("theme-select");
-    let mut looks = 0;
     for (value, name) in [("chi-rho", "Chi Rho"), ("vellum", "Vellum")] {
         assert!(themes.contains(&(value.to_owned(), name.to_owned())));
-        assert!(card.contains(&format!(
-            r#"<button type="button" class="welcome-look" role="radio" aria-checked="false" data-value="{value}"><span class="welcome-look-preview" data-theme-preview="{value}" aria-hidden="true">"#
-        )));
-        assert!(card.contains(&format!(
-            r#"<span class="welcome-look-name">{name}</span></button>"#
-        )));
-        looks += 1;
+        assert!(
+            card.contains(&format!(r#"("{value}", "{name}")"#)),
+            "{value}"
+        );
     }
-    assert_eq!(card.matches(r#"role="radio""#).count(), looks);
+    assert!(card.contains(r#"const LOOKS: [(&str, &str); 2] ="#));
+    assert_eq!(card.matches(r#"role="radio""#).count(), 1);
+    for markup in [
+        r#"class="welcome-look""#,
+        "data-value=*value",
+        r#"<span class="welcome-look-preview" data-theme-preview=*value aria-hidden="true">"#,
+        r#"<span class="welcome-look-name">{*name}</span>"#,
+    ] {
+        assert!(card.contains(markup), "{markup}");
+    }
     for gone in [
         "welcome-page",
         "welcome-next",
         "welcome-back",
         "welcome-progress",
         "<kbd>",
-        "<li>",
     ] {
         assert!(!card.contains(gone), "the card has no {gone}");
     }
-    // Its own keyboard: Escape, the radios' arrows, and Tab kept inside.
-    let script = block_after(
-        HTML,
-        "            window.addEventListener('keydown', function (event) {\n                if (welcomeOverlay.hidden) return;",
-    );
-    assert!(script.contains("event.stopPropagation();"));
-    assert!(script.contains("closeWelcome();"));
-    assert!(script.contains("/^Arrow(Left|Right|Up|Down)$/"));
-    assert!(script.contains("event.key === 'Tab'"));
-    assert!(function_body("openWelcome").contains("welcomePanel.focus();"));
-    // The places to start are escaped text from the backend.
-    let rows = function_body("renderStartHere");
-    assert!(rows.contains("${escapeHtml(row.title)}"));
-    assert!(rows.contains("${escapeHtml(row.line)}"));
-    assert!(HTML.contains("renderStartHere(home.startHere);"));
+    // Its own keyboard, ahead of the page's (capturing, on window): Escape,
+    // the radios' arrows, and Tab kept inside; focus goes to the card.
+    assert!(card.contains("dom::on_window_keydown("));
+    assert!(card.contains("event.stop_propagation();"));
+    assert!(card.contains(r#"if key == "Escape""#));
+    assert!(card.contains(r#""ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown""#));
+    assert!(card.contains(r#"key == "Tab""#));
+    assert!(card.contains("panel.focus()"));
+    // The places to start are the backend's, kept by the page from boot
+    // and shown as text (no markup is made from them).
+    assert!(HTML.contains("startHere = Array.isArray(home.startHere) ? home.startHere : [];"));
+    assert!(card.contains(r#"<span class="welcome-start-title">{title}</span>"#));
+    assert!(card.contains(r#"<span class="welcome-start-line">{line}</span>"#));
+    assert!(!card.contains("inner_html"));
     // And the seen flag is the old tour's.
-    assert!(HTML.contains("const WELCOME_KEY = 'gospel-getter-welcome';"));
+    assert!(
+        piece("bridge.rs").contains(r#"pub const WELCOME_KEY: &str = "gospel-getter-welcome";"#)
+    );
 }
 
 /// The card adds no colors of its own: --text, --text-dim and --accent on
@@ -3595,10 +3665,20 @@ fn nothing_is_left_of_the_old_tour() {
         "Start reading",
     ] {
         assert!(!HTML.contains(gone), "`{gone}` is left of the tour");
+        for (file, source) in PIECES {
+            assert!(
+                !source.contains(gone),
+                "`{gone}` is left of the tour in {file}"
+            );
+        }
     }
     // Every welcome class the stylesheet styles is used outside it, in the
-    // markup or the script.
-    let outside = &HTML[HTML.find("</style>").unwrap()..];
+    // markup or the script, the page's or the welcome's (ui-leptos).
+    let outside = format!(
+        "{}{}",
+        &HTML[HTML.find("</style>").unwrap()..],
+        piece("welcome.rs")
+    );
     let rules = rules();
     for rule in rules.iter().filter(|r| r.selector.contains("welcome")) {
         for class in rule
@@ -3960,10 +4040,16 @@ fn every_handled_key_is_in_the_shortcuts_table() {
             "`{key}` is handled but not in SHORTCUTS"
         );
     }
-    // And the sheet is that table, grouped.
-    let render = function_body("renderShortcuts");
-    assert!(render.contains("SHORTCUT_GROUPS.map("));
-    assert!(render.contains("SHORTCUTS.filter((s) => s.group === group)"));
+    // And the sheet is that table, grouped: the page hands it over whole
+    // with each request to open, and the sheet (ui-leptos) lists each
+    // group's rows.
+    let open = function_body("openShortcuts");
+    assert!(
+        open.contains("detail: { groups: SHORTCUT_GROUPS, shortcuts: SHORTCUTS, returnFocus }")
+    );
+    let sheet = piece("shortcuts.rs");
+    assert!(sheet.contains(".groups"));
+    assert!(sheet.contains(".filter(|s| &s.group == group)"));
 }
 
 /// The shortcuts sheet is a modal dialog named by its heading, reached
