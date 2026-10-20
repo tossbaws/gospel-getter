@@ -5,8 +5,11 @@
 //! the note editor editing and asking before discarding (6); the keyboard
 //! shortcuts sheet (7); Export data… then Import data… to the preview (8);
 //! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
+//! Then, in a second session on the GUI checks' test build, the updater
+//! (9 to 13, `updates`).
 
 mod dialogs;
+mod updates;
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -19,6 +22,7 @@ use crate::config::Config;
 use crate::native;
 use crate::report::{Check, Report};
 use crate::ui::{Ui, log_line};
+use crate::update_server::UpdateServer;
 
 /// How long the app's first-run search index build may take (3 to 4
 /// seconds on a desktop; CI runners are slower).
@@ -144,14 +148,54 @@ pub async fn run(config: &Config, report: &mut Report) {
         ),
     );
 
+    // The updater checks' own server, up before anything else: the app as
+    // shipped (checks 1 to 8) must ignore the test settings and send it
+    // nothing.
+    let server = start_update_server(config).await;
+    if let Err(e) = &server {
+        log_line(started, &format!("no updater checks: {e:#}"));
+    }
+
+    shipped(config, report, started).await;
+
+    match server {
+        Ok(server) => updates::run(config, report, started, &server).await,
+        Err(e) => {
+            report
+                .fail_the_rest(&Check::UPDATER, &format!("{e:#}"))
+                .await
+        }
+    }
+    log_line(
+        started,
+        &format!("done in {:.1}s", started.elapsed().as_secs_f64()),
+    );
+}
+
+/// The update server and the test build's first settings (a release
+/// installer, checking that server), if the run has a test build.
+async fn start_update_server(config: &Config) -> Result<UpdateServer> {
+    let (Some(_), Some(settings)) = (&config.updater_app, &config.updater_settings) else {
+        bail!(
+            "not run: no GUI-check test build of the app (set GUI_CHECK_UPDATER_APP for \
+             scripts/gui-check.sh: a build with the gui-test-updater feature)"
+        );
+    };
+    let server = UpdateServer::start().await?;
+    server.write_settings(settings, "self", false).await?;
+    Ok(server)
+}
+
+/// Checks 1 to 8, on the app as shipped.
+async fn shipped(config: &Config, report: &mut Report, started: Instant) {
     // Check 1 starts with the session; without one nothing else can run.
-    let driver = match start_session(config, started).await {
+    let driver = match start_session(config, &config.app, started).await {
         Ok(driver) => driver,
         Err(e) => {
             log_line(started, &format!("FAILED: {e:#}"));
             report.record(Check::Driver, Err(e)).await;
             report
-                .fail_the_rest("not run: no WebDriver session (check 1)")
+                .fail_the_rest(&Check::SHIPPED, "not run: no WebDriver session (check 1)")
                 .await;
             return;
         }
@@ -248,7 +292,7 @@ pub async fn run(config: &Config, report: &mut Report) {
     let csp = run.csp_verdict(listener, mounted).await;
     report.record(Check::Csp, csp).await;
     report
-        .fail_the_rest("not run: the page did not boot (check 1)")
+        .fail_the_rest(&Check::SHIPPED, "not run: the page did not boot (check 1)")
         .await;
 
     log_line(started, "close the app (end the WebDriver session)");
@@ -258,21 +302,17 @@ pub async fn run(config: &Config, report: &mut Report) {
         Ok(Err(e)) => log_line(started, &format!("ending the session failed: {e}")),
         Err(_) => log_line(started, "ending the session timed out after 10s"),
     }
-    log_line(
-        started,
-        &format!("done in {:.1}s", started.elapsed().as_secs_f64()),
-    );
 }
 
-/// Starts the app through tauri-driver: a WebDriver session whose browser
+/// Starts `app` through tauri-driver: a WebDriver session whose browser
 /// is the app.
-async fn start_session(config: &Config, started: Instant) -> Result<WebDriver> {
+async fn start_session(config: &Config, app: &str, started: Instant) -> Result<WebDriver> {
     log_line(
         started,
-        &format!("start the app through tauri-driver ({})", config.app),
+        &format!("start the app through tauri-driver ({app})"),
     );
     let mut caps = Capabilities::new();
-    caps.set("tauri:options", json!({ "application": config.app }))?;
+    caps.set("tauri:options", json!({ "application": app }))?;
     let limit = config.session_timeout.min(config.budget);
     let session = WebDriver::builder(config.webdriver_url.as_str(), caps).request_timeout(limit);
     let driver = tokio::time::timeout(limit, session)

@@ -3,7 +3,10 @@
 //! output (tracing, to stdout) goes nowhere when anything else starts it,
 //! and tauri-driver only starts an `.exe`. This starts the real app
 //! (`GUI_LAUNCH_TARGET`) with the same arguments and environment, its
-//! output appended to `GUI_LAUNCH_LOG`, and waits for it.
+//! output appended to `GUI_LAUNCH_LOG`, and waits for it. A copy named
+//! `gui-launch-updater.exe` starts the GUI checks' test build instead
+//! (`GUI_LAUNCH_UPDATER_TARGET`, `GUI_LAUNCH_UPDATER_LOG`), for the updater
+//! checks' session.
 //!
 //! The log starts with what the app was given that matters to WebDriver:
 //! its arguments and the WebView2 and Tauri automation variables.
@@ -31,8 +34,21 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<ExitCode, String> {
-    let target = std::env::var_os("GUI_LAUNCH_TARGET").ok_or("GUI_LAUNCH_TARGET is not set")?;
-    let log_path = std::env::var_os("GUI_LAUNCH_LOG").ok_or("GUI_LAUNCH_LOG is not set")?;
+    // Which app, by this launcher's own name.
+    let updater = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            exe.file_stem()
+                .map(|s| s.to_string_lossy().ends_with("-updater"))
+        })
+        .unwrap_or(false);
+    let (target_var, log_var) = if updater {
+        ("GUI_LAUNCH_UPDATER_TARGET", "GUI_LAUNCH_UPDATER_LOG")
+    } else {
+        ("GUI_LAUNCH_TARGET", "GUI_LAUNCH_LOG")
+    };
+    let target = std::env::var_os(target_var).ok_or(format!("{target_var} is not set"))?;
+    let log_path = std::env::var_os(log_var).ok_or(format!("{log_var} is not set"))?;
     let args: Vec<_> = std::env::args_os().skip(1).collect();
 
     let mut log = OpenOptions::new()
