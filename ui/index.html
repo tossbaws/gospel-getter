@@ -4348,7 +4348,8 @@
                     }
                     refBtn.setAttribute('aria-expanded', String(!picker.hidden));
                     sidebarToggle.setAttribute('aria-expanded', String(sidebar));
-                    // The main script scrolls it to the book being read.
+                    // The picker's Rust piece (ui-leptos/src/picker.rs)
+                    // scrolls it to the book being read.
                     if (wasHidden && !picker.hidden) document.dispatchEvent(new CustomEvent('gospel-getter:picker-shown'));
                 }
 
@@ -5162,9 +5163,6 @@
             const invoke = window.__TAURI__.core.invoke;
 
             const root = document.documentElement;
-            const picker = document.getElementById('picker');
-            const otBookList = document.getElementById('ot-book-list');
-            const ntBookList = document.getElementById('nt-book-list');
             const refBtn = document.getElementById('ref-btn');
             const refText = document.getElementById('ref-text');
             const readingPane = document.getElementById('reading-pane');
@@ -6414,8 +6412,9 @@
                 if (event.detail && event.detail.closeSearch && !searchPanel.hidden) setSearchOpen(false);
             });
 
-            // A Rust piece opens a chapter (the welcome's places to start):
-            // a jump, as the page's own are, recorded in its history.
+            // A Rust piece opens a chapter (the welcome's places to start, a
+            // chapter chosen in the picker or Random chapter's): a jump, as
+            // the page's own are, recorded in its history.
             document.addEventListener('gospel-getter:jump', function (event) {
                 const { bookId, chapter, top } = event.detail;
                 jumpTo(String(bookId), String(chapter), null, null, { top: !!top });
@@ -6536,219 +6535,33 @@
             // commands return, so the CSS above (and the DOM-driven logic
             // in this script) needs no changes at all.
 
-            // Picks uniformly from the rendered book buttons, then
-            // uniformly from 1..chapter_count for that book, entirely from
-            // data already on the page — no server-side randomness needed.
-            // Malformed or missing data (a button with no id, a
-            // non-numeric or non-positive chapter count) is treated as "no
-            // pick" rather than risking a request for a chapter that
-            // doesn't exist.
-            function pickRandomBookAndChapter() {
-                const bookButtons = document.querySelectorAll('.book-item');
-                if (bookButtons.length === 0) return null;
+            // ---- The book and chapter picker's books and chapters are the
+            // page's pieces written in Rust (ui-leptos/src/picker.rs); what
+            // crosses is documented in ui-leptos/src/bridge.rs. The picker
+            // itself, Random chapter and its two shapes (the sidebar and the
+            // popover, which the preferences script in <head> shows and
+            // hides) stay here. The page hands over the books, from boot, and
+            // the chapter on screen, each time one is put there; either may
+            // come before the pieces have loaded, so both go again when they
+            // say they're ready. A chapter chosen in the picker comes back as
+            // a jump (gospel-getter:jump, below).
+            let pickerBooks = null;
 
-                const bookBtn = bookButtons[Math.floor(Math.random() * bookButtons.length)];
-                const bookId = bookBtn.dataset.bookId;
-                const chapterCount = Number(bookBtn.dataset.chapterCount);
-                if (!bookId || !Number.isInteger(chapterCount) || chapterCount < 1) {
-                    return null;
-                }
-
-                const chapter = Math.floor(Math.random() * chapterCount) + 1;
-                return { bookId, chapter };
+            function sendPickerBooks() {
+                if (!pickerBooks) return;
+                document.dispatchEvent(new CustomEvent('gospel-getter:picker-books', { detail: pickerBooks }));
             }
 
-            // ---- The book and chapter picker: the sidebar, or the popover
-            // from the reference button (the preferences script in <head>
-            // shows and hides it, in either shape). Random chapter, then
-            // the books; choosing a book shows its chapters under it, and
-            // choosing a chapter reads it. The chapter being read, and its
-            // book, are marked.
-
-            // A book with more chapters than this (Psalms, Isaiah,
-            // Jeremiah) gets the compact grid, ten to a row; the rest get
-            // pills, six to a row (see .chapter-grid).
-            const COMPACT_OVER = 50;
-            const COMPACT_COLUMNS = 10;
-            const PILL_COLUMNS = 6;
-
-            // The book whose chapters show, as a string, or null.
-            let pickerBook = null;
-
-            function renderBookButton(book) {
-                return `<li><button type="button" class="book-item" data-book-id="${book.id}" data-chapter-count="${book.chapterCount}" aria-expanded="false">${escapeHtml(book.name)}</button></li>`;
-            }
-
-            function renderBookLists(home) {
-                otBookList.innerHTML = home.otBooks.map((b) => renderBookButton(b)).join('');
-                ntBookList.innerHTML = home.ntBooks.map((b) => renderBookButton(b)).join('');
-            }
-
-            function bookButton(bookId) {
-                return picker.querySelector(`.book-item[data-book-id="${bookId}"]`);
-            }
-
-            // Shows `bookId`'s chapters under it (and no other book's), or
-            // no book's for null. Built from the book's chapter count, so
-            // it needs nothing from the backend.
-            function showPickerChapters(bookId) {
-                const shown = document.getElementById('picker-chapters');
-                if (shown) shown.remove();
-                picker.querySelectorAll('.book-item[aria-expanded="true"]').forEach((b) => {
-                    b.setAttribute('aria-expanded', 'false');
-                    b.removeAttribute('aria-controls');
-                });
-                pickerBook = null;
-                const button = bookId == null ? null : bookButton(bookId);
-                if (!button) return;
-                const count = Number(button.dataset.chapterCount);
-                const compact = count > COMPACT_OVER;
-                const current = reading && String(reading.bookId) === String(bookId) ? reading.chapter : null;
-                const grid = document.createElement('div');
-                grid.id = 'picker-chapters';
-                grid.className = compact ? 'chapter-grid is-compact' : 'chapter-grid';
-                grid.setAttribute('role', 'group');
-                grid.setAttribute('aria-label', `${button.textContent} chapters`);
-                grid.dataset.bookId = String(bookId);
-                grid.dataset.columns = String(compact ? COMPACT_COLUMNS : PILL_COLUMNS);
-                let buttons = '';
-                for (let n = 1; n <= count; n++) {
-                    buttons += `<button type="button" class="chapter-btn" data-chapter="${n}"${n === current ? ' aria-current="page"' : ''}>${n}</button>`;
-                }
-                grid.innerHTML = buttons;
-                button.setAttribute('aria-expanded', 'true');
-                button.setAttribute('aria-controls', 'picker-chapters');
-                button.after(grid);
-                pickerBook = String(bookId);
-            }
-
-            // Scrolls the picker (not the page) just enough to show `el`.
-            function revealInPicker(el) {
-                if (!el || picker.hidden) return;
-                const top = el.offsetTop;
-                const bottom = top + el.offsetHeight;
-                if (top < picker.scrollTop) picker.scrollTop = top - 8;
-                else if (bottom > picker.scrollTop + picker.clientHeight) picker.scrollTop = bottom - picker.clientHeight + 8;
-            }
-
-            // Scrolls the picker so the book being read, and as much of its
-            // chapters as fit, are in view: unless they already are, its
-            // name goes a little below the top.
-            function revealCurrentInPicker() {
-                const book = bookButton(reading.bookId);
-                if (!book || picker.hidden) return;
-                const grid = gridAfter(book);
-                const bottom = (grid || book).offsetTop + (grid || book).offsetHeight;
-                const inView = book.offsetTop >= picker.scrollTop
-                    && bottom <= picker.scrollTop + picker.clientHeight;
-                if (!inView) picker.scrollTop = book.offsetTop - 48;
-            }
-
-            function gridAfter(book) {
-                return book.getAttribute('aria-expanded') === 'true' ? book.nextElementSibling : null;
-            }
-
-            // After a chapter is put on screen: its book and chapter are
-            // the ones marked, and its book's chapters show (unless they
-            // already do, so a reader choosing chapters keeps their place).
+            // The picker marks the chapter on screen, and shows its book's
+            // chapters.
             function markPickerCurrent() {
-                picker.querySelectorAll('.book-item[aria-current]').forEach((b) => b.removeAttribute('aria-current'));
-                const book = bookButton(reading.bookId);
-                if (book) book.setAttribute('aria-current', 'true');
-                if (pickerBook !== String(reading.bookId)) {
-                    showPickerChapters(reading.bookId);
-                } else {
-                    picker.querySelectorAll('.chapter-btn').forEach((b) => {
-                        if (Number(b.dataset.chapter) === reading.chapter) b.setAttribute('aria-current', 'page');
-                        else b.removeAttribute('aria-current');
-                    });
-                }
-                if (!picker.contains(document.activeElement)) revealCurrentInPicker();
+                if (!reading) return;
+                document.dispatchEvent(new CustomEvent('gospel-getter:picker-current', { detail: { bookId: reading.bookId, chapter: reading.chapter } }));
             }
 
-            // Reads a chapter chosen in the picker (or Random chapter's),
-            // from its top, as the end-of-chapter buttons do. The chapter
-            // already on screen stays where the reader is in it. The
-            // popover closes (focus going back to the reference button);
-            // the sidebar stays.
-            function choosePickerChapter(bookId, chapter) {
-                if (surfaces() && surfaces().current() === 'picker') closeSurfaces();
-                const shown = reading && reading.bookId === Number(bookId) && reading.chapter === Number(chapter);
-                jumpTo(bookId, chapter, null, null, { top: !shown });
-            }
-
-            document.addEventListener('gospel-getter:picker-shown', function () {
-                if (reading) revealCurrentInPicker();
-            });
-
-            picker.addEventListener('click', function (event) {
-                const book = event.target.closest('.book-item');
-                if (book) {
-                    showPickerChapters(book.getAttribute('aria-expanded') === 'true' ? null : book.dataset.bookId);
-                    return;
-                }
-                const chapter = event.target.closest('.chapter-btn');
-                if (chapter) {
-                    choosePickerChapter(chapter.closest('.chapter-grid').dataset.bookId, chapter.dataset.chapter);
-                    return;
-                }
-                if (event.target.closest('#random-chapter-btn')) {
-                    const pick = pickRandomBookAndChapter();
-                    if (pick) choosePickerChapter(pick.bookId, pick.chapter);
-                }
-            });
-
-            // The keyboard, besides Tab: ↑ and ↓ move through Random
-            // chapter and the books (into and out of a book's chapters), →
-            // shows a book's chapters and ← hides them; in the chapters,
-            // the arrows move around the grid, and Home and End go to its
-            // first and last. Arrows never turn the chapter here.
-            picker.addEventListener('keydown', function (event) {
-                if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-                event.stopPropagation();
-                event.preventDefault();
-                const items = [document.getElementById('random-chapter-btn'), ...picker.querySelectorAll('.book-item')];
-                const gridOf = (book) => (book ? gridAfter(book) : null);
-                const chapter = event.target.closest('.chapter-btn');
-                let next = null;
-                if (chapter) {
-                    const grid = chapter.closest('.chapter-grid');
-                    const buttons = [...grid.querySelectorAll('.chapter-btn')];
-                    const i = buttons.indexOf(chapter);
-                    const columns = Number(grid.dataset.columns);
-                    const lastRow = Math.floor((buttons.length - 1) / columns);
-                    const book = grid.previousElementSibling;
-                    if (event.key === 'ArrowLeft') next = buttons[i - 1];
-                    else if (event.key === 'ArrowRight') next = buttons[i + 1];
-                    else if (event.key === 'Home') next = buttons[0];
-                    else if (event.key === 'End') next = buttons[buttons.length - 1];
-                    else if (event.key === 'ArrowUp') next = i < columns ? book : buttons[i - columns];
-                    else if (buttons[i + columns]) next = buttons[i + columns];
-                    else if (Math.floor(i / columns) < lastRow) next = buttons[buttons.length - 1];
-                    else next = items[items.indexOf(book) + 1];
-                } else {
-                    const i = items.indexOf(event.target);
-                    if (i === -1) return;
-                    const target = event.target;
-                    if (event.key === 'Home') next = items[0];
-                    else if (event.key === 'End') next = items[items.length - 1];
-                    else if (event.key === 'ArrowDown') {
-                        const grid = gridOf(target);
-                        next = grid ? grid.querySelector('.chapter-btn') : items[i + 1];
-                    } else if (event.key === 'ArrowUp') {
-                        const grid = gridOf(items[i - 1]);
-                        next = grid ? [...grid.querySelectorAll('.chapter-btn')].pop() : items[i - 1];
-                    } else if (target.classList.contains('book-item')) {
-                        const open = target.getAttribute('aria-expanded') === 'true';
-                        if (event.key === 'ArrowRight' && !open) showPickerChapters(target.dataset.bookId);
-                        else if (event.key === 'ArrowRight') next = gridOf(target).querySelector('.chapter-btn');
-                        else if (open) showPickerChapters(null);
-                    }
-                }
-                if (next) {
-                    next.focus();
-                    revealInPicker(next);
-                }
+            document.addEventListener('gospel-getter:pieces-ready', function () {
+                sendPickerBooks();
+                markPickerCurrent();
             });
 
             // The reference button says where the reader is: the chapter
@@ -7939,7 +7752,8 @@
             async function boot() {
                 try {
                     const home = await invoke('get_home');
-                    renderBookLists(home);
+                    pickerBooks = { otBooks: home.otBooks, ntBooks: home.ntBooks };
+                    sendPickerBooks();
                     renderTranslationOptions(home);
                     startHere = Array.isArray(home.startHere) ? home.startHere : [];
                     await loadReading(home.currentBookId, home.currentChapter);
