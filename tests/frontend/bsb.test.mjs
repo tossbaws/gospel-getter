@@ -1,9 +1,10 @@
 // Behavior tests for the Berean Standard Bible and the translation
-// chooser: Aa's list of translations, the BSB read with its footnotes (kept
-// apart from its text, lettered where Berean put them), compare with any
-// two translations (the one being read on the left, the chosen one beside
-// it, remembered and carried in a backup), the verses the BSB doesn't
-// number, and About's credits — against the real backend.
+// chooser: the translation button's list of translations, the BSB read
+// with its footnotes (kept apart from its text, lettered where Berean put
+// them), compare with any two translations (the one being read on the
+// left, the chosen one beside it, remembered and carried in a backup), the
+// verses the BSB doesn't number, and About's credits — against the real
+// backend.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,9 +48,9 @@ const card = (app) => el(app, 'selection-card');
 const summaryRows = (app) => [...app.document.querySelectorAll('.footnote-summary .footnote-row')];
 const footnotesOf = (verse) => BIBLES.bsb[bookId('Genesis') - 1].footnotes.filter((f) => f.chapter === 1 && f.verse === verse);
 
-test('Aa lists every translation on a line of its own, as a radio group, KJV, BSB, WEB', () =>
+test('the translation button lists every translation on a line of its own, as a radio group, KJV, BSB, WEB', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
-        app.open('aa');
+        app.open('translation');
         const group = el(app, 'translation-choices');
         assert.equal(group.getAttribute('role'), 'radiogroup');
         assert.equal(group.getAttribute('aria-labelledby'), 'translation-label');
@@ -61,7 +62,7 @@ test('Aa lists every translation on a line of its own, as a radio group, KJV, BS
         // The dots are only seen; the code, name, date and licence are read.
         for (const dot of group.querySelectorAll('.translation-dot')) assert.equal(dot.getAttribute('aria-hidden'), 'true');
         assert.deepEqual(radios(app).map((r) => r.getAttribute('aria-checked')), ['true', 'false', 'false']);
-        // One tab stop: the chosen one, which Aa focuses when it opens.
+        // One tab stop: the chosen one, which the popover focuses when it opens.
         assert.deepEqual(radios(app).map((r) => r.tabIndex), [0, -1, -1]);
         assert.equal(app.document.activeElement, radios(app)[0]);
 
@@ -226,8 +227,8 @@ test('compare any two: the one being read on the left, the chosen one beside it'
                 const shown = await shownVerse(code, 'Romans', 14, 1);
                 assert.equal(verseText(app.verse(1, code)), code === 'bsb' ? storedVerse('bsb', 'Romans', 14, 1) : shown.text, code);
             }
-            // Aa's "with" offers the other two, the chosen one pressed.
-            app.open('aa');
+            // The "with" choices offer the other two, the chosen one pressed.
+            app.open('translation');
             assert.deepEqual(withButtons(app).map((b) => b.dataset.value), ['kjv', 'bsb', 'web'].filter((c) => c !== left));
             assert.deepEqual(withButtons(app).filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.value), [right]);
         });
@@ -238,26 +239,26 @@ test('until one is chosen, compare pairs the KJV and the WEB as it always has; t
     let storage;
     await withApp({ book: 'John', chapter: 3, translation: 'kjv', compare: true }, async (app) => {
         assert.deepEqual(app.compareColumns(), [NAMES.kjv, NAMES.web]);
-        app.open('aa');
+        app.open('translation');
         assert.equal(el(app, 'compare-with-choices').getAttribute('aria-label'), 'Compare with');
         const bsb = withButtons(app).find((b) => b.dataset.value === 'bsb');
         await clickAndWait(app, bsb, 'get_compare');
         assert.deepEqual(app.compareColumns(), [NAMES.kjv, NAMES.bsb]);
         assert.equal(app.storage()['gospel-getter-compare-with'], 'bsb');
-        assert.ok(app.surface('aa') && !app.surface('aa').hidden, 'Aa stays open');
+        assert.ok(app.surface('translation') && !app.surface('translation').hidden, 'the popover stays open');
         storage = app.storage();
     });
     // After a restart; reading the BSB, its partner falls back to the KJV.
     await withApp({ book: 'John', chapter: 3, translation: 'kjv', compare: true, storage }, async (app) => {
         assert.deepEqual(app.compareColumns(), [NAMES.kjv, NAMES.bsb]);
-        app.open('aa');
+        app.open('translation');
         await clickAndWait(app, radios(app)[1], 'get_compare');
         assert.deepEqual(app.compareColumns(), [NAMES.bsb, NAMES.kjv]);
         assert.deepEqual(withButtons(app).map((b) => b.dataset.value), ['kjv', 'web']);
     });
     // Without compare, choosing "with" waits for C.
     await withApp({ book: 'John', chapter: 3, translation: 'bsb' }, async (app) => {
-        app.open('aa');
+        app.open('translation');
         app.click(withButtons(app).find((b) => b.dataset.value === 'web'));
         await app.idle(0);
         assert.ok(!app.isComparing());

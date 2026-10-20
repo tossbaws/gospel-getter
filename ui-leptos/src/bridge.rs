@@ -93,8 +93,8 @@
 //! welcome's looks ([`theme`], [`choose_theme`]); Aa's `<select>` options'
 //! labels, read to name an import file's settings; the page's focus home
 //! (`#aa-toggle` in reading mode, else `#menu-toggle`, [`focus_home`]);
-//! `#translation-select`, Aa's record of the translation, read for the
-//! Library's previews ([`translation_code`]); and, for the editor's focus
+//! `#translation-select`, the translation button's record of the
+//! translation, read for the Library's previews ([`translation_code`]); and, for the editor's focus
 //! going back, the selection card's `.verse-notes .note-edit[data-note-id]`,
 //! `.verse-actions .verse-note-btn` and `.chapter-main .chapter-heading`.
 //!
@@ -144,7 +144,7 @@ pub const TOAST_EVENT: &str = "gospel-getter:toast";
 /// What the page knows and the dialog needs, taken when the button is
 /// clicked: how many notes there are (none: nothing to export), the book
 /// being read (ticked first, if it has notes), and the translation whose
-/// text the file quotes (the one chosen in Aa).
+/// text the file quotes (the one chosen with the translation button).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenRequest {
@@ -775,8 +775,9 @@ fn dispatch_object(name: &str, detail: &JsValue) {
     }
 }
 
-/// The translation chosen in Aa (`#translation-select`'s value), whose text
-/// the Library previews, as the page's `currentTranslation` reads it.
+/// The translation chosen with the translation button
+/// (`#translation-select`'s value), whose text the Library previews, as the
+/// page's `currentTranslation` reads it.
 pub fn translation_code() -> String {
     document()
         .and_then(|d| d.get_element_by_id("translation-select"))

@@ -352,6 +352,16 @@ def readme_scenes(theme):
         # markers (John 3:3's is in view).
         dict(name="bsb", size=(1280, 850), prefs=look,
              position=("John", 3, "bsb"), steps="window.scrollTo(0, 0);"),
+        # The translation button's popover open over John 3 in the KJV: the
+        # translations, a line each, and Compare with its "with" choices.
+        dict(name="translation-button", size=(1280, 850), prefs=look,
+             position=("John", 3, "kjv"),
+             steps="""
+                window.scrollTo(0, 0);
+                __gg.click(document.getElementById('translation-toggle'));
+                await __gg.until(() => !document.getElementById('translation-popover').hidden
+                    && document.querySelector('#translation-choices [aria-checked="true"]'), 'the translations');
+             """),
         # Searching the words of the text.
         dict(name="search-results", size=(1280, 1000), prefs=look, position=("John", 3, "web"),
              steps="""

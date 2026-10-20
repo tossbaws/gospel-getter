@@ -158,7 +158,7 @@ test('the checklist lists only books with notes, in Bible order with counts, and
         assert.equal(panel.getAttribute('aria-modal'), 'true');
         assert.equal(el(app, panel.getAttribute('aria-labelledby')).textContent, 'Export notes');
         assert.equal(el(app, panel.getAttribute('aria-describedby')).textContent,
-            'A Markdown file of your notes, each with its verses quoted in the King James Version.');
+            'Creates a Markdown (.md) file of your notes, plain text that opens in Notepad or any text editor. Each note has its verses quoted in the King James Version.');
         // A fieldset with a legend, operated with ordinary checkboxes.
         const list = el(app, 'export-notes-books').closest('fieldset');
         assert.equal(list.querySelector('legend').textContent, 'Books');
