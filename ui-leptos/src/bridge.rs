@@ -95,8 +95,7 @@
 //! (`#aa-toggle` in reading mode, else `#menu-toggle`, [`focus_home`]);
 //! `#translation-select`, Aa's record of the translation, read for the
 //! Library's previews ([`translation_code`]); and, for the editor's focus
-//! going back, the
-//! selection card's `.verse-notes .note-edit[data-note-id]`,
+//! going back, the selection card's `.verse-notes .note-edit[data-note-id]`,
 //! `.verse-actions .verse-note-btn` and `.chapter-main .chapter-heading`.
 //!
 //! The pieces' overlays (`#export-notes-overlay`, `#shortcuts-overlay`,
