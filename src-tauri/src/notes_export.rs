@@ -330,9 +330,11 @@ pub fn display_date(date: NaiveDate) -> String {
     date.format("%b %-d, %Y").to_string()
 }
 
-/// A stored UTC timestamp's date in `tz`, for display; the stored text
-/// itself if it can't be read (so nothing is silently dropped).
-fn stored_date<Tz: TimeZone>(stored: &str, tz: &Tz) -> String {
+/// A stored UTC timestamp's date in `tz`, for display ("Oct 9, 2026", see
+/// [`display_date`]); the stored text itself if it can't be read (so nothing
+/// is silently dropped). The export's dates, and every note's
+/// `createdAtDisplay` (`commands::NoteDto`), which the page shows.
+pub fn stored_date<Tz: TimeZone>(stored: &str, tz: &Tz) -> String {
     DateTime::parse_from_rfc3339(stored).map_or_else(
         |_| stored.to_string(),
         |at| display_date(local_date(at.to_utc(), tz)),
@@ -591,6 +593,18 @@ mod tests {
 
     fn at(stamp: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(stamp).unwrap().to_utc()
+    }
+
+    /// The page's note dates (`NoteDto::created_at_display`): the local day,
+    /// as `toLocaleDateString('en', { year: 'numeric', month: 'short', day:
+    /// 'numeric' })` wrote it.
+    #[test]
+    fn a_stored_timestamp_shows_as_its_local_day() {
+        let stamp = "2026-10-10T03:30:00.000Z";
+        assert_eq!(stored_date(stamp, &Utc), "Oct 10, 2026");
+        assert_eq!(stored_date(stamp, &mountain()), "Oct 9, 2026");
+        assert_eq!(stored_date("2026-05-01T12:00:00Z", &Utc), "May 1, 2026");
+        assert_eq!(stored_date("not a date", &Utc), "not a date");
     }
 
     /// The file for `notes`, quoting `chapters`, in KJV, at -06:00.

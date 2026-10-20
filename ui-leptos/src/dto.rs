@@ -13,7 +13,9 @@
 //! `ImportResultDto` (`commands.rs`) and `Preferences` (`reader_data.rs`,
 //! whose enums travel as their kebab-case names, strings here); for the
 //! updater, `UpdateInfo` and `DownloadEvent` (`updater.rs`) and `Block` and
-//! `Span` (`release_notes.rs`).
+//! `Span` (`release_notes.rs`); for the Library, `BookmarkDto`,
+//! `HighlightPassageDto` and `NoteDto` (`commands.rs`, of which these read
+//! only what the lists show).
 
 use serde::{Deserialize, Serialize};
 
@@ -290,4 +292,77 @@ pub enum DownloadEvent {
     Progress { chunk_length: u64 },
     /// Downloaded and verified; installing, then restarting.
     Finished,
+}
+
+/// A bookmark, as `list_bookmarks` answers (`commands::BookmarkDto`; the
+/// list reads only these fields).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bookmark {
+    pub id: i64,
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    /// e.g. "John 3:16–18", the backend's.
+    pub reference: String,
+    /// The first verse in the translation asked for, or `None` if it
+    /// doesn't number it.
+    pub preview: Option<String>,
+    /// Whether that translation numbers every verse of it.
+    pub complete: bool,
+}
+
+/// A highlighted passage, as `list_highlight_passages` answers
+/// (`commands::HighlightPassageDto`): consecutive verses in one color.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HighlightPassage {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    /// One of `library_text::COLORS`.
+    pub color: String,
+    pub reference: String,
+    pub preview: Option<String>,
+    pub complete: bool,
+}
+
+/// A note, as `list_all_notes` answers (`commands::NoteDto`; the list reads
+/// only these fields, and hands the page the note as it came).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Note {
+    pub id: i64,
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    pub reference: String,
+    pub body: String,
+}
+
+/// The arguments of `list_bookmarks` and `list_highlight_passages`: the
+/// translation the previews are in.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationArgs<'a> {
+    pub translation_code: &'a str,
+}
+
+/// `remove_bookmark`'s arguments.
+#[derive(Debug, Serialize)]
+pub struct RemoveBookmarkArgs {
+    pub id: i64,
+}
+
+/// `remove_highlight`'s arguments: exactly the passage's verses.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageArgs {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
 }

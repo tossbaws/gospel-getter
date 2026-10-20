@@ -40,7 +40,7 @@ impl Run<'_> {
     }
 
     /// Takes screenshot `name`, noting it for check 4.
-    async fn shot(&mut self, what: &str, name: &'static str) {
+    pub(super) async fn shot(&mut self, what: &str, name: &'static str) {
         let shot = self.ui.screenshot(what, &self.shot_path(name)).await;
         self.shots.note(name, shot);
     }

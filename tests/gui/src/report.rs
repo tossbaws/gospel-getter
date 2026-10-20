@@ -23,11 +23,14 @@ pub enum Check {
     UpdateDownload = 11,
     UpdateLinkOnly = 12,
     UpdateOffline = 13,
+    LibraryBookmarks = 14,
+    LibraryHighlights = 15,
+    LibraryNotes = 16,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 8] = [
+    pub const SHIPPED: [Check; 11] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -36,6 +39,9 @@ impl Check {
         Check::NoteEditor,
         Check::Shortcuts,
         Check::ImportPreview,
+        Check::LibraryBookmarks,
+        Check::LibraryHighlights,
+        Check::LibraryNotes,
     ];
 
     /// The updater's checks, on the GUI checks' test build against the
@@ -63,6 +69,9 @@ impl Check {
             Check::UpdateDownload => "update-download",
             Check::UpdateLinkOnly => "update-link-only",
             Check::UpdateOffline => "update-offline",
+            Check::LibraryBookmarks => "library-bookmarks",
+            Check::LibraryHighlights => "library-highlights",
+            Check::LibraryNotes => "library-notes",
         }
     }
 

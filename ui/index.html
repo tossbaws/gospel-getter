@@ -4523,39 +4523,9 @@
                 // Rust pieces', on its overlay (ui-leptos/src/about.rs);
                 // opening and closing it is this script's, as above.
 
-                // ---- The Library's tabs. The one last shown is kept for
-                // this session only (it isn't stored).
-                var libraryTabs = [].slice.call(libraryPanel.querySelectorAll('[role="tab"]'));
-
-                function selectLibraryTab(tab, focus) {
-                    libraryTabs.forEach(function (t) {
-                        var selected = t === tab;
-                        t.setAttribute('aria-selected', String(selected));
-                        t.tabIndex = selected ? 0 : -1;
-                        byId(t.getAttribute('aria-controls')).hidden = !selected;
-                    });
-                    if (focus) tab.focus();
-                }
-
-                libraryPanel.querySelector('[role="tablist"]').addEventListener('click', function (event) {
-                    var tab = event.target.closest('[role="tab"]');
-                    if (tab) selectLibraryTab(tab, false);
-                });
-
-                libraryPanel.querySelector('[role="tablist"]').addEventListener('keydown', function (event) {
-                    var index = libraryTabs.indexOf(event.target.closest('[role="tab"]'));
-                    if (index === -1) return;
-                    var next = null;
-                    if (event.key === 'ArrowRight') next = libraryTabs[(index + 1) % libraryTabs.length];
-                    else if (event.key === 'ArrowLeft') next = libraryTabs[(index - 1 + libraryTabs.length) % libraryTabs.length];
-                    else if (event.key === 'Home') next = libraryTabs[0];
-                    else if (event.key === 'End') next = libraryTabs[libraryTabs.length - 1];
-                    if (!next) return;
-                    // Not a chapter turn.
-                    event.preventDefault();
-                    event.stopPropagation();
-                    selectLibraryTab(next, true);
-                });
+                // ---- The Library's tabs and lists are the Rust pieces'
+                // (ui-leptos/src/library.rs), inside the panel this script
+                // opens and closes; focusInto above focuses its chosen tab.
 
                 // ---- Aa: views of the translation, text size, line
                 // spacing and theme <select>s, which stay the record of
@@ -5113,22 +5083,8 @@
             <h2 id="library-title" class="library-title">Library</h2>
             <button type="button" id="library-close" class="panel-close" aria-label="Close the library" title="Close (Esc)">&times;</button>
         </div>
-        <div class="library-tabs" role="tablist" aria-labelledby="library-title">
-            <button type="button" id="library-tab-bookmarks" class="library-tab" role="tab" aria-controls="library-bookmarks" aria-selected="true">Bookmarks <span id="bookmark-count" class="tab-count"></span></button>
-            <button type="button" id="library-tab-highlights" class="library-tab" role="tab" aria-controls="library-highlights" aria-selected="false" tabindex="-1">Highlights <span id="highlight-count" class="tab-count"></span></button>
-            <button type="button" id="library-tab-notes" class="library-tab" role="tab" aria-controls="library-notes" aria-selected="false" tabindex="-1">Notes <span id="note-count" class="tab-count"></span></button>
-        </div>
-        <div id="library-bookmarks" class="library-tabpanel" role="tabpanel" aria-labelledby="library-tab-bookmarks">
-            <ul id="bookmark-list" class="bookmark-list" aria-labelledby="library-tab-bookmarks"></ul>
-        </div>
-        <div id="library-highlights" class="library-tabpanel" role="tabpanel" aria-labelledby="library-tab-highlights" hidden>
-            <div id="highlight-filter" class="highlight-filter" role="group" aria-label="Show highlights"></div>
-            <ul id="highlight-list" class="bookmark-list" aria-labelledby="library-tab-highlights"></ul>
-        </div>
-        <div id="library-notes" class="library-tabpanel" role="tabpanel" aria-labelledby="library-tab-notes" hidden>
-            <button type="button" id="export-notes-btn" class="reader-mode-btn export-notes-btn" aria-haspopup="dialog" disabled>Export notes…</button>
-            <ul id="note-list" class="bookmark-list" aria-labelledby="library-tab-notes"></ul>
-        </div>
+        <!-- The tabs, Bookmarks, Highlights and Notes: the Rust pieces'
+             (ui-leptos/src/library.rs) put them here. -->
         <p class="library-hint">Ctrl+B opens and closes the library &middot; Esc closes it</p>
     </aside>
     <div id="search-panel" class="search-panel" role="dialog" aria-label="Search, go to or run a command" hidden>
@@ -5171,12 +5127,6 @@
             const translationSelect = document.getElementById('translation-select');
             const aaToggle = document.getElementById('aa-toggle');
             const menuToggle = document.getElementById('menu-toggle');
-            const bookmarkTab = document.getElementById('library-tab-bookmarks');
-            const bookmarkCount = document.getElementById('bookmark-count');
-            const highlightCount = document.getElementById('highlight-count');
-            const bookmarkList = document.getElementById('bookmark-list');
-            const highlightFilter = document.getElementById('highlight-filter');
-            const highlightList = document.getElementById('highlight-list');
             const searchToggle = document.getElementById('search-toggle');
             const searchPanel = document.getElementById('search-panel');
             const searchInput = document.getElementById('search-input');
@@ -5207,12 +5157,12 @@
             let selection = null;
 
             // Every bookmark, newest first, as list_bookmarks returned it
-            // for the selected translation.
+            // for the selected translation, to the Library (the Rust
+            // pieces', which hand it over: see refreshLibrary).
             let bookmarks = [];
             // Whether the bookmark list has loaded at least once, so "no
             // bookmarks" can be told apart from "couldn't load them".
             let bookmarksLoaded = false;
-            let bookmarksToken = 0;
 
             // Every highlight, as "book:chapter:verse" → color. Highlights
             // belong to no one translation, like bookmarks.
@@ -5220,13 +5170,6 @@
             let highlightsLoaded = false;
             let highlightsToken = 0;
 
-            // Every highlighted passage (consecutive verses in one color),
-            // in Bible order, as list_highlight_passages returned it for the
-            // selected translation; and the color the list shows ('all' or
-            // one color), for this session only.
-            let highlightPassages = [];
-            let highlightListFilter = 'all';
-            let highlightListToken = 0;
 
             // The last get_reading and get_compare results, so switching
             // compare on or off re-renders without re-reading the chapter.
@@ -5869,8 +5812,11 @@
                 }
                 applyHighlightMarkers();
                 if (selection) updateHighlightControls();
-                await refreshHighlightList();
+                await refreshLibrary('highlights');
             }
+            // The Library (ui-leptos) has the reader's highlights refreshed
+            // after removing one, and waits; see ui-leptos/src/bridge.rs.
+            window.gospelGetterRefreshHighlights = refreshHighlights;
 
             function setHighlightMarker(el, color) {
                 if (color) el.dataset.highlight = color;
@@ -5929,7 +5875,7 @@
                     applyHighlightMarkers();
                     if (selection) updateHighlightControls();
                     if (attempt === actionAttempt) setActionStatus(color ? `Highlighted ${color}` : 'Highlight removed', false);
-                    refreshHighlightList();
+                    refreshLibrary('highlights');
                 } catch (e) {
                     console.error('Failed to change the highlight', e);
                     if (attempt === actionAttempt) {
@@ -5960,134 +5906,40 @@
                 (root.dataset.readerMode === 'on' ? aaToggle : menuToggle).focus();
             }
 
-            // ---- My highlights: every highlighted passage, in the Library
+            // ---- The Library's lists (Bookmarks, Highlights and Notes) are
+            // the Rust pieces' (ui-leptos/src/library.rs); what crosses is
+            // documented in ui-leptos/src/bridge.rs. This page has them
+            // reloaded whenever what they show changes, as one request
+            // naming the lists, and waits for it where it waited before. The
+            // Library asks the backend, once, and hands this page the
+            // bookmarks (for the reader's markers and the Bookmark button)
+            // and the notes (for the welcome and Export notes), so it never
+            // asks for them itself. A request made before the pieces have
+            // loaded waits for them to say they're ready.
+            const libraryWaiting = new Set();
+            let libraryResent = Promise.resolve();
 
-            const colorName = (color) => color.charAt(0).toUpperCase() + color.slice(1);
-
-            highlightFilter.innerHTML = ['all', ...HIGHLIGHT_COLORS]
-                .map((f) => {
-                    const dot = f === 'all' ? '' : `<span class="highlight-dot" data-color="${f}" aria-hidden="true"></span>`;
-                    return `<button type="button" class="highlight-filter-btn" data-filter="${f}" aria-pressed="${f === highlightListFilter}">${dot}${f === 'all' ? 'All' : colorName(f)}</button>`;
-                })
-                .join('');
-
-            function renderHighlightList(error) {
-                highlightCount.textContent = error ? '' : String(highlightPassages.length);
-                highlightFilter.querySelectorAll('.highlight-filter-btn').forEach((btn) => {
-                    btn.setAttribute('aria-pressed', String(btn.dataset.filter === highlightListFilter));
-                });
-                if (error) {
-                    highlightList.innerHTML = `<li class="bookmark-empty is-error">${escapeHtml(error)}</li>`;
-                    return;
-                }
-                if (!highlightPassages.length) {
-                    highlightList.innerHTML = '<li class="bookmark-empty">No highlights yet. Click a verse, then pick a color.</li>';
-                    return;
-                }
-                const shown = highlightPassages
-                    .map((h, index) => ({ h, index }))
-                    .filter(({ h }) => highlightListFilter === 'all' || h.color === highlightListFilter);
-                if (!shown.length) {
-                    highlightList.innerHTML = `<li class="bookmark-empty">No ${highlightListFilter} highlights.</li>`;
-                    return;
-                }
-                const code = currentTranslation().toUpperCase();
-                highlightList.innerHTML = shown
-                    .map(({ h, index }) => {
-                        let preview;
-                        if (h.preview == null) {
-                            preview = `<span class="bookmark-preview is-missing">Not numbered in the ${escapeHtml(code)}</span>`;
-                        } else {
-                            const partial = h.complete ? '' : `<span class="bookmark-partial">Not all of it is numbered in the ${escapeHtml(code)}.</span>`;
-                            preview = `<span class="bookmark-preview">${escapeHtml(h.preview)}</span>${partial}`;
-                        }
-                        return `<li class="bookmark-item" data-color="${h.color}">
-                            <button type="button" class="bookmark-open" data-index="${index}">
-                                <span class="highlight-head">
-                                    <span class="bookmark-ref">${escapeHtml(h.reference)}</span>
-                                    <span class="highlight-color"><span class="highlight-dot" data-color="${h.color}" aria-hidden="true"></span>${colorName(h.color)}</span>
-                                </span>
-                                ${preview}
-                            </button>
-                            <button type="button" class="bookmark-remove" data-index="${index}" aria-label="Remove highlight ${escapeHtml(h.reference)}" title="Remove highlight">&times;</button>
-                        </li>`;
-                    })
-                    .join('');
+            function refreshLibrary(...lists) {
+                const request = new CustomEvent('gospel-getter:library-refresh', { cancelable: true, detail: { lists } });
+                if (!document.dispatchEvent(request)) return Promise.resolve(request.detail.done);
+                lists.forEach((list) => libraryWaiting.add(list));
+                return Promise.resolve();
             }
 
-            // Reloads the list. Only the latest of overlapping reloads (a
-            // highlight, then a translation switch) gets to render.
-            async function refreshHighlightList() {
-                const token = ++highlightListToken;
-                try {
-                    const list = await invoke('list_highlight_passages', { translationCode: currentTranslation() });
-                    if (token !== highlightListToken) return;
-                    highlightPassages = list;
-                    renderHighlightList();
-                } catch (e) {
-                    if (token !== highlightListToken) return;
-                    console.error('Failed to load highlighted passages', e);
-                    renderHighlightList(`Highlights couldn't be loaded: ${errorText(e)}`);
+            document.addEventListener('gospel-getter:library-loaded', function (event) {
+                const { list, items } = event.detail;
+                if (list === 'bookmarks') {
+                    if (items) {
+                        bookmarks = items;
+                        bookmarksLoaded = true;
+                    }
+                    applyBookmarkMarkers();
+                    if (selection) updateBookmarkButton();
+                } else if (list === 'notes' && items) {
+                    allNotes = items;
+                    notesLoaded = true;
                 }
-            }
-
-            highlightFilter.addEventListener('click', function (event) {
-                const btn = event.target.closest('.highlight-filter-btn');
-                if (!btn) return;
-                highlightListFilter = btn.dataset.filter;
-                renderHighlightList();
             });
-
-            function renderBookmarkList(error) {
-                bookmarkCount.textContent = error ? '' : String(bookmarks.length);
-                if (error) {
-                    bookmarkList.innerHTML = `<li class="bookmark-empty is-error">${escapeHtml(error)}</li>`;
-                    return;
-                }
-                if (!bookmarks.length) {
-                    bookmarkList.innerHTML = '<li class="bookmark-empty">No bookmarks yet. Click a verse, then &#9733; Bookmark.</li>';
-                    return;
-                }
-                const code = currentTranslation().toUpperCase();
-                bookmarkList.innerHTML = bookmarks
-                    .map((b) => {
-                        let preview;
-                        if (b.preview == null) {
-                            preview = `<span class="bookmark-preview is-missing">Not numbered in the ${escapeHtml(code)}</span>`;
-                        } else {
-                            const partial = b.complete ? '' : `<span class="bookmark-partial">Not all of it is numbered in the ${escapeHtml(code)}.</span>`;
-                            preview = `<span class="bookmark-preview">${escapeHtml(b.preview)}</span>${partial}`;
-                        }
-                        return `<li class="bookmark-item">
-                            <button type="button" class="bookmark-open" data-bookmark-id="${b.id}">
-                                <span class="bookmark-ref">${escapeHtml(b.reference)}</span>
-                                ${preview}
-                            </button>
-                            <button type="button" class="bookmark-remove" data-bookmark-id="${b.id}" aria-label="Remove bookmark ${escapeHtml(b.reference)}" title="Remove bookmark">&times;</button>
-                        </li>`;
-                    })
-                    .join('');
-            }
-
-            // Only the latest refresh is shown: an earlier one answering
-            // after it (two quick translation switches) would label the
-            // previews in the wrong translation.
-            async function refreshBookmarks() {
-                const token = ++bookmarksToken;
-                try {
-                    const list = await invoke('list_bookmarks', { translationCode: currentTranslation() });
-                    if (token !== bookmarksToken) return;
-                    bookmarks = list;
-                    bookmarksLoaded = true;
-                    renderBookmarkList();
-                } catch (e) {
-                    if (token !== bookmarksToken) return;
-                    console.error('Failed to load bookmarks', e);
-                    renderBookmarkList(`Bookmarks couldn't be loaded: ${errorText(e)}`);
-                }
-                applyBookmarkMarkers();
-                if (selection) updateBookmarkButton();
-            }
 
             async function toggleSelectionBookmark() {
                 if (!selection || !reading) return;
@@ -6104,7 +5956,7 @@
                             verseEnd: selection.end,
                         });
                     }
-                    await refreshBookmarks();
+                    await refreshLibrary('bookmarks');
                     if (attempt === actionAttempt) {
                         setActionStatus(existing ? 'Bookmark removed' : 'Bookmarked', false);
                     }
@@ -6144,64 +5996,6 @@
                 return loaded;
             }
 
-            bookmarkList.addEventListener('click', async function (event) {
-                const remove = event.target.closest('.bookmark-remove');
-                const open = event.target.closest('.bookmark-open');
-                const target = remove || open;
-                if (!target) return;
-                const bookmark = bookmarks.find((b) => String(b.id) === target.dataset.bookmarkId);
-                if (!bookmark) return;
-                if (open) {
-                    closeSurfaces();
-                    await jumpTo(bookmark.bookId, bookmark.chapter, bookmark.verseStart, bookmark.verseEnd);
-                    return;
-                }
-                try {
-                    await invoke('remove_bookmark', { id: bookmark.id });
-                } catch (e) {
-                    console.error('Failed to remove bookmark', e);
-                    renderBookmarkList(`Couldn't remove ${bookmark.reference}: ${errorText(e)}`);
-                    return;
-                }
-                const index = bookmarks.indexOf(bookmark);
-                await refreshBookmarks();
-                // Keep keyboard focus in the list, on the next bookmark.
-                const buttons = bookmarkList.querySelectorAll('.bookmark-remove');
-                const next = buttons[Math.min(index, buttons.length - 1)];
-                (next || bookmarkTab).focus();
-            });
-
-            // Opening a highlighted passage works as opening a bookmark;
-            // removing one unhighlights exactly its verses.
-            highlightList.addEventListener('click', async function (event) {
-                const remove = event.target.closest('.bookmark-remove');
-                const open = event.target.closest('.bookmark-open');
-                const target = remove || open;
-                if (!target) return;
-                const passage = highlightPassages[Number(target.dataset.index)];
-                if (!passage) return;
-                const { bookId, chapter, verseStart, verseEnd } = passage;
-                if (open) {
-                    closeSurfaces();
-                    await jumpTo(bookId, chapter, verseStart, verseEnd);
-                    return;
-                }
-                const position = [...highlightList.querySelectorAll('.bookmark-remove')].indexOf(target);
-                try {
-                    await invoke('remove_highlight', { bookId, chapter, verseStart, verseEnd });
-                } catch (e) {
-                    console.error('Failed to remove highlight', e);
-                    renderHighlightList(`Couldn't remove ${passage.reference}: ${errorText(e)}`);
-                    return;
-                }
-                await refreshHighlights();
-                // Keep keyboard focus in the list, on the next passage, or
-                // on the filter once the list is empty.
-                const buttons = highlightList.querySelectorAll('.bookmark-remove');
-                const next = buttons[Math.min(position, buttons.length - 1)];
-                (next || highlightFilter.querySelector('[aria-pressed="true"]')).focus();
-            });
-
             // ---- Notes: the reader's own words on a passage. Like
             // bookmarks they belong to no translation, and a passage can
             // have any number of them. Which notes overlap a passage, and
@@ -6212,16 +6006,14 @@
 
             const NOTES_SHOWN = 3;
             const UNDO_MS = 8000;
-            const noteList = document.getElementById('note-list');
-            const noteTabCount = document.getElementById('note-count');
-            const exportNotesBtn = document.getElementById('export-notes-btn');
             const noteAddBtn = verseActions.querySelector('.verse-note-btn');
             const notesSection = document.createElement('div');
             notesSection.className = 'verse-notes';
             notesSection.setAttribute('role', 'region');
 
             // Notes on the chapter being read (for the markers), on the
-            // selection (for its section), and all of them (the Library).
+            // selection (for its section), and all of them (the Library's,
+            // handed over: see refreshLibrary).
             let chapterNotes = [];
             let chapterNotesToken = 0;
             let selectionNotes = [];
@@ -6230,7 +6022,6 @@
             let showAllNotes = false;
             let allNotes = [];
             let notesLoaded = false;
-            let noteListToken = 0;
 
             function passageReference(bookName, chapter, start, end) {
                 return `${bookName} ${chapter}:${verseRange(start, end)}`;
@@ -6238,12 +6029,6 @@
 
             function notePassage(note) {
                 return { bookId: note.bookId, bookName: note.bookName, chapter: note.chapter, start: note.verseStart, end: note.verseEnd };
-            }
-
-            // "Oct 9, 2026", in the reader's time zone.
-            function noteDate(iso) {
-                const date = new Date(iso);
-                return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('en', { year: 'numeric', month: 'short', day: 'numeric' });
             }
 
             // Marks every verse of the chapter on screen that a note covers,
@@ -6325,7 +6110,7 @@
                     const shown = showAllNotes ? selectionNotes : selectionNotes.slice(0, NOTES_SHOWN);
                     const cards = shown
                         .map((n) => `<article class="note-card" data-note-id="${n.id}">
-                            <p class="note-card-head"><span class="note-card-ref">${escapeHtml(n.reference)}</span> <time class="note-card-date" datetime="${escapeHtml(n.createdAt)}">${escapeHtml(noteDate(n.createdAt))}</time></p>
+                            <p class="note-card-head"><span class="note-card-ref">${escapeHtml(n.reference)}</span> <time class="note-card-date" datetime="${escapeHtml(n.createdAt)}">${escapeHtml(n.createdAtDisplay)}</time></p>
                             <p class="note-card-body" id="note-card-body-${n.id}">${escapeHtml(n.body)}</p>
                             <span class="note-card-actions">
                                 <button type="button" class="note-link note-more" aria-expanded="false" aria-controls="note-card-body-${n.id}" hidden>more</button>
@@ -6352,78 +6137,21 @@
                 }
             }
 
-            function renderNoteList(error) {
-                noteTabCount.textContent = error ? '' : String(allNotes.length);
-                // Export notes… needs notes to export.
-                exportNotesBtn.disabled = !!error || !allNotes.length;
-                if (error) {
-                    noteList.innerHTML = `<li class="bookmark-empty is-error">${escapeHtml(error)}</li>`;
-                    return;
-                }
-                if (!allNotes.length) {
-                    noteList.innerHTML = '<li class="bookmark-empty">No notes yet. Click a verse, then + Add note (or press N).</li>';
-                    return;
-                }
-                noteList.innerHTML = allNotes
-                    .map((n) => `<li class="bookmark-item">
-                        <button type="button" class="bookmark-open" data-note-id="${n.id}">
-                            <span class="bookmark-ref">${escapeHtml(n.reference)}</span>
-                            <span class="note-preview">${escapeHtml(n.body.replace(/\s+/g, ' '))}</span>
-                        </button>
-                        <button type="button" class="note-list-edit" data-note-id="${n.id}" aria-label="Edit note on ${escapeHtml(n.reference)}" title="Edit note">Edit</button>
-                    </li>`)
-                    .join('');
-            }
-
-            // Reloads the Library's list. Only the latest of overlapping
-            // reloads gets to render.
-            async function refreshNoteList() {
-                const token = ++noteListToken;
-                try {
-                    const list = await invoke('list_all_notes');
-                    if (token !== noteListToken) return;
-                    allNotes = list;
-                    notesLoaded = true;
-                    renderNoteList();
-                } catch (e) {
-                    if (token !== noteListToken) return;
-                    console.error('Failed to load notes', e);
-                    renderNoteList(`Notes couldn’t be loaded: ${errorText(e)}`);
-                }
-            }
-
             // After any change to notes, wherever it came from.
             async function refreshNotes() {
-                await Promise.all([refreshChapterNotes(), refreshSelectionNotes(), refreshNoteList()]);
+                await Promise.all([refreshChapterNotes(), refreshSelectionNotes(), refreshLibrary('notes')]);
             }
             // The note editor (ui-leptos) refreshes them after a save or a
             // delete, and waits; see ui-leptos/src/bridge.rs.
             window.gospelGetterRefreshNotes = refreshNotes;
 
-            // A Library row is one link to its passage: a click anywhere on
-            // it, outside its own buttons, is a click on the row's open
-            // button, which is what the keyboard and screen readers reach
-            // (Edit and × stay separate buttons beside it, never inside).
-            for (const list of [bookmarkList, highlightList, noteList]) {
-                list.addEventListener('click', function (event) {
-                    if (event.target.closest('button, a, input')) return;
-                    const open = event.target.closest('.bookmark-item')?.querySelector('.bookmark-open');
-                    if (open) open.click();
-                });
-            }
-
-            // Opening a note's row works as opening a bookmark: its chapter,
-            // with its passage selected, so its Notes section shows. Edit
-            // does the same, then opens the note.
-            noteList.addEventListener('click', async function (event) {
-                const edit = event.target.closest('.note-list-edit');
-                const target = edit || event.target.closest('.bookmark-open');
-                if (!target) return;
-                const note = allNotes.find((n) => String(n.id) === target.dataset.noteId);
-                if (!note) return;
-                closeSurfaces(!edit);
-                await jumpTo(note.bookId, note.chapter, note.verseStart, note.verseEnd);
-                if (edit && reading) {
+            // A Library row opened (the Library already closed): its
+            // chapter, with its passage selected, so a note's Notes section
+            // shows; a note's Edit then opens the note.
+            document.addEventListener('gospel-getter:library-open', async function (event) {
+                const { bookId, chapter, verseStart, verseEnd, note } = event.detail;
+                await jumpTo(bookId, chapter, verseStart, verseEnd);
+                if (note && reading) {
                     openNotePanel({ mode: 'edit', note, code: selection ? selection.translationCode : reading.translationCode });
                 }
             });
@@ -6438,7 +6166,7 @@
 
             // The selection's notes, as the editor lists the others.
             function noteOthers() {
-                return selectionNotes.map((n) => ({ reference: n.reference, date: noteDate(n.createdAt), body: n.body }));
+                return selectionNotes.map((n) => ({ reference: n.reference, date: n.createdAtDisplay, body: n.body }));
             }
 
             // `passage` defaults to the note's own; `code` is the
@@ -6447,7 +6175,7 @@
                 if (!passage || !reading) return;
                 closeSurfaces(false);
                 if (!searchPanel.hidden) setSearchOpen(false);
-                const reference = passageReference(passage.bookName, passage.chapter, passage.start, passage.end);
+                const reference = note ? note.reference : passageReference(passage.bookName, passage.chapter, passage.start, passage.end);
                 // The verses as this translation numbers and shows them (KJV
                 // supplied words in italics, no note markers); any it
                 // doesn't number are said to be missing.
@@ -6594,13 +6322,19 @@
             // script). This is the page's whole side of that bridge; the Rust
             // side, and what crosses it, is documented in ui-leptos/src/bridge.rs.
             //
-            // The button stays here, at the top of the Library's Notes tab
-            // (the command palette clicks the same button). A click asks the
-            // dialog to open, as a cancelable event carrying a snapshot of what
-            // it needs to know; the dialog cancels the event to say it has it.
-            // If nothing does (the WebAssembly didn't load), the reader is told,
-            // and the rest of the app is as it was.
-            exportNotesBtn.addEventListener('click', function () {
+            // The button is at the top of the Library's Notes tab, drawn with
+            // the Library by the Rust pieces (enabled while there are notes);
+            // its click is this page's (the command palette clicks the same
+            // button). A click asks the dialog to open, as a cancelable event
+            // carrying a snapshot of what it needs to know; the dialog cancels
+            // the event to say it has it. If nothing does (the WebAssembly
+            // didn't load), the reader is told, and the rest of the app is as
+            // it was.
+            const exportNotesButton = () => document.getElementById('export-notes-btn');
+
+            document.getElementById('library-panel').addEventListener('click', function (event) {
+                const exportNotesBtn = event.target.closest('#export-notes-btn');
+                if (!exportNotesBtn) return;
                 if (exportNotesBtn.disabled || !allNotes.length) return;
                 const code = currentTranslation();
                 const request = new CustomEvent('gospel-getter:export-notes', {
@@ -6669,7 +6403,7 @@
                     translationSelect.value = position.translationCode;
                     await loadReading(position.bookId, position.chapter);
                 }
-                await refreshBookmarks();
+                await refreshLibrary('bookmarks');
                 await refreshHighlights();
                 await refreshNotes();
                 showNotice(message);
@@ -6692,9 +6426,10 @@
             // opens its chapter through the page's own jump.
             let startHere = [];
 
-            // A request the welcome hasn't had yet: boot can finish before
-            // the Rust pieces have loaded, so the startup question waits for
-            // them to say they're ready.
+            // The startup question the welcome hasn't had yet (boot's
+            // answer, to ask it with): boot can finish before the Rust pieces
+            // have loaded, so it waits for them to say they're ready, and for
+            // the Library's lists, which they load.
             let welcomeWaiting = null;
 
             function askWelcome(detail) {
@@ -6723,13 +6458,16 @@
                     startHere,
                     returnFocus: null,
                 };
-                if (!askWelcome(detail)) welcomeWaiting = detail;
+                if (!askWelcome(detail)) welcomeWaiting = home;
             }
 
             document.addEventListener('gospel-getter:pieces-ready', function () {
-                const detail = welcomeWaiting;
+                const lists = [...libraryWaiting];
+                libraryWaiting.clear();
+                if (lists.length) libraryResent = refreshLibrary(...lists);
+                const home = welcomeWaiting;
                 welcomeWaiting = null;
-                if (detail) askWelcome(detail);
+                if (home) libraryResent.then(() => askWelcomeAtStartup(home));
             });
 
             // The welcome's overlay is the Rust side's: looked up when asked.
@@ -7573,13 +7311,14 @@
                     run: () => {
                         if (surfaces().current() !== 'library') document.getElementById('library-toggle').click();
                         const button = document.getElementById(`library-tab-${tab}`);
+                        if (!button) return;
                         button.click();
                         button.focus();
                     },
                 }));
                 add('export-notes', 'Export notes…', {
                     words: 'markdown file',
-                    reason: exportNotesBtn.disabled ? 'There are no notes yet' : null,
+                    reason: !exportNotesButton() || exportNotesButton().disabled ? 'There are no notes yet' : null,
                     run: clickControl('export-notes-btn'),
                 });
                 add('export-data', 'Export data…', {
@@ -7948,8 +7687,13 @@
             });
 
             // One popover or panel at a time: opening one closes search.
-            document.addEventListener('gospel-getter:surface-open', function () {
+            // The Library's tabs and lists are the Rust pieces': without
+            // them, the Library says so.
+            document.addEventListener('gospel-getter:surface-open', function (event) {
                 if (!searchPanel.hidden) setSearchOpen(false);
+                if (event.detail.name === 'library' && !document.getElementById('library-tab-bookmarks')) {
+                    setDataStatus('The library isn’t available.', true);
+                }
             });
 
             // Escape closes the panel from anywhere in it (Show more).
@@ -8588,8 +8332,7 @@
                 const bookId = inner ? inner.dataset.currentBook : 1;
                 const chapter = inner ? inner.dataset.currentChapter : 1;
                 loadReading(bookId, chapter);
-                refreshBookmarks();
-                refreshHighlightList();
+                refreshLibrary('bookmarks', 'highlights');
                 if (searchInput.value.trim()) runSearch(0);
             });
 
@@ -8605,9 +8348,11 @@
                     startHere = Array.isArray(home.startHere) ? home.startHere : [];
                     await loadReading(home.currentBookId, home.currentChapter);
                     if (reading) startHistory();
-                    await refreshBookmarks();
+                    await refreshLibrary('bookmarks');
                     await refreshHighlights();
-                    await refreshNoteList();
+                    await refreshLibrary('notes');
+                    // Lists asked for before the pieces loaded, asked again.
+                    await libraryResent;
                     askWelcomeAtStartup(home);
                 } catch (e) {
                     console.error('Failed to load Gospel Getter', e);

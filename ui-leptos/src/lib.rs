@@ -3,13 +3,14 @@
 //! `Trunk.toml` and `README.md`). The pieces so far are the page's modal
 //! dialogs: Export notes (`export_notes`), the keyboard shortcuts sheet
 //! (`shortcuts`), the welcome (`welcome`), the import preview
-//! (`import_preview`) and the note editor (`note_editor`); and About
-//! (`about`) with the updater (`updates`). The page talks to them only as
-//! `bridge` says.
+//! (`import_preview`) and the note editor (`note_editor`); About
+//! (`about`) with the updater (`updates`); and the Library's tabs and lists
+//! (`library`). The page talks to them only as `bridge` says.
 //!
 //! If this module fails to load, the page works as before, except that the
-//! five dialogs and About say they are unavailable when asked for (see
-//! `bridge`), and no update is offered.
+//! five dialogs, About and the Library say they are unavailable when asked
+//! for (see `bridge`), no update is offered, and no bookmark is marked in
+//! the reader (the Library loads them).
 
 mod about;
 mod bridge;
@@ -20,6 +21,8 @@ mod import_preview;
 mod import_text;
 mod install;
 mod ipc;
+mod library;
+mod library_text;
 mod note_editor;
 mod note_text;
 mod shortcuts;
@@ -60,6 +63,8 @@ pub fn start() {
         leptos::mount::mount_to(holder.clone(), about::AboutAndUpdates).forget();
         about::place(&holder);
     }
+    // The Library's tabs and lists go inside the head script's panel.
+    library::mount();
     // Everything is listening: the page may send again what it asked
     // before the module had loaded.
     bridge::ready();

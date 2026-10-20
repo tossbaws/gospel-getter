@@ -543,8 +543,9 @@ export async function openApp({
 
     await until(() => document.getElementById('reading-pane-inner'), 'reading pane');
     // Boot loads the bookmark list, then the highlights; wait for all of
-    // it to finish.
-    await until(() => document.querySelector('#bookmark-list li'), 'bookmark list');
+    // it to finish. The list is the Rust pieces' (the Library), so there is
+    // none to wait for without them.
+    if (leptos === true) await until(() => document.querySelector('#bookmark-list li'), 'bookmark list');
     await app.idle();
     return app;
 }
