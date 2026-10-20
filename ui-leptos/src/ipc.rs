@@ -25,6 +25,27 @@ pub async fn invoke<T: DeserializeOwned>(cmd: &str, args: JsValue) -> Result<T, 
     serde_wasm_bindgen::from_value(answer).map_err(|e| JsValue::from(e.to_string()))
 }
 
+#[wasm_bindgen]
+extern "C" {
+    /// The same `invoke`, called at once: its promise.
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"], js_name = invoke, catch)]
+    fn invoke_promise(cmd: &str, args: JsValue) -> Result<js_sys::Promise, JsValue>;
+}
+
+/// As [`invoke`], but the command is sent now, within the caller's event,
+/// as the page's own `invoke` calls are, rather than when the future is
+/// first awaited.
+pub fn invoke_now<T: DeserializeOwned>(
+    cmd: &str,
+    args: JsValue,
+) -> impl Future<Output = Result<T, JsValue>> + 'static {
+    let sent = invoke_promise(cmd, args);
+    async move {
+        let answer = wasm_bindgen_futures::JsFuture::from(sent?).await?;
+        serde_wasm_bindgen::from_value(answer).map_err(|e| JsValue::from(e.to_string()))
+    }
+}
+
 /// Calls `cmd` with `args` and hands back its answer as it came, for an
 /// answer part of which goes back to the page unchanged.
 pub async fn invoke_value(cmd: &str, args: JsValue) -> Result<JsValue, JsValue> {

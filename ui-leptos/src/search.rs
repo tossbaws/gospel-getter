@@ -238,13 +238,16 @@ impl Search {
             self.render();
             return None;
         }
+        // Sent now, within the key or event, as the page sent it.
+        let sent = ipc::args(&SearchArgs {
+            query: &query,
+            translation_code: &translation_code,
+            offset,
+        })
+        .map(|args| ipc::invoke_now::<SearchAnswer>("search", args));
         Some(async move {
-            let answer = match ipc::args(&SearchArgs {
-                query: &query,
-                translation_code: &translation_code,
-                offset,
-            }) {
-                Ok(args) => ipc::invoke::<SearchAnswer>("search", args).await,
+            let answer = match sent {
+                Ok(sent) => sent.await,
                 Err(e) => Err(e),
             };
             if self.state.with_value(|s| s.token) != token {
