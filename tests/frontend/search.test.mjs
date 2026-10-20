@@ -238,6 +238,46 @@ test('common words are paged, not all rendered at once', () =>
         assert.match(app.searchStatus(), /showing 100\.$/);
     }));
 
+// Show more says how many the next page holds, of how many, in the
+// status line's number format; the button's name is that label.
+test('Show more says how many more it shows, of how many, down to the last page', () =>
+    withApp({ translation: 'web' }, async (app) => {
+        const more = app.document.getElementById('search-more');
+        const total = async (query) => {
+            await app.search(query);
+            const [, count] = app.searchStatus().match(/^([\d,]+) verses in the WEB, showing 50\.$/);
+            return count;
+        };
+        const showMore = async () => {
+            const before = app.calls.length;
+            app.click(more);
+            await app.idle(before, 'search');
+        };
+
+        // Thousands separators, as in the status line.
+        const many = await total('the');
+        assert.match(many, /^\d{1,3}(,\d{3})+$/);
+        assert.equal(more.textContent, `Show 50 more (of ${many})`);
+
+        // Three pages: 50, 50, then the rest.
+        const count = await total('grace');
+        const n = Number(count);
+        assert.ok(n > 100 && n < 150, `"grace" fills three pages (${n} verses)`);
+        assert.equal(more.hidden, false);
+        assert.equal(more.textContent, `Show 50 more (of ${n})`);
+        assert.equal(more.getAttribute('aria-label'), null, 'its name is the visible label');
+
+        await showMore();
+        assert.equal(app.searchResults().length, 100);
+        assert.equal(more.hidden, false);
+        assert.equal(more.textContent, `Show ${n - 100} more (of ${n})`);
+
+        await showMore();
+        assert.equal(app.searchResults().length, n);
+        assert.equal(app.searchStatus(), `${n} verses in the WEB.`);
+        assert.equal(more.hidden, true, 'hidden once everything is shown');
+    }));
+
 test('switching translation reruns the search in the new translation', () =>
     withApp({ translation: 'kjv' }, async (app) => {
         await app.search('yahweh');
