@@ -1,9 +1,11 @@
-// Behavior tests for the top bar and what it opens: Aa (text and display),
-// the Library (bookmarks, highlights and notes), the ☰ menu and About. One opens
-// at a time; its button, Escape, or (for Aa and the menu) a click outside
-// closes it; focus moves in on opening and back to the button on closing.
-// Aa's controls are views of the same preferences and translation the
-// rest of the app uses. Against the real backend and database.
+// Behavior tests for the top bar and what it opens: the translation
+// button (the translations and Compare), Aa (text and display), the
+// Library (bookmarks, highlights and notes), the ☰ menu and About. One
+// opens at a time; its button, Escape, or (for the popovers) a click
+// outside closes it; focus moves in on opening and back to the button on
+// closing. Their controls are views of the same preferences and
+// translation the rest of the app uses. Against the real backend and
+// database.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,7 +23,7 @@ async function withApp(options, body) {
 }
 
 const $ = (app, id) => app.document.getElementById(id);
-const TOGGLES = { aa: 'aa-toggle', library: 'library-toggle', menu: 'menu-toggle' };
+const TOGGLES = { translation: 'translation-toggle', aa: 'aa-toggle', library: 'library-toggle', menu: 'menu-toggle' };
 const toggle = (app, name) => $(app, TOGGLES[name]);
 const isOpen = (app, name) => !app.surface(name).hidden;
 const focusIn = (app, el) => el.contains(app.document.activeElement);
@@ -58,8 +60,8 @@ test('each surface opens from its button, closes from it or with Escape, and foc
             assert.equal(app.document.activeElement, btn, `focus returns to ${name}'s button`);
         }
         // Where focus lands first.
-        app.click(toggle(app, 'aa'));
-        assert.equal(app.document.activeElement.dataset.value, 'kjv', 'Aa: the chosen translation');
+        app.click(toggle(app, 'translation'));
+        assert.equal(app.document.activeElement.dataset.value, 'kjv', 'the translations: the chosen one');
         app.click(toggle(app, 'library'));
         assert.equal(app.document.activeElement, $(app, 'library-tab-bookmarks'), 'Library: the chosen tab');
         app.click(toggle(app, 'menu'));
@@ -151,10 +153,10 @@ test('Aa changes the real preferences live, and they persist across a restart', 
         app.open('aa');
         const dialog = app.surface('aa');
         assert.equal(dialog.getAttribute('role'), 'dialog');
-        assert.equal(dialog.getAttribute('aria-label'), 'Text and display');
-        // In this order: translation and compare, text size, line spacing, width, layout, theme, reading mode.
+        assert.equal(dialog.getAttribute('aria-label'), 'Display');
+        // In this order: text size, line spacing, width, layout, theme, reading mode.
         const order = [...dialog.querySelectorAll('.section-label')].map((l) => l.textContent);
-        assert.deepEqual(order, ['Translation', 'Text size', 'Line spacing', 'Width', 'Layout', 'Theme']);
+        assert.deepEqual(order, ['Text size', 'Line spacing', 'Width', 'Layout', 'Theme']);
         assert.equal(dialog.lastElementChild.querySelector('button').id, 'reader-mode-btn');
         // Compare, with the translation to compare with, under the translations.
         const compareRow = $(app, 'compare-btn').closest('.aa-row');
@@ -265,10 +267,10 @@ test('the theme list starts with Chi Rho, Vellum and System, and Chi Rho is the 
     });
 });
 
-test('Aa switches the translation through the existing path, from the list the app loads', () =>
+test('the translation button switches the translation through the existing path, from the list the app loads', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
         await backend('add_bookmark', { bookId: bookId('Psalms'), chapter: 23, verseStart: 1, verseEnd: 1 });
-        app.open('aa');
+        app.open('translation');
         const home = await backend('get_home');
         // One row per translation, in the app's order, as a radio group.
         const buttons = segments(app, 'translation-choices');
@@ -289,7 +291,7 @@ test('Aa switches the translation through the existing path, from the list the a
         assert.deepEqual(checked(app, 'translation-choices'), ['web']);
         assert.equal(app.verse(16, 'web').querySelector('.verse-text').textContent, storedVerse('web', 'John', 3, 16));
         assert.equal(app.bookmarkItems()[0].preview, storedVerse('web', 'Psalms', 23, 1), 'the Library follows');
-        assert.ok(isOpen(app, 'aa'));
+        assert.ok(isOpen(app, 'translation'));
         // Choosing the one already chosen does nothing.
         const again = app.calls.length;
         app.click(segments(app, 'translation-choices').find((b) => b.dataset.value === 'web'));
@@ -297,21 +299,22 @@ test('Aa switches the translation through the existing path, from the list the a
         assert.equal(app.calls.length, again);
     }));
 
-test('Compare sits in Aa and C still toggles it; Reading mode leaves Aa for the exit button', () =>
+test('Compare sits with the translations and C still toggles it; Reading mode leaves Aa for the exit button', () =>
     withApp({}, async (app) => {
         const compare = $(app, 'compare-btn');
-        assert.ok(app.surface('aa').contains(compare));
+        assert.ok(app.surface('translation').contains(compare));
         let before = app.calls.length;
         app.key('c');
         await app.idle(before);
         assert.ok(app.isComparing());
         assert.equal(compare.getAttribute('aria-pressed'), 'true');
-        app.open('aa');
+        app.open('translation');
         before = app.calls.length;
         app.click(compare);
         await app.idle(before);
         assert.ok(!app.isComparing());
 
+        app.open('aa');
         app.click($(app, 'reader-mode-btn'));
         assert.equal(app.document.documentElement.dataset.readerMode, 'on');
         assert.ok(!isOpen(app, 'aa'));
@@ -339,9 +342,9 @@ test('reading mode keeps Aa, search and Exit on screen, and hides the Library, �
         }
         const css = app.document.querySelector('style').textContent;
         assert.match(css, /:root\[data-reader-mode="on"\] \.top-bar \{\s*background: transparent;/);
-        // Exit sits in the bar, before Aa, not at a fixed offset.
+        // Exit sits in the bar, before the translation and Aa, not at a fixed offset.
         assert.equal($(app, 'reader-exit').parentElement, $(app, 'top-bar'));
-        assert.equal($(app, 'reader-exit').nextElementSibling, toggle(app, 'aa').parentElement);
+        assert.equal($(app, 'reader-exit').nextElementSibling, toggle(app, 'translation').parentElement);
 
         // Aa still works; the Library doesn't open from its shortcut.
         app.open('aa');

@@ -85,8 +85,8 @@ test('the reference follows navigation, the translation and compare', () =>
         assert.equal(refText(app), 'Luke 1 · KJV');
         assert.deepEqual(marked(app), { book: ['Luke'], chapter: ['1'] });
 
-        // The translation, chosen in Aa.
-        app.open('aa');
+        // The translation, chosen with the translation button.
+        app.open('translation');
         await clickAndWait(app, $(app, 'translation-choices').querySelector('[data-value="web"]'), 'get_reading');
         assert.equal(refText(app), 'Luke 1 · WEB');
         assert.equal(refBtn(app).getAttribute('aria-label'), 'Luke 1, World English Bible. Choose a book and chapter');
@@ -122,7 +122,7 @@ test('the window title follows the reference: navigation, the translation and co
         await clickAndWait(app, chapter(app, 16), 'get_reading');
         assert.equal(title(), 'Mark 16 · KJV — Gospel Getter');
 
-        app.open('aa');
+        app.open('translation');
         await clickAndWait(app, $(app, 'translation-choices').querySelector('[data-value="web"]'), 'get_reading');
         assert.equal(title(), 'Mark 16 · WEB — Gospel Getter');
 
