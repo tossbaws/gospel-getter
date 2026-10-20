@@ -17,17 +17,17 @@ needed.
 - **Three complete translations, fully offline.** The King James Version
   (KJV), the Berean Standard Bible (BSB) and the World English Bible (WEB)
   are built into the app, so reading needs no downloads, API keys or
-  network access. **Aa** → **Translation** lists them a line each, with
-  each one's date and licence; the KJV is the default, and the arrow keys
-  move through the list. **About Gospel Getter** credits where each text
+  network access. The translation button in the bar shows the one you're
+  reading (**KJV**); it, or `T`, lists them a line each, with each one's
+  date and licence. The KJV is the default, and the arrow keys move
+  through the list. **About Gospel Getter** credits where each text
   comes from (see [Translations](#translations)).
 
   ![John 3 in the Berean Standard Bible in the Chi Rho theme, with John 2 and John 4 faded on either side. The bar's reference button says "John 3 · BSB", and small letters after verses 3 and 7 mark the BSB's footnotes](screenshots/bsb.png)
 - **Read in context.** The chapter you're reading sits in the middle with
   the previous and next chapters faded on either side, scrolling with it.
-  ← and → turn chapters across the whole Bible, from Genesis 50 into
-  Exodus 1 and so on, and each chapter ends with buttons for the previous
-  and next chapter.
+  ← and → turn chapters across the whole Bible, and each chapter ends with
+  buttons for the previous and next chapter.
 - **Go to any chapter.** The reference button at the left of the bar
   (`John 3 · KJV`) always says where you are. It, or `G`, opens the book
   and chapter picker: **Random chapter**, then the Old and New Testament
@@ -85,12 +85,12 @@ needed.
   italics, as in printed KJVs, and the margin notes are left out.
 
   ![John 3:16 to 21 selected in the WEB in the Chi Rho theme, with ✎ marks after verses 16, 17, 18 and 21. The card under verse 21 has Copy, Copy as…, Bookmark and + Add note buttons, four highlight color swatches and the citation "John 3:16–21 (WEB)", then a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and an Edit link. The card floats over the verses after the selection](screenshots/notes.png)
-- **Compare any two translations.** Press `C` (or **Compare** under **Aa**)
-  to see the translation you're reading beside another, one row per verse
-  number. **Compare (C) with** under **Aa** chooses the other one, and it's
-  remembered; until you choose, it's the KJV (or, beside the KJV, the
-  WEB). Where only one translation numbers a verse, the other column says
-  so instead of shifting anything.
+- **Compare any two translations.** Press `C` (or **Compare** under the
+  translation button) to see the translation you're reading beside
+  another, one row per verse number. **Compare (C) with**, under the same
+  button, chooses the other one, and it's remembered; until you choose,
+  it's the KJV (or, beside the KJV, the WEB). Where only one translation
+  numbers a verse, the other column says so instead of shifting anything.
 - **Cross-references.** Select a verse to see related passages in its
   card. Click one to read it right there in the card, a whole range at
   once, in the translation you're reading; click it again to close it, and
@@ -113,8 +113,8 @@ needed.
   Classic Dark, Classic Light, Matrix, Beast Slayer and Hot Pink. Four text
   sizes (also Ctrl+= and Ctrl+-, and Ctrl+0 for Medium), three line
   spacings, three widths for the text (Narrow, Normal and Wide), a
-  layout, and a distraction-free reading mode, all under **Aa** with the
-  translation. Printing is always black on white.
+  layout, and a distraction-free reading mode, all under **Aa**
+  (**Display**). Printing is always black on white.
 - **Verses or Flowing.** **Layout** under **Aa** sets the verses one to a
   line (**Verses**, the default) or runs each chapter on as prose with
   small raised verse numbers (**Flowing**), in the chapter you're reading,
@@ -125,7 +125,8 @@ needed.
   ![John 3 in the KJV in the Flowing layout, in the Chi Rho theme: the verses run on as paragraphs, each starting after a small raised number, with John 2 and John 4 faded on either side, also flowing. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes. The sidebar on the left lists the books, with John's chapters open and 3 marked](screenshots/flowing.png)
 - **Everything in reach, out of the way.** A slim bar at the top holds
   the reference button (and, on wide windows, the button that hides or
-  shows the sidebar), **Aa** (text and display), the **Library**
+  shows the sidebar), the translation button (the translations and
+  Compare), **Aa** (text and display), the **Library**
   (bookmarks, highlights and notes), search and the **☰** menu (export,
   import, the welcome, the keyboard shortcuts and **About Gospel
   Getter**). Only one panel or popover opens at a time, and Esc closes it.
@@ -219,6 +220,7 @@ The main ones:
 | Shift+j / Shift+k | Extend the selection down / up a verse |
 | Ctrl+C | Copy the selected verses with their reference. If you've highlighted text yourself, that's copied instead, as usual |
 | Ctrl+Shift+C | Copy as…: the selected verses with verse numbers, as a Markdown quote, or as plain text |
+| `T` | Open or close the translations and Compare (the translation button) |
 | `C` | Compare translations on/off |
 | Ctrl+= / Ctrl+- | Larger / smaller text, through the four sizes |
 | Ctrl+0 | Text size back to Medium |
@@ -348,9 +350,9 @@ them to ship offline:
 | Berean Standard Bible (BSB) | 2023 | public domain (CC0) |
 | World English Bible (WEB) | | public domain |
 
-**Aa** → **Translation** chooses one; existing readers keep the one they
-had. The KJV's margin notes and the BSB's translators' footnotes are shown
-as lettered footnotes. **About Gospel Getter** credits each text's source,
+The translation button in the bar (or `T`) chooses one; existing readers
+keep the one they had. The KJV's margin notes and the BSB's translators'
+footnotes are shown as lettered footnotes. **About Gospel Getter** credits each text's source,
 and the cross-references' (see [Data provenance](#data-provenance-and-textual-integrity)).
 Copyrighted translations such as the NIV and ESV aren't bundled; including
 one would need a licence that permits an offline copy.
