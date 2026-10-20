@@ -13,6 +13,15 @@ edition = "2024"
 name = "gospel_getter_lib"
 path = "src/lib.rs"
 
+# Off in every build but one. `gui-test-updater` is the GUI checks' test
+# build (scripts/gui-check.sh, tests/gui): its updater reads where to check,
+# with which key, in which mode and how long to wait from a test settings
+# file (`updater/test_hook.rs`), accepts the checks' plain-HTTP server, and
+# never installs what it downloads. No release, installer or packaging build
+# enables it; tests/packaging_config.rs fails if one does.
+[features]
+gui-test-updater = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
