@@ -10,7 +10,7 @@ search the whole Bible, compare any two translations verse by verse, and
 copy, bookmark or write notes on passages. No account and no network
 needed.
 
-![The reading view in the Chi Rho theme (parchment text on near-black, gold headings): John 3 in the KJV in the centre, with John 2 and John 4 faded on either side. The bar's reference button says "John 3 · KJV", and the sidebar on the left lists the books, with John's chapters open and 3 marked. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes](screenshots/reading-neighboring-chapters.png)
+![The reading view in the Chi Rho theme (parchment text on near-black, gold headings): John 3 in the KJV in the centre, with John 2 and John 4 faded on either side. The bar's reference button says "John 3 · KJV", its translation button "KJV" beside Aa Display, and the sidebar on the left lists the books, with John's chapters open and 3 marked. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes](screenshots/reading-neighboring-chapters.png)
 
 ## Features
 
@@ -23,7 +23,9 @@ needed.
   through the list. **About Gospel Getter** credits where each text
   comes from (see [Translations](#translations)).
 
-  ![John 3 in the Berean Standard Bible in the Chi Rho theme, with John 2 and John 4 faded on either side. The bar's reference button says "John 3 · BSB", and small letters after verses 3 and 7 mark the BSB's footnotes](screenshots/bsb.png)
+  ![John 3 in the Berean Standard Bible in the Chi Rho theme, with John 2 and John 4 faded on either side. The bar's reference button says "John 3 · BSB" and its translation button "BSB", and small letters after verses 3 and 7 mark the BSB's footnotes](screenshots/bsb.png)
+
+  ![The translation button's popover open in the Chi Rho theme, hanging from the "KJV" button in the top bar, beside Aa Display, over John 3 in the KJV. Under a Translation heading, three rows: KJV · King James Version · 1611/1769 · public domain, chosen; BSB · Berean Standard Bible · 2023 · public domain; and WEB · World English Bible · public domain. Below them, Compare (C) with BSB or WEB, with WEB chosen as the one to compare with](screenshots/translation-button.png)
 - **Read in context.** The chapter you're reading sits in the middle with
   the previous and next chapters faded on either side, scrolling with it.
   ← and → turn chapters across the whole Bible, and each chapter ends with
@@ -298,14 +300,14 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.16.2?** Each updates itself to 2.16.3: it
+**Coming from 2.6.0 through 2.16.3?** Each updates itself to 2.17.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
 update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.16.3 by hand once, from the
+Install 2.17.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.

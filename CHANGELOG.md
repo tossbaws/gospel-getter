@@ -4,6 +4,25 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.17.0] - 2026-10-20
+
+### Added
+- **The translation button** in the top bar, just before **Aa**, shows the
+  translation you're reading (**KJV**, **BSB** or **WEB**) and opens the
+  translations and **Compare**. T opens it too.
+- On a wider window, **Aa** says **Display** beside it.
+
+### Changed
+- The translations and **Compare** (with its "with" choices) moved from
+  **Aa** to the new translation button. **Aa** keeps text size, line
+  spacing, width, layout, theme and reading mode.
+- **Export notes** says what it makes more plainly: a Markdown (.md) file
+  of your notes, plain text that opens in Notepad or any text editor.
+- **Export data…** and **Import data…** in the ☰ menu say what they do
+  when you hover over them: save a backup of your bookmarks, highlights,
+  notes and settings, and load a Gospel Getter backup from this or
+  another computer.
+
 ## [2.16.3] - 2026-10-19
 
 ### Fixed
