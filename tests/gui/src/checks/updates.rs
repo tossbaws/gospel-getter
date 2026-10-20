@@ -4,7 +4,7 @@
 //!
 //! - 9 update-banner: the launch check (About closed) shows the banner,
 //!   with its notes, Update and restart and Later; and the shipped app's
-//!   session (checks 1 to 8, 14 to 16) sent the test server nothing.
+//!   session (checks 1 to 8, 14 to 19) sent the test server nothing.
 //! - 10 update-about: Check now in About shows the update there, its notes
 //!   as blocks of text, Update now and Close; in both looks.
 //! - 11 update-download: Update now downloads it, its progress moving in

@@ -66,7 +66,7 @@ const PLACE_JS: &str = "const heading = document.querySelector('.chapter-main .c
 
 impl Run<'_> {
     /// Back to plain reading: no Library, no selection.
-    async fn plain_reading(&self) -> Result<()> {
+    pub(super) async fn plain_reading(&self) -> Result<()> {
         let ui = &self.ui;
         let open = ui
             .js(
@@ -101,7 +101,7 @@ impl Run<'_> {
     }
 
     /// The chapter being read, as its heading says.
-    async fn heading(&self) -> Result<String> {
+    pub(super) async fn heading(&self) -> Result<String> {
         let heading = self
             .ui
             .js(

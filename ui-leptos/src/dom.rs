@@ -119,6 +119,15 @@ pub fn on_click(el: &Element, handler: impl Fn(web_sys::MouseEvent) + 'static) {
     handler.forget();
 }
 
+/// Listens for `name` on `target`, for as long as the page lives: a plain
+/// listener (bubbling), which, as [`on_click`]'s, may run again inside
+/// itself.
+pub fn on(target: &web_sys::EventTarget, name: &str, handler: impl Fn(web_sys::Event) + 'static) {
+    let handler = Closure::<dyn Fn(web_sys::Event)>::new(handler);
+    let _ = target.add_event_listener_with_callback(name, handler.as_ref().unchecked_ref());
+    handler.forget();
+}
+
 /// Listens for `keydown` on `window`, capturing: before any of the page's
 /// own handlers, as its modals do. For as long as the page lives.
 pub fn on_window_keydown(handler: impl FnMut(KeyboardEvent) + 'static) {

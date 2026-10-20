@@ -1485,6 +1485,9 @@ pub struct SearchResultDto {
     pub reference: String,
     /// The verse's plain text (see `VerseText`), the text search covers.
     pub text: String,
+    /// The words of `text` the search matched, to be marked: byte ranges
+    /// `[start, end)` into its UTF-8, in order (`query::term_marks`).
+    pub marks: Vec<(usize, usize)>,
 }
 
 /// What the search box should do with the input.
@@ -1573,16 +1576,20 @@ pub async fn run_search(
             let code = code_of(state, translation_id);
             let results = hits
                 .into_iter()
-                .map(|h| SearchResultDto {
-                    reference: passage_reference(
-                        book_name(state, h.book_id).unwrap_or("?"),
-                        h.chapter,
-                        Some((h.verse, h.verse)),
-                    ),
-                    book_id: h.book_id,
-                    chapter: h.chapter,
-                    verse: h.verse,
-                    text: VerseText::new(code, &h.text).text,
+                .map(|h| {
+                    let text = VerseText::new(code, &h.text).text;
+                    SearchResultDto {
+                        reference: passage_reference(
+                            book_name(state, h.book_id).unwrap_or("?"),
+                            h.chapter,
+                            Some((h.verse, h.verse)),
+                        ),
+                        book_id: h.book_id,
+                        chapter: h.chapter,
+                        verse: h.verse,
+                        marks: query::term_marks(&text, &terms),
+                        text,
+                    }
                 })
                 .collect();
             Ok(SearchDto::Text {
@@ -3108,6 +3115,11 @@ mod tests {
             cor["text"],
             "And now abideth faith, hope, charity, these three; but the greatest of these is \
              charity."
+        );
+        // Each word the search matched, where it is in that text.
+        assert_eq!(
+            cor["marks"],
+            serde_json::json!([[16, 21], [23, 27], [29, 36], [80, 87]])
         );
 
         let first = run_search(&state, "love", Some("web"), 0).await.unwrap();

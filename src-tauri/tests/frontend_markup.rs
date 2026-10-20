@@ -6,9 +6,10 @@
 const HTML: &str = include_str!("../../ui/index.html");
 
 /// The page's pieces written in Rust (`ui-leptos/src`), which own the
-/// modal dialogs' markup and keyboard handling, and the Library's tabs and
-/// lists: checks of those read them where they now live.
-const PIECES: [(&str, &str); 9] = [
+/// modal dialogs' markup and keyboard handling, the Library's tabs and
+/// lists, the search box and its palette, and the table of shortcuts:
+/// checks of those read them where they now live.
+const PIECES: [(&str, &str); 11] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -30,6 +31,11 @@ const PIECES: [(&str, &str); 9] = [
     ("about.rs", include_str!("../../ui-leptos/src/about.rs")),
     ("updates.rs", include_str!("../../ui-leptos/src/updates.rs")),
     ("library.rs", include_str!("../../ui-leptos/src/library.rs")),
+    ("search.rs", include_str!("../../ui-leptos/src/search.rs")),
+    (
+        "shortcut_table.rs",
+        include_str!("../../ui-leptos/src/shortcut_table.rs"),
+    ),
 ];
 
 /// One piece's source, by file name.
@@ -3992,19 +3998,21 @@ fn compared_keys(handler: &str) -> Vec<String> {
     keys
 }
 
-/// The key values every row of the SHORTCUTS table says it handles.
+/// The key values every row of the table of shortcuts says it handles
+/// (`SHORTCUTS` in ui-leptos's `shortcut_table.rs`).
 fn shortcut_table_handles() -> Vec<String> {
-    let start = HTML
-        .find("const SHORTCUTS = [")
+    let source = piece("shortcut_table.rs");
+    let start = source
+        .find("pub const SHORTCUTS: &[Shortcut] = &[")
         .expect("the shortcuts table");
-    let table = &HTML[start..start + HTML[start..].find("\n            ];").unwrap()];
+    let table = &source[start..start + source[start..].find("\n];").unwrap()];
     let mut handles = Vec::new();
-    for row in table.split("handles: [").skip(1) {
+    for row in table.split("handles: &[").skip(1) {
         // Quoted values, until the list's closing bracket (outside quotes:
         // `]` is a key itself).
         let mut rest = row.trim_start();
-        while let Some(quoted) = rest.strip_prefix('\'') {
-            let end = quoted.find('\'').unwrap();
+        while let Some(quoted) = rest.strip_prefix('"') {
+            let end = quoted.find('"').unwrap();
             handles.push(quoted[..end].to_owned());
             rest = quoted[end + 1..].trim_start_matches([',', ' ']);
         }
@@ -4054,16 +4062,14 @@ fn every_handled_key_is_in_the_shortcuts_table() {
             "`{key}` is handled but not in SHORTCUTS"
         );
     }
-    // And the sheet is that table, grouped: the page hands it over whole
-    // with each request to open, and the sheet (ui-leptos) lists each
-    // group's rows.
+    // And the sheet is that table, grouped: it reads the table itself (the
+    // page's request to open says only where focus goes back to), and
+    // lists each group's rows.
     let open = function_body("openShortcuts");
-    assert!(
-        open.contains("detail: { groups: SHORTCUT_GROUPS, shortcuts: SHORTCUTS, returnFocus }")
-    );
+    assert!(open.contains("detail: { returnFocus }"));
     let sheet = piece("shortcuts.rs");
-    assert!(sheet.contains(".groups"));
-    assert!(sheet.contains(".filter(|s| &s.group == group)"));
+    assert!(sheet.contains("shortcut_table::GROUPS"));
+    assert!(sheet.contains("shortcut_table::in_group(group)"));
 }
 
 /// The shortcuts sheet is a modal dialog named by its heading, reached

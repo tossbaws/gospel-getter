@@ -5134,12 +5134,10 @@
              (ui-leptos/src/library.rs) put them here. -->
         <p class="library-hint">Ctrl+B opens and closes the library &middot; Esc closes it</p>
     </aside>
-    <div id="search-panel" class="search-panel" role="dialog" aria-label="Search, go to or run a command" hidden>
-        <input type="search" id="search-input" class="search-input" role="combobox" aria-expanded="false" aria-controls="search-results" aria-autocomplete="list" placeholder="Words, a reference like John 3:16, or &gt; for commands" aria-label="Search the text, go to a reference, or run a command" aria-describedby="search-status" autocomplete="off" spellcheck="false">
-        <p id="search-status" class="search-status" role="status" aria-live="polite"></p>
-        <div id="search-results" class="search-results" role="listbox" aria-label="Results"></div>
-        <button type="button" id="search-more" class="search-more" hidden>Show more</button>
-    </div>
+    <!-- The search box's contents (#search-input, #search-status,
+         #search-results, #search-more) are drawn here by the page's Rust
+         pieces (ui-leptos/src/search.rs), which open and close it. -->
+    <div id="search-panel" class="search-panel" role="dialog" aria-label="Search, go to or run a command" hidden></div>
     <!-- About (#about-overlay) is drawn here by the page's Rust pieces
          (ui-leptos/src/about.rs), and opened and closed by the head script
          as one of its surfaces. -->
@@ -5175,12 +5173,7 @@
             const translationToggle = document.getElementById('translation-toggle');
             const aaToggle = document.getElementById('aa-toggle');
             const menuToggle = document.getElementById('menu-toggle');
-            const searchToggle = document.getElementById('search-toggle');
             const searchPanel = document.getElementById('search-panel');
-            const searchInput = document.getElementById('search-input');
-            const searchStatus = document.getElementById('search-status');
-            const searchResults = document.getElementById('search-results');
-            const searchMore = document.getElementById('search-more');
 
             // Every verse the reader can select: the chapter being read, in
             // each translation column it's shown in. Neither the faded
@@ -6203,10 +6196,11 @@
             // delete, and waits; see ui-leptos/src/bridge.rs.
             window.gospelGetterRefreshNotes = refreshNotes;
 
-            // A Library row opened (the Library already closed): its
-            // chapter, with its passage selected, so a note's Notes section
-            // shows; a note's Edit then opens the note.
-            document.addEventListener('gospel-getter:library-open', async function (event) {
+            // A Library row or a search result opened (the Library or the
+            // search box already closed): its chapter, with its passage
+            // selected, so a note's Notes section shows; a note's Edit then
+            // opens the note.
+            document.addEventListener('gospel-getter:open-passage', async function (event) {
                 const { bookId, chapter, verseStart, verseEnd, note } = event.detail;
                 await jumpTo(bookId, chapter, verseStart, verseEnd);
                 if (note && reading) {
@@ -7171,64 +7165,15 @@
                 renderCurrent();
             });
 
-            // ---- Keyboard shortcuts: every key the app answers, in one
-            // table. The shortcuts sheet (?) lists it, the palette's
-            // commands show their keys from it (by `id`), and the key
-            // handlers' keys are each in some row's `handles` (the
-            // KeyboardEvent key or code values it covers; a test checks
-            // every one the handlers compare against is listed). `keys`
-            // are the ways to press it, each a list of key caps.
-            const SHORTCUT_GROUPS = ['Reading', 'Selection', 'Search & palette', 'Panels', 'Text & display', 'History'];
-            const SHORTCUTS = [
-                { id: 'previous-chapter', group: 'Reading', keys: [['←']], aria: 'ArrowLeft', does: 'Previous chapter', handles: ['ArrowLeft'] },
-                { id: 'next-chapter', group: 'Reading', keys: [['→']], aria: 'ArrowRight', does: 'Next chapter', handles: ['ArrowRight'] },
-                { id: 'previous-book', group: 'Reading', keys: [['[']], aria: '[', does: 'Previous book, at chapter 1', handles: ['['] },
-                { id: 'next-book', group: 'Reading', keys: [[']']], aria: ']', does: 'Next book, at chapter 1', handles: [']'] },
-                { id: 'picker', group: 'Reading', keys: [['G']], aria: 'G', does: 'Choose a book and chapter', handles: ['g', 'G'] },
-                { id: 'compare', group: 'Reading', keys: [['C']], aria: 'C', does: 'Compare translations, on or off', handles: ['c', 'C'] },
-                { id: 'next-verse', group: 'Selection', keys: [['j']], aria: 'J', does: 'Select the next verse', handles: ['j', 'J'] },
-                { id: 'previous-verse', group: 'Selection', keys: [['k']], aria: 'K', does: 'Select the previous verse', handles: ['k', 'K'] },
-                { id: 'extend-down', group: 'Selection', keys: [['Shift', 'j']], aria: 'Shift+J', does: 'Extend the selection down a verse', handles: [] },
-                { id: 'extend-up', group: 'Selection', keys: [['Shift', 'k']], aria: 'Shift+K', does: 'Extend the selection up a verse', handles: [] },
-                { id: 'copy', group: 'Selection', keys: [['Ctrl', 'C']], aria: 'Control+C', does: 'Copy the selected verses with their reference', handles: ['c'] },
-                { id: 'copy-as', group: 'Selection', keys: [['Ctrl', 'Shift', 'C']], aria: 'Control+Shift+C', does: 'Copy as…: with verse numbers, as Markdown, or plain', handles: ['c'] },
-                { id: 'note', group: 'Selection', keys: [['N']], aria: 'N', does: 'Add a note to the selected verses', handles: ['n', 'N'] },
-                { id: 'clear-selection', group: 'Selection', keys: [['Esc']], aria: 'Escape', does: 'Clear the selection', handles: ['Escape'] },
-                { id: 'search', group: 'Search & palette', keys: [['/'], ['Ctrl', 'K']], aria: '/ Control+K', does: 'Search, go to a reference, or run a command', handles: ['/', 'k'] },
-                { id: 'commands-only', group: 'Search & palette', keys: [['>']], aria: '>', does: 'Typed first in the box: commands only', handles: [] },
-                { id: 'palette-move', group: 'Search & palette', keys: [['↓'], ['↑']], aria: 'ArrowDown ArrowUp', does: 'Move through the results and commands', handles: [] },
-                { id: 'palette-run', group: 'Search & palette', keys: [['Enter']], aria: 'Enter', does: 'Go there, or run the command', handles: [] },
-                { id: 'translation', group: 'Panels', keys: [['T']], aria: 'T', does: 'Open or close the translations and Compare', handles: ['t', 'T'] },
-                { id: 'library', group: 'Panels', keys: [['Ctrl', 'B']], aria: 'Control+B', does: 'Open or close the Library', handles: ['b'] },
-                { id: 'shortcuts', group: 'Panels', keys: [['?']], aria: '?', does: 'These keyboard shortcuts', handles: ['?'] },
-                { id: 'close', group: 'Panels', keys: [['Esc']], aria: 'Escape', does: 'Close the search box, a panel or a popover, one at a time', handles: ['Escape'] },
-                { id: 'text-larger', group: 'Text & display', keys: [['Ctrl', '=']], aria: 'Control+=', does: 'Larger text', handles: ['=', '+', 'NumpadAdd'] },
-                { id: 'text-smaller', group: 'Text & display', keys: [['Ctrl', '-']], aria: 'Control+-', does: 'Smaller text', handles: ['-', '_', 'NumpadSubtract'] },
-                { id: 'text-medium', group: 'Text & display', keys: [['Ctrl', '0']], aria: 'Control+0', does: 'Medium text', handles: ['0', 'Numpad0'] },
-                { id: 'reader-exit', group: 'Text & display', keys: [['Esc']], aria: 'Escape', does: 'Leave reading mode', handles: ['Escape'] },
-                { id: 'back', group: 'History', keys: [['Alt', '←']], aria: 'Alt+ArrowLeft', does: 'Back to the passage you jumped from', handles: ['ArrowLeft'] },
-                { id: 'forward', group: 'History', keys: [['Alt', '→']], aria: 'Alt+ArrowRight', does: 'Forward again', handles: ['ArrowRight'] },
-            ];
-            window.gospelGetterShortcuts = SHORTCUTS;
-
-            function shortcut(id) {
-                return SHORTCUTS.find((s) => s.id === id) || null;
-            }
-
-            // The arrows are drawn, as in the chapter-end hint (the UI
-            // sans's are tiny); screen readers hear the key's name.
-            const ARROW_UP = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 13V3M4 7l4-4 4 4"/></svg>';
-            const ARROW_DOWN = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 3v10M4 9l4 4 4-4"/></svg>';
-            const CAP_NAMES = { '←': ['Left arrow', () => ARROW_LEFT], '→': ['Right arrow', () => ARROW_RIGHT], '↑': ['Up arrow', () => ARROW_UP], '↓': ['Down arrow', () => ARROW_DOWN] };
-
             // ---- The keyboard shortcuts sheet is one of the page's pieces
             // written in Rust (ui-leptos/src/shortcuts.rs); what crosses is
-            // documented in ui-leptos/src/bridge.rs. It lists the table above,
-            // which stays here, the one table: the palette's key hints and the
-            // key handlers read it at once, whatever has loaded. A request to
-            // open carries the table and where focus goes back to (what had
-            // it, or the button it was opened from); the sheet cancels the
-            // event to say it has it.
+            // documented in ui-leptos/src/bridge.rs. It lists the one table
+            // of shortcuts, the Rust pieces' (ui-leptos/src/shortcut_table.rs),
+            // which the palette's key hints come from too; the key handlers
+            // below keep their own key comparisons, each in some row's
+            // `handles` (a test checks). A request to open carries where focus
+            // goes back to (what had it, or the button it was opened from);
+            // the sheet cancels the event to say it has it.
             function openShortcuts(opener = null) {
                 if (shortcutsOpen()) return;
                 const active = document.activeElement;
@@ -7237,7 +7182,7 @@
                 closeSurfaces(false);
                 const request = new CustomEvent('gospel-getter:shortcuts', {
                     cancelable: true,
-                    detail: { groups: SHORTCUT_GROUPS, shortcuts: SHORTCUTS, returnFocus },
+                    detail: { returnFocus },
                 });
                 if (!document.dispatchEvent(request)) return;
                 setDataStatus('Keyboard shortcuts aren’t available.', true);
@@ -7253,518 +7198,96 @@
             document.getElementById('shortcuts-btn').addEventListener('click', () => openShortcuts(menuToggle));
 
             // ---- Search and go-to-reference (GH-12), and the command
-            // palette, in one box. As the reader types, the results come
-            // in three groups: "Go to" (the reference typed, as the
-            // backend reads it), "Commands" (the app's own actions) and
-            // "Verses" (the search's matches). A leading ">" lists
-            // commands only; the empty box suggests a few. Focus stays in
-            // the box, a combobox: ↓ and ↑ move through every group's
-            // options, Enter runs the one that's active, Escape closes it.
-
-            let searchToken = 0;
-            let searchTimer = null;
-            let lastSearch = null;
-            // What the Go to and Verses groups show: the last search's
-            // answer, kept while the next one is on its way, as before.
-            let searchShown = null;
-            // The active option's key ("go", "cmd:compare",
-            // "verse:43:3:16"), or null; and whether the reader chose it
-            // with the arrows (otherwise it follows what's typed).
-            let paletteActive = null;
-            let paletteMoved = false;
-            // Where focus was when the box opened, for a command to give
-            // it back to.
-            let paletteReturnFocus = null;
-
-            // ---- Commands. Each runs the code its own control runs:
-            // mostly by clicking that control (Aa's buttons, the ☰ menu's
-            // items, the Library's tabs…); where the control isn't always
-            // on the page, through the function it calls (see
-            // gospelGetterControls in Aa's script), or the key's own.
-            // A command that can't run now is still listed, disabled, with
-            // the reason; one whose control toggles (Compare, Reading
-            // mode, the sidebar) is named for what it would do.
-
-            const IN_USE = 'In use';
-            const controls = () => window.gospelGetterControls;
-            const clickControl = (id) => () => document.getElementById(id).click();
-            const clickChoice = (groupId, value) => () => document.querySelector(`#${groupId} [data-value="${value}"]`).click();
-
-            // The commands the empty box suggests, in this order.
-            const SUGGESTED = ['compare', 'reader-mode', 'random-chapter', 'copy-chapter', 'export-notes'];
-
-            function paletteCommands() {
-                const list = [];
-                // `shortcut` is its row in SHORTCUTS, whose first way to
-                // press it is shown (and all of it is its
-                // aria-keyshortcuts); `words` are other words it's found by.
-                const add = (id, label, { shortcut: shortcutId = '', words = '', reason = null, run }) => {
-                    const row = shortcutId ? shortcut(shortcutId) : null;
-                    const key = row ? row.keys[0].join('+') : '';
-                    list.push({ id, label, key, keys: row ? row.aria : '', words, reason, run });
-                };
-                const comparing = isComparing();
-                const readerMode = root.dataset.readerMode === 'on';
-                const optionsOf = (id) => [...document.getElementById(id).options];
-                const valueOf = (id) => document.getElementById(id).value;
-                const partner = window.gospelGetterComparePartner ? window.gospelGetterComparePartner() : null;
-
-                add('compare', comparing ? 'Compare off' : 'Compare on', {
-                    shortcut: 'compare', words: 'translations side by side',
-                    reason: !comparing && !partner ? 'There’s only one translation' : null,
-                    run: clickControl('compare-btn'),
-                });
-                add('reader-mode', readerMode ? 'Exit reading mode' : 'Reading mode', {
-                    shortcut: readerMode ? 'reader-exit' : '', words: 'distraction free focus',
-                    run: clickControl(readerMode ? 'reader-exit' : 'reader-mode-btn'),
-                });
-                optionsOf('layout-select').forEach((o) => add(`layout-${o.value}`, `Layout: ${o.textContent}`, {
-                    reason: comparing ? 'Compare always shows a verse to a row' : (o.value === valueOf('layout-select') ? IN_USE : null),
-                    run: clickChoice('layout-choices', o.value),
-                }));
-                optionsOf('width-select').forEach((o) => add(`width-${o.value}`, `Width: ${o.textContent}`, {
-                    words: 'column measure',
-                    reason: o.value === valueOf('width-select') ? IN_USE : null,
-                    run: clickChoice('width-choices', o.value),
-                }));
-                const sizes = optionsOf('text-size-select');
-                const size = sizes.findIndex((o) => o.value === valueOf('text-size-select'));
-                add('text-larger', 'Text size: Larger', {
-                    shortcut: 'text-larger', words: 'bigger increase font',
-                    reason: size >= sizes.length - 1 ? 'Already the largest' : null,
-                    run: () => controls().textSize(1),
-                });
-                add('text-smaller', 'Text size: Smaller', {
-                    shortcut: 'text-smaller', words: 'decrease font',
-                    reason: size <= 0 ? 'Already the smallest' : null,
-                    run: () => controls().textSize(-1),
-                });
-                add('text-medium', 'Text size: Medium', {
-                    shortcut: 'text-medium', words: 'reset default font',
-                    reason: valueOf('text-size-select') === 'medium' ? IN_USE : null,
-                    run: () => controls().textSize(0),
-                });
-                optionsOf('theme-select').forEach((o) => add(`theme-${o.value}`, `Theme: ${o.textContent}`, {
-                    words: 'colours colors look',
-                    reason: o.value === valueOf('theme-select') ? IN_USE : null,
-                    run: clickChoice('theme-choices', o.value),
-                }));
-                const reading = currentTranslation();
-                optionsOf('translation-select').forEach((o) => add(`translation-${o.value}`, `Translation: ${o.value.toUpperCase()}`, {
-                    words: o.textContent,
-                    reason: o.value === reading ? IN_USE : null,
-                    run: () => controls().chooseTranslation(o.value),
-                }));
-                optionsOf('translation-select').filter((o) => o.value !== reading).forEach((o) => add(`compare-with-${o.value}`, `Compare with: ${o.value.toUpperCase()}`, {
-                    words: o.textContent,
-                    reason: !comparing ? 'Only while comparing' : (o.value === partner ? IN_USE : null),
-                    run: () => controls().compareWith(o.value),
-                }));
-                add('random-chapter', 'Random chapter', { words: 'surprise', run: clickControl('random-chapter-btn') });
-                const sidebar = root.dataset.picker === 'sidebar';
-                add('sidebar', sidebar ? 'Hide sidebar' : 'Show sidebar', {
-                    words: 'books chapters picker',
-                    reason: readerMode ? 'Not in reading mode' : (root.dataset.wide == null ? 'The window is too narrow for it' : null),
-                    run: clickControl('sidebar-toggle'),
-                });
-                [['bookmarks', 'Bookmarks'], ['highlights', 'Highlights'], ['notes', 'Notes']].forEach(([tab, name]) => add(`library-${tab}`, `Open Library: ${name}`, {
-                    shortcut: 'library',
-                    reason: readerMode ? 'Not in reading mode' : null,
-                    run: () => {
-                        if (surfaces().current() !== 'library') document.getElementById('library-toggle').click();
-                        const button = document.getElementById(`library-tab-${tab}`);
-                        if (!button) return;
-                        button.click();
-                        button.focus();
-                    },
-                }));
-                add('export-notes', 'Export notes…', {
-                    words: 'markdown file',
-                    reason: !exportNotesButton() || exportNotesButton().disabled ? 'There are no notes yet' : null,
-                    run: clickControl('export-notes-btn'),
-                });
-                add('export-data', 'Export data…', {
-                    words: 'backup save file',
-                    reason: exportDataBtn.disabled ? 'Busy with an export or import' : null,
-                    run: clickControl('export-data-btn'),
-                });
-                add('import-data', 'Import data…', {
-                    words: 'restore backup file',
-                    reason: importDataBtn.disabled ? 'Busy with an export or import' : null,
-                    run: clickControl('import-data-btn'),
-                });
-                add('welcome', 'Show welcome', { words: 'start help', run: clickControl('welcome-btn') });
-                add('about', 'About Gospel Getter', { words: 'version credits', run: clickControl('about-btn') });
-                const updateCheckBtn = document.getElementById('update-check-btn');
-                add('check-updates', 'Check for updates', {
-                    words: 'update version new',
-                    reason: updateCheckBtn && updateCheckBtn.disabled ? 'Already checking' : null,
-                    // About, then its Check now (both the Rust pieces').
-                    run: () => {
-                        document.getElementById('about-btn').click();
-                        const button = document.getElementById('update-check-btn');
-                        if (button) button.click();
-                    },
-                });
-                add('copy-chapter', 'Copy chapter', {
-                    words: 'clipboard text',
-                    reason: copies.chapter ? null : 'No chapter is shown',
-                    run: () => copyPassage('chapter', 'reference'),
-                });
-                add('copy-chapter-as', 'Copy chapter as…', {
-                    words: 'clipboard verse numbers markdown quote plain text',
-                    reason: document.querySelector('.chapter-copy-btn') ? null : 'No chapter is shown',
-                    run: () => openCopyMenu('chapter', document.querySelector('.chapter-copy-btn')),
-                });
-                const inner = currentInner();
-                add('next-chapter', 'Next chapter', {
-                    shortcut: 'next-chapter',
-                    reason: inner && inner.dataset.nextBook ? null : 'This is the Bible’s last chapter',
-                    run: () => turnChapter('next'),
-                });
-                add('previous-chapter', 'Previous chapter', {
-                    shortcut: 'previous-chapter',
-                    reason: inner && inner.dataset.prevBook ? null : 'This is the Bible’s first chapter',
-                    run: () => turnChapter('prev'),
-                });
-                add('next-book', 'Next book', {
-                    shortcut: 'next-book',
-                    reason: lastDto && lastDto.nextBook ? null : 'This is the Bible’s last book',
-                    run: () => stepBook('next'),
-                });
-                add('previous-book', 'Previous book', {
-                    shortcut: 'previous-book',
-                    reason: lastDto && lastDto.prevBook ? null : 'This is the Bible’s first book',
-                    run: () => stepBook('prev'),
-                });
-                add('back', 'Back', {
-                    shortcut: 'back', words: 'history previous passage',
-                    reason: canGoHistory(-1) ? null : HISTORY_ENDS[-1],
-                    run: () => goHistory(-1),
-                });
-                add('forward', 'Forward', {
-                    shortcut: 'forward', words: 'history next passage',
-                    reason: canGoHistory(1) ? null : HISTORY_ENDS[1],
-                    run: () => goHistory(1),
-                });
-                add('shortcuts', 'Keyboard shortcuts', {
-                    shortcut: 'shortcuts', words: 'keys help',
-                    run: () => openShortcuts(),
-                });
-                return list;
-            }
-
-            // Matching is by words, in any order, ignoring case and
-            // accents: every word typed must begin a word of the
-            // command's name or its other words ("rea mo" is Reading mode,
-            // "theme ma" Theme: Matrix). The list keeps its own order.
-            const foldWord = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-            const wordsOf = (s) => foldWord(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-
-            function commandMatches(command, typed) {
-                const words = wordsOf(`${command.label} ${command.words}`);
-                return typed.every((t) => words.some((w) => w.startsWith(t)));
-            }
-
-            // What the box holds: commands only (after ">"), and the words.
-            function paletteQuery() {
-                const trimmed = searchInput.value.trim();
-                const commandsOnly = trimmed.startsWith('>');
-                const text = commandsOnly ? trimmed.slice(1) : trimmed;
-                return { empty: !trimmed, commandsOnly, words: wordsOf(text) };
-            }
-
-            function paletteCommandsShown(query) {
-                const all = paletteCommands();
-                if (query.commandsOnly) return query.words.length ? all.filter((c) => commandMatches(c, query.words)) : all;
-                if (query.empty) return SUGGESTED.map((id) => all.find((c) => c.id === id)).filter(Boolean);
-                return query.words.length ? all.filter((c) => commandMatches(c, query.words)) : [];
-            }
-
+            // palette, in one box, are one of the page's pieces written in
+            // Rust (ui-leptos/src/search.rs); what crosses is documented in
+            // ui-leptos/src/bridge.rs. The panel is here; the Rust side draws
+            // what's in it and opens and closes it (from its button, and when
+            // a surface opens). This page asks it to open or close (its keys,
+            // a click away, a dialog opening); without the Rust pieces, search
+            // isn't available.
             function setSearchOpen(open) {
-                if (open && searchPanel.hidden) {
-                    const active = document.activeElement;
-                    paletteReturnFocus = active && active !== document.body ? active : null;
-                }
-                searchPanel.hidden = !open;
-                searchToggle.setAttribute('aria-expanded', String(open));
-                if (open) {
-                    closeSurfaces(false);
-                    paletteMoved = false;
-                    renderPalette();
-                    searchInput.focus();
-                    searchInput.select();
-                }
+                const request = new CustomEvent('gospel-getter:search', { cancelable: true, detail: { open } });
+                if (!document.dispatchEvent(request) || !open) return;
+                setDataStatus('Search isn’t available.', true);
             }
+            document.getElementById('search-toggle').addEventListener('click', function () {
+                if (!document.getElementById('search-input')) setDataStatus('Search isn’t available.', true);
+            });
 
-            function setSearchStatus(message, isError) {
-                searchStatus.textContent = message;
-                searchStatus.classList.toggle('is-error', !!isError);
-            }
-
-            // Words matching the search terms, wrapped in <mark>. The text
-            // is split into the same letter/digit runs SQLite's FTS5
-            // tokenizer uses; every character of the verse is kept, and
-            // everything is escaped, so the result's text content is the
-            // stored verse exactly.
-            function highlightTerms(text, terms) {
-                const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-                const wanted = new Set(terms.map(fold));
-                let html = '';
-                let last = 0;
-                for (const match of text.matchAll(/[\p{L}\p{N}\p{Co}]+/gu)) {
-                    html += escapeHtml(text.slice(last, match.index));
-                    const word = escapeHtml(match[0]);
-                    html += wanted.has(fold(match[0])) ? `<mark>${word}</mark>` : word;
-                    last = match.index + match[0].length;
-                }
-                return html + escapeHtml(text.slice(last));
-            }
-
-            // The search's answer (appended to what's shown, for Show
-            // more), and its status line.
-            function renderSearchResults(result, append) {
-                if (result.kind === 'passage') {
-                    searchShown = { result, verses: [] };
-                    setSearchStatus('Press Enter to go there.');
-                } else if (result.kind !== 'text') {
-                    searchShown = null;
-                    setSearchStatus(result.message || '', result.kind === 'invalid' || result.kind === 'unavailable');
-                } else {
-                    const verses = append && searchShown ? searchShown.verses.concat(result.results) : result.results;
-                    searchShown = { result, verses };
-                    const shown = result.offset + result.results.length;
-                    const code = (lastSearch && lastSearch.translationCode || currentTranslation()).toUpperCase();
-                    if (result.total === 0) {
-                        setSearchStatus(`No verses in the ${code} contain all of: ${result.terms.join(', ')}.`);
-                    } else {
-                        const count = result.total === 1 ? '1 verse' : `${result.total.toLocaleString('en')} verses`;
-                        setSearchStatus(`${count} in the ${code}${shown < result.total ? `, showing ${shown.toLocaleString('en')}` : ''}.`);
-                    }
-                }
-                renderPalette();
-            }
-
-            // The arrows are drawn, as in the sheet (the UI sans's are
-            // tiny); the arrow itself stays in the key's text, unseen.
-            function keyHtml(command) {
-                if (!command.key) return '';
-                const key = [...command.key]
-                    .map((c) => (CAP_NAMES[c] ? `<span class="visually-hidden">${c}</span>${CAP_NAMES[c][1]()}` : escapeHtml(c)))
-                    .join('');
-                return `<span class="palette-key"><span class="visually-hidden">, key </span><kbd>${key}</kbd></span>`;
-            }
-
-            // The listbox: each group a role="group" named by its heading,
-            // its options in order. The active option is kept by key when
-            // the list is redrawn, unless the reader is typing: then the
-            // first option is active if it's a Go to or a command, so
-            // Enter goes or runs it, as Enter on a reference always has;
-            // with the empty box, or verses first, none is until ↓.
-            function renderPalette() {
-                const query = paletteQuery();
-                const commands = paletteCommandsShown(query);
-                const shown = !query.empty && !query.commandsOnly ? searchShown : null;
-                const goTo = shown && shown.result.kind === 'passage' ? shown.result : null;
-                const verses = shown ? shown.verses : [];
-                let n = 0;
-                const groups = [];
-                const group = (id, label, options) => {
-                    if (!options.length) return;
-                    groups.push(`<div class="palette-group" role="group" aria-labelledby="palette-group-${id}">
-                        <div class="palette-group-label" id="palette-group-${id}" role="presentation">${label}</div>
-                        ${options.join('')}
-                    </div>`);
+            // What the palette's commands need of this page, whenever it's
+            // drawn or a command is chosen: Aa's settings, comparing, the
+            // chapter shown, the passage history, a busy export.
+            document.addEventListener('gospel-getter:palette-state', function (event) {
+                const choices = (id) => [...document.getElementById(id).options].map((o) => ({ value: o.value, label: o.textContent }));
+                const valueOf = (id) => document.getElementById(id).value;
+                const inner = currentInner();
+                const exportNotes = exportNotesButton();
+                const updateCheckBtn = document.getElementById('update-check-btn');
+                event.detail.state = {
+                    comparing: isComparing(),
+                    partner: window.gospelGetterComparePartner ? window.gospelGetterComparePartner() : null,
+                    readerMode: root.dataset.readerMode === 'on',
+                    sidebar: root.dataset.picker === 'sidebar',
+                    wide: root.dataset.wide != null,
+                    layouts: choices('layout-select'),
+                    layout: valueOf('layout-select'),
+                    widths: choices('width-select'),
+                    width: valueOf('width-select'),
+                    textSizes: choices('text-size-select'),
+                    textSize: valueOf('text-size-select'),
+                    themes: choices('theme-select'),
+                    theme: valueOf('theme-select'),
+                    translations: choices('translation-select'),
+                    translation: currentTranslation(),
+                    notes: !!exportNotes && !exportNotes.disabled,
+                    exportBusy: exportDataBtn.disabled,
+                    importBusy: importDataBtn.disabled,
+                    checking: !!updateCheckBtn && updateCheckBtn.disabled,
+                    chapterCopy: !!copies.chapter,
+                    chapterShown: !!document.querySelector('.chapter-copy-btn'),
+                    nextChapter: !!(inner && inner.dataset.nextBook),
+                    previousChapter: !!(inner && inner.dataset.prevBook),
+                    nextBook: !!(lastDto && lastDto.nextBook),
+                    previousBook: !!(lastDto && lastDto.prevBook),
+                    back: canGoHistory(-1),
+                    forward: canGoHistory(1),
                 };
-                const option = (key, groupId, className, attrs, html, disabled = false) => `<div role="option" id="palette-option-${n++}" class="${className}" data-key="${escapeHtml(key)}" aria-selected="false" aria-describedby="palette-group-${groupId}"${disabled ? ' aria-disabled="true"' : ''}${attrs}>${html}</div>`;
-                if (goTo) {
-                    const range = goTo.verseStart != null ? ` data-verse-start="${goTo.verseStart}" data-verse-end="${goTo.verseEnd}"` : '';
-                    group('goto', 'Go to', [option('go', 'goto', 'search-result search-go', ` data-book="${goTo.bookId}" data-chapter="${goTo.chapter}"${range}`, `Go to <strong>${escapeHtml(goTo.reference)}</strong>`)]);
-                }
-                group('commands', 'Commands', commands.map((c) => option(
-                    `cmd:${c.id}`, 'commands', `search-command${c.reason ? ' is-disabled' : ''}`,
-                    ` data-command="${c.id}"${c.keys ? ` aria-keyshortcuts="${escapeHtml(c.keys)}"` : ''}`,
-                    `<span class="palette-label">${escapeHtml(c.label)}</span>${c.reason ? `<span class="visually-hidden">, </span><span class="palette-reason">${escapeHtml(c.reason)}</span>` : ''}${keyHtml(c)}`,
-                    !!c.reason,
-                )));
-                group('verses', 'Verses', verses.map((r) => option(
-                    `verse:${r.bookId}:${r.chapter}:${r.verse}`, 'verses', 'search-result',
-                    ` data-book="${r.bookId}" data-chapter="${r.chapter}" data-verse-start="${r.verse}" data-verse-end="${r.verse}"`,
-                    `<span class="search-ref">${escapeHtml(r.reference)}</span>
-                        <span class="search-text">${highlightTerms(r.text, shown.result.terms)}</span>`,
-                )));
-                searchResults.innerHTML = groups.join('');
-                const options = paletteOptions();
-                searchInput.setAttribute('aria-expanded', String(options.length > 0));
-                searchMore.hidden = !(shown && shown.result.kind === 'text' && shown.result.offset + shown.result.results.length < shown.result.total);
-                if (shown && !searchMore.hidden) searchMore.dataset.offset = String(shown.result.offset + shown.result.results.length);
-                if (query.empty) {
-                    setSearchStatus('Type words to search, a reference to go there, or > for a command.');
-                } else if (query.commandsOnly) {
-                    setSearchStatus(commands.length ? '' : 'No commands match.');
-                }
-                let active = paletteMoved ? options.find((o) => o.dataset.key === paletteActive) : null;
-                if (!paletteMoved && !query.empty && options[0] && !options[0].dataset.key.startsWith('verse:')) {
-                    active = options[0];
-                }
-                setPaletteActive(active || null);
-            }
-
-            function paletteOptions() {
-                return [...searchResults.querySelectorAll('[role="option"]')];
-            }
-
-            function setPaletteActive(option) {
-                paletteOptions().forEach((o) => {
-                    o.setAttribute('aria-selected', String(o === option));
-                    o.classList.toggle('is-active', o === option);
-                });
-                paletteActive = option ? option.dataset.key : null;
-                if (option) {
-                    searchInput.setAttribute('aria-activedescendant', option.id);
-                    if (option.scrollIntoView) option.scrollIntoView({ block: 'nearest' });
-                } else {
-                    searchInput.removeAttribute('aria-activedescendant');
-                }
-            }
-
-            // Runs the search box query in the selected translation.
-            // Resolves to the result (or null if a newer search replaced
-            // it, or it failed). Commands alone (">") and the empty box
-            // search nothing.
-            async function runSearch(offset = 0) {
-                clearTimeout(searchTimer);
-                const token = ++searchToken;
-                const query = searchInput.value;
-                const translationCode = currentTranslation();
-                const { empty, commandsOnly } = paletteQuery();
-                if (empty || commandsOnly) {
-                    lastSearch = null;
-                    searchShown = null;
-                    if (!commandsOnly) setSearchStatus('');
-                    renderPalette();
-                    return null;
-                }
-                try {
-                    const result = await invoke('search', { query, translationCode, offset });
-                    if (token !== searchToken) return null;
-                    lastSearch = { query, translationCode, result };
-                    renderSearchResults(result, offset > 0);
-                    return result;
-                } catch (e) {
-                    if (token !== searchToken) return null;
-                    console.error('Search failed', e);
-                    searchShown = null;
-                    setSearchStatus(`Search failed: ${errorText(e)}`, true);
-                    renderPalette();
-                    return null;
-                }
-            }
-
-            async function openSearchResult(option) {
-                const start = option.dataset.verseStart != null ? Number(option.dataset.verseStart) : null;
-                const end = option.dataset.verseEnd != null ? Number(option.dataset.verseEnd) : null;
-                setSearchOpen(false);
-                await jumpTo(option.dataset.book, option.dataset.chapter, start, end);
-            }
-
-            // Runs an option: goes to its passage, or runs its command
-            // once the box has closed and focus is back where it was. A
-            // disabled command says why, and stays.
-            function runPaletteOption(option) {
-                if (!option.dataset.command) {
-                    openSearchResult(option);
-                    return;
-                }
-                const command = paletteCommands().find((c) => c.id === option.dataset.command);
-                if (!command || command.reason) {
-                    setSearchStatus(command ? `${command.label}: ${command.reason}.` : '');
-                    return;
-                }
-                setSearchOpen(false);
-                const back = paletteReturnFocus;
-                paletteReturnFocus = null;
-                if (back && back.isConnected && !back.closest('[hidden]')) back.focus({ preventScroll: true });
-                else searchToggle.focus();
-                command.run();
-            }
-
-            searchInput.addEventListener('input', function () {
-                clearTimeout(searchTimer);
-                paletteMoved = false;
-                renderPalette();
-                const { empty, commandsOnly } = paletteQuery();
-                if (empty || commandsOnly) runSearch(0);
-                else searchTimer = setTimeout(() => runSearch(0), 150);
             });
 
-            searchInput.addEventListener('keydown', async function (event) {
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    setSearchOpen(false);
-                    searchToggle.focus();
-                } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                    event.preventDefault();
-                    const options = paletteOptions();
-                    if (!options.length) return;
-                    const index = options.findIndex((o) => o.dataset.key === paletteActive);
-                    const next = event.key === 'ArrowDown'
-                        ? Math.min(options.length - 1, index + 1)
-                        : Math.max(-1, index - 1);
-                    paletteMoved = true;
-                    setPaletteActive(options[next] || null);
-                } else if (event.key === 'Enter') {
-                    event.preventDefault();
-                    // A search still on its way for what's typed (Enter
-                    // pressed straight after typing a reference) is waited
-                    // for, so Enter goes there, as it always has.
-                    const query = paletteQuery();
-                    const pending = !query.empty && !query.commandsOnly
-                        && !(lastSearch && lastSearch.query === searchInput.value && lastSearch.translationCode === currentTranslation());
-                    if (pending) await runSearch(0);
-                    const option = paletteOptions().find((o) => o.dataset.key === paletteActive);
-                    if (option) runPaletteOption(option);
-                }
+            // The palette's commands whose code is this page's, each run
+            // within the click or key that chose it (copying needs that),
+            // after the box has closed and focus has gone back. (Those
+            // whose controls are on the page, the Rust side clicks.) Text
+            // size, a translation and Compare with go through Aa's own
+            // functions (gospelGetterControls in Aa's script).
+            const controls = () => window.gospelGetterControls;
+            const PAGE_COMMANDS = {
+                'copy-chapter': () => copyPassage('chapter', 'reference'),
+                'copy-chapter-as': () => openCopyMenu('chapter', document.querySelector('.chapter-copy-btn')),
+                'next-chapter': () => turnChapter('next'),
+                'previous-chapter': () => turnChapter('prev'),
+                'next-book': () => stepBook('next'),
+                'previous-book': () => stepBook('prev'),
+                back: () => goHistory(-1),
+                forward: () => goHistory(1),
+                'text-larger': () => controls().textSize(1),
+                'text-smaller': () => controls().textSize(-1),
+                'text-medium': () => controls().textSize(0),
+                translation: (code) => controls().chooseTranslation(code),
+                'compare-with': (code) => controls().compareWith(code),
+                shortcuts: () => openShortcuts(),
+            };
+            document.addEventListener('gospel-getter:command', function (event) {
+                const run = PAGE_COMMANDS[event.detail.command];
+                if (run) run(event.detail.value);
             });
 
-            // Options are chosen by clicking too; the box keeps focus.
-            searchResults.addEventListener('mousedown', function (event) {
-                if (event.target.closest('[role="option"]')) event.preventDefault();
-            });
-
-            searchPanel.addEventListener('click', function (event) {
-                const option = event.target.closest('#search-results [role="option"]');
-                if (option) {
-                    runPaletteOption(option);
-                    return;
-                }
-                if (event.target.closest('#search-more')) {
-                    paletteMoved = true;
-                    runSearch(Number(searchMore.dataset.offset || 0));
-                }
-            });
-
-            searchToggle.addEventListener('click', function () {
-                setSearchOpen(searchPanel.hidden);
-            });
-
-            // One popover or panel at a time: opening one closes search.
             // The Library's tabs and lists are the Rust pieces': without
-            // them, the Library says so.
+            // them, the Library says so. (Opening a surface closes search:
+            // the Rust side listens for that too.)
             document.addEventListener('gospel-getter:surface-open', function (event) {
-                if (!searchPanel.hidden) setSearchOpen(false);
                 if (event.detail.name === 'library' && !document.getElementById('library-tab-bookmarks')) {
                     setDataStatus('The library isn’t available.', true);
-                }
-            });
-
-            // Escape closes the panel from anywhere in it (Show more).
-            searchPanel.addEventListener('keydown', function (event) {
-                if (event.target === searchInput) return;
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    setSearchOpen(false);
-                    searchToggle.focus();
                 }
             });
 
@@ -8396,8 +7919,9 @@
 
             // Switching translations re-reads whatever chapter is currently
             // on screen, in the newly selected translation, refreshes the
-            // bookmark and highlight previews, and reruns any search. The backend
-            // remembers this as the reader's position too (see
+            // bookmark and highlight previews; the search box (the Rust
+            // pieces', which listen for this change) reruns any search. The
+            // backend remembers this as the reader's position too (see
             // get_reading), so reopening the app comes back to it.
             translationSelect.addEventListener('change', function () {
                 showTranslation();
@@ -8406,7 +7930,6 @@
                 const chapter = inner ? inner.dataset.currentChapter : 1;
                 loadReading(bookId, chapter);
                 refreshLibrary('bookmarks', 'highlights');
-                if (searchInput.value.trim()) runSearch(0);
             });
 
             // Initial load: fetch the book/translation lists and whichever
