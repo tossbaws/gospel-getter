@@ -120,6 +120,10 @@ impl Run<'_> {
     /// view, and returns the chapter it turned to.
     async fn turn_from(&self, key: Key, from: &str) -> Result<String> {
         let ui = &self.ui;
+        // The heading is under the sticky bar once the page has scrolled
+        // (a note's selection, say): back to the top of the chapter first.
+        ui.js("window.scrollTo(0, 0); return null;", Vec::new())
+            .await?;
         ui.click(
             "click the chapter heading (focus off any control)",
             ".chapter-main .chapter-heading",
@@ -234,6 +238,7 @@ impl Run<'_> {
             )
             .await?;
         }
+        ui.settled("the Library to finish sliding in").await?;
         ui.click(
             &format!("the Library's {tab} tab"),
             &format!("#library-tab-{tab}"),
