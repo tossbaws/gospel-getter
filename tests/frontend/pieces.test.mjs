@@ -1,11 +1,14 @@
 // The page's Rust pieces (ui-leptos) arriving late or not at all: a fresh
-// install whose pieces load after boot still gets its welcome, and without
-// them each piece says it isn't available while the rest of the app keeps
-// working — against the real backend and database.
+// install whose pieces load after boot still gets its welcome, and the
+// launch check for updates and About's credits once they come; without
+// them each piece says it isn't available (and no update is looked for)
+// while the rest of the app keeps working — against the real backend and
+// database.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { closeBridge, openApp, settle } from './harness.mjs';
+import { readFileSync } from 'node:fs';
 
 after(closeBridge);
 
@@ -67,6 +70,51 @@ test('without the pieces, each says it isn’t available, and reading goes on', 
         assert.deepEqual(toast(app), { text: 'The note editor isn’t available.', error: true });
 
         // The reader's own keys still work.
+        const turn = app.calls.length;
+        app.key('ArrowRight');
+        await app.idle(turn, 'get_reading');
+        assert.equal(app.heading(), 'John 4');
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
+const VERSION = JSON.parse(
+    readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
+).version;
+const UPDATE = { version: '2.6.0', notes: 'Notes.', date: '2026-10-20', canSelfUpdate: true };
+const checks = (app) => app.calls.filter((c) => c.cmd === 'check_for_update').length;
+
+test('pieces that load after boot run the launch check then, and fill About', () =>
+    withApp({ leptos: 'late', update: { check: UPDATE } }, async (app) => {
+        await app.idle();
+        assert.equal(checks(app), 0, 'nothing to check with yet');
+        assert.equal($(app, 'update-banner'), null);
+        await app.loadPieces();
+        await app.idle();
+        assert.equal(checks(app), 1, 'the launch check, once');
+        assert.equal($(app, 'update-banner').hidden, false);
+        assert.equal($(app, 'update-title').textContent, 'Gospel Getter 2.6.0 is available');
+
+        app.open('about');
+        assert.equal(app.surface('about').hidden, false);
+        assert.equal($(app, 'app-version').textContent, `Version ${VERSION}`);
+        const credits = [...$(app, 'about-credits').querySelectorAll('li')].map((li) => li.textContent);
+        assert.ok(credits.length > 1, 'the bundled texts, from boot');
+        assert.equal(credits.at(-1), 'Cross-references from OpenBible.info, CC BY 4.0');
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
+test('without the pieces, About says it isn’t available, no update is looked for, and reading goes on', () =>
+    withApp({ book: 'John', chapter: 3, leptos: false, update: { check: UPDATE } }, async (app) => {
+        await app.idle();
+        assert.equal($(app, 'about-overlay'), null);
+        assert.equal($(app, 'update-banner'), null);
+        assert.equal(checks(app), 0);
+
+        app.open('menu');
+        app.click($(app, 'about-btn'));
+        assert.deepEqual(toast(app), { text: 'About isn’t available.', error: true });
+        assert.equal(app.surface('menu').hidden, true, 'the menu closes as after any item');
+
         const turn = app.calls.length;
         app.key('ArrowRight');
         await app.idle(turn, 'get_reading');

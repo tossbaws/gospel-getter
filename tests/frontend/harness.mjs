@@ -151,10 +151,12 @@ export async function backend(cmd, args = {}, channels = {}) {
 
 /**
  * Scripts updates for the next calls (until the next openApp): `check` is
- * null (no update), an update ({ version, notes, date, canSelfUpdate }) or
- * { problem }; `install` is { events, problem } (no problem: it restarts,
- * and never answers). Problems are the app's: offline, noReleaseInfo,
- * notForThisInstall, notVerified, notAuthorized, other.
+ * null (no update), an update ({ version, notes, date, canSelfUpdate }),
+ * { problem } or { noAnswer: true } (given up on after the app's own time
+ * limit, which `checkTimeoutMs` shortens); `install` is { events, problem }
+ * (no problem: it restarts, and never answers). Problems are the app's:
+ * offline, noReleaseInfo, notForThisInstall, notVerified, notAuthorized,
+ * other.
  */
 export function setUpdate(script) {
     return backend('__set_update', script);

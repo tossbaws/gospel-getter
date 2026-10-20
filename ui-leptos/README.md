@@ -7,7 +7,10 @@ JavaScript, which stays as it is everywhere else. The pieces are the page's
 modal dialogs: Export notes (`src/export_notes.rs`, the first), the
 keyboard shortcuts sheet (`src/shortcuts.rs`), the welcome
 (`src/welcome.rs`), the import preview (`src/import_preview.rs`) and the
-note editor (`src/note_editor.rs`).
+note editor (`src/note_editor.rs`); and About (`src/about.rs`) with the
+updater (`src/updates.rs`: Check now, the launch check, the banner, the
+update shown in About, and installing with its progress). About stays one
+of the head script's surfaces: the head script opens and closes it.
 
 [Leptos]: https://leptos.dev
 
@@ -29,12 +32,15 @@ note editor (`src/note_editor.rs`).
 - `src/dom.rs`: the DOM helpers the pieces share (focus that never
   scrolls, the modals' Tab trap, listening).
 - `src/text.rs`, `src/import_text.rs`, `src/note_text.rs`,
-  `src/install.rs`: the pieces' words, numbers and rules (Export notes'
-  filter, the import's sentences, the note's length rule, the welcome's
-  fresh-install rule), free of the DOM, unit-tested natively
-  (`cargo test`).
-- `src/lib.rs`: mounts the pieces when the module loads, then tells the
-  page they're listening (`gospel-getter:pieces-ready`).
+  `src/install.rs`, `src/update_text.rs`: the pieces' words, numbers and
+  rules (Export notes' filter, the import's sentences, the note's length
+  rule, the welcome's fresh-install rule, the updater's sentences,
+  `megabytes` and download progress), free of the DOM, unit-tested natively
+  (`cargo test`). The update check's time limit and its "couldn't reach
+  GitHub" message are the backend's (`check_for_update`).
+- `src/lib.rs`: mounts the pieces when the module loads (About and the
+  banner are moved to where the page had them, for focus order), then tells
+  the page they're listening (`gospel-getter:pieces-ready`).
 
 ## Building and running
 
@@ -58,8 +64,9 @@ end of `<body>`, which loads the glue (`ui-leptos.js`) and the module
 (`ui-leptos_bg.wasm`). Trunk's own loader is an ES module import, which the
 `no-modules` glue cannot be loaded by, so `Trunk.toml` turns it off. If the
 module fails to load, the page is as it was without it, except that the
-five dialogs are unavailable, and say so when asked for. The module may
-also load after the page has booted: the welcome's startup question waits
+five dialogs and About are unavailable, and say so when asked for, and no
+update is looked for. The module may also load after the page has booted:
+the welcome's startup question, the launch check and About's credits wait
 for `gospel-getter:pieces-ready`.
 
 The Content Security Policy allows exactly what this needs beyond the page's
@@ -92,8 +99,9 @@ update it within the click or key itself, so the harness's `app.click` and
 that look at a dialog right after a click or key await it; assertions did
 not change. Where the page answered within the event itself and a test
 looks at once with nothing to await (typing in the note editor, its discard
-prompt, the import's add-or-replace choice), the piece writes to those
-elements within the event, as the page did. `openApp({ leptos: 'late' })`
+prompt, the import's add-or-replace choice, and the updater throughout:
+Check now's line while it checks, the views as an install starts, Later),
+the piece writes to those elements within the event, as the page did. `openApp({ leptos: 'late' })`
 loads the pieces only when the test calls `app.loadPieces()`, and
 `leptos: false` never (`pieces.test.mjs`).
 
@@ -106,7 +114,9 @@ loads the pieces only when the test calls `app.loadPieces()`, and
 `ImportPreview` (`commands::ImportPreviewDto`), `PositionPreview`
 (`commands::PositionPreviewDto`), `ImportResult`
 (`commands::ImportResultDto`) and `Preferences` (`reader_data::Preferences`,
-whose enums travel as their kebab-case names); and the commands' argument
+whose enums travel as their kebab-case names); for the updater,
+`UpdateInfo` and `DownloadEvent` (`updater.rs`) and `NoteBlock` and
+`NoteSpan` (`release_notes::Block` and `Span`); and the commands' argument
 objects. The backend's types carry `chrono` dates
 and `deny_unknown_fields`; the shared crate would keep them serde-only with
 the dates as `YYYY-MM-DD` strings, as the page always sent and received them.

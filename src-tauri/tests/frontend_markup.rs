@@ -8,7 +8,7 @@ const HTML: &str = include_str!("../../ui/index.html");
 /// The page's pieces written in Rust (`ui-leptos/src`), which own the
 /// modal dialogs' markup and keyboard handling: checks of those read them
 /// where they now live.
-const PIECES: [(&str, &str); 6] = [
+const PIECES: [(&str, &str); 8] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -27,6 +27,8 @@ const PIECES: [(&str, &str); 6] = [
         include_str!("../../ui-leptos/src/note_editor.rs"),
     ),
     ("bridge.rs", include_str!("../../ui-leptos/src/bridge.rs")),
+    ("about.rs", include_str!("../../ui-leptos/src/about.rs")),
+    ("updates.rs", include_str!("../../ui-leptos/src/updates.rs")),
 ];
 
 /// One piece's source, by file name.
@@ -1034,12 +1036,14 @@ fn theme_swatches_come_from_the_theme_definitions() {
     assert!(HTML.contains("optionsOf(themeSelect).forEach("));
 }
 
-/// About's Release notes link shows the same URL the backend opens.
+/// About's Release notes link shows the same URL the backend opens. About
+/// is the Rust pieces' (`ui-leptos/src/about.rs`), which build the URL.
 #[test]
 fn release_notes_link_matches_the_backend() {
     let prefix = gospel_getter_lib::updater::RELEASE_NOTES_PREFIX;
-    assert!(HTML.contains(&format!("`{prefix}${{version}}`")));
-    assert!(HTML.contains("invoke('open_release_notes')"));
+    let about = piece("about.rs");
+    assert!(about.contains(&format!("format!(\"{prefix}{{version}}\")")));
+    assert!(about.contains(r#"ipc::invoke_value("open_release_notes""#));
 }
 
 /// Arrow keys pressed on a focused settings `<select>` change that
@@ -3866,7 +3870,8 @@ fn the_translation_chooser_and_credits_are_accessible_and_use_tested_theme_color
     let render = function_body("renderAa");
     assert!(render.contains("btn.setAttribute('role', 'radio');"));
     assert!(render.contains("dot.setAttribute('aria-hidden', 'true');"));
-    assert!(HTML.contains(r#"<ul id="about-credits" class="about-credits-list"></ul>"#));
+    // About is the Rust pieces' (`ui-leptos/src/about.rs`).
+    assert!(piece("about.rs").contains(r#"<ul id="about-credits" class="about-credits-list">"#));
 
     let rules = rules();
     // The screen rule naming `selector`, alone or in a list.
@@ -4122,15 +4127,29 @@ fn the_shortcuts_sheet_is_a_modal_dialog_aa_in_every_theme() {
 
 /// The page never opens a web page itself: no anchor opens a new window,
 /// and each link out of the app (Release notes, the cross references'
-/// credits) is one the backend opens, through a click handler.
+/// credits) is one the backend opens, through a click handler. The page
+/// and its Rust pieces (About, with Release notes, is `about.rs`) together.
 #[test]
 fn every_link_out_of_the_app_is_opened_by_the_backend() {
-    assert!(!HTML.contains("target=\"_blank\""));
-    assert!(!HTML.contains("window.open("));
-    let anchors: Vec<&str> = HTML
-        .match_indices("<a ")
-        .map(|(at, _)| &HTML[at..at + HTML[at..].find('>').unwrap()])
+    let sources: Vec<&str> = std::iter::once(HTML)
+        .chain(PIECES.iter().map(|(_, source)| *source))
         .collect();
+    let mut anchors: Vec<&str> = Vec::new();
+    for source in &sources {
+        assert!(!source.contains("target=\"_blank\""));
+        assert!(!source.contains("window.open("));
+        anchors.extend(
+            source
+                .match_indices("<a")
+                .filter(|(at, _)| {
+                    source[at + 2..]
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_whitespace)
+                })
+                .map(|(at, _)| &source[at..at + source[at..].find('>').unwrap()]),
+        );
+    }
     assert_eq!(anchors.len(), 3, "{anchors:#?}");
     for anchor in anchors {
         assert!(
@@ -4139,20 +4158,31 @@ fn every_link_out_of_the_app_is_opened_by_the_backend() {
             "{anchor}"
         );
     }
-    assert!(HTML.contains("invoke('open_release_notes')"));
+    assert!(piece("about.rs").contains(r#"ipc::invoke_value("open_release_notes""#));
     assert!(HTML.contains("invoke('open_credit_link', { which: credit.dataset.link })"));
 }
 
-/// A Check now that times out in the page says what the backend says when
-/// GitHub can't be reached, word for word.
+/// A Check now that times out says what the backend says when GitHub
+/// can't be reached, word for word: the backend gives the check up itself
+/// (`updater::CHECK_TIMEOUT`, 20 s) with its own message, so neither the
+/// page nor its Rust pieces keep a copy of the message or a timer of their
+/// own.
 #[test]
 fn a_timed_out_update_check_says_the_backends_offline_message() {
     let offline = gospel_getter_lib::updater::messages::OFFLINE;
-    assert!(
-        HTML.contains(&format!("const UPDATE_CHECK_OFFLINE = '{offline}';")),
-        "{offline}"
+    assert_eq!(
+        gospel_getter_lib::updater::CHECK_TIMEOUT,
+        std::time::Duration::from_secs(20)
     );
-    assert!(HTML.contains("const UPDATE_CHECK_TIMEOUT_MS = 20000;"));
+    for (file, source) in std::iter::once(("index.html", HTML)).chain(PIECES) {
+        assert!(!source.contains(offline), "{file} repeats the message");
+        assert!(!source.contains("Couldn’t reach GitHub"), "{file}");
+        assert!(
+            !source.contains("20000") && !source.contains("20_000"),
+            "{file}"
+        );
+    }
+    assert!(!HTML.contains("withinUpdateCheckTime"));
 }
 
 /// Under the Content Security Policy (see `tauri.conf.json`), only the
