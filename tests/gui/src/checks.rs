@@ -88,7 +88,7 @@ const CSP_LISTENER_JS: &str = "
 ";
 
 /// The screenshots check 4 asks for, by file name.
-const SHOTS: [&str; 8] = [
+const SHOTS: [&str; 9] = [
     "1-reading-chi-rho.png",
     "2-export-dialog-chi-rho.png",
     "3-reading-vellum.png",
@@ -97,6 +97,7 @@ const SHOTS: [&str; 8] = [
     "6-note-editor-chi-rho.png",
     "7-shortcuts-chi-rho.png",
     "8-import-preview-chi-rho.png",
+    "9-translation-chi-rho.png",
 ];
 
 /// The import preview's screenshot: on Windows the native open dialog is
@@ -250,6 +251,12 @@ async fn shipped(config: &Config, report: &mut Report, started: Instant) {
             Err(e) => Err(e),
         };
         run.shots.note(SHOTS[0], shot);
+        if let Err(e) = run.translation_screenshot().await {
+            run.failure_screenshot(Check::Screenshots).await;
+            if !run.shots.taken.iter().any(|(n, _)| *n == SHOTS[8]) {
+                run.shots.note(SHOTS[8], Err(anyhow::anyhow!("{e:#}")));
+            }
+        }
 
         let export = run.export_notes().await;
         if export.is_err() {
@@ -816,6 +823,44 @@ impl Run<'_> {
         Ok(format!(
             "Tab stayed inside and cycled ({controls} controls)"
         ))
+    }
+
+    /// Check 4: the translation button's popover open over the reading
+    /// view, in Chi Rho. Opened by its button, which gives focus to the
+    /// chosen translation; Escape closes it, focus going back to the
+    /// button.
+    async fn translation_screenshot(&mut self) -> Result<()> {
+        {
+            let ui = &self.ui;
+            ui.click("open the translations", "#translation-toggle")
+                .await?;
+            ui.wait(
+                "the translations to show, focus on the chosen one",
+                &format!(
+                    "{VISIBLE_JS} const popover = document.getElementById('translation-popover');
+                     const active = document.activeElement;
+                     return [visible(popover) && popover.contains(active)
+                             && active.getAttribute('aria-checked') === 'true',
+                             {{ focus: active && active.dataset.value }}];"
+                ),
+            )
+            .await?;
+        }
+        self.shot(
+            "screenshot: the translation button's popover, Chi Rho",
+            SHOTS[8],
+        )
+        .await;
+        let ui = &self.ui;
+        ui.press("press Escape (close the translations)", Key::Escape)
+            .await?;
+        ui.wait(
+            "the translations to close, focus back on their button",
+            "return [document.getElementById('translation-popover').hidden
+                     && document.activeElement === document.getElementById('translation-toggle'), null];",
+        )
+        .await?;
+        Ok(())
     }
 
     /// Check 4's second half: switch to Vellum through the Aa panel, then

@@ -522,7 +522,8 @@ pub fn ExportNotes() -> impl IntoView {
                 <div class="modal-body">
                     <h2 id="export-notes-title" class="note-title">"Export notes"</h2>
                     <p id="export-notes-text" class="export-notes-text">
-                        "A Markdown file of your notes, each with its verses quoted in the "
+                        "Creates a Markdown (.md) file of your notes, plain text that opens in \
+                         Notepad or any text editor. Each note has its verses quoted in the "
                         <span id="export-notes-translation">{translation_name}</span>
                         "."
                     </p>

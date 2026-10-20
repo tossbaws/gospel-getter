@@ -92,7 +92,7 @@ test('moving on isn’t a jump: ← and →, the end-of-chapter buttons, a neigh
         await waitFor(app, () => app.key(']'));
         await waitFor(app, () => app.key('['));
         assert.equal(app.heading(), 'John 1');
-        app.open('aa');
+        app.open('translation');
         await waitFor(app, () => app.click(app.document.querySelector('#translation-choices [data-value="web"]')));
         app.key('Escape', {}, app.document.activeElement);
         await waitFor(app, () => app.key('c'), 'get_compare');

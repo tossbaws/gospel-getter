@@ -427,10 +427,11 @@
             padding: 2.5rem 1.5rem 6rem;
         }
 
-        /* The top bar: Aa, Library, search and the ☰ menu on the right,
-           over an opaque --bar-bg the page scrolls beneath (the content
-           is offset below it, on screen only). In reading mode only
-           Aa, search and the exit button stay, and the bar itself goes. */
+        /* The top bar: the translation, Aa, Library, search and the ☰ menu
+           on the right, over an opaque --bar-bg the page scrolls beneath
+           (the content is offset below it, on screen only). In reading
+           mode only the translation, Aa, search and the exit button stay,
+           and the bar itself goes. */
         .top-bar {
             position: fixed;
             top: 0;
@@ -484,10 +485,31 @@
         }
 
         .aa-toggle {
-            width: 3rem;
+            width: auto;
+            min-width: 3rem;
+            padding: 0 0.45rem;
+            gap: 0.4rem;
             font-size: 1.05rem;
             font-weight: 600;
             letter-spacing: 0.02em;
+        }
+
+        /* "Aa Display" where the bar has room for it (see the 847px
+           breakpoint below); just "Aa" in a narrower window. */
+        .aa-label {
+            font-size: 0.85rem;
+            font-weight: normal;
+            letter-spacing: 0;
+        }
+
+        /* The translation being read, by its code ("KJV"). */
+        .translation-toggle {
+            width: auto;
+            min-width: 3rem;
+            padding: 0 0.45rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
         }
 
         .bar-btn svg {
@@ -495,9 +517,10 @@
             height: 1.2rem;
         }
 
-        /* Popovers (Aa and the ☰ menu): opaque --option-bg, like the search
-           panel, hanging below their button with a small pointer to it.
-           Only one popover or panel is open at a time. */
+        /* Popovers (the translation, Aa and the ☰ menu): opaque
+           --option-bg, like the search panel, hanging below their button
+           with a small pointer to it. Only one popover or panel is open
+           at a time. */
         .popover {
             position: absolute;
             top: calc(100% + 0.55rem);
@@ -522,15 +545,18 @@
             transform: rotate(45deg);
         }
 
-        /* Aa: translation and compare, text size, line spacing, theme and
+        /* The translation button's popover: the translations and
+           Compare. Aa: text size, line spacing, width, layout, theme and
            reading mode. Every control is --accent on --panel-bg, or
            --on-accent on --accent when chosen, both AA in every theme. */
-        .aa-popover {
+        .aa-popover,
+        .translation-popover {
             width: 24rem;
             padding: 0.9rem 1rem 1rem;
         }
 
-        .aa-popover::before {
+        .aa-popover::before,
+        .translation-popover::before {
             right: calc(1.5rem - 7px);
         }
 
@@ -940,10 +966,12 @@
             }
         }
 
-        /* Narrow windows: Aa becomes a sheet along the bottom (scrolling
-           if it must), and the Library takes the full width. */
+        /* Narrow windows: Aa and the translations become a sheet along
+           the bottom (scrolling if it must), and the Library takes the
+           full width. */
         @media (max-width: 560px) {
-            .aa-popover {
+            .aa-popover,
+            .translation-popover {
                 position: fixed;
                 top: auto;
                 left: 0;
@@ -956,7 +984,8 @@
                 border-bottom: none;
             }
 
-            .aa-popover::before {
+            .aa-popover::before,
+            .translation-popover::before {
                 display: none;
             }
 
@@ -2476,10 +2505,11 @@
         }
 
         /* Distraction-free reading mode: everything but the chapter being
-           read is hidden, except Aa (so text size and spacing stay
-           adjustable), search, and an always-visible exit button — the
-           reader can never get stuck in this mode. The exit button sits in
-           the top bar, before Aa. The mode is purely presentational:
+           read is hidden, except the translation and Aa (so the
+           translation, text size and spacing stay adjustable), search, and
+           an always-visible exit button — the reader can never get stuck
+           in this mode. The exit button sits in the top bar, before the
+           translation. The mode is purely presentational:
            #reading-pane-inner and its prev/next data are untouched, so
            arrow-key navigation keeps working. */
         .reader-exit {
@@ -2881,6 +2911,11 @@
            so the arrow keys and their headings work the same. */
         @media (max-width: 847px) {
             .chapter-side-prev {
+                display: none;
+            }
+
+            /* Below it the bar would crowd the reference: Aa alone. */
+            .aa-label {
                 display: none;
             }
         }
@@ -4226,11 +4261,11 @@
 
             applyPickerShape();
 
-            // The header's popovers and panels: Aa, the Library, the ☰ menu,
-            // the About dialog, and the book and chapter picker when it's a
-            // popover. Only one is open at a time; Escape
-            // closes it, and so does a click outside a popover (the Aa
-            // popover or the menu). Opening one moves focus into it, and
+            // The header's popovers and panels: the translation button's
+            // popover, Aa, the Library, the ☰ menu, the About dialog, and
+            // the book and chapter picker when it's a popover. Only one is
+            // open at a time; Escape closes it, and so does a click outside
+            // a popover (the translation's, Aa's or the menu). Opening one moves focus into it, and
             // closing it gives focus back to the button that opened it.
             // They live here, with the preferences, so Aa (and with it
             // reading mode) keeps working even if the main script fails.
@@ -4241,6 +4276,8 @@
             document.addEventListener('DOMContentLoaded', function () {
                 var root = document.documentElement;
                 var byId = function (id) { return document.getElementById(id); };
+                var translationToggle = byId('translation-toggle');
+                var translationPopover = byId('translation-popover');
                 var aaToggle = byId('aa-toggle');
                 var aaPopover = byId('aa-popover');
                 var libraryToggle = byId('library-toggle');
@@ -4261,6 +4298,7 @@
                 // ---- Surfaces
 
                 var SURFACES = {
+                    translation: { el: translationPopover, toggle: translationToggle, popover: true },
                     aa: { el: aaPopover, toggle: aaToggle, popover: true },
                     library: { el: libraryPanel, toggle: libraryToggle, popover: false },
                     menu: { el: appMenu, toggle: menuToggle, popover: true },
@@ -4400,8 +4438,10 @@
 
                 function focusInto(name) {
                     var first;
-                    if (name === 'aa') {
-                        first = aaPopover.querySelector('.translation-choice[aria-checked="true"]') || aaPopover.querySelector('button');
+                    if (name === 'translation') {
+                        first = translationPopover.querySelector('.translation-choice[aria-checked="true"]') || translationPopover.querySelector('button');
+                    } else if (name === 'aa') {
+                        first = aaPopover.querySelector('button:not(:disabled)');
                     } else if (name === 'library') {
                         first = libraryPanel.querySelector('[role="tab"][aria-selected="true"]');
                     } else if (name === 'menu') {
@@ -4428,7 +4468,8 @@
                     if (current) closeSurface(false);
                     current = name;
                     returnFocus = opener || SURFACES[name].toggle;
-                    if (name === 'aa') renderAa();
+                    if (name === 'translation') renderTranslations();
+                    if (name === 'aa') syncAa();
                     setShown(name, true);
                     // The main script closes the search panel.
                     document.dispatchEvent(new CustomEvent('gospel-getter:surface-open', { detail: { name: name } }));
@@ -4452,6 +4493,7 @@
                 refBtn.addEventListener('click', function () { openPicker(true); });
                 sidebarToggle.addEventListener('click', function () { setSidebar(!sidebarShown()); });
 
+                translationToggle.addEventListener('click', function () { toggleSurface('translation'); });
                 aaToggle.addEventListener('click', function () { toggleSurface('aa'); });
                 libraryToggle.addEventListener('click', function () { toggleSurface('library'); });
                 menuToggle.addEventListener('click', function () { toggleSurface('menu'); });
@@ -4527,9 +4569,9 @@
                 // (ui-leptos/src/library.rs), inside the panel this script
                 // opens and closes; focusInto above focuses its chosen tab.
 
-                // ---- Aa: views of the translation, text size, line
-                // spacing and theme <select>s, which stay the record of
-                // each choice (hidden). Choosing changes the <select> and
+                // ---- The translation button's popover and Aa: views of
+                // the translation, text size, line spacing and theme
+                // <select>s, which stay the record of each choice (hidden). Choosing changes the <select> and
                 // fires its change event, so a choice goes through exactly
                 // the code a <select> change always has.
                 var translationSelect = byId('translation-select');
@@ -4616,10 +4658,10 @@
 
                 // The translations come from the backend (the main script
                 // fills the <select>), so their rows are rebuilt each time
-                // Aa opens: one line each, "KJV · King James Version ·
-                // 1611/1769 · public domain", a radio group. The dots are
-                // only seen; the words are the row's name.
-                function renderAa() {
+                // their popover opens: one line each, "KJV · King James
+                // Version · 1611/1769 · public domain", a radio group. The
+                // dots are only seen; the words are the row's name.
+                function renderTranslations() {
                     translationChoices.textContent = '';
                     optionsOf(translationSelect).forEach(function (option) {
                         var btn = document.createElement('button');
@@ -4800,7 +4842,7 @@
 
                 // The command palette (in the main script) makes the choices
                 // whose controls aren't always on the page (the translation
-                // rows and Compare with are drawn when Aa opens) through the
+                // rows and Compare with are drawn when their popover opens) through the
                 // functions those controls call, and the text size through
                 // its keys' own.
                 window.gospelGetterControls = {
@@ -4983,8 +5025,8 @@
         <button type="button" id="ref-btn" class="ref-btn" aria-label="Choose a book and chapter" title="Choose a book and chapter (G)" aria-keyshortcuts="G" aria-controls="picker" aria-expanded="false"><span id="ref-text" class="ref-text"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg></button>
         <button type="button" id="reader-exit" class="reader-exit">Exit reading mode <span aria-hidden="true">(Esc)</span></button>
         <div class="bar-item">
-            <button type="button" id="aa-toggle" class="bar-btn aa-toggle" aria-label="Text and display" title="Text and display" aria-haspopup="dialog" aria-controls="aa-popover" aria-expanded="false">Aa</button>
-            <div id="aa-popover" class="popover aa-popover" role="dialog" aria-label="Text and display" hidden>
+            <button type="button" id="translation-toggle" class="bar-btn translation-toggle" aria-label="Translation" title="Translation and compare (T)" aria-keyshortcuts="T" aria-haspopup="dialog" aria-controls="translation-popover" aria-expanded="false"></button>
+            <div id="translation-popover" class="popover translation-popover" role="dialog" aria-label="Translation and compare" hidden>
                 <div class="aa-section">
                     <span class="section-label" id="translation-label">Translation</span>
                     <div id="translation-choices" class="translation-list" role="radiogroup" aria-labelledby="translation-label"></div>
@@ -4995,6 +5037,11 @@
                         <div id="compare-with-choices" class="segmented" role="group" aria-label="Compare with"></div>
                     </div>
                 </div>
+            </div>
+        </div>
+        <div class="bar-item">
+            <button type="button" id="aa-toggle" class="bar-btn aa-toggle" aria-label="Display" title="Text and display" aria-haspopup="dialog" aria-controls="aa-popover" aria-expanded="false">Aa<span class="aa-label">Display</span></button>
+            <div id="aa-popover" class="popover aa-popover" role="dialog" aria-label="Display" hidden>
                 <div class="aa-section">
                     <span class="section-label" id="text-size-label">Text size</span>
                     <div class="size-stepper" role="group" aria-labelledby="text-size-label">
@@ -5062,8 +5109,8 @@
         <div class="bar-item">
             <button type="button" id="menu-toggle" class="bar-btn" aria-label="Menu" title="Menu" aria-haspopup="menu" aria-controls="app-menu" aria-expanded="false">&#9776;</button>
             <div id="app-menu" class="popover app-menu" role="menu" aria-label="Menu" hidden>
-                <button type="button" id="export-data-btn" class="menu-item" role="menuitem" tabindex="-1">Export data…</button>
-                <button type="button" id="import-data-btn" class="menu-item" role="menuitem" tabindex="-1">Import data…</button>
+                <button type="button" id="export-data-btn" class="menu-item" role="menuitem" tabindex="-1" title="Save a backup of your bookmarks, highlights, notes and settings">Export data…</button>
+                <button type="button" id="import-data-btn" class="menu-item" role="menuitem" tabindex="-1" title="Load a Gospel Getter backup from this or another computer">Import data…</button>
                 <div class="menu-separator" role="separator"></div>
                 <button type="button" id="welcome-btn" class="menu-item" role="menuitem" tabindex="-1">Show welcome</button>
                 <button type="button" id="shortcuts-btn" class="menu-item" role="menuitem" tabindex="-1" aria-keyshortcuts="?">Keyboard shortcuts</button>
@@ -5125,6 +5172,7 @@
             const readingPane = document.getElementById('reading-pane');
             const readerNotice = document.getElementById('reader-notice');
             const translationSelect = document.getElementById('translation-select');
+            const translationToggle = document.getElementById('translation-toggle');
             const aaToggle = document.getElementById('aa-toggle');
             const menuToggle = document.getElementById('menu-toggle');
             const searchToggle = document.getElementById('search-toggle');
@@ -5257,6 +5305,16 @@
             function translationName(code) {
                 const option = [...translationSelect.options].find((o) => o.value === code);
                 return option ? option.textContent : code.toUpperCase();
+            }
+
+            // The translation button shows the translation being read by
+            // its code ("KJV"), and names it in full ("Translation: King
+            // James Version"). Kept in step wherever the translation is
+            // set: at startup, on a switch, and by an import.
+            function showTranslation() {
+                const code = currentTranslation();
+                translationToggle.textContent = code ? code.toUpperCase() : '';
+                translationToggle.setAttribute('aria-label', code ? `Translation: ${translationName(code)}` : 'Translation');
             }
 
             function currentInner() {
@@ -5884,9 +5942,9 @@
                 }
             }
 
-            // ---- The header's popovers and panels (Aa, Library, the ☰ menu
-            // and About) are opened and closed by the preferences script in
-            // <head>; these reach them from here.
+            // ---- The header's popovers and panels (the translation, Aa,
+            // Library, the ☰ menu and About) are opened and closed by the
+            // preferences script in <head>; these reach them from here.
 
             const surfaces = () => window.gospelGetterSurfaces;
 
@@ -6401,6 +6459,7 @@
                 const { position, message } = event.detail;
                 if (position) {
                     translationSelect.value = position.translationCode;
+                    showTranslation();
                     await loadReading(position.bookId, position.chapter);
                 }
                 await refreshLibrary('bookmarks');
@@ -6722,6 +6781,7 @@
                         return `<option value="${escapeHtml(t.code)}"${selected}${date} data-licence="${escapeHtml(t.licence)}" data-credit="${escapeHtml(t.credit)}">${escapeHtml(t.name)}</option>`;
                     })
                     .join('');
+                showTranslation();
                 // About credits each bundled text, in the same order, then
                 // the cross-references (its list is the Rust pieces').
                 aboutCredits = home.translations.map((t) => t.credit);
@@ -7091,9 +7151,10 @@
                 }
             }
 
-            // Compare switched on or off (from Aa or its
-            // shortcut — the preferences script in <head> owns the setting):
-            // re-render the chapter on screen in the new layout.
+            // Compare switched on or off (from the translation button's
+            // popover or its shortcut — the preferences script in <head>
+            // owns the setting): re-render the chapter on screen in the new
+            // layout.
             document.addEventListener('gospel-getter:compare-change', async function () {
                 if (!lastDto) return;
                 if (isComparing()) {
@@ -7137,6 +7198,7 @@
                 { id: 'commands-only', group: 'Search & palette', keys: [['>']], aria: '>', does: 'Typed first in the box: commands only', handles: [] },
                 { id: 'palette-move', group: 'Search & palette', keys: [['↓'], ['↑']], aria: 'ArrowDown ArrowUp', does: 'Move through the results and commands', handles: [] },
                 { id: 'palette-run', group: 'Search & palette', keys: [['Enter']], aria: 'Enter', does: 'Go there, or run the command', handles: [] },
+                { id: 'translation', group: 'Panels', keys: [['T']], aria: 'T', does: 'Open or close the translations and Compare', handles: ['t', 'T'] },
                 { id: 'library', group: 'Panels', keys: [['Ctrl', 'B']], aria: 'Control+B', does: 'Open or close the Library', handles: ['b'] },
                 { id: 'shortcuts', group: 'Panels', keys: [['?']], aria: '?', does: 'These keyboard shortcuts', handles: ['?'] },
                 { id: 'close', group: 'Panels', keys: [['Esc']], aria: 'Escape', does: 'Close the search box, a panel or a popover, one at a time', handles: ['Escape'] },
@@ -7728,11 +7790,12 @@
                     setSearchOpen(false);
                 }
 
-                // The top bar (Aa, the ☰ menu, the reading-mode exit), the
-                // Library and About are handled by the presentation-
-                // preferences script in <head> (and the lists' own
-                // handlers above); they're never navigation or a "click
-                // away" from a verse selection. Nor is the search panel.
+                // The top bar (the translation, Aa, the ☰ menu, the
+                // reading-mode exit), the Library and About are handled by
+                // the presentation-preferences script in <head> (and the
+                // lists' own handlers above); they're never navigation or a
+                // "click away" from a verse selection. Nor is the search
+                // panel.
                 if (event.target.closest('#top-bar, #picker, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-notes-overlay, #shortcuts-overlay, #data-status')) {
                     return;
                 }
@@ -8092,6 +8155,14 @@
                     return;
                 }
 
+                // T opens or closes the translations and Compare, as the
+                // translation button does.
+                if (plain && !event.shiftKey && (event.key === 't' || event.key === 'T')) {
+                    event.preventDefault();
+                    if (surfaces()) surfaces().toggle('translation');
+                    return;
+                }
+
                 // j and k select the next and previous verse; with Shift,
                 // they extend the selection.
                 if (plain && (event.key === 'j' || event.key === 'J' || event.key === 'k' || event.key === 'K')) {
@@ -8107,7 +8178,8 @@
                     return;
                 }
 
-                // C toggles compare, through Aa's own toggle.
+                // C toggles compare, through its own toggle (in the
+                // translation button's popover).
                 if (plain && !event.shiftKey && (event.key === 'c' || event.key === 'C')) {
                     document.getElementById('compare-btn').click();
                     return;
@@ -8328,6 +8400,7 @@
             // remembers this as the reader's position too (see
             // get_reading), so reopening the app comes back to it.
             translationSelect.addEventListener('change', function () {
+                showTranslation();
                 const inner = currentInner();
                 const bookId = inner ? inner.dataset.currentBook : 1;
                 const chapter = inner ? inner.dataset.currentChapter : 1;

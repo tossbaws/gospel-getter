@@ -723,6 +723,7 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
         ".chapter-heading",
         ".verse",
         ".top-bar",
+        "#translation-toggle",
         "#aa-toggle",
         ".search-toggle",
         ".ref-btn",
@@ -812,12 +813,7 @@ fn tag_of(id: &str) -> &'static str {
 #[test]
 fn header_buttons_announce_what_they_open() {
     for (toggle, surface, role, label) in [
-        (
-            "aa-toggle",
-            "aa-popover",
-            r#"role="dialog""#,
-            "Text and display",
-        ),
+        ("aa-toggle", "aa-popover", r#"role="dialog""#, "Display"),
         ("menu-toggle", "app-menu", r#"role="menu""#, "Menu"),
     ] {
         let tag = tag_of(toggle);
@@ -828,6 +824,16 @@ fn header_buttons_announce_what_they_open() {
         assert!(surface_tag.contains(role), "#{surface} should be {role}");
         assert!(surface_tag.contains(&format!(r#"aria-label="{label}""#)));
     }
+    // The translation button names the translation once one is read (the
+    // main script sets "Translation: King James Version").
+    let translation = tag_of("translation-toggle");
+    assert!(translation.contains(r#"aria-controls="translation-popover""#));
+    assert!(translation.contains(r#"aria-expanded="false""#));
+    assert!(translation.contains(r#"aria-haspopup="dialog""#));
+    assert!(translation.contains(r#"aria-keyshortcuts="T""#));
+    let popover = tag_of("translation-popover");
+    assert!(popover.contains(r#"role="dialog""#));
+    assert!(popover.contains(r#"aria-label="Translation and compare""#));
     let library = tag_of("library-toggle");
     assert!(library.contains(r#"aria-controls="library-panel""#));
     assert!(library.contains(r#"aria-expanded="false""#));
@@ -2338,6 +2344,7 @@ fn the_reference_button_says_where_the_reader_is() {
         r#"id="sidebar-toggle""#,
         r#"id="ref-btn""#,
         r#"id="reader-exit""#,
+        r#"id="translation-toggle""#,
         r#"id="aa-toggle""#,
     ]
     .iter()
@@ -3854,9 +3861,9 @@ fn chapter_end_cross_references_are_quiet_links() {
     }
 }
 
-/// Aa's translations are a radio group, one line each ("KJV · King James
-/// Version · 1611/1769 · public domain"), and compare's partner a row of
-/// buttons beside Compare. The words are --text, the code --accent and the
+/// The translation button's translations are a radio group, one line
+/// each ("KJV · King James Version · 1611/1769 · public domain"), and
+/// compare's partner a row of buttons beside Compare. The words are --text, the code --accent and the
 /// rest --text-dim, on --panel-bg; the chosen one all --on-accent on
 /// --accent. Each AA in every theme, the focus ring 3:1. About's credits
 /// are --text-dim on the panel, AA too.
@@ -3868,7 +3875,7 @@ fn the_translation_chooser_and_credits_are_accessible_and_use_tested_theme_color
     assert!(HTML.contains(
         r#"<div id="compare-with-choices" class="segmented" role="group" aria-label="Compare with"></div>"#
     ));
-    let render = function_body("renderAa");
+    let render = function_body("renderTranslations");
     assert!(render.contains("btn.setAttribute('role', 'radio');"));
     assert!(render.contains("dot.setAttribute('aria-hidden', 'true');"));
     // About is the Rust pieces' (`ui-leptos/src/about.rs`).
@@ -3908,7 +3915,8 @@ fn the_translation_chooser_and_credits_are_accessible_and_use_tested_theme_color
             .contains("outline: 2px solid var(--accent)")
     );
     for (theme, props) in theme_palettes(&rules) {
-        // --panel-bg is a translucent tint over Aa's opaque --option-bg.
+        // --panel-bg is a translucent tint over the popover's opaque
+        // --option-bg.
         let panel = &composite(
             property(&props, "--panel-bg"),
             property(&props, "--option-bg"),
