@@ -11,7 +11,9 @@
 //! side keeps `YYYY-MM-DD` strings, as the page did); for the import,
 //! `ImportChoice`, `ImportPreviewDto`, `PositionPreviewDto` and
 //! `ImportResultDto` (`commands.rs`) and `Preferences` (`reader_data.rs`,
-//! whose enums travel as their kebab-case names, strings here).
+//! whose enums travel as their kebab-case names, strings here); for the
+//! updater, `UpdateInfo` and `DownloadEvent` (`updater.rs`) and `Block` and
+//! `Span` (`release_notes.rs`).
 
 use serde::{Deserialize, Serialize};
 
@@ -240,4 +242,52 @@ pub struct UpdateNoteArgs<'a> {
 #[derive(Debug, Serialize)]
 pub struct DeleteNoteArgs {
     pub id: i64,
+}
+
+/// An available update, as `check_for_update` answers
+/// (`updater::UpdateInfo`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub version: String,
+    /// The release notes as plain text (the banner's What's new).
+    pub notes: Option<String>,
+    /// The same notes as blocks of text (About shows them).
+    #[serde(default)]
+    pub note_blocks: Vec<NoteBlock>,
+    /// Whether this build can install it (else it links to it).
+    pub can_self_update: bool,
+}
+
+/// A block of release notes (`release_notes::Block`): any heading, a
+/// paragraph, or a list item `depth` lists deep (0 at the top).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NoteBlock {
+    Heading { spans: Vec<NoteSpan> },
+    Paragraph { spans: Vec<NoteSpan> },
+    Item { depth: u8, spans: Vec<NoteSpan> },
+}
+
+/// A run of text in the notes, maybe bold or code (`release_notes::Span`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct NoteSpan {
+    pub text: String,
+    #[serde(default)]
+    pub strong: bool,
+    #[serde(default)]
+    pub code: bool,
+}
+
+/// What `install_update` reports on its channel as the update downloads
+/// (`updater::DownloadEvent`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "event", content = "data")]
+pub enum DownloadEvent {
+    #[serde(rename_all = "camelCase")]
+    Started { content_length: Option<u64> },
+    #[serde(rename_all = "camelCase")]
+    Progress { chunk_length: u64 },
+    /// Downloaded and verified; installing, then restarting.
+    Finished,
 }

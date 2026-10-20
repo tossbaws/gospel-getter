@@ -18,10 +18,16 @@ pub enum Check {
     NoteEditor = 6,
     Shortcuts = 7,
     ImportPreview = 8,
+    UpdateBanner = 9,
+    UpdateAbout = 10,
+    UpdateDownload = 11,
+    UpdateLinkOnly = 12,
+    UpdateOffline = 13,
 }
 
 impl Check {
-    pub const ALL: [Check; 8] = [
+    /// The checks on the app as shipped (the first session).
+    pub const SHIPPED: [Check; 8] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -30,6 +36,16 @@ impl Check {
         Check::NoteEditor,
         Check::Shortcuts,
         Check::ImportPreview,
+    ];
+
+    /// The updater's checks, on the GUI checks' test build against the
+    /// run's own update server (the second session).
+    pub const UPDATER: [Check; 5] = [
+        Check::UpdateBanner,
+        Check::UpdateAbout,
+        Check::UpdateDownload,
+        Check::UpdateLinkOnly,
+        Check::UpdateOffline,
     ];
 
     pub fn name(self) -> &'static str {
@@ -42,6 +58,11 @@ impl Check {
             Check::NoteEditor => "note-editor",
             Check::Shortcuts => "shortcuts",
             Check::ImportPreview => "import-preview",
+            Check::UpdateBanner => "update-banner",
+            Check::UpdateAbout => "update-about",
+            Check::UpdateDownload => "update-download",
+            Check::UpdateLinkOnly => "update-link-only",
+            Check::UpdateOffline => "update-offline",
         }
     }
 
@@ -74,9 +95,9 @@ impl Report {
         self.write().await;
     }
 
-    /// Fails every check that has no result yet, with `why`.
-    pub async fn fail_the_rest(&mut self, why: &str) {
-        for check in Check::ALL {
+    /// Fails every one of `checks` that has no result yet, with `why`.
+    pub async fn fail_the_rest(&mut self, checks: &[Check], why: &str) {
+        for &check in checks {
             self.results
                 .entry(check)
                 .or_insert_with(|| Err(why.to_owned()));
@@ -86,8 +107,9 @@ impl Report {
 
     /// Whether every check ran and passed.
     pub fn all_passed(&self) -> bool {
-        Check::ALL
+        Check::SHIPPED
             .iter()
+            .chain(&Check::UPDATER)
             .all(|check| matches!(self.results.get(check), Some(Ok(_))))
     }
 

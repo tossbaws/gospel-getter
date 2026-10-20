@@ -5,13 +5,22 @@
 # tests/gui crate; this script gives them a world to run in and always takes
 # it down again.
 #
-#   scripts/gui-check.sh <release binary | AppImage | .exe> [out-dir]
+#   [GUI_CHECK_UPDATER_APP=<test build>] \
+#       scripts/gui-check.sh <release binary | AppImage | .exe> [out-dir]
 #
 # The out-dir (default target/gui-check/<timestamp>/) gets results.txt (one
 # PASS/FAIL line per check, with the reason), steps.log, screenshots/*.png
 # (taken by WebKit or WebView2 through WebDriver), app.log, driver.log
 # (tauri-driver with the native driver's own output) and environment.txt.
 # Exit code 0 only if every check passed.
+#
+# Checks 1 to 8 run on the app given. The updater's checks (9 to 13) run on
+# GUI_CHECK_UPDATER_APP: the GUI checks' test build of the app (cargo build
+# --release --features gui-test-updater, which no release build has), against
+# the checks' own local update server, with a signing key made for the run;
+# without it they fail as not run. Both apps are told the test build's
+# settings file (GOSPEL_GETTER_TEST_UPDATER, in the run's own folder); the
+# app as shipped ignores it, and checks that it sent the server nothing.
 #
 # Linux: nothing reaches the desktop of whoever runs this. The app, its
 # driver and the checks run with an emptied environment (env -i): no
@@ -50,7 +59,7 @@
 set -euo pipefail
 
 usage() {
-    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 if [[ $# -lt 1 || $# -gt 2 || $1 == -h || $1 == --help ]]; then
@@ -61,6 +70,7 @@ fi
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 app="$(realpath "$1")"
+updater_app="${GUI_CHECK_UPDATER_APP:-}"
 out="${2:-$repo/target/gui-check/$(date +%Y%m%d-%H%M%S)}"
 budget="${GUI_CHECK_BUDGET:-180}"
 step_timeout="${GUI_CHECK_STEP_TIMEOUT:-10}"
@@ -78,14 +88,24 @@ if [[ ! -f $app ]]; then
     echo "gui-check: no such file: $1" >&2
     exit 2
 fi
+if [[ -n $updater_app ]]; then
+    if [[ ! -f $updater_app ]]; then
+        echo "gui-check: no such file (GUI_CHECK_UPDATER_APP): $updater_app" >&2
+        exit 2
+    fi
+    updater_app="$(realpath "$updater_app")"
+fi
 
 mkdir -p "$out/screenshots"
 out="$(realpath "$out")"
 results="$out/results.txt"
 # The checks, as results.txt numbers and names them (tests/gui report.rs).
-checks=("1 driver" "2 csp" "3 export-notes" "4 screenshots" "5 welcome" "6 note-editor" "7 shortcuts" "8 import-preview")
+checks=("1 driver" "2 csp" "3 export-notes" "4 screenshots" "5 welcome" "6 note-editor" "7 shortcuts" "8 import-preview"
+    "9 update-banner" "10 update-about" "11 update-download" "12 update-link-only" "13 update-offline")
 : >"$results"
 work="$(mktemp -d "${TMPDIR:-/tmp}/gui-check.XXXXXXXX")"
+# The test build's updater settings, which the checks write.
+updater_settings="$work/test-updater.json"
 started=$SECONDS
 
 log() {
@@ -193,6 +213,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 log "app: $app"
+log "test build for the updater checks: ${updater_app:-none, so checks 9 to 13 do not run}"
 log "out: $out"
 
 # ---- The checks binary. ----
@@ -229,6 +250,7 @@ free_port() {
 driver_args=()
 run_env=()
 launch="$app"
+launch_updater=""
 xvfb_display=""
 
 if [[ $platform == linux ]]; then
@@ -257,6 +279,7 @@ if [[ $platform == linux ]]; then
         XDG_CACHE_HOME="$work/cache"
         XDG_STATE_HOME="$work/state"
         XDG_RUNTIME_DIR="$work/runtime"
+        GOSPEL_GETTER_TEST_UPDATER="$updater_settings"
         GDK_BACKEND=x11
         GTK_USE_PORTAL=0
         GSETTINGS_BACKEND=memory
@@ -353,6 +376,15 @@ EOF
     } >"$work/launch-app"
     chmod +x "$work/launch-app"
     launch="$work/launch-app"
+    if [[ -n $updater_app ]]; then
+        {
+            echo '#!/usr/bin/env bash'
+            printf 'exec %q "$@" >>%q 2>&1\n' "$updater_app" "$out/app-updater.log"
+        } >"$work/launch-updater"
+        chmod +x "$work/launch-updater"
+        launch_updater="$work/launch-updater"
+    fi
+    checks_settings="$updater_settings"
     export_dir="$work/export"
 else
     native_driver="${NATIVE_DRIVER:-$(command -v msedgedriver.exe || command -v msedgedriver || true)}"
@@ -368,7 +400,17 @@ else
     launch="$(cygpath -w "$launcher")"
     mkdir -p "$work/export"
     export_dir="$(cygpath -w "$work/export")"
-    run_env=(env GUI_LAUNCH_TARGET="$(cygpath -w "$app")" GUI_LAUNCH_LOG="$(cygpath -w "$out/app.log")")
+    run_env=(env GUI_LAUNCH_TARGET="$(cygpath -w "$app")" GUI_LAUNCH_LOG="$(cygpath -w "$out/app.log")"
+        GOSPEL_GETTER_TEST_UPDATER="$(cygpath -w "$updater_settings")")
+    if [[ -n $updater_app ]]; then
+        # The same launcher under another name, which starts the test build
+        # (gui-launch picks its target by its own name).
+        cp "$launcher" "$work/gui-launch-updater.exe"
+        launch_updater="$(cygpath -w "$work/gui-launch-updater.exe")"
+        run_env+=(GUI_LAUNCH_UPDATER_TARGET="$(cygpath -w "$updater_app")"
+            GUI_LAUNCH_UPDATER_LOG="$(cygpath -w "$out/app-updater.log")")
+    fi
+    checks_settings="$(cygpath -w "$updater_settings")"
 fi
 
 port="$(free_port)" || setup_failed "no free port for tauri-driver"
@@ -516,6 +558,8 @@ fi
 "${run_env[@]}" \
     GUI_WEBDRIVER_URL="http://127.0.0.1:$port" \
     GUI_APP="$launch" \
+    GUI_UPDATER_APP="$launch_updater" \
+    GUI_TEST_UPDATER_FILE="$checks_settings" \
     GUI_OUT_DIR="$out" \
     GUI_EXPORT_DIR="$export_dir" \
     GUI_BUDGET_SECS="$remaining" \

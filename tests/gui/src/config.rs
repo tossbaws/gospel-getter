@@ -27,6 +27,14 @@ pub struct Config {
     pub session_timeout: Duration,
     /// Linux: the private X display, the only one xdotool may touch.
     pub xvfb: Option<Xvfb>,
+    /// What tauri-driver starts for the updater checks (9 to 13): the GUI
+    /// checks' test build of the app (feature `gui-test-updater`), through
+    /// its own wrapper. Without one, those checks fail as not run.
+    pub updater_app: Option<String>,
+    /// The test build's updater settings file, which it reads before each
+    /// check (`GOSPEL_GETTER_TEST_UPDATER`, set for the app by the script),
+    /// and the checks write.
+    pub updater_settings: Option<PathBuf>,
 }
 
 /// Starting the app (a cold start seeds its database) may take longer than
@@ -66,6 +74,10 @@ impl Config {
                 DEFAULT_SESSION_TIMEOUT
             },
             xvfb,
+            updater_app: std::env::var("GUI_UPDATER_APP")
+                .ok()
+                .filter(|v| !v.is_empty()),
+            updater_settings: std::env::var_os("GUI_TEST_UPDATER_FILE").map(PathBuf::from),
         })
     }
 }

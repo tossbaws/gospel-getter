@@ -4247,8 +4247,6 @@
                 var libraryPanel = byId('library-panel');
                 var menuToggle = byId('menu-toggle');
                 var appMenu = byId('app-menu');
-                var aboutOverlay = byId('about-overlay');
-                var aboutPanel = byId('about-panel');
                 var readerModeBtn = byId('reader-mode-btn');
                 var readerExit = byId('reader-exit');
                 var compareBtn = byId('compare-btn');
@@ -4266,7 +4264,10 @@
                     aa: { el: aaPopover, toggle: aaToggle, popover: true },
                     library: { el: libraryPanel, toggle: libraryToggle, popover: false },
                     menu: { el: appMenu, toggle: menuToggle, popover: true },
-                    about: { el: aboutOverlay, toggle: null, popover: false },
+                    // About is the page's Rust pieces' element
+                    // (ui-leptos/src/about.rs), made when their code loads,
+                    // so it is looked up whenever it's needed.
+                    about: { get el() { return byId('about-overlay'); }, toggle: null, popover: false },
                     // The picker as a popover. As the sidebar it isn't a
                     // surface: it stays while the reader reads, beside any
                     // of these.
@@ -4421,6 +4422,9 @@
                 function openSurface(name, opener) {
                     // The Library's button is hidden in reading mode.
                     if (name === 'library' && isReaderMode()) return;
+                    // About isn't there if the Rust pieces didn't load (the
+                    // main script says so).
+                    if (!SURFACES[name].el) return;
                     if (current) closeSurface(false);
                     current = name;
                     returnFocus = opener || SURFACES[name].toggle;
@@ -4452,7 +4456,6 @@
                 libraryToggle.addEventListener('click', function () { toggleSurface('library'); });
                 menuToggle.addEventListener('click', function () { toggleSurface('menu'); });
                 byId('library-close').addEventListener('click', function () { closeSurface(); });
-                byId('about-close').addEventListener('click', function () { closeSurface(); });
                 byId('about-btn').addEventListener('click', function () { openSurface('about', menuToggle); });
 
                 // A click outside the open popover (and its button) closes
@@ -4516,28 +4519,9 @@
 
                 // ---- About is modal, like the import preview: Tab stays
                 // inside it, Escape closes it, and the reader's shortcuts
-                // wait (the main script checks for it).
-                aboutOverlay.addEventListener('keydown', function (event) {
-                    if (event.key === 'Escape') {
-                        event.preventDefault();
-                        closeSurface();
-                        return;
-                    }
-                    if (event.key !== 'Tab') return;
-                    var focusable = [].slice.call(aboutPanel.querySelectorAll('input, button, a[href]')).filter(function (el) {
-                        return !el.disabled && !el.closest('[hidden]');
-                    });
-                    if (!focusable.length) return;
-                    var first = focusable[0];
-                    var last = focusable[focusable.length - 1];
-                    if (event.shiftKey && document.activeElement === first) {
-                        event.preventDefault();
-                        last.focus();
-                    } else if (!event.shiftKey && document.activeElement === last) {
-                        event.preventDefault();
-                        first.focus();
-                    }
-                });
+                // wait (the main script checks for it). Its keys are the
+                // Rust pieces', on its overlay (ui-leptos/src/about.rs);
+                // opening and closing it is this script's, as above.
 
                 // ---- The Library's tabs. The one last shown is kept for
                 // this session only (it isn't stored).
@@ -4903,10 +4887,13 @@
                     setReaderMode(false);
                 });
 
-                var updateCheckToggle = document.getElementById('update-check-toggle');
-                updateCheckToggle.checked = load(PREFS.updateCheck) === 'on';
-                updateCheckToggle.addEventListener('change', function () {
-                    var value = updateCheckToggle.checked ? 'on' : 'off';
+                // The launch check's setting. Its checkbox is in About,
+                // drawn by the page's Rust pieces from html[data-update-check]
+                // (applied above); this keeps the preference.
+                document.addEventListener('change', function (event) {
+                    var toggle = event.target;
+                    if (!toggle || toggle.id !== 'update-check-toggle') return;
+                    var value = toggle.checked ? 'on' : 'off';
                     apply(PREFS.updateCheck, value);
                     store(PREFS.updateCheck, value);
                 });
@@ -5150,58 +5137,14 @@
         <div id="search-results" class="search-results" role="listbox" aria-label="Results"></div>
         <button type="button" id="search-more" class="search-more" hidden>Show more</button>
     </div>
-    <div id="about-overlay" class="import-overlay" hidden>
-        <div id="about-panel" class="import-panel about-panel" role="dialog" aria-modal="true" aria-labelledby="about-title" aria-describedby="app-version">
-            <button type="button" id="about-close" class="panel-close about-close" aria-label="Close" title="Close (Esc)">&times;</button>
-            <div class="about-head">
-                <img class="about-icon" src="favicon.svg" alt="" width="56" height="56">
-                <div>
-                    <h2 id="about-title" class="import-title">Gospel Getter</h2>
-                    <p id="app-version" class="app-version"></p>
-                </div>
-            </div>
-            <section class="about-updates" aria-labelledby="updates-label">
-                <h3 class="section-label" id="updates-label">Updates</h3>
-                <label class="update-check-option"><input type="checkbox" id="update-check-toggle" checked> <span>Check for updates when Gospel Getter starts</span></label>
-                <p class="section-note" id="update-note">Checking downloads a small file from GitHub that names the latest version, so GitHub sees your IP address, as with any download. Nothing about your reading or your data is sent.</p>
-                <button type="button" id="update-check-btn" class="reader-mode-btn" aria-describedby="update-note">Check now</button>
-                <p id="update-check-status" class="data-status" role="status" aria-live="polite"></p>
-                <div id="about-update" class="about-update" role="group" aria-labelledby="about-update-title" tabindex="-1" hidden>
-                    <h4 id="about-update-title" class="about-update-title"></h4>
-                    <div id="about-update-notes" class="about-update-notes" role="region" tabindex="0" hidden></div>
-                    <progress id="about-update-progress" class="update-progress" aria-labelledby="about-update-status" hidden></progress>
-                    <p id="about-update-status" class="update-status" role="status" aria-live="polite"></p>
-                    <div class="update-actions">
-                        <button type="button" id="about-update-install" class="import-confirm">Update now</button>
-                        <button type="button" id="about-update-download" class="import-confirm" hidden>Download page</button>
-                        <button type="button" id="about-update-close" class="reader-mode-btn">Close</button>
-                    </div>
-                </div>
-            </section>
-            <section class="about-credits" aria-labelledby="credits-label">
-                <h3 class="section-label" id="credits-label">Texts</h3>
-                <ul id="about-credits" class="about-credits-list"></ul>
-            </section>
-            <p class="about-links"><a id="release-notes-link" href="https://github.com/tossbaws/gospel-getter/releases" hidden>Release notes</a> <span id="release-notes-status" class="data-status" role="status" aria-live="polite"></span></p>
-        </div>
-    </div>
+    <!-- About (#about-overlay) is drawn here by the page's Rust pieces
+         (ui-leptos/src/about.rs), and opened and closed by the head script
+         as one of its surfaces. -->
     <p id="data-status" class="toast is-hidden" role="status" aria-live="polite"></p>
     <p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>
 
-    <section id="update-banner" class="update-banner" aria-labelledby="update-title" tabindex="-1" hidden>
-        <p id="update-title" class="update-title" role="status" aria-live="polite"></p>
-        <details id="update-notes" hidden>
-            <summary>What’s new</summary>
-            <div id="update-notes-text" class="update-notes-text"></div>
-        </details>
-        <progress id="update-progress" class="update-progress" aria-labelledby="update-status" hidden></progress>
-        <p id="update-status" class="update-status" role="status" aria-live="polite"></p>
-        <div class="update-actions">
-            <button type="button" id="update-install" class="import-confirm">Update and restart</button>
-            <button type="button" id="update-download" class="import-confirm" hidden>Download page</button>
-            <button type="button" id="update-later" class="reader-mode-btn">Later</button>
-        </div>
-    </section>
+    <!-- The update banner (#update-banner) is drawn here by the page's Rust
+         pieces (ui-leptos/src/updates.rs). -->
 
     <main class="container">
         <h1 class="visually-hidden">Gospel Getter</h1>
@@ -5231,7 +5174,6 @@
             const bookmarkTab = document.getElementById('library-tab-bookmarks');
             const bookmarkCount = document.getElementById('bookmark-count');
             const highlightCount = document.getElementById('highlight-count');
-            const aboutOverlay = document.getElementById('about-overlay');
             const bookmarkList = document.getElementById('bookmark-list');
             const highlightFilter = document.getElementById('highlight-filter');
             const highlightList = document.getElementById('highlight-list');
@@ -6610,8 +6552,10 @@
                     dataStatus.classList.add('is-hidden');
                     return;
                 }
+                // Above the update banner, if it's up (the Rust pieces'
+                // element, looked up when needed).
                 const banner = document.getElementById('update-banner');
-                dataStatus.style.bottom = banner.hidden ? '' : `calc(${banner.offsetHeight}px + 1.5rem)`;
+                dataStatus.style.bottom = !banner || banner.hidden ? '' : `calc(${banner.offsetHeight}px + 1.5rem)`;
                 dataStatus.classList.remove('is-hidden');
                 toastTimer = setTimeout(() => dataStatus.classList.add('is-hidden'), isError ? 12000 : 6000);
             }
@@ -7041,11 +6985,9 @@
                     })
                     .join('');
                 // About credits each bundled text, in the same order, then
-                // the cross-references.
-                document.getElementById('about-credits').innerHTML = home.translations
-                    .map((t) => `<li>${escapeHtml(t.credit)}</li>`)
-                    .concat(['<li>Cross-references from OpenBible.info, CC BY 4.0</li>'])
-                    .join('');
+                // the cross-references (its list is the Rust pieces').
+                aboutCredits = home.translations.map((t) => t.credit);
+                sendAboutCredits();
             }
 
             // A verse's text as the backend shaped it (see VerseText in
@@ -7652,13 +7594,15 @@
                 });
                 add('welcome', 'Show welcome', { words: 'start help', run: clickControl('welcome-btn') });
                 add('about', 'About Gospel Getter', { words: 'version credits', run: clickControl('about-btn') });
+                const updateCheckBtn = document.getElementById('update-check-btn');
                 add('check-updates', 'Check for updates', {
                     words: 'update version new',
-                    reason: updateCheckBtn.disabled ? 'Already checking' : null,
-                    // About, then its Check now.
+                    reason: updateCheckBtn && updateCheckBtn.disabled ? 'Already checking' : null,
+                    // About, then its Check now (both the Rust pieces').
                     run: () => {
                         document.getElementById('about-btn').click();
-                        updateCheckBtn.click();
+                        const button = document.getElementById('update-check-btn');
+                        if (button) button.click();
                     },
                 });
                 add('copy-chapter', 'Copy chapter', {
@@ -8252,7 +8196,7 @@
             // focus in the card itself (Shift+Tab moves through it).
             function cardGhostAllowed() {
                 if (!selectionCard.isConnected) return false;
-                if (importOpen() || !aboutOverlay.hidden || noteOpen()
+                if (importOpen() || aboutOpen() || noteOpen()
                     || exportNotesOpen() || shortcutsOpen() || welcomeOpen()) {
                     return false;
                 }
@@ -8311,7 +8255,7 @@
                 // And while the import preview, About, the note panel or
                 // Export notes is open, nothing else responds to the
                 // keyboard (they handle their own keys).
-                if (importOpen() || !aboutOverlay.hidden || noteOpen() || exportNotesOpen() || shortcutsOpen()) {
+                if (importOpen() || aboutOpen() || noteOpen() || exportNotesOpen() || shortcutsOpen()) {
                     return;
                 }
 
@@ -8670,337 +8614,49 @@
                 }
             }
 
-            // The version line in About, and its Release notes link (this
-            // version's release page). It's only informational, so if the
-            // version can't be read the line stays empty and the link
-            // hidden.
-            const releaseNotesLink = document.getElementById('release-notes-link');
-            const releaseNotesStatus = document.getElementById('release-notes-status');
-            let appVersion = '';
-            const versionRead = invoke('get_app_version')
-                .then((version) => {
-                    if (typeof version === 'string' && version) {
-                        appVersion = version;
-                        document.getElementById('app-version').textContent = `Version ${version}`;
-                        releaseNotesLink.href = `https://github.com/tossbaws/gospel-getter/releases/tag/v${version}`;
-                        releaseNotesLink.hidden = false;
-                    }
-                })
-                .catch(() => {});
+            // ---- About and the updater are the page's pieces written in Rust
+            // (ui-leptos/src/about.rs and updates.rs); what crosses is
+            // documented in ui-leptos/src/bridge.rs. About is one of the head
+            // script's surfaces (it opens and closes it); the pieces draw it
+            // with its version, Updates section, credits and Release notes
+            // link, and the update banner, and run the checks and installs.
+            // The page hands over what it alone has, from boot: each bundled
+            // text's credit, and the moment boot is done, when the launch check
+            // runs (unless the reader turned it off). Either may come before
+            // the pieces have loaded, so both go again when they say they're
+            // ready.
+            let aboutCredits = null;
 
-            // The page itself never opens a browser: the backend opens this
-            // version's release page (the URL above, built the same way).
-            releaseNotesLink.addEventListener('click', async function (event) {
-                event.preventDefault();
-                releaseNotesStatus.textContent = '';
-                try {
-                    await invoke('open_release_notes');
-                } catch (e) {
-                    releaseNotesStatus.textContent = errorText(e);
-                }
+            function sendAboutCredits() {
+                if (!aboutCredits) return;
+                document.dispatchEvent(new CustomEvent('gospel-getter:about-credits', { detail: { credits: aboutCredits } }));
+            }
+
+            let updateCheckWaiting = false;
+
+            function askUpdateCheck() {
+                const request = new CustomEvent('gospel-getter:update-check', { cancelable: true });
+                updateCheckWaiting = document.dispatchEvent(request);
+            }
+
+            document.addEventListener('gospel-getter:pieces-ready', function () {
+                sendAboutCredits();
+                if (updateCheckWaiting) askUpdateCheck();
             });
 
-            // ---- Updates. The backend decides what this copy can do: a
-            // release installer downloads, verifies and installs the update
-            // (then restarts); any other build links to the releases page.
-            // Nothing is installed until the reader chooses to. A failed
-            // check at startup says nothing (the app works the same
-            // offline); Check now says what went wrong.
-            //
-            // Where an update shows: found while About is open (by Check
-            // now, or by the launch check finishing), About shows it in
-            // place, with its notes, Update now and Close, and the banner
-            // stays away for the rest of the session, as after Later.
-            // Found by the launch check with About closed, the banner shows
-            // it, as before. Installing from either one shows its progress
-            // in both, and closing About part way through brings the
-            // banner up, so the download never runs out of sight.
-            const updateBanner = document.getElementById('update-banner');
-            const updateTitle = document.getElementById('update-title');
-            const updateNotes = document.getElementById('update-notes');
-            const updateNotesText = document.getElementById('update-notes-text');
-            const updateLaterBtn = document.getElementById('update-later');
-            const updateCheckBtn = document.getElementById('update-check-btn');
-            const updateCheckStatus = document.getElementById('update-check-status');
-            const aboutUpdate = document.getElementById('about-update');
-            const aboutUpdateTitle = document.getElementById('about-update-title');
-            const aboutUpdateNotes = document.getElementById('about-update-notes');
-            const aboutUpdateClose = document.getElementById('about-update-close');
-            // The banner's and About's own controls, which the install
-            // flow keeps in step.
-            const updateViews = {
-                banner: {
-                    root: updateBanner,
-                    progress: document.getElementById('update-progress'),
-                    status: document.getElementById('update-status'),
-                    install: document.getElementById('update-install'),
-                    download: document.getElementById('update-download'),
-                    dismiss: updateLaterBtn,
-                },
-                about: {
-                    root: aboutUpdate,
-                    progress: document.getElementById('about-update-progress'),
-                    status: document.getElementById('about-update-status'),
-                    install: document.getElementById('about-update-install'),
-                    download: document.getElementById('about-update-download'),
-                    dismiss: aboutUpdateClose,
-                },
-            };
-            const bothViews = [updateViews.banner, updateViews.about];
-            let installing = false;
-            // The update the last check found, and whether About has shown
-            // it (after which the banner stays away).
-            let offered = null;
-            let shownInAbout = false;
-
-            const aboutOpen = () => !aboutOverlay.hidden;
-
-            // A check that hasn't answered in 20 s is given up on, with the
-            // backend's own "couldn't reach GitHub" message (the same words
-            // as updater.rs's OFFLINE). Its answer, if it ever comes, is
-            // ignored. The download isn't limited: a slow one is still
-            // going somewhere.
-            const UPDATE_CHECK_TIMEOUT_MS = 20000;
-            const UPDATE_CHECK_OFFLINE = 'Couldn’t reach GitHub to check for updates. Check your internet connection and try again.';
-
-            function withinUpdateCheckTime(check) {
-                let timer;
-                const timeout = new Promise((resolve, reject) => {
-                    timer = setTimeout(() => reject(UPDATE_CHECK_OFFLINE), UPDATE_CHECK_TIMEOUT_MS);
-                });
-                return Promise.race([check, timeout]).finally(() => clearTimeout(timer));
+            // About's overlay is the Rust side's: looked up when asked.
+            function aboutOpen() {
+                const overlay = document.getElementById('about-overlay');
+                return !!overlay && !overlay.hidden;
             }
 
-            function setUpdateStatus(message, isError) {
-                for (const view of bothViews) {
-                    view.status.textContent = message;
-                    view.status.classList.toggle('is-error', !!isError);
-                }
-            }
-
-            function setCheckStatus(message, isError) {
-                updateCheckStatus.textContent = message;
-                updateCheckStatus.classList.toggle('is-error', !!isError);
-            }
-
-            // The notes as the backend read them (headings, paragraphs,
-            // lists, bold and code), built as elements holding text: never
-            // markup.
-            function renderNoteBlocks(container, blocks) {
-                container.replaceChildren();
-                const lists = [];
-                const inline = (el, spans) => {
-                    for (const span of spans) {
-                        let node = document.createTextNode(span.text);
-                        if (span.code) {
-                            const code = document.createElement('code');
-                            code.append(node);
-                            node = code;
-                        }
-                        if (span.strong) {
-                            const strong = document.createElement('strong');
-                            strong.append(node);
-                            node = strong;
-                        }
-                        el.append(node);
-                    }
-                    return el;
-                };
-                for (const block of blocks) {
-                    if (block.kind !== 'item') {
-                        lists.length = 0;
-                        container.append(inline(document.createElement(block.kind === 'heading' ? 'h5' : 'p'), block.spans));
-                        continue;
-                    }
-                    // A list as deep as the item, inside the last item of
-                    // the list above it.
-                    lists.length = Math.min(lists.length, block.depth + 1);
-                    while (lists.length < block.depth + 1) {
-                        const list = document.createElement('ul');
-                        const parent = lists.length ? lists[lists.length - 1].lastElementChild || lists[lists.length - 1] : container;
-                        parent.append(list);
-                        lists.push(list);
-                    }
-                    lists[block.depth].append(inline(document.createElement('li'), block.spans));
-                }
-            }
-
-            function resetView(view, update) {
-                view.install.hidden = !update.canSelfUpdate;
-                view.install.disabled = false;
-                view.download.hidden = update.canSelfUpdate;
-                view.dismiss.hidden = false;
-                view.progress.hidden = true;
-            }
-
-            // The banner, when About isn't showing the update.
-            function showBanner(update) {
-                if (installing) return;
-                updateTitle.textContent = `Gospel Getter ${update.version} is available`;
-                updateNotes.hidden = !update.notes;
-                updateNotes.open = false;
-                updateNotesText.textContent = update.notes || '';
-                resetView(updateViews.banner, update);
-                setUpdateStatus('', false);
-                updateBanner.hidden = false;
-            }
-
-            // About, showing the update in place of the banner.
-            // Not while an install is under way: wherever it's showing its
-            // progress (the banner, if it started there) keeps showing it,
-            // and Check now says so.
-            function showInAbout(update) {
-                if (installing) {
-                    setCheckStatus(`Gospel Getter ${offered.version} is already downloading.`, false);
-                    return;
-                }
-                shownInAbout = true;
-                hideBanner();
-                aboutUpdateTitle.textContent = `Gospel Getter ${update.version} is available`;
-                renderNoteBlocks(aboutUpdateNotes, update.noteBlocks || []);
-                aboutUpdateNotes.hidden = !aboutUpdateNotes.childElementCount;
-                aboutUpdateNotes.setAttribute('aria-label', `What’s new in ${update.version}`);
-                resetView(updateViews.about, update);
-                setUpdateStatus('', false);
-                aboutUpdate.hidden = false;
-                // Said once, by the check's own status line; the heading
-                // shows it.
-                setCheckStatus(`Gospel Getter ${update.version} is available.`, false);
-                updateCheckStatus.classList.add('visually-hidden');
-            }
-
-            function hideBanner() {
-                const hadFocus = updateBanner.contains(document.activeElement);
-                updateBanner.hidden = true;
-                if (hadFocus) focusHome();
-            }
-
-            function offer(update) {
-                // The update being installed stays the one offered.
-                if (installing) {
-                    if (aboutOpen()) showInAbout(offered);
-                    return;
-                }
-                offered = update;
-                if (aboutOpen()) showInAbout(update);
-                else if (!shownInAbout) showBanner(update);
-            }
-
-            async function checkForUpdate({ quiet }) {
-                if (!quiet) {
-                    updateCheckBtn.disabled = true;
-                    updateCheckStatus.classList.remove('visually-hidden');
-                    setCheckStatus('Checking for updates…', false);
-                }
-                try {
-                    const update = await withinUpdateCheckTime(invoke('check_for_update'));
-                    if (update) {
-                        offer(update);
-                    } else if (!quiet) {
-                        await versionRead;
-                        setCheckStatus(appVersion ? `Gospel Getter ${appVersion} is the latest version.` : 'You have the latest version.', false);
-                    }
-                } catch (e) {
-                    if (!quiet) setCheckStatus(errorText(e), true);
-                } finally {
-                    updateCheckBtn.disabled = false;
-                }
-            }
-
-            function megabytes(bytes) {
-                return `${(bytes / 1048576).toFixed(1)} MB`;
-            }
-
-            // Update now (About) or Update and restart (the banner).
-            async function install(from) {
-                if (installing || !offered) return;
-                installing = true;
-                // The reader can go on reading while it downloads. The
-                // button goes, so focus moves to its panel rather than
-                // being lost.
-                const hadFocus = document.activeElement === from.install;
-                for (const view of bothViews) {
-                    view.install.hidden = true;
-                    view.download.hidden = true;
-                    view.dismiss.hidden = true;
-                    view.progress.hidden = false;
-                    view.progress.removeAttribute('value');
-                }
-                setUpdateStatus('Downloading the update…', false);
-                if (hadFocus) from.root.focus();
-                let total = null;
-                let received = 0;
-                const channel = new window.__TAURI__.core.Channel();
-                channel.onmessage = (message) => {
-                    if (message.event === 'started') {
-                        total = message.data.contentLength || null;
-                        if (total) for (const view of bothViews) view.progress.max = total;
-                    } else if (message.event === 'progress') {
-                        received += message.data.chunkLength;
-                        if (total) {
-                            for (const view of bothViews) view.progress.value = Math.min(received, total);
-                            setUpdateStatus(`Downloading the update… ${Math.floor((Math.min(received, total) / total) * 100)}%`, false);
-                        } else {
-                            setUpdateStatus(`Downloading the update… ${megabytes(received)}`, false);
-                        }
-                    } else if (message.event === 'finished') {
-                        if (total) for (const view of bothViews) view.progress.value = total;
-                        setUpdateStatus('Installing the update. Gospel Getter will restart when it’s done.', false);
-                    }
-                };
-                try {
-                    // Only returns if something went wrong: on success the
-                    // app restarts into the new version.
-                    await invoke('install_update', { onEvent: channel });
-                } catch (e) {
-                    installing = false;
-                    for (const view of bothViews) {
-                        resetView(view, offered);
-                    }
-                    setUpdateStatus(errorText(e), true);
-                    if (from.root.contains(document.activeElement) || document.activeElement === document.body) from.install.focus();
-                }
-            }
-
-            async function openDownloadPage() {
-                try {
-                    await invoke('open_download_page');
-                    setUpdateStatus('The releases page is open in your browser.', false);
-                } catch (e) {
-                    setUpdateStatus(errorText(e), true);
-                }
-            }
-
-            for (const view of bothViews) {
-                view.install.addEventListener('click', function () { install(view); });
-                view.download.addEventListener('click', openDownloadPage);
-            }
-
-            // Later: out of the way until the next launch (or Check now).
-            updateLaterBtn.addEventListener('click', hideBanner);
-
-            // Close: About closes, and the update stays offered there.
-            aboutUpdateClose.addEventListener('click', function () {
-                window.gospelGetterSurfaces.close();
+            // Without the pieces there is no About to open (the head script
+            // leaves the ☰ item at closing the menu).
+            document.getElementById('about-btn').addEventListener('click', function () {
+                if (!document.getElementById('about-overlay')) setDataStatus('About isn’t available.', true);
             });
 
-            // About closed part way through an install: the banner carries
-            // on showing it.
-            document.addEventListener('gospel-getter:surface-close', function (event) {
-                if (event.detail.name !== 'about' || !installing || !updateBanner.hidden) return;
-                updateTitle.textContent = `Gospel Getter ${offered.version} is available`;
-                updateNotes.hidden = !offered.notes;
-                updateNotesText.textContent = offered.notes || '';
-                updateBanner.hidden = false;
-            });
-
-            updateCheckBtn.addEventListener('click', function () {
-                checkForUpdate({ quiet: false });
-            });
-
-            boot().then(() => {
-                if (root.dataset.updateCheck !== 'off') checkForUpdate({ quiet: true });
-            });
+            boot().then(askUpdateCheck);
         })();
     </script>
     <!-- The page's Rust pieces (ui-leptos/, compiled to WebAssembly by Trunk):

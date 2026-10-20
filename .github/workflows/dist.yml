@@ -12,7 +12,13 @@ name: Distribution Artifacts
 # app through its own webview with tauri-driver: gui-linux on the AppImage
 # for every run, advisory (not a required check); gui-windows on the NSIS
 # install only by hand (workflow_dispatch) or for a pull request from a
-# release/ branch, before a release.
+# release/ branch, before a release. Their updater checks run on the GUI
+# checks' test build of the app (feature gui-test-updater: its updater
+# reads a test settings file, talks to the checks' own local server, and
+# never installs), which each job builds after its installers are uploaded,
+# into an artifact of its own (gui-check-test-app-*). It is never an
+# installer and never released; tests/packaging_config.rs fails if any
+# installer or packaging build enables the feature.
 #
 # This workflow never creates a GitHub release, tag, or otherwise publishes
 # anything — it only produces downloadable workflow-run artifacts, so a
@@ -217,6 +223,23 @@ jobs:
             ${{ steps.artifacts.outputs.deb_sig }}
           if-no-files-found: error
 
+      # Last, after the installers above are uploaded: the GUI checks' test
+      # build (see the top of this file), for gui-linux's updater checks.
+      - name: Build the GUI-check test app
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --features gui-test-updater
+          mkdir -p "$RUNNER_TEMP/gui-check-test-app"
+          cp target/release/gospel_getter "$RUNNER_TEMP/gui-check-test-app/"
+
+      - name: Upload the GUI-check test app
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-check-test-app-linux
+          path: ${{ runner.temp }}/gui-check-test-app
+          if-no-files-found: error
+          retention-days: 7
+
   windows:
     name: Windows (NSIS installer)
     runs-on: windows-latest
@@ -383,6 +406,27 @@ jobs:
             ${{ steps.artifacts.outputs.msi_sig }}
           if-no-files-found: error
 
+      # Last, after the installers above are uploaded, and only when
+      # gui-windows runs: the GUI checks' test build (see the top of this
+      # file), for its updater checks.
+      - name: Build the GUI-check test app
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+        shell: pwsh
+        run: |
+          cargo build --release --locked --features gui-test-updater
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/gui-check-test-app" | Out-Null
+          Copy-Item target/release/gospel_getter.exe "$env:RUNNER_TEMP/gui-check-test-app/"
+
+      - name: Upload the GUI-check test app
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-check-test-app-windows
+          path: ${{ runner.temp }}/gui-check-test-app
+          if-no-files-found: error
+          retention-days: 7
+
   gui-linux:
     name: GUI checks (Linux)
     # The AppImage the linux job built, driven through its own webview by
@@ -409,10 +453,13 @@ jobs:
 
       # ImageMagick: a picture of the private display when a check fails
       # (the native dialogs, which WebDriver can't see).
-      - name: Install Xvfb, xdotool, WebKitWebDriver and ImageMagick
+      # The test build is a plain binary (not an AppImage), so it runs on
+      # the system's WebKitGTK and GTK.
+      - name: Install Xvfb, xdotool, WebKitWebDriver, ImageMagick and the app's runtime
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb xdotool webkit2gtk-driver dbus imagemagick
+          sudo apt-get install -y xvfb xdotool webkit2gtk-driver dbus imagemagick \
+            libwebkit2gtk-4.1-0 libgtk-3-0
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -434,7 +481,13 @@ jobs:
           name: gospel-getter-linux-appimage
           path: appimage
 
-      - name: Run the GUI checks on the AppImage
+      - name: Download the GUI-check test app
+        uses: actions/download-artifact@v4
+        with:
+          name: gui-check-test-app-linux
+          path: gui-check-test-app
+
+      - name: Run the GUI checks on the AppImage (and the updater's on the test app)
         run: |
           set -euo pipefail
           appimage="$(find appimage -maxdepth 1 -name '*.AppImage' | head -1)"
@@ -442,7 +495,9 @@ jobs:
             echo "::error::no AppImage in the downloaded artifact"
             exit 1
           fi
-          scripts/gui-check.sh "$appimage" "$RUNNER_TEMP/gui-check"
+          chmod +x gui-check-test-app/gospel_getter
+          GUI_CHECK_UPDATER_APP="$PWD/gui-check-test-app/gospel_getter" \
+            scripts/gui-check.sh "$appimage" "$RUNNER_TEMP/gui-check"
 
       - name: Upload the results and screenshots
         if: always()
@@ -546,11 +601,26 @@ jobs:
           New-ItemProperty -Path $key -Name $name -Value "--remote-debugging-port=0" -PropertyType String -Force | Out-Null
           Get-ItemProperty -Path $key | Format-List
 
-      - name: Run the GUI checks on the installed app
+      - name: Download the GUI-check test app
+        uses: actions/download-artifact@v4
+        with:
+          name: gui-check-test-app-windows
+          path: gui-check-test-app
+
+      # Named as the installed app is, so the WebView2 policy above (keyed
+      # by the program's file name) lets Edge WebDriver reach it too.
+      - name: Run the GUI checks on the installed app (and the updater's on the test app)
         shell: bash
         env:
           APP_EXE: ${{ steps.install.outputs.exe }}
-        run: scripts/gui-check.sh "$(cygpath -u "$APP_EXE")" "$(cygpath -u "$RUNNER_TEMP")/gui-check"
+        run: |
+          set -euo pipefail
+          tmp="$(cygpath -u "$RUNNER_TEMP")"
+          name="$(basename "$(cygpath -u "$APP_EXE")")"
+          mkdir -p "$tmp/gui-check-test-app"
+          cp gui-check-test-app/gospel_getter.exe "$tmp/gui-check-test-app/$name"
+          GUI_CHECK_UPDATER_APP="$tmp/gui-check-test-app/$name" \
+            scripts/gui-check.sh "$(cygpath -u "$APP_EXE")" "$tmp/gui-check"
 
       - name: Upload the results and screenshots
         if: always()

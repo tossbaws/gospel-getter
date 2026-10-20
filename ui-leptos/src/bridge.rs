@@ -25,6 +25,16 @@
 //!   follows the selection's notes while it may be open.
 //! - `detail.returnFocus` on the sheet's, welcome's and editor's requests:
 //!   the element focus goes back to ([`return_focus`]).
+//! - [`LAUNCH_CHECK_EVENT`] (`gospel-getter:update-check`): boot is done, so
+//!   the updater runs its quiet launch check, unless `html[data-update-check]`
+//!   is `off` ([`launch_check_on`]). Sent again on [`READY_EVENT`] if nobody
+//!   answered (boot beat the module).
+//! - [`ABOUT_CREDITS_EVENT`] (`gospel-getter:about-credits`): `{ credits }`,
+//!   each bundled translation's credit for About, from boot; sent again on
+//!   [`READY_EVENT`].
+//! - [`SURFACE_CLOSE_EVENT`] (`gospel-getter:surface-close`, the head
+//!   script's): `{ name }`, a surface closed; About closing part way through
+//!   an install brings the banner back.
 //!
 //! Rust to page:
 //! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): the module has loaded
@@ -48,6 +58,9 @@
 //!   under its shared `actionAttempt` guard).
 //!
 //! Page globals this crate calls (small, named, existing or exposed for it):
+//! - `window.gospelGetterSurfaces.close()` (the head script's surfaces
+//!   controller, which opens and closes About as one of its surfaces):
+//!   About's ×, Escape and its update's Close ([`close_surfaces`]).
 //! - `window.gospelGetterPreferences.apply(values)` (the head script's):
 //!   an import's display settings ([`apply_preferences`]).
 //! - `window.gospelGetterRefreshNotes()` (the page's `refreshNotes`, a
@@ -68,6 +81,16 @@
 //! check read them, looked up by id when asked, to know a modal is open.
 //! Each piece has the keyboard while it's open: a capturing `keydown` on
 //! `window` that stops every other handler.
+//!
+//! About (`#about-overlay`) and the update banner (`#update-banner`) are
+//! this crate's elements too, put where the page had them. About's `hidden`
+//! is the head script's (it shows and hides it as a surface, looking it up
+//! when it does); its keys are on the overlay itself, as they were. The
+//! page looks the banner up for its toast, which sits above it. The launch
+//! check's setting, `#update-check-toggle`, is drawn here and kept by the
+//! head script (`gospel-getter-update-check`, applied as
+//! `html[data-update-check]`), which listens for its `change` on the
+//! document.
 //!
 //! Local storage: the welcome reads the `gospel-getter-*` keys (the
 //! fresh-install rule) and writes [`WELCOME_KEY`].
@@ -561,5 +584,66 @@ pub fn note_done(action: &str, note: &JsValue) {
     init.set_detail(&detail);
     if let Ok(event) = CustomEvent::new_with_event_init_dict(NOTE_DONE_EVENT, &init) {
         let _ = document.dispatch_event(&event);
+    }
+}
+
+/// The page's boot is done: run the quiet launch check (unless it's turned
+/// off). A cancelable `CustomEvent` on `document`, no `detail`; the updater
+/// cancels it to say it has it.
+pub const LAUNCH_CHECK_EVENT: &str = "gospel-getter:update-check";
+
+/// Whether the launch check is on: `html[data-update-check]` isn't `off`
+/// (the head script applies the stored setting there before the page
+/// draws, and keeps it).
+pub fn launch_check_on() -> bool {
+    document()
+        .and_then(|d| d.document_element())
+        .is_none_or(|html| html.get_attribute("data-update-check").as_deref() != Some("off"))
+}
+
+/// The page has the bundled texts' credits for About: a `CustomEvent`
+/// whose `detail` is `{ credits }`, each translation's credit in order.
+pub const ABOUT_CREDITS_EVENT: &str = "gospel-getter:about-credits";
+
+#[derive(Debug, Deserialize)]
+struct Credits {
+    credits: Vec<String>,
+}
+
+pub fn about_credits(event: &CustomEvent) -> Result<Vec<String>, JsValue> {
+    detail::<Credits>(event).map(|c| c.credits)
+}
+
+/// The head script closed a surface: `{ name }` ("about", "menu", ...).
+pub const SURFACE_CLOSE_EVENT: &str = "gospel-getter:surface-close";
+
+#[derive(Debug, Deserialize)]
+struct SurfaceClosed {
+    name: String,
+}
+
+/// The surface `event` says closed, if it can be read.
+pub fn surface_closed(event: &CustomEvent) -> Option<String> {
+    detail::<SurfaceClosed>(event).ok().map(|s| s.name)
+}
+
+/// Closes the open surface (About), as its × and Escape do:
+/// `window.gospelGetterSurfaces.close()`, the head script's, which puts
+/// focus back where About was opened from.
+pub fn close_surfaces() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let surfaces = js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterSurfaces"))
+        .ok()
+        .filter(|s| s.is_object());
+    let Some(surfaces) = surfaces else {
+        return;
+    };
+    if let Some(close) = js_sys::Reflect::get(&surfaces, &JsValue::from_str("close"))
+        .ok()
+        .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+    {
+        let _ = close.call0(&surfaces);
     }
 }

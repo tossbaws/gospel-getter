@@ -21,9 +21,15 @@
 //! `open_release_notes`, always this version's page
 //! ([`release_notes_page`]). Neither takes a URL from the page.
 
+use std::future::Future;
+use std::time::Duration;
+
 use serde::Serialize;
 
 use crate::release_notes;
+
+#[cfg(all(desktop, feature = "gui-test-updater"))]
+pub mod test_hook;
 
 /// Where a build that can't update itself sends the reader.
 pub const RELEASES_PAGE: &str = "https://github.com/tossbaws/gospel-getter/releases/latest";
@@ -164,6 +170,26 @@ pub mod messages {
     pub const NOTES_OPEN_FAILED: &str = "Couldn\u{2019}t open the release notes in your browser.";
 }
 
+/// How long a check for updates may take: one that hasn't answered by then
+/// is given up on, with [`messages::OFFLINE`] (as if GitHub couldn't be
+/// reached), and its answer, if it ever comes, is dropped with it. The
+/// download isn't limited: a slow one is still going somewhere.
+pub const CHECK_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// `check`, given up on after `limit` with [`messages::OFFLINE`].
+pub async fn within_check_time<T>(
+    limit: Duration,
+    check: impl Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    match tokio::time::timeout(limit, check).await {
+        Ok(answer) => answer,
+        Err(_) => {
+            tracing::warn!("The check for updates didn't answer within {limit:?}");
+            Err(messages::OFFLINE.to_string())
+        }
+    }
+}
+
 /// What went wrong, in the terms the reader needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Problem {
@@ -213,9 +239,9 @@ mod desktop {
     use tauri_plugin_updater::{Error, Update, UpdaterExt};
 
     use super::{
-        Bundle, DownloadEvent, Problem, RELEASES_PAGE, SELF_UPDATE_MARKER, UpdateInfo, UpdateMode,
-        check_message, install_message, is_offered, link_only_target, messages, release_notes_page,
-        update_mode,
+        Bundle, CHECK_TIMEOUT, DownloadEvent, Problem, RELEASES_PAGE, SELF_UPDATE_MARKER,
+        UpdateInfo, UpdateMode, check_message, install_message, is_offered, link_only_target,
+        messages, release_notes_page, update_mode, within_check_time,
     };
     use crate::commands::AppState;
 
@@ -238,6 +264,40 @@ mod desktop {
 
     pub fn current_mode() -> UpdateMode {
         update_mode(SELF_UPDATE_MARKER, current_bundle())
+    }
+
+    /// Where this copy looks for updates and what it may do with one.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Settings {
+        pub mode: UpdateMode,
+        /// How long a check may take ([`CHECK_TIMEOUT`]).
+        pub timeout: std::time::Duration,
+        /// An endpoint and public key in place of `tauri.conf.json`'s, and
+        /// whether an update may be installed: only a GUI-check test build
+        /// (feature `gui-test-updater`, see `test_hook`) can have anything
+        /// but `None`, `None` and `true`; every other build checks
+        /// `tauri.conf.json`'s endpoint, verifies with its key, and
+        /// installs.
+        pub endpoint: Option<tauri::Url>,
+        pub pubkey: Option<String>,
+        pub installs: bool,
+    }
+
+    /// This build's [`Settings`]: `tauri.conf.json`'s endpoint and key (the
+    /// updater plugin's own configuration), the build's mode, and
+    /// [`CHECK_TIMEOUT`].
+    pub fn settings() -> Result<Settings, String> {
+        #[cfg(feature = "gui-test-updater")]
+        if let Some(settings) = super::test_hook::settings()? {
+            return Ok(settings);
+        }
+        Ok(Settings {
+            mode: current_mode(),
+            timeout: CHECK_TIMEOUT,
+            endpoint: None,
+            pubkey: None,
+            installs: true,
+        })
     }
 
     /// Sort an updater error into what the reader needs to know.
@@ -275,12 +335,18 @@ mod desktop {
 
     fn updater<R: Runtime>(
         app: &AppHandle<R>,
-        mode: UpdateMode,
+        settings: &Settings,
     ) -> Result<tauri_plugin_updater::Updater, Error> {
         let mut builder = app
             .updater_builder()
             .version_comparator(|current, release| is_offered(&current, &release.version));
-        match mode {
+        if let Some(endpoint) = &settings.endpoint {
+            builder = builder.endpoints(vec![endpoint.clone()])?;
+        }
+        if let Some(pubkey) = &settings.pubkey {
+            builder = builder.pubkey(pubkey.clone());
+        }
+        match settings.mode {
             UpdateMode::SelfUpdate => {
                 // Windows only: runs right before the installer starts and
                 // the app exits.
@@ -310,21 +376,27 @@ mod desktop {
         )
     }
 
-    /// The latest release, if it's newer than this one.
+    /// The latest release, if it's newer than this one. A check that takes
+    /// longer than the settings' limit ([`CHECK_TIMEOUT`]) is given up on,
+    /// as if GitHub couldn't be reached.
     #[tauri::command]
     pub async fn check_for_update<R: Runtime>(
         app: AppHandle<R>,
         pending: State<'_, PendingUpdate>,
     ) -> Result<Option<UpdateInfo>, String> {
-        let mode = current_mode();
-        let found = match updater(&app, mode) {
-            Ok(updater) => updater.check().await,
-            Err(e) => Err(e),
-        };
-        let found = found.map_err(|e| {
-            tracing::error!("Failed to check for updates: {e}");
-            check_message(classify(&e)).to_string()
-        })?;
+        let settings = settings()?;
+        let mode = settings.mode;
+        let found = within_check_time(settings.timeout, async {
+            let found = match updater(&app, &settings) {
+                Ok(updater) => updater.check().await,
+                Err(e) => Err(e),
+            };
+            found.map_err(|e| {
+                tracing::error!("Failed to check for updates: {e}");
+                check_message(classify(&e)).to_string()
+            })
+        })
+        .await?;
         let info = found.as_ref().map(|u| update_info(u, mode));
         *pending.0.lock().unwrap_or_else(|e| e.into_inner()) = found;
         Ok(info)
@@ -340,7 +412,8 @@ mod desktop {
         pending: State<'_, PendingUpdate>,
         on_event: Channel<DownloadEvent>,
     ) -> Result<(), String> {
-        if current_mode() != UpdateMode::SelfUpdate {
+        let settings = settings()?;
+        if settings.mode != UpdateMode::SelfUpdate {
             return Err(messages::LINK_ONLY.to_string());
         }
         let update = pending
@@ -369,6 +442,16 @@ mod desktop {
                 install_message(classify(&e)).to_string()
             })?;
         let _ = on_event.send(DownloadEvent::Finished);
+        // A GUI-check test build stops here, downloaded and verified: it
+        // never replaces itself. (No other build has this.)
+        #[cfg(feature = "gui-test-updater")]
+        if !settings.installs {
+            tracing::info!(
+                "Downloaded and verified update {}; a test build doesn't install it",
+                update.version
+            );
+            return Err(super::test_hook::DOESNT_INSTALL.to_string());
+        }
 
         // On Windows this runs `on_before_exit`, starts the installer and
         // exits.
@@ -630,5 +713,55 @@ mod tests {
         let error = tauri_plugin_updater::Error::Reqwest(error);
         assert_eq!(classify(&error), Problem::Offline);
         assert_eq!(check_message(classify(&error)), messages::OFFLINE);
+    }
+
+    /// A check that hasn't answered within its limit is given up on with
+    /// the "couldn't reach GitHub" message; one that answers in time keeps
+    /// its answer, an update or the problem it had. The app's limit is 20 s.
+    #[tokio::test]
+    async fn a_check_that_takes_too_long_is_given_up_on_as_offline() {
+        assert_eq!(CHECK_TIMEOUT, Duration::from_secs(20));
+        let limit = Duration::from_millis(20);
+        let never = within_check_time(limit, std::future::pending::<Result<u8, String>>());
+        assert_eq!(never.await, Err(messages::OFFLINE.to_string()));
+        let found = within_check_time(Duration::from_secs(5), async { Ok::<_, String>(7) });
+        assert_eq!(found.await, Ok(7));
+        let failed = within_check_time(Duration::from_secs(5), async {
+            Err::<u8, _>(messages::NO_RELEASE_INFO.to_string())
+        });
+        assert_eq!(failed.await, Err(messages::NO_RELEASE_INFO.to_string()));
+    }
+
+    /// Without the GUI checks' test hook (every build but their test
+    /// build), the updater checks the endpoint `tauri.conf.json` names and
+    /// verifies with its public key: the app's context is
+    /// `tauri.conf.json`'s updater configuration exactly, nothing replaces
+    /// the endpoint or key, the build's own mode and the 20 s limit apply,
+    /// and an update is installed.
+    #[cfg(all(desktop, not(feature = "gui-test-updater")))]
+    #[test]
+    fn without_the_test_hook_the_updater_is_tauri_conf_jsons() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let context = crate::app_context();
+        assert_eq!(
+            context.config().plugins.0.get("updater"),
+            Some(&config["plugins"]["updater"])
+        );
+        assert!(
+            config["plugins"]["updater"]
+                .get("dangerousInsecureTransportProtocol")
+                .is_none()
+        );
+        assert_eq!(
+            settings(),
+            Ok(Settings {
+                mode: current_mode(),
+                timeout: CHECK_TIMEOUT,
+                endpoint: None,
+                pubkey: None,
+                installs: true,
+            })
+        );
     }
 }

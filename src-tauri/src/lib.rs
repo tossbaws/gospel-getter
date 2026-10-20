@@ -47,8 +47,19 @@ pub fn run() {
             setup_app(app).map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })
         })
         .invoke_handler(invoke_handler())
-        .run(tauri::generate_context!())
+        .run(app_context())
         .expect("error while running Gospel Getter");
+}
+
+/// The app's Tauri context: `tauri.conf.json`, compiled in, as it is. Only
+/// the GUI checks' test build (feature `gui-test-updater`) changes it, to
+/// let its updater reach their local server (see `updater::test_hook`).
+pub fn app_context() -> tauri::Context<tauri::Wry> {
+    #[cfg_attr(not(feature = "gui-test-updater"), allow(unused_mut))]
+    let mut context = tauri::generate_context!();
+    #[cfg(feature = "gui-test-updater")]
+    updater::test_hook::prepare_context(&mut context);
+    context
 }
 
 /// Every command the frontend can `invoke`.
