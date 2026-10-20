@@ -26,11 +26,14 @@ pub enum Check {
     LibraryBookmarks = 14,
     LibraryHighlights = 15,
     LibraryNotes = 16,
+    Search = 17,
+    SearchGoTo = 18,
+    PaletteCommand = 19,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 11] = [
+    pub const SHIPPED: [Check; 14] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -42,6 +45,9 @@ impl Check {
         Check::LibraryBookmarks,
         Check::LibraryHighlights,
         Check::LibraryNotes,
+        Check::Search,
+        Check::SearchGoTo,
+        Check::PaletteCommand,
     ];
 
     /// The updater's checks, on the GUI checks' test build against the
@@ -72,6 +78,9 @@ impl Check {
             Check::LibraryBookmarks => "library-bookmarks",
             Check::LibraryHighlights => "library-highlights",
             Check::LibraryNotes => "library-notes",
+            Check::Search => "search",
+            Check::SearchGoTo => "search-go-to",
+            Check::PaletteCommand => "palette-command",
         }
     }
 

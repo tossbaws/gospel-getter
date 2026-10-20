@@ -9,7 +9,7 @@
 //! reads where to check, with which public key, in which mode and how long
 //! to wait from the settings file the checks write, and never installs
 //! what it downloads. A release build ignores the file, which check 9
-//! confirms: the shipped app's session (checks 1 to 8, 14 to 16) sends this server
+//! confirms: the shipped app's session (checks 1 to 8, 14 to 19) sends this server
 //! nothing.
 //!
 //! Also here: a "black hole" for check 13, which takes connections and
