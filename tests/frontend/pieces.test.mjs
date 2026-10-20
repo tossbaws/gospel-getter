@@ -171,3 +171,41 @@ test('without the pieces, the Library says it isn’t available, and the reader�
         assert.deepEqual(app.consoleErrors, []);
     });
 });
+
+test('without the pieces, search says it isn’t available, and reading goes on', () =>
+    withApp({ book: 'John', chapter: 3, leptos: false }, async (app) => {
+        await app.idle();
+        assert.equal(app.searchInput(), null, 'the box is the pieces’');
+        assert.equal(app.window.gospelGetterShortcuts, undefined, 'so is the table of shortcuts');
+
+        app.key('/');
+        assert.deepEqual(toast(app), { text: 'Search isn’t available.', error: true });
+        assert.equal(app.searchPanel().hidden, true);
+        app.click($(app, 'search-toggle'));
+        assert.deepEqual(toast(app), { text: 'Search isn’t available.', error: true });
+        assert.equal(app.searchPanel().hidden, true);
+
+        const turn = app.calls.length;
+        app.key('ArrowRight');
+        await app.idle(turn, 'get_reading');
+        assert.equal(app.heading(), 'John 4');
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
+test('pieces that load after boot bring search, and the table of shortcuts, with them', () =>
+    withApp({ book: 'John', chapter: 3, leptos: 'late' }, async (app) => {
+        await app.idle();
+        app.key('/');
+        assert.equal(app.searchPanel().hidden, true, 'not loaded yet');
+
+        await app.loadPieces();
+        assert.ok(app.window.gospelGetterShortcuts.some((s) => s.id === 'search'));
+        await app.search('rev 22:21');
+        assert.equal(app.searchStatus(), 'Press Enter to go there.');
+        const before = app.calls.length;
+        app.key('Enter', {}, app.searchInput());
+        await app.idle(before, 'get_reading');
+        assert.equal(app.heading(), 'Revelation 22');
+        assert.equal(app.searchPanel().hidden, true);
+        assert.deepEqual(app.consoleErrors, []);
+    }));

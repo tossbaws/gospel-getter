@@ -15,7 +15,8 @@
 //! updater, `UpdateInfo` and `DownloadEvent` (`updater.rs`) and `Block` and
 //! `Span` (`release_notes.rs`); for the Library, `BookmarkDto`,
 //! `HighlightPassageDto` and `NoteDto` (`commands.rs`, of which these read
-//! only what the lists show).
+//! only what the lists show); for search, `SearchDto` and `SearchResultDto`
+//! (`commands.rs`).
 
 use serde::{Deserialize, Serialize};
 
@@ -365,4 +366,59 @@ pub struct PassageArgs {
     pub chapter: i64,
     pub verse_start: i64,
     pub verse_end: i64,
+}
+
+/// `search`'s arguments: what the box holds, as typed, the translation to
+/// search, and where the page of verses starts.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchArgs<'a> {
+    pub query: &'a str,
+    pub translation_code: &'a str,
+    pub offset: i64,
+}
+
+/// What the search box should do with what's typed (`commands::SearchDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum SearchAnswer {
+    /// Nothing to search for.
+    Empty,
+    /// Go to this passage (its verses, or the whole chapter).
+    Passage {
+        book_id: i64,
+        chapter: i64,
+        verse_start: Option<i64>,
+        verse_end: Option<i64>,
+        reference: String,
+    },
+    /// A reference that doesn't exist; why.
+    Invalid { message: String },
+    /// Search isn't ready, or failed; why.
+    Unavailable { message: String },
+    /// One page of matching verses, in Bible order.
+    Text {
+        terms: Vec<String>,
+        total: i64,
+        offset: i64,
+        results: Vec<SearchVerse>,
+    },
+}
+
+/// A matching verse (`commands::SearchResultDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchVerse {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse: i64,
+    pub reference: String,
+    pub text: String,
+    /// The words the search matched: byte ranges of `text`.
+    #[serde(default)]
+    pub marks: Vec<(usize, usize)>,
 }

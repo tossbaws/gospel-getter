@@ -4,13 +4,15 @@
 //! dialogs: Export notes (`export_notes`), the keyboard shortcuts sheet
 //! (`shortcuts`), the welcome (`welcome`), the import preview
 //! (`import_preview`) and the note editor (`note_editor`); About
-//! (`about`) with the updater (`updates`); and the Library's tabs and lists
-//! (`library`). The page talks to them only as `bridge` says.
+//! (`about`) with the updater (`updates`); the Library's tabs and lists
+//! (`library`); and search with the command palette (`search`), with the
+//! table of keyboard shortcuts (`shortcut_table`) and the palette's
+//! commands (`palette`). The page talks to them only as `bridge` says.
 //!
 //! If this module fails to load, the page works as before, except that the
-//! five dialogs, About and the Library say they are unavailable when asked
-//! for (see `bridge`), no update is offered, and no bookmark is marked in
-//! the reader (the Library loads them).
+//! five dialogs, About, the Library and search say they are unavailable
+//! when asked for (see `bridge`), no update is offered, and no bookmark is
+//! marked in the reader (the Library loads them).
 
 mod about;
 mod bridge;
@@ -25,6 +27,10 @@ mod library;
 mod library_text;
 mod note_editor;
 mod note_text;
+mod palette;
+mod search;
+mod search_text;
+mod shortcut_table;
 mod shortcuts;
 mod text;
 mod update_text;
@@ -37,6 +43,8 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
+    // The table of shortcuts, where the page had it.
+    bridge::export_shortcuts();
     let Some(body) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.body())
@@ -63,8 +71,10 @@ pub fn start() {
         leptos::mount::mount_to(holder.clone(), about::AboutAndUpdates).forget();
         about::place(&holder);
     }
-    // The Library's tabs and lists go inside the head script's panel.
+    // The Library's tabs and lists go inside the head script's panel, and
+    // the search box's contents inside the page's search panel.
     library::mount();
+    search::mount();
     // Everything is listening: the page may send again what it asked
     // before the module had loaded.
     bridge::ready();

@@ -12,8 +12,12 @@ updater (`src/updates.rs`: Check now, the launch check, the banner, the
 update shown in About, and installing with its progress); and the
 Library's tabs and lists (`src/library.rs`: Bookmarks, Highlights with
 its color filter, and Notes, each loaded from the backend here, once per
-reload). About and the Library stay the head script's surfaces: the head
-script opens and closes them.
+reload); and search with the command palette (`src/search.rs`: the box,
+its Go to, Commands and Verses, Show more, and running a command), with
+the table of keyboard shortcuts (`src/shortcut_table.rs`, which the
+shortcuts sheet lists and the palette's key hints come from) and the
+palette's commands (`src/palette.rs`). About and the Library stay the head
+script's surfaces: the head script opens and closes them.
 
 [Leptos]: https://leptos.dev
 
@@ -36,13 +40,18 @@ script opens and closes them.
 - `src/dom.rs`: the DOM helpers the pieces share (focus that never
   scrolls, the modals' Tab trap, listening).
 - `src/text.rs`, `src/import_text.rs`, `src/note_text.rs`,
-  `src/install.rs`, `src/update_text.rs`, `src/library_text.rs`: the
+  `src/install.rs`, `src/update_text.rs`, `src/library_text.rs`,
+  `src/shortcut_table.rs`, `src/palette.rs`, `src/search_text.rs`: the
   pieces' words, numbers and rules (Export notes' filter, the import's
   sentences, the note's length rule, the welcome's fresh-install rule, the
   updater's sentences, `megabytes` and download progress, the Library's
-  rows, color names, filter and focus arithmetic), free of the DOM,
+  rows, color names, filter and focus arithmetic; the shortcuts; the
+  palette's commands, their reasons and its word matching; the search's
+  sentences, active option and marked words), free of the DOM,
   unit-tested natively
-  (`cargo test`). The update check's time limit and its "couldn't reach
+  (`cargo test`). The words a search matched are the backend's to find
+  (`query::term_marks`, beside the search's own terms); the box only draws
+  them. The update check's time limit and its "couldn't reach
   GitHub" message are the backend's (`check_for_update`).
 - `src/lib.rs`: mounts the pieces when the module loads (About and the
   banner are moved to where the page had them, for focus order, and the
@@ -71,9 +80,9 @@ end of `<body>`, which loads the glue (`ui-leptos.js`) and the module
 (`ui-leptos_bg.wasm`). Trunk's own loader is an ES module import, which the
 `no-modules` glue cannot be loaded by, so `Trunk.toml` turns it off. If the
 module fails to load, the page is as it was without it, except that the
-five dialogs, About and the Library are unavailable, and say so when asked
-for, no update is looked for, and the reader marks no bookmarks (the
-Library loads them). The module may also load after the page has booted:
+five dialogs, About, the Library and search are unavailable, and say so
+when asked for, no update is looked for, and the reader marks no
+bookmarks (the Library loads them). The module may also load after the page has booted:
 the Library's lists, then the welcome's startup question, the launch check
 and About's credits wait for `gospel-getter:pieces-ready`.
 
@@ -110,7 +119,9 @@ looks at once with nothing to await (typing in the note editor, its discard
 prompt, the import's add-or-replace choice, and the updater throughout:
 Check now's line while it checks, the views as an install starts, Later;
 and the Library's tabs), the piece writes to those elements within the
-event, as the page did. `openApp({ leptos: 'late' })` loads the pieces only
+event, as the page did. The search box does so throughout: it opens and
+closes, and draws its list (static Leptos views, built and put in place
+at once) and its active option, within the key or click. `openApp({ leptos: 'late' })` loads the pieces only
 when the test calls `app.loadPieces()`, and `leptos: false` never
 (`pieces.test.mjs`); boot waits for the Library's bookmark list only when
 the pieces load with the page.
@@ -129,7 +140,8 @@ whose enums travel as their kebab-case names); for the updater,
 `NoteSpan` (`release_notes::Block` and `Span`); for the Library,
 `Bookmark`, `HighlightPassage` and `Note` (`commands::BookmarkDto`,
 `HighlightPassageDto` and `NoteDto`, of which they read only what the lists
-show) and `library_text::COLORS` (`HighlightColor`); and the commands'
-argument objects. The backend's types carry `chrono` dates
+show) and `library_text::COLORS` (`HighlightColor`); for search,
+`SearchAnswer` and `SearchVerse` (`commands::SearchDto` and
+`SearchResultDto`); and the commands' argument objects. The backend's types carry `chrono` dates
 and `deny_unknown_fields`; the shared crate would keep them serde-only with
 the dates as `YYYY-MM-DD` strings, as the page always sent and received them.

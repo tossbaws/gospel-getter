@@ -346,7 +346,15 @@ impl Library {
     /// left for the editor), and the page jumps there.
     fn open(passage: PassageArgs, note: &JsValue) {
         bridge::close_surfaces_with(note.is_null());
-        bridge::library_open(&passage, note);
+        bridge::open_passage(
+            &bridge::OpenPassage {
+                book_id: passage.book_id,
+                chapter: passage.chapter,
+                verse_start: Some(passage.verse_start),
+                verse_end: Some(passage.verse_end),
+            },
+            note,
+        );
     }
 
     fn on_bookmark_click(self, target: Element) {

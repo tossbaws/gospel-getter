@@ -1,12 +1,6 @@
 //! The keyboard shortcuts sheet (`?`, ☰ → Keyboard shortcuts, or the
-//! palette's command): the page's one table of shortcuts, in its groups,
-//! each row its key caps and what it does.
-//!
-//! The table stays the page's (`SHORTCUTS` in `ui/index.html`): the
-//! palette's key hints and `aria-keyshortcuts`, and the key handlers it
-//! documents, are the page's JavaScript and read it at once, whether or not
-//! this module has loaded. The page hands it over in each request to open
-//! (see `bridge`), so there is one table.
+//! palette's command): the one table of shortcuts (`shortcut_table`), in
+//! its groups, each row its key caps and what it does.
 //!
 //! A modal, as the page's others: while open it has the keyboard (a
 //! capturing `keydown` on `window`, stopping every other handler), Escape
@@ -23,15 +17,14 @@ use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
 
-use crate::bridge::{self, ShortcutRow, ShortcutsRequest};
+use crate::bridge;
 use crate::dom::{self, focus};
+use crate::shortcut_table::{self, Shortcut};
 
 /// The sheet's state and the elements it reaches for.
 #[derive(Clone, Copy)]
 struct Sheet {
     open: RwSignal<bool>,
-    /// The table, as the page last handed it over.
-    table: RwSignal<ShortcutsRequest>,
     /// Where focus goes back to on closing.
     return_to: StoredValue<Option<HtmlElement>, LocalStorage>,
     overlay: NodeRef<html::Div>,
@@ -40,12 +33,11 @@ struct Sheet {
 }
 
 impl Sheet {
-    fn open(self, request: ShortcutsRequest, return_to: Option<HtmlElement>) {
+    fn open(self, return_to: Option<HtmlElement>) {
         if self.open.get_untracked() {
             return;
         }
         self.return_to.set_value(return_to);
-        self.table.set(request);
         self.open.set(true);
         spawn_local(async move {
             tick().await;
@@ -113,18 +105,16 @@ impl Sheet {
     fn listen(self) {
         dom::on_document_event(bridge::SHORTCUTS_EVENT, move |event: CustomEvent| {
             event.prevent_default();
-            match bridge::shortcuts_request(&event) {
-                Ok(request) => self.open(request, bridge::return_focus(&event)),
-                Err(e) => crate::ipc::log_error("The shortcuts request couldn't be read", &e),
-            }
+            self.open(bridge::return_focus(&event));
         });
         dom::on_window_keydown(move |event: KeyboardEvent| self.on_keydown(event));
     }
 }
 
-/// A key cap the sheet draws (the arrows, as the page's chapter-end hint
-/// does: the UI sans's are tiny), with the name screen readers hear.
-fn drawn_arrow(cap: &str) -> Option<(&'static str, &'static str)> {
+/// A key cap the sheet (and the palette's key hints) draw (the arrows, as
+/// the page's chapter-end hint does: the UI sans's are tiny), with the
+/// name screen readers hear and the arrow's path.
+pub fn drawn_arrow(cap: &str) -> Option<(&'static str, &'static str)> {
     match cap {
         "←" => Some(("Left arrow", "M13 8H3M7 4 3 8l4 4")),
         "→" => Some(("Right arrow", "M3 8h10M9 4l4 4-4 4")),
@@ -152,18 +142,18 @@ fn cap_view(cap: String) -> AnyView {
 
 /// The ways to press a shortcut: each a combination of caps joined by
 /// "+", the ways joined by "or".
-fn caps_view(keys: Vec<Vec<String>>) -> impl IntoView {
-    keys.into_iter()
+fn caps_view(keys: &'static [&'static [&'static str]]) -> impl IntoView {
+    keys.iter()
         .enumerate()
         .map(|(i, combo)| {
             let combo = combo
-                .into_iter()
+                .iter()
                 .enumerate()
                 .map(|(j, cap)| {
                     let plus = (j > 0).then(|| {
                         view! { <span class="key-plus" aria-hidden="true">"+"</span> }
                     });
-                    view! { {plus} {cap_view(cap)} }
+                    view! { {plus} {cap_view(cap.to_string())} }
                 })
                 .collect_view();
             let or = (i > 0).then(|| view! { " " <span class="key-or">"or"</span> " " });
@@ -172,7 +162,7 @@ fn caps_view(keys: Vec<Vec<String>>) -> impl IntoView {
         .collect_view()
 }
 
-fn row_view(row: ShortcutRow) -> impl IntoView {
+fn row_view(row: &'static Shortcut) -> impl IntoView {
     view! {
         <div class="shortcut-row" data-shortcut=row.id>
             <dt class="shortcut-keys">{caps_view(row.keys)}</dt>
@@ -187,7 +177,6 @@ fn row_view(row: ShortcutRow) -> impl IntoView {
 pub fn Shortcuts() -> impl IntoView {
     let sheet = Sheet {
         open: RwSignal::new(false),
-        table: RwSignal::new(ShortcutsRequest::default()),
         return_to: StoredValue::new_local(None),
         overlay: NodeRef::new(),
         close_button: NodeRef::new(),
@@ -195,31 +184,21 @@ pub fn Shortcuts() -> impl IntoView {
     };
     sheet.listen();
 
-    let groups = move || {
-        let table = sheet.table.get();
-        table
-            .groups
-            .iter()
-            .enumerate()
-            .map(|(i, group)| {
-                let id = format!("shortcut-group-{i}");
-                let labelled_by = id.clone();
-                let rows = table
-                    .shortcuts
-                    .iter()
-                    .filter(|s| &s.group == group)
-                    .cloned()
-                    .map(row_view)
-                    .collect_view();
-                view! {
-                    <section class="shortcut-group" aria-labelledby=labelled_by>
-                        <h3 class="shortcut-group-title" id=id>{group.clone()}</h3>
-                        <dl class="shortcut-list">{rows}</dl>
-                    </section>
-                }
-            })
-            .collect_view()
-    };
+    let groups = shortcut_table::GROUPS
+        .iter()
+        .enumerate()
+        .map(|(i, group)| {
+            let id = format!("shortcut-group-{i}");
+            let labelled_by = id.clone();
+            let rows = shortcut_table::in_group(group).map(row_view).collect_view();
+            view! {
+                <section class="shortcut-group" aria-labelledby=labelled_by>
+                    <h3 class="shortcut-group-title" id=id>{*group}</h3>
+                    <dl class="shortcut-list">{rows}</dl>
+                </section>
+            }
+        })
+        .collect_view();
 
     view! {
         <div

@@ -12,7 +12,8 @@
 //! - [`OPEN_EVENT`] (`gospel-getter:export-notes`): Export notes…, with an
 //!   [`OpenRequest`].
 //! - [`SHORTCUTS_EVENT`] (`gospel-getter:shortcuts`): the keyboard
-//!   shortcuts sheet, with the page's one table ([`ShortcutsRequest`]).
+//!   shortcuts sheet, no snapshot (the table is this crate's,
+//!   `shortcut_table`).
 //! - [`WELCOME_EVENT`] (`gospel-getter:welcome`): the welcome, asked at the
 //!   end of boot (with what the fresh-install rule needs) or opened from
 //!   ☰, with the places to start ([`WelcomeRequest`]). A startup request
@@ -41,6 +42,16 @@
 //!   boot), `{ lists }` naming them. The Library cancels it and puts in
 //!   `detail.done` a promise that settles once each list has its answer;
 //!   asked before the module loaded, the page asks again on [`READY_EVENT`].
+//! - [`SEARCH_EVENT`] (`gospel-getter:search`): `{ open }`, the page opens
+//!   the search box (`/`, Ctrl+K) or closes it (Escape outside it, a click
+//!   away, a dialog opening); the search box cancels it to say it has it.
+//! - [`PALETTE_STATE_EVENT`] (`gospel-getter:palette-state`): asked by this
+//!   crate (see Rust to page), answered by the page within the event:
+//!   `detail.state` is a [`PaletteState`], what the palette's commands need
+//!   of the page (Aa's settings, comparing, the chapter shown, the passage
+//!   history, a busy export), as it is at that moment.
+//! - [`SURFACE_OPEN_EVENT`] (`gospel-getter:surface-open`, the head
+//!   script's): a surface opened, so the search box closes.
 //!
 //! Rust to page:
 //! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): the module has loaded
@@ -68,10 +79,20 @@
 //!   page's own copy, for the reader's bookmark markers and the selection
 //!   card's Bookmark button, the welcome's fresh-install facts and Export
 //!   notes. So the page never asks the backend for them itself.
-//! - [`LIBRARY_OPEN_EVENT`] (`gospel-getter:library-open`): `{ bookId,
-//!   chapter, verseStart, verseEnd, note }`, a Library row opened (the
-//!   Library already closed): the page jumps there, as its own jumps do,
-//!   and with `note` (a note's Edit) then opens the editor on it.
+//! - [`OPEN_PASSAGE_EVENT`] (`gospel-getter:open-passage`): `{ bookId,
+//!   chapter, verseStart, verseEnd, note }`, a Library row or a search
+//!   result opened (the Library or the search box already closed): the page
+//!   jumps there, as its own jumps do (the verses selected, if any), and
+//!   with `note` (a note's Edit) then opens the editor on it.
+//! - [`PALETTE_STATE_EVENT`]: `{}`, asked whenever the palette is drawn or
+//!   a command is chosen; the page fills in `detail.state` (above).
+//! - [`COMMAND_EVENT`] (`gospel-getter:command`): `{ command, value }`, a
+//!   palette command whose code is the page's (copy the chapter, Copy
+//!   as…, turn the chapter or the book, Back and Forward, text size, a
+//!   translation, Compare with, the shortcuts sheet), run within the click
+//!   or key that chose it (the clipboard needs that), after the box has
+//!   closed and focus has gone back. The commands whose controls are on
+//!   the page are run by clicking them (see Page controls).
 //!
 //! Page globals this crate calls (small, named, existing or exposed for it):
 //! - `window.gospelGetterSurfaces.close()` (the head script's surfaces
@@ -86,7 +107,13 @@
 //!   highlight, the reader's highlights and then the list, waited for
 //!   before focus moves on ([`refresh_highlights`]).
 //! - `window.gospelGetterSurfaces.close(restoreFocus)` also closes the
-//!   Library before a row opens its passage ([`close_surfaces_with`]).
+//!   Library before a row opens its passage, and whatever is open when the
+//!   search box opens ([`close_surfaces_with`]); `.current()` says which
+//!   surface is open ([`current_surface`]).
+//!
+//! Page globals this crate sets: `window.gospelGetterShortcuts`, the table
+//! of shortcuts (`shortcut_table`), as the page had it, for its frontend
+//! tests ([`export_shortcuts`]).
 //!
 //! Page controls this crate uses as a reader would: `#theme-select`, Aa's
 //! record of the theme, read and changed (with a `change` event) for the
@@ -94,9 +121,21 @@
 //! labels, read to name an import file's settings; the page's focus home
 //! (`#aa-toggle` in reading mode, else `#menu-toggle`, [`focus_home`]);
 //! `#translation-select`, the translation button's record of the
-//! translation, read for the Library's previews ([`translation_code`]); and, for the editor's focus
-//! going back, the selection card's `.verse-notes .note-edit[data-note-id]`,
-//! `.verse-actions .verse-note-btn` and `.chapter-main .chapter-heading`.
+//! translation, read for the Library's previews and the search
+//! ([`translation_code`]), and listened to (`change`: an open search runs
+//! again in the new translation); for the editor's focus going back, the
+//! selection card's `.verse-notes .note-edit[data-note-id]`,
+//! `.verse-actions .verse-note-btn` and `.chapter-main .chapter-heading`;
+//! and, for the search box, `#search-panel` (the page's, whose `hidden`
+//! this crate keeps; the page reads it to know the box is open) and
+//! `#search-toggle` (its click, its `aria-expanded`, focus back to it),
+//! and the controls the palette's commands click as a reader would: by id
+//! (`#compare-btn`, `#reader-mode-btn`, `#reader-exit`,
+//! `#random-chapter-btn`, `#sidebar-toggle`, `#export-notes-btn`,
+//! `#export-data-btn`, `#import-data-btn`, `#welcome-btn`, `#about-btn`
+//! then `#update-check-btn`, `#library-toggle` then a `#library-tab-*`),
+//! or a `[data-value]` choice in `#layout-choices`, `#width-choices` or
+//! `#theme-choices`.
 //!
 //! The pieces' overlays (`#export-notes-overlay`, `#shortcuts-overlay`,
 //! `#welcome-overlay`, `#import-overlay`, `#note-overlay`) keep their
@@ -109,6 +148,11 @@
 //! panels, with `#export-notes-btn`, whose click stays the page's) are this
 //! crate's elements, put inside the head script's panel, which opens and
 //! closes it and focuses its chosen tab.
+//!
+//! The search box's contents (`#search-input`, `#search-status`,
+//! `#search-results` and `#search-more`) are this crate's elements, put
+//! inside the page's `#search-panel`. The page's keyboard dispatcher
+//! ignores keys there, as before.
 //!
 //! About (`#about-overlay`) and the update banner (`#update-banner`) are
 //! this crate's elements too, put where the page had them. About's `hidden`
@@ -133,6 +177,7 @@ use wasm_bindgen::JsValue;
 use web_sys::{CustomEvent, CustomEventInit, Document, HtmlElement};
 
 use crate::ipc;
+use crate::palette::PaletteState;
 
 /// The page asks the dialog to open: `document.dispatchEvent(new
 /// CustomEvent('gospel-getter:export-notes', { cancelable: true, detail }))`.
@@ -220,36 +265,26 @@ pub fn open_request(event: &CustomEvent) -> Result<OpenRequest, JsValue> {
 }
 
 /// The page asks the shortcuts sheet to open (`?`, ☰ → Keyboard shortcuts,
-/// the palette's command): a cancelable `CustomEvent` whose `detail` is a
-/// [`ShortcutsRequest`] plus `returnFocus` (see [`return_focus`]).
+/// the palette's command): a cancelable `CustomEvent` whose `detail` is
+/// `{ returnFocus }` (see [`return_focus`]).
 pub const SHORTCUTS_EVENT: &str = "gospel-getter:shortcuts";
 
-/// The page's one table of shortcuts, as the sheet lists it: the group
-/// names in order, and the rows (`SHORTCUTS` in `ui/index.html`; the sheet
-/// reads only these fields of each).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-pub struct ShortcutsRequest {
-    pub groups: Vec<String>,
-    pub shortcuts: Vec<ShortcutRow>,
-}
-
-/// One shortcut: its id, its group, the ways to press it (each a list of
-/// key caps) and what it does.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct ShortcutRow {
-    pub id: String,
-    pub group: String,
-    pub keys: Vec<Vec<String>>,
-    pub does: String,
+/// Puts the table of shortcuts where the page had it,
+/// `window.gospelGetterShortcuts`: an array of `{ id, group, keys, aria,
+/// does, handles }`, as `SHORTCUTS` was.
+pub fn export_shortcuts() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+    if let Ok(table) = crate::shortcut_table::SHORTCUTS.serialize(&serializer) {
+        let _ = js_sys::Reflect::set(&window, &JsValue::from_str("gospelGetterShortcuts"), &table);
+    }
 }
 
 /// Reads an event's `detail` as `T`, or says what was wrong with it.
 pub fn detail<T: serde::de::DeserializeOwned>(event: &CustomEvent) -> Result<T, JsValue> {
     serde_wasm_bindgen::from_value(event.detail()).map_err(|e| JsValue::from(e.to_string()))
-}
-
-pub fn shortcuts_request(event: &CustomEvent) -> Result<ShortcutsRequest, JsValue> {
-    detail(event)
 }
 
 /// `detail.returnFocus`: the element focus goes back to when a modal the
@@ -748,19 +783,31 @@ pub fn library_loaded(list: &str, items: &JsValue) {
     dispatch_object(LIBRARY_LOADED_EVENT, &detail);
 }
 
-/// A Library row opens its passage: a `CustomEvent` whose `detail` is
-/// `{ bookId, chapter, verseStart, verseEnd, note }`. The page jumps there
-/// (`jumpTo`, recorded in its history, the passage selected), then, with a
-/// `note` (as `list_all_notes` gave it), opens the note editor on it.
-pub const LIBRARY_OPEN_EVENT: &str = "gospel-getter:library-open";
+/// A Library row or a search result opens its passage: a `CustomEvent`
+/// whose `detail` is `{ bookId, chapter, verseStart, verseEnd, note }`
+/// (`verseStart` and `verseEnd` `null` for a whole chapter). The page jumps
+/// there (`jumpTo`, recorded in its history, the passage selected), then,
+/// with a `note` (as `list_all_notes` gave it), opens the note editor on
+/// it.
+pub const OPEN_PASSAGE_EVENT: &str = "gospel-getter:open-passage";
 
-/// Says [`LIBRARY_OPEN_EVENT`]; `note` is `null` to open the passage only.
-pub fn library_open(passage: &crate::dto::PassageArgs, note: &JsValue) {
+/// A passage to open: a chapter, and its verses if not all of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenPassage {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: Option<i64>,
+    pub verse_end: Option<i64>,
+}
+
+/// Says [`OPEN_PASSAGE_EVENT`]; `note` is `null` to open the passage only.
+pub fn open_passage(passage: &OpenPassage, note: &JsValue) {
     let Ok(detail) = ipc::args(passage) else {
         return;
     };
     let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("note"), note);
-    dispatch_object(LIBRARY_OPEN_EVENT, &detail);
+    dispatch_object(OPEN_PASSAGE_EVENT, &detail);
 }
 
 /// Sends `name` with `detail` as it is (an object built here).
@@ -784,4 +831,88 @@ pub fn translation_code() -> String {
         .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
         .map(|select| select.value())
         .unwrap_or_default()
+}
+
+/// The surface the head script has open ("library", "aa", ...), if any:
+/// `window.gospelGetterSurfaces.current()`.
+pub fn current_surface() -> Option<String> {
+    let window = web_sys::window()?;
+    let surfaces = js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterSurfaces"))
+        .ok()
+        .filter(JsValue::is_object)?;
+    let current = js_sys::Reflect::get(&surfaces, &JsValue::from_str("current"))
+        .ok()?
+        .dyn_into::<js_sys::Function>()
+        .ok()?;
+    current.call0(&surfaces).ok()?.as_string()
+}
+
+/// The page opens or closes the search box: a cancelable `CustomEvent`
+/// whose `detail` is `{ open }`. The search box cancels it to say it has
+/// it; when nothing does (the module didn't load), the page says search
+/// isn't available.
+pub const SEARCH_EVENT: &str = "gospel-getter:search";
+
+#[derive(Debug, Deserialize)]
+struct SearchRequest {
+    open: bool,
+}
+
+/// Whether a [`SEARCH_EVENT`] asks to open (else to close).
+pub fn search_request(event: &CustomEvent) -> Result<bool, JsValue> {
+    detail::<SearchRequest>(event).map(|r| r.open)
+}
+
+/// The head script opened a surface: `{ name }`.
+pub const SURFACE_OPEN_EVENT: &str = "gospel-getter:surface-open";
+
+/// This crate asks what the palette's commands need of the page: a
+/// `CustomEvent` whose `detail` is `{}`; the page's listener sets
+/// `detail.state` (a [`PaletteState`]) before the dispatch returns.
+pub const PALETTE_STATE_EVENT: &str = "gospel-getter:palette-state";
+
+/// The page as the palette's commands need it now (the default, all off and
+/// empty, if the page didn't say, or said something unreadable, which is
+/// logged).
+pub fn palette_state() -> PaletteState {
+    let Some(document) = document() else {
+        return PaletteState::default();
+    };
+    let detail = js_sys::Object::new();
+    let init = CustomEventInit::new();
+    init.set_detail(&detail);
+    let Ok(event) = CustomEvent::new_with_event_init_dict(PALETTE_STATE_EVENT, &init) else {
+        return PaletteState::default();
+    };
+    let _ = document.dispatch_event(&event);
+    let state = js_sys::Reflect::get(&detail, &JsValue::from_str("state")).unwrap_or_default();
+    if state.is_undefined() {
+        return PaletteState::default();
+    }
+    serde_wasm_bindgen::from_value(state).unwrap_or_else(|e| {
+        ipc::log_error("The page's palette state can't be read", &JsValue::from(e));
+        PaletteState::default()
+    })
+}
+
+/// A palette command the page runs: a `CustomEvent` whose `detail` is
+/// `{ command, value }` (`palette::Run::Page`): `copy-chapter`,
+/// `copy-chapter-as`, `next-chapter`, `previous-chapter`, `next-book`,
+/// `previous-book`, `back`, `forward`, `text-larger`, `text-smaller`,
+/// `text-medium`, `shortcuts` (`value` `null`), `translation` and
+/// `compare-with` (`value` a translation's code).
+pub const COMMAND_EVENT: &str = "gospel-getter:command";
+
+#[derive(Debug, Serialize)]
+struct PageCommand<'a> {
+    command: &'a str,
+    value: Option<&'a str>,
+}
+
+/// Says [`COMMAND_EVENT`]: the page runs it before this returns.
+pub fn page_command(command: &str, value: Option<&str>) {
+    let Ok(detail) = ipc::args(&PageCommand { command, value }) else {
+        return;
+    };
+    dispatch_object(COMMAND_EVENT, &detail);
 }
