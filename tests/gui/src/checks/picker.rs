@@ -6,7 +6,10 @@
 //! from the start, and stays as a chapter is chosen in it (21). Random
 //! chapter reads a chapter at its top (22). The keyboard moves through the
 //! chapters and the books as it always did, and Enter reads the chapter
-//! (23). Hiding and showing the sidebar keeps the reader's place: the first
+//! (23). Checks 22 and 23 run in the shape the window gives (the sidebar,
+//! or the popover where the window can't be 1200 px wide, as on the Windows
+//! runner's screen); 21 and 24 need the sidebar, and on Windows say they
+//! weren't run, and why, when the window can't be made that wide. Hiding and showing the sidebar keeps the reader's place: the first
 //! verse under the bar stays the same, within a line (24, at Aa's Wide
 //! width, where the chapter's column is narrower beside the sidebar, so the
 //! text reflows). Screenshots in Chi Rho here, and in Vellum with check
@@ -29,6 +32,20 @@ pub(super) const PICKER_SHOTS: [&str; 4] = [
 
 /// A window narrower than the sidebar's breakpoint (1200 px).
 const NARROW_WIDTH: u32 = 1000;
+
+/// The app's own window width, which has room for the sidebar.
+const WIDE_WIDTH: u32 = 1280;
+
+/// The page's width and the screen's size.
+const WINDOW_JS: &str =
+    "return { innerWidth: window.innerWidth, screen: `${screen.width}x${screen.height}` };";
+
+/// Whether the page is laid out for the window's width as it is now: the
+/// head script has the sidebar's breakpoint (`data-wide`) as the media query
+/// answers.
+const SHAPE_SETTLED_JS: &str = "const wide = window.matchMedia('(min-width: 1200px)').matches;
+    return [wide === ('wide' in document.documentElement.dataset),
+            { wide, innerWidth: window.innerWidth, screen: `${screen.width}x${screen.height}` }];";
 
 /// Books, by the ids the backend gives them.
 const PSALMS: u32 = 19;
@@ -141,8 +158,8 @@ impl Run<'_> {
         .await
     }
 
-    /// The window made `width` wide (its height kept), until the page sees
-    /// it; returns the width it had.
+    /// Makes the window `width` wide (its height kept), and waits until the
+    /// page is laid out for it; returns the width it had.
     async fn window_width(&self, width: u32) -> Result<u32> {
         let rect = self.ui.driver().get_window_rect().await?;
         self.ui
@@ -150,30 +167,76 @@ impl Run<'_> {
             .set_window_rect(rect.x, rect.y, width, rect.height as u32)
             .await?;
         self.ui
-            .wait_with(
-                &format!("the window to be {width} px wide"),
-                "return [Math.abs(window.outerWidth - arguments[0]) <= 2, window.outerWidth];",
-                vec![json!(width)],
+            .wait(
+                &format!("the page to be laid out for a {width} px window"),
+                SHAPE_SETTLED_JS,
             )
             .await?;
         Ok(rect.width as u32)
     }
 
-    /// Back to the window's own width, with the sidebar shown in it.
-    async fn wide_again(&self, width: u32) -> Result<()> {
-        self.window_width(width).await?;
-        self.picker_is(
-            "the sidebar to show again",
-            "seen.wide && seen.shape === 'sidebar' && seen.shown",
-        )
-        .await?;
-        Ok(())
+    /// Makes the window wide enough for the sidebar ([`WIDE_WIDTH`]), if it
+    /// isn't already; `Err` says why it can't be (a screen narrower than
+    /// that, as the Windows runner's).
+    async fn ensure_wide(&self) -> Result<std::result::Result<(), String>> {
+        let wide = |seen: &Value| seen["wide"] == Value::Bool(true);
+        if wide(&self.picker_state().await?) {
+            return Ok(Ok(()));
+        }
+        let rect = self.ui.driver().get_window_rect().await?;
+        if let Err(e) = self
+            .ui
+            .driver()
+            .set_window_rect(rect.x, rect.y, WIDE_WIDTH, rect.height as u32)
+            .await
+        {
+            return Ok(Err(format!("the window can't be resized here ({e})")));
+        }
+        // A few seconds for the window to grow and the page to follow.
+        for _ in 0..30 {
+            if wide(&self.picker_state().await?) {
+                self.ui
+                    .wait(
+                        "the page to be laid out for the wide window",
+                        SHAPE_SETTLED_JS,
+                    )
+                    .await?;
+                return Ok(Ok(()));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let seen = self.ui.js(WINDOW_JS, Vec::new()).await?;
+        Ok(Err(format!(
+            "the window can't be made wide enough for the sidebar (1200 px): asked for {WIDE_WIDTH} px, \
+             the page is {} px wide on a {} screen",
+            seen["innerWidth"],
+            seen["screen"].as_str().unwrap_or("?")
+        )))
     }
 
-    /// Reads `book_id`'s chapter `n` through the sidebar (its chapters shown
-    /// first, if they aren't), and waits until it's read: `heading`.
-    async fn read_in_sidebar(&self, book_id: u32, n: u32, heading: &str) -> Result<Value> {
+    /// A check that needs the sidebar, on a window that can't have it: not
+    /// run on Windows (whose runner's screen is too narrow), and a failure
+    /// elsewhere.
+    fn not_wide(&self, why: String) -> Result<String> {
+        if self.config.xvfb.is_none() {
+            Ok(format!("not run on Windows: {why}"))
+        } else {
+            bail!("{why}")
+        }
+    }
+
+    /// Reads `book_id`'s chapter `n` through the picker (the popover opened
+    /// first, on a narrow window; the book's chapters shown first, if they
+    /// aren't), and waits until it's read: `heading`.
+    async fn read_in_picker(&self, book_id: u32, n: u32, heading: &str) -> Result<Value> {
         let ui = &self.ui;
+        let state = self.picker_state().await?;
+        let sidebar = state["shape"] == json!("sidebar");
+        if state["shown"] != Value::Bool(true) {
+            ui.click("click the reference button (open the picker)", "#ref-btn")
+                .await?;
+            self.picker_is("the picker to show", "seen.shown").await?;
+        }
         let open = ui
             .js(
                 "const b = document.querySelector(arguments[0]);
@@ -186,10 +249,22 @@ impl Run<'_> {
                 .await?;
         }
         ui.click(&format!("click chapter {n}"), &chapter(n)).await?;
+        let shape = if sidebar {
+            "seen.shown && seen.shape === 'sidebar'"
+        } else {
+            "!seen.shown"
+        };
         self.picker_is(
-            &format!("{heading} to be read, marked in the sidebar, which stays"),
             &format!(
-                "seen.heading === '{heading}' && seen.shown && seen.shape === 'sidebar'
+                "{heading} to be read and marked, {}",
+                if sidebar {
+                    "the sidebar staying"
+                } else {
+                    "the popover closed"
+                }
+            ),
+            &format!(
+                "seen.heading === '{heading}' && {shape}
                  && seen.marked[1] === '{n}' && '{heading}'.startsWith(seen.marked[0] + ' ')"
             ),
         )
@@ -203,7 +278,7 @@ impl Run<'_> {
         let width = self.window_width(NARROW_WIDTH).await?;
         let checked = self.picker_popover_steps().await;
         // The window goes back to its width whatever happened.
-        let restored = self.wide_again(width).await;
+        let restored = self.window_width(width).await;
         let said = checked?;
         restored?;
         Ok(said)
@@ -278,6 +353,9 @@ impl Run<'_> {
     /// Check 21: the sidebar, on a wide window.
     pub(super) async fn picker_sidebar(&mut self) -> Result<String> {
         self.plain_reading().await?;
+        if let Err(why) = self.ensure_wide().await? {
+            return self.not_wide(why);
+        }
         let start = self
             .picker_is(
                 "the sidebar to show: a landmark, not a dialog, with every book",
@@ -297,7 +375,7 @@ impl Run<'_> {
             )
             .await?;
         let read = self
-            .read_in_sidebar(PSALMS, n, &format!("Psalms {n}"))
+            .read_in_picker(PSALMS, n, &format!("Psalms {n}"))
             .await?;
         self.shot(
             "screenshot: the picker as the sidebar, Chi Rho",
@@ -314,19 +392,20 @@ impl Run<'_> {
         ))
     }
 
-    /// Check 22: Random chapter reads a chapter at its top.
+    /// Check 22: Random chapter reads a chapter at its top, in the sidebar
+    /// or, on a narrow window, the popover (which then closes).
     pub(super) async fn random_chapter(&mut self) -> Result<String> {
         self.plain_reading().await?;
-        self.picker_is(
-            "the sidebar to show",
-            "seen.shape === 'sidebar' && seen.shown",
-        )
-        .await?;
         // A chapter longer than the window, scrolled down.
-        let here = self.heading().await?;
-        if here != "Psalms 119" {
-            self.read_in_sidebar(PSALMS, 119, "Psalms 119").await?;
+        if self.heading().await? != "Psalms 119" {
+            self.read_in_picker(PSALMS, 119, "Psalms 119").await?;
         }
+        let sidebar = self.picker_state().await?["shape"] == json!("sidebar");
+        let after = if sidebar {
+            "seen.shown"
+        } else {
+            "!seen.shown && seen.focus === '#ref-btn'"
+        };
         // Random may pick the chapter on screen (1 in 1,189), which then
         // stays where it is: another try.
         for attempt in 1..=3 {
@@ -337,14 +416,29 @@ impl Run<'_> {
                     "window.scrollTo(0, 1500); return [window.scrollY > 1000, Math.round(window.scrollY)];",
                 )
                 .await?;
+            if !sidebar {
+                self.ui
+                    .click("click the reference button (open the picker)", "#ref-btn")
+                    .await?;
+                self.picker_is("the popover to open", "seen.shown").await?;
+            }
             self.ui
                 .click("click Random chapter", "#random-chapter-btn")
                 .await?;
             let read = self
                 .picker_is(
-                    "another chapter to be read at its top, marked, the sidebar staying",
-                    "seen.heading !== 'Psalms 119' && seen.heading === `${seen.marked[0]} ${seen.marked[1]}`
-                     && seen.scrollY === 0 && seen.shown",
+                    &format!(
+                        "another chapter to be read at its top, marked, {}",
+                        if sidebar {
+                            "the sidebar staying"
+                        } else {
+                            "the popover closed, focus on the reference button"
+                        }
+                    ),
+                    &format!(
+                        "seen.heading !== 'Psalms 119' && seen.heading === `${{seen.marked[0]}} ${{seen.marked[1]}}`
+                         && seen.scrollY === 0 && {after}"
+                    ),
                 )
                 .await;
             let read = match read {
@@ -358,11 +452,24 @@ impl Run<'_> {
                 Err(e) => return Err(e),
             };
             return Ok(format!(
-                "Psalms 119 scrolled to {down} px; Random chapter: {} read, at its top (scrollY {}), \
-                 marked {} in the sidebar, which stays",
+                "{}: Psalms 119 scrolled to {down} px; Random chapter: {} read, at its top (scrollY {}), \
+                 marked {}, {}",
+                if sidebar {
+                    "the sidebar"
+                } else {
+                    "the popover (a narrow window)"
+                },
                 read["heading"].as_str().unwrap_or("?"),
                 read["scrollY"],
-                read["marked"]
+                read["marked"],
+                if sidebar {
+                    "the sidebar staying".to_owned()
+                } else {
+                    format!(
+                        "the popover closed, focus on {}",
+                        read["focus"].as_str().unwrap_or("?")
+                    )
+                }
             ));
         }
         bail!("Random chapter picked the chapter on screen three times")
@@ -373,13 +480,19 @@ impl Run<'_> {
     pub(super) async fn picker_keyboard(&mut self) -> Result<String> {
         self.plain_reading().await?;
         if self.heading().await? != "John 3" {
-            self.read_in_sidebar(JOHN, 3, "John 3").await?;
+            self.read_in_picker(JOHN, 3, "John 3").await?;
         }
+        let sidebar = self.picker_state().await?["shape"] == json!("sidebar");
+        let shape = if sidebar {
+            "the sidebar"
+        } else {
+            "the popover"
+        };
         self.focus_off_controls().await?;
-        self.ui.press("press G (into the sidebar)", "g").await?;
+        self.ui.press("press G (into the picker)", "g").await?;
         self.picker_is(
-            "focus on John 3 in the sidebar",
-            "seen.shown && seen.shape === 'sidebar' && seen.focus === 'chapter 3 (John chapters)'",
+            &format!("focus on John 3 in {shape}"),
+            "seen.shown && seen.focus === 'chapter 3 (John chapters)'",
         )
         .await?;
         let moves: [(Key, &str, &str); 8] = [
@@ -409,15 +522,23 @@ impl Run<'_> {
             bail!("an arrow turned the chapter: {}", unturned["heading"]);
         }
         self.ui.press("press Enter (read it)", Key::Enter).await?;
-        let read = self
-            .picker_is(
+        let read = if sidebar {
+            self.picker_is(
                 "Luke 7 to be read, the sidebar staying, focus on its chapter",
                 "seen.heading === 'Luke 7' && seen.shown && seen.marked.join(' ') === 'Luke 7'
                  && seen.focus === 'chapter 7 (Luke chapters)'",
             )
-            .await?;
+            .await?
+        } else {
+            self.picker_is(
+                "Luke 7 to be read, the popover closed, focus on the reference button",
+                "seen.heading === 'Luke 7' && !seen.shown && seen.marked.join(' ') === 'Luke 7'
+                 && seen.focus === '#ref-btn'",
+            )
+            .await?
+        };
         Ok(format!(
-            "G: focus on John 3; {}; the chapter stayed John 3; Enter: {} read, focus still on {}",
+            "in {shape}: G: focus on John 3; {}; the chapter stayed John 3; Enter: {} read, focus on {}",
             path[1..].join(", "),
             read["heading"].as_str().unwrap_or("?"),
             read["focus"].as_str().unwrap_or("?")
@@ -483,6 +604,9 @@ impl Run<'_> {
     /// at the Wide width (Normal is put back whatever happens).
     pub(super) async fn sidebar_reading_place(&mut self) -> Result<String> {
         self.plain_reading().await?;
+        if let Err(why) = self.ensure_wide().await? {
+            return self.not_wide(why);
+        }
         self.reading_width("wide").await?;
         let checked = self.sidebar_reading_place_steps().await;
         let normal = self.reading_width("normal").await;
@@ -498,7 +622,7 @@ impl Run<'_> {
         )
         .await?;
         if self.heading().await? != "Psalms 119" {
-            self.read_in_sidebar(PSALMS, 119, "Psalms 119").await?;
+            self.read_in_picker(PSALMS, 119, "Psalms 119").await?;
         }
         self.ui
             .wait(
@@ -576,23 +700,29 @@ impl Run<'_> {
         ))
     }
 
-    /// Check 4's Vellum screenshots of the picker: the sidebar, then the
-    /// popover on a narrow window.
+    /// Check 4's Vellum screenshots of the picker: the sidebar (where the
+    /// window can be wide enough for it), then the popover on a narrow
+    /// window.
     pub(super) async fn picker_vellum_screenshots(&mut self) -> Result<()> {
         self.plain_reading().await?;
-        self.picker_is(
-            "the sidebar to show",
-            "seen.shape === 'sidebar' && seen.shown",
-        )
-        .await?;
-        self.ui
-            .js("window.scrollTo(0, 0); return null;", Vec::new())
-            .await?;
-        self.shot(
-            "screenshot: the picker as the sidebar, Vellum",
-            PICKER_SHOTS[3],
-        )
-        .await;
+        match self.ensure_wide().await? {
+            Ok(()) => {
+                self.picker_is(
+                    "the sidebar to show",
+                    "seen.shape === 'sidebar' && seen.shown",
+                )
+                .await?;
+                self.ui
+                    .js("window.scrollTo(0, 0); return null;", Vec::new())
+                    .await?;
+                self.shot(
+                    "screenshot: the picker as the sidebar, Vellum",
+                    PICKER_SHOTS[3],
+                )
+                .await;
+            }
+            Err(why) => self.ui.log(&format!("  no sidebar screenshot: {why}")),
+        }
         let width = self.window_width(NARROW_WIDTH).await?;
         let shot = async {
             self.picker_is("the popover shape", "!seen.wide && !seen.shown")
@@ -617,8 +747,8 @@ impl Run<'_> {
             Ok::<_, anyhow::Error>(())
         }
         .await;
-        let restored = self.wide_again(width).await;
+        let restored = self.window_width(width).await;
         shot?;
-        restored
+        restored.map(|_| ())
     }
 }

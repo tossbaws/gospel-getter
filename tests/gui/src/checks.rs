@@ -320,7 +320,13 @@ async fn shipped(config: &Config, report: &mut Report, started: Instant) {
             .filter(|name| config.xvfb.is_some() || *name != IMPORT_SHOT)
             .chain(library::LIBRARY_SHOTS)
             .chain(search::SEARCH_SHOTS)
-            .chain(picker::PICKER_SHOTS)
+            // The sidebar's, only where the window can be wide enough for
+            // it (not the Windows runner's screen; see `picker`).
+            .chain(
+                picker::PICKER_SHOTS
+                    .into_iter()
+                    .filter(|name| config.xvfb.is_some() || !name.starts_with("21-")),
+            )
             .collect();
         report
             .record(Check::Screenshots, run.shots.verdict(&expected))
