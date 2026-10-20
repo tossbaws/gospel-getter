@@ -425,7 +425,7 @@ test('the Library keeps its tab and color filter for the session, not across a r
     await withApp({ book: 'John', chapter: 3, keepBookmarks: true }, async (app) => {
         const before = Object.keys(app.storage()).sort();
         app.openLibrary('highlights');
-        app.click($(app, 'highlight-filter').querySelector('[data-filter="pink"]'));
+        await app.click($(app, 'highlight-filter').querySelector('[data-filter="pink"]'));
         assert.equal(app.document.querySelectorAll('#highlight-list .bookmark-item').length, 1);
         app.key('Escape', {}, app.document.activeElement);
         assert.ok(!isOpen(app, 'library'));

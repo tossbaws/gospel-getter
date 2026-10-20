@@ -35,6 +35,12 @@
 //! - [`SURFACE_CLOSE_EVENT`] (`gospel-getter:surface-close`, the head
 //!   script's): `{ name }`, a surface closed; About closing part way through
 //!   an install brings the banner back.
+//! - [`LIBRARY_REFRESH_EVENT`] (`gospel-getter:library-refresh`): the one way
+//!   the page has the Library's lists reloaded (a bookmark or highlight
+//!   changed in the reader, a translation switch, a note saved, an import,
+//!   boot), `{ lists }` naming them. The Library cancels it and puts in
+//!   `detail.done` a promise that settles once each list has its answer;
+//!   asked before the module loaded, the page asks again on [`READY_EVENT`].
 //!
 //! Rust to page:
 //! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): the module has loaded
@@ -56,6 +62,16 @@
 //!   after the editor added, saved or deleted a note: the page's status
 //!   line, and a deletion's Undo (`restoreNote`, which stays the page's
 //!   under its shared `actionAttempt` guard).
+//! - [`LIBRARY_LOADED_EVENT`] (`gospel-getter:library-loaded`): `{ list,
+//!   items }` each time the Library's bookmarks or notes have loaded (or
+//!   failed to: `items` is `null`), the answer as the backend gave it: the
+//!   page's own copy, for the reader's bookmark markers and the selection
+//!   card's Bookmark button, the welcome's fresh-install facts and Export
+//!   notes. So the page never asks the backend for them itself.
+//! - [`LIBRARY_OPEN_EVENT`] (`gospel-getter:library-open`): `{ bookId,
+//!   chapter, verseStart, verseEnd, note }`, a Library row opened (the
+//!   Library already closed): the page jumps there, as its own jumps do,
+//!   and with `note` (a note's Edit) then opens the editor on it.
 //!
 //! Page globals this crate calls (small, named, existing or exposed for it):
 //! - `window.gospelGetterSurfaces.close()` (the head script's surfaces
@@ -65,14 +81,21 @@
 //!   an import's display settings ([`apply_preferences`]).
 //! - `window.gospelGetterRefreshNotes()` (the page's `refreshNotes`, a
 //!   promise): the editor waits for it before closing ([`refresh_notes`]).
+//! - `window.gospelGetterRefreshHighlights()` (the page's
+//!   `refreshHighlights`, a promise): after the Library removes a
+//!   highlight, the reader's highlights and then the list, waited for
+//!   before focus moves on ([`refresh_highlights`]).
+//! - `window.gospelGetterSurfaces.close(restoreFocus)` also closes the
+//!   Library before a row opens its passage ([`close_surfaces_with`]).
 //!
 //! Page controls this crate uses as a reader would: `#theme-select`, Aa's
 //! record of the theme, read and changed (with a `change` event) for the
 //! welcome's looks ([`theme`], [`choose_theme`]); Aa's `<select>` options'
 //! labels, read to name an import file's settings; the page's focus home
 //! (`#aa-toggle` in reading mode, else `#menu-toggle`, [`focus_home`]);
-//! `#export-notes-btn`; and, for the editor's focus going back, the
-//! selection card's `.verse-notes .note-edit[data-note-id]`,
+//! `#translation-select`, Aa's record of the translation, read for the
+//! Library's previews ([`translation_code`]); and, for the editor's focus
+//! going back, the selection card's `.verse-notes .note-edit[data-note-id]`,
 //! `.verse-actions .verse-note-btn` and `.chapter-main .chapter-heading`.
 //!
 //! The pieces' overlays (`#export-notes-overlay`, `#shortcuts-overlay`,
@@ -81,6 +104,11 @@
 //! check read them, looked up by id when asked, to know a modal is open.
 //! Each piece has the keyboard while it's open: a capturing `keydown` on
 //! `window` that stops every other handler.
+//!
+//! The Library's tabs and lists (`#library-panel`'s tablist and tab
+//! panels, with `#export-notes-btn`, whose click stays the page's) are this
+//! crate's elements, put inside the head script's panel, which opens and
+//! closes it and focuses its chosen tab.
 //!
 //! About (`#about-overlay`) and the update banner (`#update-banner`) are
 //! this crate's elements too, put where the page had them. About's `hidden`
@@ -103,6 +131,8 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use web_sys::{CustomEvent, CustomEventInit, Document, HtmlElement};
+
+use crate::ipc;
 
 /// The page asks the dialog to open: `document.dispatchEvent(new
 /// CustomEvent('gospel-getter:export-notes', { cancelable: true, detail }))`.
@@ -543,10 +573,23 @@ pub fn note_others(event: &CustomEvent) -> Result<Vec<OtherNote>, JsValue> {
 /// reports its own failures), waiting for it, so the editor can close onto
 /// the note's refreshed Edit.
 pub async fn refresh_notes() {
+    call_page_refresh("gospelGetterRefreshNotes").await;
+}
+
+/// Refreshes the reader's highlights after the Library has removed one:
+/// `window.gospelGetterRefreshHighlights()` (the page's `refreshHighlights`,
+/// which then has the list reloaded, through [`LIBRARY_REFRESH_EVENT`]),
+/// waiting for it, so focus moves on in the refreshed list.
+pub async fn refresh_highlights() {
+    call_page_refresh("gospelGetterRefreshHighlights").await;
+}
+
+/// Calls the page's global `name()`, a promise, and waits for it.
+async fn call_page_refresh(name: &str) {
     let Some(window) = web_sys::window() else {
         return;
     };
-    let refresh = js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterRefreshNotes"))
+    let refresh = js_sys::Reflect::get(&window, &JsValue::from_str(name))
         .ok()
         .and_then(|f| f.dyn_into::<js_sys::Function>().ok());
     let Some(refresh) = refresh else {
@@ -631,6 +674,18 @@ pub fn surface_closed(event: &CustomEvent) -> Option<String> {
 /// `window.gospelGetterSurfaces.close()`, the head script's, which puts
 /// focus back where About was opened from.
 pub fn close_surfaces() {
+    call_close(&[]);
+}
+
+/// Closes the open surface (the Library, as a row opens its passage):
+/// `window.gospelGetterSurfaces.close(restoreFocus)`. With `restore_focus`,
+/// focus goes back to the Library's button if it was in the Library; without
+/// (a note's Edit, whose editor takes focus), it's left alone.
+pub fn close_surfaces_with(restore_focus: bool) {
+    call_close(&[JsValue::from_bool(restore_focus)]);
+}
+
+fn call_close(args: &[JsValue]) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -644,6 +699,88 @@ pub fn close_surfaces() {
         .ok()
         .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
     {
-        let _ = close.call0(&surfaces);
+        let _ = match args {
+            [restore_focus] => close.call1(&surfaces, restore_focus),
+            _ => close.call0(&surfaces),
+        };
     }
+}
+
+/// The page asks the Library to reload lists: a cancelable `CustomEvent`
+/// whose `detail` is `{ lists }`, each `bookmarks`, `highlights` or `notes`
+/// (`library_text::List`). The Library cancels it to say it has it and sets
+/// `detail.done` to a promise that settles once every list named has its
+/// answer, shown (or dropped, when a newer reload of the same list has
+/// already been asked for: only the latest of overlapping reloads shows).
+/// The page waits for it where it waited for its own reloads.
+pub const LIBRARY_REFRESH_EVENT: &str = "gospel-getter:library-refresh";
+
+#[derive(Debug, Deserialize)]
+struct LibraryRefresh {
+    lists: Vec<String>,
+}
+
+/// The lists a [`LIBRARY_REFRESH_EVENT`] names, as it named them.
+pub fn library_refresh(event: &CustomEvent) -> Result<Vec<String>, JsValue> {
+    detail::<LibraryRefresh>(event).map(|r| r.lists)
+}
+
+/// Answers a [`LIBRARY_REFRESH_EVENT`]: `detail.done = done`.
+pub fn library_refresh_done(event: &CustomEvent, done: &js_sys::Promise) {
+    let _ = js_sys::Reflect::set(&event.detail(), &JsValue::from_str("done"), done);
+}
+
+/// The Library's bookmarks or notes have loaded: a `CustomEvent` whose
+/// `detail` is `{ list, items }`, `list` being `bookmarks` or `notes` and
+/// `items` the backend's answer as it came (`null` if it failed). Not sent
+/// for an answer a newer reload has overtaken.
+pub const LIBRARY_LOADED_EVENT: &str = "gospel-getter:library-loaded";
+
+/// Says [`LIBRARY_LOADED_EVENT`].
+pub fn library_loaded(list: &str, items: &JsValue) {
+    let detail = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &detail,
+        &JsValue::from_str("list"),
+        &JsValue::from_str(list),
+    );
+    let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("items"), items);
+    dispatch_object(LIBRARY_LOADED_EVENT, &detail);
+}
+
+/// A Library row opens its passage: a `CustomEvent` whose `detail` is
+/// `{ bookId, chapter, verseStart, verseEnd, note }`. The page jumps there
+/// (`jumpTo`, recorded in its history, the passage selected), then, with a
+/// `note` (as `list_all_notes` gave it), opens the note editor on it.
+pub const LIBRARY_OPEN_EVENT: &str = "gospel-getter:library-open";
+
+/// Says [`LIBRARY_OPEN_EVENT`]; `note` is `null` to open the passage only.
+pub fn library_open(passage: &crate::dto::PassageArgs, note: &JsValue) {
+    let Ok(detail) = ipc::args(passage) else {
+        return;
+    };
+    let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("note"), note);
+    dispatch_object(LIBRARY_OPEN_EVENT, &detail);
+}
+
+/// Sends `name` with `detail` as it is (an object built here).
+fn dispatch_object(name: &str, detail: &JsValue) {
+    let Some(document) = document() else {
+        return;
+    };
+    let init = CustomEventInit::new();
+    init.set_detail(detail);
+    if let Ok(event) = CustomEvent::new_with_event_init_dict(name, &init) {
+        let _ = document.dispatch_event(&event);
+    }
+}
+
+/// The translation chosen in Aa (`#translation-select`'s value), whose text
+/// the Library previews, as the page's `currentTranslation` reads it.
+pub fn translation_code() -> String {
+    document()
+        .and_then(|d| d.get_element_by_id("translation-select"))
+        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
+        .map(|select| select.value())
+        .unwrap_or_default()
 }

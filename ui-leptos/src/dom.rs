@@ -110,6 +110,15 @@ pub fn on_document_event(name: &str, handler: impl FnMut(CustomEvent) + 'static)
     handler.forget();
 }
 
+/// Listens for `click` on `el` itself, for as long as the page lives. The
+/// handler may run again inside itself (it clicks something within `el`,
+/// whose click comes back up to it), which a Leptos `on:click` can't.
+pub fn on_click(el: &Element, handler: impl Fn(web_sys::MouseEvent) + 'static) {
+    let handler = Closure::<dyn Fn(web_sys::MouseEvent)>::new(handler);
+    let _ = el.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref());
+    handler.forget();
+}
+
 /// Listens for `keydown` on `window`, capturing: before any of the page's
 /// own handlers, as its modals do. For as long as the page lives.
 pub fn on_window_keydown(handler: impl FnMut(KeyboardEvent) + 'static) {

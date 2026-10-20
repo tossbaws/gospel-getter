@@ -1259,6 +1259,9 @@ pub struct NoteDto {
     /// Plain text, as the reader wrote it (trimmed).
     pub body: String,
     pub created_at: String,
+    /// The day it was written, as the app shows it ("Oct 9, 2026", in the
+    /// reader's time zone; see `notes_export::stored_date`).
+    pub created_at_display: String,
     pub updated_at: String,
 }
 
@@ -1277,6 +1280,7 @@ fn note_dto(state: &AppState, note: Note) -> NoteDto {
         verse_start: note.verse_start,
         verse_end: note.verse_end,
         body: note.body,
+        created_at_display: crate::notes_export::stored_date(&note.created_at, &chrono::Local),
         created_at: note.created_at,
         updated_at: note.updated_at,
     }
@@ -3247,6 +3251,17 @@ mod tests {
                 note.body.as_str()
             ),
             ("John 3:16\u{2013}18", "John", "<i>Not</i> markup.")
+        );
+        // The day it was written, as the app shows it, from the stored
+        // timestamp in the reader's time zone.
+        assert_eq!(
+            note.created_at_display,
+            crate::notes_export::display_date(crate::notes_export::local_date(
+                chrono::DateTime::parse_from_rfc3339(&note.created_at)
+                    .unwrap()
+                    .to_utc(),
+                &chrono::Local,
+            ))
         );
         let listed = notes_overlapping(&state, at(17, 17)).await.unwrap();
         assert_eq!(listed[0].id, note.id);

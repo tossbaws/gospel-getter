@@ -6,9 +6,9 @@
 const HTML: &str = include_str!("../../ui/index.html");
 
 /// The page's pieces written in Rust (`ui-leptos/src`), which own the
-/// modal dialogs' markup and keyboard handling: checks of those read them
-/// where they now live.
-const PIECES: [(&str, &str); 8] = [
+/// modal dialogs' markup and keyboard handling, and the Library's tabs and
+/// lists: checks of those read them where they now live.
+const PIECES: [(&str, &str); 9] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -29,6 +29,7 @@ const PIECES: [(&str, &str); 8] = [
     ("bridge.rs", include_str!("../../ui-leptos/src/bridge.rs")),
     ("about.rs", include_str!("../../ui-leptos/src/about.rs")),
     ("updates.rs", include_str!("../../ui-leptos/src/updates.rs")),
+    ("library.rs", include_str!("../../ui-leptos/src/library.rs")),
 ];
 
 /// One piece's source, by file name.

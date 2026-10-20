@@ -14,9 +14,9 @@
 # (tauri-driver with the native driver's own output) and environment.txt.
 # Exit code 0 only if every check passed.
 #
-# Checks 1 to 8 run on the app given. The updater's checks (9 to 13) run on
-# GUI_CHECK_UPDATER_APP: the GUI checks' test build of the app (cargo build
-# --release --features gui-test-updater, which no release build has), against
+# Checks 1 to 8 and 14 to 16 (the Library) run on the app given. The
+# updater's checks (9 to 13) run on GUI_CHECK_UPDATER_APP: the GUI checks'
+# test build (cargo build --release --features gui-test-updater), against
 # the checks' own local update server, with a signing key made for the run;
 # without it they fail as not run. Both apps are told the test build's
 # settings file (GOSPEL_GETTER_TEST_UPDATER, in the run's own folder); the

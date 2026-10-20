@@ -242,6 +242,13 @@ impl Ui {
         .await
     }
 
+    /// Waits for running animations (a panel sliding in, say) to finish,
+    /// so a click lands where the element has come to rest.
+    pub async fn settled(&self, what: &str) -> Result<()> {
+        self.wait(what, SETTLED_JS).await?;
+        Ok(())
+    }
+
     /// Saves the webview's own screenshot (taken by WebKit or WebView2) as
     /// `path`, once the page has settled, after checking it is a PNG.
     pub async fn screenshot(&self, what: &str, path: &Path) -> Result<u64> {

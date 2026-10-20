@@ -7,7 +7,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
 import { readFileSync } from 'node:fs';
 
 after(closeBridge);
@@ -121,3 +121,53 @@ test('without the pieces, About says it isn’t available, no update is looked f
         assert.equal(app.heading(), 'John 4');
         assert.deepEqual(app.consoleErrors, []);
     }));
+
+const JOHN = bookId('John');
+
+/** One bookmark (John 3:16) and one highlight (John 3:3), kept for the app. */
+async function seedLibrary() {
+    await backend('__reset', { bookId: JOHN, chapter: 3, translationCode: 'kjv' });
+    await backend('add_bookmark', { bookId: JOHN, chapter: 3, verseStart: 16, verseEnd: 16 });
+    await backend('set_highlight', { bookId: JOHN, chapter: 3, verseStart: 3, verseEnd: 3, color: 'green' });
+}
+
+const listCalls = (app) => app.calls.filter((c) => ['list_bookmarks', 'list_highlight_passages', 'list_all_notes'].includes(c.cmd));
+
+test('pieces that load after boot fill the Library then, and mark the bookmarks', async () => {
+    await seedLibrary();
+    await withApp({ book: 'John', chapter: 3, keepBookmarks: true, leptos: 'late' }, async (app) => {
+        await app.idle();
+        assert.equal($(app, 'bookmark-list'), null, 'no Library yet');
+        assert.deepEqual(listCalls(app), [], 'its lists wait for it');
+        assert.deepEqual(app.bookmarkedVerseNumbers(), []);
+        assert.equal(app.verse(3).dataset.highlight, 'green', 'the reader’s own highlights don’t');
+
+        await app.loadPieces();
+        await app.idle();
+        assert.deepEqual(listCalls(app).map((c) => c.cmd).sort(), ['list_all_notes', 'list_bookmarks', 'list_highlight_passages']);
+        assert.deepEqual(app.bookmarkItems().map((i) => i.reference), ['John 3:16']);
+        assert.deepEqual(app.bookmarkedVerseNumbers(), [16]);
+        assert.equal($(app, 'highlight-count').textContent, '1');
+        assert.deepEqual(app.consoleErrors, []);
+    });
+});
+
+test('without the pieces, the Library says it isn’t available, and the reader’s highlights still show', async () => {
+    await seedLibrary();
+    await withApp({ book: 'John', chapter: 3, keepBookmarks: true, leptos: false }, async (app) => {
+        await app.idle();
+        assert.deepEqual(listCalls(app), []);
+        assert.equal(app.verse(3).dataset.highlight, 'green');
+
+        app.open('library');
+        assert.equal(app.surface('library').hidden, false);
+        assert.deepEqual(toast(app), { text: 'The library isn’t available.', error: true });
+
+        const turn = app.calls.length;
+        app.key('Escape');
+        app.key('ArrowRight');
+        await app.idle(turn, 'get_reading');
+        assert.equal(app.heading(), 'John 4');
+        assert.deepEqual(app.consoleErrors, []);
+    });
+});
