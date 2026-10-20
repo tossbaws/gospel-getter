@@ -1327,7 +1327,9 @@
             border-radius: var(--radius-s);
         }
 
+        /* Full width at the end of the results, so it's hard to miss. */
         .search-more {
+            width: 100%;
             margin-top: 0.6rem;
         }
 
@@ -8828,8 +8830,14 @@
                 searchResults.innerHTML = groups.join('');
                 const options = paletteOptions();
                 searchInput.setAttribute('aria-expanded', String(options.length > 0));
-                searchMore.hidden = !(shown && shown.result.kind === 'text' && shown.result.offset + shown.result.results.length < shown.result.total);
-                if (shown && !searchMore.hidden) searchMore.dataset.offset = String(shown.result.offset + shown.result.results.length);
+                // Show more says how many the next page holds, of how many.
+                const shownCount = shown && shown.result.kind === 'text' ? shown.result.offset + shown.result.results.length : 0;
+                searchMore.hidden = !(shownCount && shownCount < shown.result.total);
+                if (!searchMore.hidden) {
+                    const { total, pageSize } = shown.result;
+                    searchMore.dataset.offset = String(shownCount);
+                    searchMore.textContent = `Show ${Math.min(pageSize, total - shownCount).toLocaleString('en')} more (of ${total.toLocaleString('en')})`;
+                }
                 if (query.empty) {
                     setSearchStatus('Type words to search, a reference to go there, or > for a command.');
                 } else if (query.commandsOnly) {
