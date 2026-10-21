@@ -6,10 +6,11 @@
 //! computed style (25). All of them survive a restart: the app is closed
 //! and started again on the same data, and the page and Aa show what was
 //! chosen (26, in a session of its own; the settings are then put back as
-//! they were, for the updater's checks). A translation chosen from the
-//! translation button is read (27); Compare goes on and off (28); reading
-//! mode comes and goes, by its exit button and by Escape (29). Screenshots
-//! in Chi Rho and Vellum.
+//! they were, for the updater's checks; not run on Windows, where Edge
+//! WebDriver gives each session a fresh WebView2 data folder). A
+//! translation chosen from the translation button is read (27); Compare
+//! goes on and off (28); reading mode comes and goes, by its exit button
+//! and by Escape (29). Screenshots in Chi Rho and Vellum.
 
 use anyhow::{Result, bail, ensure};
 use serde_json::{Value, json};
@@ -536,6 +537,24 @@ pub(super) async fn restart(
             return;
         }
     };
+    // Windows: Edge WebDriver starts each session's WebView2 with a user
+    // data folder of its own (WEBVIEW2_USER_DATA_FOLDER, a new
+    // `scoped_dir…` each time), so the app started again in a new session
+    // can't see what the first one saved; the app itself always uses the
+    // one folder. Not run there.
+    if config.xvfb.is_none() {
+        report
+            .record(
+                Check::AaRestart,
+                Ok("not run on Windows: Edge WebDriver gives each session's WebView2 a fresh user data \
+                    folder (WEBVIEW2_USER_DATA_FOLDER, a new scoped_dir per session), so the app started \
+                    again in a new session can't see the first session's local storage (the app as \
+                    shipped keeps one folder)"
+                    .to_owned()),
+            )
+            .await;
+        return;
+    }
     log_line(started, "start the app again, on the same data (check 26)");
     let driver = match start_session(config, &config.app, started).await {
         Ok(driver) => driver,
