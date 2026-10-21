@@ -1,10 +1,10 @@
 //! The search box's words and rules (`search`), free of the DOM so they are
 //! tested natively (`cargo test`): its status sentences, which option is
-//! active as the reader types and moves, Show more's next page, and a
-//! verse's text split at the words the search matched (the backend says
-//! where they are: `marks`, the one rule for which words those are, beside
-//! the search's own). The words are the page's (`ui/index.html` at
-//! 201ab8f), byte for byte.
+//! active as the reader types and moves, Show more's next page and label,
+//! and a verse's text split at the words the search matched (the backend
+//! says where they are: `marks`, the one rule for which words those are,
+//! beside the search's own). The words are the page's (`ui/index.html` at
+//! 201ab8f; Show more's label at a1219bf, #106), byte for byte.
 
 /// The empty box says what it takes.
 pub const HINT: &str = "Type words to search, a reference to go there, or > for a command.";
@@ -67,6 +67,17 @@ pub fn verses_status(total: i64, shown: i64, code: &str, terms: &[String]) -> St
 pub fn more_from(offset: i64, count: usize, total: i64) -> Option<i64> {
     let next = offset + count as i64;
     (next < total).then_some(next)
+}
+
+/// Show more's label, its accessible name too, once `shown` of `total`
+/// verses are: how many the next page holds (pages of `page_size`), and of
+/// how many, as the status line writes counts: "Show 50 more (of 1,234)".
+pub fn more_label(shown: i64, page_size: i64, total: i64) -> String {
+    format!(
+        "Show {} more (of {})",
+        thousands(page_size.min(total - shown)),
+        thousands(total)
+    )
 }
 
 /// Which option is active once the list is drawn, given the options' keys
@@ -185,6 +196,18 @@ mod tests {
         assert_eq!(more_from(50, 50, 120), Some(100));
         assert_eq!(more_from(100, 20, 120), None);
         assert_eq!(more_from(0, 0, 0), None);
+    }
+
+    #[test]
+    fn show_more_says_how_many_more_of_how_many() {
+        // The first page, the next one, then the last (smaller) one.
+        assert_eq!(more_label(50, 50, 235), "Show 50 more (of 235)");
+        assert_eq!(more_label(100, 50, 235), "Show 50 more (of 235)");
+        assert_eq!(more_label(200, 50, 235), "Show 35 more (of 235)");
+        // Thousands separators, as in the status line.
+        assert_eq!(more_label(50, 50, 31102), "Show 50 more (of 31,102)");
+        assert_eq!(more_label(31100, 50, 31102), "Show 2 more (of 31,102)");
+        assert_eq!(more_label(1000, 1500, 3000), "Show 1,500 more (of 3,000)");
     }
 
     #[test]
