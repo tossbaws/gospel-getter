@@ -209,3 +209,73 @@ test('pieces that load after boot bring search, and the table of shortcuts, with
         assert.equal(app.searchPanel().hidden, true);
         assert.deepEqual(app.consoleErrors, []);
     }));
+
+const SAVED_LOOK = {
+    'gospel-getter-theme': 'vellum',
+    'gospel-getter-text-size': 'large',
+    'gospel-getter-layout': 'flowing',
+    'gospel-getter-compare': 'on',
+    'gospel-getter-compare-with': 'bsb',
+};
+
+test('without the pieces, Aa, the translations and the picker say they aren’t available; the Bible text shows in the saved look', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv', leptos: false, storage: SAVED_LOOK }, async (app) => {
+        await app.idle();
+        const root = app.document.documentElement.dataset;
+        assert.deepEqual([root.theme, root.textSize, root.layout, root.compare, root.compareWith], ['vellum', 'large', 'flowing', 'on', 'bsb']);
+        assert.deepEqual(app.compareColumns(), ['King James Version (KJV)', 'Berean Standard Bible (BSB)'], 'compared as saved');
+        assert.equal(app.window.gospelGetterPreferences, undefined);
+
+        app.click($(app, 'aa-toggle'));
+        assert.deepEqual(toast(app), { text: 'Display settings aren’t available.', error: true });
+        app.key('Escape', {}, app.document.activeElement);
+        app.key('t');
+        assert.deepEqual(toast(app), { text: 'Translations aren’t available.', error: true });
+        app.key('Escape', {}, app.document.activeElement);
+        assert.equal(app.surface('translation').hidden, true);
+
+        // The picker's books are the pieces' too: on a wide window G goes
+        // into the sidebar, on a narrow one it opens the popover.
+        app.key('g');
+        assert.deepEqual(toast(app), { text: 'The book list isn’t available.', error: true });
+        assert.equal(app.document.querySelectorAll('#picker .book-item').length, 0);
+        app.resize(900);
+        app.document.body.focus();
+        app.key('g');
+        assert.equal(app.surface('picker').hidden, false);
+        assert.deepEqual(toast(app), { text: 'The book list isn’t available.', error: true });
+        app.key('Escape', {}, app.document.activeElement);
+
+        // Nothing was saved, and reading goes on.
+        assert.deepEqual(Object.keys(app.storage()).sort(), Object.keys(SAVED_LOOK).sort());
+        const turn = app.calls.length;
+        app.key('ArrowRight');
+        await app.idle(turn, 'get_compare');
+        assert.equal(app.heading(), 'John 4');
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
+test('pieces that load after boot bring Aa and the translations, with the saved settings', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv', leptos: 'late', storage: { 'gospel-getter-theme': 'monster-hunter', 'gospel-getter-text-size': 'small' } }, async (app) => {
+        await app.idle();
+        const root = app.document.documentElement.dataset;
+        assert.equal(root.theme, 'beast-slayer', 'the renamed theme, from the first frame');
+        assert.equal(root.textSize, 'small');
+        app.click($(app, 'aa-toggle'));
+        assert.deepEqual(toast(app), { text: 'Display settings aren’t available.', error: true });
+        app.key('Escape', {}, app.document.activeElement);
+
+        await app.loadPieces();
+        assert.equal(app.storage()['gospel-getter-theme'], 'beast-slayer', 'saved under its new name');
+        app.click($(app, 'aa-toggle'));
+        assert.equal(app.surface('aa').hidden, false);
+        const pressed = (id) => [...$(app, id).querySelectorAll('[aria-pressed="true"]')].map((b) => b.dataset.value);
+        assert.deepEqual(pressed('theme-choices'), ['beast-slayer']);
+        assert.equal($(app, 'text-size-value').textContent, 'Small');
+        assert.equal(app.document.activeElement, $(app, 'text-size-up'), 'A− is disabled at Small');
+        app.key('Escape', {}, app.document.activeElement);
+        app.click($(app, 'translation-toggle'));
+        assert.equal(app.document.activeElement, app.document.querySelector('#translation-choices [data-value="kjv"]'));
+        assert.deepEqual(app.window.gospelGetterPreferences.current().theme, 'beast-slayer');
+        assert.deepEqual(app.consoleErrors, []);
+    }));

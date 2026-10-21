@@ -20,6 +20,7 @@ web-sys = { version = "0.3", features = [
     "CustomEventInit",
     "Document",
     "DomRect",
+    "DomStringMap",
     "Element",
     "Event",
     "EventInit",

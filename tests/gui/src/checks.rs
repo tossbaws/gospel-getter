@@ -9,12 +9,15 @@
 //! reference gone to and a palette command run (17 to 19, `search`); the
 //! book and chapter picker as a popover and as the sidebar, Random chapter,
 //! its keyboard, and the sidebar keeping the reading place (20 to 24,
-//! `picker`); screenshots in Chi Rho and Vellum (4, most taken by the other
-//! checks).
-//! Then, in a second session on the GUI checks' test build, the updater
-//! (9 to 13, `updates`).
+//! `picker`); a translation switch, Compare and reading mode (27 to 29),
+//! and every Aa control (25, `display`); screenshots in Chi Rho and Vellum
+//! (4, most taken by the other checks).
+//! Then the app started again on the same data, keeping Aa's settings (26,
+//! a second session); and, in a third session on the GUI checks' test
+//! build, the updater (9 to 13, `updates`).
 
 mod dialogs;
+mod display;
 mod library;
 mod picker;
 mod search;
@@ -166,7 +169,8 @@ pub async fn run(config: &Config, report: &mut Report) {
         log_line(started, &format!("no updater checks: {e:#}"));
     }
 
-    shipped(config, report, started).await;
+    let looks = shipped(config, report, started).await;
+    display::restart(config, report, started, looks).await;
 
     match server {
         Ok(server) => updates::run(config, report, started, &server).await,
@@ -196,8 +200,13 @@ async fn start_update_server(config: &Config) -> Result<UpdateServer> {
     Ok(server)
 }
 
-/// Checks 1 to 8 and 14 to 24, on the app as shipped.
-async fn shipped(config: &Config, report: &mut Report, started: Instant) {
+/// Checks 1 to 8, 14 to 25 and 27 to 29, on the app as shipped; what
+/// check 25 left, for check 26 (or why there's nothing).
+async fn shipped(
+    config: &Config,
+    report: &mut Report,
+    started: Instant,
+) -> std::result::Result<display::Looks, String> {
     // Check 1 starts with the session; without one nothing else can run.
     let driver = match start_session(config, &config.app, started).await {
         Ok(driver) => driver,
@@ -207,9 +216,10 @@ async fn shipped(config: &Config, report: &mut Report, started: Instant) {
             report
                 .fail_the_rest(&Check::SHIPPED, "not run: no WebDriver session (check 1)")
                 .await;
-            return;
+            return Err("no WebDriver session (check 1)".to_owned());
         }
     };
+    let mut looks = Err("the page did not boot (check 1)".to_owned());
     let mut run = Run {
         config,
         ui: Ui::new(driver, started, config.budget, config.step_timeout),
@@ -300,6 +310,9 @@ async fn shipped(config: &Config, report: &mut Report, started: Instant) {
             (Check::RandomChapter, run.random_chapter().await),
             (Check::PickerKeyboard, run.picker_keyboard().await),
             (Check::SidebarPlace, run.sidebar_reading_place().await),
+            (Check::TranslationSwitch, run.translation_switch().await),
+            (Check::Compare, run.compare().await),
+            (Check::ReadingMode, run.reading_mode().await),
         ] {
             if result.is_err() {
                 run.failure_screenshot(check).await;
@@ -315,6 +328,21 @@ async fn shipped(config: &Config, report: &mut Report, started: Instant) {
                 }
             }
         }
+        // Every Aa control, ending in the look check 26 looks for after
+        // the restart.
+        let controls = run.aa_controls().await;
+        if controls.is_err() {
+            run.failure_screenshot(Check::AaControls).await;
+        }
+        let (controls, left) = match controls {
+            Ok((said, left)) => (Ok(said), Ok(left)),
+            Err(e) => {
+                let why = format!("check 25 failed: {e:#}");
+                (Err(e), Err(why))
+            }
+        };
+        looks = left;
+        report.record(Check::AaControls, controls).await;
         let expected: Vec<&'static str> = SHOTS
             .into_iter()
             .filter(|name| config.xvfb.is_some() || *name != IMPORT_SHOT)
@@ -327,6 +355,7 @@ async fn shipped(config: &Config, report: &mut Report, started: Instant) {
                     .into_iter()
                     .filter(|name| config.xvfb.is_some() || !name.starts_with("21-")),
             )
+            .chain(display::DISPLAY_SHOTS)
             .collect();
         report
             .record(Check::Screenshots, run.shots.verdict(&expected))
@@ -346,6 +375,7 @@ async fn shipped(config: &Config, report: &mut Report, started: Instant) {
         Ok(Err(e)) => log_line(started, &format!("ending the session failed: {e}")),
         Err(_) => log_line(started, "ending the session timed out after 10s"),
     }
+    looks
 }
 
 /// Starts `app` through tauri-driver: a WebDriver session whose browser
@@ -972,6 +1002,7 @@ impl Run<'_> {
         self.escape_export_dialog().await?;
         self.library_vellum_screenshots().await?;
         self.search_vellum_screenshots().await?;
-        self.picker_vellum_screenshots().await
+        self.picker_vellum_screenshots().await?;
+        self.display_vellum_screenshots().await
     }
 }

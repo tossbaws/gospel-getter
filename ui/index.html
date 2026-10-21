@@ -4050,166 +4050,59 @@
         }
     </style>
     <script>
-        // Presentation preferences: theme, reading text size, line spacing
-        // and distraction-free reading mode. Kept local to this webview
-        // (localStorage) — they're display-only, so there's no backend
-        // command or schema for them. This script deliberately doesn't
-        // touch window.__TAURI__, and it runs here in <head> so saved
-        // preferences apply before <body> paints (no flash of the default
-        // look), and so the reading-mode exit control keeps working even
-        // if the main script below fails — reading mode can never lock the
-        // reader out of the rest of the app.
+        // The saved look, before the first frame: each saved setting as its
+        // data attribute on <html> (none for its default), which the CSS
+        // keys off, then the book and chapter picker's shape, so the page
+        // is laid out for it from the start. Only that: the page's Rust
+        // pieces (ui-leptos/src/aa.rs) keep the settings from then on, and
+        // without them the Bible text still shows in the saved look. The
+        // table is generated from shared/preferences.rs (prepaint_script);
+        // a test keeps the two the same.
         (function () {
             'use strict';
-
-            // Each preference maps to a data attribute on <html>, which the
-            // CSS keys off. The default value is represented by *no*
-            // attribute, so with nothing saved the page looks exactly as it
-            // did before these preferences existed.
-            var PREFS = {
-                theme: {
-                    key: 'gospel-getter-theme',
-                    attr: 'theme',
-                    select: 'theme-select',
-                    fallback: 'chi-rho',
-                    values: ['chi-rho', 'vellum', 'system', 'vaporwave', 'classic-dark', 'classic-light', 'matrix', 'beast-slayer', 'hot-pink'],
-                    // Theme keys that were renamed: a saved old key is
-                    // rewritten to its new one rather than silently
-                    // dropping the reader back to the default theme.
-                    renamed: { 'monster-hunter': 'beast-slayer' },
-                },
-                textSize: {
-                    key: 'gospel-getter-text-size',
-                    attr: 'textSize',
-                    select: 'text-size-select',
-                    fallback: 'medium',
-                    values: ['small', 'medium', 'large', 'x-large'],
-                    renamed: {},
-                },
-                lineSpacing: {
-                    key: 'gospel-getter-line-spacing',
-                    attr: 'lineSpacing',
-                    select: 'line-spacing-select',
-                    fallback: 'normal',
-                    values: ['compact', 'normal', 'relaxed'],
-                    renamed: {},
-                },
-                // The reading column's width (and reading mode's); Normal
-                // is the width it always had.
-                width: {
-                    key: 'gospel-getter-width',
-                    attr: 'width',
-                    select: 'width-select',
-                    fallback: 'normal',
-                    values: ['narrow', 'normal', 'wide'],
-                    renamed: {},
-                },
-                // How a chapter is set: a verse to a line, as it always
-                // was, or flowing on as prose. Compare keeps a verse to a
-                // row whichever is chosen (see .chapter-text).
-                layout: {
-                    key: 'gospel-getter-layout',
-                    attr: 'layout',
-                    select: 'layout-select',
-                    fallback: 'verses',
-                    values: ['verses', 'flowing'],
-                    renamed: {},
-                },
-                readerMode: {
-                    key: 'gospel-getter-reader-mode',
-                    attr: 'readerMode',
-                    select: null,
-                    fallback: 'off',
-                    values: ['off', 'on'],
-                    renamed: {},
-                },
-                // Compare translations side by side. The main script reads
-                // the attribute when it renders a chapter, and re-renders
-                // on the 'gospel-getter:compare-change' event below.
-                compare: {
-                    key: 'gospel-getter-compare',
-                    attr: 'compare',
-                    select: null,
-                    fallback: 'off',
-                    values: ['off', 'on'],
-                    renamed: {},
-                },
-                // The translation compare shows beside the one being read,
-                // once the reader has chosen one (Aa's "with" buttons). Its
-                // values are the bundled translations' codes, which the
-                // backend lists, so any short code is kept here and checked
-                // against them where it's used (see comparePartner).
-                compareWith: {
-                    key: 'gospel-getter-compare-with',
-                    attr: 'compareWith',
-                    select: null,
-                    fallback: '',
-                    values: null,
-                    renamed: {},
-                },
-                // Whether the book and chapter picker shows as a sidebar on
-                // a wide window (see applyPickerShape). Like updateCheck,
-                // it's for this computer's window, so it isn't exported.
-                sidebar: {
-                    key: 'gospel-getter-sidebar',
-                    attr: 'sidebar',
-                    select: null,
-                    fallback: 'open',
-                    values: ['open', 'closed'],
-                    renamed: {},
-                },
-                // Check for updates when the app starts. A setting for this
-                // computer, not a display one, so it isn't exported.
-                updateCheck: {
-                    key: 'gospel-getter-update-check',
-                    attr: 'updateCheck',
-                    select: null,
-                    fallback: 'on',
-                    values: ['on', 'off'],
-                    renamed: {},
-                },
-            };
-
-            function store(pref, value) {
-                try {
-                    localStorage.setItem(pref.key, value);
-                } catch (e) {}
-            }
-
-            // Anything unreadable or unrecognised resolves to the default,
-            // so a stale or hand-edited value can't leave the page in a
-            // state no control can represent.
-            function load(pref) {
+            var data = document.documentElement.dataset;
+            // Local storage key, data attribute, default, the values it
+            // may have (null: a translation's code), renamed values.
+            var SAVED = [
+                ['gospel-getter-theme', 'theme', 'chi-rho', ['chi-rho', 'vellum', 'system', 'vaporwave', 'classic-dark', 'classic-light', 'matrix', 'beast-slayer', 'hot-pink'], { 'monster-hunter': 'beast-slayer' }],
+                ['gospel-getter-text-size', 'textSize', 'medium', ['small', 'medium', 'large', 'x-large'], {}],
+                ['gospel-getter-line-spacing', 'lineSpacing', 'normal', ['compact', 'normal', 'relaxed'], {}],
+                ['gospel-getter-width', 'width', 'normal', ['narrow', 'normal', 'wide'], {}],
+                ['gospel-getter-layout', 'layout', 'verses', ['verses', 'flowing'], {}],
+                ['gospel-getter-reader-mode', 'readerMode', 'off', ['off', 'on'], {}],
+                ['gospel-getter-compare', 'compare', 'off', ['off', 'on'], {}],
+                ['gospel-getter-compare-with', 'compareWith', '', null, {}],
+                ['gospel-getter-sidebar', 'sidebar', 'open', ['open', 'closed'], {}],
+                ['gospel-getter-update-check', 'updateCheck', 'on', ['on', 'off'], {}],
+            ];
+            SAVED.forEach(function (pref) {
                 var value = null;
                 try {
-                    value = localStorage.getItem(pref.key);
+                    value = localStorage.getItem(pref[0]);
                 } catch (e) {}
-                if (value && Object.prototype.hasOwnProperty.call(pref.renamed, value)) {
-                    value = pref.renamed[value];
-                    store(pref, value);
-                }
-                return isValue(pref, value) ? value : pref.fallback;
-            }
-
-            // A translation's code: a few lowercase letters or digits.
-            var CODE = /^[a-z0-9]{1,16}$/;
-
-            function isValue(pref, value) {
-                if (pref.values) return pref.values.indexOf(value) !== -1;
-                return typeof value === 'string' && CODE.test(value);
-            }
-
-            function apply(pref, value) {
-                if (value === pref.fallback) {
-                    delete document.documentElement.dataset[pref.attr];
-                } else {
-                    document.documentElement.dataset[pref.attr] = value;
-                }
-            }
-
-            Object.keys(PREFS).forEach(function (name) {
-                apply(PREFS[name], load(PREFS[name]));
+                if (value && Object.prototype.hasOwnProperty.call(pref[4], value)) value = pref[4][value];
+                var valid = pref[3] ? pref[3].indexOf(value) !== -1 : typeof value === 'string' && /^[a-z0-9]{1,16}$/.test(value);
+                if (valid && value !== pref[2]) data[pref[1]] = value;
+                else delete data[pref[1]];
             });
+            // A sidebar on a window this wide, unless the reader hid it;
+            // never in reading mode.
+            var wide = !!(window.matchMedia && window.matchMedia('(min-width: 1200px)').matches);
+            if (wide) data.wide = '';
+            else delete data.wide;
+            if (wide && data.sidebar !== 'closed' && data.readerMode !== 'on') data.picker = 'sidebar';
+            else delete data.picker;
+        })();
+    </script>
+    <script>
+        // The header's popovers and panels, and the book and chapter
+        // picker's two shapes: what opens and closes them (until they move
+        // to the page's Rust pieces too). What's in Aa and the translation
+        // button's popover, and every saved setting, are the Rust pieces'
+        // (ui-leptos/src/aa.rs); this asks them as it needs them, and says
+        // so when they aren't there.
+        (function () {
+            'use strict';
 
             // The book and chapter picker is a sidebar down the left on a
             // window at least this wide, and a popover from the reference
@@ -4235,8 +4128,8 @@
 
             // On <html>, for the CSS: data-wide while there's room for the
             // sidebar, and data-picker="sidebar" while it shows (the page
-            // makes room for it). Set here, before <body> paints, so the
-            // page is laid out for it from the start.
+            // makes room for it). The pre-paint script above sets them
+            // first, so the page is laid out for it from the start.
             function applyPickerShape() {
                 var data = document.documentElement.dataset;
                 if (isWide()) data.wide = '';
@@ -4245,18 +4138,14 @@
                 else delete data.picker;
             }
 
-            applyPickerShape();
-
             // The header's popovers and panels: the translation button's
             // popover, Aa, the Library, the ☰ menu, the About dialog, and
             // the book and chapter picker when it's a popover. Only one is
             // open at a time; Escape closes it, and so does a click outside
             // a popover (the translation's, Aa's or the menu). Opening one moves focus into it, and
             // closing it gives focus back to the button that opened it.
-            // They live here, with the preferences, so Aa (and with it
-            // reading mode) keeps working even if the main script fails.
-            // The main script reaches them through this, once the page has
-            // loaded.
+            // The main script and the page's Rust pieces reach them through
+            // this, once the page has loaded.
             window.gospelGetterSurfaces = null;
 
             document.addEventListener('DOMContentLoaded', function () {
@@ -4270,9 +4159,6 @@
                 var libraryPanel = byId('library-panel');
                 var menuToggle = byId('menu-toggle');
                 var appMenu = byId('app-menu');
-                var readerModeBtn = byId('reader-mode-btn');
-                var readerExit = byId('reader-exit');
-                var compareBtn = byId('compare-btn');
                 var picker = byId('picker');
                 var refBtn = byId('ref-btn');
                 var sidebarToggle = byId('sidebar-toggle');
@@ -4365,9 +4251,8 @@
                 // Shows or hides the sidebar, and remembers it.
                 function setSidebar(open) {
                     keepReadingPlace(function () {
-                        var value = open ? 'open' : 'closed';
-                        apply(PREFS.sidebar, value);
-                        store(PREFS.sidebar, value);
+                        // The setting is the Rust pieces' to apply and save.
+                        document.dispatchEvent(new CustomEvent('gospel-getter:preference', { detail: { name: 'sidebar', value: open ? 'open' : 'closed' } }));
                         syncPicker();
                     });
                 }
@@ -4386,6 +4271,8 @@
                     } else if (current !== 'picker') {
                         openSurface('picker');
                     }
+                    // The books are the Rust pieces' (ui-leptos/src/picker.rs).
+                    if (!picker.hidden && !picker.querySelector('.book-item')) toast('The book list isn\u2019t available.');
                 }
 
                 // A window resized across the breakpoint changes shape: an
@@ -4455,8 +4342,7 @@
                     if (current) closeSurface(false);
                     current = name;
                     returnFocus = opener || SURFACES[name].toggle;
-                    if (name === 'translation') renderTranslations();
-                    if (name === 'aa') syncAa();
+                    if (name === 'translation' || name === 'aa') drawSurface(name);
                     setShown(name, true);
                     // The main script closes the search panel.
                     document.dispatchEvent(new CustomEvent('gospel-getter:surface-open', { detail: { name: name } }));
@@ -4468,12 +4354,34 @@
                     else openSurface(name, opener);
                 }
 
+                // Says `message` in the page's toast, as an error.
+                function toast(message) {
+                    document.dispatchEvent(new CustomEvent('gospel-getter:toast', { detail: { message: message, isError: true } }));
+                }
+
+                // What's in Aa and the translation button's popover is
+                // drawn by the Rust pieces (ui-leptos/src/aa.rs) as they
+                // open, before focus moves in; without them, each says so.
+                var UNAVAILABLE = {
+                    translation: 'Translations aren\u2019t available.',
+                    aa: 'Display settings aren\u2019t available.',
+                };
+
+                function drawSurface(name) {
+                    var request = new CustomEvent('gospel-getter:surface-draw', { cancelable: true, detail: { name: name } });
+                    if (document.dispatchEvent(request)) toast(UNAVAILABLE[name]);
+                }
+
+                // syncPicker and keepReadingPlace are the Rust pieces' too:
+                // reading mode and a new layout (ui-leptos/src/aa.rs).
                 window.gospelGetterSurfaces = {
                     current: function () { return current; },
                     open: openSurface,
                     close: closeSurface,
                     toggle: toggleSurface,
                     openPicker: function () { openPicker(false); },
+                    syncPicker: syncPicker,
+                    keepReadingPlace: keepReadingPlace,
                 };
 
                 syncPicker();
@@ -4556,435 +4464,9 @@
                 // (ui-leptos/src/library.rs), inside the panel this script
                 // opens and closes; focusInto above focuses its chosen tab.
 
-                // ---- The translation button's popover and Aa: views of
-                // the translation, text size, line spacing and theme
-                // <select>s, which stay the record of each choice (hidden). Choosing changes the <select> and
-                // fires its change event, so a choice goes through exactly
-                // the code a <select> change always has.
-                var translationSelect = byId('translation-select');
-                var textSizeSelect = byId('text-size-select');
-                var lineSpacingSelect = byId('line-spacing-select');
-                var themeSelect = byId('theme-select');
-                var translationChoices = byId('translation-choices');
-                var compareWithChoices = byId('compare-with-choices');
-                var lineSpacingChoices = byId('line-spacing-choices');
-                var widthSelect = byId('width-select');
-                var widthChoices = byId('width-choices');
-                var layoutSelect = byId('layout-select');
-                var layoutChoices = byId('layout-choices');
-                var layoutNote = byId('layout-note');
-                var themeChoices = byId('theme-choices');
-                var textSizeDown = byId('text-size-down');
-                var textSizeUp = byId('text-size-up');
-
-                function choose(select, value) {
-                    if (select.value !== value) {
-                        select.value = value;
-                        select.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                    syncAa();
-                }
-
-                function optionsOf(select) {
-                    return [].slice.call(select.options);
-                }
-
-                function segmentButton(option, label) {
-                    var btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'segment';
-                    btn.dataset.value = option.value;
-                    btn.textContent = label;
-                    return btn;
-                }
-
-                optionsOf(lineSpacingSelect).forEach(function (option) {
-                    lineSpacingChoices.appendChild(segmentButton(option, option.textContent));
-                });
-                optionsOf(widthSelect).forEach(function (option) {
-                    widthChoices.appendChild(segmentButton(option, option.textContent));
-                });
-                optionsOf(layoutSelect).forEach(function (option) {
-                    layoutChoices.appendChild(segmentButton(option, option.textContent));
-                });
-
-                optionsOf(themeSelect).forEach(function (option) {
-                    var btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'theme-swatch';
-                    btn.dataset.value = option.value;
-                    btn.title = option.textContent;
-                    btn.setAttribute('aria-label', option.textContent);
-                    var preview = document.createElement('span');
-                    preview.className = 'theme-swatch-preview';
-                    preview.dataset.themePreview = option.value;
-                    preview.setAttribute('aria-hidden', 'true');
-                    preview.textContent = 'A';
-                    btn.appendChild(preview);
-                    themeChoices.appendChild(btn);
-                });
-
-                // The translation compare shows beside the one being read:
-                // the one the reader chose, if it's there and isn't the one
-                // being read; otherwise the one compare always showed, the
-                // KJV, or the WEB beside the KJV; failing those, the first
-                // other. Null when there's no other.
-                var COMPARE_DEFAULTS = ['kjv', 'web'];
-
-                function comparePartner() {
-                    var codes = optionsOf(translationSelect).map(function (o) { return o.value; });
-                    var current = translationSelect.value;
-                    var candidates = [root.dataset.compareWith].concat(COMPARE_DEFAULTS, codes);
-                    for (var i = 0; i < candidates.length; i++) {
-                        var code = candidates[i];
-                        if (code && code !== current && codes.indexOf(code) !== -1) return code;
-                    }
-                    return null;
-                }
-                window.gospelGetterComparePartner = comparePartner;
-
-                // The translations come from the backend (the main script
-                // fills the <select>), so their rows are rebuilt each time
-                // their popover opens: one line each, "KJV · King James
-                // Version · 1611/1769 · public domain", a radio group. The
-                // dots are only seen; the words are the row's name.
-                function renderTranslations() {
-                    translationChoices.textContent = '';
-                    optionsOf(translationSelect).forEach(function (option) {
-                        var btn = document.createElement('button');
-                        btn.type = 'button';
-                        btn.className = 'translation-choice';
-                        btn.setAttribute('role', 'radio');
-                        btn.dataset.value = option.value;
-                        [
-                            ['translation-code', option.value.toUpperCase()],
-                            ['translation-name', option.textContent],
-                            ['translation-detail', option.dataset.date],
-                            ['translation-detail', option.dataset.licence],
-                        ].filter(function (part) { return part[1]; }).forEach(function (part, i) {
-                            if (i) {
-                                var dot = document.createElement('span');
-                                dot.className = 'translation-dot';
-                                dot.setAttribute('aria-hidden', 'true');
-                                dot.textContent = ' \u00b7 ';
-                                btn.appendChild(dot);
-                            }
-                            var span = document.createElement('span');
-                            span.className = part[0];
-                            span.textContent = part[1];
-                            btn.appendChild(span);
-                        });
-                        translationChoices.appendChild(btn);
-                    });
-                    renderCompareWith();
-                }
-
-                // "Compare with": every translation but the one being read.
-                function renderCompareWith() {
-                    compareWithChoices.textContent = '';
-                    optionsOf(translationSelect).forEach(function (option) {
-                        if (option.value === translationSelect.value) return;
-                        var btn = segmentButton(option, option.value.toUpperCase());
-                        btn.title = 'Compare with the ' + option.textContent;
-                        compareWithChoices.appendChild(btn);
-                    });
-                    syncAa();
-                }
-                translationSelect.addEventListener('change', renderCompareWith);
-
-                function chooseComparePartner(code) {
-                    if (code === comparePartner() && root.dataset.compareWith === code) return;
-                    apply(PREFS.compareWith, code);
-                    store(PREFS.compareWith, code);
-                    syncAa();
-                    document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
-                }
-
-                compareWithChoices.addEventListener('click', function (event) {
-                    var btn = event.target.closest('button');
-                    if (btn) chooseComparePartner(btn.dataset.value);
-                });
-
-                // The translations are radio buttons: one tab stop, and the
-                // arrow keys (Home and End too) move and choose. They're
-                // not a chapter turn.
-                translationChoices.addEventListener('keydown', function (event) {
-                    var radios = [].slice.call(translationChoices.querySelectorAll('[role="radio"]'));
-                    var index = radios.indexOf(event.target.closest('[role="radio"]'));
-                    if (index === -1) return;
-                    var next = null;
-                    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = radios[(index + 1) % radios.length];
-                    else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') next = radios[(index - 1 + radios.length) % radios.length];
-                    else if (event.key === 'Home') next = radios[0];
-                    else if (event.key === 'End') next = radios[radios.length - 1];
-                    if (!next) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    choose(translationSelect, next.dataset.value);
-                    next.focus();
-                });
-
-                function setPressed(group, value) {
-                    [].slice.call(group.querySelectorAll('button')).forEach(function (btn) {
-                        btn.setAttribute('aria-pressed', String(btn.dataset.value === value));
-                    });
-                }
-
-                function syncAa() {
-                    [].slice.call(translationChoices.querySelectorAll('[role="radio"]')).forEach(function (radio) {
-                        var checked = radio.dataset.value === translationSelect.value;
-                        radio.setAttribute('aria-checked', String(checked));
-                        radio.tabIndex = checked ? 0 : -1;
-                    });
-                    setPressed(compareWithChoices, comparePartner());
-                    setPressed(lineSpacingChoices, lineSpacingSelect.value);
-                    setPressed(widthChoices, widthSelect.value);
-                    setPressed(layoutChoices, layoutSelect.value);
-                    setPressed(themeChoices, themeSelect.value);
-                    // While comparing, Layout is kept but has no effect, so
-                    // its buttons are disabled and a note says why.
-                    var comparing = root.dataset.compare === 'on';
-                    [].slice.call(layoutChoices.querySelectorAll('button')).forEach(function (btn) {
-                        btn.disabled = comparing;
-                    });
-                    layoutNote.hidden = !comparing;
-                    var theme = themeSelect.options[themeSelect.selectedIndex];
-                    byId('theme-name').textContent = theme ? theme.textContent : '';
-                    var sizes = textSizeSelect.options;
-                    var index = textSizeSelect.selectedIndex;
-                    byId('text-size-value').textContent = sizes[index] ? sizes[index].textContent : '';
-                    var focused = document.activeElement;
-                    textSizeDown.disabled = index <= 0;
-                    textSizeUp.disabled = index >= sizes.length - 1;
-                    // A button that just reached the end of the range
-                    // can't keep focus; hand it to the other one.
-                    if (focused === textSizeDown && textSizeDown.disabled) textSizeUp.focus();
-                    if (focused === textSizeUp && textSizeUp.disabled) textSizeDown.focus();
-                }
-
-                function stepTextSize(by) {
-                    var option = textSizeSelect.options[textSizeSelect.selectedIndex + by];
-                    if (option) choose(textSizeSelect, option.value);
-                }
-
-                [translationChoices, lineSpacingChoices, widthChoices, layoutChoices, themeChoices].forEach(function (group) {
-                    var select = { 'translation-choices': translationSelect, 'line-spacing-choices': lineSpacingSelect, 'width-choices': widthSelect, 'layout-choices': layoutSelect, 'theme-choices': themeSelect }[group.id];
-                    group.addEventListener('click', function (event) {
-                        var btn = event.target.closest('button');
-                        if (btn) choose(select, btn.dataset.value);
-                    });
-                });
-                textSizeDown.addEventListener('click', function () { stepTextSize(-1); });
-                textSizeUp.addEventListener('click', function () { stepTextSize(1); });
-
-                // Ctrl+= (Ctrl++, Ctrl+Shift+=, numpad +) and Ctrl+- (numpad
-                // -) step through the four text sizes, and Ctrl+0 goes back
-                // to Medium, through Aa's own control, so Aa stays in step.
-                // They're never the webview's page zoom: the app turns that
-                // off (zoomHotkeysEnabled is false, in tauri.conf.json), and
-                // these keys' default is prevented besides. While typing in
-                // a field they do nothing.
-                var sizeStatus = byId('size-status');
-                var sizeStatusTimer = null;
-
-                function showTextSize() {
-                    var option = textSizeSelect.options[textSizeSelect.selectedIndex];
-                    clearTimeout(sizeStatusTimer);
-                    sizeStatus.textContent = 'Text size: ' + (option ? option.textContent : '');
-                    sizeStatus.classList.remove('is-hidden');
-                    sizeStatusTimer = setTimeout(function () {
-                        sizeStatus.classList.add('is-hidden');
-                    }, 1500);
-                }
-
-                function sizeKey(event) {
-                    if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
-                    var key = event.key;
-                    var code = event.code || '';
-                    if (key === '=' || key === '+' || code === 'NumpadAdd') return 1;
-                    if (key === '-' || key === '_' || code === 'NumpadSubtract') return -1;
-                    if ((key === '0' && !event.shiftKey) || code === 'Numpad0') return 0;
-                    return null;
-                }
-
-                // A step larger (1) or smaller (-1), or back to Medium (0),
-                // and the size shown for a moment.
-                function textSizeShortcut(step) {
-                    if (step === 0) {
-                        choose(textSizeSelect, 'medium');
-                    } else {
-                        stepTextSize(step);
-                    }
-                    showTextSize();
-                }
-
-                document.addEventListener('keydown', function (event) {
-                    var step = sizeKey(event);
-                    if (step === null) return;
-                    event.preventDefault();
-                    var target = event.target;
-                    if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) return;
-                    textSizeShortcut(step);
-                });
-
-                // The command palette (in the main script) makes the choices
-                // whose controls aren't always on the page (the translation
-                // rows and Compare with are drawn when their popover opens) through the
-                // functions those controls call, and the text size through
-                // its keys' own.
-                window.gospelGetterControls = {
-                    chooseTranslation: function (code) { choose(translationSelect, code); },
-                    compareWith: chooseComparePartner,
-                    textSize: textSizeShortcut,
-                };
-
-                // ---- Preferences
-
-                function setReaderMode(on) {
-                    var value = on ? 'on' : 'off';
-                    apply(PREFS.readerMode, value);
-                    store(PREFS.readerMode, value);
-                    readerModeBtn.setAttribute('aria-pressed', String(on));
-                    // Move focus to whichever control undoes this, so a
-                    // keyboard user always lands somewhere sensible: the
-                    // exit button, or Aa, which holds the reading-mode
-                    // toggle.
-                    closeSurface(false);
-                    // Reading mode hides the sidebar; leaving it brings
-                    // the sidebar back.
-                    syncPicker();
-                    (on ? readerExit : aaToggle).focus();
-                }
-
-                Object.keys(PREFS).forEach(function (name) {
-                    var pref = PREFS[name];
-                    if (!pref.select) return;
-                    var select = document.getElementById(pref.select);
-                    select.value = load(pref);
-                    select.addEventListener('change', function () {
-                        // A new layout reflows the whole chapter: keep the
-                        // reader's place, and let the main script move the
-                        // selection's card to its verses' new place.
-                        var change = function () {
-                            apply(pref, select.value);
-                            store(pref, select.value);
-                        };
-                        if (pref === PREFS.layout) {
-                            keepReadingPlace(change);
-                            document.dispatchEvent(new CustomEvent('gospel-getter:layout-change'));
-                        } else {
-                            change();
-                        }
-                    });
-                });
-
-                readerModeBtn.setAttribute('aria-pressed', String(isReaderMode()));
-                readerModeBtn.addEventListener('click', function () {
-                    setReaderMode(!isReaderMode());
-                });
-                readerExit.addEventListener('click', function () {
-                    setReaderMode(false);
-                });
-
-                // The launch check's setting. Its checkbox is in About,
-                // drawn by the page's Rust pieces from html[data-update-check]
-                // (applied above); this keeps the preference.
-                document.addEventListener('change', function (event) {
-                    var toggle = event.target;
-                    if (!toggle || toggle.id !== 'update-check-toggle') return;
-                    var value = toggle.checked ? 'on' : 'off';
-                    apply(PREFS.updateCheck, value);
-                    store(PREFS.updateCheck, value);
-                });
-
-                compareBtn.setAttribute('aria-pressed', String(root.dataset.compare === 'on'));
-                compareBtn.addEventListener('click', function () {
-                    var value = root.dataset.compare === 'on' ? 'off' : 'on';
-                    apply(PREFS.compare, value);
-                    store(PREFS.compare, value);
-                    compareBtn.setAttribute('aria-pressed', String(value === 'on'));
-                    syncAa();
-                    document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
-                });
-
-                // All display preferences at once, for exporting and
-                // importing them (Export data… and Import data… in the ☰
-                // menu). Names and values are the export file's: theme,
-                // text_size, line_spacing, width and layout as Aa's option
-                // values, reading_mode and compare as true/false.
-                var FILE_NAMES = {
-                    theme: 'theme',
-                    text_size: 'textSize',
-                    line_spacing: 'lineSpacing',
-                    width: 'width',
-                    layout: 'layout',
-                    reading_mode: 'readerMode',
-                    compare: 'compare',
-                    compare_with: 'compareWith',
-                };
-                var ON_OFF = { readerMode: true, compare: true };
-
-                window.gospelGetterPreferences = {
-                    // What's in effect now.
-                    current: function () {
-                        var out = {};
-                        Object.keys(FILE_NAMES).forEach(function (name) {
-                            var key = FILE_NAMES[name];
-                            var value = root.dataset[PREFS[key].attr] || PREFS[key].fallback;
-                            // Compare's partner only once chosen, and only
-                            // a translation this install has.
-                            if (key === 'compareWith') {
-                                var known = optionsOf(translationSelect).some(function (o) { return o.value === value; });
-                                if (known) out[name] = value;
-                                return;
-                            }
-                            out[name] = ON_OFF[key] ? value === 'on' : value;
-                        });
-                        return out;
-                    },
-                    // Apply and save the given preferences. Every value is
-                    // checked first, so an unknown one changes nothing.
-                    // Returns whether they were all saved; if not (storage
-                    // blocked or full), they still apply until the app
-                    // closes.
-                    apply: function (values) {
-                        var changes = Object.keys(values).map(function (name) {
-                            var key = FILE_NAMES[name];
-                            if (!key) throw new Error('Unknown display setting \u201c' + name + '\u201d.');
-                            var raw = values[name];
-                            var value = ON_OFF[key] && typeof raw === 'boolean' ? (raw ? 'on' : 'off') : raw;
-                            if (!isValue(PREFS[key], value)) {
-                                throw new Error('\u201c' + raw + '\u201d isn\u2019t a valid ' + name.replace('_', ' ') + '.');
-                            }
-                            return { pref: PREFS[key], value: value };
-                        });
-                        var persisted = true;
-                        var compareChanged = false;
-                        changes.forEach(function (change) {
-                            var pref = change.pref;
-                            if (pref === PREFS.compare && (root.dataset.compare === 'on') !== (change.value === 'on')) {
-                                compareChanged = true;
-                            }
-                            if (pref === PREFS.compareWith && root.dataset.compareWith !== change.value) {
-                                compareChanged = true;
-                            }
-                            apply(pref, change.value);
-                            store(pref, change.value);
-                            try {
-                                if (localStorage.getItem(pref.key) !== change.value) persisted = false;
-                            } catch (e) {
-                                persisted = false;
-                            }
-                            if (pref.select) document.getElementById(pref.select).value = change.value;
-                        });
-                        readerModeBtn.setAttribute('aria-pressed', String(isReaderMode()));
-                        compareBtn.setAttribute('aria-pressed', String(root.dataset.compare === 'on'));
-                        syncAa();
-                        syncPicker();
-                        if (compareChanged) document.dispatchEvent(new CustomEvent('gospel-getter:compare-change'));
-                        return { persisted: persisted };
-                    },
-                };
+                // ---- Aa and the translation button's popover: what's in
+                // them, their controls, the size keys and every saved
+                // setting are the Rust pieces' (ui-leptos/src/aa.rs).
 
                 // Escape backs out one step at a time: first the search
                 // panel, then whichever popover or panel is open, then a
@@ -4999,7 +4481,8 @@
                         event.preventDefault();
                         closeSurface();
                     } else if (isReaderMode()) {
-                        setReaderMode(false);
+                        // Aa's own toggle, the Rust pieces'.
+                        document.dispatchEvent(new CustomEvent('gospel-getter:reader-mode', { detail: { on: false } }));
                     }
                 });
             });
@@ -5036,55 +4519,29 @@
                         <output id="text-size-value" aria-live="polite"></output>
                         <button type="button" id="text-size-up" class="stepper-btn stepper-larger" aria-label="Larger text" title="Larger text">A+</button>
                     </div>
-                    <select id="text-size-select" hidden>
-                        <option value="small">Small</option>
-                        <option value="medium">Medium</option>
-                        <option value="large">Large</option>
-                        <option value="x-large">Extra large</option>
-                    </select>
+                    <select id="text-size-select" hidden></select>
                 </div>
                 <div class="aa-section">
                     <span class="section-label" id="line-spacing-label">Line spacing</span>
                     <div id="line-spacing-choices" class="segmented" role="group" aria-labelledby="line-spacing-label"></div>
-                    <select id="line-spacing-select" hidden>
-                        <option value="compact">Compact</option>
-                        <option value="normal">Normal</option>
-                        <option value="relaxed">Relaxed</option>
-                    </select>
+                    <select id="line-spacing-select" hidden></select>
                 </div>
                 <div class="aa-section">
                     <span class="section-label" id="width-label">Width</span>
                     <div id="width-choices" class="segmented" role="group" aria-labelledby="width-label"></div>
-                    <select id="width-select" hidden>
-                        <option value="narrow">Narrow</option>
-                        <option value="normal">Normal</option>
-                        <option value="wide">Wide</option>
-                    </select>
+                    <select id="width-select" hidden></select>
                 </div>
                 <div class="aa-section">
                     <span class="section-label" id="layout-label">Layout</span>
                     <div id="layout-choices" class="segmented" role="group" aria-labelledby="layout-label" aria-describedby="layout-note"></div>
                     <p id="layout-note" class="section-note layout-note" hidden>Compare always shows a verse to a row.</p>
-                    <select id="layout-select" hidden>
-                        <option value="verses">Verses</option>
-                        <option value="flowing">Flowing</option>
-                    </select>
+                    <select id="layout-select" hidden></select>
                 </div>
                 <div class="aa-section">
                     <span class="section-label" id="theme-label">Theme</span>
                     <div id="theme-choices" class="theme-swatches" role="group" aria-labelledby="theme-label"></div>
                     <p id="theme-name" class="theme-name" aria-hidden="true"></p>
-                    <select id="theme-select" hidden>
-                        <option value="chi-rho">Chi Rho</option>
-                        <option value="vellum">Vellum</option>
-                        <option value="system">System</option>
-                        <option value="vaporwave">Vaporwave</option>
-                        <option value="classic-dark">Classic Dark</option>
-                        <option value="classic-light">Classic Light</option>
-                        <option value="matrix">Matrix</option>
-                        <option value="beast-slayer">Beast Slayer</option>
-                        <option value="hot-pink">Hot Pink</option>
-                    </select>
+                    <select id="theme-select" hidden></select>
                 </div>
                 <div class="aa-section">
                     <button type="button" id="reader-mode-btn" class="reader-mode-btn" aria-pressed="false">Reading mode</button>
@@ -5921,7 +5378,7 @@
 
             // ---- The header's popovers and panels (the translation, Aa,
             // Library, the ☰ menu and About) are opened and closed by the
-            // preferences script in <head>; these reach them from here.
+            // script in <head>; these reach them from here.
 
             const surfaces = () => window.gospelGetterSurfaces;
 
@@ -6525,8 +5982,8 @@
             // page's pieces written in Rust (ui-leptos/src/picker.rs); what
             // crosses is documented in ui-leptos/src/bridge.rs. The picker
             // itself, Random chapter and its two shapes (the sidebar and the
-            // popover, which the preferences script in <head> shows and
-            // hides) stay here. The page hands over the books, from boot, and
+            // popover, which the script in <head> shows and hides) stay
+            // here. The page hands over the books, from boot, and
             // the chapter on screen, each time one is put there; either may
             // come before the pieces have loaded, so both go again when they
             // say they're ready. A chapter chosen in the picker comes back as
@@ -6860,11 +6317,28 @@
                 refreshChapterNotes();
             }
 
+            // The translation compare shows beside the one being read: the
+            // one the reader chose (Aa's "with", kept in data-compare-with),
+            // if it's there and isn't the one being read; otherwise the one
+            // compare always showed, the KJV, or the WEB beside the KJV;
+            // failing those, the first other. Null when there's no other.
+            // Aa (the page's Rust pieces, ui-leptos/src/aa.rs) marks it by
+            // this too.
+            const COMPARE_DEFAULTS = ['kjv', 'web'];
+
+            function comparePartner() {
+                const codes = [...translationSelect.options].map((o) => o.value);
+                const current = currentTranslation();
+                const candidates = [root.dataset.compareWith, ...COMPARE_DEFAULTS, ...codes];
+                return candidates.find((code) => code && code !== current && codes.includes(code)) || null;
+            }
+            window.gospelGetterComparePartner = comparePartner;
+
             // The translations compare shows, left to right: the one being
-            // read, then the one beside it (see comparePartner in Aa's
-            // script), or just the one if there's no other.
+            // read, then the one beside it, or just the one if there's no
+            // other.
             function compareCodes() {
-                const partner = window.gospelGetterComparePartner ? window.gospelGetterComparePartner() : null;
+                const partner = comparePartner();
                 return partner ? [currentTranslation(), partner] : [currentTranslation()];
             }
 
@@ -6945,8 +6419,9 @@
             }
 
             // Compare switched on or off (from the translation button's
-            // popover or its shortcut — the preferences script in <head>
-            // owns the setting): re-render the chapter on screen in the new
+            // popover or its shortcut — Aa, the page's Rust pieces in
+            // ui-leptos/src/aa.rs, owns the setting), or what it compares
+            // with changed: re-render the chapter on screen in the new
             // layout.
             document.addEventListener('gospel-getter:compare-change', async function () {
                 if (!lastDto) return;
@@ -7024,7 +6499,7 @@
                 const updateCheckBtn = document.getElementById('update-check-btn');
                 event.detail.state = {
                     comparing: isComparing(),
-                    partner: window.gospelGetterComparePartner ? window.gospelGetterComparePartner() : null,
+                    partner: comparePartner(),
                     readerMode: root.dataset.readerMode === 'on',
                     sidebar: root.dataset.picker === 'sidebar',
                     wide: root.dataset.wide != null,
@@ -7056,10 +6531,9 @@
             // The palette's commands whose code is this page's, each run
             // within the click or key that chose it (copying needs that),
             // after the box has closed and focus has gone back. (Those
-            // whose controls are on the page, the Rust side clicks.) Text
-            // size, a translation and Compare with go through Aa's own
-            // functions (gospelGetterControls in Aa's script).
-            const controls = () => window.gospelGetterControls;
+            // whose controls are on the page, the Rust side clicks; text
+            // size, a translation and Compare with are Aa's own, also the
+            // Rust side's.)
             const PAGE_COMMANDS = {
                 'copy-chapter': () => copyPassage('chapter', 'reference'),
                 'copy-chapter-as': () => openCopyMenu('chapter', document.querySelector('.chapter-copy-btn')),
@@ -7069,16 +6543,11 @@
                 'previous-book': () => stepBook('prev'),
                 back: () => goHistory(-1),
                 forward: () => goHistory(1),
-                'text-larger': () => controls().textSize(1),
-                'text-smaller': () => controls().textSize(-1),
-                'text-medium': () => controls().textSize(0),
-                translation: (code) => controls().chooseTranslation(code),
-                'compare-with': (code) => controls().compareWith(code),
                 shortcuts: () => openShortcuts(),
             };
             document.addEventListener('gospel-getter:command', function (event) {
                 const run = PAGE_COMMANDS[event.detail.command];
-                if (run) run(event.detail.value);
+                if (run) run();
             });
 
             // The Library's tabs and lists are the Rust pieces': without
@@ -7114,7 +6583,7 @@
 
                 // The top bar (the translation, Aa, the ☰ menu, the
                 // reading-mode exit), the Library and About are handled by
-                // the presentation-preferences script in <head> (and the
+                // the script in <head> and the page's Rust pieces (and the
                 // lists' own handlers above); they're never navigation or a
                 // "click away" from a verse selection. Nor is the search
                 // panel.
@@ -7389,11 +6858,11 @@
                 }
 
                 // Escape backs out one step at a time: the search panel,
-                // then an open popover or panel (closed by the preferences
-                // script), then a cross-reference previewed in the card,
+                // then an open popover or panel (closed by the script in
+                // <head>), then a cross-reference previewed in the card,
                 // then a verse selection, then reading mode (also the
-                // preferences script, which skips an Escape already handled
-                // here).
+                // script in <head>, which skips an Escape already handled
+                // here, and has Aa leave it).
                 if (event.key === 'Escape') {
                     if (!searchPanel.hidden) {
                         setSearchOpen(false);

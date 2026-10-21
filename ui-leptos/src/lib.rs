@@ -7,15 +7,21 @@
 //! (`about`) with the updater (`updates`); the Library's tabs and lists
 //! (`library`); and search with the command palette (`search`), with the
 //! table of keyboard shortcuts (`shortcut_table`) and the palette's
-//! commands (`palette`); and the book and chapter picker's books and
-//! chapters (`picker`). The page talks to them only as `bridge` says.
+//! commands (`palette`); the book and chapter picker's books and chapters
+//! (`picker`); and Aa with the translation button's popover (`aa`), which
+//! keep the saved settings (`prefs`, by the one table in `preferences`).
+//! The page talks to them only as `bridge` says.
 //!
-//! If this module fails to load, the page works as before, except that the
-//! five dialogs, About, the Library and search say they are unavailable
-//! when asked for (see `bridge`), no update is offered, no bookmark is
-//! marked in the reader (the Library loads them), and the picker lists no
-//! books.
+//! If this module fails to load, the Bible text still shows, in the saved
+//! look (the page's pre-paint script applies it), and the page reads on;
+//! but the five dialogs, About, the Library, search, Aa, the translations
+//! and the picker's books say they are unavailable when asked for (see
+//! `bridge`), no setting can be changed (reading mode can't be left), no
+//! update is offered, and no bookmark is marked in the reader (the Library
+//! loads them).
 
+mod aa;
+mod aa_text;
 mod about;
 mod bridge;
 mod dom;
@@ -32,6 +38,11 @@ mod note_text;
 mod palette;
 mod picker;
 mod picker_text;
+// The saved settings' one table, shared with the backend (src-tauri), which
+// compiles the same file.
+#[path = "../../shared/preferences.rs"]
+pub mod preferences;
+mod prefs;
 mod search;
 mod search_text;
 mod shortcut_table;
@@ -47,6 +58,9 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
+    // Aa and the saved settings first: their records (the `<select>`s) are
+    // filled before any piece reads them.
+    aa::mount();
     // The table of shortcuts, where the page had it.
     bridge::export_shortcuts();
     let Some(body) = web_sys::window()

@@ -14,7 +14,10 @@
 //! launch check's banner, a download's progress, a build that can only link
 //! to the download page, and a check that runs out of time), on the GUI
 //! checks' test build of the app against the run's own update server
-//! (`update_server`), stopping before the app would replace itself.
+//! (`update_server`), stopping before the app would replace itself. And
+//! the Library, search and the palette, the book and chapter picker, and
+//! Aa with the translations and the saved settings, which survive the app
+//! being closed and started again.
 
 mod checks;
 mod config;

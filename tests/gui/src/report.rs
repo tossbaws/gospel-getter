@@ -34,11 +34,16 @@ pub enum Check {
     RandomChapter = 22,
     PickerKeyboard = 23,
     SidebarPlace = 24,
+    AaControls = 25,
+    AaRestart = 26,
+    TranslationSwitch = 27,
+    Compare = 28,
+    ReadingMode = 29,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 19] = [
+    pub const SHIPPED: [Check; 23] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -58,10 +63,18 @@ impl Check {
         Check::RandomChapter,
         Check::PickerKeyboard,
         Check::SidebarPlace,
+        Check::AaControls,
+        Check::TranslationSwitch,
+        Check::Compare,
+        Check::ReadingMode,
     ];
 
+    /// The check on the app as shipped started again, on the first
+    /// session's data (the second session).
+    pub const RELAUNCH: [Check; 1] = [Check::AaRestart];
+
     /// The updater's checks, on the GUI checks' test build against the
-    /// run's own update server (the second session).
+    /// run's own update server (the third session).
     pub const UPDATER: [Check; 5] = [
         Check::UpdateBanner,
         Check::UpdateAbout,
@@ -96,6 +109,11 @@ impl Check {
             Check::RandomChapter => "random-chapter",
             Check::PickerKeyboard => "picker-keyboard",
             Check::SidebarPlace => "sidebar-reading-place",
+            Check::AaControls => "aa-controls",
+            Check::AaRestart => "aa-restart",
+            Check::TranslationSwitch => "translation-switch",
+            Check::Compare => "compare",
+            Check::ReadingMode => "reading-mode",
         }
     }
 
@@ -142,6 +160,7 @@ impl Report {
     pub fn all_passed(&self) -> bool {
         Check::SHIPPED
             .iter()
+            .chain(&Check::RELAUNCH)
             .chain(&Check::UPDATER)
             .all(|check| matches!(self.results.get(check), Some(Ok(_))))
     }
