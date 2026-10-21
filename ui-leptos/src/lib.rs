@@ -7,12 +7,14 @@
 //! (`about`) with the updater (`updates`); the Library's tabs and lists
 //! (`library`); and search with the command palette (`search`), with the
 //! table of keyboard shortcuts (`shortcut_table`) and the palette's
-//! commands (`palette`). The page talks to them only as `bridge` says.
+//! commands (`palette`); and the book and chapter picker's books and
+//! chapters (`picker`). The page talks to them only as `bridge` says.
 //!
 //! If this module fails to load, the page works as before, except that the
 //! five dialogs, About, the Library and search say they are unavailable
-//! when asked for (see `bridge`), no update is offered, and no bookmark is
-//! marked in the reader (the Library loads them).
+//! when asked for (see `bridge`), no update is offered, no bookmark is
+//! marked in the reader (the Library loads them), and the picker lists no
+//! books.
 
 mod about;
 mod bridge;
@@ -28,6 +30,8 @@ mod library_text;
 mod note_editor;
 mod note_text;
 mod palette;
+mod picker;
+mod picker_text;
 mod search;
 mod search_text;
 mod shortcut_table;
@@ -75,6 +79,8 @@ pub fn start() {
     // the search box's contents inside the page's search panel.
     library::mount();
     search::mount();
+    // The picker's books and chapters go inside the page's picker.
+    picker::mount();
     // Everything is listening: the page may send again what it asked
     // before the module had loaded.
     bridge::ready();

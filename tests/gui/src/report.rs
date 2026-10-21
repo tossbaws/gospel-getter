@@ -29,11 +29,16 @@ pub enum Check {
     Search = 17,
     SearchGoTo = 18,
     PaletteCommand = 19,
+    PickerPopover = 20,
+    PickerSidebar = 21,
+    RandomChapter = 22,
+    PickerKeyboard = 23,
+    SidebarPlace = 24,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 14] = [
+    pub const SHIPPED: [Check; 19] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -48,6 +53,11 @@ impl Check {
         Check::Search,
         Check::SearchGoTo,
         Check::PaletteCommand,
+        Check::PickerPopover,
+        Check::PickerSidebar,
+        Check::RandomChapter,
+        Check::PickerKeyboard,
+        Check::SidebarPlace,
     ];
 
     /// The updater's checks, on the GUI checks' test build against the
@@ -81,6 +91,11 @@ impl Check {
             Check::Search => "search",
             Check::SearchGoTo => "search-go-to",
             Check::PaletteCommand => "palette-command",
+            Check::PickerPopover => "picker-popover",
+            Check::PickerSidebar => "picker-sidebar",
+            Check::RandomChapter => "random-chapter",
+            Check::PickerKeyboard => "picker-keyboard",
+            Check::SidebarPlace => "sidebar-reading-place",
         }
     }
 

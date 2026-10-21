@@ -6,13 +6,17 @@
 //! shortcuts sheet (7); Export data… then Import data… to the preview (8);
 //! the Library's Bookmarks, Highlights and Notes, each filled from the
 //! reader, opening a row and removing one (14 to 16, `library`); search, a
-//! reference gone to and a palette command run (17 to 19, `search`);
-//! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
+//! reference gone to and a palette command run (17 to 19, `search`); the
+//! book and chapter picker as a popover and as the sidebar, Random chapter,
+//! its keyboard, and the sidebar keeping the reading place (20 to 24,
+//! `picker`); screenshots in Chi Rho and Vellum (4, most taken by the other
+//! checks).
 //! Then, in a second session on the GUI checks' test build, the updater
 //! (9 to 13, `updates`).
 
 mod dialogs;
 mod library;
+mod picker;
 mod search;
 mod updates;
 
@@ -155,7 +159,7 @@ pub async fn run(config: &Config, report: &mut Report) {
     );
 
     // The updater checks' own server, up before anything else: the app as
-    // shipped (checks 1 to 8, 14 to 19) must ignore the test settings and send it
+    // shipped (checks 1 to 8, 14 to 24) must ignore the test settings and send it
     // nothing.
     let server = start_update_server(config).await;
     if let Err(e) = &server {
@@ -192,7 +196,7 @@ async fn start_update_server(config: &Config) -> Result<UpdateServer> {
     Ok(server)
 }
 
-/// Checks 1 to 8 and 14 to 19, on the app as shipped.
+/// Checks 1 to 8 and 14 to 24, on the app as shipped.
 async fn shipped(config: &Config, report: &mut Report, started: Instant) {
     // Check 1 starts with the session; without one nothing else can run.
     let driver = match start_session(config, &config.app, started).await {
@@ -291,6 +295,11 @@ async fn shipped(config: &Config, report: &mut Report, started: Instant) {
             (Check::Search, run.search_word().await),
             (Check::SearchGoTo, run.search_go_to().await),
             (Check::PaletteCommand, run.palette_command().await),
+            (Check::PickerPopover, run.picker_popover().await),
+            (Check::PickerSidebar, run.picker_sidebar().await),
+            (Check::RandomChapter, run.random_chapter().await),
+            (Check::PickerKeyboard, run.picker_keyboard().await),
+            (Check::SidebarPlace, run.sidebar_reading_place().await),
         ] {
             if result.is_err() {
                 run.failure_screenshot(check).await;
@@ -311,6 +320,13 @@ async fn shipped(config: &Config, report: &mut Report, started: Instant) {
             .filter(|name| config.xvfb.is_some() || *name != IMPORT_SHOT)
             .chain(library::LIBRARY_SHOTS)
             .chain(search::SEARCH_SHOTS)
+            // The sidebar's, only where the window can be wide enough for
+            // it (not the Windows runner's screen; see `picker`).
+            .chain(
+                picker::PICKER_SHOTS
+                    .into_iter()
+                    .filter(|name| config.xvfb.is_some() || !name.starts_with("21-")),
+            )
             .collect();
         report
             .record(Check::Screenshots, run.shots.verdict(&expected))
@@ -955,6 +971,7 @@ impl Run<'_> {
         self.shots.note(SHOTS[3], shot);
         self.escape_export_dialog().await?;
         self.library_vellum_screenshots().await?;
-        self.search_vellum_screenshots().await
+        self.search_vellum_screenshots().await?;
+        self.picker_vellum_screenshots().await
     }
 }

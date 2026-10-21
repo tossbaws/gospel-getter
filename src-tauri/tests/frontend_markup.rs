@@ -7,9 +7,10 @@ const HTML: &str = include_str!("../../ui/index.html");
 
 /// The page's pieces written in Rust (`ui-leptos/src`), which own the
 /// modal dialogs' markup and keyboard handling, the Library's tabs and
-/// lists, the search box and its palette, and the table of shortcuts:
-/// checks of those read them where they now live.
-const PIECES: [(&str, &str); 11] = [
+/// lists, the search box and its palette, the table of shortcuts, and the
+/// book and chapter picker's books and chapters: checks of those read them
+/// where they now live.
+const PIECES: [(&str, &str); 13] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -35,6 +36,11 @@ const PIECES: [(&str, &str); 11] = [
     (
         "shortcut_table.rs",
         include_str!("../../ui-leptos/src/shortcut_table.rs"),
+    ),
+    ("picker.rs", include_str!("../../ui-leptos/src/picker.rs")),
+    (
+        "picker_text.rs",
+        include_str!("../../ui-leptos/src/picker_text.rs"),
     ),
 ];
 
@@ -148,26 +154,28 @@ fn print_stylesheet_hides_chrome_but_not_reading_content() {
 /// Regression guard for GH-5: the "Random chapter" feature picks a chapter
 /// entirely client-side, so every rendered `.book-item` button must carry
 /// its `chapter_count` as a data attribute, or the client has no valid
-/// upper bound to pick from. Book buttons are now built from one shared
-/// `renderBookButton` function (used for both the Old and New Testament
-/// lists), rather than two server-rendered loops, so this checks that
-/// function's template literal and that both lists are built from it.
+/// upper bound to pick from. Book buttons are built by one shared view,
+/// `book_view` in the picker's piece (`ui-leptos/src/picker.rs`), for both
+/// the Old and New Testament lists, rather than two server-rendered loops,
+/// so this checks that view and that both lists are built from it.
 #[test]
 fn book_item_buttons_expose_chapter_count() {
+    let picker = piece("picker.rs");
     assert!(
-        HTML.contains(r#"data-book-id="${book.id}" data-chapter-count="${book.chapterCount}""#),
+        picker.contains(
+            "data-book-id=book.id.to_string()\n                data-chapter-count=book.chapter_count.to_string()"
+        ),
         "book-item buttons must expose chapterCount as a data attribute for \
          client-side random selection"
     );
     assert!(
-        HTML.contains("home.otBooks.map((b) => renderBookButton(b"),
-        "Old Testament books should render through the shared book-button \
-         renderer"
+        picker.contains(r#"for (id, books) in [("ot-book-list", &old), ("nt-book-list", &new)] {"#),
+        "both testaments' lists should be drawn by the same loop"
     );
     assert!(
-        HTML.contains("home.ntBooks.map((b) => renderBookButton(b"),
-        "New Testament books should render through the shared book-button \
-         renderer"
+        picker.contains("books.iter().map(book_view)"),
+        "each testament's books should render through the shared book-button \
+         view"
     );
 }
 
@@ -206,24 +214,26 @@ fn random_chapter_control_is_a_real_labeled_button() {
     );
 }
 
-/// Regression guard for GH-5: the random-pick logic must be seeded from
-/// `.book-item` buttons (uniform choice of book, then 1..=chapter_count
-/// for that book) and must bail out rather than call `loadReading` when
-/// that data is missing or non-numeric — it must never fabricate a
-/// request to an invalid chapter.
+/// Regression guard for GH-5: the random pick (`random_pick` in
+/// `ui-leptos/src/picker_text.rs`, unit-tested there) must choose from the
+/// books the picker lists (uniform choice of book, then 1..=chapter_count
+/// for that book) and must bail out rather than read a chapter when the
+/// count isn't positive — it must never fabricate a request to an invalid
+/// chapter.
 #[test]
 fn random_chapter_script_guards_against_malformed_data() {
+    let rules = piece("picker_text.rs");
     assert!(
-        HTML.contains("document.querySelectorAll('.book-item')"),
-        "random pick should choose uniformly from the rendered book buttons"
+        piece("picker.rs").contains("text::random_pick(&s.books, js_sys::Math::random)"),
+        "random pick should choose uniformly from the books the picker lists"
     );
     assert!(
-        HTML.contains("!Number.isInteger(chapterCount) || chapterCount < 1"),
-        "random pick should guard against a missing/non-numeric/non-positive \
-         chapter count instead of issuing an invalid request"
+        rules.contains("if book.chapter_count < 1 {\n        return None;"),
+        "random pick should guard against a non-positive chapter count \
+         instead of issuing an invalid request"
     );
     assert!(
-        HTML.contains("Math.floor(Math.random() * chapterCount) + 1"),
+        rules.contains("floor_times(random(), count)).ok()? + 1"),
         "chapter pick should be uniform over 1..=chapter_count"
     );
 }
@@ -2427,12 +2437,19 @@ fn the_picker_is_a_navigation_landmark_or_a_dialog() {
         assert!(head.contains(wiring), "the preferences script: {wiring}");
     }
     // A book is a disclosure for its chapters, and the chapter and book
-    // being read are marked.
-    assert!(HTML.contains(r#"class="book-item" data-book-id="${book.id}" data-chapter-count="${book.chapterCount}" aria-expanded="false""#));
-    assert!(HTML.contains("button.setAttribute('aria-controls', 'picker-chapters');"));
-    assert!(HTML.contains("grid.setAttribute('role', 'group');"));
-    assert!(HTML.contains("book.setAttribute('aria-current', 'true');"));
-    assert!(HTML.contains(r#"${n === current ? ' aria-current="page"' : ''}"#));
+    // being read are marked (the picker's piece, ui-leptos/src/picker.rs,
+    // draws and marks them).
+    let picker = piece("picker.rs");
+    assert!(picker.contains(
+        "class=\"book-item\"\n                data-book-id=book.id.to_string()\n                data-chapter-count=book.chapter_count.to_string()\n                aria-expanded=\"false\""
+    ));
+    assert!(
+        picker.contains(r#"button.set_attribute("aria-controls", CHAPTERS_ID);"#)
+            && picker.contains(r#"const CHAPTERS_ID: &str = "picker-chapters";"#)
+    );
+    assert!(picker.contains(r#"role="group""#));
+    assert!(picker.contains(r#"book.set_attribute("aria-current", "true");"#));
+    assert!(picker.contains(r#"aria-current=(current == Some(n)).then_some("page")"#));
 }
 
 /// Psalms (and any book over 50 chapters) gets a compact numeric grid, ten
@@ -2441,10 +2458,12 @@ fn the_picker_is_a_navigation_landmark_or_a_dialog() {
 #[test]
 fn psalms_get_a_compact_grid_ten_to_a_row() {
     let rules = rules();
-    assert!(HTML.contains("const COMPACT_OVER = 50;"));
-    assert!(HTML.contains("const COMPACT_COLUMNS = 10;"));
-    assert!(HTML.contains("const PILL_COLUMNS = 6;"));
-    assert!(HTML.contains("const compact = count > COMPACT_OVER;"));
+    // The rule is the picker's (ui-leptos/src/picker_text.rs).
+    let picker = piece("picker_text.rs");
+    assert!(picker.contains("pub const COMPACT_OVER: i64 = 50;"));
+    assert!(picker.contains("pub const COMPACT_COLUMNS: usize = 10;"));
+    assert!(picker.contains("pub const PILL_COLUMNS: usize = 6;"));
+    assert!(picker.contains("    count > COMPACT_OVER\n"));
     let pills = &screen_rule(&rules, ".chapter-grid").body;
     assert!(pills.contains("grid-template-columns: repeat(6, 2rem)"));
     assert!(

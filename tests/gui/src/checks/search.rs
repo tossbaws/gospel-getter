@@ -74,6 +74,16 @@ const SHOW_MORE_AT_END_JS: &str = "const panel = document.getElementById('search
              shownPx: Math.round(shown), hiddenPx: Math.round(more.height - shown),
              fullyShown: more.height > 0 && shown >= more.height - 0.5 };";
 
+/// Scrolls the panel to its end again whenever it isn't there, until it
+/// has stayed there for three polls in a row (the count starts again from
+/// nothing on each call).
+const STAYS_AT_END_JS: &str = "const panel = document.getElementById('search-panel');
+    const s = window.__guiCheckAtEnd || (window.__guiCheckAtEnd = { polls: 0 });
+    const end = panel.scrollHeight - panel.clientHeight;
+    if (Math.abs(panel.scrollTop - end) > 1) { panel.scrollTop = panel.scrollHeight; s.polls = 0; }
+    else s.polls += 1;
+    return [s.polls >= 3, { scrollTop: Math.round(panel.scrollTop), end, polls: s.polls }];";
+
 impl Run<'_> {
     /// The search box as the reader sees it.
     async fn search_box(&self) -> Result<Value> {
@@ -161,6 +171,20 @@ impl Run<'_> {
         Ok(seen)
     }
 
+    /// Keeps the panel at its end until it stays there, right before Show
+    /// more's screenshot: a late redraw of the list (its active option
+    /// scrolled into view) could undo the measurement's scroll, and the
+    /// screenshot then showed the top of the list.
+    async fn stay_at_end(&self) -> Result<()> {
+        self.ui
+            .js("delete window.__guiCheckAtEnd; return null;", Vec::new())
+            .await?;
+        self.ui
+            .wait("the panel to stay scrolled to its end", STAYS_AT_END_JS)
+            .await?;
+        Ok(())
+    }
+
     /// Show more at the panel's end, in words, for the check's detail.
     fn show_more_said(seen: &Value) -> String {
         format!(
@@ -209,6 +233,7 @@ impl Run<'_> {
             let seen = self
                 .show_more_at_end("measure Show more at the panel's end, smallest height")
                 .await?;
+            self.stay_at_end().await?;
             self.shot(
                 "screenshot: Show more at the panel's end, smallest height, Chi Rho",
                 SEARCH_SHOTS[2],
@@ -290,6 +315,7 @@ impl Run<'_> {
             .show_more_at_end("measure Show more at the panel's end")
             .await?;
         said.push(format!("D4 evidence: {}", Self::show_more_said(&at_end)));
+        self.stay_at_end().await?;
         self.shot(
             "screenshot: Show more at the panel's end, Chi Rho",
             SEARCH_SHOTS[1],
@@ -453,6 +479,7 @@ impl Run<'_> {
         self.type_in_box(WORD).await?;
         self.word_results().await?;
         self.show_more_at_end("scroll the panel to its end").await?;
+        self.stay_at_end().await?;
         self.shot(
             "screenshot: Show more at the panel's end, Vellum",
             SEARCH_SHOTS[5],

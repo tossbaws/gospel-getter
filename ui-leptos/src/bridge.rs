@@ -52,6 +52,16 @@
 //!   history, a busy export), as it is at that moment.
 //! - [`SURFACE_OPEN_EVENT`] (`gospel-getter:surface-open`, the head
 //!   script's): a surface opened, so the search box closes.
+//! - [`PICKER_BOOKS_EVENT`] (`gospel-getter:picker-books`): `{ otBooks,
+//!   ntBooks }`, the books as `get_home` listed them, from boot, for the
+//!   book and chapter picker's lists; sent again on [`READY_EVENT`].
+//! - [`PICKER_CURRENT_EVENT`] (`gospel-getter:picker-current`): `{ bookId,
+//!   chapter }`, each time the page puts a chapter on screen (its
+//!   `renderCurrent`): the picker marks it and shows its book's chapters;
+//!   the latest is sent again on [`READY_EVENT`].
+//! - [`PICKER_SHOWN_EVENT`] (`gospel-getter:picker-shown`, the head
+//!   script's): the picker has appeared (the sidebar or the popover), so it
+//!   scrolls to the book being read.
 //!
 //! Rust to page:
 //! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): the module has loaded
@@ -63,7 +73,9 @@
 //!   once a file is chosen): popovers and panels go, and the search box
 //!   with `closeSearch`.
 //! - [`JUMP_EVENT`] (`gospel-getter:jump`): `{ bookId, chapter, top }`,
-//!   opened as the page's own jumps are (the welcome's places to start).
+//!   opened as the page's own jumps are (the welcome's places to start, a
+//!   chapter chosen in the picker or Random chapter's: from the top, unless
+//!   it's the chapter on screen).
 //! - [`DATA_BUSY_EVENT`] (`gospel-getter:data-busy`): `{ busy }`, the ☰
 //!   Export and Import items disabled while an import runs.
 //! - [`IMPORTED_EVENT`] (`gospel-getter:imported`): `{ position, message }`
@@ -108,8 +120,9 @@
 //!   before focus moves on ([`refresh_highlights`]).
 //! - `window.gospelGetterSurfaces.close(restoreFocus)` also closes the
 //!   Library before a row opens its passage, and whatever is open when the
-//!   search box opens ([`close_surfaces_with`]); `.current()` says which
-//!   surface is open ([`current_surface`]).
+//!   search box opens, and the picker's popover as a chapter is chosen in
+//!   it ([`close_surfaces_with`]); `.current()` says which surface is open
+//!   ([`current_surface`]).
 //!
 //! Page globals this crate sets: `window.gospelGetterShortcuts`, the table
 //! of shortcuts (`shortcut_table`), as the page had it, for its frontend
@@ -153,6 +166,16 @@
 //! `#search-results` and `#search-more`) are this crate's elements, put
 //! inside the page's `#search-panel`. The page's keyboard dispatcher
 //! ignores keys there, as before.
+//!
+//! The book and chapter picker's books and chapters (the `.book-item`s in
+//! `#ot-book-list` and `#nt-book-list`, and `#picker-chapters`) are this
+//! crate's elements, drawn inside the page's `#picker`, whose clicks and
+//! keys this crate answers (Random chapter, `#random-chapter-btn`, is the
+//! page's button). The picker's two shapes stay the head script's: it shows
+//! and hides `#picker` as the sidebar or the popover (one of its surfaces,
+//! `picker`), keeps the reading place as the sidebar comes and goes, and
+//! focuses the chapter being read (or its book, or Random chapter) by the
+//! marks drawn here.
 //!
 //! About (`#about-overlay`) and the update banner (`#update-banner`) are
 //! this crate's elements too, put where the page had them. About's `hidden`
@@ -354,7 +377,7 @@ struct Jump {
     top: bool,
 }
 
-/// Says [`JUMP_EVENT`].
+/// Says [`JUMP_EVENT`]; the page jumps before this returns.
 pub fn jump(book_id: i64, chapter: i64, top: bool) {
     dispatch(
         JUMP_EVENT,
@@ -916,3 +939,42 @@ pub fn page_command(command: &str, value: Option<&str>) {
     };
     dispatch_object(COMMAND_EVENT, &detail);
 }
+
+/// Boot's books for the picker: a `CustomEvent` whose `detail` is
+/// `{ otBooks, ntBooks }`, each a list of `{ id, name, chapterCount }`
+/// (`get_home`'s, as it gave them).
+pub const PICKER_BOOKS_EVENT: &str = "gospel-getter:picker-books";
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PickerBooks {
+    ot_books: Vec<crate::picker_text::Book>,
+    nt_books: Vec<crate::picker_text::Book>,
+}
+
+/// The Old and the New Testament's books a [`PICKER_BOOKS_EVENT`] carries.
+pub fn picker_books(
+    event: &CustomEvent,
+) -> Result<(Vec<crate::picker_text::Book>, Vec<crate::picker_text::Book>), JsValue> {
+    detail::<PickerBooks>(event).map(|b| (b.ot_books, b.nt_books))
+}
+
+/// The page has put a chapter on screen: a `CustomEvent` whose `detail` is
+/// `{ bookId, chapter }`.
+pub const PICKER_CURRENT_EVENT: &str = "gospel-getter:picker-current";
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PickerCurrent {
+    book_id: i64,
+    chapter: i64,
+}
+
+/// The book id and chapter a [`PICKER_CURRENT_EVENT`] carries.
+pub fn picker_current(event: &CustomEvent) -> Result<(i64, i64), JsValue> {
+    detail::<PickerCurrent>(event).map(|c| (c.book_id, c.chapter))
+}
+
+/// The head script has shown the picker (it was hidden): a `CustomEvent`,
+/// no `detail`.
+pub const PICKER_SHOWN_EVENT: &str = "gospel-getter:picker-shown";
