@@ -115,8 +115,8 @@ needed.
   Classic Dark, Classic Light, Matrix, Beast Slayer and Hot Pink. Four text
   sizes (also Ctrl+= and Ctrl+-, and Ctrl+0 for Medium), three line
   spacings, three widths for the text (Narrow, Normal and Wide), a
-  layout, and a distraction-free reading mode, all under **Aa**
-  (**Display**). Printing is always black on white.
+  layout, and a distraction-free reading mode, all under **Aa**. Printing
+  is always black on white.
 - **Verses or Flowing.** **Layout** under **Aa** sets the verses one to a
   line (**Verses**, the default) or runs each chapter on as prose with
   small raised verse numbers (**Flowing**), in the chapter you're reading,
