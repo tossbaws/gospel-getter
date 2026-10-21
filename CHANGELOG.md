@@ -4,6 +4,23 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.17.1] - 2026-10-20
+
+### Fixed
+- **Show more** at the end of search's results was easy to miss: a small
+  button under the 50th verse. It now spans the width of the results and
+  says how many more it shows, of how many, such as "Show 50 more (of
+  235)". (#106)
+
+### Security
+- The updater's secure connection to GitHub, which it uses to check for
+  and download updates, could in theory accept a certificate from an
+  authority that has since been distrusted (RUSTSEC-2026-0382). The
+  library that checks those certificates is updated to fix it. Updates
+  were, and still are, checked against Gospel Getter's signature before
+  they're installed, so this couldn't have let a forged update in.
+  Nothing else changes. (#108)
+
 ## [2.17.0] - 2026-10-20
 
 ### Added
