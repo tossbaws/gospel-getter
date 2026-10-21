@@ -15,7 +15,9 @@
 # Exit code 0 only if every check passed.
 #
 # Checks 1 to 8, 14 to 16 (the Library), 17 to 19 (search and the
-# palette) and 20 to 24 (the book and chapter picker) run on the app given. The updater's checks (9 to 13) run on
+# palette), 20 to 24 (the book and chapter picker) and 25 to 29 (Aa, the
+# translations, Compare and reading mode) run on the app given; for 26 it
+# is closed and started again on the same data. The updater's checks (9 to 13) run on
 # GUI_CHECK_UPDATER_APP: the GUI checks' test build (cargo build --release
 # --features gui-test-updater), against the checks' own local update
 # server, with a signing key made for the run; without it they fail as not
