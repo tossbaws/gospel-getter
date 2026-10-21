@@ -1,7 +1,7 @@
 // Behavior tests for the translation button in the top bar: it shows the
 // translation being read by its code and opens the translations and
-// Compare, which left Aa (Aa keeps the display settings, and says
-// "Display" where there's room). T opens it as the button does. Plus the
+// Compare, which left Aa (Aa keeps the display settings, named Display
+// but showing just "Aa"). T opens it as the button does. Plus the
 // ☰ menu's hover text on Export data… and Import data…. Against the real
 // backend and database.
 
@@ -185,10 +185,9 @@ test('Aa keeps the display settings, named Display; the translations and Compare
         assert.equal(toggle.getAttribute('aria-label'), 'Display');
         assert.equal(toggle.title, 'Text and display');
         assert.equal(aa.getAttribute('aria-label'), 'Display');
-        assert.equal(toggle.querySelector('.aa-label').textContent, 'Display');
-        // The label shows only where the bar has room for it.
-        const css = app.document.querySelector('style').textContent;
-        assert.match(css, /@media \(max-width: 847px\) \{[^@]*\.aa-label \{\s*display: none;/);
+        // It shows just "Aa", with no "Display" label beside it.
+        assert.equal(toggle.textContent, 'Aa');
+        assert.equal(toggle.querySelector('.aa-label'), null);
 
         // Focus goes to Aa's first control.
         app.click(toggle);
