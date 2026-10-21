@@ -195,9 +195,9 @@ pub struct NoteRecord {
 }
 
 /// Display preferences. Each is optional: a file only changes the ones it
-/// names. The values are the ones Aa offers (and the
-/// `<head>` preferences script in `ui/index.html` accepts — a test keeps
-/// the two lists in step).
+/// names. The values are the ones Aa offers and the page keeps: the enums
+/// are the saved settings' one table's (`preferences`, shared with the
+/// page's Rust pieces).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
@@ -284,55 +284,7 @@ impl<'de> Deserialize<'de> for TranslationCode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Theme {
-    ChiRho,
-    Vellum,
-    /// Chi Rho or Vellum, following the computer's light or dark setting.
-    System,
-    Vaporwave,
-    ClassicDark,
-    ClassicLight,
-    Matrix,
-    BeastSlayer,
-    HotPink,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum TextSize {
-    Small,
-    Medium,
-    Large,
-    XLarge,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum LineSpacing {
-    Compact,
-    Normal,
-    Relaxed,
-}
-
-/// The reading column's width (Aa's Width row).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Width {
-    Narrow,
-    Normal,
-    Wide,
-}
-
-/// How a chapter is set (Aa's Layout row): a verse to a line, or the
-/// verses flowing on as prose. Presentation only: the text is the same.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Layout {
-    Verses,
-    Flowing,
-}
+pub use crate::preferences::{Layout, LineSpacing, TextSize, Theme, Width};
 
 /// Why a file can't be imported, in words for the reader.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1083,22 +1035,6 @@ pub fn normalize_timestamp(input: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    const HTML: &str = include_str!("../../ui/index.html");
-
-    /// The `<option value>`s of one preference `<select>` (Aa's record of
-    /// that choice).
-    fn select_options(id: &str) -> Vec<String> {
-        let start = HTML
-            .find(&format!(r#"<select id="{id}""#))
-            .expect("select exists");
-        let end = start + HTML[start..].find("</select>").expect("select closes");
-        HTML[start..end]
-            .split(r#"<option value=""#)
-            .skip(1)
-            .map(|s| s[..s.find('"').expect("quoted")].to_string())
-            .collect()
-    }
-
     fn names<T: Serialize>(values: &[T]) -> Vec<String> {
         values
             .iter()
@@ -1112,6 +1048,12 @@ mod tests {
             .collect()
     }
 
+    fn values(choices: &[crate::preferences::Choice]) -> Vec<String> {
+        choices.iter().map(|c| c.value.to_string()).collect()
+    }
+
+    /// Each enum is written in a file as the value Aa offers and the page
+    /// saves: its choice in the one table, in order.
     #[test]
     fn preference_values_match_what_aa_offers() {
         use LineSpacing as L;
@@ -1129,24 +1071,31 @@ mod tests {
                 T::BeastSlayer,
                 T::HotPink
             ]),
-            select_options("theme-select")
+            values(Theme::CHOICES)
         );
         assert_eq!(
             names(&[S::Small, S::Medium, S::Large, S::XLarge]),
-            select_options("text-size-select")
+            values(TextSize::CHOICES)
         );
         assert_eq!(
             names(&[L::Compact, L::Normal, L::Relaxed]),
-            select_options("line-spacing-select")
+            values(LineSpacing::CHOICES)
         );
         assert_eq!(
             names(&[Width::Narrow, Width::Normal, Width::Wide]),
-            select_options("width-select")
+            values(Width::CHOICES)
         );
         assert_eq!(
             names(&[Layout::Verses, Layout::Flowing]),
-            select_options("layout-select")
+            values(Layout::CHOICES)
         );
+        // And a file's preferences are the table's exported ones, by the
+        // same names, in the same order.
+        let exported: Vec<&str> = crate::preferences::PREFERENCES
+            .iter()
+            .filter_map(|p| p.file_name)
+            .collect();
+        assert_eq!(exported, Preferences::NAMES);
     }
 
     #[test]

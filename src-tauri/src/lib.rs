@@ -8,6 +8,10 @@ pub mod db;
 pub mod domain;
 pub mod notes_export;
 pub mod passage_copy;
+// The saved settings' one table, shared with the page's Rust pieces
+// (ui-leptos), which compile the same file.
+#[path = "../../shared/preferences.rs"]
+pub mod preferences;
 pub mod reader_data;
 #[cfg(test)]
 mod reader_data_tests;
