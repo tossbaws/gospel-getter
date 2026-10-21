@@ -19,9 +19,23 @@ shortcuts sheet lists and the palette's key hints come from) and the
 palette's commands (`src/palette.rs`); and the book and chapter picker's
 books and chapters (`src/picker.rs`: the two testaments' lists, a book's
 chapters, the marks for the chapter being read, Random chapter, and the
-picker's clicks and keys, with its rules in `src/picker_text.rs`). About,
-the Library and the picker stay the head script's surfaces: the head script
-opens and closes them (the picker as the sidebar or the popover).
+picker's clicks and keys, with its rules in `src/picker_text.rs`); and Aa
+with the translation button's popover (`src/aa.rs`: the translations,
+Compare and what it compares with, text size with its stepper and keys,
+line spacing, width, layout, theme, reading mode and the launch check's
+setting, with its rules in `src/aa_text.rs`), which keep the saved settings
+(`src/prefs.rs`). About, the Library, the picker, Aa and the translations
+stay the head script's surfaces: the head script opens and closes them (the
+picker as the sidebar or the popover), and asks Aa and the translations to
+be drawn as they open.
+
+The saved settings' one table, their keys, values and names (in the page
+and in an export file), is `../shared/preferences.rs`, a file the backend
+(`src-tauri`) compiles too, as its `preferences` module: its export file's
+display settings are that file's enums. The page's pre-paint script, the
+first in its `<head>`, applies the saved look before the first frame from a
+table generated from it (`prepaint_script`); `src-tauri/tests/frontend_markup.rs`
+keeps the two the same.
 
 [Leptos]: https://leptos.dev
 
@@ -86,10 +100,14 @@ The page loads the pieces itself: Trunk inlines `ui/leptos-loader.js` at the
 end of `<body>`, which loads the glue (`ui-leptos.js`) and the module
 (`ui-leptos_bg.wasm`). Trunk's own loader is an ES module import, which the
 `no-modules` glue cannot be loaded by, so `Trunk.toml` turns it off. If the
-module fails to load, the page is as it was without it, except that the
-five dialogs, About, the Library and search are unavailable, and say so
-when asked for, no update is looked for, the reader marks no
-bookmarks (the Library loads them), and the picker lists no books. The module may also load after the page has booted:
+module fails to load, the Bible text still shows, in the saved look (the
+pre-paint script applies it), and the reader's own keys work; the five
+dialogs, About, the Library, search, Aa ("Display settings aren’t
+available.") and the translation button's popover ("Translations aren’t
+available.") say they are unavailable when asked for, and so does the
+picker, which lists no books ("The book list isn’t available."); no setting
+can be changed (reading mode can't be left), no update is looked for, and
+the reader marks no bookmarks (the Library loads them). The module may also load after the page has booted:
 the Library's lists, then the welcome's startup question, the launch check,
 About's credits and the picker's books and chapter being read wait for
 `gospel-getter:pieces-ready`.

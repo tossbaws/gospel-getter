@@ -5,12 +5,15 @@
 
 const HTML: &str = include_str!("../../ui/index.html");
 
+use gospel_getter_lib::preferences::{self, Preference, Values};
+
 /// The page's pieces written in Rust (`ui-leptos/src`), which own the
 /// modal dialogs' markup and keyboard handling, the Library's tabs and
-/// lists, the search box and its palette, the table of shortcuts, and the
-/// book and chapter picker's books and chapters: checks of those read them
-/// where they now live.
-const PIECES: [(&str, &str); 13] = [
+/// lists, the search box and its palette, the table of shortcuts, the
+/// book and chapter picker's books and chapters, and Aa with the
+/// translations and the saved settings: checks of those read them where
+/// they now live.
+const PIECES: [(&str, &str); 15] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -42,6 +45,8 @@ const PIECES: [(&str, &str); 13] = [
         "picker_text.rs",
         include_str!("../../ui-leptos/src/picker_text.rs"),
     ),
+    ("aa.rs", include_str!("../../ui-leptos/src/aa.rs")),
+    ("aa_text.rs", include_str!("../../ui-leptos/src/aa_text.rs")),
 ];
 
 /// One piece's source, by file name.
@@ -388,43 +393,37 @@ fn property<'a>(props: &'a [(String, String)], name: &str) -> &'a str {
         .unwrap_or_else(|| panic!("expected `{name}` to be declared"))
 }
 
-/// The `value` attributes of a `<select id="...">`'s options, in order.
+/// The setting whose hidden `<select id>` records it: Aa's settings, in
+/// the saved settings' one table (`shared/preferences.rs`, which the page's
+/// Rust pieces fill those `<select>`s from).
+fn preference(select_id: &str) -> &'static Preference {
+    preferences::PREFERENCES
+        .iter()
+        .find(|p| p.select == Some(select_id))
+        .unwrap_or_else(|| panic!("no setting is recorded in #{select_id}"))
+}
+
+/// The options of a setting's `<select id="...">`, `(value, label)` in
+/// order: its choices in the one table.
 fn select_options(id: &str) -> Vec<(String, String)> {
-    let start = HTML
-        .find(&format!(r#"<select id="{id}""#))
-        .unwrap_or_else(|| panic!("expected a <select id=\"{id}\">"));
-    let end = HTML[start..].find("</select>").unwrap() + start;
-    HTML[start..end]
-        .split("<option value=\"")
-        .skip(1)
-        .map(|chunk| {
-            let (value, rest) = chunk.split_once('"').unwrap();
-            let label = &rest[rest.find('>').unwrap() + 1..rest.find("</option>").unwrap()];
-            (value.to_owned(), label.trim().to_owned())
-        })
+    let Values::Choices(choices) = preference(id).values else {
+        panic!("#{id}'s setting has no choices");
+    };
+    choices
+        .iter()
+        .map(|c| (c.value.to_owned(), c.label.to_owned()))
         .collect()
 }
 
-/// The `values: [...]` list and `fallback` the preferences script
-/// validates a saved choice for the `<select id>` against.
+/// The values and default a saved choice for the `<select id>` is checked
+/// against (the store, and the pre-paint script's table generated from
+/// it): the one table's.
 fn script_preset(select_id: &str) -> (Vec<String>, String) {
-    let at = HTML
-        .find(&format!("select: '{select_id}',"))
-        .unwrap_or_else(|| panic!("the preferences script should manage #{select_id}"));
-    let entry = &HTML[at..];
-    let quoted = |field: &str| {
-        let from = entry.find(field).unwrap() + field.len();
-        entry[from..entry[from..].find('\n').unwrap() + from].to_owned()
-    };
-    let fallback = quoted("fallback: ")
-        .trim_matches([' ', '\'', ','])
-        .to_owned();
-    let values = quoted("values: [")
-        .trim_end_matches("],")
-        .split(',')
-        .map(|v| v.trim().trim_matches('\'').to_owned())
-        .collect();
-    (values, fallback)
+    let pref = preference(select_id);
+    (
+        pref.values.list().into_iter().map(str::to_owned).collect(),
+        pref.fallback.to_owned(),
+    )
 }
 
 fn relative_luminance(hex: &str) -> f64 {
@@ -604,9 +603,14 @@ fn beast_slayer_replaces_monster_hunter_and_migrates_saved_choice() {
         );
     }
 
-    assert!(
-        HTML.contains("renamed: { 'monster-hunter': 'beast-slayer' }"),
+    assert_eq!(
+        preferences::THEME.renamed_to("monster-hunter"),
+        Some("beast-slayer"),
         "a saved `monster-hunter` theme should be migrated to `beast-slayer`"
+    );
+    assert!(
+        HTML.contains("{ 'monster-hunter': 'beast-slayer' }"),
+        "and shown as `beast-slayer` from the first frame"
     );
     let (values, _) = script_preset("theme-select");
     assert!(
@@ -615,12 +619,12 @@ fn beast_slayer_replaces_monster_hunter_and_migrates_saved_choice() {
     );
 }
 
-/// Each preference `<select>` must offer exactly the values the script
+/// Each preference `<select>` must offer exactly the values the store
 /// accepts from storage (otherwise a saved choice could be un-selectable,
 /// or a selectable one silently reset on restart), and its default must be
-/// one of them. The `<select>`s are hidden records of each choice; Aa's
-/// buttons, labelled groups built from their options, are what the reader
-/// uses.
+/// one of them. The `<select>`s are hidden records of each choice, which
+/// Aa fills from the one table and sets to what's saved; Aa's buttons,
+/// labelled groups built from the same choices, are what the reader uses.
 #[test]
 fn preference_selects_match_the_values_the_script_persists() {
     for id in [
@@ -640,10 +644,44 @@ fn preference_selects_match_the_values_the_script_persists() {
             "#{id}'s default `{fallback}` should be offered"
         );
         assert!(
-            HTML.contains(&format!(r#"<select id="{id}" hidden>"#)),
-            "#{id} should be a hidden record behind Aa's buttons"
+            HTML.contains(&format!(r#"<select id="{id}" hidden></select>"#)),
+            "#{id} should be a hidden record behind Aa's buttons, filled by Aa"
         );
     }
+    let draw = block_after(piece("aa.rs"), "fn draw_choices(");
+    assert!(
+        draw.contains(
+            "let (Some(id), Values::Choices(choices)) = (pref.select, pref.values) else {"
+        )
+    );
+    assert!(draw.contains("select.set_value(&prefs::load(&pref));"));
+}
+
+/// The saved look is on the page before its first frame: the first script
+/// in `<head>` is the pre-paint script generated from the one table
+/// (`preferences::prepaint_script`), byte for byte, and it only reads what's
+/// saved. Everything that saves a setting is the page's Rust pieces'.
+#[test]
+fn the_pre_paint_script_applies_the_saved_look_from_the_one_table() {
+    let script = preferences::prepaint_script();
+    let at = HTML.find(&script).unwrap_or_else(|| {
+        panic!("ui/index.html's pre-paint script should be, byte for byte:\n{script}")
+    });
+    let head = &HTML[..HTML.find("</head>").unwrap()];
+    assert_eq!(
+        head.find("<script>"),
+        Some(at + "    ".len()),
+        "the first script"
+    );
+    assert!(head[..at].contains("</style>"), "after the stylesheet");
+    for key in preferences::PREFERENCES.map(|p| p.key) {
+        assert!(script.contains(&format!("['{key}', ")), "{key}");
+    }
+    assert!(
+        !head.contains("setItem"),
+        "the head scripts never save a setting"
+    );
+    assert!(piece("aa.rs").contains("prefs::set(&preferences::UPDATE_CHECK, value);"));
 }
 
 /// With nothing saved, verse typography must be exactly what it was before
@@ -765,10 +803,11 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
 }
 
 /// The exit control must be a real, labeled, keyboard-focusable button,
-/// Escape must also leave reading mode, and all of it has to be wired up
-/// in the `<head>` preferences script — which never touches the Tauri
-/// bridge — so a restored reading mode can't strand the reader even if
-/// the main script fails.
+/// and Escape must also leave reading mode. None of it is the main
+/// script's: the exit and the toggle are Aa's (the page's Rust pieces),
+/// Escape's last step is the `<head>` script's, which asks Aa, and neither
+/// head script touches the Tauri bridge. Without the Rust pieces reading
+/// mode can't be left (the owner's E1: Aa says it isn't available).
 #[test]
 fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
     let tag_start = HTML
@@ -795,18 +834,27 @@ fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
     let head_script = &HTML[HTML.find("<script>").unwrap()..head_end];
     assert!(
         !head_script.contains("__TAURI__.core"),
-        "the preferences script must not depend on the Tauri bridge"
+        "the head scripts must not depend on the Tauri bridge"
     );
     for wiring in [
-        "byId('reader-exit')",
-        "byId('aa-toggle')",
         "event.key !== 'Escape'",
-        "gospel-getter-reader-mode",
+        "new CustomEvent('gospel-getter:reader-mode', { detail: { on: false } })",
+        "'gospel-getter-reader-mode', 'readerMode', 'off'",
     ] {
         assert!(
             head_script.contains(wiring),
-            "preferences script should contain `{wiring}`"
+            "the head scripts should contain `{wiring}`"
         );
+    }
+    let aa = piece("aa.rs");
+    for wiring in [
+        r#"by_id("reader-exit")"#,
+        r#"by_id(if on { "reader-exit" } else { "aa-toggle" })"#,
+        "dom::on_click(&exit, |_| set_reader_mode(false));",
+        "dom::on_document_event(READER_MODE_EVENT,",
+        "prefs::set(&preferences::READER_MODE,",
+    ] {
+        assert!(aa.contains(wiring), "Aa should contain `{wiring}`");
     }
 }
 
@@ -1055,8 +1103,12 @@ fn theme_swatches_come_from_the_theme_definitions() {
     let preview = screen_rule(&rules, ".theme-swatch-preview");
     assert!(preview.body.contains("background: var(--bg)"));
     assert!(preview.body.contains("color: var(--accent)"));
-    assert!(HTML.contains("preview.dataset.themePreview = option.value;"));
-    assert!(HTML.contains("optionsOf(themeSelect).forEach("));
+    // Aa draws one swatch per theme in the one table, previewing it.
+    let aa = piece("aa.rs");
+    assert!(aa.contains(
+        r#"<span class="theme-swatch-preview" data-theme-preview=value aria-hidden="true">"#
+    ));
+    assert!(aa.contains("append(&group, swatch_view(choice.value, choice.label));"));
 }
 
 /// About's Release notes link shows the same URL the backend opens. About
@@ -1846,7 +1898,7 @@ fn chi_rho_is_the_default_theme() {
     assert!(selectors(root).any(|s| s == ":root"));
     assert!(selectors(root).any(|s| s == r#"[data-theme-preview="chi-rho"]"#));
     theme_rule(&rules, "vaporwave", "chi-rho");
-    assert!(HTML.contains("renamed: { 'monster-hunter': 'beast-slayer' }"));
+    assert!(HTML.contains("{ 'monster-hunter': 'beast-slayer' }"));
 }
 
 /// Chi Rho and Vellum are the website's palette (site/styles.css) and its
@@ -2432,9 +2484,9 @@ fn the_picker_is_a_navigation_landmark_or_a_dialog() {
         "picker.removeAttribute('role');",
         "refBtn.setAttribute('aria-haspopup', 'dialog');",
         "picker: { el: picker, toggle: refBtn, popover: true },",
-        "key: 'gospel-getter-sidebar',",
+        "['gospel-getter-sidebar', 'sidebar', 'open', ['open', 'closed'], {}],",
     ] {
-        assert!(head.contains(wiring), "the preferences script: {wiring}");
+        assert!(head.contains(wiring), "the head scripts: {wiring}");
     }
     // A book is a disclosure for its chapters, and the chapter and book
     // being read are marked (the picker's piece, ui-leptos/src/picker.rs,
@@ -2587,8 +2639,7 @@ fn the_sidebar_is_for_wide_windows_only() {
         HTML.contains("return isWide() && data.sidebar !== 'closed' && data.readerMode !== 'on';")
     );
     // It's a setting for this window, not exported with the display ones.
-    let names = block_after(HTML, "var FILE_NAMES =");
-    assert!(!names.contains("sidebar"));
+    assert_eq!(preferences::SIDEBAR.file_name, None);
 }
 
 /// The picker's colors are pairs AA in every theme, on the sidebar's
@@ -3011,7 +3062,7 @@ fn width_is_a_display_setting_in_aa() {
     let width = HTML.find(r#"id="width-label""#).unwrap();
     let theme = HTML.find(r#"id="theme-label""#).unwrap();
     assert!(spacing < width && width < theme);
-    assert!(block_after(HTML, "var FILE_NAMES =").contains("width: 'width',"));
+    assert_eq!(preferences::WIDTH.file_name, Some("width"));
 
     let rules = rules();
     let html = custom_properties(&screen_rule(&rules, "html").body);
@@ -3148,32 +3199,34 @@ fn the_palette_and_copy_as_are_aa_in_every_theme() {
 /// says the new size, politely.
 #[test]
 fn the_text_size_keys_step_aa_and_never_zoom_the_page() {
-    let keys = function_body("sizeKey");
+    // Aa's keys are the page's Rust pieces' (`ui-leptos/src/aa.rs`, the
+    // rule in `aa_text.rs`).
+    let keys = block_after(piece("aa_text.rs"), "pub fn size_key(");
     for key in [
-        "key === '='",
-        "key === '+'",
-        "code === 'NumpadAdd'",
-        "key === '-'",
-        "code === 'NumpadSubtract'",
-        "code === 'Numpad0'",
+        r#"key == "=""#,
+        r#"key == "+""#,
+        r#"code == "NumpadAdd""#,
+        r#"key == "-""#,
+        r#"code == "NumpadSubtract""#,
+        r#"code == "Numpad0""#,
     ] {
         assert!(keys.contains(key), "{key}");
     }
-    let at = HTML.find("var step = sizeKey(event);").unwrap();
-    let body = &HTML[at..at + HTML[at..].find("textSizeShortcut(step);").unwrap()];
-    let prevent = body.find("event.preventDefault();").unwrap();
-    let typing = body.find("INPUT|TEXTAREA|SELECT").unwrap();
+    let aa = piece("aa.rs");
+    let body = block_after(aa, "fn on_size_key(");
+    let prevent = body.find("event.prevent_default();").unwrap();
+    let typing = body.find(r#""INPUT" | "TEXTAREA" | "SELECT""#).unwrap();
     assert!(
         prevent < typing,
         "the page zoom is prevented even in a field"
     );
     // The keys' step, which the command palette's Text size commands run
-    // too (see gospelGetterControls).
-    let step = function_body("textSizeShortcut");
-    assert!(step.contains("choose(textSizeSelect, 'medium');"));
-    assert!(step.contains("stepTextSize(step);"));
-    assert!(step.contains("showTextSize();"));
-    assert!(HTML.contains("textSize: textSizeShortcut,"));
+    // too.
+    let step = block_after(aa, "pub fn text_size_shortcut(");
+    assert!(step.contains(r#"choose(&select, "medium");"#));
+    assert!(step.contains("step_text_size(i32::from(step));"));
+    assert!(step.contains("show_text_size();"));
+    assert!(piece("search.rs").contains("Run::TextSize(step) => aa::text_size_shortcut(*step),"));
     assert!(HTML.contains(r#"<p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>"#));
 }
 
@@ -3320,9 +3373,10 @@ fn layout_is_a_display_setting_in_aa() {
     let layout = HTML.find(r#"id="layout-label""#).unwrap();
     let theme = HTML.find(r#"id="theme-label""#).unwrap();
     assert!(width < layout && layout < theme);
-    assert!(block_after(HTML, "var FILE_NAMES =").contains("layout: 'layout',"));
-    assert!(HTML.contains("btn.disabled = comparing;"));
-    assert!(HTML.contains("layoutNote.hidden = !comparing;"));
+    assert_eq!(preferences::LAYOUT.file_name, Some("layout"));
+    let aa = piece("aa.rs");
+    assert!(aa.contains("btn.set_disabled(comparing);"));
+    assert!(aa.contains("note.set_hidden(!comparing);"));
 
     // A disabled segment is quiet but still AA: --text-dim on the
     // segments' --panel-bg, over the popover's --option-bg.
@@ -3495,7 +3549,10 @@ fn the_selection_card_anchors_to_line_boxes_in_flowing() {
     let line = function_body("lineRect");
     assert!(line.contains("verse.getClientRects()"));
     assert!(HTML.contains("document.addEventListener('gospel-getter:layout-change', placeCard);"));
-    assert!(HTML.contains("keepReadingPlace(change);"));
+    // A new layout keeps the reader's place: Aa asks the head script's
+    // keepReadingPlace.
+    assert!(piece("aa.rs").contains("bridge::keep_reading_place(change);"));
+    assert!(HTML.contains("keepReadingPlace: keepReadingPlace,"));
 }
 
 /// The welcome is one card: a modal dialog labelled by its title and
@@ -3900,9 +3957,10 @@ fn the_translation_chooser_and_credits_are_accessible_and_use_tested_theme_color
     assert!(HTML.contains(
         r#"<div id="compare-with-choices" class="segmented" role="group" aria-label="Compare with"></div>"#
     ));
-    let render = function_body("renderTranslations");
-    assert!(render.contains("btn.setAttribute('role', 'radio');"));
-    assert!(render.contains("dot.setAttribute('aria-hidden', 'true');"));
+    // Aa's rows (`ui-leptos/src/aa.rs`).
+    let render = block_after(piece("aa.rs"), "fn translation_view(");
+    assert!(render.contains(r#"class="translation-choice" role="radio""#));
+    assert!(render.contains(r#"<span class="translation-dot" aria-hidden="true">"#));
     // About is the Rust pieces' (`ui-leptos/src/about.rs`).
     assert!(piece("about.rs").contains(r#"<ul id="about-credits" class="about-credits-list">"#));
 
@@ -3997,19 +4055,22 @@ fn a_footnotes_verse_number_is_set_small() {
 
 /// The key values a handler compares against: `event.key === 'j'`,
 /// `key === '='`, `code === 'NumpadAdd'`, `toLowerCase() === 'k'`,
-/// `event.key !== 'Escape'`.
+/// `event.key !== 'Escape'`; in Rust, `key == "="` and `code ==
+/// "NumpadAdd"`.
 fn compared_keys(handler: &str) -> Vec<String> {
     let mut keys = Vec::new();
-    for marker in [
-        "key === '",
-        "key !== '",
-        "code === '",
-        "toLowerCase() === '",
+    for (marker, quote) in [
+        ("key === '", '\''),
+        ("key !== '", '\''),
+        ("code === '", '\''),
+        ("toLowerCase() === '", '\''),
+        ("key == \"", '"'),
+        ("code == \"", '"'),
     ] {
         let mut rest = handler;
         while let Some(at) = rest.find(marker) {
             let after = &rest[at + marker.len()..];
-            let end = after.find('\'').unwrap();
+            let end = after.find(quote).unwrap();
             keys.push(after[..end].to_owned());
             rest = &after[end..];
         }
@@ -4050,7 +4111,7 @@ fn every_handled_key_is_in_the_shortcuts_table() {
             HTML,
             "document.addEventListener('keydown', function (event) {\n                // Keys typed into a form control",
         ),
-        function_body("sizeKey"),
+        block_after(piece("aa_text.rs"), "pub fn size_key("),
         block_after(
             HTML,
             "document.addEventListener('keydown', function (event) {\n                    if (event.key !== 'Escape') return;",
@@ -4270,9 +4331,10 @@ fn nothing_inline_that_the_content_security_policy_would_block() {
     ] {
         assert!(!HTML.contains(blocked), "{blocked}");
     }
-    // The two inline scripts and the one stylesheet Tauri hashes.
-    assert_eq!(HTML.matches("<script>").count(), 2);
-    assert_eq!(HTML.matches("<script").count(), 2);
+    // The three inline scripts (the pre-paint script, the rest of the head
+    // script and the main one) and the one stylesheet Tauri hashes.
+    assert_eq!(HTML.matches("<script>").count(), 3);
+    assert_eq!(HTML.matches("<script").count(), 3);
     assert_eq!(HTML.matches("<style>").count(), 1);
     assert_eq!(HTML.matches("<style").count(), 1);
     // The one style the markup used to carry, the compare grid's column

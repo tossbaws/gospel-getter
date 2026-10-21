@@ -28,6 +28,7 @@ use leptos::task::spawn_local;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Element, HtmlElement, KeyboardEvent};
 
+use crate::aa;
 use crate::bridge;
 use crate::dom;
 use crate::dto::{SearchAnswer, SearchArgs, SearchVerse};
@@ -774,7 +775,10 @@ fn run(action: &Run) {
             click("about-btn");
             click("update-check-btn");
         }
-        Run::Page { command, value } => bridge::page_command(command, value.as_deref()),
+        Run::TextSize(step) => aa::text_size_shortcut(*step),
+        Run::Translation(code) => aa::choose_translation(code),
+        Run::CompareWith(code) => aa::compare_with(code),
+        Run::Page(command) => bridge::page_command(command),
     }
 }
 

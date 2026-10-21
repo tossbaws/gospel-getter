@@ -88,12 +88,17 @@ pub enum Run {
     Library(&'static str),
     /// About, then its Check now.
     CheckUpdates,
+    /// Aa's text size step (`aa::text_size_shortcut`), as its keys take
+    /// it: a step larger (1) or smaller (-1), or back to Medium (0).
+    TextSize(i8),
+    /// Reads this translation, as its row in the translation button's
+    /// popover does.
+    Translation(String),
+    /// Compares with this translation, as Compare's "with" does.
+    CompareWith(String),
     /// The page's own code for it, through `bridge::COMMAND_EVENT`: the
-    /// command's name there, and a value for it.
-    Page {
-        command: &'static str,
-        value: Option<String>,
-    },
+    /// command's name there.
+    Page(&'static str),
 }
 
 /// One command, as the palette lists it.
@@ -136,10 +141,7 @@ fn click(id: &'static str) -> Run {
 }
 
 fn page(command: &'static str) -> Run {
-    Run::Page {
-        command,
-        value: None,
-    }
+    Run::Page(command)
 }
 
 /// The reason when `in_use`, else none.
@@ -247,7 +249,7 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         "text-larger",
         "bigger increase font",
         (size >= sizes - 1).then_some("Already the largest"),
-        page("text-larger"),
+        Run::TextSize(1),
     );
     add(
         "text-smaller".into(),
@@ -255,7 +257,7 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         "text-smaller",
         "decrease font",
         (size <= 0).then_some("Already the smallest"),
-        page("text-smaller"),
+        Run::TextSize(-1),
     );
     add(
         "text-medium".into(),
@@ -263,7 +265,7 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         "text-medium",
         "reset default font",
         in_use(state.text_size == "medium"),
-        page("text-medium"),
+        Run::TextSize(0),
     );
     for o in &state.themes {
         add(
@@ -286,10 +288,7 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
             "",
             &o.label,
             in_use(&o.value == reading),
-            Run::Page {
-                command: "translation",
-                value: Some(o.value.clone()),
-            },
+            Run::Translation(o.value.clone()),
         );
     }
     for o in state.translations.iter().filter(|o| &o.value != reading) {
@@ -303,10 +302,7 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
             } else {
                 Some("Only while comparing")
             },
-            Run::Page {
-                command: "compare-with",
-                value: Some(o.value.clone()),
-            },
+            Run::CompareWith(o.value.clone()),
         );
     }
     add(
@@ -852,11 +848,14 @@ mod tests {
         );
         assert_eq!(
             find(&list, "translation-bsb").run,
-            Run::Page {
-                command: "translation",
-                value: Some("bsb".into())
-            }
+            Run::Translation("bsb".into())
         );
+        assert_eq!(
+            find(&list, "compare-with-web").run,
+            Run::CompareWith("web".into())
+        );
+        assert_eq!(find(&list, "text-larger").run, Run::TextSize(1));
+        assert_eq!(find(&list, "text-medium").run, Run::TextSize(0));
         assert_eq!(find(&list, "library-notes").run, Run::Library("notes"));
         assert_eq!(find(&list, "check-updates").run, Run::CheckUpdates);
         assert_eq!(find(&list, "back").run, page("back"));

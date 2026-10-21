@@ -69,22 +69,14 @@ struct Import {
     cancel: NodeRef<html::Button>,
 }
 
-/// An Aa `<select>` option's text: `label(select, value)`.
+/// What Aa calls `value` of the setting its `<select>` `select` records
+/// (the one table's label), or the value itself: `label(select, value)`.
 fn option_text(select: &str, value: &str) -> String {
-    use wasm_bindgen::JsCast;
-    let options = bridge::document()
-        .and_then(|d| d.get_element_by_id(select))
-        .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
-        .map(|select| select.options());
-    let Some(options) = options else {
-        return value.to_string();
-    };
-    (0..options.length())
-        .filter_map(|i| options.item(i))
-        .filter_map(|el| el.dyn_into::<web_sys::HtmlOptionElement>().ok())
-        .find(|option| option.value() == value)
-        .map(|option| option.text_content().unwrap_or_default())
-        .unwrap_or_else(|| value.to_string())
+    crate::preferences::PREFERENCES
+        .iter()
+        .find(|p| p.select == Some(select))
+        .and_then(|p| p.label(value))
+        .map_or_else(|| value.to_string(), str::to_string)
 }
 
 impl Import {
@@ -314,7 +306,7 @@ impl Import {
             // database, so they're applied after the database part has
             // succeeded; a failure here is reported, not hidden.
             if use_prefs {
-                let applied = bridge::apply_preferences(&raw_prefs).map_err(|e| {
+                let applied = crate::aa::apply_preferences(&raw_prefs).map_err(|e| {
                     ipc::log_error("Failed to apply display settings", &e);
                     ipc::error_text(&e)
                 });

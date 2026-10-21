@@ -62,6 +62,19 @@
 //! - [`PICKER_SHOWN_EVENT`] (`gospel-getter:picker-shown`, the head
 //!   script's): the picker has appeared (the sidebar or the popover), so it
 //!   scrolls to the book being read.
+//! - [`aa::DRAW_EVENT`](crate::aa::DRAW_EVENT) (`gospel-getter:surface-draw`,
+//!   the head script's): `{ name }`, Aa (`aa`) or the translation button's
+//!   popover (`translation`) is opening: Aa draws what's in it, within the
+//!   event, and cancels it to say so. If nothing does, the head script
+//!   says "Display settings aren’t available." or "Translations aren’t
+//!   available."
+//! - [`aa::PREFERENCE_EVENT`](crate::aa::PREFERENCE_EVENT)
+//!   (`gospel-getter:preference`, the head script's): `{ name, value }`, a
+//!   setting the head script shows changed (the sidebar, from its toggle),
+//!   by the page's name for it: applied and saved within the event.
+//! - [`aa::READER_MODE_EVENT`](crate::aa::READER_MODE_EVENT)
+//!   (`gospel-getter:reader-mode`, the head script's): `{ on }`, reading
+//!   mode on or off (Escape, last of all, leaves it), as Aa's toggle does.
 //!
 //! Rust to page:
 //! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): the module has loaded
@@ -98,20 +111,34 @@
 //!   with `note` (a note's Edit) then opens the editor on it.
 //! - [`PALETTE_STATE_EVENT`]: `{}`, asked whenever the palette is drawn or
 //!   a command is chosen; the page fills in `detail.state` (above).
-//! - [`COMMAND_EVENT`] (`gospel-getter:command`): `{ command, value }`, a
+//! - [`COMMAND_EVENT`] (`gospel-getter:command`): `{ command }`, a
 //!   palette command whose code is the page's (copy the chapter, Copy
-//!   as…, turn the chapter or the book, Back and Forward, text size, a
-//!   translation, Compare with, the shortcuts sheet), run within the click
-//!   or key that chose it (the clipboard needs that), after the box has
-//!   closed and focus has gone back. The commands whose controls are on
-//!   the page are run by clicking them (see Page controls).
+//!   as…, turn the chapter or the book, Back and Forward, the shortcuts
+//!   sheet), run within the click or key that chose it (the clipboard needs
+//!   that), after the box has closed and focus has gone back. The commands
+//!   whose controls are on the page are run by clicking them (see Page
+//!   controls); text size, a translation and Compare with are Aa's own.
+//! - [`aa::COMPARE_CHANGE_EVENT`](crate::aa::COMPARE_CHANGE_EVENT)
+//!   (`gospel-getter:compare-change`): no `detail`, Compare went on or off,
+//!   or what it compares with changed: the page shows the chapter in the
+//!   new layout.
+//! - [`aa::LAYOUT_CHANGE_EVENT`](crate::aa::LAYOUT_CHANGE_EVENT)
+//!   (`gospel-getter:layout-change`): no `detail`, the layout changed: the
+//!   page moves the selection's card to its verses' new place.
 //!
 //! Page globals this crate calls (small, named, existing or exposed for it):
 //! - `window.gospelGetterSurfaces.close()` (the head script's surfaces
 //!   controller, which opens and closes About as one of its surfaces):
 //!   About's ×, Escape and its update's Close ([`close_surfaces`]).
-//! - `window.gospelGetterPreferences.apply(values)` (the head script's):
-//!   an import's display settings ([`apply_preferences`]).
+//! - `window.gospelGetterSurfaces.syncPicker()` and
+//!   `.keepReadingPlace(change)` (the head script's, until the surfaces
+//!   move here): the picker takes the shape reading mode or the sidebar
+//!   setting calls for ([`sync_picker`]), and a new layout keeps the
+//!   reader's place ([`keep_reading_place`]).
+//! - `window.gospelGetterComparePartner()` (the page's: the reader fetches
+//!   a comparison by it, from boot on, so its rule is the page's): the
+//!   translation Compare shows beside the one being read, for Aa's
+//!   "with" choices.
 //! - `window.gospelGetterRefreshNotes()` (the page's `refreshNotes`, a
 //!   promise): the editor waits for it before closing ([`refresh_notes`]).
 //! - `window.gospelGetterRefreshHighlights()` (the page's
@@ -126,12 +153,21 @@
 //!
 //! Page globals this crate sets: `window.gospelGetterShortcuts`, the table
 //! of shortcuts (`shortcut_table`), as the page had it, for its frontend
-//! tests ([`export_shortcuts`]).
+//! tests ([`export_shortcuts`]); and `window.gospelGetterPreferences`
+//! (`aa`): `current()`, the display settings an export carries, which the
+//! page's Export data… reads, and `apply(values)`.
 //!
-//! Page controls this crate uses as a reader would: `#theme-select`, Aa's
-//! record of the theme, read and changed (with a `change` event) for the
-//! welcome's looks ([`theme`], [`choose_theme`]); Aa's `<select>` options'
-//! labels, read to name an import file's settings; the page's focus home
+//! Aa's settings' records, the hidden `<select>`s `#theme-select`,
+//! `#text-size-select`, `#line-spacing-select`, `#width-select` and
+//! `#layout-select`, are this crate's (`aa` fills them from the one table
+//! and keeps them), where the page's other scripts read them as before;
+//! choosing sends their `change` as before. Aa draws inside the head
+//! script's `#aa-popover` and `#translation-popover`, and answers their
+//! controls, `#reader-exit` and the size keys.
+//!
+//! Page controls this crate uses as a reader would: `#theme-select`, read
+//! and changed (with a `change` event, as Aa does) for the welcome's looks
+//! ([`theme`], [`choose_theme`]); the page's focus home
 //! (`#aa-toggle` in reading mode, else `#menu-toggle`, [`focus_home`]);
 //! `#translation-select`, the translation button's record of the
 //! translation, read for the Library's previews and the search
@@ -182,13 +218,14 @@
 //! is the head script's (it shows and hides it as a surface, looking it up
 //! when it does); its keys are on the overlay itself, as they were. The
 //! page looks the banner up for its toast, which sits above it. The launch
-//! check's setting, `#update-check-toggle`, is drawn here and kept by the
-//! head script (`gospel-getter-update-check`, applied as
-//! `html[data-update-check]`), which listens for its `change` on the
-//! document.
+//! check's setting, `#update-check-toggle`, is drawn here and kept here too
+//! (`gospel-getter-update-check`, applied as `html[data-update-check]`),
+//! by a listener for its `change` on the document (`aa`).
 //!
-//! Local storage: the welcome reads the `gospel-getter-*` keys (the
-//! fresh-install rule) and writes [`WELCOME_KEY`].
+//! Local storage: the saved settings' keys are this crate's to write
+//! (`prefs`), as the one table says (`preferences`); the page's pre-paint
+//! script only reads them. The welcome reads the `gospel-getter-*` keys
+//! (the fresh-install rule) and writes [`WELCOME_KEY`].
 //!
 //! Shared with the backend, not the page: the commands the pieces invoke,
 //! through the same `window.__TAURI__.core.invoke` the page uses (see
@@ -424,8 +461,8 @@ pub fn welcome_request(event: &CustomEvent) -> Result<WelcomeRequest, JsValue> {
 
 /// Aa's record of the theme: `#theme-select`, a hidden `<select>`. The
 /// welcome reads it to know which look is in use, and picks a look the way
-/// Aa does: setting its value and sending it a `change` event, which the
-/// page's preference script applies, stores and shows.
+/// Aa does: setting its value and sending it a `change` event, which Aa
+/// applies and saves (`aa`).
 const THEME_SELECT: &str = "theme-select";
 
 /// The theme in use, as `#theme-select` has it.
@@ -528,27 +565,6 @@ pub fn imported(position: Option<&crate::dto::PositionPreview>, message: &str) {
         chapter: p.chapter,
     });
     dispatch(IMPORTED_EVENT, &Imported { position, message });
-}
-
-/// Applies display settings from an import file through the page's own
-/// `window.gospelGetterPreferences.apply(values)` (the head script's
-/// global; the only way to set them in bulk): `values` as the backend sent
-/// them. `Ok(persisted)` says whether they could also be saved; an error is
-/// what `apply` threw.
-pub fn apply_preferences(values: &JsValue) -> Result<bool, JsValue> {
-    let window: JsValue = web_sys::window()
-        .ok_or_else(|| JsValue::from_str("no window"))?
-        .into();
-    let preferences = js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterPreferences"))?;
-    let apply = js_sys::Reflect::get(&preferences, &JsValue::from_str("apply"))?
-        .dyn_into::<js_sys::Function>()
-        .map_err(|_| JsValue::from_str("The display settings can’t be applied here."))?;
-    let applied = apply.call1(&preferences, values)?;
-    Ok(
-        js_sys::Reflect::get(&applied, &JsValue::from_str("persisted"))?
-            .as_bool()
-            .unwrap_or(false),
-    )
 }
 
 /// The page opens the note editor (the selection card's + Add note and
@@ -744,24 +760,56 @@ pub fn close_surfaces_with(restore_focus: bool) {
 }
 
 fn call_close(args: &[JsValue]) {
-    let Some(window) = web_sys::window() else {
+    let Some(surfaces) = surfaces() else {
         return;
     };
-    let surfaces = js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterSurfaces"))
-        .ok()
-        .filter(|s| s.is_object());
-    let Some(surfaces) = surfaces else {
-        return;
-    };
-    if let Some(close) = js_sys::Reflect::get(&surfaces, &JsValue::from_str("close"))
-        .ok()
-        .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
-    {
+    if let Some(close) = surfaces_function(&surfaces, "close") {
         let _ = match args {
             [restore_focus] => close.call1(&surfaces, restore_focus),
             _ => close.call0(&surfaces),
         };
     }
+}
+
+/// The head script's `window.gospelGetterSurfaces`, if it's there.
+fn surfaces() -> Option<JsValue> {
+    let window = web_sys::window()?;
+    js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterSurfaces"))
+        .ok()
+        .filter(JsValue::is_object)
+}
+
+/// The surfaces' `name` function.
+fn surfaces_function(surfaces: &JsValue, name: &str) -> Option<js_sys::Function> {
+    js_sys::Reflect::get(surfaces, &JsValue::from_str(name))
+        .ok()?
+        .dyn_into::<js_sys::Function>()
+        .ok()
+}
+
+/// The book and chapter picker takes the shape reading mode and the
+/// sidebar setting now call for (the sidebar or the popover, shown or
+/// hidden): `window.gospelGetterSurfaces.syncPicker()`, the head script's.
+pub fn sync_picker() {
+    if let Some(surfaces) = surfaces()
+        && let Some(sync) = surfaces_function(&surfaces, "syncPicker")
+    {
+        let _ = sync.call0(&surfaces);
+    }
+}
+
+/// Runs `change` (which reflows the page) keeping the reader's place, as
+/// the head script keeps it: `window.gospelGetterSurfaces.keepReadingPlace(
+/// change)`. Without the head script, `change` just runs.
+pub fn keep_reading_place(change: impl Fn() + 'static) {
+    let keep = surfaces().and_then(|s| surfaces_function(&s, "keepReadingPlace").map(|f| (s, f)));
+    let Some((surfaces, keep)) = keep else {
+        change();
+        return;
+    };
+    // Called before `keepReadingPlace` returns, so it can go then.
+    let change = wasm_bindgen::closure::Closure::<dyn Fn()>::new(change);
+    let _ = keep.call1(&surfaces, change.as_ref());
 }
 
 /// The page asks the Library to reload lists: a cancelable `CustomEvent`
@@ -859,15 +907,11 @@ pub fn translation_code() -> String {
 /// The surface the head script has open ("library", "aa", ...), if any:
 /// `window.gospelGetterSurfaces.current()`.
 pub fn current_surface() -> Option<String> {
-    let window = web_sys::window()?;
-    let surfaces = js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterSurfaces"))
-        .ok()
-        .filter(JsValue::is_object)?;
-    let current = js_sys::Reflect::get(&surfaces, &JsValue::from_str("current"))
+    let surfaces = surfaces()?;
+    surfaces_function(&surfaces, "current")?
+        .call0(&surfaces)
         .ok()?
-        .dyn_into::<js_sys::Function>()
-        .ok()?;
-    current.call0(&surfaces).ok()?.as_string()
+        .as_string()
 }
 
 /// The page opens or closes the search box: a cancelable `CustomEvent`
@@ -919,22 +963,19 @@ pub fn palette_state() -> PaletteState {
 }
 
 /// A palette command the page runs: a `CustomEvent` whose `detail` is
-/// `{ command, value }` (`palette::Run::Page`): `copy-chapter`,
+/// `{ command }` (`palette::Run::Page`): `copy-chapter`,
 /// `copy-chapter-as`, `next-chapter`, `previous-chapter`, `next-book`,
-/// `previous-book`, `back`, `forward`, `text-larger`, `text-smaller`,
-/// `text-medium`, `shortcuts` (`value` `null`), `translation` and
-/// `compare-with` (`value` a translation's code).
+/// `previous-book`, `back`, `forward` and `shortcuts`.
 pub const COMMAND_EVENT: &str = "gospel-getter:command";
 
 #[derive(Debug, Serialize)]
 struct PageCommand<'a> {
     command: &'a str,
-    value: Option<&'a str>,
 }
 
 /// Says [`COMMAND_EVENT`]: the page runs it before this returns.
-pub fn page_command(command: &str, value: Option<&str>) {
-    let Ok(detail) = ipc::args(&PageCommand { command, value }) else {
+pub fn page_command(command: &str) {
+    let Ok(detail) = ipc::args(&PageCommand { command }) else {
         return;
     };
     dispatch_object(COMMAND_EVENT, &detail);
