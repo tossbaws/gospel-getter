@@ -405,6 +405,8 @@ pub enum SearchAnswer {
         terms: Vec<String>,
         total: i64,
         offset: i64,
+        /// How many verses a page holds (`commands::SEARCH_PAGE_SIZE`).
+        page_size: i64,
         results: Vec<SearchVerse>,
     },
 }

@@ -56,6 +56,8 @@ enum Shown {
         offset: i64,
         /// How many the last page had.
         page: usize,
+        /// How many a page holds.
+        page_size: i64,
         verses: Vec<SearchVerse>,
     },
 }
@@ -326,6 +328,7 @@ impl Search {
                 terms,
                 total,
                 offset,
+                page_size,
                 results,
             } => {
                 let page = results.len();
@@ -347,6 +350,7 @@ impl Search {
                         total,
                         offset,
                         page,
+                        page_size,
                         verses,
                     });
                 });
@@ -420,6 +424,7 @@ impl Search {
             total,
             offset,
             page,
+            page_size,
             verses,
         }) = &shown
         {
@@ -434,7 +439,8 @@ impl Search {
                     .collect();
                 groups.push(group_view("verses", "Verses", options));
             }
-            more = text::more_from(*offset, *page, *total);
+            more = text::more_from(*offset, *page, *total)
+                .map(|next| (next, text::more_label(next, *page_size, *total)));
         }
 
         while let Some(child) = results.first_child() {
@@ -453,8 +459,10 @@ impl Search {
         }
         if let Some(button) = self.more.get_untracked() {
             button.set_hidden(more.is_none());
-            if let Some(next) = more {
+            // Show more says how many the next page holds, of how many.
+            if let Some((next, label)) = more {
                 let _ = button.set_attribute("data-offset", &next.to_string());
+                button.set_text_content(Some(&label));
             }
         }
         if query.empty {
