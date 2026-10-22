@@ -384,6 +384,121 @@ test('resizing across 1200px swaps the sidebar for the popover and back', () =>
         assert.equal(picker(app).getAttribute('role'), null);
     }));
 
+test('resizing across 1200px keeps the reading place, as the sidebar button does', () =>
+    withApp({ book: 'John', chapter: 3, width: 1280 }, async (app) => {
+        const { window, document } = app;
+        // Stubbed layout, as for the sidebar button: the bar ends at 54px,
+        // and verse 2 is the first thing below it, 100px down with the
+        // sidebar and 160px down without it.
+        $(app, 'top-bar').getBoundingClientRect = () => ({ top: 0, bottom: 54 });
+        app.verse(2).getBoundingClientRect = () => {
+            const top = document.documentElement.dataset.picker === 'sidebar' ? 100 : 160;
+            return { top, bottom: top + 40 };
+        };
+        const scrolls = [];
+        window.scrollBy = (x, y) => scrolls.push([x, y]);
+
+        app.resize(1199);
+        assert.equal(document.documentElement.dataset.picker, undefined);
+        assert.deepEqual(scrolls, [[0, 60]], 'verse 2 stays 100px down');
+        // Widening with the popover open: it closes, and the place stays.
+        app.click(refBtn(app));
+        assert.equal(app.window.gospelGetterSurfaces.current(), 'picker');
+        app.resize(1200);
+        assert.equal(app.window.gospelGetterSurfaces.current(), null);
+        assert.equal(document.documentElement.dataset.picker, 'sidebar');
+        assert.deepEqual(scrolls, [[0, 60], [0, -60]], 'verse 2 stays 160px down');
+        // Narrowing again keeps it again; a resize that stays on one side
+        // of 1200px is left to the browser.
+        app.resize(1000);
+        assert.deepEqual(scrolls, [[0, 60], [0, -60], [0, 60]]);
+        app.resize(900);
+        assert.deepEqual(scrolls, [[0, 60], [0, -60], [0, 60]], 'nothing more');
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
+// Waits for the page's next animation frame, after the ones it asked for.
+const frame = (app) => new Promise((resolve) => app.window.requestAnimationFrame(() => resolve()));
+
+// Stubbed layout for a window resized across 1200px, as WebKitGTK lays it
+// out: the bar ends at 54px, and the reading column is as wide with the
+// sidebar at 1280px as without it at 1000px. When the 1200px media query
+// tells the page, it's already laid out at the new width in the old shape
+// (`width` is that new width): a layout the reader never sees, with
+// another verse first under the bar.
+function crossingLayout(app) {
+    const layout = { width: 1280 };
+    const tops = {
+        2: { 'wide-sidebar': -202, 'narrow-sidebar': 55, 'narrow-popover': -202, 'wide-popover': -400 },
+        6: { 'wide-sidebar': 30, 'narrow-sidebar': 300, 'narrow-popover': 30, 'wide-popover': -150 },
+        8: { 'wide-sidebar': 500, 'narrow-sidebar': 500, 'narrow-popover': 500, 'wide-popover': 60 },
+    };
+    $(app, 'top-bar').getBoundingClientRect = () => ({ top: 0, bottom: 54 });
+    for (const [n, at] of Object.entries(tops)) {
+        app.verse(Number(n)).getBoundingClientRect = () => {
+            const shape = app.document.documentElement.dataset.picker === 'sidebar' ? 'sidebar' : 'popover';
+            const top = at[`${layout.width >= 1200 ? 'wide' : 'narrow'}-${shape}`];
+            return { top, bottom: top + 40 };
+        };
+    }
+    return layout;
+}
+
+test('resizing across 1200px keeps the place the reader saw, not one laid out on the way', () =>
+    withApp({ book: 'John', chapter: 3, width: 1280 }, async (app) => {
+        const { window } = app;
+        const layout = crossingLayout(app);
+        const scrolls = [];
+        window.scrollBy = (x, y) => scrolls.push([x, y]);
+        // The reader sees verse 6, 30px down.
+        window.dispatchEvent(new window.Event('scroll'));
+        await frame(app);
+
+        // On the way to 1000px, verse 2 was first under the bar, at 55px,
+        // and the sidebar's going takes it to -202px; measured there, the
+        // page would jump 257px back to it. Verse 6 is still 30px down.
+        layout.width = 1000;
+        app.resize(1000);
+        assert.equal(app.document.documentElement.dataset.picker, undefined);
+        assert.deepEqual(scrolls, [], 'verse 6 stays 30px down');
+        await frame(app);
+
+        // Widening with the popover open: on the way, verse 8 was first.
+        app.click(refBtn(app));
+        assert.equal(window.gospelGetterSurfaces.current(), 'picker');
+        layout.width = 1280;
+        app.resize(1280);
+        assert.equal(window.gospelGetterSurfaces.current(), null);
+        assert.equal(app.document.documentElement.dataset.picker, 'sidebar');
+        assert.deepEqual(scrolls, [], 'verse 6 stays 30px down again');
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
+test('resizing across 1200px with no place seen yet, or one no longer on the page, keeps the place found then', () =>
+    withApp({ book: 'John', chapter: 3, width: 1280 }, async (app) => {
+        const { window } = app;
+        const layout = crossingLayout(app);
+        const scrolls = [];
+        window.scrollBy = (x, y) => scrolls.push([x, y]);
+        // No frame has seen the stubbed layout: verse 2, first at 55px on
+        // the way, stays there.
+        layout.width = 1000;
+        app.resize(1000);
+        assert.deepEqual(scrolls, [[0, -257]]);
+
+        // Verse 6 was seen, then left the page (a new chapter took it).
+        layout.width = 1280;
+        app.resize(1280);
+        window.dispatchEvent(new window.Event('scroll'));
+        await frame(app);
+        app.verse(6).remove();
+        scrolls.length = 0;
+        layout.width = 1000;
+        app.resize(1000);
+        assert.deepEqual(scrolls, [[0, -257]]);
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
 // ---- The keyboard
 
 test('G opens the picker, but not while typing', async () => {

@@ -721,7 +721,7 @@ fn on_select_change(pref: Preference) {
         }
     };
     if pref == preferences::LAYOUT {
-        surfaces::keep_reading_place(change);
+        surfaces::keep_reading_place(change, None);
         announce(LAYOUT_CHANGE_EVENT);
     } else {
         change();
