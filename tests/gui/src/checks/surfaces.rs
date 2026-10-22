@@ -11,8 +11,8 @@
 //! a Tab: WebKitGTK gives it as an "Unidentified" key). G and the sidebar's button (35, on a
 //! window wide enough for the sidebar). The window narrowed below 1200 px
 //! and widened again changes the picker's shape (sidebar to popover and
-//! back) and keeps the reading place (36; on Windows a move is reported,
-//! not failed: see `place_across_resize`). Screenshots of the ☰ menu and
+//! back) and keeps the reading place, also as it widens with the popover
+//! open (36). Screenshots of the ☰ menu and
 //! of the picker's popover on a narrow window, in Chi Rho here and in
 //! Vellum with check 4's.
 
@@ -621,7 +621,7 @@ impl Run<'_> {
         let narrowed = self
             .reading_place("the first verse under the bar, narrow")
             .await?;
-        let first = self.place_across_resize(&before, &narrowed)?;
+        let first = Self::place_across_resize(&before, &narrowed)?;
         self.window_width(1280).await?;
         let wide = self
             .surfaces_are(
@@ -633,9 +633,14 @@ impl Run<'_> {
         let back = self
             .reading_place("the first verse under the bar, wide again")
             .await?;
-        let second = self.place_across_resize(&narrowed, &back)?;
-        // The popover, on the narrow window, closes as the window widens.
+        let second = Self::place_across_resize(&narrowed, &back)?;
+        // The popover, on the narrow window, closes as the window widens,
+        // and the place stays then too.
         self.window_width(NARROW_WIDTH).await?;
+        self.ui.settled("the page to settle, narrow again").await?;
+        let opened = self
+            .reading_place("the first verse under the bar, narrow again")
+            .await?;
         self.ui.press("press G (the popover)", "g").await?;
         self.surfaces_are(
             "the popover to open",
@@ -655,11 +660,18 @@ impl Run<'_> {
                  && seen.expanded['ref-btn'] === 'true'",
             )
             .await?;
+        self.ui
+            .settled("the page to settle, wide with the popover closed")
+            .await?;
+        let closed = self
+            .reading_place("the first verse under the bar, the popover closed by widening")
+            .await?;
+        let third = Self::place_across_resize(&opened, &closed)?;
         Ok(format!(
             "Psalms 119 at scrollY {}: verse {} at {} px, the column {} px beside the sidebar; {NARROW_WIDTH} px: \
              the popover shape ({:?}), verse {} at {} px, the column {} px ({first}); 1280 px: the sidebar back \
-             ({:?}), verse {} at {} px ({second}); a line is {} px; narrow again, G \
-             opened the popover, and widening closed it ({:?})",
+             ({:?}), verse {} at {} px ({second}); a line is {} px; narrow again, verse {} at {} px, G \
+             opened the popover, and widening closed it ({:?}), verse {} at {} px ({third})",
             before["scrollY"],
             before["verse"],
             before["top"],
@@ -672,24 +684,18 @@ impl Run<'_> {
             back["verse"],
             back["top"],
             before["line"],
-            widened["open"]
+            opened["verse"],
+            opened["top"],
+            widened["open"],
+            closed["verse"],
+            closed["top"]
         ))
     }
 
     /// Whether the reading place held across the window crossing 1200 px:
-    /// within a line, as check 24's. On Windows a move is reported rather
-    /// than failed: WebView2 anchors the page's scroll on its own as the
-    /// window resizes, and the shape change (the head script's
-    /// `onShapeChange`, as this port keeps it) never kept the place itself.
-    fn place_across_resize(&self, before: &Value, after: &Value) -> Result<String> {
-        match Self::same_place(before, after) {
-            Ok(shift) => Ok(format!("moved {shift:.1} px")),
-            Err(e) if self.config.xvfb.is_none() => Ok(format!(
-                "NOT kept on Windows, reported not failed (the shape change never kept the place; \
-                 WebView2 anchors the scroll itself): {e:#}"
-            )),
-            Err(e) => Err(e),
-        }
+    /// within a line, as check 24's, on every platform.
+    fn place_across_resize(before: &Value, after: &Value) -> Result<String> {
+        Self::same_place(before, after).map(|shift| format!("moved {shift:.1} px"))
     }
 
     /// Check 4's Vellum screenshots of the ☰ menu and of the picker's
