@@ -4381,11 +4381,14 @@
 
                 // A window resized across the breakpoint changes shape: an
                 // open popover closes, and focus in a sidebar that's gone
-                // goes to the reference button.
+                // goes to the reference button. The reading place stays,
+                // as with the sidebar's own button.
                 function onShapeChange() {
                     var focusWasInside = picker.contains(document.activeElement);
-                    if (current === 'picker') closeSurface(false);
-                    syncPicker();
+                    keepReadingPlace(function () {
+                        if (current === 'picker') closeSurface(false);
+                        syncPicker();
+                    });
                     if (focusWasInside && picker.hidden) refBtn.focus();
                 }
 
