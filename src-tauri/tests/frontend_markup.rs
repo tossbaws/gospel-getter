@@ -10,10 +10,10 @@ use gospel_getter_lib::preferences::{self, Preference, Values};
 /// The page's pieces written in Rust (`ui-leptos/src`), which own the
 /// modal dialogs' markup and keyboard handling, the Library's tabs and
 /// lists, the search box and its palette, the table of shortcuts, the
-/// book and chapter picker's books and chapters, and Aa with the
-/// translations and the saved settings: checks of those read them where
-/// they now live.
-const PIECES: [(&str, &str); 15] = [
+/// book and chapter picker's books and chapters, Aa with the translations
+/// and the saved settings, and the header's surfaces with the picker's
+/// shapes: checks of those read them where they now live.
+const PIECES: [(&str, &str); 17] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -47,6 +47,14 @@ const PIECES: [(&str, &str); 15] = [
     ),
     ("aa.rs", include_str!("../../ui-leptos/src/aa.rs")),
     ("aa_text.rs", include_str!("../../ui-leptos/src/aa_text.rs")),
+    (
+        "surfaces.rs",
+        include_str!("../../ui-leptos/src/surfaces.rs"),
+    ),
+    (
+        "surfaces_text.rs",
+        include_str!("../../ui-leptos/src/surfaces_text.rs"),
+    ),
 ];
 
 /// One piece's source, by file name.
@@ -805,9 +813,10 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
 /// The exit control must be a real, labeled, keyboard-focusable button,
 /// and Escape must also leave reading mode. None of it is the main
 /// script's: the exit and the toggle are Aa's (the page's Rust pieces),
-/// Escape's last step is the `<head>` script's, which asks Aa, and neither
-/// head script touches the Tauri bridge. Without the Rust pieces reading
-/// mode can't be left (the owner's E1: Aa says it isn't available).
+/// Escape's last step is the surfaces' (Rust too), which asks Aa, and the
+/// `<head>` script (only the pre-paint one now) doesn't touch the Tauri
+/// bridge. Without the Rust pieces reading mode can't be left (the
+/// owner's E1: the exit and Escape say Aa isn't available).
 #[test]
 fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
     let tag_start = HTML
@@ -836,14 +845,15 @@ fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
         !head_script.contains("__TAURI__.core"),
         "the head scripts must not depend on the Tauri bridge"
     );
+    let escape = block_after(piece("surfaces.rs"), "fn on_escape(");
     for wiring in [
-        "event.key !== 'Escape'",
-        "new CustomEvent('gospel-getter:reader-mode', { detail: { on: false } })",
+        r#"event.key() != "Escape""#,
+        "aa::set_reader_mode(false);",
         "'gospel-getter-reader-mode', 'readerMode', 'off'",
     ] {
         assert!(
-            head_script.contains(wiring),
-            "the head scripts should contain `{wiring}`"
+            head_script.contains(wiring) || escape.contains(wiring),
+            "the pre-paint script or the surfaces' Escape should contain `{wiring}`"
         );
     }
     let aa = piece("aa.rs");
@@ -851,7 +861,7 @@ fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
         r#"by_id("reader-exit")"#,
         r#"by_id(if on { "reader-exit" } else { "aa-toggle" })"#,
         "dom::on_click(&exit, |_| set_reader_mode(false));",
-        "dom::on_document_event(READER_MODE_EVENT,",
+        "pub fn set_reader_mode(on: bool) {",
         "prefs::set(&preferences::READER_MODE,",
     ] {
         assert!(aa.contains(wiring), "Aa should contain `{wiring}`");
@@ -2450,8 +2460,8 @@ fn the_reference_button_says_where_the_reader_is() {
 
 /// The picker is one `<nav>` landmark, "Books and chapters": Random
 /// chapter, then each testament's books under its heading. As a popover
-/// it's a dialog (the preferences script sets the role), and both the
-/// reference button and the sidebar's button control it.
+/// it's a dialog (the surfaces set the role, ui-leptos/src/surfaces.rs),
+/// and both the reference button and the sidebar's button control it.
 #[test]
 fn the_picker_is_a_navigation_landmark_or_a_dialog() {
     let tag = tag_of("picker");
@@ -2479,14 +2489,18 @@ fn the_picker_is_a_navigation_landmark_or_a_dialog() {
         assert!(toggle.contains(attr), "#sidebar-toggle: {attr}");
     }
     let head = &HTML[..HTML.find("</head>").unwrap()];
+    let surfaces = [piece("surfaces.rs"), piece("surfaces_text.rs")].concat();
     for wiring in [
-        "picker.setAttribute('role', 'dialog');",
-        "picker.removeAttribute('role');",
-        "refBtn.setAttribute('aria-haspopup', 'dialog');",
-        "picker: { el: picker, toggle: refBtn, popover: true },",
+        r#"picker.set_attribute("role", "dialog");"#,
+        r#"picker.remove_attribute("role");"#,
+        r#"ref_btn.set_attribute("aria-haspopup", "dialog");"#,
+        r#"Surface::Picker => Some("ref-btn"),"#,
         "['gospel-getter-sidebar', 'sidebar', 'open', ['open', 'closed'], {}],",
     ] {
-        assert!(head.contains(wiring), "the head scripts: {wiring}");
+        assert!(
+            head.contains(wiring) || surfaces.contains(wiring),
+            "the pre-paint script or the surfaces: {wiring}"
+        );
     }
     // A book is a disclosure for its chapters, and the chapter and book
     // being read are marked (the picker's piece, ui-leptos/src/picker.rs,
@@ -2589,7 +2603,7 @@ fn psalms_get_a_compact_grid_ten_to_a_row() {
 #[test]
 fn the_sidebar_is_for_wide_windows_only() {
     let rules = rules();
-    assert!(HTML.contains("var WIDE = '(min-width: 1200px)';"));
+    assert!(piece("surfaces.rs").contains("w.match_media(preferences::WIDE_QUERY)"));
     let html = custom_properties(&screen_rule(&rules, "html").body);
     assert_eq!(property(&html, "--sidebar-width"), "18rem");
     let screen = |selector: &str| -> &Rule {
@@ -2634,9 +2648,10 @@ fn the_sidebar_is_for_wide_windows_only() {
     ] {
         assert!(popover.contains(declaration), "the popover: {declaration}");
     }
-    // Reading mode never shows the sidebar (see sidebarShown).
+    // Reading mode never shows the sidebar (see sidebar_shown).
     assert!(
-        HTML.contains("return isWide() && data.sidebar !== 'closed' && data.readerMode !== 'on';")
+        piece("surfaces_text.rs")
+            .contains(r#"wide && sidebar != Some("closed") && reader_mode != Some("on")"#)
     );
     // It's a setting for this window, not exported with the display ones.
     assert_eq!(preferences::SIDEBAR.file_name, None);
@@ -3549,10 +3564,10 @@ fn the_selection_card_anchors_to_line_boxes_in_flowing() {
     let line = function_body("lineRect");
     assert!(line.contains("verse.getClientRects()"));
     assert!(HTML.contains("document.addEventListener('gospel-getter:layout-change', placeCard);"));
-    // A new layout keeps the reader's place: Aa asks the head script's
-    // keepReadingPlace.
-    assert!(piece("aa.rs").contains("bridge::keep_reading_place(change);"));
-    assert!(HTML.contains("keepReadingPlace: keepReadingPlace,"));
+    // A new layout keeps the reader's place: Aa asks the surfaces'
+    // keep_reading_place.
+    assert!(piece("aa.rs").contains("surfaces::keep_reading_place(change);"));
+    assert!(piece("surfaces.rs").contains("pub fn keep_reading_place(change: impl FnOnce()) {"));
 }
 
 /// The welcome is one card: a modal dialog labelled by its title and
@@ -4062,6 +4077,7 @@ fn compared_keys(handler: &str) -> Vec<String> {
     for (marker, quote) in [
         ("key === '", '\''),
         ("key !== '", '\''),
+        ("key() != \"", '"'),
         ("code === '", '\''),
         ("toLowerCase() === '", '\''),
         ("key == \"", '"'),
@@ -4112,10 +4128,7 @@ fn every_handled_key_is_in_the_shortcuts_table() {
             "document.addEventListener('keydown', function (event) {\n                // Keys typed into a form control",
         ),
         block_after(piece("aa_text.rs"), "pub fn size_key("),
-        block_after(
-            HTML,
-            "document.addEventListener('keydown', function (event) {\n                    if (event.key !== 'Escape') return;",
-        ),
+        block_after(piece("surfaces.rs"), "fn on_escape("),
     ]
     .into_iter()
     .flat_map(compared_keys)
@@ -4331,10 +4344,10 @@ fn nothing_inline_that_the_content_security_policy_would_block() {
     ] {
         assert!(!HTML.contains(blocked), "{blocked}");
     }
-    // The three inline scripts (the pre-paint script, the rest of the head
-    // script and the main one) and the one stylesheet Tauri hashes.
-    assert_eq!(HTML.matches("<script>").count(), 3);
-    assert_eq!(HTML.matches("<script").count(), 3);
+    // The two inline scripts (the pre-paint script, the head's only one,
+    // and the main one) and the one stylesheet Tauri hashes.
+    assert_eq!(HTML.matches("<script>").count(), 2);
+    assert_eq!(HTML.matches("<script").count(), 2);
     assert_eq!(HTML.matches("<style>").count(), 1);
     assert_eq!(HTML.matches("<style").count(), 1);
     // The one style the markup used to carry, the compare grid's column

@@ -160,7 +160,7 @@ test('without the pieces, the Library says it isn’t available, and the reader�
         assert.equal(app.verse(3).dataset.highlight, 'green');
 
         app.open('library');
-        assert.equal(app.surface('library').hidden, false);
+        assert.equal(app.surface('library').hidden, true, 'nothing opens without the pieces (E1)');
         assert.deepEqual(toast(app), { text: 'The library isn’t available.', error: true });
 
         const turn = app.calls.length;
@@ -242,7 +242,7 @@ test('without the pieces, Aa, the translations and the picker say they aren’t 
         app.resize(900);
         app.document.body.focus();
         app.key('g');
-        assert.equal(app.surface('picker').hidden, false);
+        assert.equal(app.surface('picker').hidden, true, 'nothing opens without the pieces (E1)');
         assert.deepEqual(toast(app), { text: 'The book list isn’t available.', error: true });
         app.key('Escape', {}, app.document.activeElement);
 
@@ -277,5 +277,58 @@ test('pieces that load after boot bring Aa and the translations, with the saved 
         app.click($(app, 'translation-toggle'));
         assert.equal(app.document.activeElement, app.document.querySelector('#translation-choices [data-value="kjv"]'));
         assert.deepEqual(app.window.gospelGetterPreferences.current().theme, 'beast-slayer');
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
+test('without the pieces, ☰, the sidebar’s button and reading mode’s exit say they aren’t available', () =>
+    withApp({ book: 'John', chapter: 3, leptos: false, readerMode: true }, async (app) => {
+        await app.idle();
+        assert.equal(app.window.gospelGetterSurfaces, undefined);
+        const root = app.document.documentElement.dataset;
+        assert.equal(root.readerMode, 'on', 'the saved look, from the first frame');
+
+        app.click($(app, 'reader-exit'));
+        assert.deepEqual(toast(app), { text: 'Display settings aren’t available.', error: true });
+        app.toast().textContent = '';
+        app.document.body.focus();
+        app.key('Escape');
+        assert.deepEqual(toast(app), { text: 'Display settings aren’t available.', error: true });
+        assert.equal(root.readerMode, 'on', 'still reading');
+
+        app.click($(app, 'menu-toggle'));
+        assert.deepEqual(toast(app), { text: 'The menu isn’t available.', error: true });
+        assert.equal(app.surface('menu').hidden, true);
+        assert.equal($(app, 'menu-toggle').getAttribute('aria-expanded'), 'false');
+        app.click($(app, 'sidebar-toggle'));
+        assert.deepEqual(toast(app), { text: 'The book list isn’t available.', error: true });
+
+        // Nothing was saved, and reading goes on.
+        assert.deepEqual(Object.keys(app.storage()), ['gospel-getter-reader-mode']);
+        const turn = app.calls.length;
+        app.key('ArrowRight');
+        await app.idle(turn, 'get_reading');
+        assert.equal(app.heading(), 'John 4');
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
+test('pieces that load after boot open the ☰ menu and the picker from then on', () =>
+    withApp({ book: 'John', chapter: 3, leptos: 'late', width: 900 }, async (app) => {
+        await app.idle();
+        app.click($(app, 'menu-toggle'));
+        assert.deepEqual(toast(app), { text: 'The menu isn’t available.', error: true });
+        assert.equal(app.surface('picker').hidden, true);
+
+        await app.loadPieces();
+        assert.equal(app.window.gospelGetterSurfaces.current(), null);
+        app.click($(app, 'menu-toggle'));
+        assert.equal(app.surface('menu').hidden, false);
+        assert.equal(app.window.gospelGetterSurfaces.current(), 'menu');
+        assert.equal(app.document.activeElement, $(app, 'export-data-btn'));
+        app.document.body.focus();
+        app.key('g');
+        assert.equal(app.surface('menu').hidden, true, 'one at a time');
+        assert.equal(app.surface('picker').hidden, false);
+        assert.equal($(app, 'picker').getAttribute('role'), 'dialog');
+        assert.equal(app.document.activeElement, app.document.querySelector('#picker .chapter-btn[aria-current="page"]'));
         assert.deepEqual(app.consoleErrors, []);
     }));

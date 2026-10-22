@@ -9,14 +9,17 @@
 //! table of keyboard shortcuts (`shortcut_table`) and the palette's
 //! commands (`palette`); the book and chapter picker's books and chapters
 //! (`picker`); and Aa with the translation button's popover (`aa`), which
-//! keep the saved settings (`prefs`, by the one table in `preferences`).
-//! The page talks to them only as `bridge` says.
+//! keep the saved settings (`prefs`, by the one table in `preferences`);
+//! and the header's popovers and panels themselves, with the picker's two
+//! shapes (`surfaces`), which open and close all of these. The page talks
+//! to them only as `bridge` says.
 //!
 //! If this module fails to load, the Bible text still shows, in the saved
 //! look (the page's pre-paint script applies it), and the page reads on;
-//! but the five dialogs, About, the Library, search, Aa, the translations
-//! and the picker's books say they are unavailable when asked for (see
-//! `bridge`), no setting can be changed (reading mode can't be left), no
+//! but the five dialogs, About, the Library, search, Aa, the translations,
+//! the ☰ menu and the picker say they are unavailable when asked for (see
+//! `bridge`), nothing opens, no setting can be changed (reading mode can't
+//! be left: its button and Escape say so), no
 //! update is offered, and no bookmark is marked in the reader (the Library
 //! loads them).
 
@@ -47,6 +50,8 @@ mod search;
 mod search_text;
 mod shortcut_table;
 mod shortcuts;
+mod surfaces;
+mod surfaces_text;
 mod text;
 mod update_text;
 mod updates;
@@ -58,7 +63,10 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
-    // Aa and the saved settings first: their records (the `<select>`s) are
+    // The popovers and panels, and the picker's shape, first: they were the
+    // page's head script's, which ran before the other pieces' code.
+    surfaces::mount();
+    // Aa and the saved settings next: their records (the `<select>`s) are
     // filled before any piece reads them.
     aa::mount();
     // The table of shortcuts, where the page had it.
@@ -89,7 +97,7 @@ pub fn start() {
         leptos::mount::mount_to(holder.clone(), about::AboutAndUpdates).forget();
         about::place(&holder);
     }
-    // The Library's tabs and lists go inside the head script's panel, and
+    // The Library's tabs and lists go inside the page's panel, and
     // the search box's contents inside the page's search panel.
     library::mount();
     search::mount();

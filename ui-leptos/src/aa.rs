@@ -6,11 +6,10 @@
 //! goes through the saved settings' store (`prefs`).
 //!
 //! The two popovers themselves (`#aa-popover`, `#translation-popover`, with
-//! their headings, the stepper, Compare and Reading mode) are the page's,
-//! and so is opening and closing them: they are the head script's surfaces.
-//! As one opens, the head script asks for it to be drawn
-//! ([`DRAW_EVENT`]): the translations' rows and the choices' marks are
-//! drawn here, there and then, before focus moves in. This draws the
+//! their headings, the stepper, Compare and Reading mode) are the page's;
+//! opening and closing them is `surfaces`'. As one opens, it has it drawn
+//! ([`draw`]): the translations' rows and the choices' marks are drawn
+//! here, there and then, before focus moves in. This draws the
 //! choices themselves, and fills the hidden `<select>`s that record Aa's
 //! settings for the page's other scripts, from the one table
 //! (`preferences`).
@@ -44,23 +43,7 @@ use crate::bridge;
 use crate::dom;
 use crate::preferences::{self, Preference, Values};
 use crate::prefs::{self, Raw};
-
-/// The head script asks for Aa or the translation button's popover to be
-/// drawn as it opens: a cancelable `CustomEvent` on `document` whose
-/// `detail` is `{ name }` (`aa` or `translation`). This cancels it to say
-/// it has drawn it; if nothing does, the head script says it isn't
-/// available.
-pub const DRAW_EVENT: &str = "gospel-getter:surface-draw";
-
-/// The head script sets one of the settings it shows (the sidebar, from
-/// its toggle): a `CustomEvent` whose `detail` is `{ name, value }`, by the
-/// page's name for it. It's applied and saved here before the dispatch
-/// returns.
-pub const PREFERENCE_EVENT: &str = "gospel-getter:preference";
-
-/// The head script turns reading mode on or off (Escape, last of all, turns
-/// it off): a `CustomEvent` whose `detail` is `{ on }`.
-pub const READER_MODE_EVENT: &str = "gospel-getter:reader-mode";
+use crate::surfaces::{self, Surface};
 
 /// Compare was switched on or off, or what it compares with changed: a
 /// `CustomEvent` on `document`, no `detail`. The page shows the chapter in
@@ -278,17 +261,17 @@ pub fn text_size_shortcut(step: i8) {
     show_text_size();
 }
 
-/// Reading mode on or off. Focus goes to whichever control undoes it, so a
-/// keyboard reader always lands somewhere sensible: the exit button, or
-/// Aa, which holds its toggle. It hides the sidebar, and leaving it brings
-/// the sidebar back.
-fn set_reader_mode(on: bool) {
+/// Reading mode on or off (also Escape, last of all, leaving it). Focus
+/// goes to whichever control undoes it, so a keyboard reader always lands
+/// somewhere sensible: the exit button, or Aa, which holds its toggle. It
+/// hides the sidebar, and leaving it brings the sidebar back.
+pub fn set_reader_mode(on: bool) {
     prefs::set(&preferences::READER_MODE, if on { "on" } else { "off" });
     if let Some(toggle) = by_id("reader-mode-btn") {
         let _ = toggle.set_attribute("aria-pressed", &on.to_string());
     }
-    bridge::close_surfaces_with(false);
-    bridge::sync_picker();
+    surfaces::close(false);
+    surfaces::sync_picker();
     if let Some(target) = by_id(if on { "reader-exit" } else { "aa-toggle" }) {
         let _ = target.focus();
     }
@@ -609,7 +592,7 @@ pub fn apply_preferences(values: &JsValue) -> Result<bool, JsValue> {
     }
     show_toggles();
     sync_aa();
-    bridge::sync_picker();
+    surfaces::sync_picker();
     if compare_changed {
         announce(COMPARE_CHANGE_EVENT);
     }
@@ -728,8 +711,9 @@ fn on_size_key(event: &KeyboardEvent) {
 }
 
 /// A setting's `<select>` changed: apply and save it. A new layout reflows
-/// the whole chapter, so the reader's place is kept (the head script's
-/// `keepReadingPlace`), and the page moves the selection's card.
+/// the whole chapter, so the reader's place is kept
+/// (`surfaces::keep_reading_place`), and the page moves the selection's
+/// card.
 fn on_select_change(pref: Preference) {
     let change = move || {
         if let Some(chosen) = pref.select.and_then(select) {
@@ -737,34 +721,28 @@ fn on_select_change(pref: Preference) {
         }
     };
     if pref == preferences::LAYOUT {
-        bridge::keep_reading_place(change);
+        surfaces::keep_reading_place(change);
         announce(LAYOUT_CHANGE_EVENT);
     } else {
         change();
     }
 }
 
-#[derive(serde::Deserialize)]
-struct DrawRequest {
-    name: String,
-}
-
-#[derive(serde::Deserialize)]
-struct PreferenceRequest {
-    name: String,
-    value: String,
-}
-
-#[derive(serde::Deserialize)]
-struct ReaderModeRequest {
-    on: bool,
+/// Draws what's in Aa or the translation button's popover as it opens
+/// (`surfaces`); the other surfaces are drawn by their own pieces.
+pub fn draw(surface: Surface) {
+    match surface {
+        Surface::Translation => render_translations(),
+        Surface::Aa => sync_aa(),
+        _ => {}
+    }
 }
 
 /// Draws the choices, keeps the `<select>`s, and listens to Aa's and the
-/// translations' controls, the size keys, About's launch check setting and
-/// the head script's requests; and puts `window.gospelGetterPreferences`
-/// where the page reads it. Called first of all the pieces, so the
-/// settings' records are filled before anything reads them.
+/// translations' controls, the size keys and About's launch check setting;
+/// and puts `window.gospelGetterPreferences` where the page reads it.
+/// Called before the other pieces (after `surfaces`, which reads none of
+/// them), so the settings' records are filled before anything reads them.
 pub fn mount() {
     let Some(document) = bridge::document() else {
         return;
@@ -848,33 +826,6 @@ pub fn mount() {
         if let Some(toggle) = toggle {
             let value = if toggle.checked() { "on" } else { "off" };
             prefs::set(&preferences::UPDATE_CHECK, value);
-        }
-    });
-
-    dom::on_document_event(DRAW_EVENT, |event| {
-        let Ok(request) = bridge::detail::<DrawRequest>(&event) else {
-            return;
-        };
-        match request.name.as_str() {
-            "translation" => render_translations(),
-            "aa" => sync_aa(),
-            _ => return,
-        }
-        event.prevent_default();
-    });
-    dom::on_document_event(PREFERENCE_EVENT, |event| {
-        let Ok(request) = bridge::detail::<PreferenceRequest>(&event) else {
-            return;
-        };
-        if let Some(pref) = preferences::by_name(&request.name)
-            && pref.allows(&request.value)
-        {
-            prefs::set(pref, &request.value);
-        }
-    });
-    dom::on_document_event(READER_MODE_EVENT, |event| {
-        if let Ok(request) = bridge::detail::<ReaderModeRequest>(&event) {
-            set_reader_mode(request.on);
         }
     });
 

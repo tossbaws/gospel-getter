@@ -371,10 +371,11 @@ pub fn prepaint_script() -> String {
         // data attribute on <html> (none for its default), which the CSS
         // keys off, then the book and chapter picker's shape, so the page
         // is laid out for it from the start. Only that: the page's Rust
-        // pieces (ui-leptos/src/aa.rs) keep the settings from then on, and
-        // without them the Bible text still shows in the saved look. The
-        // table is generated from shared/preferences.rs (prepaint_script);
-        // a test keeps the two the same.
+        // pieces keep the settings (ui-leptos/src/aa.rs) and the picker's
+        // shape (ui-leptos/src/surfaces.rs) from then on, and without them
+        // the Bible text still shows in the saved look. The table is
+        // generated from shared/preferences.rs (prepaint_script); a test
+        // keeps the two the same.
         (function () {{
             'use strict';
             var data = document.documentElement.dataset;

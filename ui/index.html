@@ -4054,10 +4054,11 @@
         // data attribute on <html> (none for its default), which the CSS
         // keys off, then the book and chapter picker's shape, so the page
         // is laid out for it from the start. Only that: the page's Rust
-        // pieces (ui-leptos/src/aa.rs) keep the settings from then on, and
-        // without them the Bible text still shows in the saved look. The
-        // table is generated from shared/preferences.rs (prepaint_script);
-        // a test keeps the two the same.
+        // pieces keep the settings (ui-leptos/src/aa.rs) and the picker's
+        // shape (ui-leptos/src/surfaces.rs) from then on, and without them
+        // the Bible text still shows in the saved look. The table is
+        // generated from shared/preferences.rs (prepaint_script); a test
+        // keeps the two the same.
         (function () {
             'use strict';
             var data = document.documentElement.dataset;
@@ -4092,400 +4093,6 @@
             else delete data.wide;
             if (wide && data.sidebar !== 'closed' && data.readerMode !== 'on') data.picker = 'sidebar';
             else delete data.picker;
-        })();
-    </script>
-    <script>
-        // The header's popovers and panels, and the book and chapter
-        // picker's two shapes: what opens and closes them (until they move
-        // to the page's Rust pieces too). What's in Aa and the translation
-        // button's popover, and every saved setting, are the Rust pieces'
-        // (ui-leptos/src/aa.rs); this asks them as it needs them, and says
-        // so when they aren't there.
-        (function () {
-            'use strict';
-
-            // The book and chapter picker is a sidebar down the left on a
-            // window at least this wide, and a popover from the reference
-            // button on a narrower one. At 1200px the sidebar
-            // (--sidebar-width, 264px) and the page's gutters leave 888px
-            // for the chapter and its two faded neighbors: a reading column
-            // of about 51 characters at the default size (55 in the default
-            // 1280px window, which gets the sidebar; 62 from 1440px up, as
-            // without it). Any narrower and the column drops below 50.
-            var WIDE = '(min-width: 1200px)';
-            var wideQuery = window.matchMedia ? window.matchMedia(WIDE) : null;
-
-            function isWide() {
-                return !!(wideQuery && wideQuery.matches);
-            }
-
-            // The sidebar shows on a wide window unless the reader hid it;
-            // reading mode never shows it.
-            function sidebarShown() {
-                var data = document.documentElement.dataset;
-                return isWide() && data.sidebar !== 'closed' && data.readerMode !== 'on';
-            }
-
-            // On <html>, for the CSS: data-wide while there's room for the
-            // sidebar, and data-picker="sidebar" while it shows (the page
-            // makes room for it). The pre-paint script above sets them
-            // first, so the page is laid out for it from the start.
-            function applyPickerShape() {
-                var data = document.documentElement.dataset;
-                if (isWide()) data.wide = '';
-                else delete data.wide;
-                if (sidebarShown()) data.picker = 'sidebar';
-                else delete data.picker;
-            }
-
-            // The header's popovers and panels: the translation button's
-            // popover, Aa, the Library, the ☰ menu, the About dialog, and
-            // the book and chapter picker when it's a popover. Only one is
-            // open at a time; Escape closes it, and so does a click outside
-            // a popover (the translation's, Aa's or the menu). Opening one moves focus into it, and
-            // closing it gives focus back to the button that opened it.
-            // The main script and the page's Rust pieces reach them through
-            // this, once the page has loaded.
-            window.gospelGetterSurfaces = null;
-
-            document.addEventListener('DOMContentLoaded', function () {
-                var root = document.documentElement;
-                var byId = function (id) { return document.getElementById(id); };
-                var translationToggle = byId('translation-toggle');
-                var translationPopover = byId('translation-popover');
-                var aaToggle = byId('aa-toggle');
-                var aaPopover = byId('aa-popover');
-                var libraryToggle = byId('library-toggle');
-                var libraryPanel = byId('library-panel');
-                var menuToggle = byId('menu-toggle');
-                var appMenu = byId('app-menu');
-                var picker = byId('picker');
-                var refBtn = byId('ref-btn');
-                var sidebarToggle = byId('sidebar-toggle');
-
-                function isReaderMode() {
-                    return root.dataset.readerMode === 'on';
-                }
-
-                // ---- Surfaces
-
-                var SURFACES = {
-                    translation: { el: translationPopover, toggle: translationToggle, popover: true },
-                    aa: { el: aaPopover, toggle: aaToggle, popover: true },
-                    library: { el: libraryPanel, toggle: libraryToggle, popover: false },
-                    menu: { el: appMenu, toggle: menuToggle, popover: true },
-                    // About is the page's Rust pieces' element
-                    // (ui-leptos/src/about.rs), made when their code loads,
-                    // so it is looked up whenever it's needed.
-                    about: { get el() { return byId('about-overlay'); }, toggle: null, popover: false },
-                    // The picker as a popover. As the sidebar it isn't a
-                    // surface: it stays while the reader reads, beside any
-                    // of these.
-                    picker: { el: picker, toggle: refBtn, popover: true },
-                };
-                var current = null;
-                var returnFocus = null;
-                var pickerPopoverOpen = false;
-
-                function shown(el) {
-                    return !!el && el.isConnected && !el.closest('[hidden]') && getComputedStyle(el).display !== 'none';
-                }
-
-                function setShown(name, open) {
-                    if (name === 'picker') {
-                        pickerPopoverOpen = open;
-                        syncPicker();
-                        return;
-                    }
-                    var surface = SURFACES[name];
-                    surface.el.hidden = !open;
-                    if (surface.toggle) surface.toggle.setAttribute('aria-expanded', String(open));
-                }
-
-                // ---- The picker's two shapes. As the sidebar it's a
-                // navigation landmark, shown while sidebarShown(); as the
-                // popover it's a dialog, shown while open. The reference
-                // button and the sidebar's own button say which.
-                function syncPicker() {
-                    applyPickerShape();
-                    var sidebar = sidebarShown();
-                    var wasHidden = picker.hidden;
-                    picker.hidden = !(sidebar || pickerPopoverOpen);
-                    if (sidebar) {
-                        picker.removeAttribute('role');
-                        refBtn.removeAttribute('aria-haspopup');
-                    } else {
-                        picker.setAttribute('role', 'dialog');
-                        refBtn.setAttribute('aria-haspopup', 'dialog');
-                    }
-                    refBtn.setAttribute('aria-expanded', String(!picker.hidden));
-                    sidebarToggle.setAttribute('aria-expanded', String(sidebar));
-                    // The picker's Rust piece (ui-leptos/src/picker.rs)
-                    // scrolls it to the book being read.
-                    if (wasHidden && !picker.hidden) document.dispatchEvent(new CustomEvent('gospel-getter:picker-shown'));
-                }
-
-                // Makes `change` (which reflows the page) keep the reader's
-                // place: the first heading or verse of the chapter being
-                // read that reaches below the bar stays where it was on
-                // screen.
-                function keepReadingPlace(change) {
-                    var barBottom = byId('top-bar').getBoundingClientRect().bottom;
-                    var marks = document.querySelectorAll('.chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap');
-                    var anchor = null;
-                    var before = 0;
-                    for (var i = 0; i < marks.length; i++) {
-                        var rect = marks[i].getBoundingClientRect();
-                        if (rect.bottom > barBottom) {
-                            anchor = marks[i];
-                            before = rect.top;
-                            break;
-                        }
-                    }
-                    change();
-                    if (!anchor) return;
-                    var shift = anchor.getBoundingClientRect().top - before;
-                    if (shift) window.scrollBy(0, shift);
-                }
-
-                // Shows or hides the sidebar, and remembers it.
-                function setSidebar(open) {
-                    keepReadingPlace(function () {
-                        // The setting is the Rust pieces' to apply and save.
-                        document.dispatchEvent(new CustomEvent('gospel-getter:preference', { detail: { name: 'sidebar', value: open ? 'open' : 'closed' } }));
-                        syncPicker();
-                    });
-                }
-
-                // The reference button, or G: on a wide window, into the
-                // sidebar (showing it, if it was hidden); otherwise the
-                // popover, which the button also closes (`toggle`). Focus
-                // goes to the chapter being read.
-                function openPicker(toggle) {
-                    if (isWide() && !isReaderMode()) {
-                        if (current && SURFACES[current].popover) closeSurface(false);
-                        if (!sidebarShown()) setSidebar(true);
-                        focusInto('picker');
-                    } else if (toggle) {
-                        toggleSurface('picker');
-                    } else if (current !== 'picker') {
-                        openSurface('picker');
-                    }
-                    // The books are the Rust pieces' (ui-leptos/src/picker.rs).
-                    if (!picker.hidden && !picker.querySelector('.book-item')) toast('The book list isn\u2019t available.');
-                }
-
-                // A window resized across the breakpoint changes shape: an
-                // open popover closes, and focus in a sidebar that's gone
-                // goes to the reference button.
-                function onShapeChange() {
-                    var focusWasInside = picker.contains(document.activeElement);
-                    if (current === 'picker') closeSurface(false);
-                    syncPicker();
-                    if (focusWasInside && picker.hidden) refBtn.focus();
-                }
-
-                if (wideQuery) {
-                    if (wideQuery.addEventListener) wideQuery.addEventListener('change', onShapeChange);
-                    else wideQuery.addListener(onShapeChange);
-                }
-
-                // Closes whatever is open. Focus goes back to the button
-                // that opened it, unless it has already moved on to
-                // something else (a dialog the surface opened, say), or
-                // `restoreFocus` is false.
-                function closeSurface(restoreFocus) {
-                    if (!current) return;
-                    var el = SURFACES[current].el;
-                    var target = returnFocus;
-                    var active = document.activeElement;
-                    var focusWasInside = !active || active === document.body || el.contains(active);
-                    var closed = current;
-                    setShown(current, false);
-                    current = null;
-                    returnFocus = null;
-                    if (restoreFocus !== false && focusWasInside && target && shown(target)) target.focus();
-                    // The main script brings up the update banner if About
-                    // closes on an install.
-                    document.dispatchEvent(new CustomEvent('gospel-getter:surface-close', { detail: { name: closed } }));
-                }
-
-                function focusInto(name) {
-                    var first;
-                    if (name === 'translation') {
-                        first = translationPopover.querySelector('.translation-choice[aria-checked="true"]') || translationPopover.querySelector('button');
-                    } else if (name === 'aa') {
-                        first = aaPopover.querySelector('button:not(:disabled)');
-                    } else if (name === 'library') {
-                        first = libraryPanel.querySelector('[role="tab"][aria-selected="true"]');
-                    } else if (name === 'menu') {
-                        first = menuItems()[0];
-                    } else if (name === 'picker') {
-                        first = picker.querySelector('.chapter-btn[aria-current="page"]')
-                            || picker.querySelector('.book-item[aria-current="true"]')
-                            || byId('random-chapter-btn');
-                    } else {
-                        first = byId('about-close');
-                    }
-                    if (first) first.focus();
-                }
-
-                // `opener` is the control focus returns to on closing: the
-                // surface's own button unless given (About, opened from
-                // the ☰ menu, returns to ☰).
-                function openSurface(name, opener) {
-                    // The Library's button is hidden in reading mode.
-                    if (name === 'library' && isReaderMode()) return;
-                    // About isn't there if the Rust pieces didn't load (the
-                    // main script says so).
-                    if (!SURFACES[name].el) return;
-                    if (current) closeSurface(false);
-                    current = name;
-                    returnFocus = opener || SURFACES[name].toggle;
-                    if (name === 'translation' || name === 'aa') drawSurface(name);
-                    setShown(name, true);
-                    // The main script closes the search panel.
-                    document.dispatchEvent(new CustomEvent('gospel-getter:surface-open', { detail: { name: name } }));
-                    focusInto(name);
-                }
-
-                function toggleSurface(name, opener) {
-                    if (current === name) closeSurface();
-                    else openSurface(name, opener);
-                }
-
-                // Says `message` in the page's toast, as an error.
-                function toast(message) {
-                    document.dispatchEvent(new CustomEvent('gospel-getter:toast', { detail: { message: message, isError: true } }));
-                }
-
-                // What's in Aa and the translation button's popover is
-                // drawn by the Rust pieces (ui-leptos/src/aa.rs) as they
-                // open, before focus moves in; without them, each says so.
-                var UNAVAILABLE = {
-                    translation: 'Translations aren\u2019t available.',
-                    aa: 'Display settings aren\u2019t available.',
-                };
-
-                function drawSurface(name) {
-                    var request = new CustomEvent('gospel-getter:surface-draw', { cancelable: true, detail: { name: name } });
-                    if (document.dispatchEvent(request)) toast(UNAVAILABLE[name]);
-                }
-
-                // syncPicker and keepReadingPlace are the Rust pieces' too:
-                // reading mode and a new layout (ui-leptos/src/aa.rs).
-                window.gospelGetterSurfaces = {
-                    current: function () { return current; },
-                    open: openSurface,
-                    close: closeSurface,
-                    toggle: toggleSurface,
-                    openPicker: function () { openPicker(false); },
-                    syncPicker: syncPicker,
-                    keepReadingPlace: keepReadingPlace,
-                };
-
-                syncPicker();
-                refBtn.addEventListener('click', function () { openPicker(true); });
-                sidebarToggle.addEventListener('click', function () { setSidebar(!sidebarShown()); });
-
-                translationToggle.addEventListener('click', function () { toggleSurface('translation'); });
-                aaToggle.addEventListener('click', function () { toggleSurface('aa'); });
-                libraryToggle.addEventListener('click', function () { toggleSurface('library'); });
-                menuToggle.addEventListener('click', function () { toggleSurface('menu'); });
-                byId('library-close').addEventListener('click', function () { closeSurface(); });
-                byId('about-btn').addEventListener('click', function () { openSurface('about', menuToggle); });
-
-                // A click outside the open popover (and its button) closes
-                // it. The Library stays open while the reader reads, and
-                // About is modal.
-                document.addEventListener('click', function (event) {
-                    if (!current || !SURFACES[current].popover) return;
-                    var surface = SURFACES[current];
-                    if (surface.el.contains(event.target) || surface.toggle.contains(event.target)) return;
-                    closeSurface();
-                });
-
-                // ---- The ☰ menu: a menu, so ↑ and ↓ (and Home and End)
-                // move between its items, Enter or Space chooses one,
-                // and Escape or Tab closes it. Choosing an item closes it
-                // too.
-                function menuItems() {
-                    return [].slice.call(appMenu.querySelectorAll('[role="menuitem"]')).filter(function (item) {
-                        return !item.disabled;
-                    });
-                }
-
-                appMenu.addEventListener('keydown', function (event) {
-                    var items = menuItems();
-                    var index = items.indexOf(document.activeElement);
-                    var next = null;
-                    if (event.key === 'ArrowDown') next = items[(index + 1) % items.length];
-                    else if (event.key === 'ArrowUp') next = items[(index - 1 + items.length) % items.length];
-                    else if (event.key === 'Home') next = items[0];
-                    else if (event.key === 'End') next = items[items.length - 1];
-                    else if (event.key === 'Tab') {
-                        event.preventDefault();
-                        closeSurface();
-                        return;
-                    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-                        // Not a chapter turn while in the menu.
-                        event.stopPropagation();
-                        return;
-                    } else {
-                        return;
-                    }
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (next) next.focus();
-                });
-
-                menuToggle.addEventListener('keydown', function (event) {
-                    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-                    event.preventDefault();
-                    if (current !== 'menu') openSurface('menu');
-                    var items = menuItems();
-                    if (items.length) items[event.key === 'ArrowDown' ? 0 : items.length - 1].focus();
-                });
-
-                // Runs after the item's own action (that listener is on the
-                // item itself), so an item that opened something else has
-                // already closed the menu.
-                appMenu.addEventListener('click', function (event) {
-                    if (event.target.closest('[role="menuitem"]') && current === 'menu') closeSurface();
-                });
-
-                // ---- About is modal, like the import preview: Tab stays
-                // inside it, Escape closes it, and the reader's shortcuts
-                // wait (the main script checks for it). Its keys are the
-                // Rust pieces', on its overlay (ui-leptos/src/about.rs);
-                // opening and closing it is this script's, as above.
-
-                // ---- The Library's tabs and lists are the Rust pieces'
-                // (ui-leptos/src/library.rs), inside the panel this script
-                // opens and closes; focusInto above focuses its chosen tab.
-
-                // ---- Aa and the translation button's popover: what's in
-                // them, their controls, the size keys and every saved
-                // setting are the Rust pieces' (ui-leptos/src/aa.rs).
-
-                // Escape backs out one step at a time: first the search
-                // panel, then whichever popover or panel is open, then a
-                // verse selection, then reading mode. The main script's
-                // handler runs first (it's registered before
-                // DOMContentLoaded) and marks an Escape that closed search
-                // or cleared a verse selection as handled.
-                document.addEventListener('keydown', function (event) {
-                    if (event.key !== 'Escape') return;
-                    if (event.defaultPrevented) return;
-                    if (current) {
-                        event.preventDefault();
-                        closeSurface();
-                    } else if (isReaderMode()) {
-                        // Aa's own toggle, the Rust pieces'.
-                        document.dispatchEvent(new CustomEvent('gospel-getter:reader-mode', { detail: { on: false } }));
-                    }
-                });
-            });
         })();
     </script>
 </head>
@@ -4583,8 +4190,8 @@
          pieces (ui-leptos/src/search.rs), which open and close it. -->
     <div id="search-panel" class="search-panel" role="dialog" aria-label="Search, go to or run a command" hidden></div>
     <!-- About (#about-overlay) is drawn here by the page's Rust pieces
-         (ui-leptos/src/about.rs), and opened and closed by the head script
-         as one of its surfaces. -->
+         (ui-leptos/src/about.rs), and opened and closed by them as one of
+         the header's surfaces (ui-leptos/src/surfaces.rs). -->
     <p id="data-status" class="toast is-hidden" role="status" aria-live="polite"></p>
     <p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>
 
@@ -5377,10 +4984,35 @@
             }
 
             // ---- The header's popovers and panels (the translation, Aa,
-            // Library, the ☰ menu and About) are opened and closed by the
-            // script in <head>; these reach them from here.
+            // the Library, the ☰ menu, About and the picker) are the page's
+            // Rust pieces' (ui-leptos/src/surfaces.rs), which open and close
+            // them, and which this reaches through
+            // window.gospelGetterSurfaces (current, close, toggle,
+            // openPicker; see ui-leptos/src/bridge.rs). Without them nothing
+            // opens: each button (and its key) says what isn't there, as the
+            // other pieces do.
 
             const surfaces = () => window.gospelGetterSurfaces;
+
+            const UNAVAILABLE = {
+                'translation-toggle': 'Translations aren’t available.',
+                'aa-toggle': 'Display settings aren’t available.',
+                'reader-exit': 'Display settings aren’t available.',
+                'library-toggle': 'The library isn’t available.',
+                'menu-toggle': 'The menu isn’t available.',
+                'ref-btn': 'The book list isn’t available.',
+                'sidebar-toggle': 'The book list isn’t available.',
+            };
+
+            function unavailable(id) {
+                setDataStatus(UNAVAILABLE[id], true);
+            }
+
+            Object.keys(UNAVAILABLE).forEach((id) => {
+                document.getElementById(id).addEventListener('click', () => {
+                    if (!surfaces()) unavailable(id);
+                });
+            });
 
             function surfaceOpen() {
                 return !!(surfaces() && surfaces().current());
@@ -5981,9 +5613,10 @@
             // ---- The book and chapter picker's books and chapters are the
             // page's pieces written in Rust (ui-leptos/src/picker.rs); what
             // crosses is documented in ui-leptos/src/bridge.rs. The picker
-            // itself, Random chapter and its two shapes (the sidebar and the
-            // popover, which the script in <head> shows and hides) stay
-            // here. The page hands over the books, from boot, and
+            // itself and Random chapter are this page's markup; its two
+            // shapes (the sidebar and the popover) are the Rust pieces' too
+            // (ui-leptos/src/surfaces.rs). The page hands over the books,
+            // from boot, and
             // the chapter on screen, each time one is put there; either may
             // come before the pieces have loaded, so both go again when they
             // say they're ready. A chapter chosen in the picker comes back as
@@ -6550,15 +6183,6 @@
                 if (run) run();
             });
 
-            // The Library's tabs and lists are the Rust pieces': without
-            // them, the Library says so. (Opening a surface closes search:
-            // the Rust side listens for that too.)
-            document.addEventListener('gospel-getter:surface-open', function (event) {
-                if (event.detail.name === 'library' && !document.getElementById('library-tab-bookmarks')) {
-                    setDataStatus('The library isn’t available.', true);
-                }
-            });
-
             // Clicks in the reading pane: the selected verses' actions,
             // neighboring chapters' headings, cross-references, and
             // selecting verses. (The book and chapter picker has its own
@@ -6583,8 +6207,8 @@
 
                 // The top bar (the translation, Aa, the ☰ menu, the
                 // reading-mode exit), the Library and About are handled by
-                // the script in <head> and the page's Rust pieces (and the
-                // lists' own handlers above); they're never navigation or a
+                // the page's Rust pieces (and the lists' own handlers
+                // above); they're never navigation or a
                 // "click away" from a verse selection. Nor is the search
                 // panel.
                 if (event.target.closest('#top-bar, #picker, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-notes-overlay, #shortcuts-overlay, #data-status')) {
@@ -6858,11 +6482,12 @@
                 }
 
                 // Escape backs out one step at a time: the search panel,
-                // then an open popover or panel (closed by the script in
-                // <head>), then a cross-reference previewed in the card,
-                // then a verse selection, then reading mode (also the
-                // script in <head>, which skips an Escape already handled
-                // here, and has Aa leave it).
+                // then an open popover or panel (closed by the Rust pieces,
+                // ui-leptos/src/surfaces.rs), then a cross-reference
+                // previewed in the card, then a verse selection, then
+                // reading mode (also the Rust pieces', which skip an Escape
+                // already handled here; without them, it says Aa isn't
+                // there).
                 if (event.key === 'Escape') {
                     if (!searchPanel.hidden) {
                         setSearchOpen(false);
@@ -6873,6 +6498,8 @@
                     } else if (selection && !surfaceOpen()) {
                         clearSelection();
                         event.preventDefault();
+                    } else if (!surfaces() && root.dataset.readerMode === 'on') {
+                        unavailable('reader-exit');
                     }
                     return;
                 }
@@ -6927,6 +6554,7 @@
                 if (ctrl && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'b') {
                     event.preventDefault();
                     if (surfaces()) surfaces().toggle('library');
+                    else unavailable('library-toggle');
                     return;
                 }
 
@@ -6943,6 +6571,7 @@
                 if (plain && !event.shiftKey && (event.key === 'g' || event.key === 'G')) {
                     event.preventDefault();
                     if (surfaces()) surfaces().openPicker();
+                    else unavailable('ref-btn');
                     return;
                 }
 
@@ -6951,6 +6580,7 @@
                 if (plain && !event.shiftKey && (event.key === 't' || event.key === 'T')) {
                     event.preventDefault();
                     if (surfaces()) surfaces().toggle('translation');
+                    else unavailable('translation-toggle');
                     return;
                 }
 
@@ -7260,8 +6890,7 @@
                 return !!overlay && !overlay.hidden;
             }
 
-            // Without the pieces there is no About to open (the head script
-            // leaves the ☰ item at closing the menu).
+            // Without the pieces there is no About to open.
             document.getElementById('about-btn').addEventListener('click', function () {
                 if (!document.getElementById('about-overlay')) setDataStatus('About isn’t available.', true);
             });

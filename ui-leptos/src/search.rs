@@ -36,6 +36,7 @@ use crate::ipc;
 use crate::palette::{self, Command, Query, Run};
 use crate::search_text::{self as text};
 use crate::shortcuts::drawn_arrow;
+use crate::surfaces::{self, Surface};
 
 /// How long typing pauses before the words are searched.
 const DEBOUNCE_MS: i32 = 150;
@@ -192,7 +193,7 @@ impl Search {
             let _ = toggle.set_attribute("aria-expanded", if open { "true" } else { "false" });
         }
         if open {
-            bridge::close_surfaces_with(false);
+            surfaces::close(false);
             self.state.update_value(|s| s.moved = false);
             self.render();
             if let Some(input) = self.input.get_untracked() {
@@ -762,7 +763,7 @@ fn run(action: &Run) {
             }
         }
         Run::Library(tab) => {
-            if bridge::current_surface().as_deref() != Some("library") {
+            if surfaces::current() != Some(Surface::Library) {
                 click("library-toggle");
             }
             if let Some(tab) = by_id(&format!("library-tab-{tab}")) {

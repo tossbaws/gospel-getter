@@ -24,10 +24,13 @@ with the translation button's popover (`src/aa.rs`: the translations,
 Compare and what it compares with, text size with its stepper and keys,
 line spacing, width, layout, theme, reading mode and the launch check's
 setting, with its rules in `src/aa_text.rs`), which keep the saved settings
-(`src/prefs.rs`). About, the Library, the picker, Aa and the translations
-stay the head script's surfaces: the head script opens and closes them (the
-picker as the sidebar or the popover), and asks Aa and the translations to
-be drawn as they open.
+(`src/prefs.rs`); and the header's popovers and panels themselves
+(`src/surfaces.rs`: the translations, Aa, the Library, the ☰ menu, About
+and the picker as the sidebar or the popover; one open at a time, their
+buttons, focus in and back, a click outside, Escape, the menu's keys and
+the window crossing 1200px, with its rules in `src/surfaces_text.rs`),
+which the page's reader reaches through `window.gospelGetterSurfaces`. The
+page's `<head>` keeps only its pre-paint script.
 
 The saved settings' one table, their keys, values and names (in the page
 and in an export file), is `../shared/preferences.rs`, a file the backend
@@ -60,14 +63,16 @@ keeps the two the same.
 - `src/text.rs`, `src/import_text.rs`, `src/note_text.rs`,
   `src/install.rs`, `src/update_text.rs`, `src/library_text.rs`,
   `src/shortcut_table.rs`, `src/palette.rs`, `src/search_text.rs`,
-  `src/picker_text.rs`: the
+  `src/picker_text.rs`, `src/aa_text.rs`, `src/surfaces_text.rs`: the
   pieces' words, numbers and rules (Export notes' filter, the import's
   sentences, the note's length rule, the welcome's fresh-install rule, the
   updater's sentences, `megabytes` and download progress, the Library's
   rows, color names, filter and focus arithmetic; the shortcuts; the
   palette's commands, their reasons and its word matching; the search's
   sentences, active option and marked words; the picker's compact grid,
-  Random chapter's pick, its keyboard moves and how far it scrolls), free
+  Random chapter's pick, its keyboard moves and how far it scrolls; the
+  size keys; the surfaces' table, the sidebar's rule and the ☰ menu's
+  keys), free
   of the DOM,
   unit-tested natively
   (`cargo test`). The words a search matched are the backend's to find
