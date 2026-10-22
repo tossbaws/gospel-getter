@@ -4335,12 +4335,16 @@
                     if (wasHidden && !picker.hidden) document.dispatchEvent(new CustomEvent('gospel-getter:picker-shown'));
                 }
 
+                // What a reading place can be: a heading or verse of the
+                // chapter being read, or a gap in compare's columns.
+                var PLACE_MARKS = '.chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap';
+
                 // The reader's place: the first heading or verse of the
                 // chapter being read that reaches below the bar, and where
                 // it is on screen.
                 function readingPlace() {
                     var barBottom = byId('top-bar').getBoundingClientRect().bottom;
-                    var marks = document.querySelectorAll('.chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap');
+                    var marks = document.querySelectorAll(PLACE_MARKS);
                     for (var i = 0; i < marks.length; i++) {
                         var rect = marks[i].getBoundingClientRect();
                         if (rect.bottom > barBottom) return { mark: marks[i], top: rect.top };
@@ -4348,20 +4352,51 @@
                     return null;
                 }
 
-                // The place as the reader last saw it, noted in the
-                // animation frame after anything that moves it. By then
-                // that frame's resize and media query listeners have run,
-                // so onShapeChange still finds the place before the change.
-                var paintedPlace = null;
-                var placePending = false;
+                // The page as last painted: where each mark readingPlace
+                // looks at is in the page (scrolling doesn't move it there),
+                // and where the bar ends on screen. Noted in the animation
+                // frame after anything that can move them. By then that
+                // frame's resize and media query listeners have run, so
+                // onShapeChange still finds the layout from before the
+                // change.
+                var paintedLayout = null;
+                var layoutPending = false;
                 function notePaintedPlace() {
-                    if (placePending) return;
-                    placePending = true;
+                    if (layoutPending) return;
+                    layoutPending = true;
                     window.requestAnimationFrame(function () {
-                        placePending = false;
-                        paintedPlace = readingPlace();
+                        layoutPending = false;
+                        var y = window.scrollY;
+                        var marks = document.querySelectorAll(PLACE_MARKS);
+                        var at = [];
+                        for (var i = 0; i < marks.length; i++) {
+                            var rect = marks[i].getBoundingClientRect();
+                            at.push({ mark: marks[i], top: rect.top + y, bottom: rect.bottom + y });
+                        }
+                        paintedLayout = { barBottom: byId('top-bar').getBoundingClientRect().bottom, marks: at };
                     });
                 }
+
+                // The reader's place in the painted layout scrolled to `y`,
+                // as readingPlace would have measured it there; null with no
+                // layout painted yet, or a place no longer on the page.
+                function paintedPlaceAt(y) {
+                    if (!paintedLayout) return null;
+                    var marks = paintedLayout.marks;
+                    for (var i = 0; i < marks.length; i++) {
+                        if (marks[i].bottom - y > paintedLayout.barBottom) {
+                            return marks[i].mark.isConnected ? { mark: marks[i].mark, top: marks[i].top - y } : null;
+                        }
+                    }
+                    return null;
+                }
+
+                // Whether the browser scrolls to keep a place of its own when
+                // the window is resized: Chromium's scroll anchoring does
+                // (WebView2, on Windows); WebKitGTK's doesn't. Both say they
+                // support overflow-anchor, so it's told by Chromium's own
+                // window.chrome.
+                var anchorsOnResize = !!window.chrome;
 
                 window.addEventListener('scroll', notePaintedPlace, { passive: true });
                 window.addEventListener('resize', notePaintedPlace);
@@ -4412,13 +4447,21 @@
                 // A window resized across the breakpoint changes shape: an
                 // open popover closes, and focus in a sidebar that's gone
                 // goes to the reference button. The reading place stays,
-                // as with the sidebar's own button: the place the reader
-                // last saw, because by now the page is laid out at the new
-                // width in the old shape, which they never saw (and which
-                // can have another verse first under the bar).
+                // as with the sidebar's own button. By now the page is laid
+                // out at the new width in the old shape, which the reader
+                // never saw (and which can have another verse first under
+                // the bar). WebKitGTK has left the scroll position alone, so
+                // the place is the painted layout's at that position: right
+                // even when the page was scrolled after the last frame, in
+                // the same one as the resize, which a place noted in that
+                // frame would miss. Chromium's anchoring has already scrolled
+                // to keep a place of its own through the resize, so the
+                // painted layout no longer goes with the scroll position:
+                // the place is measured there instead (keepReadingPlace, with
+                // no place), as close as its anchoring kept it.
                 function onShapeChange() {
                     var focusWasInside = picker.contains(document.activeElement);
-                    var place = paintedPlace && paintedPlace.mark.isConnected ? paintedPlace : null;
+                    var place = anchorsOnResize ? null : paintedPlaceAt(window.scrollY);
                     keepReadingPlace(function () {
                         if (current === 'picker') closeSurface(false);
                         syncPicker();

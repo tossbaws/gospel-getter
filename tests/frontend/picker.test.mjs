@@ -499,6 +499,88 @@ test('resizing across 1200px with no place seen yet, or one no longer on the pag
         assert.deepEqual(app.consoleErrors, []);
     }));
 
+// Stubbed layout with scrolling: each verse's top in the page (`page`),
+// by width and shape as in crossingLayout, and the window scrolled to
+// `layout.y`, which scrollBy moves. Verse 6 opens the chapter; verse 20 is
+// 3000px further down, with verse 19 above it.
+function scrolledLayout(app) {
+    const layout = { width: 1280, y: 0, scrolls: [] };
+    const page = {
+        6: { 'wide-sidebar': 30, 'narrow-sidebar': 300, 'narrow-popover': 30 },
+        19: { 'wide-sidebar': 2980, 'narrow-sidebar': 3055, 'narrow-popover': 2798 },
+        20: { 'wide-sidebar': 3030, 'narrow-sidebar': 3330, 'narrow-popover': 3030 },
+    };
+    const { window } = app;
+    Object.defineProperty(window, 'scrollY', { configurable: true, get: () => layout.y });
+    window.scrollBy = (x, y) => {
+        layout.scrolls.push([x, y]);
+        layout.y += y;
+    };
+    $(app, 'top-bar').getBoundingClientRect = () => ({ top: 0, bottom: 54 });
+    layout.top = (n) => {
+        const shape = app.document.documentElement.dataset.picker === 'sidebar' ? 'sidebar' : 'popover';
+        return page[n][`${layout.width >= 1200 ? 'wide' : 'narrow'}-${shape}`] - layout.y;
+    };
+    for (const n of Object.keys(page)) {
+        app.verse(Number(n)).getBoundingClientRect = () => ({ top: layout.top(n), bottom: layout.top(n) + 40 });
+    }
+    return layout;
+}
+
+test('resizing across 1200px right after a scroll keeps the place scrolled to, not the one before it', () =>
+    withApp({ book: 'John', chapter: 3, width: 1280 }, async (app) => {
+        const { window } = app;
+        const layout = scrolledLayout(app);
+        // The reader sees verse 6, 30px down.
+        window.dispatchEvent(new window.Event('scroll'));
+        await frame(app);
+
+        // Scrolled 3000px down, to verse 20 30px down, and the window
+        // narrowed before the next frame: the scroll's event comes after
+        // the resize. On the way verse 19 is first, at 55px.
+        layout.y = 3000;
+        layout.width = 1000;
+        app.resize(1000);
+        window.dispatchEvent(new window.Event('scroll'));
+        assert.equal(app.document.documentElement.dataset.picker, undefined);
+        assert.deepEqual(layout.scrolls, [], 'verse 20 stays 30px down');
+        assert.equal(layout.top(20), 30);
+
+        // Its event before the resize, in the same frame, is the same.
+        await frame(app);
+        layout.width = 1280;
+        app.resize(1280);
+        await frame(app);
+        layout.y = 0;
+        window.dispatchEvent(new window.Event('scroll'));
+        layout.y = 3000;
+        window.dispatchEvent(new window.Event('scroll'));
+        layout.width = 1000;
+        app.resize(1000);
+        assert.deepEqual(layout.scrolls, []);
+        assert.equal(layout.top(20), 30);
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
+test('resizing across 1200px in Chromium, which anchors scrolling, keeps the place it kept', () =>
+    withApp({ book: 'John', chapter: 3, width: 1280, chromium: true }, async (app) => {
+        const { window } = app;
+        const layout = scrolledLayout(app);
+        window.dispatchEvent(new window.Event('scroll'));
+        await frame(app);
+
+        // Scrolled to verse 20, 30px down; the browser's anchoring keeps it
+        // there through the resize (scrolling 300px), so it's the place
+        // measured as the shape changes, and kept.
+        layout.y = 3000;
+        layout.width = 1000;
+        layout.y = 3300;
+        app.resize(1000);
+        assert.deepEqual(layout.scrolls, [[0, -300]]);
+        assert.equal(layout.top(20), 30);
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
 // ---- The keyboard
 
 test('G opens the picker, but not while typing', async () => {

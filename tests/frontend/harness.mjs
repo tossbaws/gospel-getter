@@ -203,6 +203,10 @@ export async function openApp({
     update = null,
     hold = [],
     width = 1280,
+    // Whether the page runs in Chromium (window.chrome), which anchors
+    // scrolling through a window resize, as WebView2 does; WebKitGTK and
+    // jsdom don't.
+    chromium = false,
     alterReading = (dto) => dto,
     alter = {},
     // Called with the page's window before its scripts run (fake timers).
@@ -271,6 +275,7 @@ export async function openApp({
             for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, value);
             if (readerMode) window.localStorage.setItem('gospel-getter-reader-mode', 'on');
             if (compare) window.localStorage.setItem('gospel-getter-compare', 'on');
+            if (chromium) window.chrome = {};
             setUp(window);
             window.__TAURI__ = { core: { invoke, Channel } };
             window.matchMedia = (query) => {
