@@ -4,6 +4,19 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.17.2] - 2026-10-21
+
+### Fixed
+- **Aa** no longer says **Display** beside it. The bar is back to just
+  **Aa**, beside the translation button. It still opens text size, line
+  spacing, width, layout, theme and reading mode, and its hover text
+  still reads "Text and display". (#111)
+- Making the window wider or narrower than 1200 px, where the books and
+  chapters switch between the sidebar and the popover, could move your
+  reading place on Windows: the page jumped by a few lines, or to another
+  verse. Your place now stays where you saw it, on Windows and on Linux,
+  as it already did with the sidebar's own button. (#116, #118)
+
 ## [2.17.1] - 2026-10-20
 
 ### Fixed
