@@ -1974,3 +1974,122 @@ async fn strings_from_the_file_are_cut_short_in_problem_messages() {
         );
     }
 }
+
+/// Every export imports again, however many bookmarks it holds: adding and
+/// merging bookmarks have no limit, so importing them has none either (the
+/// file's size is its only limit; see `reader_data::MAX_FILE_BYTES`). Two
+/// imports, the first of 10,000 bookmarks, the second of one more, merge
+/// into 10,001; their export restores every one into a fresh install.
+#[tokio::test]
+async fn an_export_of_more_than_10000_bookmarks_imports_again() {
+    // The first 10,001 verses of the Bible, a bookmark each.
+    let records: Vec<String> = bundled("kjv")
+        .iter()
+        .zip(1..)
+        .flat_map(|(book, b)| {
+            book.chapters
+                .iter()
+                .zip(1..)
+                .flat_map(move |(verses, c)| (1..=verses.len()).map(move |v| (b, c, v)))
+        })
+        .take(10_001)
+        .map(|(book, chapter, verse)| {
+            format!(
+                r#"{{"book": {book}, "chapter": {chapter}, "verse_start": {verse}, "verse_end": {verse}}}"#
+            )
+        })
+        .collect();
+    let (db, a) = app("rd_many_bookmarks").await;
+    let first = file(&db, "first.gospel-getter.json");
+    std::fs::write(&first, file_with(&records[..10_000].join(","), "null")).unwrap();
+    let second = file(&db, "second.gospel-getter.json");
+    std::fs::write(&second, file_with(&records[10_000..].join(","), "null")).unwrap();
+    assert_eq!(import(&a, &first, false).await.added, 10_000);
+    assert_eq!(import(&a, &second, false).await.added, 1);
+    let before = personal(&a).await;
+    assert_eq!(before.0.len(), 10_001);
+
+    let backup = file(&db, "backup.gospel-getter.json");
+    let ExportOutcome::Saved { bookmarks, .. } =
+        export_to(&a, &backup, Preferences::default()).await
+    else {
+        panic!("expected saved")
+    };
+    assert_eq!(bookmarks, 10_001);
+
+    let (db_b, b) = app("rd_many_bookmarks_into").await;
+    let p = preview(&b, &backup).await;
+    assert_eq!(
+        (p.bookmarks_in_file, p.new_bookmarks, p.duplicates_in_file),
+        (10_001, 10_001, 0)
+    );
+    let result = commands::apply_pending_import(&b, p.token, false, true)
+        .await
+        .unwrap();
+    assert_eq!((result.added, result.already_present), (10_001, 0));
+    assert_eq!(personal(&b).await, before, "every bookmark, with its date");
+
+    // Past 10,000, adding stays idempotent and merging counts truly: the
+    // same file again adds nothing; bookmarking a passage that's already
+    // bookmarked returns that bookmark; a new one is one more.
+    let again = import(&b, &backup, false).await;
+    assert_eq!((again.added, again.already_present), (0, 10_001));
+    let genesis_1_1 = b.store.all_bookmarks().await.unwrap()[0].clone();
+    assert_eq!(
+        (
+            genesis_1_1.book_id,
+            genesis_1_1.chapter,
+            genesis_1_1.verse_start
+        ),
+        (1, 1, 1)
+    );
+    assert_eq!(
+        commands::bookmark_passage(&b, 1, 1, 1, 1).await,
+        Ok(genesis_1_1.id)
+    );
+    assert_eq!(personal(&b).await, before);
+    commands::bookmark_passage(&b, 43, 3, 16, 18).await.unwrap();
+    let mixed = file(&db_b, "mixed.gospel-getter.json");
+    std::fs::write(
+        &mixed,
+        file_with(
+            r#"{"book": 1, "chapter": 1, "verse_start": 1, "verse_end": 1},
+               {"book": 1, "chapter": 1, "verse_start": 1, "verse_end": 1},
+               {"book": 43, "chapter": 3, "verse_start": 16, "verse_end": 18},
+               {"book": 66, "chapter": 22, "verse_start": 21, "verse_end": 21}"#,
+            "null",
+        ),
+    )
+    .unwrap();
+    let p = preview(&b, &mixed).await;
+    assert_eq!(
+        (
+            p.bookmarks_in_file,
+            p.duplicates_in_file,
+            p.new_bookmarks,
+            p.already_present,
+            p.current_bookmarks
+        ),
+        (3, 1, 1, 2, 10_002)
+    );
+    let result = import(&b, &mixed, false).await;
+    assert_eq!((result.added, result.already_present), (1, 2));
+    assert_eq!(personal(&b).await.0.len(), 10_003);
+
+    // A file too large to be an export is still refused, as it always was.
+    let big = file(&db_b, "big.gospel-getter.json");
+    std::fs::write(
+        &big,
+        vec![b' '; crate::reader_data::MAX_FILE_BYTES as usize + 1],
+    )
+    .unwrap();
+    assert_eq!(
+        invalid(&b, &big).await,
+        (
+            "The file is too large to be a Gospel Getter export (131072 KB; the limit is \
+             131072 KB)."
+                .to_string(),
+            vec![]
+        )
+    );
+}

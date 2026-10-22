@@ -47,16 +47,17 @@ pub const FORMAT_VERSION_2: u64 = 2;
 pub const FORMAT_VERSION_1: u64 = 1;
 /// The suggested file-name suffix.
 pub const FILE_SUFFIX: &str = ".gospel-getter.json";
-/// The largest file import will read: 128 MiB, the smallest of 64, 96
-/// and 128 MiB that always holds a file at every limit below, as this app
-/// writes it, however its notes are written. Worst cases, pretty-printed as
+/// The largest file import will read: 128 MiB. Every export imports
+/// again (bookmarking, highlighting and merging an import have no limit,
+/// so neither does importing), and this is the only limit on bookmarks
+/// and highlights in a file: it refuses a file that can't be an export
+/// without reading all of it. Worst cases, pretty-printed as
 /// `to_file_contents` writes them, with the longest book name, the largest
 /// book, chapter and verse numbers and every optional field present
 /// (`a_maximal_file_fits_the_size_limit` builds one and checks every
 /// figure here):
 ///
-/// - a bookmark takes 188 bytes: 10,000 of them, 1,880,000 bytes;
-/// - a highlight takes 231 bytes: 40,000 of them, 9,240,000 bytes;
+/// - a bookmark takes 188 bytes, a highlight 231;
 /// - a note takes 254 bytes besides its text: 10,000 of them (`MAX_NOTES`),
 ///   2,540,000 bytes;
 /// - the notes' text is at most `MAX_TOTAL_NOTE_CHARS` (25,000,000)
@@ -68,18 +69,21 @@ pub const FILE_SUFFIX: &str = ".gospel-getter.json";
 /// - the rest of the file (its header, reading position and every
 ///   preference) takes 562 bytes.
 ///
-/// That's 113,660,562 bytes in all, 108.4 MiB: over 96 MiB, under 128.
+/// A highlight is one verse, and the bundled translations number 31,109
+/// verses between them, so at most 7,186,179 bytes of highlights. With
+/// every verse highlighted and the notes at both their limits, a file of
+/// 50,000 bookmarks is 119,126,741 bytes (113.6 MiB), and one of 130,271
+/// fits. Without notes, every bookmark there can be — each of the 530,288
+/// verse ranges within a chapter — and every highlight fit, in
+/// 106,880,885 bytes (101.9 MiB). Only a reader with notes near both
+/// their limits (25 million characters, every one 4 bytes long) and more
+/// than 130,271 bookmarks could export a file too large to import.
+///
 /// Format 2's limit was 16 MiB; it rose because the reader's notes can
 /// hold far more text than every other record together, and a backup of
-/// them must always import. The limit is still there to refuse a file
-/// that can't be an export without reading all of it; checking one of
-/// 128 MiB briefly holds a few times that in memory, which a desktop has
-/// to spare.
+/// them must always import. Checking a file of 128 MiB briefly holds a
+/// few times that in memory, which a desktop has to spare.
 pub const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
-/// The most bookmarks one file may hold.
-pub const MAX_BOOKMARKS: usize = 10_000;
-/// The most highlights one file may hold: more than there are verses.
-pub const MAX_HIGHLIGHTS: usize = 40_000;
 /// The most notes one file may hold: as many as the reader can keep.
 pub const MAX_NOTES: usize = crate::db::notes::MAX_NOTES;
 /// The most characters the notes in one file may hold together: as many
@@ -760,18 +764,6 @@ pub fn validate(
     let mut problems = Vec::new();
     let book = |id: i64| books.iter().find(|b| b.id == id);
 
-    if data.bookmarks.len() > MAX_BOOKMARKS {
-        return Err(ImportError::Invalid(vec![format!(
-            "It has {} bookmarks; the most one file can hold is {MAX_BOOKMARKS}.",
-            data.bookmarks.len()
-        )]));
-    }
-    if data.highlights.len() > MAX_HIGHLIGHTS {
-        return Err(ImportError::Invalid(vec![format!(
-            "It has {} highlights; the most one file can hold is {MAX_HIGHLIGHTS}.",
-            data.highlights.len()
-        )]));
-    }
     if data.notes.len() > MAX_NOTES {
         return Err(ImportError::Invalid(vec![format!(
             "It has {} notes; the most one file can hold is {MAX_NOTES}.",
@@ -1622,12 +1614,12 @@ mod tests {
         assert_eq!(widest, 4);
     }
 
-    /// The arithmetic in `MAX_FILE_BYTES`'s documentation: a file at every
-    /// limit, with every record as large as it can be and the notes' text
-    /// at its total limit, fits — and wouldn't in 96 MiB.
+    /// The arithmetic in `MAX_FILE_BYTES`'s documentation, with every
+    /// record as large as it can be and the notes at both their limits.
     #[test]
     fn a_maximal_file_fits_the_size_limit() {
         use crate::db::notes::MAX_NOTE_CHARS;
+        use crate::db::test_support::bundled_bsb;
         let base = maximal_file_size(1, 1, 1);
         let bookmark = maximal_file_size(2, 1, 1) - base;
         let highlight = maximal_file_size(1, 2, 1) - base;
@@ -1644,22 +1636,47 @@ mod tests {
             (bookmark, highlight, note_record, rest),
             (188, 231, 254, 562)
         );
-        let total = rest
-            + MAX_BOOKMARKS * bookmark
-            + MAX_HIGHLIGHTS * highlight
-            + MAX_NOTES * note_record
-            + 4 * MAX_TOTAL_NOTE_CHARS;
-        assert_eq!(total, 113_660_562);
-        assert!(
-            total as u64 <= MAX_FILE_BYTES,
-            "a maximal file is {total} bytes, over the {MAX_FILE_BYTES}-byte limit"
-        );
-        assert!(total as u64 > 96 * 1024 * 1024, "a smaller limit would do");
+        let notes = MAX_NOTES * note_record + 4 * MAX_TOTAL_NOTE_CHARS;
+        assert_eq!(notes, 102_540_000);
+
+        // The verses a highlight or bookmark can be on: in each chapter,
+        // up to the last any bundled translation numbers.
+        let mut last_verses: HashMap<(usize, usize), usize> = HashMap::new();
+        let mut count = |book: usize, chapter: usize, verses: usize| {
+            let last = last_verses.entry((book, chapter)).or_default();
+            *last = (*last).max(verses);
+        };
+        for code in ["kjv", "web"] {
+            for (b, book) in crate::db::test_support::bundled(code).iter().enumerate() {
+                for (c, verses) in book.chapters.iter().enumerate() {
+                    count(b, c, verses.len());
+                }
+            }
+        }
+        for (b, book) in bundled_bsb().iter().enumerate() {
+            for (c, verses) in book.chapters.iter().enumerate() {
+                count(b, c, verses.len());
+            }
+        }
+        let verses: usize = last_verses.values().sum();
+        let ranges: usize = last_verses.values().map(|n| n * (n + 1) / 2).sum();
+        assert_eq!((verses, ranges), (31_109, 530_288));
+
+        let size = |bookmarks: usize, notes: usize| {
+            (rest + bookmarks * bookmark + verses * highlight + notes) as u64
+        };
+        assert_eq!(size(50_000, notes), 119_126_741);
+        assert!(size(130_271, notes) <= MAX_FILE_BYTES);
+        assert!(size(130_272, notes) > MAX_FILE_BYTES);
+        assert_eq!(size(ranges, 0), 106_880_885);
+        assert!(size(ranges, 0) <= MAX_FILE_BYTES);
     }
 
-    /// One more than each limit is refused, before anything else is checked.
+    /// More notes than the reader can keep are refused, before anything
+    /// else is checked. Bookmarks and highlights have no such limit: any
+    /// number the file holds is checked as usual.
     #[test]
-    fn files_over_a_limit_are_refused() {
+    fn only_notes_have_a_count_limit() {
         let empty = || ReaderData {
             format: FORMAT.to_string(),
             format_version: FORMAT_VERSION,
@@ -1700,22 +1717,14 @@ mod tests {
             updated_at: None,
         };
         let refused = |data: ReaderData| validate(data, &[], &[], &HashMap::new()).unwrap_err();
-        assert_eq!(
-            refused(ReaderData {
-                bookmarks: vec![bookmark; MAX_BOOKMARKS + 1],
-                ..empty()
-            })
-            .problems(),
-            ["It has 10001 bookmarks; the most one file can hold is 10000."]
-        );
-        assert_eq!(
-            refused(ReaderData {
-                highlights: vec![highlight; MAX_HIGHLIGHTS + 1],
-                ..empty()
-            })
-            .problems(),
-            ["It has 40001 highlights; the most one file can hold is 40000."]
-        );
+        let many = refused(ReaderData {
+            bookmarks: vec![bookmark; 100_000],
+            highlights: vec![highlight; 100_000],
+            ..empty()
+        });
+        // Here the book is what's wrong, in every one of them.
+        assert_eq!(many.problems()[0], "Bookmark 1: there's no book number 43.");
+        assert_eq!(many.problems().last().unwrap(), "…and 199988 more.");
         assert_eq!(
             refused(ReaderData {
                 notes: vec![note.clone(); MAX_NOTES + 1],
@@ -1724,7 +1733,7 @@ mod tests {
             .problems(),
             ["It has 10001 notes; the most one file can hold is 10000."]
         );
-        // At the limit, the count is fine (here the book is what's wrong).
+        // At the limit, the count is fine.
         let at_limit = refused(ReaderData {
             notes: vec![note; MAX_NOTES],
             ..empty()
