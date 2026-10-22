@@ -224,6 +224,14 @@ mod ipc_tests {
     use crate::commands::AppState;
     use crate::db::test_support::{bundled, fresh_database};
 
+    /// Where the page is served from, so a request from it counts as the
+    /// app's own: Windows serves the `tauri://` protocol over http.
+    const APP_URL: &str = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+
     fn invoke(
         webview: &tauri::WebviewWindow<tauri::test::MockRuntime>,
         cmd: &str,
@@ -235,7 +243,7 @@ mod ipc_tests {
                 cmd: cmd.into(),
                 callback: CallbackFn(0),
                 error: CallbackFn(1),
-                url: "tauri://localhost".parse().expect("url"),
+                url: APP_URL.parse().expect("url"),
                 body: InvokeBody::Json(args),
                 headers: Default::default(),
                 invoke_key: INVOKE_KEY.to_string(),

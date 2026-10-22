@@ -1,3 +1,6 @@
+//! The rows the app reads back as they are stored: books, verses,
+//! translations and cross-references.
+
 use sqlx::FromRow;
 
 /// A book of the Bible, in canonical order (Genesis = 1 ... Revelation = 66).

@@ -5,6 +5,9 @@ description = "Read the Bible, book by book, chapter by chapter"
 license = "MIT"
 repository = "https://github.com/tossbaws/gospel-getter"
 edition = "2024"
+# The oldest Rust that builds it: sqlx 0.9 needs 1.94 (and Tauri 2.12
+# 1.90), more than the code's own let chains (1.88).
+rust-version = "1.94"
 
 # The app's code lives in the library, so the frontend test bridge
 # (`examples/frontend_bridge.rs`) can drive the real commands; `main.rs`

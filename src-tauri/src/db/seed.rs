@@ -1,3 +1,6 @@
+//! The bundled translations and cross-references, embedded in the binary,
+//! and seeding the database with whichever of them it doesn't have yet.
+
 use anyhow::Context;
 use serde::Deserialize;
 

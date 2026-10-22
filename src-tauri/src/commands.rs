@@ -1,3 +1,9 @@
+//! The commands the page calls with `invoke`, and the state they share
+//! (`AppState`). Each `#[tauri::command]` is a thin wrapper over a function
+//! taking `&AppState` (`get_reading` over `reading`), which the frontend
+//! tests' bridge (`examples/frontend_bridge.rs`) calls directly. A failure
+//! reaches the page as a sentence for the reader; its cause is logged.
+
 use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
