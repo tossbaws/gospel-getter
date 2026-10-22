@@ -3,14 +3,13 @@
 //! it credits, and a Release notes link to this version's release page,
 //! which the backend opens.
 //!
-//! About is one of the page's surfaces: the head script opens and closes it
-//! (`window.gospelGetterSurfaces`), keeps one surface open at a time, puts
-//! focus on its close button and back on ☰ when it closes, and says
-//! `gospel-getter:surface-close`. This renders it, fills it, and has its
-//! keys: Escape closes it and Tab stays inside it, on the overlay as the
-//! head script had them; the reader's shortcuts wait meanwhile (the page's
-//! keyboard dispatcher looks the overlay up). Its `hidden` is the head
-//! script's alone.
+//! About is one of the page's surfaces: `surfaces` opens and closes it,
+//! keeps one surface open at a time, puts focus on its close button and
+//! back on ☰ when it closes, and says `gospel-getter:surface-close`. This
+//! renders it, fills it, and has its keys: Escape closes it and Tab stays
+//! inside it, on the overlay as the head script had them; the reader's
+//! shortcuts wait meanwhile (the page's keyboard dispatcher looks the
+//! overlay up). Its `hidden` is `surfaces`' alone.
 //!
 //! This is the page's About markup and its version, Release notes and
 //! credits scripts (`ui/index.html` at 41e04f3) as a Leptos component: the
@@ -25,6 +24,7 @@ use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
 use crate::bridge;
 use crate::dom;
 use crate::ipc;
+use crate::surfaces;
 use crate::update_text;
 use crate::updates::{UpdateBanner, Updates, UpdatesSection};
 
@@ -43,7 +43,7 @@ fn on_keydown(panel: NodeRef<html::Div>, event: &KeyboardEvent) {
     match event.key().as_str() {
         "Escape" => {
             event.prevent_default();
-            bridge::close_surfaces();
+            surfaces::close(true);
         }
         "Tab" => {
             let Some(panel) = panel.get_untracked() else {
@@ -129,7 +129,7 @@ pub fn AboutAndUpdates() -> impl IntoView {
                     class="panel-close about-close"
                     aria-label="Close"
                     title="Close (Esc)"
-                    on:click=move |_| bridge::close_surfaces()
+                    on:click=move |_| surfaces::close(true)
                 >
                     "×"
                 </button>

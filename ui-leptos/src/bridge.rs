@@ -33,9 +33,6 @@
 //! - [`ABOUT_CREDITS_EVENT`] (`gospel-getter:about-credits`): `{ credits }`,
 //!   each bundled translation's credit for About, from boot; sent again on
 //!   [`READY_EVENT`].
-//! - [`SURFACE_CLOSE_EVENT`] (`gospel-getter:surface-close`, the head
-//!   script's): `{ name }`, a surface closed; About closing part way through
-//!   an install brings the banner back.
 //! - [`LIBRARY_REFRESH_EVENT`] (`gospel-getter:library-refresh`): the one way
 //!   the page has the Library's lists reloaded (a bookmark or highlight
 //!   changed in the reader, a translation switch, a note saved, an import,
@@ -50,8 +47,6 @@
 //!   `detail.state` is a [`PaletteState`], what the palette's commands need
 //!   of the page (Aa's settings, comparing, the chapter shown, the passage
 //!   history, a busy export), as it is at that moment.
-//! - [`SURFACE_OPEN_EVENT`] (`gospel-getter:surface-open`, the head
-//!   script's): a surface opened, so the search box closes.
 //! - [`PICKER_BOOKS_EVENT`] (`gospel-getter:picker-books`): `{ otBooks,
 //!   ntBooks }`, the books as `get_home` listed them, from boot, for the
 //!   book and chapter picker's lists; sent again on [`READY_EVENT`].
@@ -59,26 +54,19 @@
 //!   chapter }`, each time the page puts a chapter on screen (its
 //!   `renderCurrent`): the picker marks it and shows its book's chapters;
 //!   the latest is sent again on [`READY_EVENT`].
-//! - [`PICKER_SHOWN_EVENT`] (`gospel-getter:picker-shown`, the head
-//!   script's): the picker has appeared (the sidebar or the popover), so it
-//!   scrolls to the book being read.
-//! - [`aa::DRAW_EVENT`](crate::aa::DRAW_EVENT) (`gospel-getter:surface-draw`,
-//!   the head script's): `{ name }`, Aa (`aa`) or the translation button's
-//!   popover (`translation`) is opening: Aa draws what's in it, within the
-//!   event, and cancels it to say so. If nothing does, the head script
-//!   says "Display settings aren’t available." or "Translations aren’t
-//!   available."
-//! - [`aa::PREFERENCE_EVENT`](crate::aa::PREFERENCE_EVENT)
-//!   (`gospel-getter:preference`, the head script's): `{ name, value }`, a
-//!   setting the head script shows changed (the sidebar, from its toggle),
-//!   by the page's name for it: applied and saved within the event.
-//! - [`aa::READER_MODE_EVENT`](crate::aa::READER_MODE_EVENT)
-//!   (`gospel-getter:reader-mode`, the head script's): `{ on }`, reading
-//!   mode on or off (Escape, last of all, leaves it), as Aa's toggle does.
 //!
 //! Rust to page:
 //! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): the module has loaded
 //!   and every piece is listening.
+//! - [`SURFACE_OPEN_EVENT`] (`gospel-getter:surface-open`) and
+//!   [`SURFACE_CLOSE_EVENT`] (`gospel-getter:surface-close`): `{ name }`, a
+//!   header surface opened or closed (`surfaces`: "translation", "aa",
+//!   "library", "menu", "about" or "picker"). This crate hears them too:
+//!   one opening closes the search box, and About closing part way through
+//!   an install brings the banner back.
+//! - [`PICKER_SHOWN_EVENT`] (`gospel-getter:picker-shown`): no `detail`,
+//!   the picker has appeared (the sidebar or the popover, `surfaces`), so
+//!   it scrolls to the book being read (`picker`).
 //! - [`TOAST_EVENT`] (`gospel-getter:toast`): `{ message, isError }` for
 //!   the page's toast (`setDataStatus`).
 //! - [`MODAL_OPENING_EVENT`] (`gospel-getter:modal-opening`): a piece is
@@ -127,14 +115,6 @@
 //!   page moves the selection's card to its verses' new place.
 //!
 //! Page globals this crate calls (small, named, existing or exposed for it):
-//! - `window.gospelGetterSurfaces.close()` (the head script's surfaces
-//!   controller, which opens and closes About as one of its surfaces):
-//!   About's ×, Escape and its update's Close ([`close_surfaces`]).
-//! - `window.gospelGetterSurfaces.syncPicker()` and
-//!   `.keepReadingPlace(change)` (the head script's, until the surfaces
-//!   move here): the picker takes the shape reading mode or the sidebar
-//!   setting calls for ([`sync_picker`]), and a new layout keeps the
-//!   reader's place ([`keep_reading_place`]).
 //! - `window.gospelGetterComparePartner()` (the page's: the reader fetches
 //!   a comparison by it, from boot on, so its rule is the page's): the
 //!   translation Compare shows beside the one being read, for Aa's
@@ -145,25 +125,38 @@
 //!   `refreshHighlights`, a promise): after the Library removes a
 //!   highlight, the reader's highlights and then the list, waited for
 //!   before focus moves on ([`refresh_highlights`]).
-//! - `window.gospelGetterSurfaces.close(restoreFocus)` also closes the
-//!   Library before a row opens its passage, and whatever is open when the
-//!   search box opens, and the picker's popover as a chapter is chosen in
-//!   it ([`close_surfaces_with`]); `.current()` says which surface is open
-//!   ([`current_surface`]).
 //!
 //! Page globals this crate sets: `window.gospelGetterShortcuts`, the table
 //! of shortcuts (`shortcut_table`), as the page had it, for its frontend
-//! tests ([`export_shortcuts`]); and `window.gospelGetterPreferences`
-//! (`aa`): `current()`, the display settings an export carries, which the
-//! page's Export data… reads, and `apply(values)`.
+//! tests ([`export_shortcuts`]); `window.gospelGetterPreferences` (`aa`):
+//! `current()`, the display settings an export carries, which the page's
+//! Export data… reads, and `apply(values)`; and
+//! `window.gospelGetterSurfaces` (`surfaces`), the header surfaces for the
+//! page's reader: `current()` (the open one's name, or `null`),
+//! `close(restoreFocus)`, `toggle(name)` and `openPicker()`, each answered
+//! within the call. Without this module none of them is there, and the page
+//! says what isn't available.
 //!
 //! Aa's settings' records, the hidden `<select>`s `#theme-select`,
 //! `#text-size-select`, `#line-spacing-select`, `#width-select` and
 //! `#layout-select`, are this crate's (`aa` fills them from the one table
 //! and keeps them), where the page's other scripts read them as before;
-//! choosing sends their `change` as before. Aa draws inside the head
-//! script's `#aa-popover` and `#translation-popover`, and answers their
-//! controls, `#reader-exit` and the size keys.
+//! choosing sends their `change` as before. Aa draws inside the page's
+//! `#aa-popover` and `#translation-popover`, and answers their controls,
+//! `#reader-exit` and the size keys.
+//!
+//! The header's popovers and panels (`#translation-popover`,
+//! `#aa-popover`, `#library-panel`, `#app-menu`, About's `#about-overlay`,
+//! and `#picker` as the popover) are the page's markup, shown and hidden
+//! here (`surfaces`): their `hidden`, their buttons' `aria-expanded`
+//! (`#translation-toggle`, `#aa-toggle`, `#library-toggle`,
+//! `#menu-toggle`, `#ref-btn`, `#sidebar-toggle`), the picker's `role` and
+//! `#ref-btn`'s `aria-haspopup`, and `html[data-wide]` and
+//! `html[data-picker]` after the pre-paint script's first ones. This
+//! answers those buttons, `#library-close`, `#about-btn`, the ☰ menu's
+//! keys, a click outside a popover, Escape (after the page's keyboard
+//! dispatcher, which marks an Escape it used as handled) and the window
+//! crossing 1200px.
 //!
 //! Page controls this crate uses as a reader would: `#theme-select`, read
 //! and changed (with a `change` event, as Aa does) for the welcome's looks
@@ -195,8 +188,8 @@
 //!
 //! The Library's tabs and lists (`#library-panel`'s tablist and tab
 //! panels, with `#export-notes-btn`, whose click stays the page's) are this
-//! crate's elements, put inside the head script's panel, which opens and
-//! closes it and focuses its chosen tab.
+//! crate's elements, put inside the page's panel, which `surfaces` opens
+//! and closes, focusing its chosen tab.
 //!
 //! The search box's contents (`#search-input`, `#search-status`,
 //! `#search-results` and `#search-more`) are this crate's elements, put
@@ -207,16 +200,16 @@
 //! `#ot-book-list` and `#nt-book-list`, and `#picker-chapters`) are this
 //! crate's elements, drawn inside the page's `#picker`, whose clicks and
 //! keys this crate answers (Random chapter, `#random-chapter-btn`, is the
-//! page's button). The picker's two shapes stay the head script's: it shows
-//! and hides `#picker` as the sidebar or the popover (one of its surfaces,
-//! `picker`), keeps the reading place as the sidebar comes and goes, and
-//! focuses the chapter being read (or its book, or Random chapter) by the
-//! marks drawn here.
+//! page's button). Its two shapes are `surfaces`': it shows and hides
+//! `#picker` as the sidebar or the popover (one of the surfaces, `picker`),
+//! keeps the reading place as the sidebar comes and goes, and focuses the
+//! chapter being read (or its book, or Random chapter) by the marks drawn
+//! here.
 //!
 //! About (`#about-overlay`) and the update banner (`#update-banner`) are
 //! this crate's elements too, put where the page had them. About's `hidden`
-//! is the head script's (it shows and hides it as a surface, looking it up
-//! when it does); its keys are on the overlay itself, as they were. The
+//! is `surfaces`' (it shows and hides it as a surface, looking it up when
+//! it does); its keys are on the overlay itself, as they were. The
 //! page looks the banner up for its toast, which sits above it. The launch
 //! check's setting, `#update-check-toggle`, is drawn here and kept here too
 //! (`gospel-getter-update-check`, applied as `html[data-update-check]`),
@@ -710,8 +703,8 @@ pub fn note_done(action: &str, note: &JsValue) {
 pub const LAUNCH_CHECK_EVENT: &str = "gospel-getter:update-check";
 
 /// Whether the launch check is on: `html[data-update-check]` isn't `off`
-/// (the head script applies the stored setting there before the page
-/// draws, and keeps it).
+/// (the pre-paint script applies the stored setting there before the page
+/// draws, and `aa` keeps it).
 pub fn launch_check_on() -> bool {
     document()
         .and_then(|d| d.document_element())
@@ -731,7 +724,8 @@ pub fn about_credits(event: &CustomEvent) -> Result<Vec<String>, JsValue> {
     detail::<Credits>(event).map(|c| c.credits)
 }
 
-/// The head script closed a surface: `{ name }` ("about", "menu", ...).
+/// A header surface closed (`surfaces`): `{ name }` ("about", "menu",
+/// ...).
 pub const SURFACE_CLOSE_EVENT: &str = "gospel-getter:surface-close";
 
 #[derive(Debug, Deserialize)]
@@ -742,74 +736,6 @@ struct SurfaceClosed {
 /// The surface `event` says closed, if it can be read.
 pub fn surface_closed(event: &CustomEvent) -> Option<String> {
     detail::<SurfaceClosed>(event).ok().map(|s| s.name)
-}
-
-/// Closes the open surface (About), as its × and Escape do:
-/// `window.gospelGetterSurfaces.close()`, the head script's, which puts
-/// focus back where About was opened from.
-pub fn close_surfaces() {
-    call_close(&[]);
-}
-
-/// Closes the open surface (the Library, as a row opens its passage):
-/// `window.gospelGetterSurfaces.close(restoreFocus)`. With `restore_focus`,
-/// focus goes back to the Library's button if it was in the Library; without
-/// (a note's Edit, whose editor takes focus), it's left alone.
-pub fn close_surfaces_with(restore_focus: bool) {
-    call_close(&[JsValue::from_bool(restore_focus)]);
-}
-
-fn call_close(args: &[JsValue]) {
-    let Some(surfaces) = surfaces() else {
-        return;
-    };
-    if let Some(close) = surfaces_function(&surfaces, "close") {
-        let _ = match args {
-            [restore_focus] => close.call1(&surfaces, restore_focus),
-            _ => close.call0(&surfaces),
-        };
-    }
-}
-
-/// The head script's `window.gospelGetterSurfaces`, if it's there.
-fn surfaces() -> Option<JsValue> {
-    let window = web_sys::window()?;
-    js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterSurfaces"))
-        .ok()
-        .filter(JsValue::is_object)
-}
-
-/// The surfaces' `name` function.
-fn surfaces_function(surfaces: &JsValue, name: &str) -> Option<js_sys::Function> {
-    js_sys::Reflect::get(surfaces, &JsValue::from_str(name))
-        .ok()?
-        .dyn_into::<js_sys::Function>()
-        .ok()
-}
-
-/// The book and chapter picker takes the shape reading mode and the
-/// sidebar setting now call for (the sidebar or the popover, shown or
-/// hidden): `window.gospelGetterSurfaces.syncPicker()`, the head script's.
-pub fn sync_picker() {
-    if let Some(surfaces) = surfaces()
-        && let Some(sync) = surfaces_function(&surfaces, "syncPicker")
-    {
-        let _ = sync.call0(&surfaces);
-    }
-}
-
-/// Runs `change` (which reflows the page) keeping the reader's place, as
-/// the head script keeps it: `window.gospelGetterSurfaces.keepReadingPlace(
-/// change)`. Without the head script, `change` just runs.
-pub fn keep_reading_place(change: impl Fn() + 'static) {
-    let keep = surfaces().and_then(|s| surfaces_function(&s, "keepReadingPlace").map(|f| (s, f)));
-    let Some((surfaces, keep)) = keep else {
-        change();
-        return;
-    };
-    // Called before `keepReadingPlace` returns, so it can go then.
-    let change = wasm_bindgen::closure::Closure::<dyn Fn()>::new(change);
-    let _ = keep.call1(&surfaces, change.as_ref());
 }
 
 /// The page asks the Library to reload lists: a cancelable `CustomEvent`
@@ -904,16 +830,6 @@ pub fn translation_code() -> String {
         .unwrap_or_default()
 }
 
-/// The surface the head script has open ("library", "aa", ...), if any:
-/// `window.gospelGetterSurfaces.current()`.
-pub fn current_surface() -> Option<String> {
-    let surfaces = surfaces()?;
-    surfaces_function(&surfaces, "current")?
-        .call0(&surfaces)
-        .ok()?
-        .as_string()
-}
-
 /// The page opens or closes the search box: a cancelable `CustomEvent`
 /// whose `detail` is `{ open }`. The search box cancels it to say it has
 /// it; when nothing does (the module didn't load), the page says search
@@ -930,7 +846,7 @@ pub fn search_request(event: &CustomEvent) -> Result<bool, JsValue> {
     detail::<SearchRequest>(event).map(|r| r.open)
 }
 
-/// The head script opened a surface: `{ name }`.
+/// A header surface opened (`surfaces`): `{ name }`.
 pub const SURFACE_OPEN_EVENT: &str = "gospel-getter:surface-open";
 
 /// This crate asks what the palette's commands need of the page: a
@@ -1016,6 +932,6 @@ pub fn picker_current(event: &CustomEvent) -> Result<(i64, i64), JsValue> {
     detail::<PickerCurrent>(event).map(|c| (c.book_id, c.chapter))
 }
 
-/// The head script has shown the picker (it was hidden): a `CustomEvent`,
+/// `surfaces` has shown the picker (it was hidden): a `CustomEvent`,
 /// no `detail`.
 pub const PICKER_SHOWN_EVENT: &str = "gospel-getter:picker-shown";

@@ -5,9 +5,9 @@
 //! chapter).
 //!
 //! The picker itself (`#picker`, with Random chapter and the testaments'
-//! headings and lists) is the page's, and so are its two shapes: the head
-//! script shows it as the sidebar on a wide window or as the popover from
-//! the reference button, keeps the reader's place as the sidebar comes and
+//! headings and lists) is the page's; its two shapes are `surfaces`': it
+//! shows it as the sidebar on a wide window or as the popover from the
+//! reference button, keeps the reader's place as the sidebar comes and
 //! goes, and moves focus into it (the chapter being read, marked here). This
 //! draws the books into its lists from what boot hands over
 //! (`bridge::PICKER_BOOKS_EVENT`), a book's chapters, the marks for the
@@ -33,6 +33,7 @@ use crate::bridge;
 use crate::dom;
 use crate::ipc;
 use crate::picker_text::{self as text, Book, FromChapter, FromItem, Key};
+use crate::surfaces::{self, Surface};
 
 /// The grid of chapters' id: one book's chapters show at a time.
 const CHAPTERS_ID: &str = "picker-chapters";
@@ -270,8 +271,8 @@ impl Picker {
     /// where the reader is in it. The popover closes (focus going back to
     /// the reference button); the sidebar stays.
     fn choose(self, book_id: i64, chapter: i64) {
-        if bridge::current_surface().as_deref() == Some("picker") {
-            bridge::close_surfaces_with(true);
+        if surfaces::current() == Some(Surface::Picker) {
+            surfaces::close(true);
         }
         let shown = self.reading() == Some((book_id, chapter));
         bridge::jump(book_id, chapter, !shown);
@@ -418,7 +419,7 @@ impl Picker {
                 Err(e) => ipc::log_error("The chapter on screen couldn't be read", &e),
             }
         });
-        // The head script shows the picker: scroll it to the book being read.
+        // `surfaces` shows the picker: scroll it to the book being read.
         dom::on_document_event(bridge::PICKER_SHOWN_EVENT, move |_| self.reveal_current());
     }
 }

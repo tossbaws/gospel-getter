@@ -39,6 +39,7 @@ use crate::bridge;
 use crate::dom;
 use crate::dto::{DownloadEvent, NoteBlock, NoteSpan, UpdateInfo};
 use crate::ipc;
+use crate::surfaces;
 use crate::update_text::{self, Download};
 
 /// The banner or About: the two places an update shows.
@@ -187,8 +188,8 @@ impl Updates {
         }
     }
 
-    /// Whether About is open (its overlay is the head script's to show and
-    /// hide, as one of the page's surfaces).
+    /// Whether About is open (its overlay is `surfaces`' to show and hide,
+    /// as one of the page's surfaces).
     fn about_open() -> bool {
         bridge::document()
             .and_then(|d| d.get_element_by_id("about-overlay"))
@@ -496,10 +497,10 @@ impl Updates {
         hide(self.banner.get_untracked(), false);
     }
 
-    /// Listens for the page: About closing (the head script's
-    /// `gospel-getter:surface-close`), and the end of boot, when the launch
-    /// check runs unless the reader turned it off (`html[data-update-check]`
-    /// is `off`; the preference is the head script's).
+    /// Listens for About closing (`surfaces`'
+    /// `gospel-getter:surface-close`), and for the end of boot, when the
+    /// launch check runs unless the reader turned it off
+    /// (`html[data-update-check]` is `off`; the preference is `aa`'s).
     pub fn listen(self) {
         dom::on_document_event(bridge::SURFACE_CLOSE_EVENT, move |event: CustomEvent| {
             if bridge::surface_closed(&event).as_deref() == Some("about") {
@@ -649,13 +650,14 @@ pub fn UpdateBanner(updates: Updates) -> impl IntoView {
     }
 }
 
-/// About's Updates section: the launch check's setting (the head script's
-/// preference; this only shows it), what checking sends, Check now with its
+/// About's Updates section: the launch check's setting (`aa`'s preference;
+/// this only shows it), what checking sends, Check now with its
 /// status line, and an update found while About is open.
 #[component]
 pub fn UpdatesSection(updates: Updates) -> impl IntoView {
     // On unless the reader turned it off: `html[data-update-check]`, which
-    // the head script set from the stored preference before the page drew.
+    // the pre-paint script set from the stored preference before the page
+    // drew.
     let launch_check = bridge::launch_check_on();
     view! {
         <section class="about-updates" aria-labelledby="updates-label">
@@ -746,7 +748,7 @@ pub fn UpdatesSection(updates: Updates) -> impl IntoView {
                         id="about-update-close"
                         class="reader-mode-btn"
                         node_ref=updates.about_close
-                        on:click=move |_| bridge::close_surfaces()
+                        on:click=move |_| surfaces::close(true)
                     >
                         "Close"
                     </button>

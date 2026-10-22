@@ -2,9 +2,9 @@
 //! highlighted passage, with a color filter) and Notes, each row one link
 //! to its passage with its own × or Edit beside it.
 //!
-//! The Library is one of the page's surfaces: the head script opens and
-//! closes `#library-panel` (not in reading mode), keeps one surface open at
-//! a time and focuses the chosen tab when it opens. This draws what's
+//! The Library is one of the page's surfaces: `surfaces` opens and closes
+//! `#library-panel` (not in reading mode), keeps one surface open at a
+//! time and focuses the chosen tab when it opens. This draws what's
 //! inside it (put there by [`place`]), switches the tabs, loads the lists
 //! and acts on their rows: opening a row closes the Library and has the
 //! page jump to the passage (a note's Edit then opens the note editor);
@@ -37,6 +37,7 @@ use crate::dto::{
 };
 use crate::ipc;
 use crate::library_text::{self as text, List};
+use crate::surfaces;
 
 /// A list as last shown: its rows, or why it couldn't be loaded (or a row
 /// removed) in place of them. The rows stay meanwhile, as the page kept
@@ -345,7 +346,7 @@ impl Library {
     /// Opens a passage: the Library closes (focus back to its button, or
     /// left for the editor), and the page jumps there.
     fn open(passage: PassageArgs, note: &JsValue) {
-        bridge::close_surfaces_with(note.is_null());
+        surfaces::close(note.is_null());
         bridge::open_passage(
             &bridge::OpenPassage {
                 book_id: passage.book_id,
