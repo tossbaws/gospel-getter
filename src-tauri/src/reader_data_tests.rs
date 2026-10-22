@@ -117,7 +117,10 @@ async fn export_round_trips_into_a_fresh_install() {
     commands::bookmark_passage(&a, 19, 23, 1, 1).await.unwrap();
     // Matthew 2:23 is numbered only in the WEB; it still travels.
     commands::bookmark_passage(&a, 40, 2, 23, 23).await.unwrap();
-    commands::reading(&a, 45, 8, Some("web")).await.unwrap();
+    commands::reading(&a, 45, 8, Some("web"))
+        .await
+        .unwrap()
+        .unwrap();
     let before = personal(&a).await;
 
     let path = file(&db, "backup.gospel-getter.json");
@@ -256,7 +259,10 @@ async fn replace_swaps_bookmarks_and_an_earlier_export_undoes_it() {
             .await
             .unwrap();
     }
-    commands::reading(&state, 43, 3, Some("kjv")).await.unwrap();
+    commands::reading(&state, 43, 3, Some("kjv"))
+        .await
+        .unwrap()
+        .unwrap();
     let original = personal(&state).await;
     let backup = file(&db, "before-replace.gospel-getter.json");
     export_to(&state, &backup, Preferences::default()).await;
@@ -296,7 +302,10 @@ async fn replace_swaps_bookmarks_and_an_earlier_export_undoes_it() {
 #[tokio::test]
 async fn restoring_the_position_is_optional() {
     let (db, state) = app("rd_position").await;
-    commands::reading(&state, 1, 1, Some("kjv")).await.unwrap();
+    commands::reading(&state, 1, 1, Some("kjv"))
+        .await
+        .unwrap()
+        .unwrap();
     let path = file(&db, "pos.gospel-getter.json");
     std::fs::write(
         &path,
@@ -376,7 +385,10 @@ async fn invalid_files_are_rejected_whole_and_change_nothing() {
     commands::bookmark_passage(&state, 43, 3, 16, 16)
         .await
         .unwrap();
-    commands::reading(&state, 43, 3, Some("kjv")).await.unwrap();
+    commands::reading(&state, 43, 3, Some("kjv"))
+        .await
+        .unwrap()
+        .unwrap();
     let before = personal(&state).await;
 
     let ok = r#"{"book": 43, "chapter": 3, "verse_start": 1, "verse_end": 1}"#;
@@ -566,7 +578,10 @@ async fn a_failed_import_rolls_back_completely() {
     commands::bookmark_passage(&state, 45, 8, 28, 28)
         .await
         .unwrap();
-    commands::reading(&state, 43, 3, Some("kjv")).await.unwrap();
+    commands::reading(&state, 43, 3, Some("kjv"))
+        .await
+        .unwrap()
+        .unwrap();
     let before = personal(&state).await;
 
     let path = file(&db, "fails.gospel-getter.json");

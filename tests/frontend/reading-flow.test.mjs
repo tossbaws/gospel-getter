@@ -467,3 +467,87 @@ test('other chapters have no edge card, and comparing shows none', async () => {
         assert.equal(app.document.querySelector('.edge-card, .chapter-side'), null);
     });
 });
+
+// ---- A chapter that couldn't be read
+
+const FAILED = "John 4 couldn't be loaded.";
+const toast = (app) => app.document.getElementById('data-status');
+const retry = (app) => app.document.querySelector('#reader-notice .reading-retry');
+
+test('a chapter that couldn’t be read says so with a Try again, and the one on screen stays', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        app.failCommand('get_reading', FAILED);
+        const before = app.calls.length;
+        app.key('ArrowRight');
+        await app.idle(before, 'get_reading');
+        assert.equal(app.heading(), 'John 3');
+        assert.equal(app.notice(), `${FAILED} Try again`);
+        assert.equal(retry(app).tagName, 'BUTTON');
+        assert.equal(retry(app).type, 'button');
+        // Said where the reader is, too.
+        assert.equal(toast(app).textContent, FAILED);
+        assert.ok(!toast(app).classList.contains('is-hidden'));
+        assert.ok(toast(app).classList.contains('is-error'));
+        // Try again asks for the same chapter: still failing, it still
+        // says so; once it can be read, it opens and the notice goes.
+        await clickAndWait(app, retry(app), 'get_reading');
+        assert.equal(app.calls.filter((c) => c.cmd === 'get_reading').at(-1).args.chapter, 4);
+        assert.equal(app.heading(), 'John 3');
+        assert.equal(app.notice(), `${FAILED} Try again`);
+        app.failCommand('get_reading', null);
+        await clickAndWait(app, retry(app), 'get_reading');
+        assert.equal(app.heading(), 'John 4');
+        assert.equal(app.notice(), '');
+    }));
+
+test('a chapter that couldn’t be read at startup says so where the chapter would be, and Try again opens it', () =>
+    withApp({ book: 'John', chapter: 4, translation: 'kjv', failing: { get_reading: FAILED } }, async (app) => {
+        assert.equal(app.notice(), `${FAILED} Try again`);
+        assert.equal(main(app), null);
+        app.failCommand('get_reading', null);
+        await clickAndWait(app, retry(app), 'get_reading');
+        assert.equal(app.heading(), 'John 4');
+        assert.equal(app.notice(), '');
+        // It's where the history starts, as at any startup: a jump can be
+        // gone back from to here.
+        await app.search('Romans 8');
+        const before = app.calls.length;
+        app.key('Enter', {}, app.searchInput());
+        await app.idle(before, 'get_reading');
+        assert.equal(app.heading(), 'Romans 8');
+        const back = app.calls.length;
+        app.key('ArrowLeft', { altKey: true });
+        await app.idle(back, 'get_reading');
+        assert.equal(app.heading(), 'John 4');
+    }));
+
+test('a failure that arrives after a newer chapter was put on screen says nothing', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        const fail = app.holdFailure('get_reading', FAILED);
+        app.key('ArrowRight');
+        const before = app.calls.length;
+        app.key('ArrowLeft');
+        await app.waitForHeading('John 2');
+        fail();
+        await app.idle(before);
+        assert.equal(app.heading(), 'John 2');
+        assert.equal(app.notice(), '');
+        assert.ok(toast(app).classList.contains('is-hidden'));
+    }));
+
+test('a chapter the Bible doesn’t have changes nothing and says nothing', () =>
+    withApp({ book: 'John', chapter: 21, translation: 'kjv' }, async (app) => {
+        // The real backend answers a 67th book, and John 22, with no
+        // chapter.
+        for (const [book, chapter] of [['67', '1'], ['43', '22']]) {
+            const inner = app.document.getElementById('reading-pane-inner');
+            inner.dataset.nextBook = book;
+            inner.dataset.nextChapter = chapter;
+            const before = app.calls.length;
+            app.key('ArrowRight');
+            await app.idle(before, 'get_reading');
+            assert.equal(app.heading(), 'John 21');
+            assert.ok(toast(app).classList.contains('is-hidden'));
+            assert.equal(app.notice(), '');
+        }
+    }));

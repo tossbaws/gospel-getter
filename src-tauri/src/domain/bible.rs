@@ -1,3 +1,6 @@
+//! Moving through the Bible: the chapter or book before and after one, by
+//! the books' canonical order and chapter counts.
+
 use crate::db::Book;
 
 /// A reference to one chapter, identified by its book and chapter number.

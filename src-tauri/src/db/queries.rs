@@ -1,3 +1,7 @@
+//! Reads (and the one write) that belong to no single feature: the books
+//! and translations, a chapter's verses and cross-references, verse
+//! ranges, and the reading position.
+
 use anyhow::Context;
 use sqlx::SqlitePool;
 

@@ -8,6 +8,7 @@ use super::bookmarks::{add_bookmark, list_bookmarks, remove_bookmark};
 use super::highlights::{
     list_highlight_passages, list_highlights, remove_highlights, set_highlights,
 };
+use super::migrate::SCHEMA_VERSION;
 use super::notes::{
     MAX_NOTE_CHARS, MAX_NOTES, MAX_TOTAL_NOTE_CHARS, NoteLimit, Passage, add_note, delete_note,
     list_notes, notes_overlapping, update_note,
@@ -18,7 +19,7 @@ use super::test_support::{
     verses_snapshot, write_v2_1_0_database,
 };
 use super::{
-    BookmarkError, HighlightColor, NoteBodyError, NoteError, ensure_search_index, prepare,
+    BookmarkError, HighlightColor, NoteBodyError, NoteError, ensure_search_index, migrate, prepare,
 };
 
 const KJV: i64 = 1;
@@ -119,6 +120,35 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
     assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
 
     assert_verses_match_bundled(&verses_snapshot(pool.read()).await);
+    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
+}
+
+async fn user_version(pool: &sqlx::SqlitePool) -> i64 {
+    sqlx::query_scalar("PRAGMA user_version")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// `migrate` records the schema's version, which `SCHEMA_VERSION` names,
+/// and leaves a newer one (from a later app) as it is.
+#[tokio::test]
+async fn the_schema_version_is_recorded_and_never_lowered() {
+    let db = TempDb::new("schema_version");
+    let pool = db.connect().await;
+    assert_eq!(user_version(pool.read()).await, 0);
+    migrate(pool.write()).await.unwrap();
+    assert_eq!(SCHEMA_VERSION, 1);
+    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
+    migrate(pool.write()).await.unwrap();
+    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
+
+    sqlx::query("PRAGMA user_version = 7")
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+    migrate(pool.write()).await.unwrap();
+    assert_eq!(user_version(pool.read()).await, 7);
 }
 
 #[tokio::test]
@@ -129,6 +159,7 @@ async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_searc
     let pool = db.connect().await;
     let verses_before = verses_snapshot(pool.read()).await;
     let others_before = other_tables_snapshot(pool.read()).await;
+    assert_eq!(user_version(pool.read()).await, 0);
     assert!(
         !table_names(pool.read())
             .await
@@ -164,6 +195,7 @@ async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_searc
         .unwrap();
     others_expected.insert(at, "translations: 3|bsb|Berean Standard Bible".to_string());
     assert_eq!(other_tables_snapshot(pool.read()).await, others_expected);
+    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
     let tables = table_names(pool.read()).await;
     for table in [
         "footnotes",

@@ -49,6 +49,12 @@ jobs:
       - name: Clippy (no warnings allowed)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      # The doc comments' links and code spans resolve (no warnings).
+      - name: Docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps
+
       - name: Build
         run: cargo build --all-targets
 
@@ -70,3 +76,31 @@ jobs:
         run: |
           npm ci
           npm test
+
+  # The Rust tests on Windows as well: its own paths (the temporary
+  # file's drop order before a rename, opening links with ShellExecute)
+  # are otherwise only run by the dist workflow's smoke test.
+  test-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      # The files as committed, not converted to CRLF: tests compare the
+      # page's markup and the bundled data byte for byte.
+      - name: Keep line endings
+        working-directory: .
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Test
+        run: cargo test --all-targets
