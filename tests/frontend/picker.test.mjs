@@ -384,6 +384,39 @@ test('resizing across 1200px swaps the sidebar for the popover and back', () =>
         assert.equal(picker(app).getAttribute('role'), null);
     }));
 
+test('resizing across 1200px keeps the reading place, as the sidebar button does', () =>
+    withApp({ book: 'John', chapter: 3, width: 1280 }, async (app) => {
+        const { window, document } = app;
+        // Stubbed layout, as for the sidebar button: the bar ends at 54px,
+        // and verse 2 is the first thing below it, 100px down with the
+        // sidebar and 160px down without it.
+        $(app, 'top-bar').getBoundingClientRect = () => ({ top: 0, bottom: 54 });
+        app.verse(2).getBoundingClientRect = () => {
+            const top = document.documentElement.dataset.picker === 'sidebar' ? 100 : 160;
+            return { top, bottom: top + 40 };
+        };
+        const scrolls = [];
+        window.scrollBy = (x, y) => scrolls.push([x, y]);
+
+        app.resize(1199);
+        assert.equal(document.documentElement.dataset.picker, undefined);
+        assert.deepEqual(scrolls, [[0, 60]], 'verse 2 stays 100px down');
+        // Widening with the popover open: it closes, and the place stays.
+        app.click(refBtn(app));
+        assert.equal(app.window.gospelGetterSurfaces.current(), 'picker');
+        app.resize(1200);
+        assert.equal(app.window.gospelGetterSurfaces.current(), null);
+        assert.equal(document.documentElement.dataset.picker, 'sidebar');
+        assert.deepEqual(scrolls, [[0, 60], [0, -60]], 'verse 2 stays 160px down');
+        // Narrowing again keeps it again; a resize that stays on one side
+        // of 1200px is left to the browser.
+        app.resize(1000);
+        assert.deepEqual(scrolls, [[0, 60], [0, -60], [0, 60]]);
+        app.resize(900);
+        assert.deepEqual(scrolls, [[0, 60], [0, -60], [0, 60]], 'nothing more');
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
 // ---- The keyboard
 
 test('G opens the picker, but not while typing', async () => {
