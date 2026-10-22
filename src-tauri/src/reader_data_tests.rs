@@ -117,10 +117,7 @@ async fn export_round_trips_into_a_fresh_install() {
     commands::bookmark_passage(&a, 19, 23, 1, 1).await.unwrap();
     // Matthew 2:23 is numbered only in the WEB; it still travels.
     commands::bookmark_passage(&a, 40, 2, 23, 23).await.unwrap();
-    commands::reading(&a, 45, 8, Some("web"))
-        .await
-        .unwrap()
-        .unwrap();
+    commands::remember_position(&a, 45, 8, "web").await.unwrap();
     let before = personal(&a).await;
 
     let path = file(&db, "backup.gospel-getter.json");
@@ -259,9 +256,8 @@ async fn replace_swaps_bookmarks_and_an_earlier_export_undoes_it() {
             .await
             .unwrap();
     }
-    commands::reading(&state, 43, 3, Some("kjv"))
+    commands::remember_position(&state, 43, 3, "kjv")
         .await
-        .unwrap()
         .unwrap();
     let original = personal(&state).await;
     let backup = file(&db, "before-replace.gospel-getter.json");
@@ -302,9 +298,8 @@ async fn replace_swaps_bookmarks_and_an_earlier_export_undoes_it() {
 #[tokio::test]
 async fn restoring_the_position_is_optional() {
     let (db, state) = app("rd_position").await;
-    commands::reading(&state, 1, 1, Some("kjv"))
+    commands::remember_position(&state, 1, 1, "kjv")
         .await
-        .unwrap()
         .unwrap();
     let path = file(&db, "pos.gospel-getter.json");
     std::fs::write(
@@ -385,9 +380,8 @@ async fn invalid_files_are_rejected_whole_and_change_nothing() {
     commands::bookmark_passage(&state, 43, 3, 16, 16)
         .await
         .unwrap();
-    commands::reading(&state, 43, 3, Some("kjv"))
+    commands::remember_position(&state, 43, 3, "kjv")
         .await
-        .unwrap()
         .unwrap();
     let before = personal(&state).await;
 
@@ -578,9 +572,8 @@ async fn a_failed_import_rolls_back_completely() {
     commands::bookmark_passage(&state, 45, 8, 28, 28)
         .await
         .unwrap();
-    commands::reading(&state, 43, 3, Some("kjv"))
+    commands::remember_position(&state, 43, 3, "kjv")
         .await
-        .unwrap()
         .unwrap();
     let before = personal(&state).await;
 

@@ -59,6 +59,7 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::get_home,
         commands::get_chapters,
         commands::get_reading,
+        commands::save_reading_position,
         commands::get_passage,
         commands::get_copy_text,
         commands::list_bookmarks,
@@ -297,13 +298,36 @@ mod ipc_tests {
             reading["currentVerses"][15]["text"],
             bundled("web")[42].chapters[2][15].as_str()
         );
-        // Reading a chapter saves the position, so the next launch isn't a
-        // first run.
+        // Reading a chapter saves nothing; the page saves the one it shows,
+        // so the next launch isn't a first run and opens there.
+        let home = invoke(&webview, "get_home", json!({})).unwrap();
+        assert_eq!(home["hasSavedPosition"], false);
+        assert_eq!(
+            invoke(
+                &webview,
+                "save_reading_position",
+                json!({ "bookId": 43, "chapter": 3, "translationCode": "web" }),
+            )
+            .unwrap(),
+            Value::Null
+        );
         let home = invoke(&webview, "get_home", json!({})).unwrap();
         assert_eq!(home["hasSavedPosition"], true);
         assert_eq!(
-            (&home["currentBookId"], &home["currentChapter"]),
-            (&json!(43), &json!(3))
+            (
+                &home["currentTranslationCode"],
+                &home["currentBookId"],
+                &home["currentChapter"]
+            ),
+            (&json!("web"), &json!(43), &json!(3))
+        );
+        assert_eq!(
+            invoke(
+                &webview,
+                "save_reading_position",
+                json!({ "bookId": 43, "chapter": 22, "translationCode": "web" }),
+            ),
+            Err(json!("John has no chapter 22."))
         );
 
         let passage = invoke(

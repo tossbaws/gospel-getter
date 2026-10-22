@@ -8398,6 +8398,33 @@
                 if (lastDto) setDataStatus(message, true);
             }
 
+            // The reading position the next launch opens at: the chapter
+            // put on screen last, in the translation it was shown in.
+            // loadReading saves it once the chapter is shown, never for an
+            // answer it dropped (get_reading itself saves nothing). One
+            // save is on its way at a time; a newer one waits, replacing
+            // any that waited before it, so they reach the backend in the
+            // order the chapters were shown and the last one wins.
+            let positionSaving = false;
+            let positionWaiting = null;
+
+            async function savePosition(bookId, chapter, translationCode) {
+                positionWaiting = { bookId, chapter, translationCode };
+                if (positionSaving) return;
+                positionSaving = true;
+                while (positionWaiting) {
+                    const position = positionWaiting;
+                    positionWaiting = null;
+                    try {
+                        await invoke('save_reading_position', position);
+                    } catch (e) {
+                        // The next chapter shown saves again.
+                        console.error('Failed to save the reading position', e);
+                    }
+                }
+                positionSaving = false;
+            }
+
             // Returns whether the chapter was put on screen. A chapter the
             // Bible doesn't have (no answer) changes nothing; one that
             // couldn't be read says so (showReadingFailure), unless a newer
@@ -8436,6 +8463,7 @@
                     };
                     showNotice(isComparing() && !compare ? COMPARE_FAILED : '');
                     renderCurrent();
+                    savePosition(reading.bookId, reading.chapter, translationCode);
                     return true;
                 } catch (e) {
                     console.error('Failed to load reading pane', e);
@@ -9729,9 +9757,9 @@
 
             // Switching translations re-reads whatever chapter is currently
             // on screen, in the newly selected translation, refreshes the
-            // bookmark and highlight previews, and reruns any search. The backend
-            // remembers this as the reader's position too (see
-            // get_reading), so reopening the app comes back to it.
+            // bookmark and highlight previews, and reruns any search. Once
+            // it's shown, it's the reader's position too (see
+            // savePosition), so reopening the app comes back to it.
             translationSelect.addEventListener('change', function () {
                 showTranslation();
                 const inner = currentInner();
