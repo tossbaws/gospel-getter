@@ -4330,27 +4330,52 @@
                     if (wasHidden && !picker.hidden) document.dispatchEvent(new CustomEvent('gospel-getter:picker-shown'));
                 }
 
+                // The reader's place: the first heading or verse of the
+                // chapter being read that reaches below the bar, and where
+                // it is on screen.
+                function readingPlace() {
+                    var barBottom = byId('top-bar').getBoundingClientRect().bottom;
+                    var marks = document.querySelectorAll('.chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap');
+                    for (var i = 0; i < marks.length; i++) {
+                        var rect = marks[i].getBoundingClientRect();
+                        if (rect.bottom > barBottom) return { mark: marks[i], top: rect.top };
+                    }
+                    return null;
+                }
+
+                // The place as the reader last saw it, noted in the
+                // animation frame after anything that moves it. By then
+                // that frame's resize and media query listeners have run,
+                // so onShapeChange still finds the place before the change.
+                var paintedPlace = null;
+                var placePending = false;
+                function notePaintedPlace() {
+                    if (placePending) return;
+                    placePending = true;
+                    window.requestAnimationFrame(function () {
+                        placePending = false;
+                        paintedPlace = readingPlace();
+                    });
+                }
+
+                window.addEventListener('scroll', notePaintedPlace, { passive: true });
+                window.addEventListener('resize', notePaintedPlace);
+                // A chapter put on screen, or reflowed (text size, fonts).
+                if (typeof ResizeObserver === 'function') new ResizeObserver(notePaintedPlace).observe(byId('reading-pane'));
+                notePaintedPlace();
+
                 // Makes `change` (which reflows the page) keep the reader's
                 // place: the first heading or verse of the chapter being
                 // read that reaches below the bar stays where it was on
-                // screen.
-                function keepReadingPlace(change) {
-                    var barBottom = byId('top-bar').getBoundingClientRect().bottom;
-                    var marks = document.querySelectorAll('.chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap');
-                    var anchor = null;
-                    var before = 0;
-                    for (var i = 0; i < marks.length; i++) {
-                        var rect = marks[i].getBoundingClientRect();
-                        if (rect.bottom > barBottom) {
-                            anchor = marks[i];
-                            before = rect.top;
-                            break;
-                        }
-                    }
+                // screen, or where `place` says it was.
+                function keepReadingPlace(change, place) {
+                    if (!place) place = readingPlace();
                     change();
-                    if (!anchor) return;
-                    var shift = anchor.getBoundingClientRect().top - before;
-                    if (shift) window.scrollBy(0, shift);
+                    if (place) {
+                        var shift = place.mark.getBoundingClientRect().top - place.top;
+                        if (shift) window.scrollBy(0, shift);
+                    }
+                    notePaintedPlace();
                 }
 
                 // Shows or hides the sidebar, and remembers it.
@@ -4382,13 +4407,17 @@
                 // A window resized across the breakpoint changes shape: an
                 // open popover closes, and focus in a sidebar that's gone
                 // goes to the reference button. The reading place stays,
-                // as with the sidebar's own button.
+                // as with the sidebar's own button: the place the reader
+                // last saw, because by now the page is laid out at the new
+                // width in the old shape, which they never saw (and which
+                // can have another verse first under the bar).
                 function onShapeChange() {
                     var focusWasInside = picker.contains(document.activeElement);
+                    var place = paintedPlace && paintedPlace.mark.isConnected ? paintedPlace : null;
                     keepReadingPlace(function () {
                         if (current === 'picker') closeSurface(false);
                         syncPicker();
-                    });
+                    }, place);
                     if (focusWasInside && picker.hidden) refBtn.focus();
                 }
 
