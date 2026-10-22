@@ -147,7 +147,7 @@ impl Run<'_> {
 
     /// Focus off any control, at the top of the chapter, as a reader's
     /// would be before a key.
-    async fn focus_off_controls(&self) -> Result<()> {
+    pub(super) async fn focus_off_controls(&self) -> Result<()> {
         let ui = &self.ui;
         ui.js("window.scrollTo(0, 0); return null;", Vec::new())
             .await?;
@@ -160,7 +160,7 @@ impl Run<'_> {
 
     /// Makes the window `width` wide (its height kept), and waits until the
     /// page is laid out for it; returns the width it had.
-    async fn window_width(&self, width: u32) -> Result<u32> {
+    pub(super) async fn window_width(&self, width: u32) -> Result<u32> {
         let rect = self.ui.driver().get_window_rect().await?;
         self.ui
             .driver()
@@ -178,7 +178,7 @@ impl Run<'_> {
     /// Makes the window wide enough for the sidebar ([`WIDE_WIDTH`]), if it
     /// isn't already; `Err` says why it can't be (a screen narrower than
     /// that, as the Windows runner's).
-    async fn ensure_wide(&self) -> Result<std::result::Result<(), String>> {
+    pub(super) async fn ensure_wide(&self) -> Result<std::result::Result<(), String>> {
         let wide = |seen: &Value| seen["wide"] == Value::Bool(true);
         if wide(&self.picker_state().await?) {
             return Ok(Ok(()));
@@ -217,7 +217,7 @@ impl Run<'_> {
     /// A check that needs the sidebar, on a window that can't have it: not
     /// run on Windows (whose runner's screen is too narrow), and a failure
     /// elsewhere.
-    fn not_wide(&self, why: String) -> Result<String> {
+    pub(super) fn not_wide(&self, why: String) -> Result<String> {
         if self.config.xvfb.is_none() {
             Ok(format!("not run on Windows: {why}"))
         } else {
@@ -228,7 +228,12 @@ impl Run<'_> {
     /// Reads `book_id`'s chapter `n` through the picker (the popover opened
     /// first, on a narrow window; the book's chapters shown first, if they
     /// aren't), and waits until it's read: `heading`.
-    async fn read_in_picker(&self, book_id: u32, n: u32, heading: &str) -> Result<Value> {
+    pub(super) async fn read_in_picker(
+        &self,
+        book_id: u32,
+        n: u32,
+        heading: &str,
+    ) -> Result<Value> {
         let ui = &self.ui;
         let state = self.picker_state().await?;
         let sidebar = state["shape"] == json!("sidebar");
@@ -546,7 +551,7 @@ impl Run<'_> {
     }
 
     /// Where the reader is in the chapter: the first verse under the bar.
-    async fn reading_place(&self, what: &str) -> Result<Value> {
+    pub(super) async fn reading_place(&self, what: &str) -> Result<Value> {
         let place = self
             .ui
             .step(what, async { self.ui.js(PLACE_JS, Vec::new()).await })
@@ -589,7 +594,7 @@ impl Run<'_> {
     }
 
     /// Whether `after` is the place `before` was, within a line.
-    fn same_place(before: &Value, after: &Value) -> Result<f64> {
+    pub(super) fn same_place(before: &Value, after: &Value) -> Result<f64> {
         let shift = (after["top"].as_f64().unwrap_or(f64::NAN)
             - before["top"].as_f64().unwrap_or(f64::NAN))
         .abs();

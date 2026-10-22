@@ -15,8 +15,10 @@
 # Exit code 0 only if every check passed.
 #
 # Checks 1 to 8, 14 to 16 (the Library), 17 to 19 (search and the
-# palette), 20 to 24 (the book and chapter picker) and 25 to 29 (Aa, the
-# translations, Compare and reading mode) run on the app given; for 26 it
+# palette), 20 to 24 (the book and chapter picker), 25 to 29 (Aa, the
+# translations, Compare and reading mode) and 30 to 36 (the header's
+# popovers and panels, the ☰ menu's keys, About's Tab, G and the sidebar,
+# and the window crossing 1200 px) run on the app given; for 26 it
 # is closed and started again on the same data. The updater's checks (9 to 13) run on
 # GUI_CHECK_UPDATER_APP: the GUI checks' test build (cargo build --release
 # --features gui-test-updater), against the checks' own local update
@@ -62,7 +64,7 @@
 set -euo pipefail
 
 usage() {
-    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 if [[ $# -lt 1 || $# -gt 2 || $1 == -h || $1 == --help ]]; then

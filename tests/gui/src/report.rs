@@ -39,11 +39,18 @@ pub enum Check {
     TranslationSwitch = 27,
     Compare = 28,
     ReadingMode = 29,
+    OnePanel = 30,
+    EscapeChain = 31,
+    OutsideClick = 32,
+    MenuKeyboard = 33,
+    AboutTrap = 34,
+    GSidebar = 35,
+    ResizePlace = 36,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 23] = [
+    pub const SHIPPED: [Check; 30] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -67,6 +74,13 @@ impl Check {
         Check::TranslationSwitch,
         Check::Compare,
         Check::ReadingMode,
+        Check::OnePanel,
+        Check::EscapeChain,
+        Check::OutsideClick,
+        Check::MenuKeyboard,
+        Check::AboutTrap,
+        Check::GSidebar,
+        Check::ResizePlace,
     ];
 
     /// The check on the app as shipped started again, on the first
@@ -114,6 +128,13 @@ impl Check {
             Check::TranslationSwitch => "translation-switch",
             Check::Compare => "compare",
             Check::ReadingMode => "reading-mode",
+            Check::OnePanel => "one-panel",
+            Check::EscapeChain => "escape-chain",
+            Check::OutsideClick => "outside-click",
+            Check::MenuKeyboard => "menu-keyboard",
+            Check::AboutTrap => "about-trap",
+            Check::GSidebar => "g-and-sidebar",
+            Check::ResizePlace => "resize-reading-place",
         }
     }
 
