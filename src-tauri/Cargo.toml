@@ -20,7 +20,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 # `time`: the search index build's pauses between tries (`retry.rs`).
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
-sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "macros"] }
+# Without sqlx's defaults: the queries are plain strings (no `query!`, so
+# no `macros`), there are no sqlx migrations, `Any` pools or JSON columns.
+# `derive` is for `FromRow`.
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
