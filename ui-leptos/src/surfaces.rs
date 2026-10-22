@@ -32,7 +32,8 @@
 //! This is the head script's surfaces controller (`ui/index.html` at
 //! 49736df, from `isWide` to its Escape handler) in Rust: the same ids,
 //! ARIA, focus order and keys. Everything happens within the click or key,
-//! as it did.
+//! as it did. Since then, main's #116: a resize across 1200px keeps the
+//! reading place ([`on_shape_change`]).
 
 use std::cell::{Cell, RefCell};
 
@@ -249,15 +250,20 @@ fn open_picker(toggle: bool) {
 
 /// A window resized across the breakpoint changes shape: an open popover
 /// closes, and focus in a sidebar that's gone goes to the reference button.
+/// The reading place stays, as with the sidebar's own button. The close is
+/// inside [`keep_reading_place`] too: it syncs the picker itself, so outside
+/// it the new shape would reflow the page before the place was measured.
 fn on_shape_change() {
     let Some(picker) = by_id("picker") else {
         return;
     };
     let focus_was_inside = contains(&picker, active().as_deref());
-    if CURRENT.get() == Some(Surface::Picker) {
-        close(false);
-    }
-    sync_picker();
+    keep_reading_place(|| {
+        if CURRENT.get() == Some(Surface::Picker) {
+            close(false);
+        }
+        sync_picker();
+    });
     if focus_was_inside
         && picker.hidden()
         && let Some(ref_btn) = by_id("ref-btn")
