@@ -986,6 +986,16 @@ pub async fn bookmarks_in(
         .collect())
 }
 
+/// For `map_err` on a command's failure: logs the error with its causes
+/// (give it its context first, with `anyhow::Context`) and answers with
+/// `sentence`, which is what the reader is shown.
+fn failed(sentence: &'static str) -> impl FnOnce(anyhow::Error) -> String {
+    move |e| {
+        tracing::error!("{e:#}");
+        sentence.to_owned()
+    }
+}
+
 /// A passage that couldn't be bookmarked or highlighted, in words for the
 /// reader. `action` is "bookmarked" or "highlighted"; `failed` is the
 /// message for a database failure.
@@ -1046,10 +1056,8 @@ pub async fn list_bookmarks(
 ) -> Result<Vec<BookmarkDto>, String> {
     bookmarks_in(&state, translation_code.as_deref())
         .await
-        .map_err(|e| {
-            tracing::error!("Failed to list bookmarks: {e:#}");
-            "Bookmarks couldn't be loaded.".to_string()
-        })
+        .context("Failed to list bookmarks")
+        .map_err(failed("Bookmarks couldn't be loaded."))
 }
 
 #[tauri::command]
@@ -1066,10 +1074,12 @@ pub async fn add_bookmark(
 /// Remove a bookmark; `false` if it was already gone.
 #[tauri::command]
 pub async fn remove_bookmark(state: tauri::State<'_, AppState>, id: i64) -> Result<bool, String> {
-    state.store.remove_bookmark(id).await.map_err(|e| {
-        tracing::error!("Failed to remove bookmark {id}: {e:#}");
-        "The bookmark couldn't be removed.".to_string()
-    })
+    state
+        .store
+        .remove_bookmark(id)
+        .await
+        .with_context(|| format!("Failed to remove bookmark {id}"))
+        .map_err(failed("The bookmark couldn't be removed."))
 }
 
 // ---- Highlights
@@ -1197,20 +1207,18 @@ pub async fn unhighlight_passage(
         .store
         .remove_highlights(book_id, chapter, verse_start, verse_end)
         .await
-        .map_err(|e| {
-            tracing::error!("Failed to remove highlights: {e:#}");
-            "The highlight couldn't be removed.".to_string()
-        })
+        .context("Failed to remove highlights")
+        .map_err(failed("The highlight couldn't be removed."))
 }
 
 #[tauri::command]
 pub async fn list_highlights(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<HighlightDto>, String> {
-    highlights_list(&state).await.map_err(|e| {
-        tracing::error!("Failed to list highlights: {e:#}");
-        "Highlights couldn't be loaded.".to_string()
-    })
+    highlights_list(&state)
+        .await
+        .context("Failed to list highlights")
+        .map_err(failed("Highlights couldn't be loaded."))
 }
 
 #[tauri::command]
@@ -1220,10 +1228,8 @@ pub async fn list_highlight_passages(
 ) -> Result<Vec<HighlightPassageDto>, String> {
     highlight_passages_in(&state, translation_code.as_deref())
         .await
-        .map_err(|e| {
-            tracing::error!("Failed to list highlighted passages: {e:#}");
-            "Highlights couldn't be loaded.".to_string()
-        })
+        .context("Failed to list highlighted passages")
+        .map_err(failed("Highlights couldn't be loaded."))
 }
 
 #[tauri::command]
@@ -1315,10 +1321,12 @@ pub async fn notes_overlapping(state: &AppState, passage: Passage) -> Result<Vec
             passage.verse_start, passage.verse_end
         ));
     }
-    let notes = state.store.notes_overlapping(&passage).await.map_err(|e| {
-        tracing::error!("Failed to list notes: {e:#}");
-        "Notes couldn't be loaded.".to_string()
-    })?;
+    let notes = state
+        .store
+        .notes_overlapping(&passage)
+        .await
+        .context("Failed to list notes")
+        .map_err(failed("Notes couldn't be loaded."))?;
     Ok(notes.into_iter().map(|n| note_dto(state, n)).collect())
 }
 
@@ -1361,10 +1369,8 @@ pub async fn note_delete(state: &AppState, id: i64) -> Result<Option<NoteDto>, S
         .delete_note(id)
         .await
         .map(|n| n.map(|n| note_dto(state, n)))
-        .map_err(|e| {
-            tracing::error!("Failed to delete note {id}: {e:#}");
-            "The note couldn't be deleted.".to_string()
-        })
+        .with_context(|| format!("Failed to delete note {id}"))
+        .map_err(failed("The note couldn't be deleted."))
 }
 
 /// Bring back a deleted note: the same passage, text and dates (a new id).
@@ -1411,10 +1417,10 @@ pub async fn list_notes(
 
 #[tauri::command]
 pub async fn list_all_notes(state: tauri::State<'_, AppState>) -> Result<Vec<NoteDto>, String> {
-    notes_list(&state).await.map_err(|e| {
-        tracing::error!("Failed to list notes: {e:#}");
-        "Notes couldn't be loaded.".to_string()
-    })
+    notes_list(&state)
+        .await
+        .context("Failed to list notes")
+        .map_err(failed("Notes couldn't be loaded."))
 }
 
 #[tauri::command]
@@ -1613,10 +1619,8 @@ pub async fn search(
         offset.unwrap_or(0),
     )
     .await
-    .map_err(|e| {
-        tracing::error!("Search for {query:?} failed: {e:#}");
-        "Search failed.".to_string()
-    })
+    .with_context(|| format!("Search for {query:?} failed"))
+    .map_err(failed("Search failed."))
 }
 
 // ---- Compare translations (GH-13)
@@ -1702,10 +1706,8 @@ pub async fn get_compare(
 ) -> Result<Option<CompareDto>, String> {
     compare_chapter(&state, book_id, chapter, &translation_codes)
         .await
-        .map_err(|e| {
-            tracing::error!("Failed to load {book_id}:{chapter} for comparison: {e:#}");
-            "The comparison couldn't be loaded.".to_string()
-        })
+        .with_context(|| format!("Failed to load {book_id}:{chapter} for comparison"))
+        .map_err(failed("The comparison couldn't be loaded."))
 }
 
 // ---- Export and import the reader's own data
@@ -2291,10 +2293,10 @@ pub async fn export_reader_data<R: tauri::Runtime>(
 ) -> Result<ExportOutcome, String> {
     // Gathered before the dialog opens, so a failure is reported without
     // asking for a file name first.
-    let data = build_reader_data(&state, preferences).await.map_err(|e| {
-        tracing::error!("Failed to gather data to export: {e:#}");
-        "Your data couldn't be read for export.".to_string()
-    })?;
+    let data = build_reader_data(&state, preferences)
+        .await
+        .context("Failed to gather data to export")
+        .map_err(failed("Your data couldn't be read for export."))?;
     let suggested = format!(
         "gospel-getter-{}{}",
         data.exported_at.get(..10).unwrap_or("export"),
@@ -2324,10 +2326,12 @@ pub async fn choose_import_file<R: tauri::Runtime>(
     let Some(path) = run_dialog(move || dialog.blocking_pick_file()).await? else {
         return Ok(ImportChoice::Cancelled);
     };
-    prepare_import(&state, &path).await.map_err(|e| {
-        tracing::error!("Failed to check import file: {e:#}");
-        "The file couldn't be checked against your Bible data.".to_string()
-    })
+    prepare_import(&state, &path)
+        .await
+        .context("Failed to check import file")
+        .map_err(failed(
+            "The file couldn't be checked against your Bible data.",
+        ))
 }
 
 /// Apply the previewed import (see `apply_pending_import`).
@@ -2379,10 +2383,12 @@ const NOTES_UNREADABLE: &str = "Your notes couldn't be read for export.";
 
 /// Every note, for an export (or its count).
 async fn notes_to_export(state: &AppState) -> Result<Vec<Note>, String> {
-    state.store.notes().await.map_err(|e| {
-        tracing::error!("Failed to read notes to export: {e:#}");
-        NOTES_UNREADABLE.to_string()
-    })
+    state
+        .store
+        .notes()
+        .await
+        .context("Failed to read notes to export")
+        .map_err(failed(NOTES_UNREADABLE))
 }
 
 /// What the export dialog offers, worked out when it opens.
@@ -2466,10 +2472,8 @@ pub async fn build_notes_export<Tz: chrono::TimeZone>(
             .store
             .chapter_verses(translation.id, note.book_id, note.chapter)
             .await
-            .map_err(|e| {
-                tracing::error!("Failed to read verses to export: {e:#}");
-                NOTES_UNREADABLE.to_string()
-            })?;
+            .context("Failed to read verses to export")
+            .map_err(failed(NOTES_UNREADABLE))?;
         verses.insert(key, chapter);
     }
     export.verses = &verses;
@@ -2593,6 +2597,21 @@ mod tests {
                 row.title
             );
         }
+    }
+
+    /// A failure answers with its sentence alone; what's logged is its
+    /// context and causes, as each command logged them by hand before.
+    #[test]
+    fn a_failure_is_its_sentence_and_logs_its_context() {
+        let e = anyhow::anyhow!("database is locked").context("Failed to list bookmarks");
+        assert_eq!(
+            format!("{e:#}"),
+            "Failed to list bookmarks: database is locked"
+        );
+        assert_eq!(
+            failed("Bookmarks couldn't be loaded.")(e),
+            "Bookmarks couldn't be loaded."
+        );
     }
 
     /// A chapter the Bible doesn't have is no chapter (the page stays where
