@@ -3565,9 +3565,12 @@ fn the_selection_card_anchors_to_line_boxes_in_flowing() {
     assert!(line.contains("verse.getClientRects()"));
     assert!(HTML.contains("document.addEventListener('gospel-getter:layout-change', placeCard);"));
     // A new layout keeps the reader's place: Aa asks the surfaces'
-    // keep_reading_place.
-    assert!(piece("aa.rs").contains("surfaces::keep_reading_place(change);"));
-    assert!(piece("surfaces.rs").contains("pub fn keep_reading_place(change: impl FnOnce()) {"));
+    // keep_reading_place, for the place found then.
+    assert!(piece("aa.rs").contains("surfaces::keep_reading_place(change, None);"));
+    assert!(
+        piece("surfaces.rs")
+            .contains("pub fn keep_reading_place(change: impl FnOnce(), place: Option<Place>) {")
+    );
 }
 
 /// The welcome is one card: a modal dialog labelled by its title and
