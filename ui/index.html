@@ -3555,6 +3555,11 @@
             font-size: 0.9rem;
         }
 
+        /* A chapter that couldn't be read: Try again, after the sentence. */
+        .reader-notice .reading-retry {
+            font-size: inherit;
+        }
+
         /* Compare: one column per translation, one grid row per verse
            number, so verses with the same number always sit side by side
            and both columns scroll together with the page. */
@@ -8320,7 +8325,31 @@
             // rendered markup into the DOM, same shape as the old
             // network-fetched fragment loads used to.
 
-            // Returns whether the chapter was put on screen.
+            // A chapter that couldn't be read: the notice above the reading
+            // pane says so until a chapter is put on screen, with a Try
+            // again that asks for it once more (and starts the history, if
+            // it was the first chapter). The chapter on screen, if any,
+            // stays, and a toast says it too, however far down the reader
+            // is.
+            function showReadingFailure(message, bookId, chapter) {
+                showNotice(message);
+                const retry = document.createElement('button');
+                retry.type = 'button';
+                retry.className = 'note-link reading-retry';
+                retry.textContent = 'Try again';
+                retry.addEventListener('click', () => {
+                    loadReading(bookId, chapter).then((loaded) => {
+                        if (loaded && !places.length) startHistory();
+                    });
+                });
+                readerNotice.append(' ', retry);
+                if (lastDto) setDataStatus(message, true);
+            }
+
+            // Returns whether the chapter was put on screen. A chapter the
+            // Bible doesn't have (no answer) changes nothing; one that
+            // couldn't be read says so (showReadingFailure), unless a newer
+            // request has started since.
             async function loadReading(bookId, chapter) {
                 const token = ++loadToken;
                 // The reader has asked for another chapter or translation:
@@ -8358,6 +8387,7 @@
                     return true;
                 } catch (e) {
                     console.error('Failed to load reading pane', e);
+                    if (token === loadToken) showReadingFailure(errorText(e), bookId, chapter);
                     return false;
                 }
             }

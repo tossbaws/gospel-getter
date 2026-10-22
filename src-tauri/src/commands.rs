@@ -601,33 +601,40 @@ pub async fn get_reading(
     chapter: i64,
     translation_code: Option<String>,
 ) -> Result<Option<ReadingPaneDto>, String> {
-    Ok(reading(&state, book_id, chapter, translation_code.as_deref()).await)
+    reading(&state, book_id, chapter, translation_code.as_deref()).await
 }
 
-/// The logic behind `get_reading`.
+/// The logic behind `get_reading`. `None` when there's no such chapter (a
+/// book the Bible doesn't have, or a chapter past its book's end); an
+/// error, as a sentence for the reader, when the chapter is there but
+/// couldn't be read.
 pub async fn reading(
     state: &AppState,
     book_id: i64,
     chapter: i64,
     translation_code: Option<&str>,
-) -> Option<ReadingPaneDto> {
-    let translation_id = resolve_translation(state, translation_code);
-    match build_reading_pane_dto(state, translation_id, book_id, chapter).await {
-        Ok(dto) => {
-            if let Err(e) = state
-                .store
-                .save_reading_position(translation_id, book_id, chapter)
-                .await
-            {
-                tracing::warn!("Failed to save reading position: {e}");
-            }
-            Some(dto)
-        }
-        Err(e) => {
-            tracing::error!("Failed to build reading pane for {book_id}:{chapter}: {e}");
-            None
-        }
+) -> Result<Option<ReadingPaneDto>, String> {
+    let Some(book) = state.books.iter().find(|b| b.id == book_id) else {
+        return Ok(None);
+    };
+    if !(1..=book.chapter_count).contains(&chapter) {
+        return Ok(None);
     }
+    let translation_id = resolve_translation(state, translation_code);
+    let dto = build_reading_pane_dto(state, translation_id, book_id, chapter)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to build reading pane for {book_id}:{chapter}: {e:#}");
+            format!("{} {chapter} couldn't be loaded.", book.name)
+        })?;
+    if let Err(e) = state
+        .store
+        .save_reading_position(translation_id, book_id, chapter)
+        .await
+    {
+        tracing::warn!("Failed to save reading position: {e}");
+    }
+    Ok(Some(dto))
 }
 
 /// A passage to read in place: a cross-reference previewed in the
@@ -2574,6 +2581,7 @@ mod tests {
         for row in &rows {
             let dto = reading(&state, row.book_id, row.chapter, Some("kjv"))
                 .await
+                .unwrap()
                 .unwrap();
             assert_eq!(
                 (dto.current_book_id, dto.current_chapter),
@@ -2585,6 +2593,21 @@ mod tests {
                 row.title
             );
         }
+    }
+
+    /// A chapter the Bible doesn't have is no chapter (the page stays where
+    /// it is and says nothing), while one the database can't read is a
+    /// sentence the reader is shown, naming it.
+    #[tokio::test]
+    async fn a_missing_chapter_is_none_and_a_failed_one_is_an_error() {
+        let (_db, state) = app_state("cmd_reading_outcomes").await;
+        for (book, chapter) in [(0, 1), (67, 1), (43, 0), (43, 22)] {
+            let shown = reading(&state, book, chapter, Some("kjv")).await;
+            assert!(matches!(shown, Ok(None)), "{book}:{chapter}");
+        }
+        state.store.close().await;
+        let failed = reading(&state, 43, 4, Some("kjv")).await;
+        assert_eq!(failed.err().as_deref(), Some("John 4 couldn't be loaded."));
     }
 
     /// A previewed range is every verse in it, in order, with its
@@ -2840,7 +2863,10 @@ mod tests {
             ("kjv", 19, 119, 105, 106, "Psalms 119:105\u{2013}106 (KJV)"),
             ("bsb", 40, 17, 20, 22, "Matthew 17:20\u{2013}22 (BSB)"),
         ] {
-            let shown = reading(&state, book, chapter, Some(code)).await.unwrap();
+            let shown = reading(&state, book, chapter, Some(code))
+                .await
+                .unwrap()
+                .unwrap();
             let text = shown
                 .current_verses
                 .iter()
@@ -2933,7 +2959,7 @@ mod tests {
 
         // A whole KJV chapter: every verse, as the reader shows it.
         let kjv = copy_text(&state, "kjv", 19, 23, None, None).await.unwrap();
-        let shown = reading(&state, 19, 23, Some("kjv")).await.unwrap();
+        let shown = reading(&state, 19, 23, Some("kjv")).await.unwrap().unwrap();
         let lines: Vec<String> = shown
             .current_verses
             .iter()
@@ -2982,13 +3008,13 @@ mod tests {
                 book_name: name.to_owned(),
             })
         };
-        let psalm = reading(&state, 19, 23, Some("kjv")).await.unwrap();
+        let psalm = reading(&state, 19, 23, Some("kjv")).await.unwrap().unwrap();
         assert_eq!(psalm.prev_book, start(18, "Job"));
         assert_eq!(psalm.next_book, start(20, "Proverbs"));
-        let genesis = reading(&state, 1, 50, Some("kjv")).await.unwrap();
+        let genesis = reading(&state, 1, 50, Some("kjv")).await.unwrap().unwrap();
         assert_eq!(genesis.prev_book, None);
         assert_eq!(genesis.next_book, start(2, "Exodus"));
-        let revelation = reading(&state, 66, 1, Some("web")).await.unwrap();
+        let revelation = reading(&state, 66, 1, Some("web")).await.unwrap().unwrap();
         assert_eq!(revelation.prev_book, start(65, "Jude"));
         assert_eq!(revelation.next_book, None);
         let json = serde_json::to_value(&psalm).unwrap();
@@ -3002,7 +3028,7 @@ mod tests {
     #[tokio::test]
     async fn the_bible_s_first_and_last_chapters_have_an_edge_card() {
         let (_db, state) = app_state("cmd_bible_edges").await;
-        let genesis_1 = reading(&state, 1, 1, Some("kjv")).await.unwrap();
+        let genesis_1 = reading(&state, 1, 1, Some("kjv")).await.unwrap().unwrap();
         assert!(genesis_1.prev.is_none());
         assert_eq!(
             genesis_1.prev_edge,
@@ -3014,7 +3040,7 @@ mod tests {
         assert_eq!(genesis_1.next_edge, None);
         assert_eq!(genesis_1.next.as_ref().map(|n| n.chapter), Some(2));
 
-        let revelation_22 = reading(&state, 66, 22, Some("web")).await.unwrap();
+        let revelation_22 = reading(&state, 66, 22, Some("web")).await.unwrap().unwrap();
         assert!(revelation_22.next.is_none());
         assert_eq!(
             revelation_22.next_edge,
@@ -3026,7 +3052,10 @@ mod tests {
         assert_eq!(revelation_22.prev_edge, None);
 
         for (book, chapter) in [(1, 50), (2, 1), (39, 4), (40, 1), (66, 21), (19, 119)] {
-            let dto = reading(&state, book, chapter, Some("kjv")).await.unwrap();
+            let dto = reading(&state, book, chapter, Some("kjv"))
+                .await
+                .unwrap()
+                .unwrap();
             assert!(dto.prev.is_some() && dto.next.is_some(), "{book}:{chapter}");
             assert_eq!(
                 (dto.prev_edge, dto.next_edge),
@@ -3677,7 +3706,10 @@ mod tests {
 
         // The chapter being read (which the note panel quotes from too):
         // plain text, parts and footnotes.
-        let dto = reading(&state, 19, 119, Some("kjv")).await.unwrap();
+        let dto = reading(&state, 19, 119, Some("kjv"))
+            .await
+            .unwrap()
+            .unwrap();
         let v105 = serde_json::to_value(&dto.current_verses[104]).unwrap();
         assert_eq!(
             v105,
@@ -3700,7 +3732,7 @@ mod tests {
             })
         );
         // A note without a colon has no lemma: Psalms 73:22's second.
-        let psalm_73 = reading(&state, 19, 73, Some("kjv")).await.unwrap();
+        let psalm_73 = reading(&state, 19, 73, Some("kjv")).await.unwrap().unwrap();
         assert_eq!(
             serde_json::to_value(&psalm_73.current_verses[21].shown.footnotes).unwrap(),
             serde_json::json!([
@@ -3766,7 +3798,7 @@ mod tests {
         );
 
         // A malformed verse is shown exactly as stored (Hebrews 10:34).
-        let hebrews = reading(&state, 58, 10, Some("kjv")).await.unwrap();
+        let hebrews = reading(&state, 58, 10, Some("kjv")).await.unwrap().unwrap();
         let stored = &kjv[57].chapters[9][33];
         assert_eq!(
             hebrews.current_verses[33].shown,
@@ -3776,7 +3808,10 @@ mod tests {
         // The WEB, everywhere, exactly as stored: one text part, no
         // footnotes.
         let web = bundled("web");
-        let dto = reading(&state, 19, 119, Some("web")).await.unwrap();
+        let dto = reading(&state, 19, 119, Some("web"))
+            .await
+            .unwrap()
+            .unwrap();
         for (v, stored) in dto.current_verses.iter().zip(&web[18].chapters[118]) {
             assert_eq!(v.shown, VerseText::as_stored(stored));
         }
@@ -3847,7 +3882,7 @@ mod tests {
 
         // Genesis 1: each verse is its stored text, and verse 3's note
         // stands after “light,”, lettered, its words as Berean's.
-        let dto = reading(&state, 1, 1, Some("bsb")).await.unwrap();
+        let dto = reading(&state, 1, 1, Some("bsb")).await.unwrap().unwrap();
         for v in &dto.current_verses {
             assert_eq!(v.shown.text, text(1, 1, v.number as usize));
         }
@@ -3883,7 +3918,7 @@ mod tests {
         );
 
         // Matthew 17 in the BSB: no verse 21, and verse 20's note says so.
-        let dto = reading(&state, 40, 17, Some("bsb")).await.unwrap();
+        let dto = reading(&state, 40, 17, Some("bsb")).await.unwrap().unwrap();
         let numbers: Vec<i64> = dto.current_verses.iter().map(|v| v.number).collect();
         assert_eq!(numbers, (1..=27).filter(|&n| n != 21).collect::<Vec<_>>());
         assert!(
