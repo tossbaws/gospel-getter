@@ -32,14 +32,18 @@
 //! This is the head script's surfaces controller (`ui/index.html` at
 //! 49736df, from `isWide` to its Escape handler) in Rust: the same ids,
 //! ARIA, focus order and keys. Everything happens within the click or key,
-//! as it did. Since then, main's #116: a resize across 1200px keeps the
-//! reading place ([`on_shape_change`]).
+//! as it did. Since then, main's #116 and #118: a resize across 1200px
+//! keeps the reading place the reader last saw ([`on_shape_change`],
+//! [`note_painted_place`]).
 
 use std::cell::{Cell, RefCell};
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent, MediaQueryList, Node};
+use web_sys::{
+    AddEventListenerOptions, CustomEvent, Element, HtmlElement, KeyboardEvent, MediaQueryList,
+    Node, ResizeObserver,
+};
 
 use crate::aa;
 use crate::bridge;
@@ -58,6 +62,10 @@ thread_local! {
     static PICKER_POPOVER_OPEN: Cell<bool> = const { Cell::new(false) };
     /// `matchMedia(WIDE_QUERY)`: is there room for the sidebar?
     static WIDE: RefCell<Option<MediaQueryList>> = const { RefCell::new(None) };
+    /// The reading place as the reader last saw it ([`note_painted_place`]).
+    static PAINTED_PLACE: RefCell<Option<Place>> = const { RefCell::new(None) };
+    /// A frame is asked for, to note the painted place.
+    static PLACE_PENDING: Cell<bool> = const { Cell::new(false) };
 }
 
 // ---- The page's elements.
@@ -176,14 +184,18 @@ pub fn sync_picker() {
     }
 }
 
-/// Runs `change` (which reflows the page) keeping the reader's place: the
-/// first heading or verse of the chapter being read that reaches below the
-/// bar stays where it was on screen.
-pub fn keep_reading_place(change: impl FnOnce()) {
-    let (Some(document), Some(bar)) = (bridge::document(), by_id("top-bar")) else {
-        change();
-        return;
-    };
+/// The reader's place: the first heading or verse of the chapter being
+/// read that reaches below the bar, and where it is on screen.
+#[derive(Clone)]
+pub struct Place {
+    mark: HtmlElement,
+    top: f64,
+}
+
+/// The reader's place as the page is laid out now, if anything of the
+/// chapter reaches below the bar.
+fn reading_place() -> Option<Place> {
+    let (document, bar) = (bridge::document()?, by_id("top-bar")?);
     let bar_bottom = bar.get_bounding_client_rect().bottom();
     let marks = document
         .query_selector_all(
@@ -192,34 +204,68 @@ pub fn keep_reading_place(change: impl FnOnce()) {
         .map(|found| dom::elements(&found))
         .unwrap_or_default();
     // Each mark's box is read once, up to the one kept.
-    let mut tops = Vec::new();
-    let anchor = text::first_below(
+    let mut top = 0.0;
+    let index = text::first_below(
         bar_bottom,
         marks.iter().map(|mark| {
             let rect = mark.get_bounding_client_rect();
-            tops.push(rect.top());
+            top = rect.top();
             rect.bottom()
         }),
-    );
-    change();
-    let Some(index) = anchor else {
+    )?;
+    Some(Place {
+        mark: marks[index].clone(),
+        top,
+    })
+}
+
+/// Notes the place as the reader last saw it, in the animation frame after
+/// anything that moves it (one frame asked for at most). By then that
+/// frame's resize and media query listeners have run, so
+/// [`on_shape_change`] still finds the place before the change.
+fn note_painted_place() {
+    if PLACE_PENDING.replace(true) {
         return;
-    };
-    let shift = marks[index].get_bounding_client_rect().top() - tops[index];
-    if shift != 0.0
-        && !shift.is_nan()
+    }
+    let noted = Closure::once_into_js(|| {
+        PLACE_PENDING.set(false);
+        PAINTED_PLACE.set(reading_place());
+    });
+    let asked = web_sys::window().is_some_and(|window| {
+        window
+            .request_animation_frame(noted.unchecked_ref())
+            .is_ok()
+    });
+    if !asked {
+        PLACE_PENDING.set(false);
+    }
+}
+
+/// Runs `change` (which reflows the page) keeping the reader's place: the
+/// first heading or verse of the chapter being read that reaches below the
+/// bar stays where it was on screen, or where `place` says it was.
+pub fn keep_reading_place(change: impl FnOnce(), place: Option<Place>) {
+    let place = place.or_else(reading_place);
+    change();
+    if let Some(place) = place
+        && let Some(shift) =
+            text::scroll_shift(place.top, place.mark.get_bounding_client_rect().top())
         && let Some(window) = web_sys::window()
     {
         window.scroll_by_with_x_and_y(0.0, shift);
     }
+    note_painted_place();
 }
 
 /// Shows or hides the sidebar, and remembers it (the saved settings').
 fn set_sidebar(open: bool) {
-    keep_reading_place(|| {
-        prefs::set(&preferences::SIDEBAR, if open { "open" } else { "closed" });
-        sync_picker();
-    });
+    keep_reading_place(
+        || {
+            prefs::set(&preferences::SIDEBAR, if open { "open" } else { "closed" });
+            sync_picker();
+        },
+        None,
+    );
 }
 
 /// The reference button, or G: on a wide window, into the sidebar (showing
@@ -250,20 +296,30 @@ fn open_picker(toggle: bool) {
 
 /// A window resized across the breakpoint changes shape: an open popover
 /// closes, and focus in a sidebar that's gone goes to the reference button.
-/// The reading place stays, as with the sidebar's own button. The close is
-/// inside [`keep_reading_place`] too: it syncs the picker itself, so outside
-/// it the new shape would reflow the page before the place was measured.
+/// The reading place stays, as with the sidebar's own button: the place the
+/// reader last saw ([`note_painted_place`]), because by now the page is laid
+/// out at the new width in the old shape, which they never saw (and which
+/// can have another verse first under the bar). With no place seen yet, or
+/// one no longer on the page, it's the place found now. The close is inside
+/// [`keep_reading_place`] too: it syncs the picker itself, so outside it the
+/// new shape would reflow the page before the place was kept.
 fn on_shape_change() {
     let Some(picker) = by_id("picker") else {
         return;
     };
     let focus_was_inside = contains(&picker, active().as_deref());
-    keep_reading_place(|| {
-        if CURRENT.get() == Some(Surface::Picker) {
-            close(false);
-        }
-        sync_picker();
-    });
+    let place = PAINTED_PLACE
+        .with_borrow(Clone::clone)
+        .filter(|place| place.mark.is_connected());
+    keep_reading_place(
+        || {
+            if CURRENT.get() == Some(Surface::Picker) {
+                close(false);
+            }
+            sync_picker();
+        },
+        place,
+    );
     if focus_was_inside
         && picker.hidden()
         && let Some(ref_btn) = by_id("ref-btn")
@@ -531,6 +587,33 @@ fn export_surfaces() {
     open_picker.forget();
 }
 
+/// Notes the painted place after a scroll, a resize, or a reflow of the
+/// reading pane (a chapter put on screen, or reflowed: text size, fonts),
+/// and once now.
+fn watch_painted_place() {
+    if let Some(window) = web_sys::window() {
+        let noted = Closure::<dyn Fn()>::new(note_painted_place);
+        let passive = AddEventListenerOptions::new();
+        passive.set_passive(true);
+        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
+            "scroll",
+            noted.as_ref().unchecked_ref(),
+            &passive,
+        );
+        let _ = window.add_event_listener_with_callback("resize", noted.as_ref().unchecked_ref());
+        if js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false)
+            && let (Some(pane), Ok(observer)) = (
+                by_id("reading-pane"),
+                ResizeObserver::new(noted.as_ref().unchecked_ref()),
+            )
+        {
+            observer.observe(&pane);
+        }
+        noted.forget();
+    }
+    note_painted_place();
+}
+
 /// Takes the picker's shape, listens to the header's buttons, the menu's
 /// keys, the window's width and Escape, and puts
 /// `window.gospelGetterSurfaces` where the page reads it. Called first of
@@ -551,6 +634,7 @@ pub fn mount() {
         }
     }
     WIDE.set(wide);
+    watch_painted_place();
 
     sync_picker();
     on_click_of("ref-btn", |_| open_picker(true));

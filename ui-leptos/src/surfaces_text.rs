@@ -164,6 +164,14 @@ pub fn first_below(bar_bottom: f64, bottoms: impl IntoIterator<Item = f64>) -> O
     bottoms.into_iter().position(|bottom| bottom > bar_bottom)
 }
 
+/// How far to scroll to put back a mark that was `before` px down the
+/// screen and now is `after`: nothing if it hasn't moved (or a box gave no
+/// number).
+pub fn scroll_shift(before: f64, after: f64) -> Option<f64> {
+    let shift = after - before;
+    (shift != 0.0 && !shift.is_nan()).then_some(shift)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,5 +273,14 @@ mod tests {
         assert_eq!(first_below(56.0, [100.0]), Some(0));
         assert_eq!(first_below(56.0, [0.0, 0.0]), None);
         assert_eq!(first_below(56.0, []), None);
+    }
+
+    #[test]
+    fn the_scroll_that_keeps_it() {
+        assert_eq!(scroll_shift(30.0, 287.0), Some(257.0));
+        assert_eq!(scroll_shift(55.0, -202.0), Some(-257.0));
+        assert_eq!(scroll_shift(29.7, 29.7), None);
+        assert_eq!(scroll_shift(f64::NAN, 10.0), None);
+        assert_eq!(scroll_shift(10.0, f64::NAN), None);
     }
 }
