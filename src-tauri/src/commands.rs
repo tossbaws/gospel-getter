@@ -1540,6 +1540,17 @@ pub struct SearchResultDto {
     pub text: String,
 }
 
+/// A book typed by name alone: its first chapter, to go to.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoToDto {
+    pub book_id: i64,
+    /// Always 1.
+    pub chapter: i64,
+    /// e.g. "Psalms 1".
+    pub reference: String,
+}
+
 /// What the search box should do with the input.
 #[derive(Serialize)]
 #[serde(
@@ -1569,12 +1580,17 @@ pub enum SearchDto {
         offset: i64,
         page_size: i64,
         results: Vec<SearchResultDto>,
+        /// When what was typed is a book's name alone, that book's first
+        /// chapter, offered before the verses; left out otherwise.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        go_to: Option<GoToDto>,
     },
 }
 
 /// Interpret the search box input against one translation: a passage to
 /// go to (checking its verses exist in that translation), or a page of
-/// text-search results.
+/// text-search results; for a book's name alone, the results and its first
+/// chapter to go to (or, while the index isn't ready, just the chapter).
 pub async fn run_search(
     state: &AppState,
     query_text: &str,
@@ -1613,40 +1629,74 @@ pub async fn run_search(
             })
         }
         Interpretation::Text(terms) => {
-            if let Some(message) = state.search_index.unavailable_reason() {
-                return Ok(SearchDto::Unavailable {
-                    message: message.to_string(),
+            text_search(state, translation_id, terms, offset, None).await
+        }
+        Interpretation::TextOrBook(terms, book) => {
+            let reference =
+                passage_reference(book_name(state, book.book_id).unwrap_or("?"), 1, None);
+            // The chapter doesn't need the index; offer it alone until the
+            // index is ready, rather than nothing.
+            if state.search_index.unavailable_reason().is_some() {
+                return Ok(SearchDto::Passage {
+                    book_id: book.book_id,
+                    chapter: book.chapter,
+                    verse_start: None,
+                    verse_end: None,
+                    reference,
                 });
             }
-            let offset = offset.max(0);
-            let (total, hits) = state
-                .store
-                .search(translation_id, &terms, SEARCH_PAGE_SIZE, offset)
-                .await?;
-            let code = code_of(state, translation_id);
-            let results = hits
-                .into_iter()
-                .map(|h| SearchResultDto {
-                    reference: passage_reference(
-                        book_name(state, h.book_id).unwrap_or("?"),
-                        h.chapter,
-                        Some((h.verse, h.verse)),
-                    ),
-                    book_id: h.book_id,
-                    chapter: h.chapter,
-                    verse: h.verse,
-                    text: VerseText::new(code, &h.text).text,
-                })
-                .collect();
-            Ok(SearchDto::Text {
-                terms,
-                total,
-                offset,
-                page_size: SEARCH_PAGE_SIZE,
-                results,
-            })
+            let go_to = GoToDto {
+                book_id: book.book_id,
+                chapter: book.chapter,
+                reference,
+            };
+            text_search(state, translation_id, terms, offset, Some(go_to)).await
         }
     }
+}
+
+/// One page of the verses containing every one of `terms`, in Bible order,
+/// with `go_to` passed through.
+async fn text_search(
+    state: &AppState,
+    translation_id: i64,
+    terms: Vec<String>,
+    offset: i64,
+    go_to: Option<GoToDto>,
+) -> anyhow::Result<SearchDto> {
+    if let Some(message) = state.search_index.unavailable_reason() {
+        return Ok(SearchDto::Unavailable {
+            message: message.to_string(),
+        });
+    }
+    let offset = offset.max(0);
+    let (total, hits) = state
+        .store
+        .search(translation_id, &terms, SEARCH_PAGE_SIZE, offset)
+        .await?;
+    let code = code_of(state, translation_id);
+    let results = hits
+        .into_iter()
+        .map(|h| SearchResultDto {
+            reference: passage_reference(
+                book_name(state, h.book_id).unwrap_or("?"),
+                h.chapter,
+                Some((h.verse, h.verse)),
+            ),
+            book_id: h.book_id,
+            chapter: h.chapter,
+            verse: h.verse,
+            text: VerseText::new(code, &h.text).text,
+        })
+        .collect();
+    Ok(SearchDto::Text {
+        terms,
+        total,
+        offset,
+        page_size: SEARCH_PAGE_SIZE,
+        results,
+        go_to,
+    })
 }
 
 #[tauri::command]
@@ -3263,6 +3313,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_book_alone_offers_its_first_chapter_before_the_verses() {
+        let (_db, state) = app_state("cmd_search_book").await;
+
+        let v = search_in(&state, "Psalms", "kjv").await;
+        assert_eq!(v["kind"], "text");
+        assert_eq!(v["terms"], serde_json::json!(["psalms"]));
+        assert_eq!(
+            v["goTo"],
+            serde_json::json!({ "bookId": 19, "chapter": 1, "reference": "Psalms 1" })
+        );
+        assert!(v["total"].as_i64().unwrap() > 0, "verses still say psalms");
+        assert!(!v["results"].as_array().unwrap().is_empty());
+
+        // Every page carries it, Show more's too.
+        let v = run_search(&state, "mark", Some("web"), SEARCH_PAGE_SIZE)
+            .await
+            .unwrap();
+        let SearchDto::Text {
+            offset,
+            go_to: Some(go_to),
+            ..
+        } = v
+        else {
+            panic!("expected text results with a go-to");
+        };
+        assert_eq!(offset, SEARCH_PAGE_SIZE);
+        assert_eq!((go_to.book_id, go_to.chapter), (41, 1));
+        assert_eq!(go_to.reference, "Mark 1");
+
+        // No verse has the words; the chapter is still offered.
+        let v = search_in(&state, "1 cor", "kjv").await;
+        assert_eq!(v["kind"], "text");
+        assert_eq!(v["total"], 0);
+        assert_eq!(v["goTo"]["reference"], "1 Corinthians 1");
+        assert_eq!(v["goTo"]["bookId"], 46);
+
+        // Other words have no go-to at all; the shape is as before.
+        let v = search_in(&state, "shepherd", "kjv").await;
+        assert_eq!(v["kind"], "text");
+        assert!(v.get("goTo").is_none());
+        let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(
+            keys,
+            ["kind", "offset", "pageSize", "results", "terms", "total"]
+        );
+        // And a reference is a passage, as before.
+        assert_eq!(
+            search_in(&state, "Psalms 1", "kjv").await,
+            serde_json::json!({
+                "kind": "passage",
+                "bookId": 19,
+                "chapter": 1,
+                "verseStart": null,
+                "verseEnd": null,
+                "reference": "Psalms 1"
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn text_search_waits_for_the_index() {
         let (db, pool) = fresh_database("cmd_search_wait").await;
         let state = AppState::load(pool).await.unwrap();
@@ -3273,6 +3383,18 @@ mod tests {
         assert_eq!(
             search_in(&state, "John 3:16", "kjv").await["kind"],
             "passage"
+        );
+        // Nor does a book's first chapter: offered alone until it's ready.
+        assert_eq!(
+            search_in(&state, "Psalms", "kjv").await,
+            serde_json::json!({
+                "kind": "passage",
+                "bookId": 19,
+                "chapter": 1,
+                "verseStart": null,
+                "verseEnd": null,
+                "reference": "Psalms 1"
+            })
         );
         state.search_index.set_failed();
         let v = serde_json::to_value(run_search(&state, "love", Some("kjv"), 0).await.unwrap())

@@ -8618,7 +8618,8 @@
             // ---- Search and go-to-reference (GH-12), and the command
             // palette, in one box. As the reader types, the results come
             // in three groups: "Go to" (the reference typed, as the
-            // backend reads it), "Commands" (the app's own actions) and
+            // backend reads it, or a book's first chapter when its name
+            // is typed alone), "Commands" (the app's own actions) and
             // "Verses" (the search's matches). A leading ">" lists
             // commands only; the empty box suggests a few. Focus stays in
             // the box, a combobox: ↓ and ↑ move through every group's
@@ -8895,11 +8896,15 @@
                     searchShown = { result, verses };
                     const shown = result.offset + result.results.length;
                     const code = (lastSearch && lastSearch.translationCode || currentTranslation()).toUpperCase();
+                    // A book's name alone offers its first chapter first.
+                    const goTo = result.goTo ? `Press Enter to go to ${result.goTo.reference}` : '';
                     if (result.total === 0) {
-                        setSearchStatus(`No verses in the ${code} contain all of: ${result.terms.join(', ')}.`);
+                        const none = `No verses in the ${code} contain all of: ${result.terms.join(', ')}.`;
+                        setSearchStatus(goTo ? `${goTo}. ${none}` : none);
                     } else {
                         const count = result.total === 1 ? '1 verse' : `${result.total.toLocaleString('en')} verses`;
-                        setSearchStatus(`${count} in the ${code}${shown < result.total ? `, showing ${shown.toLocaleString('en')}` : ''}.`);
+                        const verses = `${count} in the ${code}${shown < result.total ? `, showing ${shown.toLocaleString('en')}` : ''}`;
+                        setSearchStatus(goTo ? `${goTo}, or ↓ for the ${verses}.` : `${verses}.`);
                     }
                 }
                 renderPalette();
@@ -8925,7 +8930,7 @@
                 const query = paletteQuery();
                 const commands = paletteCommandsShown(query);
                 const shown = !query.empty && !query.commandsOnly ? searchShown : null;
-                const goTo = shown && shown.result.kind === 'passage' ? shown.result : null;
+                const goTo = shown && (shown.result.kind === 'passage' ? shown.result : shown.result.goTo) || null;
                 const verses = shown ? shown.verses : [];
                 let n = 0;
                 const groups = [];
