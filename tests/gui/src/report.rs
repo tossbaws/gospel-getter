@@ -46,11 +46,12 @@ pub enum Check {
     AboutTrap = 34,
     GSidebar = 35,
     ResizePlace = 36,
+    ScrollThenResize = 37,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 30] = [
+    pub const SHIPPED: [Check; 31] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -81,6 +82,7 @@ impl Check {
         Check::AboutTrap,
         Check::GSidebar,
         Check::ResizePlace,
+        Check::ScrollThenResize,
     ];
 
     /// The check on the app as shipped started again, on the first
@@ -135,6 +137,7 @@ impl Check {
             Check::AboutTrap => "about-trap",
             Check::GSidebar => "g-and-sidebar",
             Check::ResizePlace => "resize-reading-place",
+            Check::ScrollThenResize => "scroll-then-resize",
         }
     }
 

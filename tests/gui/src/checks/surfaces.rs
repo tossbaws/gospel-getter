@@ -1,4 +1,4 @@
-//! Checks 30 to 36: the header's popovers and panels, and the picker's two
+//! Checks 30 to 37: the header's popovers and panels, and the picker's two
 //! shapes, which the Rust pieces (ui-leptos/src/surfaces.rs) took over from
 //! the head script, each through the real UI. One panel at a time: Aa,
 //! then the Library (Aa closes), then the translations (the Library
@@ -12,7 +12,9 @@
 //! window wide enough for the sidebar). The window narrowed below 1200 px
 //! and widened again changes the picker's shape (sidebar to popover and
 //! back) and keeps the reading place, also as it widens with the popover
-//! open (36). Screenshots of the ☰ menu and
+//! open (36), and also when the page was scrolled just before, with no
+//! animation frame between the scroll and the crossing (37, #121's D14).
+//! Screenshots of the ☰ menu and
 //! of the picker's popover on a narrow window, in Chi Rho here and in
 //! Vellum with check 4's.
 
@@ -20,6 +22,7 @@ use anyhow::{Result, ensure};
 use serde_json::Value;
 use thirtyfour::prelude::*;
 
+use super::picker::PLACE_JS;
 use super::{DESCRIBE_JS, Run, VISIBLE_JS};
 
 /// The screenshots checks 33 and 36 take (check 4 lists them).
@@ -32,6 +35,50 @@ pub(super) const SURFACES_SHOTS: [&str; 4] = [
 
 /// A window narrower than the sidebar's breakpoint (1200 px).
 const NARROW_WIDTH: u32 = 1000;
+
+/// Check 37's crossings: where the page is scrolled to, then the width the
+/// window crosses 1200 px to, with no animation frame between the two.
+/// Each starts from the place the one before left painted.
+const SCROLL_THEN_CROSS: [(u32, u32); 4] = [(3000, 1000), (4200, 1280), (2000, 1000), (5100, 1280)];
+
+/// Holds the page's animation frames (its `requestAnimationFrame`
+/// callbacks, the page's and the Rust pieces' alike, wait in a queue) and
+/// scrolls to `arguments[0]`, so to the page the scroll and what comes
+/// next share a frame; then the reading place, as [`PLACE_JS`] finds it.
+/// Prepended to [`PLACE_JS`].
+const HOLD_AND_SCROLL_JS: &str = "if (!window.__guiCheckFrames) {
+        const real = window.requestAnimationFrame.bind(window);
+        const frames = { real, holding: false, held: [] };
+        window.__guiCheckFrames = frames;
+        window.requestAnimationFrame = (callback) => {
+            if (!frames.holding) return real(callback);
+            frames.held.push(callback);
+            return 0;
+        };
+    }
+    window.__guiCheckFrames.holding = true;
+    window.scrollTo(0, arguments[0]);";
+
+/// Lets the page's animation frames run again: the ones held run in the
+/// next frame. Returns how many were held.
+const RELEASE_FRAMES_JS: &str = "const frames = window.__guiCheckFrames;
+    if (!frames) return 0;
+    frames.holding = false;
+    const held = frames.held.splice(0);
+    for (const callback of held) frames.real(callback);
+    return held.length;";
+
+/// Waits until two animation frames have passed since it was first asked
+/// (so the page has noted the place it painted).
+const TWO_FRAMES_JS: &str = "if (!window.__guiCheckTick) {
+        const tick = { n: 0 };
+        window.__guiCheckTick = tick;
+        const next = () => { tick.n += 1; if (tick.n < 2) window.requestAnimationFrame(next); };
+        window.requestAnimationFrame(next);
+    }
+    const n = window.__guiCheckTick.n;
+    if (n >= 2) delete window.__guiCheckTick;
+    return [n >= 2, n];";
 
 /// What the reader sees of the header's surfaces: which show, each button's
 /// `aria-expanded`, the open one as the page's reader asks it, reading
@@ -690,6 +737,90 @@ impl Run<'_> {
             closed["verse"],
             closed["top"]
         ))
+    }
+
+    /// Check 37: the page scrolled and the window crossing 1200 px with no
+    /// animation frame between them (#121's D14: the place the page noted
+    /// in the frame before the scroll is out of date by then). The reading
+    /// place found just after the scroll is kept, on every platform, within
+    /// a line as check 36's.
+    pub(super) async fn scroll_then_resize(&mut self) -> Result<String> {
+        self.nothing_open().await?;
+        if let Err(why) = self.ensure_wide().await? {
+            return self.not_wide(why);
+        }
+        let rect = self.ui.driver().get_window_rect().await?;
+        let width = rect.width as u32;
+        let checked = self.scroll_then_resize_steps().await;
+        // The frames run again, and the window goes back to its width,
+        // whatever happened.
+        let released = self.ui.js(RELEASE_FRAMES_JS, Vec::new()).await;
+        let restored = self.window_width(width).await;
+        let said = checked?;
+        released?;
+        restored?;
+        Ok(said)
+    }
+
+    async fn scroll_then_resize_steps(&mut self) -> Result<String> {
+        self.surfaces_are(
+            "the sidebar to show",
+            "seen.shape === 'sidebar' && seen.open.includes('picker')",
+        )
+        .await?;
+        if self.heading().await? != "Psalms 119" {
+            self.read_in_picker(19, 119, "Psalms 119").await?;
+        }
+        self.ui
+            .js(
+                "if (document.activeElement) document.activeElement.blur(); window.scrollTo(0, 0); return null;",
+                Vec::new(),
+            )
+            .await?;
+        let mut said = Vec::new();
+        for (y, width) in SCROLL_THEN_CROSS {
+            // The place painted where the last crossing left the page (the
+            // top of the chapter, first).
+            self.ui
+                .wait("two animation frames (the place painted)", TWO_FRAMES_JS)
+                .await?;
+            let before = self
+                .ui
+                .step(
+                    &format!("hold the page's frames and scroll to {y}"),
+                    self.ui.js(
+                        &format!("{HOLD_AND_SCROLL_JS} {PLACE_JS}"),
+                        vec![serde_json::json!(y)],
+                    ),
+                )
+                .await?;
+            ensure!(
+                !before.is_null(),
+                "nothing of the chapter under the bar at scrollY {y}"
+            );
+            let scrolled = before["scrollY"].as_f64().unwrap_or(0.0);
+            ensure!(
+                (scrolled - f64::from(y)).abs() < 1.0,
+                "the page didn't scroll to {y}: {before}"
+            );
+            self.ui.log(&format!("  place: {before}"));
+            self.window_width(width).await?;
+            let held = self.ui.js(RELEASE_FRAMES_JS, Vec::new()).await?;
+            self.ui
+                .settled(&format!("the page to settle at {width} px"))
+                .await?;
+            let after = self
+                .reading_place(&format!("the first verse under the bar, at {width} px"))
+                .await?;
+            let shift = Self::same_place(&before, &after)
+                .map_err(|e| e.context(format!("scrolled to {y}, then {width} px")))?;
+            said.push(format!(
+                "scrollY {y}, then {width} px with no frame between ({held} frame callbacks held): verse {} \
+                 at {} px, then verse {} at {} px, scrollY {} (moved {shift:.1} px)",
+                before["verse"], before["top"], after["verse"], after["top"], after["scrollY"]
+            ));
+        }
+        Ok(format!("Psalms 119: {}", said.join("; ")))
     }
 
     /// Whether the reading place held across the window crossing 1200 px:

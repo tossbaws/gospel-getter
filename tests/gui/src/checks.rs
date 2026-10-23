@@ -13,7 +13,7 @@
 //! and every Aa control (25, `display`); the header's popovers and panels:
 //! one at a time, Escape's order, a click outside, the ☰ menu by keyboard,
 //! About's Tab, G and the sidebar's button, and the window crossing 1200 px
-//! (30 to 36, `surfaces`); screenshots in Chi Rho and Vellum (4, most taken
+//! (30 to 37, `surfaces`); screenshots in Chi Rho and Vellum (4, most taken
 //! by the other checks).
 //! Then the app started again on the same data, keeping Aa's settings (26,
 //! a second session); and, in a third session on the GUI checks' test
@@ -204,7 +204,7 @@ async fn start_update_server(config: &Config) -> Result<UpdateServer> {
     Ok(server)
 }
 
-/// Checks 1 to 8, 14 to 25 and 27 to 36, on the app as shipped; what
+/// Checks 1 to 8, 14 to 25 and 27 to 37, on the app as shipped; what
 /// check 25 left, for check 26 (or why there's nothing).
 async fn shipped(
     config: &Config,
@@ -324,6 +324,7 @@ async fn shipped(
             (Check::AboutTrap, run.about_trap().await),
             (Check::GSidebar, run.g_and_sidebar().await),
             (Check::ResizePlace, run.resize_reading_place().await),
+            (Check::ScrollThenResize, run.scroll_then_resize().await),
         ] {
             if result.is_err() {
                 run.failure_screenshot(check).await;
