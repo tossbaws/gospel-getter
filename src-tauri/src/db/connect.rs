@@ -1,3 +1,6 @@
+//! Opening the database: a pool of connections that only read, and the one
+//! connection every write takes its turn on, with the settings both share.
+
 use anyhow::Context;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Sqlite, SqlitePool, Transaction};

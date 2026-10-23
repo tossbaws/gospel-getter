@@ -15,8 +15,8 @@
 //! updater, `UpdateInfo` and `DownloadEvent` (`updater.rs`) and `Block` and
 //! `Span` (`release_notes.rs`); for the Library, `BookmarkDto`,
 //! `HighlightPassageDto` and `NoteDto` (`commands.rs`, of which these read
-//! only what the lists show); for search, `SearchDto` and `SearchResultDto`
-//! (`commands.rs`).
+//! only what the lists show); for search, `SearchDto`, `SearchResultDto`
+//! and `GoToDto` (`commands.rs`).
 
 use serde::{Deserialize, Serialize};
 
@@ -408,7 +408,23 @@ pub enum SearchAnswer {
         /// How many verses a page holds (`commands::SEARCH_PAGE_SIZE`).
         page_size: i64,
         results: Vec<SearchVerse>,
+        /// A book typed by name alone: its first chapter, offered first.
+        /// Left out of the JSON otherwise.
+        #[serde(default)]
+        go_to: Option<GoTo>,
     },
+}
+
+/// A book typed by name alone: its first chapter, to go to
+/// (`commands::GoToDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoTo {
+    pub book_id: i64,
+    /// Always 1.
+    pub chapter: i64,
+    /// e.g. "Psalms 1".
+    pub reference: String,
 }
 
 /// A matching verse (`commands::SearchResultDto`).

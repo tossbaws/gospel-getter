@@ -8,17 +8,19 @@ use super::bookmarks::{add_bookmark, list_bookmarks, remove_bookmark};
 use super::highlights::{
     list_highlight_passages, list_highlights, remove_highlights, set_highlights,
 };
+use super::migrate::SCHEMA_VERSION;
 use super::notes::{
     MAX_NOTE_CHARS, MAX_NOTES, MAX_TOTAL_NOTE_CHARS, NoteLimit, Passage, add_note, delete_note,
     list_notes, notes_overlapping, update_note,
 };
 use super::search::{SEARCH_CONTENT_VERSION, search_verses};
 use super::test_support::{
-    TempDb, bundled, bundled_bsb, fill_notes, fresh_database, other_tables_snapshot, table_names,
-    verses_snapshot, write_v2_1_0_database,
+    TempDb, bundled, bundled_bsb, fill_notes, fresh_database, other_tables_snapshot,
+    prepared_database, table_names, verses_snapshot, write_v2_1_0_database,
 };
 use super::{
-    BookmarkError, HighlightColor, NoteBodyError, NoteError, ensure_search_index, prepare,
+    BookmarkError, Db, HighlightColor, NoteBodyError, NoteError, ensure_search_index, migrate,
+    prepare,
 };
 
 const KJV: i64 = 1;
@@ -119,6 +121,123 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
     assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
 
     assert_verses_match_bundled(&verses_snapshot(pool.read()).await);
+    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
+}
+
+/// The databases most tests start from are copies of templates prepared
+/// once per test binary (see `test_support`). A copy of each must be
+/// exactly what startup makes of a new database: the same schema, version
+/// and rows, row for row, rowids included.
+#[tokio::test]
+async fn the_template_databases_are_what_startup_prepares() {
+    let db = TempDb::new("template_check");
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+    let (prepared, _prepared_pool) = prepared_database("template_prepared").await;
+    assert_same_database(&pool, &prepared.path()).await;
+
+    ensure_search_index(&pool).await.unwrap();
+    let (indexed, _indexed_pool) = fresh_database("template_indexed").await;
+    assert_same_database(&pool, &indexed.path()).await;
+}
+
+/// The database `pool` opens and the one at `other` hold the same schema,
+/// `user_version` and rows: every table's, the search index's own tables
+/// included, each row with its rowid (a table without rowids by its key).
+async fn assert_same_database(pool: &Db, other: &std::path::Path) {
+    let mut conn = pool.write().pool().acquire().await.unwrap();
+    sqlx::query("ATTACH DATABASE $1 AS other")
+        .bind(other.to_str().unwrap())
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+
+    let mut schemas = Vec::new();
+    for schema in ["main", "other"] {
+        // `rootpage` is left out: it's where a table starts in the file.
+        let rows: Vec<(String, String, String, Option<String>)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "SELECT type, name, tbl_name, sql FROM {schema}.sqlite_schema ORDER BY type, name"
+            )))
+            .fetch_all(&mut *conn)
+            .await
+            .unwrap();
+        let version: i64 =
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!("PRAGMA {schema}.user_version")))
+                .fetch_one(&mut *conn)
+                .await
+                .unwrap();
+        schemas.push((rows, version));
+    }
+    assert_eq!(schemas[0], schemas[1], "schema or user_version differs");
+    assert_eq!(schemas[0].1, SCHEMA_VERSION);
+
+    let tables = schemas[0].0.iter().filter(|(kind, _, _, sql)| {
+        kind == "table"
+            && !sql
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("CREATE VIRTUAL TABLE")
+    });
+    for (_, table, _, sql) in tables {
+        let key = if sql.as_deref().unwrap_or("").contains("WITHOUT ROWID") {
+            ""
+        } else {
+            "rowid, "
+        };
+        // Names from `sqlite_schema` just above.
+        let counts: (i64, i64) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT (SELECT COUNT(*) FROM main.\"{table}\"), \
+                    (SELECT COUNT(*) FROM other.\"{table}\")"
+        )))
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap();
+        assert_eq!(counts.0, counts.1, "{table}: row count differs");
+        for (from, to) in [("main", "other"), ("other", "main")] {
+            let unmatched: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM (SELECT {key}* FROM {from}.\"{table}\" \
+                 EXCEPT SELECT {key}* FROM {to}.\"{table}\")"
+            )))
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+            assert_eq!(unmatched, 0, "{table}: rows in {from} missing from {to}");
+        }
+    }
+
+    sqlx::query("DETACH DATABASE other")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+}
+
+async fn user_version(pool: &sqlx::SqlitePool) -> i64 {
+    sqlx::query_scalar("PRAGMA user_version")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// `migrate` records the schema's version, which `SCHEMA_VERSION` names,
+/// and leaves a newer one (from a later app) as it is.
+#[tokio::test]
+async fn the_schema_version_is_recorded_and_never_lowered() {
+    let db = TempDb::new("schema_version");
+    let pool = db.connect().await;
+    assert_eq!(user_version(pool.read()).await, 0);
+    migrate(pool.write()).await.unwrap();
+    assert_eq!(SCHEMA_VERSION, 1);
+    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
+    migrate(pool.write()).await.unwrap();
+    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
+
+    sqlx::query("PRAGMA user_version = 7")
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+    migrate(pool.write()).await.unwrap();
+    assert_eq!(user_version(pool.read()).await, 7);
 }
 
 #[tokio::test]
@@ -129,6 +248,7 @@ async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_searc
     let pool = db.connect().await;
     let verses_before = verses_snapshot(pool.read()).await;
     let others_before = other_tables_snapshot(pool.read()).await;
+    assert_eq!(user_version(pool.read()).await, 0);
     assert!(
         !table_names(pool.read())
             .await
@@ -164,6 +284,7 @@ async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_searc
         .unwrap();
     others_expected.insert(at, "translations: 3|bsb|Berean Standard Bible".to_string());
     assert_eq!(other_tables_snapshot(pool.read()).await, others_expected);
+    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
     let tables = table_names(pool.read()).await;
     for table in [
         "footnotes",
@@ -497,9 +618,7 @@ async fn a_reseeded_translation_is_reindexed_on_its_own() {
 
 #[tokio::test]
 async fn bookmarks_are_validated_deduplicated_and_survive_a_restart() {
-    let db = TempDb::new("bookmarks");
-    let pool = db.connect().await;
-    prepare(pool.write()).await.unwrap();
+    let (db, pool) = prepared_database("bookmarks").await;
 
     let john = add_bookmark(pool.write(), 43, 3, 16, 18).await.unwrap();
     let genesis = add_bookmark(pool.write(), 1, 1, 1, 1).await.unwrap();
@@ -584,9 +703,7 @@ async fn bookmarks_are_validated_deduplicated_and_survive_a_restart() {
 
 #[tokio::test]
 async fn bookmarks_follow_each_translations_own_verse_numbering() {
-    let db = TempDb::new("numbering");
-    let pool = db.connect().await;
-    prepare(pool.write()).await.unwrap();
+    let (_db, pool) = prepared_database("numbering").await;
 
     // Matthew 2:23 is numbered in the WEB (23 verses) but not the KJV (22),
     // and 3 John 1:15 the other way round. Both can be bookmarked.
@@ -713,9 +830,7 @@ async fn highlight_colors(pool: &sqlx::SqlitePool) -> Vec<(i64, i64, i64, Highli
 #[tokio::test]
 async fn highlights_are_set_recolored_and_removed_over_ranges() {
     use HighlightColor::{Blue, Green, Pink, Yellow};
-    let db = TempDb::new("highlights");
-    let pool = db.connect().await;
-    prepare(pool.write()).await.unwrap();
+    let (db, pool) = prepared_database("highlights").await;
 
     // A range: every verse in it gets the color.
     set_highlights(pool.write(), 43, 3, 16, 18, Yellow)
@@ -862,9 +977,7 @@ async fn the_highlights_table_is_added_to_an_existing_database() {
 
 #[tokio::test]
 async fn highlighted_passages_preview_each_translations_own_verses() {
-    let db = TempDb::new("highlight_passages");
-    let pool = db.connect().await;
-    prepare(pool.write()).await.unwrap();
+    let (_db, pool) = prepared_database("highlight_passages").await;
     assert_eq!(list_highlight_passages(pool.read(), KJV).await.unwrap(), []);
 
     // John 3:16-18 green with 3:17 recolored pink; Matthew 2:22-23 (2:23

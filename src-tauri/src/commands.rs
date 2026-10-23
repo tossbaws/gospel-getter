@@ -1,3 +1,9 @@
+//! The commands the page calls with `invoke`, and the state they share
+//! (`AppState`). Each `#[tauri::command]` is a thin wrapper over a function
+//! taking `&AppState` (`get_reading` over `reading`), which the frontend
+//! tests' bridge (`examples/frontend_bridge.rs`) calls directly. A failure
+//! reaches the page as a sentence for the reader; its cause is logged.
+
 use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -592,8 +598,8 @@ pub fn get_chapters(
 }
 
 /// The reading pane for one chapter — used by chapter clicks, arrow-key
-/// navigation, and switching translations. Also remembers this as the
-/// reader's current position, so reopening the app returns here.
+/// navigation, and switching translations. It saves nothing: the page
+/// saves the chapter it puts on screen with `save_reading_position`.
 #[tauri::command]
 pub async fn get_reading(
     state: tauri::State<'_, AppState>,
@@ -601,33 +607,78 @@ pub async fn get_reading(
     chapter: i64,
     translation_code: Option<String>,
 ) -> Result<Option<ReadingPaneDto>, String> {
-    Ok(reading(&state, book_id, chapter, translation_code.as_deref()).await)
+    reading(&state, book_id, chapter, translation_code.as_deref()).await
 }
 
-/// The logic behind `get_reading`.
+/// The logic behind `get_reading`. `None` when there's no such chapter (a
+/// book the Bible doesn't have, or a chapter past its book's end); an
+/// error, as a sentence for the reader, when the chapter is there but
+/// couldn't be read.
 pub async fn reading(
     state: &AppState,
     book_id: i64,
     chapter: i64,
     translation_code: Option<&str>,
-) -> Option<ReadingPaneDto> {
-    let translation_id = resolve_translation(state, translation_code);
-    match build_reading_pane_dto(state, translation_id, book_id, chapter).await {
-        Ok(dto) => {
-            if let Err(e) = state
-                .store
-                .save_reading_position(translation_id, book_id, chapter)
-                .await
-            {
-                tracing::warn!("Failed to save reading position: {e}");
-            }
-            Some(dto)
-        }
-        Err(e) => {
-            tracing::error!("Failed to build reading pane for {book_id}:{chapter}: {e}");
-            None
-        }
+) -> Result<Option<ReadingPaneDto>, String> {
+    let Some(book) = state.books.iter().find(|b| b.id == book_id) else {
+        return Ok(None);
+    };
+    if !(1..=book.chapter_count).contains(&chapter) {
+        return Ok(None);
     }
+    let translation_id = resolve_translation(state, translation_code);
+    let dto = build_reading_pane_dto(state, translation_id, book_id, chapter)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to build reading pane for {book_id}:{chapter}: {e:#}");
+            format!("{} {chapter} couldn't be loaded.", book.name)
+        })?;
+    Ok(Some(dto))
+}
+
+/// Remember a chapter as the reader's position, so reopening the app
+/// returns there. The page calls this once it has put the chapter on
+/// screen (`get_reading` saves nothing, so an answer the page asked for
+/// and then dropped never moves the position), and sends one at a time,
+/// in the order it showed them, so the chapter shown last is the one
+/// kept. With two copies of the app open, the last save from either is.
+#[tauri::command]
+pub async fn save_reading_position(
+    state: tauri::State<'_, AppState>,
+    book_id: i64,
+    chapter: i64,
+    translation_code: String,
+) -> Result<(), String> {
+    remember_position(&state, book_id, chapter, &translation_code).await
+}
+
+/// The logic behind `save_reading_position`: an error, as a sentence for
+/// the reader, for a translation, book or chapter that isn't there, or a
+/// position that couldn't be saved.
+pub async fn remember_position(
+    state: &AppState,
+    book_id: i64,
+    chapter: i64,
+    translation_code: &str,
+) -> Result<(), String> {
+    let translation = state
+        .translations
+        .iter()
+        .find(|t| t.code == translation_code)
+        .ok_or_else(|| format!("There's no translation \"{translation_code}\"."))?;
+    let book = state
+        .books
+        .iter()
+        .find(|b| b.id == book_id)
+        .ok_or_else(|| format!("There's no book {book_id}."))?;
+    if !(1..=book.chapter_count).contains(&chapter) {
+        return Err(format!("{} has no chapter {chapter}.", book.name));
+    }
+    state
+        .store
+        .save_reading_position(translation.id, book_id, chapter)
+        .await
+        .map_err(failed("The reading position couldn't be saved."))
 }
 
 /// A passage to read in place: a cross-reference previewed in the
@@ -979,6 +1030,16 @@ pub async fn bookmarks_in(
         .collect())
 }
 
+/// For `map_err` on a command's failure: logs the error with its causes
+/// (give it its context first, with `anyhow::Context`) and answers with
+/// `sentence`, which is what the reader is shown.
+fn failed(sentence: &'static str) -> impl FnOnce(anyhow::Error) -> String {
+    move |e| {
+        tracing::error!("{e:#}");
+        sentence.to_owned()
+    }
+}
+
 /// A passage that couldn't be bookmarked or highlighted, in words for the
 /// reader. `action` is "bookmarked" or "highlighted"; `failed` is the
 /// message for a database failure.
@@ -1039,10 +1100,8 @@ pub async fn list_bookmarks(
 ) -> Result<Vec<BookmarkDto>, String> {
     bookmarks_in(&state, translation_code.as_deref())
         .await
-        .map_err(|e| {
-            tracing::error!("Failed to list bookmarks: {e:#}");
-            "Bookmarks couldn't be loaded.".to_string()
-        })
+        .context("Failed to list bookmarks")
+        .map_err(failed("Bookmarks couldn't be loaded."))
 }
 
 #[tauri::command]
@@ -1059,10 +1118,12 @@ pub async fn add_bookmark(
 /// Remove a bookmark; `false` if it was already gone.
 #[tauri::command]
 pub async fn remove_bookmark(state: tauri::State<'_, AppState>, id: i64) -> Result<bool, String> {
-    state.store.remove_bookmark(id).await.map_err(|e| {
-        tracing::error!("Failed to remove bookmark {id}: {e:#}");
-        "The bookmark couldn't be removed.".to_string()
-    })
+    state
+        .store
+        .remove_bookmark(id)
+        .await
+        .with_context(|| format!("Failed to remove bookmark {id}"))
+        .map_err(failed("The bookmark couldn't be removed."))
 }
 
 // ---- Highlights
@@ -1190,20 +1251,18 @@ pub async fn unhighlight_passage(
         .store
         .remove_highlights(book_id, chapter, verse_start, verse_end)
         .await
-        .map_err(|e| {
-            tracing::error!("Failed to remove highlights: {e:#}");
-            "The highlight couldn't be removed.".to_string()
-        })
+        .context("Failed to remove highlights")
+        .map_err(failed("The highlight couldn't be removed."))
 }
 
 #[tauri::command]
 pub async fn list_highlights(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<HighlightDto>, String> {
-    highlights_list(&state).await.map_err(|e| {
-        tracing::error!("Failed to list highlights: {e:#}");
-        "Highlights couldn't be loaded.".to_string()
-    })
+    highlights_list(&state)
+        .await
+        .context("Failed to list highlights")
+        .map_err(failed("Highlights couldn't be loaded."))
 }
 
 #[tauri::command]
@@ -1213,10 +1272,8 @@ pub async fn list_highlight_passages(
 ) -> Result<Vec<HighlightPassageDto>, String> {
     highlight_passages_in(&state, translation_code.as_deref())
         .await
-        .map_err(|e| {
-            tracing::error!("Failed to list highlighted passages: {e:#}");
-            "Highlights couldn't be loaded.".to_string()
-        })
+        .context("Failed to list highlighted passages")
+        .map_err(failed("Highlights couldn't be loaded."))
 }
 
 #[tauri::command]
@@ -1312,10 +1369,12 @@ pub async fn notes_overlapping(state: &AppState, passage: Passage) -> Result<Vec
             passage.verse_start, passage.verse_end
         ));
     }
-    let notes = state.store.notes_overlapping(&passage).await.map_err(|e| {
-        tracing::error!("Failed to list notes: {e:#}");
-        "Notes couldn't be loaded.".to_string()
-    })?;
+    let notes = state
+        .store
+        .notes_overlapping(&passage)
+        .await
+        .context("Failed to list notes")
+        .map_err(failed("Notes couldn't be loaded."))?;
     Ok(notes.into_iter().map(|n| note_dto(state, n)).collect())
 }
 
@@ -1358,10 +1417,8 @@ pub async fn note_delete(state: &AppState, id: i64) -> Result<Option<NoteDto>, S
         .delete_note(id)
         .await
         .map(|n| n.map(|n| note_dto(state, n)))
-        .map_err(|e| {
-            tracing::error!("Failed to delete note {id}: {e:#}");
-            "The note couldn't be deleted.".to_string()
-        })
+        .with_context(|| format!("Failed to delete note {id}"))
+        .map_err(failed("The note couldn't be deleted."))
 }
 
 /// Bring back a deleted note: the same passage, text and dates (a new id).
@@ -1408,10 +1465,10 @@ pub async fn list_notes(
 
 #[tauri::command]
 pub async fn list_all_notes(state: tauri::State<'_, AppState>) -> Result<Vec<NoteDto>, String> {
-    notes_list(&state).await.map_err(|e| {
-        tracing::error!("Failed to list notes: {e:#}");
-        "Notes couldn't be loaded.".to_string()
-    })
+    notes_list(&state)
+        .await
+        .context("Failed to list notes")
+        .map_err(failed("Notes couldn't be loaded."))
 }
 
 #[tauri::command]
@@ -1490,6 +1547,17 @@ pub struct SearchResultDto {
     pub marks: Vec<(usize, usize)>,
 }
 
+/// A book typed by name alone: its first chapter, to go to.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoToDto {
+    pub book_id: i64,
+    /// Always 1.
+    pub chapter: i64,
+    /// e.g. "Psalms 1".
+    pub reference: String,
+}
+
 /// What the search box should do with the input.
 #[derive(Serialize)]
 #[serde(
@@ -1519,12 +1587,17 @@ pub enum SearchDto {
         offset: i64,
         page_size: i64,
         results: Vec<SearchResultDto>,
+        /// When what was typed is a book's name alone, that book's first
+        /// chapter, offered before the verses; left out otherwise.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        go_to: Option<GoToDto>,
     },
 }
 
 /// Interpret the search box input against one translation: a passage to
 /// go to (checking its verses exist in that translation), or a page of
-/// text-search results.
+/// text-search results; for a book's name alone, the results and its first
+/// chapter to go to (or, while the index isn't ready, just the chapter).
 pub async fn run_search(
     state: &AppState,
     query_text: &str,
@@ -1563,44 +1636,78 @@ pub async fn run_search(
             })
         }
         Interpretation::Text(terms) => {
-            if let Some(message) = state.search_index.unavailable_reason() {
-                return Ok(SearchDto::Unavailable {
-                    message: message.to_string(),
+            text_search(state, translation_id, terms, offset, None).await
+        }
+        Interpretation::TextOrBook(terms, book) => {
+            let reference =
+                passage_reference(book_name(state, book.book_id).unwrap_or("?"), 1, None);
+            // The chapter doesn't need the index; offer it alone until the
+            // index is ready, rather than nothing.
+            if state.search_index.unavailable_reason().is_some() {
+                return Ok(SearchDto::Passage {
+                    book_id: book.book_id,
+                    chapter: book.chapter,
+                    verse_start: None,
+                    verse_end: None,
+                    reference,
                 });
             }
-            let offset = offset.max(0);
-            let (total, hits) = state
-                .store
-                .search(translation_id, &terms, SEARCH_PAGE_SIZE, offset)
-                .await?;
-            let code = code_of(state, translation_id);
-            let results = hits
-                .into_iter()
-                .map(|h| {
-                    let text = VerseText::new(code, &h.text).text;
-                    SearchResultDto {
-                        reference: passage_reference(
-                            book_name(state, h.book_id).unwrap_or("?"),
-                            h.chapter,
-                            Some((h.verse, h.verse)),
-                        ),
-                        book_id: h.book_id,
-                        chapter: h.chapter,
-                        verse: h.verse,
-                        marks: query::term_marks(&text, &terms),
-                        text,
-                    }
-                })
-                .collect();
-            Ok(SearchDto::Text {
-                terms,
-                total,
-                offset,
-                page_size: SEARCH_PAGE_SIZE,
-                results,
-            })
+            let go_to = GoToDto {
+                book_id: book.book_id,
+                chapter: book.chapter,
+                reference,
+            };
+            text_search(state, translation_id, terms, offset, Some(go_to)).await
         }
     }
+}
+
+/// One page of the verses containing every one of `terms`, in Bible order,
+/// with `go_to` passed through.
+async fn text_search(
+    state: &AppState,
+    translation_id: i64,
+    terms: Vec<String>,
+    offset: i64,
+    go_to: Option<GoToDto>,
+) -> anyhow::Result<SearchDto> {
+    if let Some(message) = state.search_index.unavailable_reason() {
+        return Ok(SearchDto::Unavailable {
+            message: message.to_string(),
+        });
+    }
+    let offset = offset.max(0);
+    let (total, hits) = state
+        .store
+        .search(translation_id, &terms, SEARCH_PAGE_SIZE, offset)
+        .await?;
+    let code = code_of(state, translation_id);
+    let results = hits
+        .into_iter()
+        .map(|h| {
+            let text = VerseText::new(code, &h.text).text;
+            SearchResultDto {
+                reference: passage_reference(
+                    book_name(state, h.book_id).unwrap_or("?"),
+                    h.chapter,
+                    Some((h.verse, h.verse)),
+                ),
+                book_id: h.book_id,
+                chapter: h.chapter,
+                verse: h.verse,
+                marks: query::term_marks(&text, &terms),
+                text,
+            }
+        })
+        .collect();
+    Ok(SearchDto::Text {
+        terms,
+        total,
+        offset,
+        page_size: SEARCH_PAGE_SIZE,
+        results,
+        go_to,
+    })
 }
 
 #[tauri::command]
@@ -1617,10 +1724,8 @@ pub async fn search(
         offset.unwrap_or(0),
     )
     .await
-    .map_err(|e| {
-        tracing::error!("Search for {query:?} failed: {e:#}");
-        "Search failed.".to_string()
-    })
+    .with_context(|| format!("Search for {query:?} failed"))
+    .map_err(failed("Search failed."))
 }
 
 // ---- Compare translations (GH-13)
@@ -1706,10 +1811,8 @@ pub async fn get_compare(
 ) -> Result<Option<CompareDto>, String> {
     compare_chapter(&state, book_id, chapter, &translation_codes)
         .await
-        .map_err(|e| {
-            tracing::error!("Failed to load {book_id}:{chapter} for comparison: {e:#}");
-            "The comparison couldn't be loaded.".to_string()
-        })
+        .with_context(|| format!("Failed to load {book_id}:{chapter} for comparison"))
+        .map_err(failed("The comparison couldn't be loaded."))
 }
 
 // ---- Export and import the reader's own data
@@ -2295,10 +2398,10 @@ pub async fn export_reader_data<R: tauri::Runtime>(
 ) -> Result<ExportOutcome, String> {
     // Gathered before the dialog opens, so a failure is reported without
     // asking for a file name first.
-    let data = build_reader_data(&state, preferences).await.map_err(|e| {
-        tracing::error!("Failed to gather data to export: {e:#}");
-        "Your data couldn't be read for export.".to_string()
-    })?;
+    let data = build_reader_data(&state, preferences)
+        .await
+        .context("Failed to gather data to export")
+        .map_err(failed("Your data couldn't be read for export."))?;
     let suggested = format!(
         "gospel-getter-{}{}",
         data.exported_at.get(..10).unwrap_or("export"),
@@ -2328,10 +2431,12 @@ pub async fn choose_import_file<R: tauri::Runtime>(
     let Some(path) = run_dialog(move || dialog.blocking_pick_file()).await? else {
         return Ok(ImportChoice::Cancelled);
     };
-    prepare_import(&state, &path).await.map_err(|e| {
-        tracing::error!("Failed to check import file: {e:#}");
-        "The file couldn't be checked against your Bible data.".to_string()
-    })
+    prepare_import(&state, &path)
+        .await
+        .context("Failed to check import file")
+        .map_err(failed(
+            "The file couldn't be checked against your Bible data.",
+        ))
 }
 
 /// Apply the previewed import (see `apply_pending_import`).
@@ -2383,10 +2488,12 @@ const NOTES_UNREADABLE: &str = "Your notes couldn't be read for export.";
 
 /// Every note, for an export (or its count).
 async fn notes_to_export(state: &AppState) -> Result<Vec<Note>, String> {
-    state.store.notes().await.map_err(|e| {
-        tracing::error!("Failed to read notes to export: {e:#}");
-        NOTES_UNREADABLE.to_string()
-    })
+    state
+        .store
+        .notes()
+        .await
+        .context("Failed to read notes to export")
+        .map_err(failed(NOTES_UNREADABLE))
 }
 
 /// What the export dialog offers, worked out when it opens.
@@ -2470,10 +2577,8 @@ pub async fn build_notes_export<Tz: chrono::TimeZone>(
             .store
             .chapter_verses(translation.id, note.book_id, note.chapter)
             .await
-            .map_err(|e| {
-                tracing::error!("Failed to read verses to export: {e:#}");
-                NOTES_UNREADABLE.to_string()
-            })?;
+            .context("Failed to read verses to export")
+            .map_err(failed(NOTES_UNREADABLE))?;
         verses.insert(key, chapter);
     }
     export.verses = &verses;
@@ -2585,6 +2690,7 @@ mod tests {
         for row in &rows {
             let dto = reading(&state, row.book_id, row.chapter, Some("kjv"))
                 .await
+                .unwrap()
                 .unwrap();
             assert_eq!(
                 (dto.current_book_id, dto.current_chapter),
@@ -2596,6 +2702,79 @@ mod tests {
                 row.title
             );
         }
+    }
+
+    /// A failure answers with its sentence alone; what's logged is its
+    /// context and causes, as each command logged them by hand before.
+    #[test]
+    fn a_failure_is_its_sentence_and_logs_its_context() {
+        let e = anyhow::anyhow!("database is locked").context("Failed to list bookmarks");
+        assert_eq!(
+            format!("{e:#}"),
+            "Failed to list bookmarks: database is locked"
+        );
+        assert_eq!(
+            failed("Bookmarks couldn't be loaded.")(e),
+            "Bookmarks couldn't be loaded."
+        );
+    }
+
+    /// A chapter the Bible doesn't have is no chapter (the page stays where
+    /// it is and says nothing), while one the database can't read is a
+    /// sentence the reader is shown, naming it.
+    #[tokio::test]
+    async fn a_missing_chapter_is_none_and_a_failed_one_is_an_error() {
+        let (_db, state) = app_state("cmd_reading_outcomes").await;
+        for (book, chapter) in [(0, 1), (67, 1), (43, 0), (43, 22)] {
+            let shown = reading(&state, book, chapter, Some("kjv")).await;
+            assert!(matches!(shown, Ok(None)), "{book}:{chapter}");
+        }
+        state.store.close().await;
+        let failed = reading(&state, 43, 4, Some("kjv")).await;
+        assert_eq!(failed.err().as_deref(), Some("John 4 couldn't be loaded."));
+    }
+
+    /// Reading a chapter never moves the saved position (an answer the
+    /// page drops mustn't); saving one does, for a translation, book and
+    /// chapter that are there, and nothing else.
+    #[tokio::test]
+    async fn only_saving_a_position_moves_it() {
+        let (_db, state) = app_state("cmd_reading_position").await;
+        reading(&state, 43, 3, Some("web")).await.unwrap().unwrap();
+        assert_eq!(state.store.reading_position().await.unwrap(), None);
+
+        remember_position(&state, 43, 3, "web").await.unwrap();
+        let web = state
+            .translations
+            .iter()
+            .find(|t| t.code == "web")
+            .unwrap()
+            .id;
+        assert_eq!(
+            state.store.reading_position().await.unwrap(),
+            Some((web, 43, 3))
+        );
+        reading(&state, 1, 1, Some("kjv")).await.unwrap().unwrap();
+        for ((book, chapter, code), refused) in [
+            ((43, 3, "niv"), "There's no translation \"niv\"."),
+            ((67, 1, "kjv"), "There's no book 67."),
+            ((43, 0, "kjv"), "John has no chapter 0."),
+            ((43, 22, "kjv"), "John has no chapter 22."),
+        ] {
+            assert_eq!(
+                remember_position(&state, book, chapter, code).await,
+                Err(refused.to_string())
+            );
+        }
+        assert_eq!(
+            state.store.reading_position().await.unwrap(),
+            Some((web, 43, 3))
+        );
+        state.store.close().await;
+        assert_eq!(
+            remember_position(&state, 45, 8, "kjv").await,
+            Err("The reading position couldn't be saved.".to_string())
+        );
     }
 
     /// A previewed range is every verse in it, in order, with its
@@ -2851,7 +3030,10 @@ mod tests {
             ("kjv", 19, 119, 105, 106, "Psalms 119:105\u{2013}106 (KJV)"),
             ("bsb", 40, 17, 20, 22, "Matthew 17:20\u{2013}22 (BSB)"),
         ] {
-            let shown = reading(&state, book, chapter, Some(code)).await.unwrap();
+            let shown = reading(&state, book, chapter, Some(code))
+                .await
+                .unwrap()
+                .unwrap();
             let text = shown
                 .current_verses
                 .iter()
@@ -2944,7 +3126,7 @@ mod tests {
 
         // A whole KJV chapter: every verse, as the reader shows it.
         let kjv = copy_text(&state, "kjv", 19, 23, None, None).await.unwrap();
-        let shown = reading(&state, 19, 23, Some("kjv")).await.unwrap();
+        let shown = reading(&state, 19, 23, Some("kjv")).await.unwrap().unwrap();
         let lines: Vec<String> = shown
             .current_verses
             .iter()
@@ -2993,13 +3175,13 @@ mod tests {
                 book_name: name.to_owned(),
             })
         };
-        let psalm = reading(&state, 19, 23, Some("kjv")).await.unwrap();
+        let psalm = reading(&state, 19, 23, Some("kjv")).await.unwrap().unwrap();
         assert_eq!(psalm.prev_book, start(18, "Job"));
         assert_eq!(psalm.next_book, start(20, "Proverbs"));
-        let genesis = reading(&state, 1, 50, Some("kjv")).await.unwrap();
+        let genesis = reading(&state, 1, 50, Some("kjv")).await.unwrap().unwrap();
         assert_eq!(genesis.prev_book, None);
         assert_eq!(genesis.next_book, start(2, "Exodus"));
-        let revelation = reading(&state, 66, 1, Some("web")).await.unwrap();
+        let revelation = reading(&state, 66, 1, Some("web")).await.unwrap().unwrap();
         assert_eq!(revelation.prev_book, start(65, "Jude"));
         assert_eq!(revelation.next_book, None);
         let json = serde_json::to_value(&psalm).unwrap();
@@ -3013,7 +3195,7 @@ mod tests {
     #[tokio::test]
     async fn the_bible_s_first_and_last_chapters_have_an_edge_card() {
         let (_db, state) = app_state("cmd_bible_edges").await;
-        let genesis_1 = reading(&state, 1, 1, Some("kjv")).await.unwrap();
+        let genesis_1 = reading(&state, 1, 1, Some("kjv")).await.unwrap().unwrap();
         assert!(genesis_1.prev.is_none());
         assert_eq!(
             genesis_1.prev_edge,
@@ -3025,7 +3207,7 @@ mod tests {
         assert_eq!(genesis_1.next_edge, None);
         assert_eq!(genesis_1.next.as_ref().map(|n| n.chapter), Some(2));
 
-        let revelation_22 = reading(&state, 66, 22, Some("web")).await.unwrap();
+        let revelation_22 = reading(&state, 66, 22, Some("web")).await.unwrap().unwrap();
         assert!(revelation_22.next.is_none());
         assert_eq!(
             revelation_22.next_edge,
@@ -3037,7 +3219,10 @@ mod tests {
         assert_eq!(revelation_22.prev_edge, None);
 
         for (book, chapter) in [(1, 50), (2, 1), (39, 4), (40, 1), (66, 21), (19, 119)] {
-            let dto = reading(&state, book, chapter, Some("kjv")).await.unwrap();
+            let dto = reading(&state, book, chapter, Some("kjv"))
+                .await
+                .unwrap()
+                .unwrap();
             assert!(dto.prev.is_some() && dto.next.is_some(), "{book}:{chapter}");
             assert_eq!(
                 (dto.prev_edge, dto.next_edge),
@@ -3144,6 +3329,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_book_alone_offers_its_first_chapter_before_the_verses() {
+        let (_db, state) = app_state("cmd_search_book").await;
+
+        let v = search_in(&state, "Psalms", "kjv").await;
+        assert_eq!(v["kind"], "text");
+        assert_eq!(v["terms"], serde_json::json!(["psalms"]));
+        assert_eq!(
+            v["goTo"],
+            serde_json::json!({ "bookId": 19, "chapter": 1, "reference": "Psalms 1" })
+        );
+        assert!(v["total"].as_i64().unwrap() > 0, "verses still say psalms");
+        assert!(!v["results"].as_array().unwrap().is_empty());
+
+        // Every page carries it, Show more's too.
+        let v = run_search(&state, "mark", Some("web"), SEARCH_PAGE_SIZE)
+            .await
+            .unwrap();
+        let SearchDto::Text {
+            offset,
+            go_to: Some(go_to),
+            ..
+        } = v
+        else {
+            panic!("expected text results with a go-to");
+        };
+        assert_eq!(offset, SEARCH_PAGE_SIZE);
+        assert_eq!((go_to.book_id, go_to.chapter), (41, 1));
+        assert_eq!(go_to.reference, "Mark 1");
+
+        // No verse has the words; the chapter is still offered.
+        let v = search_in(&state, "1 cor", "kjv").await;
+        assert_eq!(v["kind"], "text");
+        assert_eq!(v["total"], 0);
+        assert_eq!(v["goTo"]["reference"], "1 Corinthians 1");
+        assert_eq!(v["goTo"]["bookId"], 46);
+
+        // Other words have no go-to at all; the shape is as before.
+        let v = search_in(&state, "shepherd", "kjv").await;
+        assert_eq!(v["kind"], "text");
+        assert!(v.get("goTo").is_none());
+        let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(
+            keys,
+            ["kind", "offset", "pageSize", "results", "terms", "total"]
+        );
+        // And a reference is a passage, as before.
+        assert_eq!(
+            search_in(&state, "Psalms 1", "kjv").await,
+            serde_json::json!({
+                "kind": "passage",
+                "bookId": 19,
+                "chapter": 1,
+                "verseStart": null,
+                "verseEnd": null,
+                "reference": "Psalms 1"
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn text_search_waits_for_the_index() {
         let (db, pool) = fresh_database("cmd_search_wait").await;
         let state = AppState::load(pool).await.unwrap();
@@ -3154,6 +3399,18 @@ mod tests {
         assert_eq!(
             search_in(&state, "John 3:16", "kjv").await["kind"],
             "passage"
+        );
+        // Nor does a book's first chapter: offered alone until it's ready.
+        assert_eq!(
+            search_in(&state, "Psalms", "kjv").await,
+            serde_json::json!({
+                "kind": "passage",
+                "bookId": 19,
+                "chapter": 1,
+                "verseStart": null,
+                "verseEnd": null,
+                "reference": "Psalms 1"
+            })
         );
         state.search_index.set_failed();
         let v = serde_json::to_value(run_search(&state, "love", Some("kjv"), 0).await.unwrap())
@@ -3704,7 +3961,10 @@ mod tests {
 
         // The chapter being read (which the note panel quotes from too):
         // plain text, parts and footnotes.
-        let dto = reading(&state, 19, 119, Some("kjv")).await.unwrap();
+        let dto = reading(&state, 19, 119, Some("kjv"))
+            .await
+            .unwrap()
+            .unwrap();
         let v105 = serde_json::to_value(&dto.current_verses[104]).unwrap();
         assert_eq!(
             v105,
@@ -3727,7 +3987,7 @@ mod tests {
             })
         );
         // A note without a colon has no lemma: Psalms 73:22's second.
-        let psalm_73 = reading(&state, 19, 73, Some("kjv")).await.unwrap();
+        let psalm_73 = reading(&state, 19, 73, Some("kjv")).await.unwrap().unwrap();
         assert_eq!(
             serde_json::to_value(&psalm_73.current_verses[21].shown.footnotes).unwrap(),
             serde_json::json!([
@@ -3793,7 +4053,7 @@ mod tests {
         );
 
         // A malformed verse is shown exactly as stored (Hebrews 10:34).
-        let hebrews = reading(&state, 58, 10, Some("kjv")).await.unwrap();
+        let hebrews = reading(&state, 58, 10, Some("kjv")).await.unwrap().unwrap();
         let stored = &kjv[57].chapters[9][33];
         assert_eq!(
             hebrews.current_verses[33].shown,
@@ -3803,7 +4063,10 @@ mod tests {
         // The WEB, everywhere, exactly as stored: one text part, no
         // footnotes.
         let web = bundled("web");
-        let dto = reading(&state, 19, 119, Some("web")).await.unwrap();
+        let dto = reading(&state, 19, 119, Some("web"))
+            .await
+            .unwrap()
+            .unwrap();
         for (v, stored) in dto.current_verses.iter().zip(&web[18].chapters[118]) {
             assert_eq!(v.shown, VerseText::as_stored(stored));
         }
@@ -3874,7 +4137,7 @@ mod tests {
 
         // Genesis 1: each verse is its stored text, and verse 3's note
         // stands after “light,”, lettered, its words as Berean's.
-        let dto = reading(&state, 1, 1, Some("bsb")).await.unwrap();
+        let dto = reading(&state, 1, 1, Some("bsb")).await.unwrap().unwrap();
         for v in &dto.current_verses {
             assert_eq!(v.shown.text, text(1, 1, v.number as usize));
         }
@@ -3910,7 +4173,7 @@ mod tests {
         );
 
         // Matthew 17 in the BSB: no verse 21, and verse 20's note says so.
-        let dto = reading(&state, 40, 17, Some("bsb")).await.unwrap();
+        let dto = reading(&state, 40, 17, Some("bsb")).await.unwrap().unwrap();
         let numbers: Vec<i64> = dto.current_verses.iter().map(|v| v.number).collect();
         assert_eq!(numbers, (1..=27).filter(|&n| n != 21).collect::<Vec<_>>());
         assert!(

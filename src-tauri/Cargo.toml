@@ -1,10 +1,13 @@
 [package]
 name = "gospel_getter"
-version = "2.17.1"
+version = "2.18.0"
 description = "Read the Bible, book by book, chapter by chapter"
 license = "MIT"
 repository = "https://github.com/tossbaws/gospel-getter"
 edition = "2024"
+# The oldest Rust that builds it: sqlx 0.9 needs 1.94 (and Tauri 2.12
+# 1.90), more than the code's own let chains (1.88).
+rust-version = "1.94"
 
 # The app's code lives in the library, so the frontend test bridge
 # (`examples/frontend_bridge.rs`) can drive the real commands; `main.rs`
@@ -29,7 +32,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 # `time`: the search index build's pauses between tries (`retry.rs`).
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
-sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "macros"] }
+# Without sqlx's defaults: the queries are plain strings (no `query!`, so
+# no `macros`), there are no sqlx migrations, `Any` pools or JSON columns.
+# `derive` is for `FromRow`.
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"

@@ -117,14 +117,20 @@ pub enum Interpretation {
     InvalidReference(String),
     /// Words to search the text for, lowercased and de-duplicated.
     Text(Vec<String>),
+    /// A book's name or abbreviation alone (`Psalms`, `1 cor`): words to
+    /// search the text for, as `Text`, and that book's first chapter to go
+    /// to as well, offered first.
+    TextOrBook(Vec<String>, PassageRef),
 }
 
 /// Decide whether `input` is a reference or a text search. A reference is
 /// a book name or abbreviation followed by a chapter, optionally with a
 /// verse or verse range (`:`, or `.`, between chapter and verse; `-`, `–`
-/// or `—` for a range). A book name with no number, or words that aren't a
-/// book, are a text search, so `mark` or `numbers` can still be searched
-/// for.
+/// or `—` for a range). Words that aren't a book are a text search. A book
+/// name or abbreviation with no number is both: a text search, so `mark` or
+/// `numbers` can still be searched for, and the book's first chapter to go
+/// to. Only the whole input counts as a book, matched exactly as a
+/// reference's book is; there's no guessing from a prefix.
 pub fn interpret(input: &str, books: &[Book]) -> Interpretation {
     let input = input.trim();
     if input.is_empty() {
@@ -154,9 +160,18 @@ pub fn interpret(input: &str, books: &[Book]) -> Interpretation {
 
     let terms = search_terms(input);
     if terms.is_empty() {
-        Interpretation::Empty
-    } else {
-        Interpretation::Text(terms)
+        return Interpretation::Empty;
+    }
+    match find_book(input, books) {
+        Some(book) => Interpretation::TextOrBook(
+            terms,
+            PassageRef {
+                book_id: book.id,
+                chapter: 1,
+                verses: None,
+            },
+        ),
+        None => Interpretation::Text(terms),
     }
 }
 
@@ -528,16 +543,20 @@ mod tests {
     }
 
     #[test]
-    fn words_and_bare_book_names_are_text_searches() {
+    fn words_are_text_searches() {
         let books = books();
         let cases: &[(&str, &[&str])] = &[
             ("faith hope love", &["faith", "hope", "love"]),
             ("Faith, HOPE & love!", &["faith", "hope", "love"]),
             ("love love", &["love"]),
-            ("mark", &["mark"]),
-            ("numbers", &["numbers"]),
-            ("John", &["john"]),
             ("love 1", &["love", "1"]),
+            // Close to a book, but not one a reference accepts.
+            ("jo", &["jo"]),
+            ("psal", &["psal"]),
+            ("johns", &["johns"]),
+            ("mark john", &["mark", "john"]),
+            ("4 john", &["4", "john"]),
+            ("the song", &["the", "song"]),
             ("brother\u{2019}s keeper", &["brother", "s", "keeper"]),
             ("don't", &["don", "t"]),
         ];
@@ -585,6 +604,66 @@ mod tests {
             term_marks("Psalm 23, verse 1", &search_terms("23")),
             [(6, 8)]
         );
+    }
+
+    #[test]
+    fn a_book_alone_is_a_text_search_that_offers_its_first_chapter() {
+        let books = books();
+        let cases: &[(&str, &[&str], i64)] = &[
+            ("Psalms", &["psalms"], 19),
+            ("psalm", &["psalm"], 19),
+            ("PS", &["ps"], 19),
+            ("  psalms  ", &["psalms"], 19),
+            ("John", &["john"], 43),
+            ("jn.", &["jn"], 43),
+            ("mark", &["mark"], 41),
+            ("Numbers", &["numbers"], 4),
+            ("acts", &["acts"], 44),
+            ("job", &["job"], 18),
+            ("Judges", &["judges"], 7),
+            ("Revelation", &["revelation"], 66),
+            ("revelations", &["revelations"], 66),
+            ("1 cor", &["1", "cor"], 46),
+            ("1 Corinthians", &["1", "corinthians"], 46),
+            ("1 john", &["1", "john"], 62),
+            ("1john", &["1john"], 62),
+            ("I John", &["i", "john"], 62),
+            ("First   John", &["first", "john"], 62),
+            ("3 jn", &["3", "jn"], 64),
+            ("song of songs", &["song", "of", "songs"], 22),
+            ("Song of Solomon", &["song", "of", "solomon"], 22),
+            ("Jude", &["jude"], 65),
+        ];
+        for (input, terms, book_id) in cases {
+            let terms = terms.iter().map(|t| (*t).to_string()).collect();
+            assert_eq!(
+                interpret(input, &books),
+                Interpretation::TextOrBook(
+                    terms,
+                    PassageRef {
+                        book_id: *book_id,
+                        chapter: 1,
+                        verses: None,
+                    },
+                ),
+                "input {input:?}"
+            );
+        }
+        // Every book, by its own name.
+        for book in &books {
+            assert!(
+                matches!(
+                    interpret(&book.name, &books),
+                    Interpretation::TextOrBook(_, PassageRef { book_id, chapter: 1, verses: None })
+                        if book_id == book.id
+                ),
+                "{}",
+                book.name
+            );
+        }
+        // With a number it's still a reference, as before.
+        assert_eq!(interpret("Psalms 1", &books), at(19, 1, None));
+        assert_eq!(interpret("mark 2", &books), at(41, 2, None));
     }
 
     #[test]

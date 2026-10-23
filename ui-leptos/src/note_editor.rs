@@ -97,6 +97,18 @@ impl Editor {
         }
     }
 
+    /// While a save or delete is on its way, through the refresh after it,
+    /// the text is read-only (still focusable, and read out), so nothing
+    /// typed meanwhile is lost when the editor closes, and Save stays off,
+    /// so one save is one note.
+    fn set_busy(self, busy: bool) {
+        self.busy.set_value(busy);
+        if let Some(input) = self.input.get() {
+            input.set_read_only(busy);
+        }
+        self.update_controls();
+    }
+
     /// When adding, the other notes on the passage, read-only.
     fn set_others(self, others: Vec<OtherNote>) {
         let adding = self
@@ -153,9 +165,8 @@ impl Editor {
         if let Some(delete) = self.delete.get() {
             delete.set_hidden(!editing);
         }
-        self.busy.set_value(false);
         self.show_discard_prompt(false);
-        self.update_controls();
+        self.set_busy(false);
         if let Some(overlay) = self.overlay.get() {
             overlay.set_hidden(false);
         }
@@ -239,13 +250,12 @@ impl Editor {
         let Some(session) = self.session.get_value() else {
             return;
         };
-        if self.save.get().is_none_or(|b| b.disabled()) {
+        if self.busy.get_value() || self.save.get().is_none_or(|b| b.disabled()) {
             return;
         }
         let body = self.text();
-        self.busy.set_value(true);
         self.error.set(String::new());
-        self.update_controls();
+        self.set_busy(true);
         spawn_local(async move {
             let result = match (&session.request.note, session.request.mode.as_str()) {
                 (Some(note), "edit") => match ipc::args(&UpdateNoteArgs {
@@ -276,23 +286,22 @@ impl Editor {
             };
             if let Err(e) = result {
                 ipc::log_error("Failed to save the note", &e);
-                self.busy.set_value(false);
                 if self.same_session(session.id) {
+                    self.set_busy(false);
                     self.error.set(format!(
                         "The note wasn’t saved: {} Your text is still here.",
                         ipc::error_text(&e)
                     ));
-                    self.update_controls();
                     if let Some(input) = self.input.get() {
                         focus(&input);
                     }
                 }
                 return;
             }
-            self.busy.set_value(false);
             bridge::refresh_notes().await;
             if self.same_session(session.id) {
                 self.close();
+                self.set_busy(false);
             }
             let action = if session.request.mode == "edit" {
                 "saved"
@@ -313,9 +322,8 @@ impl Editor {
         if session.request.mode != "edit" || self.busy.get_value() {
             return;
         }
-        self.busy.set_value(true);
         self.error.set(String::new());
-        self.update_controls();
+        self.set_busy(true);
         spawn_local(async move {
             let result = match ipc::args(&DeleteNoteArgs { id }) {
                 Ok(args) => ipc::invoke_value("delete_note", args).await,
@@ -325,19 +333,18 @@ impl Editor {
                 Ok(deleted) => deleted,
                 Err(e) => {
                     ipc::log_error("Failed to delete the note", &e);
-                    self.busy.set_value(false);
                     if self.same_session(session.id) {
+                        self.set_busy(false);
                         self.error
                             .set(format!("The note wasn’t deleted: {}", ipc::error_text(&e)));
-                        self.update_controls();
                     }
                     return;
                 }
             };
-            self.busy.set_value(false);
             bridge::refresh_notes().await;
             if self.same_session(session.id) {
                 self.close();
+                self.set_busy(false);
             }
             // The note as it was, for the page's Undo.
             let gone = if deleted.is_null() || deleted.is_undefined() {

@@ -1,9 +1,10 @@
 name: CI
 
-# Two jobs, in parallel: build-and-test (the Rust checks: formatting,
-# Clippy, the backend's build and tests, the page's Rust pieces) and
-# frontend-tests (the frontend behavior tests, split across two runners).
-# build-and-test is a required check on main; keep its name.
+# Three jobs, in parallel: build-and-test (the Rust checks: formatting,
+# Clippy, the backend's build and tests, the page's Rust pieces),
+# frontend-tests (the frontend behavior tests, split across two runners)
+# and test-windows (the backend's tests on Windows). build-and-test and
+# test-windows are required checks on main; keep their names.
 #
 # It runs on pushes to leptos too, so a pull request into leptos starts
 # from leptos's caches: a pull request can only restore caches saved on
@@ -96,6 +97,12 @@ jobs:
       - name: Clippy (no warnings allowed)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      # The doc comments' links and code spans resolve (no warnings).
+      - name: Docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps
+
       - name: Build
         run: cargo build --all-targets
 
@@ -166,3 +173,46 @@ jobs:
         run: |
           npm ci
           npm run test:built -- --test-shard=${{ matrix.shard }}/2
+
+  # The Rust tests on Windows as well: its own paths (the temporary
+  # file's drop order before a rename, opening links with ShellExecute)
+  # are otherwise only run by the dist workflow's smoke test.
+  test-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      # The files as committed, not converted to CRLF: tests compare the
+      # page's markup and the bundled data byte for byte.
+      - name: Keep line endings
+        working-directory: .
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # The app crate embeds the page Trunk builds into dist/, so the
+      # page is built before the tests.
+      - name: Install Trunk
+        uses: jetli/trunk-action@v0.5.1
+        with:
+          version: "v0.21.14"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            ui-leptos
+
+      - name: Build the page (Trunk)
+        working-directory: .
+        run: trunk build --release
+
+      - name: Test
+        run: cargo test --all-targets

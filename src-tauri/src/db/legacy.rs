@@ -1,3 +1,6 @@
+//! Bringing a database from the pre-Tauri install into the app's data
+//! directory, by copying it, the first time the app runs.
+
 use std::path::Path;
 
 /// If the app's own database doesn't exist yet, but a database from the

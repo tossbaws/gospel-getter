@@ -1,3 +1,6 @@
+//! `Store`: the database access the commands use once the app has
+//! started.
+
 use std::collections::{HashMap, HashSet};
 
 use crate::db::reader_data::{ApplyImportError, ImportCounts};

@@ -4,7 +4,8 @@
 //! and a verse's text split at the words the search matched (the backend
 //! says where they are: `marks`, the one rule for which words those are,
 //! beside the search's own). The words are the page's (`ui/index.html` at
-//! 201ab8f; Show more's label at a1219bf, #106), byte for byte.
+//! 201ab8f; Show more's label at a1219bf, #106; a book's first chapter
+//! offered with its verses at 0dad77e, #124), byte for byte.
 
 /// The empty box says what it takes.
 pub const HINT: &str = "Type words to search, a reference to go there, or > for a command.";
@@ -40,14 +41,26 @@ pub fn thousands(n: i64) -> String {
 
 /// The status line for a page of verses: how many verses in `code`
 /// (the translation searched, any case) have every term, and how many are
-/// shown so far if not all.
-pub fn verses_status(total: i64, shown: i64, code: &str, terms: &[String]) -> String {
+/// shown so far if not all. With `go_to` (a book typed by name alone: its
+/// first chapter's reference), Enter goes there first, and it says so.
+pub fn verses_status(
+    total: i64,
+    shown: i64,
+    code: &str,
+    terms: &[String],
+    go_to: Option<&str>,
+) -> String {
     let code = code.to_uppercase();
+    let go_to = go_to.map(|reference| format!("Press Enter to go to {reference}"));
     if total == 0 {
-        return format!(
+        let none = format!(
             "No verses in the {code} contain all of: {}.",
             terms.join(", ")
         );
+        return match go_to {
+            Some(go_to) => format!("{go_to}. {none}"),
+            None => none,
+        };
     }
     let count = if total == 1 {
         "1 verse".to_string()
@@ -59,7 +72,11 @@ pub fn verses_status(total: i64, shown: i64, code: &str, terms: &[String]) -> St
     } else {
         String::new()
     };
-    format!("{count} in the {code}{showing}.")
+    let verses = format!("{count} in the {code}{showing}");
+    match go_to {
+        Some(go_to) => format!("{go_to}, or ↓ for the {verses}."),
+        None => format!("{verses}."),
+    }
 }
 
 /// Where Show more starts, if there are more verses than shown: the page
@@ -167,26 +184,51 @@ mod tests {
     fn the_status_says_how_many_and_how_many_are_shown() {
         let terms = keys(&["faith", "hope"]);
         assert_eq!(
-            verses_status(0, 0, "kjv", &terms),
+            verses_status(0, 0, "kjv", &terms, None),
             "No verses in the KJV contain all of: faith, hope."
         );
-        assert_eq!(verses_status(1, 1, "web", &terms), "1 verse in the WEB.");
         assert_eq!(
-            verses_status(12, 12, "kjv", &terms),
+            verses_status(1, 1, "web", &terms, None),
+            "1 verse in the WEB."
+        );
+        assert_eq!(
+            verses_status(12, 12, "kjv", &terms, None),
             "12 verses in the KJV."
         );
         assert_eq!(
-            verses_status(1234, 50, "WEB", &terms),
+            verses_status(1234, 50, "WEB", &terms, None),
             "1,234 verses in the WEB, showing 50."
         );
         assert_eq!(
-            verses_status(1234, 1234, "bsb", &terms),
+            verses_status(1234, 1234, "bsb", &terms, None),
             "1,234 verses in the BSB."
         );
         assert_eq!(failed("Search failed."), "Search failed: Search failed.");
         assert_eq!(
             cannot_run("Compare with: WEB", "Only while comparing"),
             "Compare with: WEB: Only while comparing."
+        );
+    }
+
+    #[test]
+    fn a_book_alone_says_enter_goes_to_its_first_chapter() {
+        let psalms = keys(&["psalms"]);
+        assert_eq!(
+            verses_status(42, 42, "kjv", &psalms, Some("Psalms 1")),
+            "Press Enter to go to Psalms 1, or ↓ for the 42 verses in the KJV."
+        );
+        assert_eq!(
+            verses_status(1, 1, "web", &psalms, Some("Psalms 1")),
+            "Press Enter to go to Psalms 1, or ↓ for the 1 verse in the WEB."
+        );
+        assert_eq!(
+            verses_status(1234, 50, "kjv", &keys(&["mark"]), Some("Mark 1")),
+            "Press Enter to go to Mark 1, or ↓ for the 1,234 verses in the KJV, showing 50."
+        );
+        // No verse has the words: the chapter is still offered.
+        assert_eq!(
+            verses_status(0, 0, "kjv", &keys(&["1", "cor"]), Some("1 Corinthians 1")),
+            "Press Enter to go to 1 Corinthians 1. No verses in the KJV contain all of: 1, cor."
         );
     }
 

@@ -164,6 +164,16 @@ pub fn first_below(bar_bottom: f64, bottoms: impl IntoIterator<Item = f64>) -> O
     bottoms.into_iter().position(|bottom| bottom > bar_bottom)
 }
 
+/// The reader's place in a painted layout scrolled to `y`, as
+/// [`first_below`] would find it on screen there: of the `marks` (each
+/// mark's top and bottom in the page, which scrolling doesn't change, in
+/// order), the first that reaches below the bar's bottom (`bar_bottom`, on
+/// screen), and its top on screen.
+pub fn place_at(bar_bottom: f64, marks: &[(f64, f64)], y: f64) -> Option<(usize, f64)> {
+    let index = first_below(bar_bottom, marks.iter().map(|&(_, bottom)| bottom - y))?;
+    Some((index, marks[index].0 - y))
+}
+
 /// How far to scroll to put back a mark that was `before` px down the
 /// screen and now is `after`: nothing if it hasn't moved (or a box gave no
 /// number).
@@ -273,6 +283,26 @@ mod tests {
         assert_eq!(first_below(56.0, [100.0]), Some(0));
         assert_eq!(first_below(56.0, [0.0, 0.0]), None);
         assert_eq!(first_below(56.0, []), None);
+    }
+
+    #[test]
+    fn the_place_in_a_painted_layout_at_a_scroll_position() {
+        // A heading and three verses, by their place in the page; the bar
+        // ends 54px down the screen.
+        let marks = [
+            (0.0, 40.0),
+            (30.0, 70.0),
+            (2980.0, 3020.0),
+            (3030.0, 3070.0),
+        ];
+        assert_eq!(place_at(54.0, &marks, 0.0), Some((1, 30.0)));
+        // Scrolled 3000px after the layout was painted: the verse at 3030
+        // is 30px down, as on screen; the one at 2980 ends above the bar.
+        assert_eq!(place_at(54.0, &marks, 3000.0), Some((3, 30.0)));
+        assert_eq!(place_at(54.0, &marks, 2960.0), Some((2, 20.0)));
+        // Nothing below the bar, or nothing painted.
+        assert_eq!(place_at(54.0, &marks, 5000.0), None);
+        assert_eq!(place_at(54.0, &[], 0.0), None);
     }
 
     #[test]

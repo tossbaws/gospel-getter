@@ -1,7 +1,8 @@
 //! Search and go-to-reference, and the command palette, in one box
 //! (`#search-panel`, opened with ⌕, `/` or Ctrl+K). As the reader types,
 //! the results come in three groups: "Go to" (the reference typed, as the
-//! backend reads it), "Commands" (the app's own actions, `palette`) and
+//! backend reads it, or a book's first chapter when its name is typed
+//! alone), "Commands" (the app's own actions, `palette`) and
 //! "Verses" (the search's matches, the words found marked). A leading ">"
 //! lists commands only; the empty box suggests a few. Focus stays in the
 //! box, a combobox: ↓ and ↑ move through every group's options, Enter runs
@@ -31,7 +32,7 @@ use web_sys::{Element, HtmlElement, KeyboardEvent};
 use crate::aa;
 use crate::bridge;
 use crate::dom;
-use crate::dto::{SearchAnswer, SearchArgs, SearchVerse};
+use crate::dto::{GoTo, SearchAnswer, SearchArgs, SearchVerse};
 use crate::ipc;
 use crate::palette::{self, Command, Query, Run};
 use crate::search_text::{self as text};
@@ -61,6 +62,8 @@ enum Shown {
         /// How many a page holds.
         page_size: i64,
         verses: Vec<SearchVerse>,
+        /// A book typed by name alone: its first chapter, offered first.
+        go_to: Option<GoTo>,
     },
 }
 
@@ -332,6 +335,7 @@ impl Search {
                 offset,
                 page_size,
                 results,
+                go_to,
             } => {
                 let page = results.len();
                 let code = self.state.with_value(|s| {
@@ -341,7 +345,14 @@ impl Search {
                         .filter(|c| !c.is_empty())
                 });
                 let code = code.unwrap_or_else(bridge::translation_code);
-                let status = text::verses_status(total, offset + page as i64, &code, &terms);
+                // A book's name alone offers its first chapter first.
+                let status = text::verses_status(
+                    total,
+                    offset + page as i64,
+                    &code,
+                    &terms,
+                    go_to.as_ref().map(|g| g.reference.as_str()),
+                );
                 self.state.update_value(|s| {
                     let mut verses = match (append, s.shown.take()) {
                         (true, Some(Shown::Text { verses, .. })) => verses,
@@ -354,6 +365,7 @@ impl Search {
                         page,
                         page_size,
                         verses,
+                        go_to,
                     });
                 });
                 self.set_status(&status, false);
@@ -391,20 +403,28 @@ impl Search {
         let mut keys = Vec::new();
         let mut groups = Vec::new();
 
-        if let Some(Shown::Passage {
-            book_id,
-            chapter,
-            verse_start,
-            verse_end,
-            reference,
-        }) = &shown
-        {
+        // The reference typed, or a book's first chapter (its name typed
+        // alone, offered before its verses).
+        let go_to = match &shown {
+            Some(Shown::Passage {
+                book_id,
+                chapter,
+                verse_start,
+                verse_end,
+                reference,
+            }) => Some((*book_id, *chapter, *verse_start, *verse_end, reference)),
+            Some(Shown::Text {
+                go_to: Some(go_to), ..
+            }) => Some((go_to.book_id, go_to.chapter, None, None, &go_to.reference)),
+            _ => None,
+        };
+        if let Some((book_id, chapter, verse_start, verse_end, reference)) = go_to {
             let option = go_to_view(
                 keys.len(),
-                *book_id,
-                *chapter,
-                *verse_start,
-                *verse_end,
+                book_id,
+                chapter,
+                verse_start,
+                verse_end,
                 reference.clone(),
             );
             keys.push("go".to_string());
@@ -428,6 +448,7 @@ impl Search {
             page,
             page_size,
             verses,
+            ..
         }) = &shown
         {
             if !verses.is_empty() {
