@@ -40,10 +40,12 @@ needed.
   jumps to references such as `John 3:16`, `jn 3:16-18`, `1 Cor 13` or
   `Psalm 23`, and searches the text for anything else. Results show every
   verse in the current translation containing all your words, in Bible
-  order, with the words highlighted. The same box runs commands: as you
-  type, it lists **Go to**, **Commands** and **Verses**, in that order, and
-  each command shows its key, if it has one. Start with `>` to list
-  commands only.
+  order, with the words highlighted. Type a book's name, like `Psalms` or
+  `1 John`, to go straight to its first chapter, with the verses that
+  mention it listed below. The same box runs commands: as you type, it
+  lists **Go to**, **Commands** and **Verses**, in that order, and each
+  command shows its key, if it has one. Start with `>` to list commands
+  only.
 
   ![The search box as a command palette in the Chi Rho theme, with ">theme" typed: under a Commands heading, the nine theme commands from Theme: Chi Rho, marked "In use", to Theme: Hot Pink, open over John 3 in the KJV, with John's chapters open in the sidebar](screenshots/palette.png)
 - **Select verses.** Click a verse, or Shift-click another to select a
@@ -186,7 +188,9 @@ Chi Rho, the default theme, in a window wide enough for the picker's
 sidebar. The other eight themes are under **Aa**.
 
 **Search the text, or jump straight to a reference.** Matching words are
-highlighted, and clicking a result opens and selects that verse.
+highlighted, and clicking a result opens and selects that verse. Type a
+book's name, like `Psalms` or `1 John`, to go straight to its first
+chapter, with the verses that mention it listed below.
 
 ![The search panel in the Chi Rho theme, listing under a Verses heading the World English Bible verses that contain "love one another", with the words highlighted](screenshots/search-results.png)
 
@@ -300,14 +304,14 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.17.1?** Each updates itself to 2.17.2: it
+**Coming from 2.6.0 through 2.17.2?** Each updates itself to 2.18.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
 update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.17.2 by hand once, from the
+Install 2.18.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
