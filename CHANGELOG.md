@@ -4,6 +4,40 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.18.0] - 2026-10-22
+
+### Added
+- **A book's name in search goes to its first chapter.** Type a book's
+  name or its short form alone, such as `Psalms`, `Mark` or `1 John`
+  (`/` or Ctrl+K), and search offers **Go to Psalms 1** first, so Enter
+  goes there. The verses that mention the word are still listed below,
+  and ↓ reaches them. (#124)
+
+### Fixed
+- A chapter the app couldn't read from its database did nothing and said
+  nothing: the page just stayed as it was. Now the app says so, such as
+  "John 4 couldn't be loaded.", with a **Try again** button, and the
+  chapter you were reading stays on screen. (#121)
+- Scrolling and, at almost the same moment, making the window wider or
+  narrower than 1200 px could still send your reading place back to the
+  chapter's heading. It now keeps the place you scrolled to. (#121)
+- A backup with more than 10,000 bookmarks or 40,000 highlights couldn't
+  be imported, even by the version that made it ("the most one file can
+  hold is 10000"). Every backup now imports again, however many
+  bookmarks or highlights it holds. (#122)
+- Text you typed in a note while it was saving was lost: the panel closed
+  and the note kept only what was there when you chose Save. The note
+  now holds still until it's saved, so what's saved is what you see. If
+  the save fails, you can edit it again, with your text kept. (#122)
+- Switching chapters or translations quickly, before the first had
+  loaded (WEB to BSB, say, or John 4 to Acts 1), could make the app
+  reopen next time on the one you'd left. It now reopens on the chapter
+  and translation that were on screen. (#122)
+
+The faster tests (#123), and the rest of #121 (the database now records
+its schema version, the tests also run on Windows, and the Windows app
+embeds its manifest another way), change nothing you'll see.
+
 ## [2.17.2] - 2026-10-21
 
 ### Fixed
