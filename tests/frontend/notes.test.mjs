@@ -386,6 +386,164 @@ test('a note that can’t be saved stays in the panel, with why', () =>
         assert.equal(el(app, 'note-length').textContent, '10,001 characters: a note can hold up to 10,000.');
     }));
 
+// What a reader can do to the note's text: type into it only while it
+// takes typing (not read-only, not disabled), as a keyboard can.
+function typeAsReader(app, text) {
+    const input = el(app, 'note-input');
+    if (input.readOnly || input.disabled) return false;
+    app.type(input, text);
+    return true;
+}
+
+// Every way the reader can ask to save again: Ctrl+Enter twice, and a
+// double click on Save.
+function askToSaveAgain(app) {
+    const input = el(app, 'note-input');
+    app.key('Enter', { ctrlKey: true }, input);
+    app.key('Enter', { ctrlKey: true }, input);
+    app.click(el(app, 'note-save'));
+    app.click(el(app, 'note-save'));
+}
+
+const callsTo = (app, cmd) => app.calls.filter((c) => c.cmd === cmd).length;
+
+test('while a new note is saving its text can’t change, so nothing typed is lost, and it’s saved once', () =>
+    withNotes([], {}, async (app) => {
+        await select(app, 16);
+        app.click(addNoteButton(app));
+        await typeNote(app, 'Before save');
+        const input = el(app, 'note-input');
+        // The save is held on its way.
+        const releaseSave = app.holdCommand('add_note');
+        app.key('Enter', { ctrlKey: true }, input);
+        await app.until(() => callsTo(app, 'add_note') === 1, 'the save');
+        assert.ok(input.readOnly, 'the text is read-only while it saves');
+        assert.equal(typeAsReader(app, 'Before save plus text typed while saving'), false);
+        assert.equal(input.value, 'Before save');
+        assert.equal(app.document.activeElement, input, 'focus stays on the text');
+        assert.ok(el(app, 'note-save').disabled);
+        askToSaveAgain(app);
+        await settle();
+        assert.equal(callsTo(app, 'add_note'), 1, 'one save intent, one add_note');
+        // Escape doesn't close it mid-save either.
+        app.key('Escape', {}, input);
+        assert.ok(panelOpen(app));
+
+        // Saved; then the lists refresh, held too: the text stays
+        // read-only and Save stays off until that's done and it closes.
+        const releaseRefresh = app.holdCommand('list_all_notes');
+        releaseSave();
+        await app.until(() => callsTo(app, 'list_all_notes') >= 1 && app.calls.find((c) => c.cmd === 'add_note').done, 'the refresh');
+        assert.ok(panelOpen(app));
+        assert.ok(input.readOnly, 'still read-only while the lists refresh');
+        assert.equal(typeAsReader(app, 'Typed while refreshing'), false);
+        askToSaveAgain(app);
+        await settle();
+        assert.equal(callsTo(app, 'add_note'), 1, 'no second note');
+        const before = app.calls.length;
+        releaseRefresh();
+        await app.until(() => !panelOpen(app), 'the panel to close');
+        await app.idle(before);
+        assert.ok(!input.readOnly, 'ready for the next note');
+        assert.deepEqual((await allNotes()).map((n) => [n.reference, n.body]), [['John 3:16', 'Before save']]);
+        assert.equal(statusText(app), 'Note added');
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
+test('a save that fails late leaves the text as it was, and editable again', () =>
+    withNotes([], {}, async (app) => {
+        await select(app, 16);
+        app.click(addNoteButton(app));
+        await typeNote(app, 'Precious words.');
+        const input = el(app, 'note-input');
+        const fail = app.holdFailure('add_note', 'The note couldn’t be saved.');
+        app.click(el(app, 'note-save'));
+        await app.until(() => callsTo(app, 'add_note') === 1, 'the save');
+        assert.ok(input.readOnly);
+        assert.equal(typeAsReader(app, 'Precious words, and more.'), false);
+        askToSaveAgain(app);
+        let before = app.calls.length;
+        fail();
+        await app.idle(before);
+        assert.equal(callsTo(app, 'add_note'), 1);
+        assert.ok(panelOpen(app));
+        assert.ok(!input.readOnly, 'editable again');
+        assert.equal(input.value, 'Precious words.');
+        assert.equal(el(app, 'note-error').textContent, 'The note wasn’t saved: The note couldn’t be saved. Your text is still here.');
+        assert.equal(app.document.activeElement, input);
+        assert.ok(!el(app, 'note-save').disabled, 'it can be tried again');
+
+        // What's typed now is what's saved.
+        assert.ok(typeAsReader(app, 'Precious words, and more.'));
+        before = app.calls.length;
+        app.key('Enter', { ctrlKey: true }, input);
+        await app.idle(before, 'list_all_notes');
+        assert.ok(!panelOpen(app));
+        assert.deepEqual((await allNotes()).map((n) => n.body), ['Precious words, and more.']);
+    }));
+
+test('editing: the text is read-only while it saves or deletes, through the refresh, and back after a failure', () =>
+    withNotes([[16, 16, 'First thoughts.']], {}, async (app) => {
+        await select(app, 16);
+        const input = el(app, 'note-input');
+        app.click(section(app).querySelector('.note-edit'));
+        await typeNote(app, 'Second thoughts.');
+        const releaseSave = app.holdCommand('update_note');
+        app.key('Enter', { ctrlKey: true }, input);
+        await app.until(() => callsTo(app, 'update_note') === 1, 'the save');
+        assert.ok(input.readOnly);
+        assert.ok(el(app, 'note-delete').disabled, 'nor can it be deleted meanwhile');
+        assert.equal(typeAsReader(app, 'Second thoughts, and third.'), false);
+        askToSaveAgain(app);
+        const releaseRefresh = app.holdCommand('list_all_notes');
+        releaseSave();
+        await app.until(() => app.calls.find((c) => c.cmd === 'update_note').done && callsTo(app, 'list_all_notes') >= 1, 'the refresh');
+        assert.ok(input.readOnly, 'still read-only while the lists refresh');
+        askToSaveAgain(app);
+        await settle();
+        assert.equal(callsTo(app, 'update_note'), 1);
+        let before = app.calls.length;
+        releaseRefresh();
+        await app.until(() => !panelOpen(app), 'the panel to close');
+        await app.idle(before);
+        assert.deepEqual((await allNotes()).map((n) => n.body), ['Second thoughts.']);
+        assert.equal(statusText(app), 'Note saved');
+
+        // A failed edit: editable again, the text kept.
+        app.click(section(app).querySelector('.note-edit'));
+        await typeNote(app, 'Third thoughts.');
+        const fail = app.holdFailure('update_note', 'The note couldn’t be saved.');
+        app.click(el(app, 'note-save'));
+        await app.until(() => callsTo(app, 'update_note') === 2, 'the second save');
+        assert.ok(input.readOnly);
+        before = app.calls.length;
+        fail();
+        await app.idle(before);
+        assert.ok(!input.readOnly);
+        assert.equal(input.value, 'Third thoughts.');
+        assert.ok(typeAsReader(app, 'Third thoughts, kept.'));
+        assert.deepEqual((await allNotes()).map((n) => n.body), ['Second thoughts.']);
+
+        // Deleting: read-only too, until it's done and the panel closes.
+        const releaseDelete = app.holdCommand('delete_note');
+        app.click(el(app, 'note-delete'));
+        await app.until(() => callsTo(app, 'delete_note') === 1, 'the delete');
+        assert.ok(input.readOnly);
+        assert.ok(el(app, 'note-save').disabled);
+        assert.equal(typeAsReader(app, 'Typed while deleting'), false);
+        app.click(el(app, 'note-delete'));
+        app.key('Enter', { ctrlKey: true }, input);
+        await settle();
+        assert.equal(callsTo(app, 'delete_note'), 1);
+        assert.equal(callsTo(app, 'update_note'), 2);
+        before = app.calls.length;
+        releaseDelete();
+        await app.until(() => !panelOpen(app), 'the panel to close');
+        await app.idle(before);
+        assert.deepEqual(await allNotes(), []);
+        assert.ok(!input.readOnly);
+    }));
+
 test('a note’s text is shown as text, never as markup', () => {
     const body = '<img src=x onerror="window.__pwned = true"><b>bold?</b>\n&amp; <script>window.__pwned = true</script>';
     return withNotes([[16, 16, body]], {}, async (app) => {

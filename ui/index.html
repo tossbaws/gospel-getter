@@ -6754,6 +6754,16 @@
             let noteReturn = null;
             let noteBusy = false;
 
+            // While a save or delete is on its way, through the refresh
+            // after it, the text is read-only (still focusable, and read
+            // out), so nothing typed meanwhile is lost when the panel
+            // closes, and Save stays off, so one save is one note.
+            function setNoteBusy(busy) {
+                noteBusy = busy;
+                noteInput.readOnly = busy;
+                updateNoteControls();
+            }
+
             const charCount = (text) => [...text].length;
 
             function noteChanged() {
@@ -6818,9 +6828,8 @@
                 noteInput.value = noteSession.initial;
                 noteError.textContent = '';
                 noteDelete.hidden = mode !== 'edit';
-                noteBusy = false;
                 showDiscardPrompt(false);
-                updateNoteControls();
+                setNoteBusy(false);
                 noteOverlay.hidden = false;
                 notePanel.querySelector('.modal-body').scrollTop = 0;
                 // Focus never scrolls the page behind; in a short window the
@@ -6873,11 +6882,10 @@
             // A note that can't be saved stays in the panel, with why.
             async function saveNote() {
                 const session = noteSession;
-                if (!session || noteSave.disabled) return;
+                if (!session || noteBusy || noteSave.disabled) return;
                 const body = noteInput.value;
-                noteBusy = true;
                 noteError.textContent = '';
-                updateNoteControls();
+                setNoteBusy(true);
                 try {
                     if (session.mode === 'edit') {
                         await invoke('update_note', { id: session.note.id, body });
@@ -6887,41 +6895,42 @@
                     }
                 } catch (e) {
                     console.error('Failed to save the note', e);
-                    noteBusy = false;
                     if (noteSession === session) {
+                        setNoteBusy(false);
                         noteError.textContent = `The note wasn’t saved: ${errorText(e)} Your text is still here.`;
-                        updateNoteControls();
                         noteInput.focus({ preventScroll: true });
                     }
                     return;
                 }
-                noteBusy = false;
                 await refreshNotes();
-                if (noteSession === session) closeNotePanel();
+                if (noteSession === session) {
+                    closeNotePanel();
+                    setNoteBusy(false);
+                }
                 if (verseActions.isConnected) setActionStatus(session.mode === 'edit' ? 'Note saved' : 'Note added', false);
             }
 
             async function deleteNote() {
                 const session = noteSession;
                 if (!session || session.mode !== 'edit' || noteBusy) return;
-                noteBusy = true;
                 noteError.textContent = '';
-                updateNoteControls();
+                setNoteBusy(true);
                 let deleted;
                 try {
                     deleted = await invoke('delete_note', { id: session.note.id });
                 } catch (e) {
                     console.error('Failed to delete the note', e);
-                    noteBusy = false;
                     if (noteSession === session) {
+                        setNoteBusy(false);
                         noteError.textContent = `The note wasn’t deleted: ${errorText(e)}`;
-                        updateNoteControls();
                     }
                     return;
                 }
-                noteBusy = false;
                 await refreshNotes();
-                if (noteSession === session) closeNotePanel();
+                if (noteSession === session) {
+                    closeNotePanel();
+                    setNoteBusy(false);
+                }
                 const gone = deleted || session.note;
                 if (verseActions.isConnected) {
                     setActionStatus('Note deleted · ', false, { undo: () => restoreNote(gone), duration: UNDO_MS });
@@ -8389,6 +8398,33 @@
                 if (lastDto) setDataStatus(message, true);
             }
 
+            // The reading position the next launch opens at: the chapter
+            // put on screen last, in the translation it was shown in.
+            // loadReading saves it once the chapter is shown, never for an
+            // answer it dropped (get_reading itself saves nothing). One
+            // save is on its way at a time; a newer one waits, replacing
+            // any that waited before it, so they reach the backend in the
+            // order the chapters were shown and the last one wins.
+            let positionSaving = false;
+            let positionWaiting = null;
+
+            async function savePosition(bookId, chapter, translationCode) {
+                positionWaiting = { bookId, chapter, translationCode };
+                if (positionSaving) return;
+                positionSaving = true;
+                while (positionWaiting) {
+                    const position = positionWaiting;
+                    positionWaiting = null;
+                    try {
+                        await invoke('save_reading_position', position);
+                    } catch (e) {
+                        // The next chapter shown saves again.
+                        console.error('Failed to save the reading position', e);
+                    }
+                }
+                positionSaving = false;
+            }
+
             // Returns whether the chapter was put on screen. A chapter the
             // Bible doesn't have (no answer) changes nothing; one that
             // couldn't be read says so (showReadingFailure), unless a newer
@@ -8427,6 +8463,7 @@
                     };
                     showNotice(isComparing() && !compare ? COMPARE_FAILED : '');
                     renderCurrent();
+                    savePosition(reading.bookId, reading.chapter, translationCode);
                     return true;
                 } catch (e) {
                     console.error('Failed to load reading pane', e);
@@ -9720,9 +9757,9 @@
 
             // Switching translations re-reads whatever chapter is currently
             // on screen, in the newly selected translation, refreshes the
-            // bookmark and highlight previews, and reruns any search. The backend
-            // remembers this as the reader's position too (see
-            // get_reading), so reopening the app comes back to it.
+            // bookmark and highlight previews, and reruns any search. Once
+            // it's shown, it's the reader's position too (see
+            // savePosition), so reopening the app comes back to it.
             translationSelect.addEventListener('change', function () {
                 showTranslation();
                 const inner = currentInner();

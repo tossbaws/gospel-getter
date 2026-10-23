@@ -47,7 +47,8 @@ fn is_lock_error(message: &str) -> bool {
 const BETWEEN_ROUNDS: std::time::Duration = std::time::Duration::from_millis(25);
 
 /// What one reader does, round after round, until the build has finished:
-/// read a chapter and remember it (the page's `get_reading`), then mark it.
+/// read a chapter and remember it (the page's `get_reading`, then its
+/// `save_reading_position`), then mark it.
 async fn reader(pool: Db, lane: i64, done: Arc<Mutex<bool>>, failures: Arc<Mutex<Vec<String>>>) {
     let mut round: i64 = 0;
     loop {

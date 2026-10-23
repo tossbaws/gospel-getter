@@ -598,8 +598,8 @@ pub fn get_chapters(
 }
 
 /// The reading pane for one chapter — used by chapter clicks, arrow-key
-/// navigation, and switching translations. Also remembers this as the
-/// reader's current position, so reopening the app returns here.
+/// navigation, and switching translations. It saves nothing: the page
+/// saves the chapter it puts on screen with `save_reading_position`.
 #[tauri::command]
 pub async fn get_reading(
     state: tauri::State<'_, AppState>,
@@ -633,14 +633,52 @@ pub async fn reading(
             tracing::error!("Failed to build reading pane for {book_id}:{chapter}: {e:#}");
             format!("{} {chapter} couldn't be loaded.", book.name)
         })?;
-    if let Err(e) = state
-        .store
-        .save_reading_position(translation_id, book_id, chapter)
-        .await
-    {
-        tracing::warn!("Failed to save reading position: {e}");
-    }
     Ok(Some(dto))
+}
+
+/// Remember a chapter as the reader's position, so reopening the app
+/// returns there. The page calls this once it has put the chapter on
+/// screen (`get_reading` saves nothing, so an answer the page asked for
+/// and then dropped never moves the position), and sends one at a time,
+/// in the order it showed them, so the chapter shown last is the one
+/// kept. With two copies of the app open, the last save from either is.
+#[tauri::command]
+pub async fn save_reading_position(
+    state: tauri::State<'_, AppState>,
+    book_id: i64,
+    chapter: i64,
+    translation_code: String,
+) -> Result<(), String> {
+    remember_position(&state, book_id, chapter, &translation_code).await
+}
+
+/// The logic behind `save_reading_position`: an error, as a sentence for
+/// the reader, for a translation, book or chapter that isn't there, or a
+/// position that couldn't be saved.
+pub async fn remember_position(
+    state: &AppState,
+    book_id: i64,
+    chapter: i64,
+    translation_code: &str,
+) -> Result<(), String> {
+    let translation = state
+        .translations
+        .iter()
+        .find(|t| t.code == translation_code)
+        .ok_or_else(|| format!("There's no translation \"{translation_code}\"."))?;
+    let book = state
+        .books
+        .iter()
+        .find(|b| b.id == book_id)
+        .ok_or_else(|| format!("There's no book {book_id}."))?;
+    if !(1..=book.chapter_count).contains(&chapter) {
+        return Err(format!("{} has no chapter {chapter}.", book.name));
+    }
+    state
+        .store
+        .save_reading_position(translation.id, book_id, chapter)
+        .await
+        .map_err(failed("The reading position couldn't be saved."))
 }
 
 /// A passage to read in place: a cross-reference previewed in the
@@ -2633,6 +2671,49 @@ mod tests {
         state.store.close().await;
         let failed = reading(&state, 43, 4, Some("kjv")).await;
         assert_eq!(failed.err().as_deref(), Some("John 4 couldn't be loaded."));
+    }
+
+    /// Reading a chapter never moves the saved position (an answer the
+    /// page drops mustn't); saving one does, for a translation, book and
+    /// chapter that are there, and nothing else.
+    #[tokio::test]
+    async fn only_saving_a_position_moves_it() {
+        let (_db, state) = app_state("cmd_reading_position").await;
+        reading(&state, 43, 3, Some("web")).await.unwrap().unwrap();
+        assert_eq!(state.store.reading_position().await.unwrap(), None);
+
+        remember_position(&state, 43, 3, "web").await.unwrap();
+        let web = state
+            .translations
+            .iter()
+            .find(|t| t.code == "web")
+            .unwrap()
+            .id;
+        assert_eq!(
+            state.store.reading_position().await.unwrap(),
+            Some((web, 43, 3))
+        );
+        reading(&state, 1, 1, Some("kjv")).await.unwrap().unwrap();
+        for ((book, chapter, code), refused) in [
+            ((43, 3, "niv"), "There's no translation \"niv\"."),
+            ((67, 1, "kjv"), "There's no book 67."),
+            ((43, 0, "kjv"), "John has no chapter 0."),
+            ((43, 22, "kjv"), "John has no chapter 22."),
+        ] {
+            assert_eq!(
+                remember_position(&state, book, chapter, code).await,
+                Err(refused.to_string())
+            );
+        }
+        assert_eq!(
+            state.store.reading_position().await.unwrap(),
+            Some((web, 43, 3))
+        );
+        state.store.close().await;
+        assert_eq!(
+            remember_position(&state, 45, 8, "kjv").await,
+            Err("The reading position couldn't be saved.".to_string())
+        );
     }
 
     /// A previewed range is every verse in it, in order, with its

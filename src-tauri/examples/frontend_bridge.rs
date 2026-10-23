@@ -157,6 +157,14 @@ async fn dispatch(
                 Err(e) => Err(e),
             }
         }
+        "save_reading_position" => commands::remember_position(
+            state,
+            arg(args, "bookId")?,
+            arg(args, "chapter")?,
+            code.unwrap_or_default(),
+        )
+        .await
+        .map(|()| Value::Null),
         "get_passage" => match commands::passage_text(
             state,
             code.unwrap_or_default(),
