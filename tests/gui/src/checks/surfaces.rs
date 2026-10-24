@@ -18,8 +18,11 @@
 //! of the picker's popover on a narrow window, in Chi Rho here and in
 //! Vellum with check 4's.
 
-use anyhow::{Result, ensure};
-use serde_json::Value;
+use std::future::Future;
+use std::time::Duration;
+
+use anyhow::{Context, Result, bail, ensure};
+use serde_json::{Value, json};
 use thirtyfour::prelude::*;
 
 use super::picker::PLACE_JS;
@@ -45,10 +48,20 @@ const SCROLL_THEN_CROSS: [(u32, u32); 4] = [(3000, 1000), (4200, 1280), (2000, 1
 /// callbacks, the page's and the Rust pieces' alike, wait in a queue) and
 /// scrolls to `arguments[0]`, so to the page the scroll and what comes
 /// next share a frame; then the reading place, as [`PLACE_JS`] finds it.
+/// The page lets them go itself after 10 s, whatever becomes of the check
+/// (a step timed out, WebDriver gone), and [`RELEASE_FRAMES_JS`] says so.
 /// Prepended to [`PLACE_JS`].
 const HOLD_AND_SCROLL_JS: &str = "if (!window.__guiCheckFrames) {
-        const real = window.requestAnimationFrame.bind(window);
-        const frames = { real, holding: false, held: [] };
+        const original = window.requestAnimationFrame;
+        const real = original.bind(window);
+        const frames = { original, real, holding: false, held: [], timer: 0, gaveUp: false };
+        frames.release = () => {
+            clearTimeout(frames.timer);
+            frames.holding = false;
+            const held = frames.held.splice(0);
+            for (const callback of held) real(callback);
+            return held.length;
+        };
         window.__guiCheckFrames = frames;
         window.requestAnimationFrame = (callback) => {
             if (!frames.holding) return real(callback);
@@ -56,17 +69,81 @@ const HOLD_AND_SCROLL_JS: &str = "if (!window.__guiCheckFrames) {
             return 0;
         };
     }
-    window.__guiCheckFrames.holding = true;
+    const frames = window.__guiCheckFrames;
+    frames.release();
+    frames.gaveUp = false;
+    frames.holding = true;
+    frames.timer = setTimeout(() => { frames.gaveUp = true; frames.release(); }, 10000);
+    if (window.__guiCheckSeen) window.__guiCheckSeen.log.push('frames held');
     window.scrollTo(0, arguments[0]);";
 
 /// Lets the page's animation frames run again: the ones held run in the
-/// next frame. Returns how many were held.
+/// next frame. With `arguments[0]`, the page's own `requestAnimationFrame`
+/// is put back too. Returns how many were held, and whether the page had
+/// already let them go (after 10 s).
 const RELEASE_FRAMES_JS: &str = "const frames = window.__guiCheckFrames;
-    if (!frames) return 0;
-    frames.holding = false;
-    const held = frames.held.splice(0);
-    for (const callback of held) frames.real(callback);
-    return held.length;";
+    if (!frames) return { held: 0, gaveUp: false };
+    const said = { held: frames.release(), gaveUp: frames.gaveUp };
+    if (arguments[0]) {
+        window.requestAnimationFrame = frames.original;
+        delete window.__guiCheckFrames;
+    }
+    return said;";
+
+/// Check 37's record of what the page saw, for its failure message: each
+/// `scroll`, `resize` and width media query change (its listeners run
+/// after the app's), and each `window.scrollBy`/`scrollTo` call, with the
+/// scroll position, `<html>`'s inline `overflow-anchor` and the reading
+/// place there (`verse@top`). With `arguments[0]` false, stops recording.
+const WATCH_JS: &str = "const old = window.__guiCheckSeen;
+    if (old) old.stop();
+    if (!arguments[0]) return null;
+    const bar = () => document.getElementById('top-bar').getBoundingClientRect().bottom;
+    const place = () => {
+        const below = bar();
+        for (const mark of document.querySelectorAll('.chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap')) {
+            const box = mark.getBoundingClientRect();
+            if (box.bottom > below) return `${mark.dataset.verse || 'heading'}@${Math.round(box.top * 10) / 10}`;
+        }
+        return 'none';
+    };
+    const seen = { log: [] };
+    const note = (what) => seen.log.push(`${what}: scrollY ${Math.round(window.scrollY * 10) / 10}, `
+        + `${window.innerWidth} px, anchor ${document.documentElement.style.overflowAnchor || 'auto'}, ${place()}`);
+    const onScroll = () => note('scroll');
+    const onResize = () => note('resize');
+    const onChange = (e) => note(`media query ${e.matches ? 'wide' : 'narrow'}`);
+    const wide = window.matchMedia('(min-width: 1200px)');
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onResize);
+    wide.addEventListener('change', onChange);
+    const wrapped = {};
+    for (const name of ['scrollBy', 'scrollTo']) {
+        wrapped[name] = window[name];
+        window[name] = function (...args) {
+            const result = wrapped[name].apply(window, args);
+            note(`${name}(${args.map((a) => typeof a === 'number' ? Math.round(a * 10) / 10 : JSON.stringify(a)).join(', ')})`);
+            return result;
+        };
+    }
+    seen.stop = () => {
+        window.removeEventListener('scroll', onScroll);
+        window.removeEventListener('resize', onResize);
+        wide.removeEventListener('change', onChange);
+        for (const name of Object.keys(wrapped)) window[name] = wrapped[name];
+        delete window.__guiCheckSeen;
+    };
+    window.__guiCheckSeen = seen;
+    return null;";
+
+/// What [`WATCH_JS`] has recorded since it was last asked, and starts
+/// again.
+const SEEN_JS: &str = "const seen = window.__guiCheckSeen;
+    return seen ? seen.log.splice(0) : [];";
+
+/// How long putting the page and the window back may take, after check 36
+/// or 37, even once the run's budget has run out.
+const PUT_BACK_LIMIT: Duration = Duration::from_secs(15);
 
 /// Waits until two animation frames have passed since it was first asked
 /// (so the page has noted the place it painted).
@@ -623,14 +700,41 @@ impl Run<'_> {
         if let Err(why) = self.ensure_wide().await? {
             return self.not_wide(why);
         }
-        let rect = self.ui.driver().get_window_rect().await?;
-        let width = rect.width as u32;
+        let width = self.window_width_now().await?;
         let checked = self.resize_reading_place_steps().await;
         // The window goes back to its width whatever happened.
-        let restored = self.window_width(width).await;
+        let restored = self
+            .put_back("put the window back to its width", self.window_width(width))
+            .await;
         let said = checked?;
         restored?;
         Ok(said)
+    }
+
+    /// The window's width now.
+    async fn window_width_now(&self) -> Result<u32> {
+        let rect = self
+            .ui
+            .step("the window's width", async {
+                Ok(self.ui.driver().get_window_rect().await?)
+            })
+            .await?;
+        Ok(rect.width as u32)
+    }
+
+    /// Puts something back after check 36 or 37 (the page's frames, the
+    /// window's width), within [`PUT_BACK_LIMIT`] whatever is left of the
+    /// run's budget.
+    async fn put_back<T>(&self, what: &str, action: impl Future<Output = Result<T>>) -> Result<T> {
+        self.ui.log(what);
+        let done = tokio::time::timeout(PUT_BACK_LIMIT, action)
+            .await
+            .with_context(|| format!("\"{what}\" timed out after {}s", PUT_BACK_LIMIT.as_secs()))?
+            .with_context(|| format!("\"{what}\" failed"));
+        if let Err(e) = &done {
+            self.ui.log(&format!("  FAILED: {e:#}"));
+        }
+        done
     }
 
     async fn resize_reading_place_steps(&mut self) -> Result<String> {
@@ -749,15 +853,30 @@ impl Run<'_> {
         if let Err(why) = self.ensure_wide().await? {
             return self.not_wide(why);
         }
-        let rect = self.ui.driver().get_window_rect().await?;
-        let width = rect.width as u32;
+        let width = self.window_width_now().await?;
         let checked = self.scroll_then_resize_steps().await;
-        // The frames run again, and the window goes back to its width,
-        // whatever happened.
-        let released = self.ui.js(RELEASE_FRAMES_JS, Vec::new()).await;
-        let restored = self.window_width(width).await;
+        // The frames run again (the page lets them go itself after 10 s
+        // anyway), the page's own requestAnimationFrame and scroll calls are
+        // put back, and the window goes back to its width, whatever
+        // happened.
+        let released = self
+            .put_back(
+                "let the page's frames go, and put its requestAnimationFrame back",
+                self.ui.js(RELEASE_FRAMES_JS, vec![json!(true)]),
+            )
+            .await;
+        let unwatched = self
+            .put_back(
+                "stop recording what the page sees",
+                self.ui.js(WATCH_JS, vec![json!(false)]),
+            )
+            .await;
+        let restored = self
+            .put_back("put the window back to its width", self.window_width(width))
+            .await;
         let said = checked?;
         released?;
+        unwatched?;
         restored?;
         Ok(said)
     }
@@ -772,9 +891,15 @@ impl Run<'_> {
             self.read_in_picker(19, 119, "Psalms 119").await?;
         }
         self.ui
-            .js(
-                "if (document.activeElement) document.activeElement.blur(); window.scrollTo(0, 0); return null;",
-                Vec::new(),
+            .step(
+                "start at the top, and record what the page sees",
+                self.ui.js(
+                    &format!(
+                        "if (document.activeElement) document.activeElement.blur(); \
+                         window.scrollTo(0, 0); {WATCH_JS}"
+                    ),
+                    vec![json!(true)],
+                ),
             )
             .await?;
         let mut said = Vec::new();
@@ -784,14 +909,16 @@ impl Run<'_> {
             self.ui
                 .wait("two animation frames (the place painted)", TWO_FRAMES_JS)
                 .await?;
+            let painted = self
+                .reading_place("the place painted, before the frames are held")
+                .await?;
+            self.ui.js(SEEN_JS, Vec::new()).await?;
             let before = self
                 .ui
                 .step(
                     &format!("hold the page's frames and scroll to {y}"),
-                    self.ui.js(
-                        &format!("{HOLD_AND_SCROLL_JS} {PLACE_JS}"),
-                        vec![serde_json::json!(y)],
-                    ),
+                    self.ui
+                        .js(&format!("{HOLD_AND_SCROLL_JS} {PLACE_JS}"), vec![json!(y)]),
                 )
                 .await?;
             ensure!(
@@ -805,15 +932,40 @@ impl Run<'_> {
             );
             self.ui.log(&format!("  place: {before}"));
             self.window_width(width).await?;
-            let held = self.ui.js(RELEASE_FRAMES_JS, Vec::new()).await?;
+            let resized = self
+                .reading_place(&format!("the place at {width} px, the frames still held"))
+                .await?;
+            let released = self
+                .ui
+                .step(
+                    "let the page's frames go",
+                    self.ui.js(RELEASE_FRAMES_JS, vec![json!(false)]),
+                )
+                .await?;
             self.ui
                 .settled(&format!("the page to settle at {width} px"))
                 .await?;
             let after = self
                 .reading_place(&format!("the first verse under the bar, at {width} px"))
                 .await?;
+            let seen = self.ui.js(SEEN_JS, Vec::new()).await?;
+            let held = released["held"].as_u64().unwrap_or(0);
+            let steps = || {
+                format!(
+                    "the place painted {painted}; after scrollTo {before}; at {width} px with the frames \
+                     held {resized}; after they ran ({held} held) {after}; the page saw: {}",
+                    Self::seen_list(&seen)
+                )
+            };
+            if released["gaveUp"] == Value::Bool(true) {
+                bail!(
+                    "scrolled to {y}, then {width} px: the page let its frames go itself (10 s) before \
+                     the window had crossed; {}",
+                    steps()
+                );
+            }
             let shift = Self::same_place(&before, &after)
-                .map_err(|e| e.context(format!("scrolled to {y}, then {width} px")))?;
+                .map_err(|e| e.context(format!("scrolled to {y}, then {width} px; {}", steps())))?;
             said.push(format!(
                 "scrollY {y}, then {width} px with no frame between ({held} frame callbacks held): verse {} \
                  at {} px, then verse {} at {} px, scrollY {} (moved {shift:.1} px)",
@@ -821,6 +973,19 @@ impl Run<'_> {
             ));
         }
         Ok(format!("Psalms 119: {}", said.join("; ")))
+    }
+
+    /// [`SEEN_JS`]'s record, one entry after another.
+    fn seen_list(seen: &Value) -> String {
+        let entries: Vec<&str> = seen
+            .as_array()
+            .map(|list| list.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        if entries.is_empty() {
+            "nothing".to_owned()
+        } else {
+            entries.join("; ")
+        }
     }
 
     /// Whether the reading place held across the window crossing 1200 px:

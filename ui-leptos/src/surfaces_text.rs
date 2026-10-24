@@ -174,6 +174,14 @@ pub fn place_at(bar_bottom: f64, marks: &[(f64, f64)], y: f64) -> Option<(usize,
     Some((index, marks[index].0 - y))
 }
 
+/// Whether a resize turns the browser's scroll anchoring off: only where it
+/// anchors on a resize (`anchors`: Chromium), and only one that changes the
+/// picker's shape, as the window's width now says it's `wide` and the page
+/// is still laid out for the other.
+pub fn holds_anchoring(anchors: bool, wide: bool, laid_out_wide: bool) -> bool {
+    anchors && wide != laid_out_wide
+}
+
 /// How far to scroll to put back a mark that was `before` px down the
 /// screen and now is `after`: nothing if it hasn't moved (or a box gave no
 /// number).
@@ -303,6 +311,19 @@ mod tests {
         // Nothing below the bar, or nothing painted.
         assert_eq!(place_at(54.0, &marks, 5000.0), None);
         assert_eq!(place_at(54.0, &[], 0.0), None);
+    }
+
+    #[test]
+    fn anchoring_is_held_for_a_resize_across_the_breakpoint_in_chromium() {
+        // Narrowed across 1200px, or widened across it.
+        assert!(holds_anchoring(true, false, true));
+        assert!(holds_anchoring(true, true, false));
+        // A resize on the same side of it keeps Chromium's anchoring.
+        assert!(!holds_anchoring(true, true, true));
+        assert!(!holds_anchoring(true, false, false));
+        // WebKitGTK has none to hold.
+        assert!(!holds_anchoring(false, false, true));
+        assert!(!holds_anchoring(false, true, false));
     }
 
     #[test]
