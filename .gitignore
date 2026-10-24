@@ -9,3 +9,7 @@ target/
 .idea/
 *.iml
 node_modules/
+
+# Claude Code: share only the project settings; everything else in .claude/ is local
+.claude/*
+!.claude/settings.json
