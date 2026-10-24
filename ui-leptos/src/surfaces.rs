@@ -32,9 +32,10 @@
 //! This is the head script's surfaces controller (`ui/index.html` at
 //! 49736df, from `isWide` to its Escape handler) in Rust: the same ids,
 //! ARIA, focus order and keys. Everything happens within the click or key,
-//! as it did. Since then, main's #116 and #118: a resize across 1200px
-//! keeps the reading place the reader last saw ([`on_shape_change`],
-//! [`note_painted_place`]).
+//! as it did. Since then, main's #116, #118 and #121 (D14): a resize across
+//! 1200px keeps the reading place the reader last saw ([`on_shape_change`],
+//! [`note_painted_place`]), even right after a scroll, and in Chromium,
+//! whatever place its scroll anchoring kept ([`SCROLL_BEFORE_RESIZE`]).
 
 use std::cell::{Cell, RefCell};
 
@@ -62,10 +63,15 @@ thread_local! {
     static PICKER_POPOVER_OPEN: Cell<bool> = const { Cell::new(false) };
     /// `matchMedia(WIDE_QUERY)`: is there room for the sidebar?
     static WIDE: RefCell<Option<MediaQueryList>> = const { RefCell::new(None) };
-    /// The reading place as the reader last saw it ([`note_painted_place`]).
-    static PAINTED_PLACE: RefCell<Option<Place>> = const { RefCell::new(None) };
-    /// A frame is asked for, to note the painted place.
-    static PLACE_PENDING: Cell<bool> = const { Cell::new(false) };
+    /// The page as last painted ([`note_painted_place`]).
+    static PAINTED_LAYOUT: RefCell<Option<PaintedLayout>> = const { RefCell::new(None) };
+    /// A frame is asked for, to note the painted layout.
+    static LAYOUT_PENDING: Cell<bool> = const { Cell::new(false) };
+    /// The scroll position the page's last `scroll` event found.
+    static SCROLL_SEEN: Cell<f64> = const { Cell::new(0.0) };
+    /// [`SCROLL_SEEN`] as the last resize's event came, before the scroll
+    /// event of anything that scrolled for it ([`on_shape_change`]).
+    static SCROLL_BEFORE_RESIZE: Cell<Option<f64>> = const { Cell::new(None) };
 }
 
 // ---- The page's elements.
@@ -184,6 +190,19 @@ pub fn sync_picker() {
     }
 }
 
+/// What a reading place can be: a heading or verse of the chapter being
+/// read, or a gap in compare's columns.
+const PLACE_MARKS: &str =
+    ".chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap";
+
+/// The marks a reading place can be, in order.
+fn place_marks() -> Vec<HtmlElement> {
+    bridge::document()
+        .and_then(|document| document.query_selector_all(PLACE_MARKS).ok())
+        .map(|found| dom::elements(&found))
+        .unwrap_or_default()
+}
+
 /// The reader's place: the first heading or verse of the chapter being
 /// read that reaches below the bar, and where it is on screen.
 #[derive(Clone)]
@@ -192,17 +211,22 @@ pub struct Place {
     top: f64,
 }
 
+/// The page as last painted: where each mark [`reading_place`] looks at is
+/// in the page (its top and bottom; scrolling doesn't move it there), and
+/// where the bar ends on screen.
+struct PaintedLayout {
+    bar_bottom: f64,
+    marks: Vec<HtmlElement>,
+    /// Each mark's top and bottom in the page, in order.
+    at: Vec<(f64, f64)>,
+}
+
 /// The reader's place as the page is laid out now, if anything of the
 /// chapter reaches below the bar.
 fn reading_place() -> Option<Place> {
-    let (document, bar) = (bridge::document()?, by_id("top-bar")?);
+    let bar = by_id("top-bar")?;
     let bar_bottom = bar.get_bounding_client_rect().bottom();
-    let marks = document
-        .query_selector_all(
-            ".chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap",
-        )
-        .map(|found| dom::elements(&found))
-        .unwrap_or_default();
+    let marks = place_marks();
     // Each mark's box is read once, up to the one kept.
     let mut top = 0.0;
     let index = text::first_below(
@@ -219,17 +243,33 @@ fn reading_place() -> Option<Place> {
     })
 }
 
-/// Notes the place as the reader last saw it, in the animation frame after
-/// anything that moves it (one frame asked for at most). By then that
-/// frame's resize and media query listeners have run, so
-/// [`on_shape_change`] still finds the place before the change.
+/// Notes the page as painted ([`PaintedLayout`]), in the animation frame
+/// after anything that can move it (one frame asked for at most). By then
+/// that frame's resize and media query listeners have run, so
+/// [`on_shape_change`] still finds the layout from before the change.
 fn note_painted_place() {
-    if PLACE_PENDING.replace(true) {
+    if LAYOUT_PENDING.replace(true) {
         return;
     }
     let noted = Closure::once_into_js(|| {
-        PLACE_PENDING.set(false);
-        PAINTED_PLACE.set(reading_place());
+        LAYOUT_PENDING.set(false);
+        let (Some(window), Some(bar)) = (web_sys::window(), by_id("top-bar")) else {
+            return;
+        };
+        let y = window.scroll_y().unwrap_or(0.0);
+        let marks = place_marks();
+        let at = marks
+            .iter()
+            .map(|mark| {
+                let rect = mark.get_bounding_client_rect();
+                (rect.top() + y, rect.bottom() + y)
+            })
+            .collect();
+        PAINTED_LAYOUT.set(Some(PaintedLayout {
+            bar_bottom: bar.get_bounding_client_rect().bottom(),
+            marks,
+            at,
+        }));
     });
     let asked = web_sys::window().is_some_and(|window| {
         window
@@ -237,8 +277,35 @@ fn note_painted_place() {
             .is_ok()
     });
     if !asked {
-        PLACE_PENDING.set(false);
+        LAYOUT_PENDING.set(false);
     }
+}
+
+/// The reader's place in the painted layout scrolled to `y`, as
+/// [`reading_place`] would have measured it there; none with no layout
+/// painted yet, or a place no longer on the page.
+fn painted_place_at(y: f64) -> Option<Place> {
+    PAINTED_LAYOUT.with_borrow(|layout| {
+        let layout = layout.as_ref()?;
+        let (index, top) = text::place_at(layout.bar_bottom, &layout.at, y)?;
+        let mark = &layout.marks[index];
+        mark.is_connected().then(|| Place {
+            mark: mark.clone(),
+            top,
+        })
+    })
+}
+
+/// Whether the browser scrolls to keep a place of its own when the window
+/// is resized: Chromium's scroll anchoring does (WebView2, on Windows);
+/// WebKitGTK's doesn't. Both say they support `overflow-anchor`, so it's
+/// told by Chromium's own `window.chrome`. Its place needn't be the
+/// reader's: it can be a line of the faded chapter beside, which comes
+/// first in the page.
+fn anchors_on_resize() -> bool {
+    web_sys::window()
+        .and_then(|window| js_sys::Reflect::get(&window, &JsValue::from_str("chrome")).ok())
+        .is_some_and(|chrome| chrome.is_truthy())
 }
 
 /// Runs `change` (which reflows the page) keeping the reader's place: the
@@ -296,21 +363,34 @@ fn open_picker(toggle: bool) {
 
 /// A window resized across the breakpoint changes shape: an open popover
 /// closes, and focus in a sidebar that's gone goes to the reference button.
-/// The reading place stays, as with the sidebar's own button: the place the
-/// reader last saw ([`note_painted_place`]), because by now the page is laid
-/// out at the new width in the old shape, which they never saw (and which
-/// can have another verse first under the bar). With no place seen yet, or
-/// one no longer on the page, it's the place found now. The close is inside
-/// [`keep_reading_place`] too: it syncs the picker itself, so outside it the
-/// new shape would reflow the page before the place was kept.
+/// The reading place stays, as with the sidebar's own button. By now the
+/// page is laid out at the new width in the old shape, which the reader
+/// never saw (and which can have another verse first under the bar).
+/// The place is the painted layout's ([`painted_place_at`]) at the scroll
+/// position the reader had. WebKitGTK has left the scroll position alone,
+/// so that's the one now: right even when the page was scrolled after the
+/// last frame, in the same one as the resize, which a place noted in that
+/// frame would miss. Chromium's anchoring has already scrolled to keep a
+/// place of its own ([`anchors_on_resize`]), as it laid the page out at
+/// the new width (in WebView2 before the resize's event), so it's the one
+/// the page's last `scroll` event found as the resize's event came
+/// ([`SCROLL_BEFORE_RESIZE`]): the anchoring's own scroll event comes after
+/// it. Measured now instead, the first verse under the bar would be
+/// wherever Chromium's place left it. With no layout painted yet, or a
+/// place no longer on the page, it's the place found now. The close is
+/// inside [`keep_reading_place`] too: it syncs the picker itself, so
+/// outside it the new shape would reflow the page before the place was
+/// kept.
 fn on_shape_change() {
     let Some(picker) = by_id("picker") else {
         return;
     };
     let focus_was_inside = contains(&picker, active().as_deref());
-    let place = PAINTED_PLACE
-        .with_borrow(Clone::clone)
-        .filter(|place| place.mark.is_connected());
+    let before_resize = SCROLL_BEFORE_RESIZE.take();
+    let place = web_sys::window()
+        .and_then(|window| window.scroll_y().ok())
+        .map(|now| text::scroll_read_at(anchors_on_resize(), before_resize, now))
+        .and_then(painted_place_at);
     keep_reading_place(
         || {
             if CURRENT.get() == Some(Surface::Picker) {
@@ -587,20 +667,34 @@ fn export_surfaces() {
     open_picker.forget();
 }
 
-/// Notes the painted place after a scroll, a resize, or a reflow of the
+/// Notes the painted layout after a scroll, a resize, or a reflow of the
 /// reading pane (a chapter put on screen, or reflowed: text size, fonts),
-/// and once now.
+/// and once now. Each scroll's position is noted at once ([`SCROLL_SEEN`]),
+/// and a resize notes it as its event comes ([`SCROLL_BEFORE_RESIZE`]).
 fn watch_painted_place() {
     if let Some(window) = web_sys::window() {
-        let noted = Closure::<dyn Fn()>::new(note_painted_place);
+        SCROLL_SEEN.set(window.scroll_y().unwrap_or(0.0));
+        let scrolled = Closure::<dyn Fn()>::new(|| {
+            if let Some(y) = web_sys::window().and_then(|window| window.scroll_y().ok()) {
+                SCROLL_SEEN.set(y);
+            }
+            note_painted_place();
+        });
         let passive = AddEventListenerOptions::new();
         passive.set_passive(true);
         let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
             "scroll",
-            noted.as_ref().unchecked_ref(),
+            scrolled.as_ref().unchecked_ref(),
             &passive,
         );
-        let _ = window.add_event_listener_with_callback("resize", noted.as_ref().unchecked_ref());
+        scrolled.forget();
+        let resized = Closure::<dyn Fn()>::new(|| {
+            SCROLL_BEFORE_RESIZE.set(Some(SCROLL_SEEN.get()));
+            note_painted_place();
+        });
+        let _ = window.add_event_listener_with_callback("resize", resized.as_ref().unchecked_ref());
+        resized.forget();
+        let noted = Closure::<dyn Fn()>::new(note_painted_place);
         if js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false)
             && let (Some(pane), Ok(observer)) = (
                 by_id("reading-pane"),

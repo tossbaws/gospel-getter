@@ -154,9 +154,21 @@ async fn dispatch(
             arg(args, "bookId")?,
             arg(args, "active")?,
         ))?),
-        "get_reading" => Ok(to_value(
-            commands::reading(state, arg(args, "bookId")?, arg(args, "chapter")?, code).await,
-        )?),
+        "get_reading" => {
+            match commands::reading(state, arg(args, "bookId")?, arg(args, "chapter")?, code).await
+            {
+                Ok(dto) => Ok(to_value(dto)?),
+                Err(e) => Err(e),
+            }
+        }
+        "save_reading_position" => commands::remember_position(
+            state,
+            arg(args, "bookId")?,
+            arg(args, "chapter")?,
+            code.unwrap_or_default(),
+        )
+        .await
+        .map(|()| Value::Null),
         "get_passage" => match commands::passage_text(
             state,
             code.unwrap_or_default(),

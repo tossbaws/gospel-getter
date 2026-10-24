@@ -1,3 +1,8 @@
+//! The SQLite database: its schema (`migrate`), the bundled Bible data it's
+//! seeded with (`seed`), and the reader's bookmarks, highlights and notes.
+//! `prepare` brings any database, new or from any earlier version, up to
+//! date at startup.
+
 pub mod bookmarks;
 pub mod connect;
 pub mod highlights;

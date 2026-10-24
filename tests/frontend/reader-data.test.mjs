@@ -265,6 +265,9 @@ test('confirming merges bookmarks, goes to the position and applies the settings
         assert.equal(app.window.localStorage.getItem('gospel-getter-theme'), 'matrix');
         assert.equal(el(app, 'translation-select').value, 'web');
         assert.equal(app.heading(), 'Romans 8');
+        // The next launch opens there too.
+        const home = await backend('get_home');
+        assert.deepEqual([home.currentTranslationCode, home.currentBookId, home.currentChapter], ['web', 45, 8]);
         assert.ok(app.isComparing(), 'compare turned on by the imported settings');
         const expected = 'Import complete. Added 1 bookmark (1 you already had). Went to Romans 8 (WEB). Display settings applied.';
         assert.equal(app.notice(), expected);

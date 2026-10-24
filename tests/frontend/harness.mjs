@@ -216,6 +216,10 @@ export async function openApp({
     update = null,
     hold = [],
     width = 1280,
+    // Whether the page runs in Chromium (window.chrome), which anchors
+    // scrolling through a window resize, as WebView2 does; WebKitGTK and
+    // jsdom don't.
+    chromium = false,
     alterReading = (dto) => dto,
     alter = {},
     // Called with the page's window before its scripts run (fake timers).
@@ -233,7 +237,7 @@ export async function openApp({
 
     const calls = [];
     const clipboardWrites = [];
-    const state = { failReading: false, clipboard, failing: new Map(Object.entries(failing)), held: new Map(), heldAnswers: [] };
+    const state = { failReading: false, clipboard, failing: new Map(Object.entries(failing)), held: new Map(), heldAnswers: [], heldFailures: [] };
     const releases = new Map();
     for (const cmd of hold) {
         state.held.set(cmd, new Promise((resolve) => releases.set(cmd, resolve)));
@@ -254,6 +258,12 @@ export async function openApp({
         }
         if (state.failing.has(cmd)) {
             throw state.failing.get(cmd);
+        }
+        const failure = state.heldFailures.findIndex((h) => h.cmd === cmd);
+        if (failure !== -1) {
+            const { message, until } = state.heldFailures.splice(failure, 1)[0];
+            await until;
+            throw message;
         }
         if (state.held.has(cmd)) {
             await state.held.get(cmd);
@@ -283,6 +293,7 @@ export async function openApp({
             for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, value);
             if (readerMode) window.localStorage.setItem('gospel-getter-reader-mode', 'on');
             if (compare) window.localStorage.setItem('gospel-getter-compare', 'on');
+            if (chromium) window.chrome = {};
             setUp(window);
             window.__TAURI__ = { core: { invoke, Channel } };
             window.matchMedia = (query) => {
@@ -342,9 +353,15 @@ export async function openApp({
             }
             return out;
         },
-        /** Resizes the window to `width`, telling media query listeners that change. */
-        resize(newWidth) {
+        /**
+         * Resizes the window to `width`, telling media query listeners that
+         * change. `events` are window events to fire first, in order, as a
+         * browser fires its resize event (and then the scroll event of
+         * anything that scrolled) before media query listeners hear of it.
+         */
+        resize(newWidth, { events = [] } = {}) {
             media.width = newWidth;
+            for (const type of events) window.dispatchEvent(new window.Event(type));
             for (const entry of media.lists) {
                 const now = entry.list.matches;
                 if (now === entry.last) continue;
@@ -386,6 +403,15 @@ export async function openApp({
         holdAnswer(cmd) {
             let release;
             state.heldAnswers.push({ cmd, until: new Promise((resolve) => { release = resolve; }) });
+            return () => release();
+        },
+        /**
+         * Makes the next `cmd` call fail with `message`, but only when the
+         * returned function is called: a failure that arrives late.
+         */
+        holdFailure(cmd, message) {
+            let release;
+            state.heldFailures.push({ cmd, message, until: new Promise((resolve) => { release = resolve; }) });
             return () => release();
         },
         /** The answer the next native file dialog gives: a path, or null (cancelled). */
@@ -541,7 +567,8 @@ export async function openApp({
         },
     };
 
-    await until(() => document.getElementById('reading-pane-inner'), 'reading pane');
+    // The chapter, or the notice saying it couldn't be read.
+    await until(() => document.getElementById('reading-pane-inner') || app.notice(), 'reading pane');
     // Boot loads the bookmark list, then the highlights; wait for all of
     // it to finish. The list is the Rust pieces' (the Library), so there is
     // none to wait for without them.

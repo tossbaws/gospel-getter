@@ -105,8 +105,9 @@ test('groups come in order: Go to, Commands, Verses; ↓ and ↑ move through al
     withApp({
         translation: 'kjv',
         // No real reference is also a word a command begins with (a book
-        // alone is searched as a word), so for the Go to group's place
-        // the search answers "mark" as it would "Mark 1".
+        // alone offers its first chapter, but with its verses), so for
+        // the Go to group's place the search answers "mark" as it would
+        // "Mark 1".
         alter: {
             search: (result) => (result.kind === 'text' && result.terms.join(' ') === 'mark'
                 ? { kind: 'passage', bookId: 41, chapter: 1, verseStart: null, verseEnd: null, reference: 'Mark 1' }
@@ -413,6 +414,80 @@ test('a word search keeps Enter as it was: nothing until a verse is chosen', () 
         await app.idle(before, 'get_reading');
         assert.equal(app.searchPanel().hidden, true);
         assert.equal(`${app.heading()}`, first.querySelector('.search-ref').textContent.replace(/:\d+$/, ''));
+    }));
+
+test('a book’s name alone offers Go to its first chapter first, with the verses below', () =>
+    withApp({ book: 'Genesis', chapter: 1, translation: 'kjv' }, async (app) => {
+        await type(app, 'Psalms');
+        assert.deepEqual(groupLabels(app), ['Go to', 'Verses']);
+        const [goTo] = groups(app)[0].options;
+        assert.equal(goTo.textContent.trim(), 'Go to Psalms 1');
+        assert.equal(goTo.querySelector('strong').textContent, 'Psalms 1');
+        assert.equal(active(app), goTo, 'Go to is active, so Enter goes there');
+        assert.match(app.searchStatus(), /^Press Enter to go to Psalms 1, or ↓ for the \d+ verses? in the KJV\.$/);
+        const verses = groups(app)[1].options;
+        assert.ok(verses.length > 0);
+        assert.ok(verses.every((o) => o.querySelector('mark').textContent.toLowerCase() === 'psalms'));
+
+        // ↓ reaches the verses, ↑ comes back.
+        app.key('ArrowDown', {}, input(app));
+        assert.equal(active(app), verses[0]);
+        app.key('ArrowUp', {}, input(app));
+        assert.equal(active(app), goTo);
+
+        let before = app.calls.length;
+        await enter(app);
+        await app.idle(before, 'get_reading');
+        assert.equal(app.searchPanel().hidden, true);
+        assert.equal(app.heading(), 'Psalms 1');
+        assert.deepEqual(app.selectedVerseNumbers(), []);
+
+        // A verse below is still a ↓ and Enter away.
+        await type(app, 'psalm');
+        assert.equal(groups(app)[0].options[0].textContent.trim(), 'Go to Psalms 1');
+        app.key('ArrowDown', {}, input(app));
+        const verse = active(app);
+        assert.equal(app.document.getElementById(verse.getAttribute('aria-describedby')).textContent, 'Verses');
+        before = app.calls.length;
+        await enter(app);
+        await app.idle(before, 'get_reading');
+        assert.equal(app.heading(), verse.querySelector('.search-ref').textContent.replace(/:\d+$/, ''));
+        assert.deepEqual(app.selectedVerseNumbers(), [Number(verse.dataset.verseStart)]);
+    }));
+
+test('a book no verse names still offers Go to; numbered books and abbreviations too', () =>
+    withApp({ book: 'Genesis', chapter: 1, translation: 'kjv' }, async (app) => {
+        await type(app, '1 cor');
+        assert.deepEqual(groupLabels(app), ['Go to']);
+        assert.equal(groups(app)[0].options[0].textContent.trim(), 'Go to 1 Corinthians 1');
+        assert.equal(app.searchStatus(), 'Press Enter to go to 1 Corinthians 1. No verses in the KJV contain all of: 1, cor.');
+        const before = app.calls.length;
+        await enter(app);
+        await app.idle(before, 'get_reading');
+        assert.equal(app.heading(), '1 Corinthians 1');
+
+        for (const [typed, reference] of [['1john', '1 John 1'], ['song of songs', 'Song of Solomon 1'], ['JOB', 'Job 1']]) {
+            await type(app, typed);
+            assert.equal(groupLabels(app)[0], 'Go to', typed);
+            assert.equal(groups(app)[0].options[0].textContent.trim(), `Go to ${reference}`, typed);
+            assert.equal(active(app), groups(app)[0].options[0], typed);
+        }
+
+        // Not a book: words only, as before.
+        await type(app, 'psal');
+        assert.ok(!groupLabels(app).includes('Go to'));
+    }));
+
+test('a book that is also a common word goes first too, its commands and verses below', () =>
+    withApp({ book: 'Genesis', chapter: 1, translation: 'web' }, async (app) => {
+        await type(app, 'mark');
+        assert.deepEqual(groupLabels(app), ['Go to', 'Commands', 'Verses']);
+        assert.equal(groups(app)[0].options[0].textContent.trim(), 'Go to Mark 1');
+        assert.match(app.searchStatus(), /^Press Enter to go to Mark 1, or ↓ for the \d+ verses in the WEB(, showing 50)?\.$/);
+        const before = app.calls.length;
+        await enter(app);
+        await app.idle(before, 'get_reading');
+        assert.equal(app.heading(), 'Mark 1');
     }));
 
 test('Enter straight after typing a reference waits for it, as before', () =>

@@ -164,6 +164,27 @@ pub fn first_below(bar_bottom: f64, bottoms: impl IntoIterator<Item = f64>) -> O
     bottoms.into_iter().position(|bottom| bottom > bar_bottom)
 }
 
+/// The reader's place in a painted layout scrolled to `y`, as
+/// [`first_below`] would find it on screen there: of the `marks` (each
+/// mark's top and bottom in the page, which scrolling doesn't change, in
+/// order), the first that reaches below the bar's bottom (`bar_bottom`, on
+/// screen), and its top on screen.
+pub fn place_at(bar_bottom: f64, marks: &[(f64, f64)], y: f64) -> Option<(usize, f64)> {
+    let index = first_below(bar_bottom, marks.iter().map(|&(_, bottom)| bottom - y))?;
+    Some((index, marks[index].0 - y))
+}
+
+/// The scroll position to read the painted layout at, as the window
+/// changes shape: `now`, unless the browser scrolls to keep a place of its
+/// own on a resize (`anchors`), and so may have since the resize began:
+/// then the one the page saw before it (`before_resize`), if known.
+pub fn scroll_read_at(anchors: bool, before_resize: Option<f64>, now: f64) -> f64 {
+    match before_resize {
+        Some(y) if anchors => y,
+        _ => now,
+    }
+}
+
 /// How far to scroll to put back a mark that was `before` px down the
 /// screen and now is `after`: nothing if it hasn't moved (or a box gave no
 /// number).
@@ -273,6 +294,56 @@ mod tests {
         assert_eq!(first_below(56.0, [100.0]), Some(0));
         assert_eq!(first_below(56.0, [0.0, 0.0]), None);
         assert_eq!(first_below(56.0, []), None);
+    }
+
+    #[test]
+    fn the_place_in_a_painted_layout_at_a_scroll_position() {
+        // A heading and three verses, by their place in the page; the bar
+        // ends 54px down the screen.
+        let marks = [
+            (0.0, 40.0),
+            (30.0, 70.0),
+            (2980.0, 3020.0),
+            (3030.0, 3070.0),
+        ];
+        assert_eq!(place_at(54.0, &marks, 0.0), Some((1, 30.0)));
+        // Scrolled 3000px after the layout was painted: the verse at 3030
+        // is 30px down, as on screen; the one at 2980 ends above the bar.
+        assert_eq!(place_at(54.0, &marks, 3000.0), Some((3, 30.0)));
+        assert_eq!(place_at(54.0, &marks, 2960.0), Some((2, 20.0)));
+        // Nothing below the bar, or nothing painted.
+        assert_eq!(place_at(54.0, &marks, 5000.0), None);
+        assert_eq!(place_at(54.0, &[], 0.0), None);
+    }
+
+    #[test]
+    fn the_place_before_chromium_scrolled_for_the_resize() {
+        // Psalms 119:30 to 35 by their place in the page, a 1280px window
+        // with the sidebar (WebView2, a line 28.56px); the bar ends 54.4px
+        // down the screen. At scrollY 2000, verse 33 is 45.3px down.
+        let marks = [
+            (1850.0, 1907.1),
+            (1915.1, 1972.2),
+            (1980.2, 2037.3),
+            (2045.3, 2102.4),
+            (2110.4, 2167.5),
+            (2175.5, 2232.6),
+        ];
+        // Narrowed to 1000px, Chromium has scrolled to 2115 for a place of
+        // its own (a line of Psalms 118, beside): the place is still
+        // verse 33's, from the scroll seen before the resize.
+        let y = scroll_read_at(true, Some(2000.0), 2115.0);
+        assert_eq!(y, 2000.0);
+        let (index, top) = place_at(54.4, &marks, y).unwrap();
+        assert_eq!(index, 3);
+        assert!((top - 45.3).abs() < 1e-9, "{top}");
+        // Read at 2115, it would be verse 35.
+        assert_eq!(place_at(54.4, &marks, 2115.0).map(|(i, _)| i), Some(5));
+        // WebKitGTK leaves the scroll position alone: now is the reader's,
+        // even if the page was scrolled after the resize's frame began.
+        assert_eq!(scroll_read_at(false, Some(2000.0), 2115.0), 2115.0);
+        // No resize seen: now.
+        assert_eq!(scroll_read_at(true, None, 2115.0), 2115.0);
     }
 
     #[test]

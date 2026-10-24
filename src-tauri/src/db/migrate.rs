@@ -1,8 +1,23 @@
+//! The database's schema: the tables `migrate` creates on every launch,
+//! and the version it records for them.
+
 use anyhow::Context;
 
 use crate::db::WritePool;
 
-/// Create the schema if it doesn't already exist.
+/// The schema `migrate` brings a database to, kept in SQLite's
+/// `PRAGMA user_version`. A database from an older app reads 0 there: its
+/// tables are some of version 1's, and `migrate` adds the rest.
+///
+/// Every change so far has been a new table, which `CREATE ... IF NOT
+/// EXISTS` adds to any database. The first one it can't make (a new
+/// column, a changed constraint) bumps this to 2, adds a step after the
+/// `CREATE`s that runs only when the stored version is below 2 (an
+/// `ALTER TABLE`, say), and writes 2 in place of 1 below.
+pub const SCHEMA_VERSION: i64 = 1;
+
+/// Create the schema if it doesn't already exist, and record its version
+/// (`SCHEMA_VERSION`).
 pub async fn migrate(writer: &WritePool) -> anyhow::Result<()> {
     sqlx::query(
         r#"
@@ -241,6 +256,21 @@ pub async fn migrate(writer: &WritePool) -> anyhow::Result<()> {
     .execute(writer.pool())
     .await
     .context("Failed to create search_index_version table")?;
+
+    // A database a newer version of the app has opened keeps its own
+    // (higher) number, so that version doesn't take it for an older one.
+    let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+        .fetch_one(writer.pool())
+        .await
+        .context("Failed to read the schema version")?;
+    if version < SCHEMA_VERSION {
+        // PRAGMA takes no bound parameters: the number is written out, and
+        // must be SCHEMA_VERSION's.
+        sqlx::query("PRAGMA user_version = 1")
+            .execute(writer.pool())
+            .await
+            .context("Failed to record the schema version")?;
+    }
 
     Ok(())
 }

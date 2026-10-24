@@ -94,7 +94,7 @@ const PICKER_JS: &str = "const picker = document.getElementById('picker');
 /// The first heading or verse of the chapter that reaches below the bar
 /// (as the head script's keepReadingPlace finds it): which, where it is on
 /// screen, and a line's height of its text.
-const PLACE_JS: &str = "const bar = document.getElementById('top-bar').getBoundingClientRect().bottom;
+pub(super) const PLACE_JS: &str = "const bar = document.getElementById('top-bar').getBoundingClientRect().bottom;
     const marks = document.querySelectorAll('.chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap');
     let first = null;
     for (const mark of marks) {
