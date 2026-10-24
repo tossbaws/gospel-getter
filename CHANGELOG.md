@@ -4,6 +4,24 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.18.1] - 2026-10-23
+
+### Fixed
+- On Windows, making the window wider or narrower than 1200 px, where the
+  books and chapters switch between the sidebar and the popover, could
+  still move your reading place when you were partway into a chapter:
+  the text jumped, and the verse you were reading moved down a few lines
+  or another verse took its place at the top. The verse you were reading
+  now stays at the top. This was on Windows only, since 2.17.2; Linux
+  wasn't affected. (#130)
+
+### Security
+- tokio 1.53.3, the library the app uses for background work, for
+  RUSTSEC-2026-0386, which marks part of 1.53.1 as unsound. Nothing
+  you'll see changes. (#129)
+
+The project's Claude Code settings (#128) change nothing you'll see.
+
 ## [2.18.0] - 2026-10-22
 
 ### Added
