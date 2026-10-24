@@ -562,21 +562,37 @@ test('resizing across 1200px right after a scroll keeps the place scrolled to, n
         assert.deepEqual(app.consoleErrors, []);
     }));
 
-test('resizing across 1200px in Chromium, which anchors scrolling, keeps the place it kept', () =>
+test('resizing across 1200px in Chromium keeps the place seen before it, not the one its anchoring kept', () =>
     withApp({ book: 'John', chapter: 3, width: 1280, chromium: true }, async (app) => {
         const { window } = app;
+        const root = app.document.documentElement;
         const layout = scrolledLayout(app);
+        // The reader sees verse 20, 30px down.
+        layout.y = 3000;
         window.dispatchEvent(new window.Event('scroll'));
         await frame(app);
 
-        // Scrolled to verse 20, 30px down; the browser's anchoring keeps it
-        // there through the resize (scrolling 300px), so it's the place
-        // measured as the shape changes, and kept.
-        layout.y = 3000;
+        // Narrowed. Chromium lays the page out at the new width (still with
+        // the sidebar) and its anchoring scrolls 115px to keep a place of
+        // its own (in WebView2 before the resize's event; the anchoring's
+        // scroll event comes after it). There verse 20 is 215px down, first
+        // under the bar; the place is still the one seen before the resize.
         layout.width = 1000;
-        layout.y = 3300;
-        app.resize(1000);
-        assert.deepEqual(layout.scrolls, [[0, -300]]);
+        layout.y += 115;
+        app.resize(1000, { events: ['resize', 'scroll'] });
+        assert.equal(root.dataset.picker, undefined);
+        assert.deepEqual(layout.scrolls, [[0, -115]]);
+        assert.equal(layout.top(20), 30);
+
+        // Widened again (after the scroll back's own event), the same.
+        window.dispatchEvent(new window.Event('scroll'));
+        await frame(app);
+        layout.scrolls.length = 0;
+        layout.width = 1280;
+        layout.y += 115;
+        app.resize(1280, { events: ['resize', 'scroll'] });
+        assert.equal(root.dataset.picker, 'sidebar');
+        assert.deepEqual(layout.scrolls, [[0, -115]]);
         assert.equal(layout.top(20), 30);
         assert.deepEqual(app.consoleErrors, []);
     }));
