@@ -7,7 +7,10 @@
 // version bump can't merge without updating it. They also check that the
 // site's own links stay relative (it's served from /gospel-getter/ on
 // github.io and later from a domain's root), that in-page anchors and local
-// files exist, and that images keep their dimensions and alt text.
+// files exist, and that images keep their dimensions and alt text. The
+// Support section's tips are plain links to Stripe Payment Links, the
+// Stripe customer portal and Ko-fi: nothing from Stripe or Ko-fi loads on
+// the site, and it never says "donate" or "donation".
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -178,4 +181,60 @@ test('the feature screenshots are in the default theme, Chi Rho; the theme strip
         assert.deepEqual([img.getAttribute('width'), img.getAttribute('height')], ['720', '435']);
         assert.match(img.getAttribute('alt'), new RegExp(`in the ${f.querySelector('figcaption').textContent} theme`));
     }
+});
+
+// TODO(plan step 5): the links below are Stripe sandbox links for testing.
+// The commit that swaps in the live Payment Links adds a test that no
+// buy.stripe.com/test_ link is left anywhere on the site.
+test('the Support section links to four Payment Links, the customer portal and Ko-fi', () => {
+    const { document } = pages.find((p) => p.name === 'index.html');
+    const support = document.getElementById('support');
+    assert.ok(support, 'site/index.html has no #support section');
+    assert.equal(support.getAttribute('aria-labelledby'), 'support-title');
+    assert.equal(document.getElementById('support-title').textContent, 'Support Gospel Getter');
+    const hrefs = [...support.querySelectorAll('a[href]')].map((a) => a.getAttribute('href'));
+    // One one-time tip and three monthly tiers, each its own Payment Link.
+    const paymentLinks = hrefs.filter((href) => href.startsWith('https://buy.stripe.com/'));
+    assert.equal(paymentLinks.length, 4, `#support has ${paymentLinks.length} Payment Links, not 4`);
+    assert.equal(new Set(paymentLinks).size, 4, '#support repeats a Payment Link');
+    assert.ok(
+        hrefs.some((href) => href.startsWith('https://billing.stripe.com/p/login/')),
+        '#support has no link to the Stripe customer portal',
+    );
+    assert.ok(hrefs.includes('https://ko-fi.com/crcllc'), '#support has no link to https://ko-fi.com/crcllc');
+});
+
+test('the site runs no scripts and loads nothing from Stripe or Ko-fi', () => {
+    const thirdParty = (url) => {
+        try {
+            const { hostname } = new URL(url);
+            return ['stripe.com', 'ko-fi.com'].some((host) => hostname === host || hostname.endsWith(`.${host}`));
+        } catch {
+            return false; // a relative URL
+        }
+    };
+    for (const page of pages) {
+        assert.equal(page.document.querySelectorAll('script').length, 0, `${page.name} has a <script>`);
+        const loaded = [...page.document.querySelectorAll('[src], [srcset], link[href]')].flatMap((el) => [
+            el.getAttribute('src'),
+            el.tagName === 'LINK' ? el.getAttribute('href') : null,
+            ...(el.getAttribute('srcset') || '').split(',').map((s) => s.trim().split(/\s+/)[0]),
+        ]).filter(Boolean);
+        assert.deepEqual(loaded.filter(thirdParty), [], `${page.name} loads something from Stripe or Ko-fi`);
+    }
+});
+
+test('no site page says "donate" or "donation"', () => {
+    for (const page of pages) {
+        const found = page.html.match(/donat(e|ion)/gi);
+        assert.equal(found, null, `${page.name} says ${found?.join(', ')}; the wording is "Support" or "Tip"`);
+    }
+});
+
+test('the footer links to Support; the main nav and the hero don\'t', () => {
+    const { document } = pages.find((p) => p.name === 'index.html');
+    const link = document.querySelector('.site-footer .footer-links a[href="#support"]');
+    assert.ok(link, 'the footer has no link to #support');
+    assert.equal(link.textContent, 'Support');
+    assert.equal(document.querySelectorAll('.site-nav a[href="#support"], .hero a[href="#support"]').length, 0);
 });
