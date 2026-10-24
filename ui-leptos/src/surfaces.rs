@@ -34,8 +34,8 @@
 //! ARIA, focus order and keys. Everything happens within the click or key,
 //! as it did. Since then, main's #116, #118 and #121 (D14): a resize across
 //! 1200px keeps the reading place the reader last saw ([`on_shape_change`],
-//! [`note_painted_place`]), even right after a scroll, and in Chromium too
-//! ([`hold_anchoring`]).
+//! [`note_painted_place`]), even right after a scroll, and in Chromium,
+//! whatever place its scroll anchoring kept ([`SCROLL_BEFORE_RESIZE`]).
 
 use std::cell::{Cell, RefCell};
 
@@ -67,9 +67,11 @@ thread_local! {
     static PAINTED_LAYOUT: RefCell<Option<PaintedLayout>> = const { RefCell::new(None) };
     /// A frame is asked for, to note the painted layout.
     static LAYOUT_PENDING: Cell<bool> = const { Cell::new(false) };
-    /// Chromium's scroll anchoring is off for a resize that changes the
-    /// picker's shape ([`hold_anchoring`]).
-    static ANCHORING_HELD: Cell<bool> = const { Cell::new(false) };
+    /// The scroll position the page's last `scroll` event found.
+    static SCROLL_SEEN: Cell<f64> = const { Cell::new(0.0) };
+    /// [`SCROLL_SEEN`] as the last resize's event came, before the scroll
+    /// event of anything that scrolled for it ([`on_shape_change`]).
+    static SCROLL_BEFORE_RESIZE: Cell<Option<f64>> = const { Cell::new(None) };
 }
 
 // ---- The page's elements.
@@ -297,49 +299,13 @@ fn painted_place_at(y: f64) -> Option<Place> {
 /// Whether the browser scrolls to keep a place of its own when the window
 /// is resized: Chromium's scroll anchoring does (WebView2, on Windows);
 /// WebKitGTK's doesn't. Both say they support `overflow-anchor`, so it's
-/// told by Chromium's own `window.chrome`.
+/// told by Chromium's own `window.chrome`. Its place needn't be the
+/// reader's: it can be a line of the faded chapter beside, which comes
+/// first in the page.
 fn anchors_on_resize() -> bool {
     web_sys::window()
         .and_then(|window| js_sys::Reflect::get(&window, &JsValue::from_str("chrome")).ok())
         .is_some_and(|chrome| chrome.is_truthy())
-}
-
-/// `<html>`'s own style.
-fn root_style() -> Option<web_sys::CssStyleDeclaration> {
-    bridge::document()?
-        .document_element()?
-        .dyn_into::<HtmlElement>()
-        .ok()
-        .map(|root| root.style())
-}
-
-/// As a resize begins (its listeners run before anything lays the page
-/// out at the new size), turns Chromium's scroll anchoring off if the
-/// picker's shape is about to change: the page is laid out at the new
-/// width in the old shape first, and the place Chromium keeps through that
-/// isn't the reader's (it can be a line of the faded chapter beside), so
-/// it would scroll the reader's away. With it off, Chromium leaves the
-/// scroll position alone, as WebKitGTK does, for [`on_shape_change`].
-/// Other resizes keep Chromium's anchoring.
-fn hold_anchoring() {
-    let laid_out_wide = root_data("data-wide").is_some();
-    if !text::holds_anchoring(anchors_on_resize(), is_wide(), laid_out_wide) {
-        return;
-    }
-    if let Some(style) = root_style() {
-        let _ = style.set_property("overflow-anchor", "none");
-        ANCHORING_HELD.set(true);
-    }
-}
-
-/// Turns Chromium's scroll anchoring back on, if [`hold_anchoring`] turned
-/// it off.
-fn release_anchoring() {
-    if ANCHORING_HELD.replace(false)
-        && let Some(style) = root_style()
-    {
-        let _ = style.remove_property("overflow-anchor");
-    }
 }
 
 /// Runs `change` (which reflows the page) keeping the reader's place: the
@@ -400,24 +366,30 @@ fn open_picker(toggle: bool) {
 /// The reading place stays, as with the sidebar's own button. By now the
 /// page is laid out at the new width in the old shape, which the reader
 /// never saw (and which can have another verse first under the bar).
-/// The scroll position is still the reader's: WebKitGTK leaves it alone,
-/// and Chromium's anchoring is off for this resize ([`hold_anchoring`]).
-/// So the place is the painted layout's at that position
-/// ([`painted_place_at`]): right even when the page was scrolled after the
+/// The place is the painted layout's ([`painted_place_at`]) at the scroll
+/// position the reader had. WebKitGTK has left the scroll position alone,
+/// so that's the one now: right even when the page was scrolled after the
 /// last frame, in the same one as the resize, which a place noted in that
-/// frame would miss. With no layout painted yet, or a place no longer on
-/// the page, it's the place found now. The close is inside
-/// [`keep_reading_place`] too: it syncs the picker itself, so outside it
-/// the new shape would reflow the page before the place was kept. Then
-/// Chromium's anchoring is back on ([`release_anchoring`]).
+/// frame would miss. Chromium's anchoring has already scrolled to keep a
+/// place of its own ([`anchors_on_resize`]), as it laid the page out at
+/// the new width (in WebView2 before the resize's event), so it's the one
+/// the page's last `scroll` event found as the resize's event came
+/// ([`SCROLL_BEFORE_RESIZE`]): the anchoring's own scroll event comes after
+/// it. Measured now instead, the first verse under the bar would be
+/// wherever Chromium's place left it. With no layout painted yet, or a
+/// place no longer on the page, it's the place found now. The close is
+/// inside [`keep_reading_place`] too: it syncs the picker itself, so
+/// outside it the new shape would reflow the page before the place was
+/// kept.
 fn on_shape_change() {
     let Some(picker) = by_id("picker") else {
-        release_anchoring();
         return;
     };
     let focus_was_inside = contains(&picker, active().as_deref());
+    let before_resize = SCROLL_BEFORE_RESIZE.take();
     let place = web_sys::window()
         .and_then(|window| window.scroll_y().ok())
+        .map(|now| text::scroll_read_at(anchors_on_resize(), before_resize, now))
         .and_then(painted_place_at);
     keep_reading_place(
         || {
@@ -428,7 +400,6 @@ fn on_shape_change() {
         },
         place,
     );
-    release_anchoring();
     if focus_was_inside
         && picker.hidden()
         && let Some(ref_btn) = by_id("ref-btn")
@@ -698,30 +669,32 @@ fn export_surfaces() {
 
 /// Notes the painted layout after a scroll, a resize, or a reflow of the
 /// reading pane (a chapter put on screen, or reflowed: text size, fonts),
-/// and once now. A resize, first of all its listeners (capturing), may
-/// hold Chromium's anchoring ([`hold_anchoring`]).
+/// and once now. Each scroll's position is noted at once ([`SCROLL_SEEN`]),
+/// and a resize notes it as its event comes ([`SCROLL_BEFORE_RESIZE`]).
 fn watch_painted_place() {
     if let Some(window) = web_sys::window() {
-        let resizing = Closure::<dyn Fn()>::new(|| {
-            // One that doesn't change the shape after all lets it go.
-            release_anchoring();
-            hold_anchoring();
+        SCROLL_SEEN.set(window.scroll_y().unwrap_or(0.0));
+        let scrolled = Closure::<dyn Fn()>::new(|| {
+            if let Some(y) = web_sys::window().and_then(|window| window.scroll_y().ok()) {
+                SCROLL_SEEN.set(y);
+            }
+            note_painted_place();
         });
-        let _ = window.add_event_listener_with_callback_and_bool(
-            "resize",
-            resizing.as_ref().unchecked_ref(),
-            true,
-        );
-        resizing.forget();
-        let noted = Closure::<dyn Fn()>::new(note_painted_place);
         let passive = AddEventListenerOptions::new();
         passive.set_passive(true);
         let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
             "scroll",
-            noted.as_ref().unchecked_ref(),
+            scrolled.as_ref().unchecked_ref(),
             &passive,
         );
-        let _ = window.add_event_listener_with_callback("resize", noted.as_ref().unchecked_ref());
+        scrolled.forget();
+        let resized = Closure::<dyn Fn()>::new(|| {
+            SCROLL_BEFORE_RESIZE.set(Some(SCROLL_SEEN.get()));
+            note_painted_place();
+        });
+        let _ = window.add_event_listener_with_callback("resize", resized.as_ref().unchecked_ref());
+        resized.forget();
+        let noted = Closure::<dyn Fn()>::new(note_painted_place);
         if js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false)
             && let (Some(pane), Ok(observer)) = (
                 by_id("reading-pane"),

@@ -355,12 +355,13 @@ export async function openApp({
         },
         /**
          * Resizes the window to `width`, telling media query listeners that
-         * change. With `event`, the window's resize event first, as a browser
-         * fires it before media query listeners hear of the change.
+         * change. `events` are window events to fire first, in order, as a
+         * browser fires its resize event (and then the scroll event of
+         * anything that scrolled) before media query listeners hear of it.
          */
-        resize(newWidth, { event = false } = {}) {
+        resize(newWidth, { events = [] } = {}) {
             media.width = newWidth;
-            if (event) window.dispatchEvent(new window.Event('resize'));
+            for (const type of events) window.dispatchEvent(new window.Event(type));
             for (const entry of media.lists) {
                 const now = entry.list.matches;
                 if (now === entry.last) continue;

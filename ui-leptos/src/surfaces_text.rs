@@ -174,12 +174,15 @@ pub fn place_at(bar_bottom: f64, marks: &[(f64, f64)], y: f64) -> Option<(usize,
     Some((index, marks[index].0 - y))
 }
 
-/// Whether a resize turns the browser's scroll anchoring off: only where it
-/// anchors on a resize (`anchors`: Chromium), and only one that changes the
-/// picker's shape, as the window's width now says it's `wide` and the page
-/// is still laid out for the other.
-pub fn holds_anchoring(anchors: bool, wide: bool, laid_out_wide: bool) -> bool {
-    anchors && wide != laid_out_wide
+/// The scroll position to read the painted layout at, as the window
+/// changes shape: `now`, unless the browser scrolls to keep a place of its
+/// own on a resize (`anchors`), and so may have since the resize began:
+/// then the one the page saw before it (`before_resize`), if known.
+pub fn scroll_read_at(anchors: bool, before_resize: Option<f64>, now: f64) -> f64 {
+    match before_resize {
+        Some(y) if anchors => y,
+        _ => now,
+    }
 }
 
 /// How far to scroll to put back a mark that was `before` px down the
@@ -314,16 +317,33 @@ mod tests {
     }
 
     #[test]
-    fn anchoring_is_held_for_a_resize_across_the_breakpoint_in_chromium() {
-        // Narrowed across 1200px, or widened across it.
-        assert!(holds_anchoring(true, false, true));
-        assert!(holds_anchoring(true, true, false));
-        // A resize on the same side of it keeps Chromium's anchoring.
-        assert!(!holds_anchoring(true, true, true));
-        assert!(!holds_anchoring(true, false, false));
-        // WebKitGTK has none to hold.
-        assert!(!holds_anchoring(false, false, true));
-        assert!(!holds_anchoring(false, true, false));
+    fn the_place_before_chromium_scrolled_for_the_resize() {
+        // Psalms 119:30 to 35 by their place in the page, a 1280px window
+        // with the sidebar (WebView2, a line 28.56px); the bar ends 54.4px
+        // down the screen. At scrollY 2000, verse 33 is 45.3px down.
+        let marks = [
+            (1850.0, 1907.1),
+            (1915.1, 1972.2),
+            (1980.2, 2037.3),
+            (2045.3, 2102.4),
+            (2110.4, 2167.5),
+            (2175.5, 2232.6),
+        ];
+        // Narrowed to 1000px, Chromium has scrolled to 2115 for a place of
+        // its own (a line of Psalms 118, beside): the place is still
+        // verse 33's, from the scroll seen before the resize.
+        let y = scroll_read_at(true, Some(2000.0), 2115.0);
+        assert_eq!(y, 2000.0);
+        let (index, top) = place_at(54.4, &marks, y).unwrap();
+        assert_eq!(index, 3);
+        assert!((top - 45.3).abs() < 1e-9, "{top}");
+        // Read at 2115, it would be verse 35.
+        assert_eq!(place_at(54.4, &marks, 2115.0).map(|(i, _)| i), Some(5));
+        // WebKitGTK leaves the scroll position alone: now is the reader's,
+        // even if the page was scrolled after the resize's frame began.
+        assert_eq!(scroll_read_at(false, Some(2000.0), 2115.0), 2115.0);
+        // No resize seen: now.
+        assert_eq!(scroll_read_at(true, None, 2115.0), 2115.0);
     }
 
     #[test]
