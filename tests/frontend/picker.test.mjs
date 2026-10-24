@@ -562,22 +562,52 @@ test('resizing across 1200px right after a scroll keeps the place scrolled to, n
         assert.deepEqual(app.consoleErrors, []);
     }));
 
-test('resizing across 1200px in Chromium, which anchors scrolling, keeps the place it kept', () =>
+test('resizing across 1200px in Chromium turns its scroll anchoring off for it, and keeps the place painted', () =>
     withApp({ book: 'John', chapter: 3, width: 1280, chromium: true }, async (app) => {
         const { window } = app;
+        const root = app.document.documentElement;
         const layout = scrolledLayout(app);
+        // Chromium, its anchoring on, scrolls through a resize to keep a
+        // place of its own, which needn't be the reader's (a line of the
+        // faded chapter beside): here 115px.
+        const anchoring = [];
+        window.addEventListener('resize', () => {
+            const value = root.style.getPropertyValue('overflow-anchor');
+            anchoring.push(value);
+            if (value !== 'none') layout.y += 115;
+        });
+        // The reader sees verse 20, 30px down.
+        layout.y = 3000;
         window.dispatchEvent(new window.Event('scroll'));
         await frame(app);
 
-        // Scrolled to verse 20, 30px down; the browser's anchoring keeps it
-        // there through the resize (scrolling 300px), so it's the place
-        // measured as the shape changes, and kept.
-        layout.y = 3000;
+        // Narrowed: anchoring is off as the resize begins, so nothing
+        // scrolls for it, and verse 20 stays 30px down (on the way, laid out
+        // narrow with the sidebar, verse 19 is first, at 55px).
         layout.width = 1000;
-        layout.y = 3300;
-        app.resize(1000);
-        assert.deepEqual(layout.scrolls, [[0, -300]]);
+        app.resize(1000, { event: true });
+        assert.deepEqual(anchoring, ['none']);
+        assert.equal(root.dataset.picker, undefined);
+        assert.deepEqual(layout.scrolls, []);
         assert.equal(layout.top(20), 30);
+        assert.equal(root.style.getPropertyValue('overflow-anchor'), '', 'anchoring is back on');
+
+        // A resize that doesn't cross 1200px keeps Chromium's anchoring.
+        await frame(app);
+        app.resize(900, { event: true });
+        assert.deepEqual(anchoring, ['none', '']);
+        // (Its 115px taken back, for the stubbed layout.)
+        layout.y -= 115;
+
+        // Widened across it again: the same.
+        await frame(app);
+        layout.width = 1280;
+        app.resize(1280, { event: true });
+        assert.deepEqual(anchoring, ['none', '', 'none']);
+        assert.equal(root.dataset.picker, 'sidebar');
+        assert.deepEqual(layout.scrolls, []);
+        assert.equal(layout.top(20), 30);
+        assert.equal(root.style.getPropertyValue('overflow-anchor'), '');
         assert.deepEqual(app.consoleErrors, []);
     }));
 
