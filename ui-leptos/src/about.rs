@@ -1,7 +1,8 @@
 //! About Gospel Getter (☰ → About Gospel Getter, or the palette): the
 //! app's icon, name and version, its Updates section (`updates`), the texts
-//! it credits, and a Release notes link to this version's release page,
-//! which the backend opens.
+//! it credits, a Release notes link to this version's release page, and a
+//! Support Gospel Getter link to the Ko-fi page, both of which the backend
+//! opens.
 //!
 //! About is one of the page's surfaces: `surfaces` opens and closes it,
 //! keeps one surface open at a time, puts focus on its close button and
@@ -92,6 +93,7 @@ pub fn AboutAndUpdates() -> impl IntoView {
     });
 
     let notes_status = RwSignal::new(String::new());
+    let support_status = RwSignal::new(String::new());
     let panel = NodeRef::<html::Div>::new();
 
     let known_version = move || version.get().flatten();
@@ -103,6 +105,17 @@ pub fn AboutAndUpdates() -> impl IntoView {
         spawn_local(async move {
             if let Err(e) = ipc::invoke_value("open_release_notes", JsValue::UNDEFINED).await {
                 notes_status.set(ipc::error_text(&e));
+            }
+        });
+    };
+    let open_support_page = move |event: MouseEvent| {
+        // As Release notes: the backend opens its own fixed URL, the one
+        // shown; the page passes none.
+        event.prevent_default();
+        support_status.set(String::new());
+        spawn_local(async move {
+            if let Err(e) = ipc::invoke_value("open_support_page", JsValue::UNDEFINED).await {
+                support_status.set(ipc::error_text(&e));
             }
         });
     };
@@ -181,6 +194,18 @@ pub fn AboutAndUpdates() -> impl IntoView {
                         aria-live="polite"
                     >
                         {move || notes_status.get()}
+                    </span>
+                    <span aria-hidden="true" hidden=move || known_version().is_none()>
+                        " · "
+                    </span>
+                    // The backend's `support_link::SUPPORT_PAGE`, shown as
+                    // the link's address.
+                    <a id="support-link" href="https://ko-fi.com/crcllc" on:click=open_support_page>
+                        "Support Gospel Getter"
+                    </a>
+                    " "
+                    <span id="support-status" class="data-status" role="status" aria-live="polite">
+                        {move || support_status.get()}
                     </span>
                 </p>
             </div>
