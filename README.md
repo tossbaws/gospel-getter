@@ -308,14 +308,14 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.17.2?** Each updates itself to 2.18.0: it
+**Coming from 2.6.0 through 2.18.0?** Each updates itself to 2.18.1: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
 update themselves.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.18.0 by hand once, from the
+Install 2.18.1 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -482,6 +482,13 @@ stored exactly as its source provides it.
 
 Cross-references are from [OpenBible.info](https://www.openbible.info/labs/cross-references/)
 under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+## Support
+
+Gospel Getter is free and always will be. If it helps you, you can leave
+a tip on [Ko-fi](https://ko-fi.com/crcllc) or on
+[the website](https://tossbaws.github.io/gospel-getter/#support). It's
+entirely optional and changes nothing in the app.
 
 ## License
 
