@@ -477,6 +477,13 @@ stored exactly as its source provides it.
 Cross-references are from [OpenBible.info](https://www.openbible.info/labs/cross-references/)
 under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
+## Support
+
+Gospel Getter is free and always will be. If it helps you, you can leave
+a tip on [Ko-fi](https://ko-fi.com/crcllc) or on
+[the website](https://tossbaws.github.io/gospel-getter/#support). It's
+entirely optional and changes nothing in the app.
+
 ## License
 
 [MIT](LICENSE).
