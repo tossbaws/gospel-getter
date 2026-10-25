@@ -183,10 +183,7 @@ test('the feature screenshots are in the default theme, Chi Rho; the theme strip
     }
 });
 
-// TODO(plan step 5): the links below are Stripe sandbox links for testing.
-// The commit that swaps in the live Payment Links adds a test that no
-// buy.stripe.com/test_ link is left anywhere on the site.
-test('the Support section links to four Payment Links, the customer portal and Ko-fi', () => {
+test('the Support section links to four Payment Links, the customer portal, Ko-fi and the refund email', () => {
     const { document } = pages.find((p) => p.name === 'index.html');
     const support = document.getElementById('support');
     assert.ok(support, 'site/index.html has no #support section');
@@ -202,6 +199,16 @@ test('the Support section links to four Payment Links, the customer portal and K
         '#support has no link to the Stripe customer portal',
     );
     assert.ok(hrefs.includes('https://ko-fi.com/crcllc'), '#support has no link to https://ko-fi.com/crcllc');
+    // A tip is refunded on request.
+    assert.ok(hrefs.includes('mailto:help@chirhocode.com'), '#support has no link to mailto:help@chirhocode.com');
+});
+
+test('no site page links to a Stripe sandbox (test-mode) link', () => {
+    for (const page of pages) {
+        for (const sandbox of ['buy.stripe.com/test_', 'billing.stripe.com/p/login/test_']) {
+            assert.ok(!page.html.includes(sandbox), `${page.name} still has a ${sandbox} link; use the live one`);
+        }
+    }
 });
 
 test('the site runs no scripts and loads nothing from Stripe or Ko-fi', () => {
