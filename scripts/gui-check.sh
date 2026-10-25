@@ -28,6 +28,15 @@
 # (GOSPEL_GETTER_TEST_UPDATER, in the run's own folder); the app as shipped
 # ignores it, and checks that it sent the server nothing.
 #
+# The app as shipped never reaches the real update server: it's started
+# with its HTTPS proxy set to a local port nothing answers on (the
+# updater's requests honour HTTPS_PROXY and ALL_PROXY, on Linux and
+# Windows; NO_PROXY keeps 127.0.0.1 direct), so its launch check fails
+# quietly, as offline. Otherwise, once GitHub has a release newer than the
+# build, that check's real banner covers the page and other checks' clicks
+# land on it. The test build isn't cut off: checks 9 to 13 use their own
+# server on 127.0.0.1.
+#
 # Linux: nothing reaches the desktop of whoever runs this. The app, its
 # driver and the checks run with an emptied environment (env -i): no
 # WAYLAND_DISPLAY, DISPLAY set to a private Xvfb started here, GDK_BACKEND=x11,
@@ -113,6 +122,9 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/gui-check.XXXXXXXX")"
 # The test build's updater settings, which the checks write.
 updater_settings="$work/test-updater.json"
 started=$SECONDS
+# Where the app as shipped sends its HTTPS (and any other) requests: port 9
+# on this computer, which nothing serves and only root could bind.
+cut_off_proxy="http://127.0.0.1:9"
 
 log() {
     printf '[gui-check %3ds] %s\n' "$((SECONDS - started))" "$*" | tee -a "$out/steps.log" >&2
@@ -375,10 +387,13 @@ EOF
     fi
 
     # tauri-driver passes its environment to WebKitWebDriver, which starts
-    # the app; this wrapper only sends the app's output to app.log.
+    # the app; this wrapper cuts the app off from the real update server
+    # (see the top) and sends its output to app.log.
     {
         echo '#!/usr/bin/env bash'
-        printf 'exec %q "$@" >>%q 2>&1\n' "$launch" "$out/app.log"
+        printf 'exec env HTTPS_PROXY=%q HTTP_PROXY=%q ALL_PROXY=%q NO_PROXY=%q %q "$@" >>%q 2>&1\n' \
+            "$cut_off_proxy" "$cut_off_proxy" "$cut_off_proxy" "127.0.0.1,localhost,::1" \
+            "$launch" "$out/app.log"
     } >"$work/launch-app"
     chmod +x "$work/launch-app"
     launch="$work/launch-app"
@@ -406,7 +421,9 @@ else
     launch="$(cygpath -w "$launcher")"
     mkdir -p "$work/export"
     export_dir="$(cygpath -w "$work/export")"
+    # gui-launch gives the app as shipped (not the test build) this proxy.
     run_env=(env GUI_LAUNCH_TARGET="$(cygpath -w "$app")" GUI_LAUNCH_LOG="$(cygpath -w "$out/app.log")"
+        GUI_LAUNCH_CUT_OFF_PROXY="$cut_off_proxy"
         GOSPEL_GETTER_TEST_UPDATER="$(cygpath -w "$updater_settings")")
     if [[ -n $updater_app ]]; then
         # The same launcher under another name, which starts the test build
@@ -448,6 +465,7 @@ fi
     echo "tauri-driver: $tauri_driver"
     echo "native driver: $native_driver (${native_version:-version unknown})"
     echo "display: ${xvfb_display:-desktop (Windows)}"
+    echo "the app as shipped: HTTPS_PROXY, HTTP_PROXY and ALL_PROXY $cut_off_proxy (no real update server)"
     echo "budget: ${budget}s, step timeout: ${step_timeout}s, session timeout: ${GUI_CHECK_SESSION_TIMEOUT:-30}s"
     if [[ $platform == windows ]]; then
         echo "TEMP: $(cygpath -w "${TEMP:-}" 2>/dev/null), TMP: $(cygpath -w "${TMP:-}" 2>/dev/null)"
