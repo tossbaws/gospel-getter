@@ -10,7 +10,9 @@
 //! to wait from the settings file the checks write, and never installs
 //! what it downloads. A release build ignores the file, which check 9
 //! confirms: the shipped app's session (checks 1 to 8, 14 to 19) sends this server
-//! nothing.
+//! nothing. Nor does it reach the real one: `scripts/gui-check.sh` starts
+//! it with its HTTPS proxy on a port nothing serves, so a release on GitHub
+//! newer than the build can't put its banner over the page.
 //!
 //! Also here: a "black hole" for check 13, which takes connections and
 //! never answers, so the check runs out of time.
