@@ -4237,9 +4237,10 @@ fn the_shortcuts_sheet_is_a_modal_dialog_aa_in_every_theme() {
 }
 
 /// The page never opens a web page itself: no anchor opens a new window,
-/// and each link out of the app (Release notes, the cross references'
-/// credits) is one the backend opens, through a click handler. The page
-/// and its Rust pieces (About, with Release notes, is `about.rs`) together.
+/// and each link out of the app (Release notes, Support Gospel Getter, the
+/// cross references' credits) is one the backend opens, through a click
+/// handler. The page and its Rust pieces (About, with Release notes and
+/// Support Gospel Getter, is `about.rs`) together.
 #[test]
 fn every_link_out_of_the_app_is_opened_by_the_backend() {
     let sources: Vec<&str> = std::iter::once(HTML)
@@ -4261,15 +4262,17 @@ fn every_link_out_of_the_app_is_opened_by_the_backend() {
                 .map(|(at, _)| &source[at..at + source[at..].find('>').unwrap()]),
         );
     }
-    assert_eq!(anchors.len(), 3, "{anchors:#?}");
+    assert_eq!(anchors.len(), 4, "{anchors:#?}");
     for anchor in anchors {
         assert!(
             anchor.contains("id=\"release-notes-link\"")
+                || anchor.contains("id=\"support-link\"")
                 || anchor.contains("class=\"credit-link\" data-link="),
             "{anchor}"
         );
     }
     assert!(piece("about.rs").contains(r#"ipc::invoke_value("open_release_notes""#));
+    assert!(piece("about.rs").contains(r#"ipc::invoke_value("open_support_page""#));
     assert!(HTML.contains("invoke('open_credit_link', { which: credit.dataset.link })"));
 }
 

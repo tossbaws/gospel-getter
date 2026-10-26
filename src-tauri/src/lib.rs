@@ -18,6 +18,7 @@ mod reader_data_tests;
 pub mod release_notes;
 pub mod retry;
 pub mod start_here;
+pub mod support_link;
 pub mod updater;
 pub mod window;
 
@@ -104,6 +105,7 @@ fn invoke_handler<R: tauri::Runtime>()
         updater::open_download_page,
         updater::open_release_notes,
         credit_links::open_credit_link,
+        support_link::open_support_page,
     ]
 }
 

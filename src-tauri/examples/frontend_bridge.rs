@@ -408,7 +408,7 @@ async fn dispatch(
         }
         // Opening a browser is the system's job; the call itself is what
         // the tests check.
-        "open_download_page" | "open_release_notes" => Ok(Value::Null),
+        "open_download_page" | "open_release_notes" | "open_support_page" => Ok(Value::Null),
         // The app's own table decides which keys open anything.
         "open_credit_link" => {
             let which: String = arg(args, "which")?;
