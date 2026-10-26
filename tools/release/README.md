@@ -51,5 +51,7 @@ python3 tools/release/site_version_gate.py --site site/index.html --published v2
 ```
 
 prints `deploy=true` or `deploy=false`, with the reason on stderr.
+A pre-release's tag (`v2.19.0-beta.1`) is ignored, and publishing a
+pre-release starts no deploy: the site never shows or links a pre-release.
 
 Tests: `python3 -m unittest discover -s tools/release` (run in CI).

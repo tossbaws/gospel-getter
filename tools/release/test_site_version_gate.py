@@ -96,6 +96,20 @@ class Main(unittest.TestCase):
         code, out, _ = self.run_main(page("2.16.0"), "--published", "v2.16.0", "--published", "")
         self.assertEqual((code, out), (0, "deploy=true\n"))
 
+    def test_a_pre_release_tag_is_ignored(self):
+        # A pre-release never reaches the site: its tag neither counts as
+        # published nor fails the run.
+        code, out, err = self.run_main(page("2.19.0"), "--published", "v2.18.1",
+                                       "--published", "v2.19.0-beta.1")
+        self.assertEqual((code, out), (0, "deploy=false\n"))
+        self.assertIn("v2.19.0-beta.1 is a pre-release", err)
+        self.assertIn("newest published release is v2.18.1", err)
+        code, out, _ = self.run_main(page("2.18.1"), "--published", "v2.18.1",
+                                     "--published", "v2.19.0-beta.1")
+        self.assertEqual((code, out), (0, "deploy=true\n"))
+        code, out, _ = self.run_main(page("2.19.0"), "--published", "2.19.0-rc.1")
+        self.assertEqual((code, out), (0, "deploy=false\n"))
+
     def test_the_site_version(self):
         self.assertEqual(self.run_main(page("2.16.0"), "--site-version")[:2], (0, "2.16.0\n"))
 

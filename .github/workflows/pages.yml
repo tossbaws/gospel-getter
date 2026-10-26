@@ -17,6 +17,8 @@ name: Website
 #   the release's run because the github-pages environment only deploys
 #   from main, and a release's run is on its tag.
 # - workflow_dispatch on main deploys under the same rule.
+# - A pre-release (v2.19.0-beta.1) never reaches the site: publishing one
+#   starts no deploy, and the gate ignores a pre-release's tag.
 
 on:
   push:
@@ -40,7 +42,7 @@ permissions:
 jobs:
   # A release was published: deploy from main, in a run of its own.
   from-release:
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' && !github.event.release.prerelease
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -72,7 +74,7 @@ jobs:
           # The release that started this run counts too, if it's published:
           # the latest-release answer can lag a moment behind it.
           if [ -n "$RELEASE_TAG" ]; then
-            if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
               echo "release_tag isn't a version tag: $RELEASE_TAG" >&2
               exit 1
             fi
