@@ -103,52 +103,9 @@ pub fn classify(text: &str) -> Option<Vec<((usize, usize), Span)>> {
         .collect()
 }
 
-/// What a [`Part`] of a verse is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PartKind {
-    /// The verse's own words.
-    Text,
-    /// Words the translators supplied, without their braces.
-    Supplied,
-    /// A margin note, shown as its footnote's marker.
-    Note,
-}
-
-/// One piece of a verse, in order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Part {
-    pub kind: PartKind,
-    /// The words, or for a note its text exactly as stored inside the
-    /// braces.
-    pub text: String,
-    /// A note's marker letter ("a", "b", …); `None` for anything else.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-}
-
-/// One of a verse's margin notes, as a footnote.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Footnote {
-    /// Its marker letter, lettered per verse from "a".
-    pub label: String,
-    /// The verse's words the note is on, before its first colon, shown in
-    /// italics like a printed footnote's: "lamp" in "lamp: or, candle".
-    /// `None` when the note has no lemma (see [`Footnote::new`]).
-    pub lemma: Option<String>,
-    /// The rest of the note after the lemma, from its colon on: ": or,
-    /// candle". The whole note when there's no lemma. `lemma` and `rest`
-    /// together are always exactly `text`.
-    pub rest: String,
-    /// The note exactly as stored inside the braces, e.g.
-    /// "lamp: or, candle". For a USFM note (see `usfm_note`), the note's
-    /// words as shown.
-    pub text: String,
-    /// A USFM note's runs (see `usfm_note`): its words, alternative
-    /// readings and verse numbers. `None` for a KJV margin note.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub segments: Option<Vec<crate::domain::usfm_note::Segment>>,
-}
+// A verse's parts and footnotes are the shapes the page's Rust pieces read
+// back (shared with them; see `verse_parts`).
+pub use crate::verse_parts::{Footnote, Part, PartKind};
 
 /// The most words a note's lemma has in the bundled KJV is six (Judges
 /// 19:9's "the day groweth to an end"); a first colon after more than

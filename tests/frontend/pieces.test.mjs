@@ -1,13 +1,13 @@
 // The page's Rust pieces (ui-leptos) arriving late or not at all: a fresh
 // install whose pieces load after boot still gets its welcome, and the
-// launch check for updates and About's credits once they come; without
-// them each piece says it isn't available (and no update is looked for)
-// while the rest of the app keeps working — against the real backend and
-// database.
+// launch check for updates, About's credits and the chapter itself once
+// they come; without them each piece says it isn't available (and no
+// update is looked for), and the chapter shows as plain text, read-only —
+// against the real backend and database.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, closeBridge, openApp, settle, shownVerse } from './harness.mjs';
 import { readFileSync } from 'node:fs';
 
 after(closeBridge);
@@ -23,6 +23,24 @@ async function withApp(options, body) {
 
 const $ = (app, id) => app.document.getElementById(id);
 const toast = (app) => ({ text: app.toast().textContent, error: app.toast().classList.contains('is-error') });
+
+// Without the pieces, the chapter shows as plain text (step 7 F2): the
+// saved position, read once, with a line saying the rest isn't there;
+// nothing in it can be selected, and nothing turns it.
+const PLAIN_TEXT = 'This chapter is shown as plain text: the rest of the reader isn’t available.';
+
+async function readsAsPlainText(app, book, chapter) {
+    assert.equal(app.heading(), `${book} ${chapter}`);
+    assert.equal(app.notice(), PLAIN_TEXT);
+    assert.equal(app.document.querySelectorAll('.chapter-main .verse[data-translation]').length, 0, 'nothing to select');
+    const verses = [...app.document.querySelectorAll('.chapter-main .verse .verse-text')];
+    assert.equal(verses[15].textContent, (await shownVerse('kjv', book, chapter, 16)).text, 'the verses as the backend sends them');
+    const turn = app.calls.length;
+    app.key('ArrowRight');
+    await app.idle(turn);
+    assert.deepEqual(app.calls.slice(turn).map((c) => c.cmd), [], 'nothing turns it');
+    assert.equal(app.heading(), `${book} ${chapter}`);
+}
 
 test('a fresh install whose pieces load after boot still opens the welcome', () =>
     withApp({ fresh: true, leptos: 'late' }, async (app) => {
@@ -44,7 +62,7 @@ test('pieces that load after boot on an install that isn’t fresh open nothing'
         assert.deepEqual(app.consoleErrors, []);
     }));
 
-test('without the pieces, each says it isn’t available, and reading goes on', () =>
+test('without the pieces, each says it isn’t available, and the chapter shows as plain text', () =>
     withApp({ book: 'John', chapter: 3, leptos: false }, async (app) => {
         await app.idle();
         for (const id of ['shortcuts-overlay', 'welcome-overlay', 'import-overlay', 'note-overlay', 'export-notes-overlay']) {
@@ -65,15 +83,7 @@ test('without the pieces, each says it isn’t available, and reading goes on', 
         assert.deepEqual(toast(app), { text: 'Import isn’t available.', error: true });
         assert.deepEqual(app.calls.slice(before).map((c) => c.cmd), [], 'no file dialog');
 
-        app.click(app.verse(16));
-        app.key('n');
-        assert.deepEqual(toast(app), { text: 'The note editor isn’t available.', error: true });
-
-        // The reader's own keys still work.
-        const turn = app.calls.length;
-        app.key('ArrowRight');
-        await app.idle(turn, 'get_reading');
-        assert.equal(app.heading(), 'John 4');
+        await readsAsPlainText(app, 'John', 3);
         assert.deepEqual(app.consoleErrors, []);
     }));
 
@@ -103,7 +113,7 @@ test('pieces that load after boot run the launch check then, and fill About', ()
         assert.deepEqual(app.consoleErrors, []);
     }));
 
-test('without the pieces, About says it isn’t available, no update is looked for, and reading goes on', () =>
+test('without the pieces, About says it isn’t available, no update is looked for, and the chapter shows as plain text', () =>
     withApp({ book: 'John', chapter: 3, leptos: false, update: { check: UPDATE } }, async (app) => {
         await app.idle();
         assert.equal($(app, 'about-overlay'), null);
@@ -115,10 +125,7 @@ test('without the pieces, About says it isn’t available, no update is looked f
         assert.deepEqual(toast(app), { text: 'About isn’t available.', error: true });
         assert.equal(app.surface('menu').hidden, true, 'the menu closes as after any item');
 
-        const turn = app.calls.length;
-        app.key('ArrowRight');
-        await app.idle(turn, 'get_reading');
-        assert.equal(app.heading(), 'John 4');
+        await readsAsPlainText(app, 'John', 3);
         assert.deepEqual(app.consoleErrors, []);
     }));
 
@@ -140,10 +147,11 @@ test('pieces that load after boot fill the Library then, and mark the bookmarks'
         assert.equal($(app, 'bookmark-list'), null, 'no Library yet');
         assert.deepEqual(listCalls(app), [], 'its lists wait for it');
         assert.deepEqual(app.bookmarkedVerseNumbers(), []);
-        assert.equal(app.verse(3).dataset.highlight, 'green', 'the reader’s own highlights don’t');
+        assert.equal($(app, 'reading-pane-inner'), null, 'so does the chapter, the reader being one of them');
 
         await app.loadPieces();
         await app.idle();
+        assert.equal(app.verse(3).dataset.highlight, 'green', 'the reader’s own highlights, once it’s there');
         assert.deepEqual(listCalls(app).map((c) => c.cmd).sort(), ['list_all_notes', 'list_bookmarks', 'list_highlight_passages']);
         assert.deepEqual(app.bookmarkItems().map((i) => i.reference), ['John 3:16']);
         assert.deepEqual(app.bookmarkedVerseNumbers(), [16]);
@@ -152,27 +160,24 @@ test('pieces that load after boot fill the Library then, and mark the bookmarks'
     });
 });
 
-test('without the pieces, the Library says it isn’t available, and the reader’s highlights still show', async () => {
+test('without the pieces, the Library says it isn’t available, and the chapter shows as plain text', async () => {
     await seedLibrary();
     await withApp({ book: 'John', chapter: 3, keepBookmarks: true, leptos: false }, async (app) => {
         await app.idle();
         assert.deepEqual(listCalls(app), []);
-        assert.equal(app.verse(3).dataset.highlight, 'green');
+        assert.equal(app.document.querySelector('.chapter-main .verse[data-highlight]'), null, 'plain text, unmarked');
 
         app.open('library');
         assert.equal(app.surface('library').hidden, true, 'nothing opens without the pieces (E1)');
         assert.deepEqual(toast(app), { text: 'The library isn’t available.', error: true });
 
-        const turn = app.calls.length;
         app.key('Escape');
-        app.key('ArrowRight');
-        await app.idle(turn, 'get_reading');
-        assert.equal(app.heading(), 'John 4');
+        await readsAsPlainText(app, 'John', 3);
         assert.deepEqual(app.consoleErrors, []);
     });
 });
 
-test('without the pieces, search says it isn’t available, and reading goes on', () =>
+test('without the pieces, search says it isn’t available, and the chapter shows as plain text', () =>
     withApp({ book: 'John', chapter: 3, leptos: false }, async (app) => {
         await app.idle();
         assert.equal(app.searchInput(), null, 'the box is the pieces’');
@@ -185,10 +190,7 @@ test('without the pieces, search says it isn’t available, and reading goes on'
         assert.deepEqual(toast(app), { text: 'Search isn’t available.', error: true });
         assert.equal(app.searchPanel().hidden, true);
 
-        const turn = app.calls.length;
-        app.key('ArrowRight');
-        await app.idle(turn, 'get_reading');
-        assert.equal(app.heading(), 'John 4');
+        await readsAsPlainText(app, 'John', 3);
         assert.deepEqual(app.consoleErrors, []);
     }));
 
@@ -218,12 +220,12 @@ const SAVED_LOOK = {
     'gospel-getter-compare-with': 'bsb',
 };
 
-test('without the pieces, Aa, the translations and the picker say they aren’t available; the Bible text shows in the saved look', () =>
+test('without the pieces, Aa, the translations and the picker say they aren’t available; the Bible text shows in the saved look, as plain text', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv', leptos: false, storage: SAVED_LOOK }, async (app) => {
         await app.idle();
         const root = app.document.documentElement.dataset;
         assert.deepEqual([root.theme, root.textSize, root.layout, root.compare, root.compareWith], ['vellum', 'large', 'flowing', 'on', 'bsb']);
-        assert.deepEqual(app.compareColumns(), ['King James Version (KJV)', 'Berean Standard Bible (BSB)'], 'compared as saved');
+        assert.deepEqual(app.compareColumns(), [], 'plain text: one translation, not compared');
         assert.equal(app.window.gospelGetterPreferences, undefined);
 
         app.click($(app, 'aa-toggle'));
@@ -246,12 +248,9 @@ test('without the pieces, Aa, the translations and the picker say they aren’t 
         assert.deepEqual(toast(app), { text: 'The book list isn’t available.', error: true });
         app.key('Escape', {}, app.document.activeElement);
 
-        // Nothing was saved, and reading goes on.
+        // Nothing was saved, and the chapter shows as plain text.
         assert.deepEqual(Object.keys(app.storage()).sort(), Object.keys(SAVED_LOOK).sort());
-        const turn = app.calls.length;
-        app.key('ArrowRight');
-        await app.idle(turn, 'get_compare');
-        assert.equal(app.heading(), 'John 4');
+        await readsAsPlainText(app, 'John', 3);
         assert.deepEqual(app.consoleErrors, []);
     }));
 
@@ -302,12 +301,9 @@ test('without the pieces, ☰, the sidebar’s button and reading mode’s exit 
         app.click($(app, 'sidebar-toggle'));
         assert.deepEqual(toast(app), { text: 'The book list isn’t available.', error: true });
 
-        // Nothing was saved, and reading goes on.
+        // Nothing was saved, and the chapter shows as plain text.
         assert.deepEqual(Object.keys(app.storage()), ['gospel-getter-reader-mode']);
-        const turn = app.calls.length;
-        app.key('ArrowRight');
-        await app.idle(turn, 'get_reading');
-        assert.equal(app.heading(), 'John 4');
+        await readsAsPlainText(app, 'John', 3);
         assert.deepEqual(app.consoleErrors, []);
     }));
 

@@ -30,9 +30,6 @@
 //!   the updater runs its quiet launch check, unless `html[data-update-check]`
 //!   is `off` ([`launch_check_on`]). Sent again on [`READY_EVENT`] if nobody
 //!   answered (boot beat the module).
-//! - [`ABOUT_CREDITS_EVENT`] (`gospel-getter:about-credits`): `{ credits }`,
-//!   each bundled translation's credit for About, from boot; sent again on
-//!   [`READY_EVENT`].
 //! - [`LIBRARY_REFRESH_EVENT`] (`gospel-getter:library-refresh`): the one way
 //!   the page has the Library's lists reloaded (a bookmark or highlight
 //!   changed in the reader, a translation switch, a note saved, an import,
@@ -50,10 +47,24 @@
 //! - [`PICKER_BOOKS_EVENT`] (`gospel-getter:picker-books`): `{ otBooks,
 //!   ntBooks }`, the books as `get_home` listed them, from boot, for the
 //!   book and chapter picker's lists; sent again on [`READY_EVENT`].
-//! - [`PICKER_CURRENT_EVENT`] (`gospel-getter:picker-current`): `{ bookId,
-//!   chapter }`, each time the page puts a chapter on screen (its
-//!   `renderCurrent`): the picker marks it and shows its book's chapters;
-//!   the latest is sent again on [`READY_EVENT`].
+//! - [`READER_EVENT`] (`gospel-getter:reader`): the one way the page asks
+//!   the reader (`reader`) for anything, `{ action, ... }`: `start` (boot's,
+//!   with `home`, `get_home`'s answer: the translations, then the chapter
+//!   the reader was on, then the history from there; asked again on
+//!   [`READY_EVENT`] if nobody answered), `load` (`{ bookId, chapter,
+//!   translationCode, top }`: ← and →, by `#reading-pane-inner`'s
+//!   `data-prev-*` and `data-next-*`, and an import's position), `book`
+//!   (`{ which }`, `prev` or `next`: `[` and `]`), `translation`
+//!   (the translation changed: the chapter on screen in it), `jump`
+//!   (`{ bookId, chapter, start, end }`: the selection card's Go to),
+//!   `history` (`{ step }`, -1 or 1: Alt+← and Alt+→) and `notice`
+//!   (`{ message }`, for above the chapter). The reader cancels it to say
+//!   it has it, and puts in `detail.done` a promise of whether a chapter
+//!   was put on screen. Nothing answers without this module.
+//! - [`VERSE_MARKUP_EVENT`] (`gospel-getter:verse-markup`): `{ verses }` or
+//!   `{ footnotes }`, as the backend sent them: the selection card's verses
+//!   and footnotes as markup, answered within the event in `detail.html`,
+//!   one string each (verses without note markers).
 //!
 //! Rust to page:
 //! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): the module has loaded
@@ -73,10 +84,30 @@
 //!   about to open on its own (the welcome at startup, the import preview
 //!   once a file is chosen): popovers and panels go, and the search box
 //!   with `closeSearch`.
-//! - [`JUMP_EVENT`] (`gospel-getter:jump`): `{ bookId, chapter, top }`,
-//!   opened as the page's own jumps are (the welcome's places to start, a
-//!   chapter chosen in the picker or Random chapter's: from the top, unless
-//!   it's the chapter on screen).
+//! - [`CHAPTER_LOADING_EVENT`] (`gospel-getter:chapter-loading`): no
+//!   `detail`, the reader has asked for a chapter: the page drops the verse
+//!   selection at once, so nothing acts on it meanwhile.
+//! - [`CHAPTER_SHOWN_EVENT`] (`gospel-getter:chapter-shown`): a
+//!   [`ChapterShown`] snapshot each time the reader has drawn a chapter
+//!   (`#reading-pane-inner` is new): what the page's selection card,
+//!   copying, verse marks and keys need of it, the verses as the backend
+//!   sent them. The page then closes Copy as…, fetches the chapter's copy
+//!   text, drops the selection and marks the verses, as it did after
+//!   drawing one itself.
+//! - [`CHAPTER_SELECT_EVENT`] (`gospel-getter:chapter-select`):
+//!   `{ translationCode, start, end }`, a passage opened (a jump, Back or
+//!   Forward) whose verses that translation numbers: the page selects them,
+//!   scrolls them to the middle and places the card, and answers within the
+//!   event in `detail.selection` (`{ start, end }` as now selected).
+//! - [`NOTE_EDIT_EVENT`] (`gospel-getter:edit-note`): `{ note }`, a note's
+//!   Edit in the Library has opened its passage: the page opens the note
+//!   editor on it (as `list_all_notes` gave it).
+//! - [`PICKER_CURRENT_EVENT`] (`gospel-getter:picker-current`): `{ bookId,
+//!   chapter }`, sent within this crate by the reader each time it puts a
+//!   chapter on screen: the picker marks it and shows its book's chapters.
+//! - [`ABOUT_CREDITS_EVENT`] (`gospel-getter:about-credits`): `{ credits }`,
+//!   each bundled translation's credit for About, sent within this crate by
+//!   the reader from boot's answer.
 //! - [`DATA_BUSY_EVENT`] (`gospel-getter:data-busy`): `{ busy }`, the ☰
 //!   Export and Import items disabled while an import runs.
 //! - [`IMPORTED_EVENT`] (`gospel-getter:imported`): `{ position, message }`
@@ -92,33 +123,29 @@
 //!   page's own copy, for the reader's bookmark markers and the selection
 //!   card's Bookmark button, the welcome's fresh-install facts and Export
 //!   notes. So the page never asks the backend for them itself.
-//! - [`OPEN_PASSAGE_EVENT`] (`gospel-getter:open-passage`): `{ bookId,
-//!   chapter, verseStart, verseEnd, note }`, a Library row or a search
-//!   result opened (the Library or the search box already closed): the page
-//!   jumps there, as its own jumps do (the verses selected, if any), and
-//!   with `note` (a note's Edit) then opens the editor on it.
 //! - [`PALETTE_STATE_EVENT`]: `{}`, asked whenever the palette is drawn or
 //!   a command is chosen; the page fills in `detail.state` (above).
 //! - [`COMMAND_EVENT`] (`gospel-getter:command`): `{ command }`, a
 //!   palette command whose code is the page's (copy the chapter, Copy
 //!   as…, turn the chapter or the book, Back and Forward, the shortcuts
 //!   sheet), run within the click or key that chose it (the clipboard needs
-//!   that), after the box has closed and focus has gone back. The commands
+//!   that), after the box has closed and focus has gone back (the turns and
+//!   Back and Forward come back to the reader as [`READER_EVENT`]s, as the
+//!   keys' do). The commands
 //!   whose controls are on the page are run by clicking them (see Page
 //!   controls); text size, a translation and Compare with are Aa's own.
 //! - [`aa::COMPARE_CHANGE_EVENT`](crate::aa::COMPARE_CHANGE_EVENT)
 //!   (`gospel-getter:compare-change`): no `detail`, Compare went on or off,
-//!   or what it compares with changed: the page shows the chapter in the
-//!   new layout.
+//!   or what it compares with changed: the reader shows the chapter in the
+//!   new layout (heard within this crate).
 //! - [`aa::LAYOUT_CHANGE_EVENT`](crate::aa::LAYOUT_CHANGE_EVENT)
 //!   (`gospel-getter:layout-change`): no `detail`, the layout changed: the
 //!   page moves the selection's card to its verses' new place.
 //!
 //! Page globals this crate calls (small, named, existing or exposed for it):
-//! - `window.gospelGetterComparePartner()` (the page's: the reader fetches
-//!   a comparison by it, from boot on, so its rule is the page's): the
-//!   translation Compare shows beside the one being read, for Aa's
-//!   "with" choices.
+//! - `window.gospelGetterComparePartner()` (the page's, its rule still the
+//!   page's): the translation Compare shows beside the one being read, for
+//!   Aa's "with" choices and the reader's comparisons.
 //! - `window.gospelGetterRefreshNotes()` (the page's `refreshNotes`, a
 //!   promise): the editor waits for it before closing ([`refresh_notes`]).
 //! - `window.gospelGetterRefreshHighlights()` (the page's
@@ -157,6 +184,27 @@
 //! keys, a click outside a popover, Escape (after the page's keyboard
 //! dispatcher, which marks an Escape it used as handled) and the window
 //! crossing 1200px.
+//!
+//! The reading pane (`#reading-pane`'s contents: `#reading-pane-inner`
+//! with its `data-current-*`, `data-prev-*` and `data-next-*`, the verses,
+//! the chapter's end and its lists), the notice above it
+//! (`#reader-notice`, with Try again), the reference button's text and
+//! label (`#ref-text`, `#ref-btn`), the window title, the translation
+//! button's text and label (`#translation-toggle`) and its record's options
+//! (`#translation-select`) are the reader's, drawn and kept here. The page
+//! reads the pane's markup as before (its selection card goes after the
+//! last selected verse, Copy as… after `.chapter-copy`), and its click
+//! handler on the body, which runs first, leaves the reader's controls in
+//! the pane (the chapter steps, a neighbor's heading, the disclosures, the
+//! cross-reference chips and credit links) to the reader's own, also on the
+//! body. The disclosures' state is the reader's in local storage
+//! (`gospel-getter-footnotes`, `gospel-getter-cross-references`: `open` or
+//! `closed`).
+//!
+//! If this module fails to load, the page's loader says so with
+//! `gospel-getter:pieces-failed` on `document`, no `detail`; the page's
+//! small inline fallback then shows the chapter as plain text (see
+//! `ui/index.html`). Nothing in this crate hears it.
 //!
 //! Page controls this crate uses as a reader would: `#theme-select`, read
 //! and changed (with a `change` event, as Aa does) for the welcome's looks
@@ -392,31 +440,6 @@ struct ModalOpening {
 /// Says [`MODAL_OPENING_EVENT`].
 pub fn modal_opening(close_search: bool) {
     dispatch(MODAL_OPENING_EVENT, &ModalOpening { close_search });
-}
-
-/// Open a chapter, as a jump the page's history records (the page's
-/// `jumpTo`): a `CustomEvent` on `document` whose `detail` is
-/// `{ bookId, chapter, top }`; with `top`, from the top of the chapter.
-pub const JUMP_EVENT: &str = "gospel-getter:jump";
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Jump {
-    book_id: i64,
-    chapter: i64,
-    top: bool,
-}
-
-/// Says [`JUMP_EVENT`]; the page jumps before this returns.
-pub fn jump(book_id: i64, chapter: i64, top: bool) {
-    dispatch(
-        JUMP_EVENT,
-        &Jump {
-            book_id,
-            chapter,
-            top,
-        },
-    );
 }
 
 /// The page asks the welcome to open: a cancelable `CustomEvent` whose
@@ -780,17 +803,9 @@ pub fn library_loaded(list: &str, items: &JsValue) {
     dispatch_object(LIBRARY_LOADED_EVENT, &detail);
 }
 
-/// A Library row or a search result opens its passage: a `CustomEvent`
-/// whose `detail` is `{ bookId, chapter, verseStart, verseEnd, note }`
-/// (`verseStart` and `verseEnd` `null` for a whole chapter). The page jumps
-/// there (`jumpTo`, recorded in its history, the passage selected), then,
-/// with a `note` (as `list_all_notes` gave it), opens the note editor on
-/// it.
-pub const OPEN_PASSAGE_EVENT: &str = "gospel-getter:open-passage";
-
-/// A passage to open: a chapter, and its verses if not all of it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// A passage to open: a chapter, and its verses if not all of it (a
+/// Library row or a search result, opened through `reader::open`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenPassage {
     pub book_id: i64,
     pub chapter: i64,
@@ -798,17 +813,8 @@ pub struct OpenPassage {
     pub verse_end: Option<i64>,
 }
 
-/// Says [`OPEN_PASSAGE_EVENT`]; `note` is `null` to open the passage only.
-pub fn open_passage(passage: &OpenPassage, note: &JsValue) {
-    let Ok(detail) = ipc::args(passage) else {
-        return;
-    };
-    let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("note"), note);
-    dispatch_object(OPEN_PASSAGE_EVENT, &detail);
-}
-
 /// Sends `name` with `detail` as it is (an object built here).
-fn dispatch_object(name: &str, detail: &JsValue) {
+pub fn dispatch_object(name: &str, detail: &JsValue) {
     let Some(document) = document() else {
         return;
     };
@@ -872,10 +878,12 @@ pub fn palette_state() -> PaletteState {
     if state.is_undefined() {
         return PaletteState::default();
     }
-    serde_wasm_bindgen::from_value(state).unwrap_or_else(|e| {
+    let mut state = serde_wasm_bindgen::from_value(state).unwrap_or_else(|e| {
         ipc::log_error("The page's palette state can't be read", &JsValue::from(e));
         PaletteState::default()
-    })
+    });
+    crate::reader::palette_facts(&mut state);
+    state
 }
 
 /// A palette command the page runs: a `CustomEvent` whose `detail` is
@@ -916,8 +924,8 @@ pub fn picker_books(
     detail::<PickerBooks>(event).map(|b| (b.ot_books, b.nt_books))
 }
 
-/// The page has put a chapter on screen: a `CustomEvent` whose `detail` is
-/// `{ bookId, chapter }`.
+/// The reader has put a chapter on screen: a `CustomEvent` whose `detail`
+/// is `{ bookId, chapter }`.
 pub const PICKER_CURRENT_EVENT: &str = "gospel-getter:picker-current";
 
 #[derive(Debug, Deserialize)]
@@ -925,6 +933,18 @@ pub const PICKER_CURRENT_EVENT: &str = "gospel-getter:picker-current";
 struct PickerCurrent {
     book_id: i64,
     chapter: i64,
+}
+
+/// Says [`PICKER_CURRENT_EVENT`] (the reader, of the chapter it has put on
+/// screen).
+pub fn show_picker_current(book_id: i64, chapter: i64) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Current {
+        book_id: i64,
+        chapter: i64,
+    }
+    dispatch(PICKER_CURRENT_EVENT, &Current { book_id, chapter });
 }
 
 /// The book id and chapter a [`PICKER_CURRENT_EVENT`] carries.
@@ -935,3 +955,140 @@ pub fn picker_current(event: &CustomEvent) -> Result<(i64, i64), JsValue> {
 /// `surfaces` has shown the picker (it was hidden): a `CustomEvent`,
 /// no `detail`.
 pub const PICKER_SHOWN_EVENT: &str = "gospel-getter:picker-shown";
+
+/// The page asks the reader: a cancelable `CustomEvent` whose `detail` is
+/// `{ action, ... }` (`reader::Request`). The reader cancels it to say it
+/// has it, and sets `detail.done` ([`reader_done`]).
+pub const READER_EVENT: &str = "gospel-getter:reader";
+
+/// Answers a [`READER_EVENT`]: `detail.done = done`, a promise of whether a
+/// chapter was put on screen.
+pub fn reader_done(event: &CustomEvent, done: &js_sys::Promise) {
+    let _ = js_sys::Reflect::set(&event.detail(), &JsValue::from_str("done"), done);
+}
+
+/// The reader has asked for a chapter: a `CustomEvent`, no `detail`. The
+/// page drops the selection at once.
+pub const CHAPTER_LOADING_EVENT: &str = "gospel-getter:chapter-loading";
+
+/// Says [`CHAPTER_LOADING_EVENT`]; the page has dropped the selection when
+/// this returns.
+pub fn chapter_loading() {
+    if let (Some(document), Ok(event)) = (document(), CustomEvent::new(CHAPTER_LOADING_EVENT)) {
+        let _ = document.dispatch_event(&event);
+    }
+}
+
+/// The reader has drawn a chapter: a `CustomEvent` whose `detail` is a
+/// [`ChapterShown`].
+pub const CHAPTER_SHOWN_EVENT: &str = "gospel-getter:chapter-shown";
+
+/// What the page's selection card, copying, verse marks and keys need of
+/// the chapter on screen, as its `reading`, `lastDto` and `lastCompare`
+/// gave it: `{ bookId, bookName, chapter, translationCode, columns,
+/// currentVerses, compareFirst }`.
+pub struct ChapterShown<'a> {
+    pub book_id: i64,
+    pub book_name: &'a str,
+    pub chapter: i64,
+    /// The translation being read (the left column while comparing).
+    pub translation_code: &'a str,
+    /// Each column on screen, by translation: `{ [code]: { verses } }`,
+    /// the verses as the backend sent them (`text`, `parts`, `footnotes`;
+    /// the only source of verse text for anything acting on a selection).
+    pub columns: Vec<(&'a str, &'a JsValue)>,
+    /// `get_reading`'s verses as it sent them, with their
+    /// cross-references (the same in every column).
+    pub current_verses: &'a JsValue,
+    /// The first column of the last comparison fetched, if any: the
+    /// translation a cross-reference preview reads while comparing.
+    pub compare_first: Option<&'a str>,
+}
+
+/// Says [`CHAPTER_SHOWN_EVENT`]; the page has done its part when this
+/// returns.
+pub fn chapter_shown(shown: &ChapterShown<'_>) {
+    let set = |target: &js_sys::Object, key: &str, value: &JsValue| {
+        let _ = js_sys::Reflect::set(target, &JsValue::from_str(key), value);
+    };
+    let columns = js_sys::Object::new();
+    for (code, verses) in &shown.columns {
+        let column = js_sys::Object::new();
+        set(&column, "verses", verses);
+        set(&columns, code, &column);
+    }
+    let detail = js_sys::Object::new();
+    set(&detail, "bookId", &JsValue::from_f64(shown.book_id as f64));
+    set(&detail, "bookName", &JsValue::from_str(shown.book_name));
+    set(&detail, "chapter", &JsValue::from_f64(shown.chapter as f64));
+    set(
+        &detail,
+        "translationCode",
+        &JsValue::from_str(shown.translation_code),
+    );
+    set(&detail, "columns", &columns);
+    set(&detail, "currentVerses", shown.current_verses);
+    set(
+        &detail,
+        "compareFirst",
+        &shown.compare_first.map_or(JsValue::NULL, JsValue::from_str),
+    );
+    dispatch_object(CHAPTER_SHOWN_EVENT, &detail);
+}
+
+/// The reader has opened a passage whose verses are numbered: a
+/// `CustomEvent` whose `detail` is `{ translationCode, start, end }`. The
+/// page selects them and answers within the event in `detail.selection`.
+pub const CHAPTER_SELECT_EVENT: &str = "gospel-getter:chapter-select";
+
+/// Says [`CHAPTER_SELECT_EVENT`]: the page's selection once it has
+/// selected them (its first and last verse), if it has one.
+pub fn chapter_select(translation_code: &str, start: i64, end: i64) -> Option<(i64, i64)> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Select<'a> {
+        translation_code: &'a str,
+        start: i64,
+        end: i64,
+    }
+    #[derive(Deserialize)]
+    struct Selected {
+        start: i64,
+        end: i64,
+    }
+    let detail = ipc::args(&Select {
+        translation_code,
+        start,
+        end,
+    })
+    .ok()?;
+    dispatch_object(CHAPTER_SELECT_EVENT, &detail);
+    let selection = js_sys::Reflect::get(&detail, &JsValue::from_str("selection")).ok()?;
+    if selection.is_null() || selection.is_undefined() {
+        return None;
+    }
+    serde_wasm_bindgen::from_value::<Selected>(selection)
+        .ok()
+        .map(|s| (s.start, s.end))
+}
+
+/// The page's selection card asks for markup: a `CustomEvent` whose
+/// `detail` is `{ verses }` or `{ footnotes }`; answered within the event
+/// ([`markup_answer`]).
+pub const VERSE_MARKUP_EVENT: &str = "gospel-getter:verse-markup";
+
+/// Answers a [`VERSE_MARKUP_EVENT`]: `detail.html = html`.
+pub fn markup_answer(event: &CustomEvent, html: &js_sys::Array) {
+    let _ = js_sys::Reflect::set(&event.detail(), &JsValue::from_str("html"), html);
+}
+
+/// A note's passage is open: a `CustomEvent` whose `detail` is `{ note }`;
+/// the page opens the note editor on it.
+pub const NOTE_EDIT_EVENT: &str = "gospel-getter:edit-note";
+
+/// Says [`NOTE_EDIT_EVENT`].
+pub fn edit_note(note: &JsValue) {
+    let detail = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("note"), note);
+    dispatch_object(NOTE_EDIT_EVENT, &detail);
+}

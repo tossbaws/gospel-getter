@@ -16,7 +16,12 @@
 //! `Span` (`release_notes.rs`); for the Library, `BookmarkDto`,
 //! `HighlightPassageDto` and `NoteDto` (`commands.rs`, of which these read
 //! only what the lists show); for search, `SearchDto`, `SearchResultDto`
-//! and `GoToDto` (`commands.rs`).
+//! and `GoToDto` (`commands.rs`); for the reader, `HomeDto`'s translations
+//! and position, `TranslationDto`, `ReadingPaneDto`, `VerseDto` and
+//! `SimpleVerseDto`, `XrefDto`, `ChapterSideDto`, `BibleEdgeDto`,
+//! `BookStartDto`, `CompareDto` and `CompareColumnDto` (`commands.rs`). A
+//! verse's parts and footnotes are already shared with the backend
+//! (`verse_parts`).
 
 use serde::{Deserialize, Serialize};
 
@@ -439,4 +444,154 @@ pub struct SearchVerse {
     /// The words the search matched: byte ranges of `text`.
     #[serde(default)]
     pub marks: Vec<(usize, usize)>,
+}
+
+// ---- The reader.
+
+/// What the reader takes from `get_home`'s answer (`commands::HomeDto`):
+/// the translations and where the reader was.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Home {
+    pub translations: Vec<Translation>,
+    pub current_translation_code: String,
+    pub current_book_id: i64,
+    pub current_chapter: i64,
+}
+
+/// A bundled translation (`commands::TranslationDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Translation {
+    pub code: String,
+    pub name: String,
+    /// When it was made ("1611/1769"), if there's one date.
+    #[serde(default)]
+    pub date: Option<String>,
+    pub licence: String,
+    /// Its line in About's credits.
+    pub credit: String,
+}
+
+/// A cross-reference (`commands::XrefDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Xref {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse: i64,
+    #[serde(default)]
+    pub end_verse: Option<i64>,
+    pub citation: String,
+}
+
+/// A verse as shown (`commands::VerseDto`, or `SimpleVerseDto`, which has
+/// no cross-references).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Verse {
+    pub number: i64,
+    /// Its plain text, for anything without parts.
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub parts: Option<Vec<crate::verse_parts::Part>>,
+    #[serde(default)]
+    pub footnotes: Vec<crate::verse_parts::Footnote>,
+    #[serde(default)]
+    pub xrefs: Vec<Xref>,
+}
+
+/// A neighboring chapter, shown faded (`commands::ChapterSideDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSide {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub book_name: String,
+    pub verses: Vec<Verse>,
+}
+
+/// The quiet card in a neighbor's place at the Bible's edges
+/// (`commands::BibleEdgeDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Edge {
+    pub title: String,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+/// A book's first chapter, named (`commands::BookStartDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookStart {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub book_name: String,
+}
+
+/// `get_reading`'s answer (`commands::ReadingPaneDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reading {
+    pub current_book_id: i64,
+    pub current_chapter: i64,
+    pub current_book_name: String,
+    pub current_verses: Vec<Verse>,
+    #[serde(default)]
+    pub prev: Option<ChapterSide>,
+    #[serde(default)]
+    pub next: Option<ChapterSide>,
+    #[serde(default)]
+    pub prev_edge: Option<Edge>,
+    #[serde(default)]
+    pub next_edge: Option<Edge>,
+    #[serde(default)]
+    pub prev_book: Option<BookStart>,
+    #[serde(default)]
+    pub next_book: Option<BookStart>,
+    #[serde(default)]
+    pub has_chapter_xrefs: bool,
+}
+
+/// `get_reading`'s arguments.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingArgs<'a> {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub translation_code: &'a str,
+}
+
+/// One translation's column (`commands::CompareColumnDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CompareColumn {
+    pub code: String,
+    pub name: String,
+    pub verses: Vec<Verse>,
+}
+
+/// `get_compare`'s answer (`commands::CompareDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Compare {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub columns: Vec<CompareColumn>,
+}
+
+/// `get_compare`'s arguments.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareArgs<'a> {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub translation_codes: &'a [String],
+}
+
+/// `save_reading_position`'s arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Position {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub translation_code: String,
 }

@@ -129,7 +129,7 @@ impl Welcome {
     /// Start here: closes the card, then opens the chapter from the top.
     fn start(self, row: &StartRow) {
         self.close();
-        bridge::jump(row.book_id, row.chapter, true);
+        crate::reader::jump(row.book_id, row.chapter, true);
     }
 
     fn on_keydown(self, event: KeyboardEvent) {

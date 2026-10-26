@@ -83,10 +83,11 @@ mod tests {
     }
 
     /// The page's two anchors name these keys, and show these URLs as their
-    /// `href`s, so what a link reads as is what it opens.
+    /// `href`s, so what a link reads as is what it opens. The reader (the
+    /// page's Rust pieces) draws them.
     #[test]
     fn the_page_shows_the_urls_it_opens() {
-        let page = include_str!("../../ui/index.html");
+        let page = include_str!("../../ui-leptos/src/reader_text.rs");
         for (key, url) in CREDIT_LINKS {
             let anchor = format!("<a class=\"credit-link\" data-link=\"{key}\" href=\"{url}\">");
             assert!(page.contains(&anchor), "{anchor}");

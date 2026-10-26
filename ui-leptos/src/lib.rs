@@ -11,17 +11,19 @@
 //! (`picker`); and Aa with the translation button's popover (`aa`), which
 //! keep the saved settings (`prefs`, by the one table in `preferences`);
 //! and the header's popovers and panels themselves, with the picker's two
-//! shapes (`surfaces`), which open and close all of these. The page talks
-//! to them only as `bridge` says.
+//! shapes (`surfaces`), which open and close all of these; and the reader
+//! (`reader`, with its markup and rules in `reader_text`): the chapter on
+//! screen, how it gets there, and the passage history. The page talks to
+//! them only as `bridge` says.
 //!
-//! If this module fails to load, the Bible text still shows, in the saved
-//! look (the page's pre-paint script applies it), and the page reads on;
-//! but the five dialogs, About, the Library, search, Aa, the translations,
-//! the ☰ menu and the picker say they are unavailable when asked for (see
+//! If this module fails to load, the chapter still shows, as plain text, in
+//! the saved look (the page's small fallback reads it, and its pre-paint
+//! script applies the look), with a line saying the rest of the reader
+//! isn't available: nothing in it can be selected, turned or changed. The
+//! five dialogs, About, the Library, search, Aa, the translations, the ☰
+//! menu and the picker say they are unavailable when asked for (see
 //! `bridge`), nothing opens, no setting can be changed (reading mode can't
-//! be left: its button and Escape say so), no
-//! update is offered, and no bookmark is marked in the reader (the Library
-//! loads them).
+//! be left: its button and Escape say so), and no update is offered.
 
 mod aa;
 mod aa_text;
@@ -46,6 +48,8 @@ mod picker_text;
 #[path = "../../shared/preferences.rs"]
 pub mod preferences;
 mod prefs;
+mod reader;
+mod reader_text;
 mod search;
 mod search_text;
 mod shortcut_table;
@@ -55,6 +59,10 @@ mod surfaces_text;
 mod text;
 mod update_text;
 mod updates;
+// A verse's parts and footnotes, shared with the backend, which compiles the
+// same file.
+#[path = "../../shared/verse_parts.rs"]
+pub mod verse_parts;
 mod welcome;
 
 use wasm_bindgen::prelude::*;
@@ -103,6 +111,9 @@ pub fn start() {
     search::mount();
     // The picker's books and chapters go inside the page's picker.
     picker::mount();
+    // The reader: the chapter on screen, how it gets there, and the passage
+    // history.
+    reader::mount();
     // Everything is listening: the page may send again what it asked
     // before the module had loaded.
     bridge::ready();
