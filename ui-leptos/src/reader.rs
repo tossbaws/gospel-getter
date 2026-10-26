@@ -83,6 +83,8 @@ struct State {
     waiting: Option<Position>,
     /// The chapter Try again reads again.
     retry: Option<(i64, i64)>,
+    /// Each bundled translation's credit, from boot, for About.
+    credits: Vec<String>,
     history: History,
 }
 
@@ -259,18 +261,23 @@ fn show_translations(home: &Home) {
         ));
     }
     show_translation();
-    let credits: Vec<&str> = home
-        .translations
-        .iter()
-        .map(|t| t.credit.as_str())
-        .collect();
-    bridge::dispatch(bridge::ABOUT_CREDITS_EVENT, &Credits { credits });
+    let credits: Vec<String> = home.translations.iter().map(|t| t.credit.clone()).collect();
+    send_credits(&credits);
+    with(|s| s.credits = credits);
+}
+
+/// About's credits, to About (which may not be there yet: they go again
+/// once every piece is, `bridge::READY_EVENT`).
+fn send_credits(credits: &[String]) {
+    if !credits.is_empty() {
+        bridge::dispatch(bridge::ABOUT_CREDITS_EVENT, &Credits { credits });
+    }
 }
 
 /// About's credits, each bundled text's, in order.
 #[derive(Serialize)]
 struct Credits<'a> {
-    credits: Vec<&'a str>,
+    credits: &'a [String],
 }
 
 // ---- Putting a chapter on screen.
@@ -401,6 +408,12 @@ fn load_compare(book_id: i64, chapter: i64) -> js_sys::Promise {
 /// chapter the Bible doesn't have changes nothing; one that couldn't be
 /// read says so, unless a newer load has begun since.
 fn load_reading(book_id: i64, chapter: i64) -> Load {
+    load_sent(book_id, chapter, None)
+}
+
+/// [`load_reading`], with its `get_reading` already sent, if `sent` is (boot
+/// asks for its chapter before this module has loaded).
+fn load_sent(book_id: i64, chapter: i64, sent: Option<js_sys::Promise>) -> Load {
     let token = with(|s| {
         s.load_token += 1;
         s.load_token
@@ -408,12 +421,15 @@ fn load_reading(book_id: i64, chapter: i64) -> Load {
     bridge::chapter_loading();
     let translation_code = bridge::translation_code();
     let layout = compare_layout();
-    let reading = ipc::args(&ReadingArgs {
-        book_id,
-        chapter,
-        translation_code: &translation_code,
-    })
-    .and_then(|args| ipc::send("get_reading", args));
+    let reading = match sent {
+        Some(sent) => Ok(sent),
+        None => ipc::args(&ReadingArgs {
+            book_id,
+            chapter,
+            translation_code: &translation_code,
+        })
+        .and_then(|args| ipc::send("get_reading", args)),
+    };
     let compare = is_comparing().then(|| load_compare(book_id, chapter));
     Box::pin(async move {
         let answer = match reading {
@@ -799,7 +815,9 @@ pub fn palette_facts(state: &mut PaletteState) {
 )]
 enum Request {
     /// Boot's: the translations and the chapter the reader was on, then
-    /// the history from there.
+    /// the history from there. The chapter's `get_reading` may already be
+    /// on its way (`detail.reading`, boot's, sent with `get_home`'s answer;
+    /// `null` while comparing).
     Start { home: Home },
     /// A chapter, not a jump (← and →, an import's position): in
     /// `translation_code`, if given; from the top, with `top`.
@@ -839,18 +857,24 @@ fn on_request(event: CustomEvent) {
         }
     };
     event.prevent_default();
-    let load = run(request);
+    // Adopted, so any promise will do (one from another realm, say).
+    let sent = js_sys::Reflect::get(&event.detail(), &JsValue::from_str("reading"))
+        .ok()
+        .filter(|reading| !reading.is_null() && !reading.is_undefined())
+        .map(|reading| js_sys::Promise::resolve(&reading));
+    let load = run(request, sent);
     let done =
         wasm_bindgen_futures::future_to_promise(async move { Ok(JsValue::from_bool(load.await)) });
     bridge::reader_done(&event, &done);
 }
 
-/// Starts what `request` asks for, now; its end is the load's.
-fn run(request: Request) -> Load {
+/// Starts what `request` asks for, now; its end is the load's. `sent` is
+/// boot's `get_reading`, already on its way.
+fn run(request: Request, sent: Option<js_sys::Promise>) -> Load {
     match request {
         Request::Start { home } => {
             show_translations(&home);
-            let load = load_reading(home.current_book_id, home.current_chapter);
+            let load = load_sent(home.current_book_id, home.current_chapter, sent);
             Box::pin(async move {
                 let loaded = load.await;
                 if with(|s| s.reading.is_some()) {
@@ -1050,11 +1074,19 @@ struct CreditArgs<'a> {
 
 /// Listens for the page's requests and the markup it asks for, Compare's
 /// changes, clicks on the pane's controls and on Try again, and the mouse's
-/// back and forward buttons.
+/// back and forward buttons; then tells the page it's there
+/// (`bridge::READER_READY_EVENT`), so boot's chapter needn't wait for the
+/// other pieces to mount. Called right after Aa's (whose records it fills).
 pub fn mount() {
     let Some(document) = bridge::document() else {
         return;
     };
+    // About is mounted after this: it gets its credits again once every
+    // piece is.
+    dom::on_document_event(bridge::READY_EVENT, |_| {
+        let credits = with(|s| s.credits.clone());
+        send_credits(&credits);
+    });
     dom::on_document_event(bridge::READER_EVENT, on_request);
     dom::on_document_event(bridge::VERSE_MARKUP_EVENT, on_markup);
     dom::on_document_event(aa::COMPARE_CHANGE_EVENT, |_| on_compare_change());
@@ -1092,4 +1124,5 @@ pub fn mount() {
             spawn(go_history(step));
         });
     }
+    bridge::reader_ready();
 }

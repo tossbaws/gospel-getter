@@ -50,8 +50,10 @@
 //! - [`READER_EVENT`] (`gospel-getter:reader`): the one way the page asks
 //!   the reader (`reader`) for anything, `{ action, ... }`: `start` (boot's,
 //!   with `home`, `get_home`'s answer: the translations, then the chapter
-//!   the reader was on, then the history from there; asked again on
-//!   [`READY_EVENT`] if nobody answered), `load` (`{ bookId, chapter,
+//!   the reader was on, then the history from there, and `reading`, that
+//!   chapter's `get_reading` already sent by boot, a promise, or `null`
+//!   while comparing; asked again on [`READER_READY_EVENT`] if nobody
+//!   answered), `load` (`{ bookId, chapter,
 //!   translationCode, top }`: ← and →, by `#reading-pane-inner`'s
 //!   `data-prev-*` and `data-next-*`, and an import's position), `book`
 //!   (`{ which }`, `prev` or `next`: `[` and `]`), `translation`
@@ -84,6 +86,9 @@
 //!   about to open on its own (the welcome at startup, the import preview
 //!   once a file is chosen): popovers and panels go, and the search box
 //!   with `closeSearch`.
+//! - [`READER_READY_EVENT`] (`gospel-getter:reader-ready`): the reader has
+//!   loaded and listens, before the other pieces mount, so boot's chapter
+//!   needn't wait for them.
 //! - [`CHAPTER_LOADING_EVENT`] (`gospel-getter:chapter-loading`): no
 //!   `detail`, the reader has asked for a chapter: the page drops the verse
 //!   selection at once, so nothing acts on it meanwhile.
@@ -107,7 +112,8 @@
 //!   chapter on screen: the picker marks it and shows its book's chapters.
 //! - [`ABOUT_CREDITS_EVENT`] (`gospel-getter:about-credits`): `{ credits }`,
 //!   each bundled translation's credit for About, sent within this crate by
-//!   the reader from boot's answer.
+//!   the reader from boot's answer, and again on [`READY_EVENT`] (About
+//!   mounts after the reader).
 //! - [`DATA_BUSY_EVENT`] (`gospel-getter:data-busy`): `{ busy }`, the ☰
 //!   Export and Import items disabled while an import runs.
 //! - [`IMPORTED_EVENT`] (`gospel-getter:imported`): `{ position, message }`
@@ -970,6 +976,17 @@ pub fn reader_done(event: &CustomEvent, done: &js_sys::Promise) {
 /// The reader has asked for a chapter: a `CustomEvent`, no `detail`. The
 /// page drops the selection at once.
 pub const CHAPTER_LOADING_EVENT: &str = "gospel-getter:chapter-loading";
+
+/// The reader has loaded and listens: a `CustomEvent`, no `detail`, before
+/// the other pieces have mounted. A boot that beat it asks again then.
+pub const READER_READY_EVENT: &str = "gospel-getter:reader-ready";
+
+/// Says [`READER_READY_EVENT`].
+pub fn reader_ready() {
+    if let (Some(document), Ok(event)) = (document(), CustomEvent::new(READER_READY_EVENT)) {
+        let _ = document.dispatch_event(&event);
+    }
+}
 
 /// Says [`CHAPTER_LOADING_EVENT`]; the page has dropped the selection when
 /// this returns.

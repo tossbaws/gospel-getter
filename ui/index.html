@@ -5616,15 +5616,28 @@
             }
 
             // Boot's: the translations, the chapter the reader was on, and
-            // the history from there. Boot can get this far before the Rust
-            // pieces have loaded; it then asks once they say they're ready.
+            // the history from there. The chapter is asked for here, with
+            // get_home's answer, as boot always did (in the translation the
+            // translation button's record will have selected), so it's on its
+            // way while the Rust pieces load; the reader takes it from there.
+            // While comparing, the reader asks for all of it itself (Compare's
+            // partner goes by the translations it records). Boot can get this
+            // far before the reader has loaded; it then asks once the reader
+            // says it's there.
             function startReader(home) {
-                const asked = askReader({ action: 'start', home });
+                const code = home.translations.some((t) => t.code === home.currentTranslationCode)
+                    ? home.currentTranslationCode
+                    : (home.translations.length ? home.translations[0].code : '');
+                const reading = isComparing()
+                    ? null
+                    : invoke('get_reading', { bookId: home.currentBookId, chapter: home.currentChapter, translationCode: code });
+                // A failure is the reader's to say, once it's there.
+                if (reading) reading.catch(() => {});
+                const ask = () => askReader({ action: 'start', home, reading });
+                const asked = ask();
                 if (asked) return asked;
                 return new Promise((resolve) => {
-                    document.addEventListener('gospel-getter:pieces-ready', () => {
-                        resolve(askReader({ action: 'start', home }));
-                    }, { once: true });
+                    document.addEventListener('gospel-getter:reader-ready', () => resolve(ask()), { once: true });
                 });
             }
 

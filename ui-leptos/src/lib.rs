@@ -77,6 +77,9 @@ pub fn start() {
     // Aa and the saved settings next: their records (the `<select>`s) are
     // filled before any piece reads them.
     aa::mount();
+    // The reader, before the rest: boot's chapter is on its way, and needn't
+    // wait for every other piece to mount (it's drawn once they have).
+    reader::mount();
     // The table of shortcuts, where the page had it.
     bridge::export_shortcuts();
     let Some(body) = web_sys::window()
@@ -111,9 +114,6 @@ pub fn start() {
     search::mount();
     // The picker's books and chapters go inside the page's picker.
     picker::mount();
-    // The reader: the chapter on screen, how it gets there, and the passage
-    // history.
-    reader::mount();
     // Everything is listening: the page may send again what it asked
     // before the module had loaded.
     bridge::ready();
