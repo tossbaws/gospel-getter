@@ -13,7 +13,8 @@
 //! and widened again changes the picker's shape (sidebar to popover and
 //! back) and keeps the reading place, also as it widens with the popover
 //! open (36), and also when the page was scrolled just before, with no
-//! animation frame between the scroll and the crossing (37, #121's D14).
+//! animation frame between the scroll and the crossing (37, #121's D14),
+//! the scroll's own events coming after the crossing's resize (gg-race-37).
 //! Screenshots of the ☰ menu and
 //! of the picker's popover on a narrow window, in Chi Rho here and in
 //! Vellum with check 4's.
@@ -40,28 +41,55 @@ pub(super) const SURFACES_SHOTS: [&str; 4] = [
 const NARROW_WIDTH: u32 = 1000;
 
 /// Check 37's crossings: where the page is scrolled to, then the width the
-/// window crosses 1200 px to, with no animation frame between the two.
-/// Each starts from the place the one before left painted.
+/// window crosses 1200 px to, with no animation frame between the two and
+/// the scroll's events after the resize's. Each starts from the place the
+/// one before left painted.
 const SCROLL_THEN_CROSS: [(u32, u32); 4] = [(3000, 1000), (4200, 1280), (2000, 1000), (5100, 1280)];
 
 /// Holds the page's animation frames (its `requestAnimationFrame`
 /// callbacks, the page's and the Rust pieces' alike, wait in a queue) and
 /// scrolls to `arguments[0]`, so to the page the scroll and what comes
 /// next share a frame; then the reading place, as [`PLACE_JS`] finds it.
-/// The page lets them go itself after 10 s, whatever becomes of the check
-/// (a step timed out, WebDriver gone), and [`RELEASE_FRAMES_JS`] says so.
-/// Prepended to [`PLACE_JS`].
+/// The scroll's `scroll` and `scrollend` events are held too, from the
+/// page's listeners, until the window's next resize's listeners (the
+/// page's) have run, and then fired: the order a browser fires them in
+/// when no frame runs between the scroll and the resize (a frame fires its
+/// resize events before its scroll events), which WebView2 does only now
+/// and then (dist run 40366658096) and headless Chromium every time.
+/// The page lets them all go itself after 10 s, whatever becomes of the
+/// check (a step timed out, WebDriver gone), and [`RELEASE_FRAMES_JS`] says
+/// so. Prepended to [`PLACE_JS`].
 const HOLD_AND_SCROLL_JS: &str = "if (!window.__guiCheckFrames) {
         const original = window.requestAnimationFrame;
         const real = original.bind(window);
-        const frames = { original, real, holding: false, held: [], timer: 0, gaveUp: false };
+        const frames = { original, real, holding: false, held: [], timer: 0, gaveUp: false,
+            scrolls: { holding: false, held: [] } };
+        // The held scroll events, fired as the page's own would be (at the
+        // document, bubbling to the window).
+        frames.deliver = (why) => {
+            frames.scrolls.holding = false;
+            const types = frames.scrolls.held.splice(0);
+            if (types.length && window.__guiCheckSeen) window.__guiCheckSeen.log.push(`${why}: ${types.join(', ')}`);
+            for (const type of types) document.dispatchEvent(new Event(type, { bubbles: true }));
+        };
         frames.release = () => {
             clearTimeout(frames.timer);
             frames.holding = false;
+            frames.deliver('scroll events let go');
             const held = frames.held.splice(0);
             for (const callback of held) real(callback);
             return held.length;
         };
+        // Capturing at the window: before the page's own listeners.
+        frames.hold = (event) => {
+            if (!frames.scrolls.holding || !event.isTrusted) return;
+            event.stopImmediatePropagation();
+            if (!frames.scrolls.held.includes(event.type)) frames.scrolls.held.push(event.type);
+        };
+        // Added after the page's resize listener, so it runs after it.
+        frames.resized = () => frames.deliver('after the resize, the scroll events held');
+        for (const type of ['scroll', 'scrollend']) window.addEventListener(type, frames.hold, { capture: true });
+        window.addEventListener('resize', frames.resized);
         window.__guiCheckFrames = frames;
         window.requestAnimationFrame = (callback) => {
             if (!frames.holding) return real(callback);
@@ -73,26 +101,33 @@ const HOLD_AND_SCROLL_JS: &str = "if (!window.__guiCheckFrames) {
     frames.release();
     frames.gaveUp = false;
     frames.holding = true;
+    frames.scrolls.holding = true;
     frames.timer = setTimeout(() => { frames.gaveUp = true; frames.release(); }, 10000);
-    if (window.__guiCheckSeen) window.__guiCheckSeen.log.push('frames held');
+    if (window.__guiCheckSeen) window.__guiCheckSeen.log.push('frames and scroll events held');
     window.scrollTo(0, arguments[0]);";
 
 /// Lets the page's animation frames run again: the ones held run in the
-/// next frame. With `arguments[0]`, the page's own `requestAnimationFrame`
-/// is put back too. Returns how many were held, and whether the page had
-/// already let them go (after 10 s).
+/// next frame (and any scroll events still held fire now). With
+/// `arguments[0]`, the page's own `requestAnimationFrame` is put back too,
+/// and the scroll events are no longer watched. Returns how many frame
+/// callbacks were held, and whether the page had already let them go
+/// (after 10 s).
 const RELEASE_FRAMES_JS: &str = "const frames = window.__guiCheckFrames;
     if (!frames) return { held: 0, gaveUp: false };
     const said = { held: frames.release(), gaveUp: frames.gaveUp };
     if (arguments[0]) {
         window.requestAnimationFrame = frames.original;
+        for (const type of ['scroll', 'scrollend']) window.removeEventListener(type, frames.hold, { capture: true });
+        window.removeEventListener('resize', frames.resized);
         delete window.__guiCheckFrames;
     }
     return said;";
 
 /// Check 37's record of what the page saw, for its failure message: each
-/// `scroll`, `resize` and width media query change (its listeners run
-/// after the app's), and each `window.scrollBy`/`scrollTo` call, with the
+/// `scroll`, `scrollend`, `resize` and width media query change (its
+/// listeners run after the app's), the scroll events [`HOLD_AND_SCROLL_JS`]
+/// held and when it fired them, and each `window.scrollBy`/`scrollTo` call,
+/// with the
 /// scroll position, `<html>`'s inline `overflow-anchor` and the reading
 /// place there (`verse@top`). With `arguments[0]` false, stops recording.
 const WATCH_JS: &str = "const old = window.__guiCheckSeen;
@@ -111,10 +146,12 @@ const WATCH_JS: &str = "const old = window.__guiCheckSeen;
     const note = (what) => seen.log.push(`${what}: scrollY ${Math.round(window.scrollY * 10) / 10}, `
         + `${window.innerWidth} px, anchor ${document.documentElement.style.overflowAnchor || 'auto'}, ${place()}`);
     const onScroll = () => note('scroll');
+    const onScrollEnd = () => note('scrollend');
     const onResize = () => note('resize');
     const onChange = (e) => note(`media query ${e.matches ? 'wide' : 'narrow'}`);
     const wide = window.matchMedia('(min-width: 1200px)');
     window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scrollend', onScrollEnd);
     window.addEventListener('resize', onResize);
     wide.addEventListener('change', onChange);
     const wrapped = {};
@@ -128,6 +165,7 @@ const WATCH_JS: &str = "const old = window.__guiCheckSeen;
     }
     seen.stop = () => {
         window.removeEventListener('scroll', onScroll);
+        window.removeEventListener('scrollend', onScrollEnd);
         window.removeEventListener('resize', onResize);
         wide.removeEventListener('change', onChange);
         for (const name of Object.keys(wrapped)) window[name] = wrapped[name];
@@ -845,7 +883,10 @@ impl Run<'_> {
 
     /// Check 37: the page scrolled and the window crossing 1200 px with no
     /// animation frame between them (#121's D14: the place the page noted
-    /// in the frame before the scroll is out of date by then). The reading
+    /// in the frame before the scroll is out of date by then), the scroll's
+    /// events coming after the resize's, as they do then (gg-race-37: the
+    /// scroll position the page saw before the resize is out of date too,
+    /// and in WebView2 its anchoring has already scrolled). The reading
     /// place found just after the scroll is kept, on every platform, within
     /// a line as check 36's.
     pub(super) async fn scroll_then_resize(&mut self) -> Result<String> {
@@ -967,7 +1008,8 @@ impl Run<'_> {
             let shift = Self::same_place(&before, &after)
                 .map_err(|e| e.context(format!("scrolled to {y}, then {width} px; {}", steps())))?;
             said.push(format!(
-                "scrollY {y}, then {width} px with no frame between ({held} frame callbacks held): verse {} \
+                "scrollY {y}, then {width} px with no frame between ({held} frame callbacks held), its \
+                 scroll events after the resize's: verse {} \
                  at {} px, then verse {} at {} px, scrollY {} (moved {shift:.1} px)",
                 before["verse"], before["top"], after["verse"], after["top"], after["scrollY"]
             ));
