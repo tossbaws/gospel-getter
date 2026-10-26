@@ -4339,6 +4339,13 @@
                 // chapter being read, or a gap in compare's columns.
                 var PLACE_MARKS = '.chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap';
 
+                // Every heading and verse of the reading row, the faded
+                // chapters' beside it too, in page order: what Chromium's
+                // scroll anchoring keeps in place (scrollBeforeAnchoring).
+                var ROW_MARKS = '.reading-row .chapter-heading, .reading-row .chapter-heading-link, '
+                    + '.reading-row .edge-card-title, .reading-row .edge-card-detail, '
+                    + '.reading-row .verse[data-verse], .reading-row .compare-gap';
+
                 // The reader's place: the first heading or verse of the
                 // chapter being read that reaches below the bar, and where
                 // it is on screen.
@@ -4354,7 +4361,8 @@
 
                 // The page as last painted: where each mark readingPlace
                 // looks at is in the page (scrolling doesn't move it there),
-                // and where the bar ends on screen. Noted in the animation
+                // the same for the reading row's marks (ROW_MARKS), and
+                // where the bar ends on screen. Noted in the animation
                 // frame after anything that can move them. By then that
                 // frame's resize and media query listeners have run, so
                 // onShapeChange still finds the layout from before the
@@ -4367,13 +4375,20 @@
                     window.requestAnimationFrame(function () {
                         layoutPending = false;
                         var y = window.scrollY;
-                        var marks = document.querySelectorAll(PLACE_MARKS);
-                        var at = [];
-                        for (var i = 0; i < marks.length; i++) {
-                            var rect = marks[i].getBoundingClientRect();
-                            at.push({ mark: marks[i], top: rect.top + y, bottom: rect.bottom + y });
-                        }
-                        paintedLayout = { barBottom: byId('top-bar').getBoundingClientRect().bottom, marks: at };
+                        var inPage = function (selector) {
+                            var marks = document.querySelectorAll(selector);
+                            var at = [];
+                            for (var i = 0; i < marks.length; i++) {
+                                var rect = marks[i].getBoundingClientRect();
+                                at.push({ mark: marks[i], top: rect.top + y, bottom: rect.bottom + y });
+                            }
+                            return at;
+                        };
+                        paintedLayout = {
+                            barBottom: byId('top-bar').getBoundingClientRect().bottom,
+                            marks: inPage(PLACE_MARKS),
+                            row: inPage(ROW_MARKS),
+                        };
                     });
                 }
 
@@ -4391,6 +4406,37 @@
                     return null;
                 }
 
+                // The scroll position the page had before Chromium's scroll
+                // anchoring scrolled it for a resize, found from where its
+                // anchor is now. Chromium keeps the first heading or verse
+                // of the reading row that reaches below the bar (its scroll
+                // padding) where it was on screen: the faded chapter beside
+                // first, as it comes first in the page. So it's the position
+                // at which the first of the painted row's marks on screen
+                // now, scrolled back to where it was, is the first to reach
+                // below the bar. Chromium scrolls by whole pixels, so that
+                // can be half a pixel off. Null with no layout painted, or
+                // no mark that is.
+                function scrollBeforeAnchoring() {
+                    if (!paintedLayout) return null;
+                    var row = paintedLayout.row;
+                    var barBottom = paintedLayout.barBottom;
+                    var firstAt = function (y) {
+                        for (var i = 0; i < row.length; i++) {
+                            if (row[i].bottom - y > barBottom) return i;
+                        }
+                        return -1;
+                    };
+                    for (var i = 0; i < row.length; i++) {
+                        if (!row[i].mark.isConnected) continue;
+                        var rect = row[i].mark.getBoundingClientRect();
+                        if (rect.bottom <= barBottom || rect.top >= window.innerHeight) continue;
+                        var y = row[i].top - rect.top;
+                        if (firstAt(y) === i || firstAt(y - 0.5) === i || firstAt(y + 0.5) === i) return y;
+                    }
+                    return null;
+                }
+
                 // Whether the browser scrolls to keep a place of its own when
                 // the window is resized: Chromium's scroll anchoring does
                 // (WebView2, on Windows); WebKitGTK's doesn't. Both say they
@@ -4403,15 +4449,24 @@
                 // The scroll position the page's last scroll event found, and
                 // what it was as the last resize's event came, before the
                 // scroll event of anything that scrolled for it
-                // (onShapeChange).
+                // (onShapeChange); and whether a scroll ended (scrollend)
+                // after that resize's event: a scroll with no frame between
+                // it and the resize, whose events come after the resize's,
+                // so scrollBeforeResize is older than the reader's place.
+                // Chromium's anchoring scrolls without one.
                 var scrollSeen = window.scrollY;
                 var scrollBeforeResize = null;
+                var scrolledAfterResize = false;
                 window.addEventListener('scroll', function () {
                     scrollSeen = window.scrollY;
                     notePaintedPlace();
                 }, { passive: true });
+                window.addEventListener('scrollend', function () {
+                    if (scrollBeforeResize != null) scrolledAfterResize = true;
+                }, { passive: true });
                 window.addEventListener('resize', function () {
                     scrollBeforeResize = scrollSeen;
+                    scrolledAfterResize = false;
                     notePaintedPlace();
                 });
                 // A chapter put on screen, or reflowed (text size, fonts).
@@ -4475,12 +4530,28 @@
                 // page's last scroll event found as the resize's event came:
                 // the anchoring's own scroll event comes after it. Measured
                 // now instead, the first verse under the bar would be
-                // wherever Chromium's place left it.
+                // wherever Chromium's place left it. But a scroll with no
+                // frame between it and the resize has its events after the
+                // resize's too (a browser fires a frame's resize events
+                // before its scroll events), so then the position seen is
+                // older than the reader's, and restoring the place there
+                // would take the reader back to it (to the top of the
+                // chapter, after a jump down it). Its scrollend says so
+                // (the anchoring's scroll has none), and the position is
+                // found from the anchoring instead (scrollBeforeAnchoring):
+                // the newest scroll always wins. With no position found,
+                // it's the place found now.
                 function onShapeChange() {
                     var focusWasInside = picker.contains(document.activeElement);
-                    var y = anchorsOnResize && scrollBeforeResize != null ? scrollBeforeResize : window.scrollY;
+                    var place;
+                    if (anchorsOnResize && scrolledAfterResize) {
+                        var before = scrollBeforeAnchoring();
+                        place = before == null ? null : paintedPlaceAt(before);
+                    } else {
+                        place = paintedPlaceAt(anchorsOnResize && scrollBeforeResize != null ? scrollBeforeResize : window.scrollY);
+                    }
                     scrollBeforeResize = null;
-                    var place = paintedPlaceAt(y);
+                    scrolledAfterResize = false;
                     keepReadingPlace(function () {
                         if (current === 'picker') closeSurface(false);
                         syncPicker();
