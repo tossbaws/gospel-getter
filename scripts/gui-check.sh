@@ -24,8 +24,12 @@
 # again and the plain-text fallback) and 46 to 52 (the selection card:
 # verses selected with the mouse, Copy and Copy as… read back from the
 # clipboard, a bookmark, highlights and a note from the card, a
-# cross-reference read in it, the Shift ghost) run on the app given; for 26 and 45 it
-# is closed and started again on the same data. The updater's checks (9 to 13) run on
+# cross-reference read in it, the Shift ghost) and 53 to 57 (the keyboard:
+# chapters and books turned, verses selected with j and k and Shift, Escape,
+# Ctrl+C read back from the clipboard and Ctrl+Shift+C, Alt+← and Alt+→, N;
+# the palette's page commands) run on the app given; for 58 (a cold start to
+# the saved chapter), 26 and 45 it is closed and started again on the same
+# data. The updater's checks (9 to 13) run on
 # GUI_CHECK_UPDATER_APP: the GUI checks' test build (cargo build --release
 # --features gui-test-updater), against the checks' own local update
 # server, with a signing key made for the run; without it they fail as not
@@ -79,7 +83,7 @@
 set -euo pipefail
 
 usage() {
-    sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 if [[ $# -lt 1 || $# -gt 2 || $1 == -h || $1 == --help ]]; then

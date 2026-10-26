@@ -100,6 +100,17 @@ impl Run<'_> {
     /// Clicks verse `number` (a plain click: it's selected, or cleared if it
     /// was the one selected).
     async fn click_verse(&self, number: u32) -> Result<()> {
+        // Into the middle of the window first, as the Shift-click does:
+        // left to the driver, a verse low in the chapter can be brought only
+        // to the window's foot, where the chapter's end can move under the
+        // pointer as the page settles and take the click (its next-chapter
+        // step), which the driver reports as intercepted.
+        self.ui
+            .js(
+                "document.querySelector(arguments[0]).scrollIntoView({ block: 'center' }); return null;",
+                vec![json!(verse(number))],
+            )
+            .await?;
         self.ui
             .click(&format!("click verse {number}"), &verse(number))
             .await
@@ -205,7 +216,7 @@ impl Run<'_> {
     }
 
     /// Waits for the card's status line to say `said`.
-    async fn wait_for_status(&self, said: &str) -> Result<Value> {
+    pub(super) async fn wait_for_status(&self, said: &str) -> Result<Value> {
         self.ui
             .wait_with(
                 &format!("the card's status line to say \"{said}\""),
@@ -219,7 +230,7 @@ impl Run<'_> {
     }
 
     /// The backend's text for `args` (`get_copy_text`'s) in every format.
-    async fn expected_copy(&self, args: Value) -> Result<Value> {
+    pub(super) async fn expected_copy(&self, args: Value) -> Result<Value> {
         let got = self
             .ui
             .wait_with(
@@ -284,7 +295,7 @@ impl Run<'_> {
 
     /// Waits for the clipboard to hold `want` (the paste reads what's there
     /// once the copy's promise has settled).
-    async fn expect_clipboard(&self, what: &str, want: &str) -> Result<()> {
+    pub(super) async fn expect_clipboard(&self, what: &str, want: &str) -> Result<()> {
         let mut got = self.clipboard().await?;
         if self.config.xvfb.is_none() {
             // Windows keeps the clipboard's text with CRLF line breaks
@@ -962,6 +973,17 @@ impl Run<'_> {
             CARD_SHOTS[6],
         )
         .await;
+        // Escape backs out the preview first; then plain reading clears the
+        // selection.
+        self.ui
+            .press("press Escape (close the cross-reference)", Key::Escape)
+            .await?;
+        self.ui
+            .wait(
+                "the cross-reference to close",
+                "const p = document.getElementById('xref-preview'); return [!p || !p.isConnected || p.hidden, null];",
+            )
+            .await?;
         self.plain_reading().await
     }
 }

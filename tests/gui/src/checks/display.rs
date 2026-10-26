@@ -519,31 +519,29 @@ impl Run<'_> {
     }
 }
 
-/// Check 26: the app closed (check 25 left its settings) and started
-/// again, on the same data: the page and Aa show every setting as it was
-/// left. Then they're put back as they were before check 25.
+/// The second session: the app closed and started again, on the same data.
+/// Check 58: a cold start goes straight to the chapter the first session
+/// left (`saved`). Check 26 (check 25 left its settings): the page and Aa
+/// show every setting as it was left; then they're put back as they were
+/// before check 25. Check 45: the lists check 40 left open are open.
 pub(super) async fn restart(
     config: &Config,
     report: &mut Report,
     started: std::time::Instant,
     looks: Result<Looks, String>,
+    saved: Option<String>,
 ) {
-    let looks = match looks {
-        Ok(looks) => looks,
-        Err(why) => {
-            report
-                .fail_the_rest(&Check::RELAUNCH, &format!("not run: {why}"))
-                .await;
-            return;
-        }
-    };
+    let kept_here = [Check::AaRestart, Check::DisclosuresKept];
     // Windows: Edge WebDriver starts each session's WebView2 with a user
     // data folder of its own (WEBVIEW2_USER_DATA_FOLDER, a new
     // `scoped_dir…` each time), so the app started again in a new session
-    // can't see what the first one saved; the app itself always uses the
-    // one folder. Not run there.
-    if config.xvfb.is_none() {
-        for check in Check::RELAUNCH {
+    // can't see what the first one saved in local storage; the app itself
+    // always uses the one folder. Checks 26 and 45 aren't run there. The
+    // reading position is the backend's (its database, in the account's
+    // own folder), so check 58 is.
+    let windows = config.xvfb.is_none();
+    if windows {
+        for check in kept_here {
             report
                 .record(
                     check,
@@ -555,15 +553,26 @@ pub(super) async fn restart(
                 )
                 .await;
         }
-        return;
     }
-    log_line(started, "start the app again, on the same data (check 26)");
+    let looks = match looks {
+        Ok(looks) => Some(looks),
+        Err(why) => {
+            report
+                .fail_the_rest(&kept_here, &format!("not run: {why}"))
+                .await;
+            None
+        }
+    };
+    log_line(
+        started,
+        "start the app again, on the same data (checks 58, 26 and 45)",
+    );
     let driver = match start_session(config, &config.app, started).await {
         Ok(driver) => driver,
         Err(e) => {
             report
                 .record(
-                    Check::AaRestart,
+                    Check::ColdStart,
                     Err(e.context("no WebDriver session on the app started again")),
                 )
                 .await;
@@ -581,16 +590,23 @@ pub(super) async fn restart(
         ui: Ui::new(driver, started, config.budget, config.step_timeout),
         shots: Shots::default(),
     };
-    let result = run.restored(&looks).await;
-    if result.is_err() {
-        run.failure_screenshot(Check::AaRestart).await;
+    let cold = run.cold_start(saved.as_deref()).await;
+    if cold.is_err() {
+        run.failure_screenshot(Check::ColdStart).await;
     }
-    report.record(Check::AaRestart, result).await;
-    let kept = run.disclosures_kept().await;
-    if kept.is_err() {
-        run.failure_screenshot(Check::DisclosuresKept).await;
+    report.record(Check::ColdStart, cold).await;
+    if let (false, Some(looks)) = (windows, looks) {
+        let result = run.restored(&looks).await;
+        if result.is_err() {
+            run.failure_screenshot(Check::AaRestart).await;
+        }
+        report.record(Check::AaRestart, result).await;
+        let kept = run.disclosures_kept().await;
+        if kept.is_err() {
+            run.failure_screenshot(Check::DisclosuresKept).await;
+        }
+        report.record(Check::DisclosuresKept, kept).await;
     }
-    report.record(Check::DisclosuresKept, kept).await;
 
     log_line(started, "close the app (end the second WebDriver session)");
     let driver = run.ui.into_driver();

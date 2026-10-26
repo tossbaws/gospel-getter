@@ -62,11 +62,17 @@ pub enum Check {
     CardNote = 50,
     XrefPreview = 51,
     ShiftGhost = 52,
+    KeyTurns = 53,
+    KeySelection = 54,
+    KeyCopy = 55,
+    KeyHistoryNote = 56,
+    PalettePageCommands = 57,
+    ColdStart = 58,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 45] = [
+    pub const SHIPPED: [Check; 50] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -111,12 +117,17 @@ impl Check {
         Check::CardNote,
         Check::XrefPreview,
         Check::ShiftGhost,
+        Check::KeyTurns,
+        Check::KeySelection,
+        Check::KeyCopy,
+        Check::KeyHistoryNote,
+        Check::PalettePageCommands,
         Check::PlainText,
     ];
 
     /// The checks on the app as shipped started again, on the first
     /// session's data (the second session).
-    pub const RELAUNCH: [Check; 2] = [Check::AaRestart, Check::DisclosuresKept];
+    pub const RELAUNCH: [Check; 3] = [Check::ColdStart, Check::AaRestart, Check::DisclosuresKept];
 
     /// The updater's checks, on the GUI checks' test build against the
     /// run's own update server (the third session).
@@ -182,6 +193,12 @@ impl Check {
             Check::CardNote => "card-note",
             Check::XrefPreview => "xref-preview",
             Check::ShiftGhost => "shift-ghost",
+            Check::KeyTurns => "key-turns",
+            Check::KeySelection => "key-selection",
+            Check::KeyCopy => "key-copy",
+            Check::KeyHistoryNote => "key-history-and-note",
+            Check::PalettePageCommands => "palette-page-commands",
+            Check::ColdStart => "cold-start",
         }
     }
 

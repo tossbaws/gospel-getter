@@ -28,6 +28,7 @@
 mod card;
 mod dialogs;
 mod display;
+mod keys;
 mod library;
 mod picker;
 mod reader;
@@ -181,8 +182,8 @@ pub async fn run(config: &Config, report: &mut Report) {
         log_line(started, &format!("no updater checks: {e:#}"));
     }
 
-    let looks = shipped(config, report, started).await;
-    display::restart(config, report, started, looks).await;
+    let (looks, saved) = shipped(config, report, started).await;
+    display::restart(config, report, started, looks, saved).await;
 
     match server {
         Ok(server) => updates::run(config, report, started, &server).await,
@@ -212,13 +213,14 @@ async fn start_update_server(config: &Config) -> Result<UpdateServer> {
     Ok(server)
 }
 
-/// Checks 1 to 8, 14 to 25 and 27 to 44, on the app as shipped; what
-/// check 25 left, for check 26 (or why there's nothing).
+/// Checks 1 to 8, 14 to 25, 27 to 44 and 46 to 57, on the app as shipped;
+/// what check 25 left, for check 26 (or why there's nothing), and the
+/// chapter the reader is left on, for check 58.
 async fn shipped(
     config: &Config,
     report: &mut Report,
     started: Instant,
-) -> std::result::Result<display::Looks, String> {
+) -> (std::result::Result<display::Looks, String>, Option<String>) {
     // Check 1 starts with the session; without one nothing else can run.
     let driver = match start_session(config, &config.app, started).await {
         Ok(driver) => driver,
@@ -228,10 +230,11 @@ async fn shipped(
             report
                 .fail_the_rest(&Check::SHIPPED, "not run: no WebDriver session (check 1)")
                 .await;
-            return Err("no WebDriver session (check 1)".to_owned());
+            return (Err("no WebDriver session (check 1)".to_owned()), None);
         }
     };
     let mut looks = Err("the page did not boot (check 1)".to_owned());
+    let mut saved = None;
     let mut run = Run {
         config,
         ui: Ui::new(driver, started, config.budget, config.step_timeout),
@@ -346,6 +349,14 @@ async fn shipped(
             (Check::CardNote, run.card_note().await),
             (Check::XrefPreview, run.xref_preview().await),
             (Check::ShiftGhost, run.shift_ghost().await),
+            (Check::KeyTurns, run.key_turns().await),
+            (Check::KeySelection, run.key_selection().await),
+            (Check::KeyCopy, run.key_copy().await),
+            (Check::KeyHistoryNote, run.key_history_note().await),
+            (
+                Check::PalettePageCommands,
+                run.palette_page_commands().await,
+            ),
         ] {
             if result.is_err() {
                 run.failure_screenshot(check).await;
@@ -376,6 +387,17 @@ async fn shipped(
         };
         looks = left;
         report.record(Check::AaControls, controls).await;
+        // The chapter the reader is left on: the second session starts
+        // there (check 58).
+        saved = run
+            .ui
+            .js(
+                "const h = document.querySelector('.chapter-main .chapter-heading'); return h ? h.textContent.trim() : null;",
+                Vec::new(),
+            )
+            .await
+            .ok()
+            .and_then(|h| h.as_str().map(str::to_owned));
         // Last: it leaves the page showing the fallback.
         let plain = run.plain_text_fallback().await;
         if plain.is_err() {
@@ -397,6 +419,7 @@ async fn shipped(
             .chain(display::DISPLAY_SHOTS)
             .chain(reader::READER_SHOTS)
             .chain(card::CARD_SHOTS)
+            .chain(keys::KEYS_SHOTS)
             // The popover on a narrow window, only where the window can be
             // wide enough first (check 36).
             .chain(surfaces::SURFACES_SHOTS.into_iter().filter(|name| {
@@ -421,7 +444,7 @@ async fn shipped(
         Ok(Err(e)) => log_line(started, &format!("ending the session failed: {e}")),
         Err(_) => log_line(started, "ending the session timed out after 10s"),
     }
-    looks
+    (looks, saved)
 }
 
 /// Starts `app` through tauri-driver: a WebDriver session whose browser
@@ -1052,6 +1075,7 @@ impl Run<'_> {
         self.display_vellum_screenshots().await?;
         self.surfaces_vellum_screenshots().await?;
         self.reader_vellum_screenshots().await?;
-        self.card_vellum_screenshots().await
+        self.card_vellum_screenshots().await?;
+        self.keys_vellum_screenshots().await
     }
 }
