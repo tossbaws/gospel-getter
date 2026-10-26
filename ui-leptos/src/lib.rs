@@ -67,7 +67,7 @@ mod welcome;
 
 use wasm_bindgen::prelude::*;
 
-/// Mounts every piece, the reader with the first (see [`mount_the_rest`]).
+/// Mounts every piece, the reader with the first (see `mount_the_rest`).
 /// Called by wasm-bindgen once the module is loaded.
 #[wasm_bindgen(start)]
 pub fn start() {
