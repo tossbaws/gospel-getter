@@ -1,12 +1,12 @@
 //! The note editor: write a note on the selected verses, or edit or delete
-//! one, with the passage quoted as the reader is reading it. The page opens
-//! it (the selection card's + Add note and Edit, N, and the Library's
-//! Edit) with a snapshot of the passage and, when adding, the other notes
-//! on it; the editor saves and deletes through the backend, then has the
-//! page refresh its notes (markers, the card's Notes section, the
-//! Library) before closing, so focus can go back to the note's own Edit.
-//! The status afterwards, and a deleted note's Undo, are the page's (the
-//! selection card's status line); see `bridge`.
+//! one, with the passage quoted as the reader is reading it. The selection
+//! card opens it (its + Add note and Edit, N, and the Library's Edit) with a
+//! snapshot of the passage and, when adding, the other notes on it; the
+//! editor saves and deletes through the backend, then has the card refresh
+//! the notes (markers, the card's Notes section, the Library) before
+//! closing, so focus can go back to the note's own Edit. The status
+//! afterwards, and a deleted note's Undo, are the card's (its status line);
+//! see `bridge`.
 //!
 //! A modal, as the page's others: while open it has the keyboard (a
 //! capturing `keydown` on `window`, stopping every other handler). Escape
@@ -31,6 +31,7 @@ use wasm_bindgen::JsValue;
 use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge::{self, NoteRequest, OtherNote};
+use crate::card;
 use crate::dom::{self, focus};
 use crate::dto::{AddNoteArgs, DeleteNoteArgs, UpdateNoteArgs};
 use crate::ipc;
@@ -298,7 +299,7 @@ impl Editor {
                 }
                 return;
             }
-            bridge::refresh_notes().await;
+            card::refresh_notes().await;
             if self.same_session(session.id) {
                 self.close();
                 self.set_busy(false);
@@ -341,12 +342,12 @@ impl Editor {
                     return;
                 }
             };
-            bridge::refresh_notes().await;
+            card::refresh_notes().await;
             if self.same_session(session.id) {
                 self.close();
                 self.set_busy(false);
             }
-            // The note as it was, for the page's Undo.
+            // The note as it was, for the card's Undo.
             let gone = if deleted.is_null() || deleted.is_undefined() {
                 session.note.clone()
             } else {

@@ -23,6 +23,7 @@ use crate::domain::kjv_markup::{PartKind, VerseText};
 use crate::domain::query::{self, Interpretation};
 use crate::notes_export::NotesFilter;
 use crate::passage_copy::{self, CopyFormat};
+use crate::passage_reference::passage_reference;
 use crate::reader_data::{
     self, BookmarkRecord, HighlightRecord, NewBookmark, NewPosition, NoteRecord, PositionRecord,
     Preferences, ReaderData, ValidatedImport,
@@ -942,15 +943,6 @@ fn verse_list(runs: &[(i64, i64)]) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-/// "John 3", "John 3:16" or "John 3:16–18".
-fn passage_reference(book_name: &str, chapter: i64, verses: Option<(i64, i64)>) -> String {
-    match verses {
-        None => format!("{book_name} {chapter}"),
-        Some((first, last)) if first == last => format!("{book_name} {chapter}:{first}"),
-        Some((first, last)) => format!("{book_name} {chapter}:{first}\u{2013}{last}"),
-    }
 }
 
 fn translation_name(state: &AppState, translation_id: i64) -> &str {

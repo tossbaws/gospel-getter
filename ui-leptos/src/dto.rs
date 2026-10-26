@@ -19,9 +19,11 @@
 //! and `GoToDto` (`commands.rs`); for the reader, `HomeDto`'s translations
 //! and position, `TranslationDto`, `ReadingPaneDto`, `VerseDto` and
 //! `SimpleVerseDto`, `XrefDto`, `ChapterSideDto`, `BibleEdgeDto`,
-//! `BookStartDto`, `CompareDto` and `CompareColumnDto` (`commands.rs`). A
-//! verse's parts and footnotes are already shared with the backend
-//! (`verse_parts`).
+//! `BookStartDto`, `CompareDto` and `CompareColumnDto` (`commands.rs`); for
+//! the selection card, `NoteDto` (what the card shows of it), `PassageDto`,
+//! `CopyTextDto` and `CopyFormatsDto`, and `HighlightDto` (`commands.rs`).
+//! A verse's parts and footnotes are already shared with the backend
+//! (`verse_parts`), and so is how a passage is named (`passage_reference`).
 
 use serde::{Deserialize, Serialize};
 
@@ -363,7 +365,8 @@ pub struct RemoveBookmarkArgs {
     pub id: i64,
 }
 
-/// `remove_highlight`'s arguments: exactly the passage's verses.
+/// A passage's verses: the arguments of `remove_highlight`, `add_bookmark`
+/// and `list_notes`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PassageArgs {
@@ -594,4 +597,114 @@ pub struct Position {
     pub book_id: i64,
     pub chapter: i64,
     pub translation_code: String,
+}
+
+// ---- The selection card.
+
+/// A note on the selection, as `list_notes` answers (`commands::NoteDto`;
+/// the card reads only these fields, and hands the note editor the note as
+/// it came).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionNote {
+    pub id: i64,
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    pub reference: String,
+    pub body: String,
+    pub created_at: String,
+    /// "Oct 9, 2026", the backend's (`notes_export::display_date`).
+    pub created_at_display: String,
+}
+
+/// A cross-reference's passage, as `get_passage` answers
+/// (`commands::PassageDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageText {
+    /// "1 John 4:9–10".
+    pub reference: String,
+    pub verses: Vec<Verse>,
+    /// What isn't numbered, if anything.
+    #[serde(default)]
+    pub notice: Option<String>,
+}
+
+/// `get_passage`'s arguments.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageTextArgs<'a> {
+    pub translation_code: &'a str,
+    pub book_id: i64,
+    pub chapter: i64,
+    pub start: i64,
+    pub end: i64,
+}
+
+/// A passage's text to copy, as `get_copy_text` answers
+/// (`commands::CopyTextDto`): what the status line names, and each format.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CopyText {
+    pub reference: String,
+    pub formats: CopyFormats,
+}
+
+/// The passage in each of Copy as…'s formats (`commands::CopyFormatsDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CopyFormats {
+    pub reference: String,
+    pub numbered: String,
+    pub markdown: String,
+    pub plain: String,
+}
+
+impl CopyFormats {
+    /// The text in `format` (`card_text::COPY_FORMATS`' names).
+    pub fn get(&self, format: &str) -> Option<&str> {
+        match format {
+            "reference" => Some(&self.reference),
+            "numbered" => Some(&self.numbered),
+            "markdown" => Some(&self.markdown),
+            "plain" => Some(&self.plain),
+            _ => None,
+        }
+    }
+}
+
+/// `get_copy_text`'s arguments: the selected verses, or (without them) the
+/// whole chapter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyTextArgs {
+    pub translation_code: String,
+    pub book_id: i64,
+    pub chapter: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<i64>,
+}
+
+/// A highlighted verse, as `list_highlights` answers
+/// (`commands::HighlightDto`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Highlight {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse: i64,
+    pub color: String,
+}
+
+/// `set_highlight`'s arguments: the passage's verses and the color.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetHighlightArgs<'a> {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    pub color: &'a str,
 }

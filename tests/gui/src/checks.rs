@@ -15,13 +15,17 @@
 //! About's Tab, G and the sidebar's button, and the window crossing 1200 px
 //! (30 to 37, `surfaces`); the reader: the chapter's end, Compare's grid,
 //! the chapter's lists, a cross-reference and the mouse's back and forward
-//! buttons, Psalm 119, Try again, and, last, the plain-text fallback (38 to
-//! 44, `reader`); screenshots in Chi Rho and Vellum (4, most taken by the
-//! other checks).
+//! buttons, Psalm 119 and Try again (38 to 43, `reader`); the selection
+//! card: verses selected with the mouse and the card placed by them, Copy
+//! and Copy as… read back from the clipboard, a bookmark, highlights and a
+//! note from the card, a cross-reference read in it, and the Shift ghost
+//! (46 to 52, `card`); and, last, the plain-text fallback (44, `reader`);
+//! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
 //! Then the app started again on the same data, keeping Aa's settings (26)
 //! and the chapter's lists as left (45), a second session; and, in a third
 //! session on the GUI checks' test build, the updater (9 to 13, `updates`).
 
+mod card;
 mod dialogs;
 mod display;
 mod library;
@@ -335,6 +339,13 @@ async fn shipped(
             (Check::BackForward, run.back_forward().await),
             (Check::LongChapter, run.long_chapter().await),
             (Check::TryAgain, run.try_again().await),
+            (Check::SelectVerses, run.select_verses().await),
+            (Check::CopyFormats, run.copy_formats().await),
+            (Check::CardBookmark, run.card_bookmark().await),
+            (Check::CardHighlight, run.card_highlight().await),
+            (Check::CardNote, run.card_note().await),
+            (Check::XrefPreview, run.xref_preview().await),
+            (Check::ShiftGhost, run.shift_ghost().await),
         ] {
             if result.is_err() {
                 run.failure_screenshot(check).await;
@@ -385,6 +396,7 @@ async fn shipped(
             )
             .chain(display::DISPLAY_SHOTS)
             .chain(reader::READER_SHOTS)
+            .chain(card::CARD_SHOTS)
             // The popover on a narrow window, only where the window can be
             // wide enough first (check 36).
             .chain(surfaces::SURFACES_SHOTS.into_iter().filter(|name| {
@@ -1039,6 +1051,7 @@ impl Run<'_> {
         self.picker_vellum_screenshots().await?;
         self.display_vellum_screenshots().await?;
         self.surfaces_vellum_screenshots().await?;
-        self.reader_vellum_screenshots().await
+        self.reader_vellum_screenshots().await?;
+        self.card_vellum_screenshots().await
     }
 }

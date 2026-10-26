@@ -12,9 +12,10 @@ use gospel_getter_lib::preferences::{self, Preference, Values};
 /// lists, the search box and its palette, the table of shortcuts, the
 /// book and chapter picker's books and chapters, Aa with the translations
 /// and the saved settings, the header's surfaces with the picker's
-/// shapes, and the reader (the chapter's markup, its loading and the
-/// passage history): checks of those read them where they now live.
-const PIECES: [(&str, &str); 19] = [
+/// shapes, the reader (the chapter's markup, its loading and the passage
+/// history), and the selection card (copying, and the card's bookmark,
+/// highlight and notes): checks of those read them where they now live.
+const PIECES: [(&str, &str); 21] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -60,6 +61,11 @@ const PIECES: [(&str, &str); 19] = [
     (
         "reader_text.rs",
         include_str!("../../ui-leptos/src/reader_text.rs"),
+    ),
+    ("card.rs", include_str!("../../ui-leptos/src/card.rs")),
+    (
+        "card_text.rs",
+        include_str!("../../ui-leptos/src/card_text.rs"),
     ),
 ];
 
@@ -275,12 +281,18 @@ fn frontend_uses_invoke_not_http() {
     );
     // The picker builds a book's chapters from its chapter count in
     // `get_home`, so it doesn't call `get_chapters`.
-    for command in ["get_home", "get_reading", "list_notes"] {
+    for command in ["get_home", "get_reading"] {
         assert!(
             HTML.contains(&format!("invoke('{command}'")),
             "expected a call to the `{command}` Tauri command"
         );
     }
+    // The verses' notes are the selection card's (ui-leptos/src/card.rs),
+    // through the same global `invoke` (ui-leptos/src/ipc.rs).
+    assert!(
+        piece("card.rs").contains(r#"send("list_notes", &args)"#),
+        "expected a call to the `list_notes` Tauri command"
+    );
 }
 
 // ---- Reader comfort, themes and reading mode -------------------------
@@ -2453,7 +2465,7 @@ fn the_reference_button_says_where_the_reader_is() {
     );
     // Updated whenever a chapter is put on screen.
     let render = block_after(piece("reader.rs"), "fn render_current()");
-    assert!(render.contains("update_reference(&here, compare.as_ref().map(|(c, _)| c.as_ref()));"));
+    assert!(render.contains("update_reference(&here, compare.as_deref());"));
     assert!(render.contains("bridge::show_picker_current(here.book_id, here.chapter);"));
     // G opens the picker, in the main keyboard handler, which leaves keys
     // typed into a form control alone.
@@ -2991,39 +3003,43 @@ fn the_chapter_end_uses_tested_theme_colors() {
 /// selection leaves no room on either side; it isn't printed.
 #[test]
 fn the_selection_card_floats_over_the_text() {
-    assert!(HTML.contains("selectionCard.id = 'selection-card';"));
-    assert!(HTML.contains("selectionCard.setAttribute('role', 'group');"));
-    assert!(HTML.contains("selectionCard.append(verseActions, cardFootnotes, cardXrefs);"));
-    let render = function_body("renderSelection");
-    assert!(render.contains("selectionCard.setAttribute('aria-label', `Selection: ${citation}`);"));
+    // The card is the selection card's (ui-leptos/src/card.rs, its markup
+    // and rules in card_text.rs).
+    let card_rs = piece("card.rs");
+    assert!(card_rs.contains(r#"card.set_id("selection-card");"#));
+    assert!(card_rs.contains(r#"let _ = card.set_attribute("role", "group");"#));
+    assert!(card_rs.contains("let _ = card.append_with_node_3(&actions, &footnotes, &xrefs);"));
+    let render = block_after(card_rs, "fn render_selection()");
+    assert!(render.contains(r#".set_attribute("aria-label", &format!("Selection: {citation}"));"#));
     assert!(
-        render.contains("last.after(selectionCard);"),
+        render.contains("let _ = last.after_with_node_1(&els.card);"),
         "after the last selected verse"
     );
     assert!(
-        !render.contains("last.append("),
+        !render.contains("last.append"),
         "nothing goes inside a verse"
     );
     assert!(
-        render.contains("verse.focus({ preventScroll: true });"),
+        render.contains("dom::focus(&verse);"),
         "focus returns to the verse"
     );
     assert!(
-        HTML.contains("cardXrefs.before(notesSection);"),
+        card_rs.contains("let _ = els.xrefs.before_with_node_1(&els.notes);"),
         "notes before the cross-references"
     );
     assert!(!HTML.contains("renderVersePopup"), "verses carry no popup");
-    let chips = function_body("renderCardReferences");
-    assert!(chips.contains(r#"<ul class="xref-chips""#));
+    let chips = block_after(piece("card_text.rs"), "pub fn xrefs_html(");
+    assert!(chips.contains(r#"<ul class=\"xref-chips\""#));
     assert!(chips.contains(r#"<li><button type="button" class="xref-citation""#));
-    let place = function_body("placeCard");
-    for rule in [
-        "below < wanted",
-        "above >= wanted",
-        "classList.add('is-above')",
-        "classList.add('is-docked')",
+    let place = block_after(piece("card_text.rs"), "pub fn placement(");
+    let place_card = block_after(card_rs, "fn place_card()");
+    for (body, rule) in [
+        (place, "below < wanted"),
+        (place, "above >= wanted"),
+        (place_card, r#"card.class_list().add_1("is-above")"#),
+        (place_card, r#"card.class_list().add_1("is-docked")"#),
     ] {
-        assert!(place.contains(rule), "placeCard: {rule}");
+        assert!(body.contains(rule), "placeCard: {rule}");
     }
 
     let rules = rules();
@@ -3584,13 +3600,21 @@ fn flowing_verses_wash_and_select_at_aa_in_every_theme() {
 /// run's box), from the column's left edge. A new layout re-places it.
 #[test]
 fn the_selection_card_anchors_to_line_boxes_in_flowing() {
-    let place = function_body("placeCard");
-    assert!(place.contains("const firstRect = lineRect(first, 'first');"));
-    assert!(place.contains("const lastRect = lineRect(cardVerse, 'last');"));
-    assert!(place.contains("const left = flowing ? 0 :"));
-    let line = function_body("lineRect");
-    assert!(line.contains("verse.getClientRects()"));
-    assert!(HTML.contains("document.addEventListener('gospel-getter:layout-change', placeCard);"));
+    // The card is the selection card's (ui-leptos/src/card.rs, its rules in
+    // card_text.rs).
+    let place = block_after(piece("card.rs"), "fn place_card()");
+    assert!(place.contains("let first_rect = line_rect(&first, true);"));
+    assert!(place.contains("let last_rect = line_rect(&card_verse, false);"));
+    assert!(
+        block_after(piece("card_text.rs"), "pub fn card_box(")
+            .contains("let left = if flowing {\n        0.0")
+    );
+    let line = block_after(piece("card.rs"), "fn line_rect(");
+    assert!(line.contains("verse.get_client_rects()"));
+    assert!(
+        piece("card.rs")
+            .contains("dom::on_document_event(crate::aa::LAYOUT_CHANGE_EVENT, |_| place_card());")
+    );
     // A new layout keeps the reader's place: Aa asks the surfaces'
     // keep_reading_place, for the place found then.
     assert!(piece("aa.rs").contains("surfaces::keep_reading_place(change, None);"));
@@ -3842,22 +3866,30 @@ fn nothing_is_left_of_the_old_tour() {
 /// its --accent-2 text, AA over the same wash, ringed at 3:1.
 #[test]
 fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
-    let render = function_body("renderCardReferences");
+    // The preview is the selection card's (ui-leptos/src/card.rs, its markup
+    // in card_text.rs).
+    let render = block_after(piece("card_text.rs"), "pub fn xrefs_html(");
     assert!(render.contains(r#"aria-expanded="false" aria-controls="xref-preview""#));
-    assert!(HTML.contains("xrefPreview.setAttribute('role', 'region');"));
-    assert!(HTML.contains("xrefPreview.setAttribute('aria-labelledby', 'xref-preview-title');"));
-    let toggle = function_body("toggleXrefPreview");
+    assert!(piece("card.rs").contains(r#"let _ = preview.set_attribute("role", "region");"#));
     assert!(
-        toggle.contains("invoke('get_passage', { translationCode, bookId, chapter, start, end })")
+        piece("card.rs")
+            .contains(r#"let _ = preview.set_attribute("aria-labelledby", "xref-preview-title");"#)
     );
+    let toggle = block_after(piece("card.rs"), "fn toggle_preview(");
+    assert!(toggle.contains(
+        "\"get_passage\",\n        &PassageTextArgs {\n            translation_code: &code,\n            book_id,\n            chapter,\n            start,\n            end,"
+    ));
     assert!(
-        !toggle.contains("openPassage"),
+        !toggle.contains("reader::"),
         "a chip previews; only Go to opens"
     );
-    // Its verses' markup is the reader's (see VERSE_MARKUP_EVENT in
-    // ui-leptos/src/bridge.rs), without note markers.
-    assert!(toggle.contains("markup({ verses: passage.verses })"));
-    assert!(HTML.contains(r#"invoke('get_passage'"#));
+    // Its verses' markup is the reader's (reader_text::verse_html), without
+    // note markers.
+    assert!(
+        block_after(piece("card_text.rs"), "pub fn preview_html(").contains("verse_html(v, false)")
+    );
+    // Through the page's own `invoke` (ui-leptos/src/ipc.rs).
+    assert!(block_after(piece("card.rs"), "fn send(").contains("ipc::send(cmd, args)"));
 
     let rules = rules();
     for control in [".xref-citation", ".xref-preview-go"] {

@@ -4239,118 +4239,32 @@
             // neighbors nor cross-reference text carry data-translation.
             const SELECTABLE = '.chapter-main .verse[data-translation]';
 
-            // The chapter in the reading column: which one, and its verses
-            // in each translation on screen (just the selected one, or all
-            // of them while comparing), exactly as the backend returned
-            // them, as the reader (the page's Rust pieces) last showed it
-            // (see gospel-getter:chapter-shown below). Anything that acts on
-            // a verse selection reads verse text from here, never from the
-            // rendered DOM, so verse numbers, popup labels and markup can't
-            // leak into it.
-            let reading = null;
+            // ---- The selection card is one of the page's pieces written in
+            // Rust (ui-leptos/src/card.rs): the verse selection and everything
+            // about it (the card under the selected verses, with Copy, Copy
+            // as…, Bookmark, + Add note, the highlighter, the selection's
+            // footnotes, notes and cross-references), Copy chapter…, the
+            // verses' bookmark, highlight and note marks, and the Shift ghost.
+            // What crosses is documented in ui-leptos/src/bridge.rs. This page's
+            // click and keyboard dispatchers (below) still hear the clicks and
+            // keys, and ask the card for what they're for, within them (the
+            // clipboard needs that); so do boot, an import and the palette's
+            // page commands. Without the Rust pieces nothing answers (no verse
+            // is shown to select).
 
-            // The reader's verse selection: a contiguous, inclusive range
-            // of verse numbers in one translation column of `reading`'s
-            // chapter — `anchor` is the verse clicked first, which
-            // Shift-click extends from — or null. It's dropped whenever a
-            // chapter is rendered (navigation, a translation switch, or
-            // entering/leaving compare), since verse numbering isn't
-            // guaranteed to line up across translations.
-            let selection = null;
-
-            // Every bookmark, newest first, as list_bookmarks returned it
-            // for the selected translation, to the Library (the Rust
-            // pieces', which hand it over: see refreshLibrary).
-            let bookmarks = [];
-            // Whether the bookmark list has loaded at least once, so "no
-            // bookmarks" can be told apart from "couldn't load them".
-            let bookmarksLoaded = false;
-
-            // Every highlight, as "book:chapter:verse" → color. Highlights
-            // belong to no one translation, like bookmarks.
-            let highlights = new Map();
-            let highlightsLoaded = false;
-            let highlightsToken = 0;
-
-
-            // The chapter's verses as get_reading sent them, with their
-            // cross-references (the same in every column), and the first
-            // column of the comparison the reader last fetched: the card's
-            // references and previews read them.
-            let chapterVerses = [];
-            let compareFirst = null;
-
-            // The highlighter colors, in the order the swatches show them.
-            // The backend accepts exactly these.
-            const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue', 'pink'];
-
-            const verseActions = document.createElement('span');
-            verseActions.className = 'verse-actions';
-            verseActions.innerHTML = `<button type="button" class="verse-copy-btn" title="Copy (Ctrl+C)">Copy</button>
-                <button type="button" class="verse-copy-as-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="copy-as-menu" title="Copy as… (Ctrl+Shift+C)" aria-keyshortcuts="Control+Shift+C">Copy as…</button>
-                <button type="button" class="verse-bookmark-btn">&#9733; Bookmark</button>
-                <button type="button" class="verse-note-btn" title="Add a note (N)" aria-keyshortcuts="N"><span aria-hidden="true">+</span> Add note</button>
-                <span class="verse-highlight" role="group" aria-label="Highlight">
-                    ${HIGHLIGHT_COLORS.map((c) => `<button type="button" class="highlight-swatch" data-color="${c}" aria-label="Highlight ${c}" title="Highlight ${c}" aria-pressed="false"></button>`).join('')}
-                    <button type="button" class="highlight-remove" hidden>Remove highlight</button>
-                </span>
-                <span class="verse-actions-ref"></span>
-                <span class="verse-actions-status" role="status" aria-live="polite"></span>`;
-            // The selection card: everything about the selected verses, in
-            // one card that floats over the text just under them (or just
-            // above, when there's no room below), so selecting never moves
-            // the text. It sits in the DOM straight after the last
-            // selected verse, so Tab reaches it right after the selection,
-            // but it's out of the flow (absolutely placed in the reading
-            // column). In order: the actions and citation, the selection's
-            // footnotes, its notes, and its cross-references as chips.
-            const selectionCard = document.createElement('div');
-            selectionCard.id = 'selection-card';
-            selectionCard.className = 'selection-card';
-            selectionCard.setAttribute('role', 'group');
-            const cardFootnotes = document.createElement('div');
-            cardFootnotes.className = 'popup-footnotes selection-footnotes';
-            const cardXrefs = document.createElement('div');
-            cardXrefs.className = 'selection-xrefs';
-            selectionCard.append(verseActions, cardFootnotes, cardXrefs);
-            // A cross-reference read in place: one at a time, under the
-            // row of the chip that opened it (`previewChip`, pressed while
-            // it shows). Its "Go to" button opens the passage.
-            const xrefPreview = document.createElement('div');
-            xrefPreview.id = 'xref-preview';
-            xrefPreview.className = 'xref-preview';
-            xrefPreview.setAttribute('role', 'region');
-            xrefPreview.setAttribute('aria-labelledby', 'xref-preview-title');
-            xrefPreview.hidden = true;
-            let previewChip = null;
-            let previewToken = 0;
-            // The verse the card belongs to (the last selected one), where
-            // focus goes back to when it closes.
-            let cardVerse = null;
-            const actionStatus = verseActions.querySelector('.verse-actions-status');
-            const bookmarkBtn = verseActions.querySelector('.verse-bookmark-btn');
-            const highlightSwatches = [...verseActions.querySelectorAll('.highlight-swatch')];
-            const highlightRemoveBtn = verseActions.querySelector('.highlight-remove');
-            let actionAttempt = 0;
-            let actionStatusTimer = null;
-            // What the status line's Undo does, while it shows one.
-            let actionUndo = null;
+            // Asks the card. Its answer, within the event (null when nothing
+            // answered).
+            function askCard(detail) {
+                const request = new CustomEvent('gospel-getter:card', { cancelable: true, detail });
+                if (!document.dispatchEvent(request)) return request.detail.answer;
+                return null;
+            }
 
             // An error's text for the reader: its message, or what it was
             // thrown as. Never empty (a command can fail with ''), so a
             // failure always says so and is never taken for success.
             function errorText(e) {
                 return String((e && e.message) || e || '').trim() || 'Something went wrong.';
-            }
-
-            function escapeHtml(value) {
-                return String(value).replace(/[&<>"']/g, (c) => ({
-                    '&': '&amp;',
-                    '<': '&lt;',
-                    '>': '&gt;',
-                    '"': '&quot;',
-                    "'": '&#39;',
-                }[c]));
             }
 
             function currentTranslation() {
@@ -4366,614 +4280,8 @@
                 return root.dataset.compare === 'on';
             }
 
-            function verseRange(start, end) {
-                return start === end ? `${start}` : `${start}–${end}`;
-            }
-
-            // ---- Verse selection (GH-10), shared by copying, bookmarks,
-            // search results and compare.
-
-            function columnVerses(code) {
-                const column = reading && reading.columns[code];
-                return column ? column.verses : [];
-            }
-
             function verseElement(code, number) {
                 return document.querySelector(`${SELECTABLE}[data-translation="${code}"][data-verse="${number}"]`);
-            }
-
-            function selectionVerses() {
-                if (!reading || !selection) return [];
-                return columnVerses(selection.translationCode)
-                    .filter((v) => v.number >= selection.start && v.number <= selection.end)
-                    .sort((a, b) => a.number - b.number);
-            }
-
-            // "John 3:16 (WEB)", or "John 3:16–18 (WEB)" for a range.
-            function selectionCitation() {
-                const { start, end, translationCode } = selection;
-                return `${reading.bookName} ${reading.chapter}:${verseRange(start, end)} (${translationCode.toUpperCase()})`;
-            }
-
-            // The verses' plain text as the backend gives it (the KJV's
-            // supplied words as words, no braces or margin notes; any other
-            // translation as stored), joined by single spaces, then " — "
-            // and the citation.
-            function selectionClipboardText() {
-                const text = selectionVerses().map((v) => v.text).join(' ');
-                return `${text} — ${selectionCitation()}`;
-            }
-
-            // A message stays 2.5 s unless `duration` says otherwise (an
-            // error stays). With `undo`, the message ends with an Undo
-            // button that calls it.
-            function setActionStatus(message, isError, { undo = null, duration = 2500 } = {}) {
-                clearTimeout(actionStatusTimer);
-                actionStatus.textContent = message;
-                actionStatus.classList.toggle('is-error', isError);
-                actionUndo = undo;
-                if (undo) {
-                    const button = document.createElement('button');
-                    button.type = 'button';
-                    button.className = 'note-link status-undo';
-                    button.textContent = 'Undo';
-                    actionStatus.append(button);
-                }
-                if (message && !isError) {
-                    actionStatusTimer = setTimeout(() => {
-                        const hadFocus = actionStatus.contains(document.activeElement);
-                        setActionStatus('', false);
-                        if (hadFocus && noteAddBtn.isConnected) noteAddBtn.focus({ preventScroll: true });
-                    }, duration);
-                }
-            }
-
-            // Reflects `selection` in the reading column: highlights the
-            // selected verses and opens the selection card on them (or
-            // closes it, returning focus to the verse if it was in the
-            // card). Nothing is added to the column's flow.
-            function renderSelection() {
-                actionAttempt += 1;
-                setActionStatus('', false);
-                const hadFocus = selectionCard.contains(document.activeElement);
-                let last = null;
-                document.querySelectorAll(SELECTABLE).forEach((el) => {
-                    const number = Number(el.dataset.verse);
-                    const selected = !!selection
-                        && el.dataset.translation === selection.translationCode
-                        && number >= selection.start
-                        && number <= selection.end;
-                    el.classList.toggle('verse-selected', selected);
-                    if (selected && number === selection.end) last = el;
-                });
-                closeCopyMenu();
-                copies.selection = null;
-                selectionNotesToken += 1;
-                selectionNotes = [];
-                selectionNotesError = '';
-                showAllNotes = false;
-                notesSection.remove();
-                if (!last) {
-                    closeXrefPreview();
-                    const verse = cardVerse;
-                    cardVerse = null;
-                    selectionCard.remove();
-                    if (hadFocus && verse && verse.isConnected) {
-                        verse.setAttribute('tabindex', '-1');
-                        verse.focus({ preventScroll: true });
-                    }
-                    return;
-                }
-                cardVerse = last;
-                fetchCopy('selection', {
-                    translationCode: selection.translationCode,
-                    bookId: reading.bookId,
-                    chapter: reading.chapter,
-                    start: selection.start,
-                    end: selection.end,
-                });
-                const citation = selectionCitation();
-                selectionCard.setAttribute('aria-label', `Selection: ${citation}`);
-                verseActions.querySelector('.verse-actions-ref').textContent = citation;
-                renderCardReferences();
-                last.after(selectionCard);
-                updateBookmarkButton();
-                updateHighlightControls();
-                placeCard();
-                refreshSelectionNotes();
-            }
-
-            // The selection's footnotes and cross-references, from the
-            // chapter as the backend returned it. Cross-references are by
-            // verse number (the same in every column); footnotes are the
-            // column's own. A range labels each with its verse.
-            function renderCardReferences() {
-                const verses = selectionVerses();
-                const range = selection.start !== selection.end;
-                const notes = verses.flatMap((v) => (v.footnotes || []).map((f) => ({ v, f })));
-                const notesHtml = notes.length ? markup({ footnotes: notes.map(({ f }) => f) }) : [];
-                cardFootnotes.hidden = !notes.length;
-                cardFootnotes.innerHTML = notes.length
-                    ? `<span class="xref-popup-title">Footnotes</span>
-                        ${notes.map(({ v, f }, i) => `<span class="footnote-entry"><span class="footnote-label">${range ? v.number : ''}${escapeHtml(f.label)}</span>${notesHtml[i]}</span>`).join('')}`
-                    : '';
-                const xrefsByVerse = new Map(chapterVerses.map((v) => [v.number, v.xrefs]));
-                const rows = verses
-                    .map((v) => ({ number: v.number, xrefs: xrefsByVerse.get(v.number) || [] }))
-                    .filter((row) => row.xrefs.length);
-                cardXrefs.hidden = !rows.length;
-                cardXrefs.innerHTML = rows.length
-                    ? `<span class="xref-popup-title" id="selection-xrefs-title">Cross references</span>
-                        ${rows.map((row) => `<div class="selection-xref-row">
-                            ${range ? `<span class="selection-xref-verse">${reading.chapter}:${row.number}</span>` : ''}
-                            <ul class="xref-chips" aria-labelledby="selection-xrefs-title">${row.xrefs.map((x) => {
-                                const end = x.endVerse != null ? ` data-end-verse="${x.endVerse}"` : '';
-                                return `<li><button type="button" class="xref-citation" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${end} aria-expanded="false" aria-controls="xref-preview">${escapeHtml(x.citation)}</button></li>`;
-                            }).join('')}</ul>
-                        </div>`).join('')}`
-                    : '';
-                closeXrefPreview();
-                cardXrefs.append(xrefPreview);
-            }
-
-            // The passage's text comes from the translation being read; while
-            // comparing, from the first (left) column's.
-            function previewTranslation() {
-                if (isComparing() && compareFirst) return compareFirst;
-                return reading.translationCode;
-            }
-
-            function closeXrefPreview({ focusChip = false } = {}) {
-                previewToken += 1;
-                const chip = previewChip;
-                previewChip = null;
-                xrefPreview.hidden = true;
-                xrefPreview.innerHTML = '';
-                if (!chip) return;
-                chip.setAttribute('aria-expanded', 'false');
-                if (focusChip && chip.isConnected) chip.focus({ preventScroll: true });
-            }
-
-            // A chip shows its passage under its row, replacing any other
-            // preview; the same chip again closes it. Nothing navigates.
-            async function toggleXrefPreview(chip) {
-                if (previewChip === chip) {
-                    closeXrefPreview();
-                    return;
-                }
-                closeXrefPreview();
-                previewChip = chip;
-                chip.setAttribute('aria-expanded', 'true');
-                chip.closest('.selection-xref-row').append(xrefPreview);
-                const bookId = Number(chip.dataset.book);
-                const chapter = Number(chip.dataset.chapter);
-                const start = Number(chip.dataset.verse);
-                const end = Number(chip.dataset.endVerse || chip.dataset.verse);
-                const translationCode = previewTranslation();
-                const token = previewToken;
-                let passage = null;
-                let failure = '';
-                try {
-                    passage = await invoke('get_passage', { translationCode, bookId, chapter, start, end });
-                } catch (e) {
-                    console.error('Failed to read a cross-reference', e);
-                    failure = errorText(e);
-                }
-                if (token !== previewToken) return;
-                // "1 John 4:9–10", as the backend names it (or, if it
-                // couldn't, the chip's citation with its dash).
-                const reference = passage ? passage.reference : chip.textContent.replace(/(\d)-(\d)/, '$1\u2013$2');
-                const texts = passage ? markup({ verses: passage.verses }) : [];
-                const verses = passage
-                    ? passage.verses.map((v, i) => `<span class="xref-preview-verse"><span class="xref-preview-num">${v.number}</span>${texts[i]}</span>`).join(' ')
-                    : '';
-                const notice = passage ? (passage.notice || '') : `Couldn't read ${reference}: ${failure}`;
-                xrefPreview.innerHTML = `<p class="xref-preview-title" id="xref-preview-title">${escapeHtml(reference)} (${escapeHtml(translationCode.toUpperCase())})</p>
-                    ${verses ? `<p class="xref-preview-text">${verses}</p>` : ''}
-                    ${notice ? `<p class="xref-preview-notice">${escapeHtml(notice)}</p>` : ''}
-                    <button type="button" class="xref-preview-go" data-book="${bookId}" data-chapter="${chapter}" data-verse="${start}" data-end-verse="${end}">Go to ${escapeHtml(reference)} <span aria-hidden="true">→</span></button>`;
-                xrefPreview.hidden = false;
-                placeCard();
-                revealXrefPreview();
-            }
-
-            // Scrolls the card, not the page, so the whole preview shows
-            // (or its top, when it's taller than the card).
-            function revealXrefPreview() {
-                const card = selectionCard.getBoundingClientRect();
-                const box = xrefPreview.getBoundingClientRect();
-                const inset = parseFloat(window.getComputedStyle(selectionCard).paddingBottom) || 0;
-                if (box.bottom + inset > card.bottom) {
-                    selectionCard.scrollTop += Math.min(box.bottom + inset - card.bottom, box.top - card.top);
-                } else if (box.top < card.top) {
-                    selectionCard.scrollTop -= card.top - box.top;
-                }
-            }
-
-            // Where the card goes, measured each time it opens or its
-            // contents change (not on scroll: it's placed in the reading
-            // column, so it moves with the verses):
-            // - under the last selected verse, if it fits in the window
-            //   below it;
-            // - otherwise above the first selected verse, if it fits there;
-            // - otherwise on whichever side has more room, scrolling inside
-            //   a shorter card;
-            // - and if neither side has CARD_MIN px (a selection taller than
-            //   the window), docked to the bottom of the window, across the
-            //   reading column.
-            // It never covers the selected verses unless docked, and stays
-            // inside the reading column: as wide as it, up to CARD_WIDTH, at
-            // the selected verse's left edge where there's room (the
-            // selected column, while comparing). In the Flowing layout a
-            // verse is a run of lines that can start and end mid-line, so
-            // "under" is under the last selected verse's last line, "above"
-            // is above the first one's first line, and the card starts at
-            // the column's left edge.
-            const CARD_GAP = 8;
-            const CARD_MIN = 120;
-            const CARD_WIDTH = 544;
-
-            // The box of a verse's first or last line (its whole box when
-            // it's a block, a verse to a line).
-            function lineRect(verse, which) {
-                const rects = [...verse.getClientRects()].filter((r) => r.width > 0 || r.height > 0);
-                if (rects.length < 2) return verse.getBoundingClientRect();
-                return which === 'first' ? rects[0] : rects[rects.length - 1];
-            }
-
-            function placeCard() {
-                if (!selectionCard.isConnected || !cardVerse) return;
-                // A preview opening or closing doesn't move the card to the
-                // other side: it grows (or scrolls) where it is.
-                const keep = previewChip
-                    ? (selectionCard.classList.contains('is-docked') && 'docked')
-                        || (selectionCard.classList.contains('is-above') ? 'above' : 'below')
-                    : null;
-                const scrolled = selectionCard.scrollTop;
-                const column = selectionCard.closest('.chapter-main');
-                const first = document.querySelector(`${SELECTABLE}.verse-selected`) || cardVerse;
-                const flowing = document.documentElement.dataset.layout === 'flowing'
-                    && cardVerse.parentElement.classList.contains('chapter-text');
-                const columnRect = column.getBoundingClientRect();
-                const firstRect = lineRect(first, 'first');
-                const lastRect = lineRect(cardVerse, 'last');
-                const bar = document.getElementById('top-bar').getBoundingClientRect().bottom;
-                const width = Math.min(columnRect.width, CARD_WIDTH) || columnRect.width;
-                const left = flowing ? 0 : Math.max(0, Math.min(firstRect.left - columnRect.left, columnRect.width - width));
-                selectionCard.classList.remove('is-docked', 'is-above');
-                selectionCard.style.maxHeight = '';
-                selectionCard.style.width = width ? `${width}px` : '';
-                selectionCard.style.left = `${left}px`;
-                const cap = parseFloat(window.getComputedStyle(selectionCard).maxHeight) || Infinity;
-                const wanted = Math.min(selectionCard.scrollHeight, cap);
-                const below = window.innerHeight - lastRect.bottom - 2 * CARD_GAP;
-                const above = firstRect.top - bar - 2 * CARD_GAP;
-                let side = 'below';
-                let room = wanted;
-                if (keep === 'above' || keep === 'below') {
-                    side = keep;
-                    room = Math.min(wanted, Math.max(keep === 'above' ? above : below, CARD_MIN));
-                } else if (below < wanted) {
-                    if (above >= wanted) {
-                        side = 'above';
-                    } else {
-                        side = above > below ? 'above' : 'below';
-                        room = Math.max(above, below);
-                    }
-                }
-                if (keep === 'docked' || (!keep && room < Math.min(wanted, CARD_MIN))) {
-                    selectionCard.classList.add('is-docked');
-                    selectionCard.style.left = `${columnRect.left}px`;
-                    selectionCard.style.width = `${columnRect.width}px`;
-                    selectionCard.style.top = '';
-                    selectionCard.scrollTop = scrolled;
-                    return;
-                }
-                if (room < wanted) selectionCard.style.maxHeight = `${room}px`;
-                if (side === 'below') {
-                    selectionCard.style.top = `${lastRect.bottom - columnRect.top + CARD_GAP}px`;
-                } else {
-                    selectionCard.classList.add('is-above');
-                    selectionCard.style.top = `${firstRect.top - columnRect.top - CARD_GAP - selectionCard.offsetHeight}px`;
-                }
-                selectionCard.scrollTop = scrolled;
-            }
-
-            window.addEventListener('resize', placeCard);
-            // A new layout moves the selected verses.
-            document.addEventListener('gospel-getter:layout-change', placeCard);
-            // The card grows as its notes load or a status line shows.
-            if (typeof ResizeObserver === 'function') {
-                let lastHeight = 0;
-                new ResizeObserver(() => {
-                    if (selectionCard.scrollHeight === lastHeight) return;
-                    lastHeight = selectionCard.scrollHeight;
-                    placeCard();
-                }).observe(selectionCard);
-            }
-
-            function selectVerses(translationCode, anchor, focus) {
-                selection = { translationCode, anchor, start: Math.min(anchor, focus), end: Math.max(anchor, focus) };
-                renderSelection();
-            }
-
-            function clearSelection() {
-                if (!selection) return;
-                selection = null;
-                renderSelection();
-            }
-
-            // ---- Copying (GH-10), Copy as… and Copy chapter. The text
-            // comes from the backend (get_copy_text, one formatter for every
-            // format, and for the notes export's quotes), fetched as soon
-            // as verses are selected or a chapter is shown: WebKitGTK only
-            // allows writeText during the click or keydown that asked for
-            // it, so the text must already be here by then. Should it not
-            // be yet, the copy waits for it and tries anyway, and says so
-            // if that fails.
-
-            // The menu's formats, in order, and what the status line adds
-            // after "Copied John 3:16–18".
-            const COPY_FORMATS = [
-                { format: 'reference', label: 'Text with reference', status: '' },
-                { format: 'numbered', label: 'With verse numbers', status: ' with verse numbers' },
-                { format: 'markdown', label: 'Markdown quote', status: ' as a Markdown quote' },
-                { format: 'plain', label: 'Plain text', status: ' as plain text' },
-            ];
-
-            // The selection's and the chapter's text, each as
-            // { key, value, promise }: value is get_copy_text's answer
-            // once it's in.
-            const copies = { selection: null, chapter: null };
-
-            function fetchCopy(slot, args) {
-                const key = JSON.stringify(args);
-                if (copies[slot] && copies[slot].key === key) return;
-                const entry = { key, value: null };
-                entry.promise = invoke('get_copy_text', args).then((value) => {
-                    entry.value = value;
-                    return value;
-                });
-                // A failure is reported when a copy is asked for.
-                entry.promise.catch((e) => console.error('Failed to read the text to copy', e));
-                copies[slot] = entry;
-            }
-
-            // Copies the selection ('selection') or the chapter being read
-            // ('chapter') in `format`, and says so: in the card's status
-            // line for the selection, in the toast for the chapter.
-            function copyPassage(slot, format) {
-                if (!reading || (slot === 'selection' && !selection)) return;
-                const entry = copies[slot];
-                if (!entry) return;
-                const attempt = ++actionAttempt;
-                const report = (message, isError) => {
-                    if (slot === 'chapter') setDataStatus(message, isError);
-                    else if (attempt === actionAttempt) setActionStatus(message, isError);
-                };
-                const { status } = COPY_FORMATS.find((f) => f.format === format);
-                let write;
-                try {
-                    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
-                        throw new Error('clipboard access is not available');
-                    }
-                    write = entry.value
-                        ? Promise.resolve(navigator.clipboard.writeText(entry.value.formats[format]))
-                        : entry.promise.then((value) => navigator.clipboard.writeText(value.formats[format]));
-                } catch (e) {
-                    write = Promise.reject(e);
-                }
-                write.then(
-                    () => report(`Copied ${entry.value.reference}${status}`, false),
-                    (e) => {
-                        console.error('Failed to copy verses', e);
-                        report(`Couldn't copy: ${errorText(e)}`, true);
-                    },
-                );
-            }
-
-            // Must be called synchronously from the click or keydown that
-            // asked for it (see above).
-            function copySelection() {
-                copyPassage('selection', 'reference');
-            }
-
-            // Copy as…: a menu of the formats, under the card's actions
-            // for the selection, or under the chapter's Copy chapter
-            // control. One at a time; ↑ and ↓ (and Home and End) move,
-            // Enter or a click copies, Escape or Tab closes it, focus going
-            // back to the button that opened it.
-            const copyMenu = document.createElement('div');
-            copyMenu.id = 'copy-as-menu';
-            copyMenu.className = 'copy-as-menu';
-            copyMenu.setAttribute('role', 'menu');
-            copyMenu.hidden = true;
-            copyMenu.innerHTML = COPY_FORMATS
-                .map((f) => `<button type="button" class="copy-as-item" role="menuitem" tabindex="-1" data-format="${f.format}">${f.label}</button>`)
-                .join('');
-            let copyMenuFor = null;
-            let copyMenuOpener = null;
-
-            function openCopyMenu(slot, opener) {
-                closeCopyMenu();
-                if (!reading || (slot === 'selection' && !selection)) return;
-                copyMenuFor = slot;
-                copyMenuOpener = opener;
-                copyMenu.setAttribute('aria-label', slot === 'chapter'
-                    ? `Copy ${reading.bookName} ${reading.chapter} as`
-                    : `Copy ${selectionCitation()} as`);
-                if (slot === 'chapter') opener.closest('.chapter-copy').after(copyMenu);
-                else verseActions.after(copyMenu);
-                copyMenu.hidden = false;
-                opener.setAttribute('aria-expanded', 'true');
-                copyMenu.querySelector('.copy-as-item').focus({ preventScroll: slot === 'selection' });
-                if (slot === 'chapter' && copyMenu.scrollIntoView) copyMenu.scrollIntoView({ block: 'nearest' });
-            }
-
-            function closeCopyMenu({ focusOpener = false } = {}) {
-                if (!copyMenuFor) return;
-                const opener = copyMenuOpener;
-                copyMenuFor = null;
-                copyMenuOpener = null;
-                copyMenu.hidden = true;
-                copyMenu.remove();
-                opener.setAttribute('aria-expanded', 'false');
-                if (focusOpener && opener.isConnected) opener.focus({ preventScroll: true });
-            }
-
-            function chooseCopyFormat(item) {
-                const slot = copyMenuFor;
-                closeCopyMenu({ focusOpener: true });
-                copyPassage(slot, item.dataset.format);
-            }
-
-            // Enter and Space choose an item by clicking it, so the copy
-            // happens within that click (see the body's click handler).
-            copyMenu.addEventListener('keydown', function (event) {
-                const items = [...copyMenu.querySelectorAll('.copy-as-item')];
-                const index = items.indexOf(document.activeElement);
-                let next = null;
-                if (event.key === 'ArrowDown') next = items[(index + 1) % items.length];
-                else if (event.key === 'ArrowUp') next = items[(index - 1 + items.length) % items.length];
-                else if (event.key === 'Home') next = items[0];
-                else if (event.key === 'End') next = items[items.length - 1];
-                else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    closeCopyMenu({ focusOpener: true });
-                    return;
-                } else if (event.key === 'Tab') {
-                    event.preventDefault();
-                    closeCopyMenu({ focusOpener: true });
-                    return;
-                } else {
-                    // Not a chapter turn while in the menu.
-                    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') event.stopPropagation();
-                    return;
-                }
-                event.preventDefault();
-                event.stopPropagation();
-                if (next) next.focus();
-            });
-
-            // ---- Bookmarks (GH-11)
-
-            function bookmarkFor(bookId, chapter, start, end) {
-                return bookmarks.find((b) => b.bookId === bookId && b.chapter === chapter
-                    && b.verseStart === start && b.verseEnd === end) || null;
-            }
-
-            function selectedBookmark() {
-                if (!selection || !reading) return null;
-                return bookmarkFor(reading.bookId, reading.chapter, selection.start, selection.end);
-            }
-
-            function updateBookmarkButton() {
-                bookmarkBtn.innerHTML = selectedBookmark() ? '&#9733; Remove bookmark' : '&#9733; Bookmark';
-            }
-
-            // Marks every bookmarked verse of the chapter on screen, in
-            // every column (bookmarks belong to no one translation).
-            function applyBookmarkMarkers() {
-                document.querySelectorAll(SELECTABLE).forEach((el) => {
-                    const number = Number(el.dataset.verse);
-                    const marked = !!reading && bookmarks.some((b) => b.bookId === reading.bookId
-                        && b.chapter === reading.chapter && number >= b.verseStart && number <= b.verseEnd);
-                    el.classList.toggle('is-bookmarked', marked);
-                });
-            }
-
-            // ---- Highlights
-
-            function highlightKey(bookId, chapter, verse) {
-                return `${bookId}:${chapter}:${verse}`;
-            }
-
-            // Only the latest refresh is shown: an earlier one answering
-            // after it (a quick second change) is dropped.
-            async function refreshHighlights() {
-                const token = ++highlightsToken;
-                try {
-                    const list = await invoke('list_highlights');
-                    if (token !== highlightsToken) return;
-                    highlights = new Map(list.map((h) => [highlightKey(h.bookId, h.chapter, h.verse), h.color]));
-                    highlightsLoaded = true;
-                } catch (e) {
-                    if (token !== highlightsToken) return;
-                    console.error('Failed to load highlights', e);
-                }
-                applyHighlightMarkers();
-                if (selection) updateHighlightControls();
-                await refreshLibrary('highlights');
-            }
-            // The Library (ui-leptos) has the reader's highlights refreshed
-            // after removing one, and waits; see ui-leptos/src/bridge.rs.
-            window.gospelGetterRefreshHighlights = refreshHighlights;
-
-            function setHighlightMarker(el, color) {
-                if (color) el.dataset.highlight = color;
-                else delete el.dataset.highlight;
-            }
-
-            // Shows every highlight on screen: in the chapter being read
-            // (every column, while comparing) and the faded neighbors.
-            function applyHighlightMarkers() {
-                document.querySelectorAll(SELECTABLE).forEach((el) => {
-                    setHighlightMarker(el, reading
-                        && highlights.get(highlightKey(reading.bookId, reading.chapter, Number(el.dataset.verse))));
-                });
-                document.querySelectorAll('.chapter-side .verse[data-verse]').forEach((el) => {
-                    setHighlightMarker(el, highlights.get(highlightKey(el.dataset.book, el.dataset.chapter, el.dataset.verse)));
-                });
-            }
-
-            // The selected verses' colors (undefined where there's none).
-            function selectedHighlightColors() {
-                if (!selection || !reading) return [];
-                return selectionVerses().map((v) => highlights.get(highlightKey(reading.bookId, reading.chapter, v.number)));
-            }
-
-            // A swatch is pressed when the whole selection has its color;
-            // Remove highlight shows when any selected verse has one.
-            function updateHighlightControls() {
-                const colors = selectedHighlightColors();
-                highlightSwatches.forEach((btn) => {
-                    const all = colors.length > 0 && colors.every((c) => c === btn.dataset.color);
-                    btn.setAttribute('aria-pressed', String(all));
-                });
-                const hadFocus = document.activeElement === highlightRemoveBtn;
-                highlightRemoveBtn.hidden = !colors.some(Boolean);
-                if (hadFocus && highlightRemoveBtn.hidden) highlightSwatches[0].focus();
-            }
-
-            // Highlights every selected verse in `color`, replacing any
-            // color they had, or (with null) removes their highlights.
-            async function highlightSelection(color) {
-                if (!selection || !reading) return;
-                const attempt = ++actionAttempt;
-                const { bookId, chapter } = reading;
-                const { start, end } = selection;
-                try {
-                    if (color) {
-                        await invoke('set_highlight', { bookId, chapter, verseStart: start, verseEnd: end, color });
-                    } else {
-                        await invoke('remove_highlight', { bookId, chapter, verseStart: start, verseEnd: end });
-                    }
-                    for (let verse = start; verse <= end; verse++) {
-                        const key = highlightKey(bookId, chapter, verse);
-                        if (color) highlights.set(key, color);
-                        else highlights.delete(key);
-                    }
-                    applyHighlightMarkers();
-                    if (selection) updateHighlightControls();
-                    if (attempt === actionAttempt) setActionStatus(color ? `Highlighted ${color}` : 'Highlight removed', false);
-                    refreshLibrary('highlights');
-                } catch (e) {
-                    console.error('Failed to change the highlight', e);
-                    if (attempt === actionAttempt) {
-                        setActionStatus(`Couldn't ${color ? 'highlight' : 'remove the highlight'}: ${errorText(e)}`, true);
-                    }
-                }
             }
 
             // ---- The header's popovers and panels (the translation, Aa,
@@ -5028,10 +4336,9 @@
             // documented in ui-leptos/src/bridge.rs. This page has them
             // reloaded whenever what they show changes, as one request
             // naming the lists, and waits for it where it waited before. The
-            // Library asks the backend, once, and hands this page the
-            // bookmarks (for the reader's markers and the Bookmark button)
-            // and the notes (for the welcome and Export notes), so it never
-            // asks for them itself. A request made before the pieces have
+            // Library asks the backend, once, and hands this page the notes
+            // (for the welcome and Export notes), so it never asks for them
+            // itself (the bookmarks it hands the card). A request made before the pieces have
             // loaded waits for them to say they're ready.
             const libraryWaiting = new Set();
             let libraryResent = Promise.resolve();
@@ -5043,306 +4350,23 @@
                 return Promise.resolve();
             }
 
+            // Every note, as list_all_notes returned it, from the Library.
+            let allNotes = [];
+            let notesLoaded = false;
+
             document.addEventListener('gospel-getter:library-loaded', function (event) {
                 const { list, items } = event.detail;
-                if (list === 'bookmarks') {
-                    if (items) {
-                        bookmarks = items;
-                        bookmarksLoaded = true;
-                    }
-                    applyBookmarkMarkers();
-                    if (selection) updateBookmarkButton();
-                } else if (list === 'notes' && items) {
+                if (list === 'notes' && items) {
                     allNotes = items;
                     notesLoaded = true;
                 }
             });
 
-            async function toggleSelectionBookmark() {
-                if (!selection || !reading) return;
-                const attempt = ++actionAttempt;
-                const existing = selectedBookmark();
-                try {
-                    if (existing) {
-                        await invoke('remove_bookmark', { id: existing.id });
-                    } else {
-                        await invoke('add_bookmark', {
-                            bookId: reading.bookId,
-                            chapter: reading.chapter,
-                            verseStart: selection.start,
-                            verseEnd: selection.end,
-                        });
-                    }
-                    await refreshLibrary('bookmarks');
-                    if (attempt === actionAttempt) {
-                        setActionStatus(existing ? 'Bookmark removed' : 'Bookmarked', false);
-                    }
-                } catch (e) {
-                    console.error('Failed to change bookmark', e);
-                    if (attempt === actionAttempt) {
-                        setActionStatus(`Couldn't ${existing ? 'remove' : 'save'} bookmark: ${errorText(e)}`, true);
-                    }
-                }
-            }
-
-            // ---- Notes: the reader's own words on a passage. Like
-            // bookmarks they belong to no translation, and a passage can
-            // have any number of them. Which notes overlap a passage, and
-            // their order, is the backend's (list_notes); this shows them
-            // and edits them. Every change reloads all three views — the
-            // markers, the selection's Notes section and the Library — so
-            // none of them goes stale.
-
-            const NOTES_SHOWN = 3;
-            const UNDO_MS = 8000;
-            const noteAddBtn = verseActions.querySelector('.verse-note-btn');
-            const notesSection = document.createElement('div');
-            notesSection.className = 'verse-notes';
-            notesSection.setAttribute('role', 'region');
-
-            // Notes on the chapter being read (for the markers), on the
-            // selection (for its section), and all of them (the Library's,
-            // handed over: see refreshLibrary).
-            let chapterNotes = [];
-            let chapterNotesToken = 0;
-            let selectionNotes = [];
-            let selectionNotesError = '';
-            let selectionNotesToken = 0;
-            let showAllNotes = false;
-            let allNotes = [];
-            let notesLoaded = false;
-
-            function passageReference(bookName, chapter, start, end) {
-                return `${bookName} ${chapter}:${verseRange(start, end)}`;
-            }
-
-            function notePassage(note) {
-                return { bookId: note.bookId, bookName: note.bookName, chapter: note.chapter, start: note.verseStart, end: note.verseEnd };
-            }
-
-            // Marks every verse of the chapter on screen that a note covers,
-            // in every column, with the pencil (CSS) and, for screen
-            // readers, one hidden "has notes" per verse.
-            function applyNoteMarkers() {
-                document.querySelectorAll(SELECTABLE).forEach((el) => {
-                    const number = Number(el.dataset.verse);
-                    const noted = !!reading && chapterNotes.some((n) => n.bookId === reading.bookId
-                        && n.chapter === reading.chapter && number >= n.verseStart && number <= n.verseEnd);
-                    el.classList.toggle('has-notes', noted);
-                    const cue = el.querySelector(':scope > .note-cue');
-                    if (noted && !cue) {
-                        const added = document.createElement('span');
-                        added.className = 'note-cue visually-hidden';
-                        added.textContent = '(has notes) ';
-                        el.querySelector('.verse-num').after(added);
-                    } else if (!noted && cue) {
-                        cue.remove();
-                    }
-                });
-            }
-
-            async function refreshChapterNotes() {
-                const token = ++chapterNotesToken;
-                if (!reading) return;
-                const { bookId, chapter } = reading;
-                const numbers = Object.values(reading.columns).flatMap((c) => c.verses.map((v) => v.number));
-                try {
-                    const list = await invoke('list_notes', { bookId, chapter, verseStart: 1, verseEnd: Math.max(1, ...numbers) });
-                    if (token !== chapterNotesToken) return;
-                    chapterNotes = list;
-                } catch (e) {
-                    if (token !== chapterNotesToken) return;
-                    console.error('Failed to load the chapter’s notes', e);
-                    chapterNotes = [];
-                }
-                applyNoteMarkers();
-            }
-
-            async function refreshSelectionNotes() {
-                const token = ++selectionNotesToken;
-                if (!selection || !reading) return;
-                try {
-                    const list = await invoke('list_notes', {
-                        bookId: reading.bookId,
-                        chapter: reading.chapter,
-                        verseStart: selection.start,
-                        verseEnd: selection.end,
-                    });
-                    if (token !== selectionNotesToken) return;
-                    selectionNotes = list;
-                    selectionNotesError = '';
-                } catch (e) {
-                    if (token !== selectionNotesToken) return;
-                    console.error('Failed to load notes', e);
-                    selectionNotes = [];
-                    selectionNotesError = `Notes couldn’t be loaded: ${errorText(e)}`;
-                }
-                renderNotesSection();
-                // The note editor, if it's open and adding, lists them too.
-                document.dispatchEvent(new CustomEvent('gospel-getter:note-others', { detail: { others: noteOthers() } }));
-            }
-
-            // The selection's Notes section, under its actions: shown only
-            // when notes overlap it (or they couldn't be loaded).
-            function renderNotesSection() {
-                if (!selection || !reading || !verseActions.isConnected || (!selectionNotes.length && !selectionNotesError)) {
-                    notesSection.remove();
-                    placeCard();
-                    return;
-                }
-                const hadFocus = notesSection.contains(document.activeElement) ? document.activeElement : null;
-                const citation = passageReference(reading.bookName, reading.chapter, selection.start, selection.end);
-                notesSection.setAttribute('aria-label', `Notes for ${citation}`);
-                if (selectionNotesError) {
-                    notesSection.innerHTML = `<p class="verse-notes-title">Notes</p><p class="note-card-body is-expanded">${escapeHtml(selectionNotesError)}</p>`;
-                } else {
-                    const shown = showAllNotes ? selectionNotes : selectionNotes.slice(0, NOTES_SHOWN);
-                    const cards = shown
-                        .map((n) => `<article class="note-card" data-note-id="${n.id}">
-                            <p class="note-card-head"><span class="note-card-ref">${escapeHtml(n.reference)}</span> <time class="note-card-date" datetime="${escapeHtml(n.createdAt)}">${escapeHtml(n.createdAtDisplay)}</time></p>
-                            <p class="note-card-body" id="note-card-body-${n.id}">${escapeHtml(n.body)}</p>
-                            <span class="note-card-actions">
-                                <button type="button" class="note-link note-more" aria-expanded="false" aria-controls="note-card-body-${n.id}" hidden>more</button>
-                                <button type="button" class="note-link note-edit" data-note-id="${n.id}" aria-label="Edit note on ${escapeHtml(n.reference)}">Edit</button>
-                            </span>
-                        </article>`)
-                        .join('');
-                    const all = shown.length < selectionNotes.length
-                        ? `<button type="button" class="note-link note-show-all">Show all ${selectionNotes.length} notes</button>`
-                        : '';
-                    notesSection.innerHTML = `<p class="verse-notes-title">Notes (${selectionNotes.length})</p>${cards}${all}`;
-                }
-                cardXrefs.before(notesSection);
-                // "more" only where the text is cut short.
-                notesSection.querySelectorAll('.note-card-body[id]').forEach((body) => {
-                    const more = body.parentElement.querySelector('.note-more');
-                    if (more) more.hidden = !(body.scrollHeight > body.clientHeight + 1);
-                });
-                placeCard();
-                if (hadFocus && !hadFocus.isConnected) {
-                    const same = hadFocus.dataset.noteId
-                        && notesSection.querySelector(`.note-edit[data-note-id="${hadFocus.dataset.noteId}"]`);
-                    (same || noteAddBtn).focus({ preventScroll: true });
-                }
-            }
-
-            // After any change to notes, wherever it came from.
-            async function refreshNotes() {
-                await Promise.all([refreshChapterNotes(), refreshSelectionNotes(), refreshLibrary('notes')]);
-            }
-            // The note editor (ui-leptos) refreshes them after a save or a
-            // delete, and waits; see ui-leptos/src/bridge.rs.
-            window.gospelGetterRefreshNotes = refreshNotes;
-
-            // A note's Edit in the Library has opened its passage (the
-            // reader jumped there, the passage selected, so its Notes
-            // section shows): the note opens.
-            document.addEventListener('gospel-getter:edit-note', function (event) {
-                const { note } = event.detail;
-                if (note && reading) {
-                    openNotePanel({ mode: 'edit', note, code: selection ? selection.translationCode : reading.translationCode });
-                }
-            });
-
-            // ---- The note editor is one of the page's pieces written in
-            // Rust (ui-leptos/src/note_editor.rs); what crosses is documented
-            // in ui-leptos/src/bridge.rs. These open it, with the passage as
-            // it's read here and, when adding, the other notes on it; it
-            // saves and deletes, has the notes refreshed, closes, and then
-            // says what it did (below): the status line, and a deleted
-            // note's Undo, stay here, in the selection card.
-
-            // The selection's notes, as the editor lists the others.
-            function noteOthers() {
-                return selectionNotes.map((n) => ({ reference: n.reference, date: n.createdAtDisplay, body: n.body }));
-            }
-
-            // `passage` defaults to the note's own; `code` is the
-            // translation whose text is quoted.
-            function openNotePanel({ mode, note = null, passage = note && notePassage(note), code, opener = null }) {
-                if (!passage || !reading) return;
-                closeSurfaces(false);
-                if (!searchPanel.hidden) setSearchOpen(false);
-                const reference = note ? note.reference : passageReference(passage.bookName, passage.chapter, passage.start, passage.end);
-                // The verses as this translation numbers and shows them (KJV
-                // supplied words in italics, no note markers); any it
-                // doesn't number are said to be missing.
-                const verses = reading.bookId === passage.bookId && reading.chapter === passage.chapter
-                    ? columnVerses(code).filter((v) => v.number >= passage.start && v.number <= passage.end).sort((a, b) => a.number - b.number)
-                    : [];
-                const missing = passage.end - passage.start + 1 - verses.length;
-                const texts = verses.length ? markup({ verses }) : [];
-                const passageHtml = verses
-                    .map((v, i) => `<span class="note-passage-num">${v.number}</span>${texts[i]}`)
-                    .join(' ')
-                    + (missing > 0 ? ` <em>${verses.length ? 'Not all of it is' : 'It isn’t'} numbered in the ${escapeHtml(code.toUpperCase())}.</em>` : '');
-                const request = new CustomEvent('gospel-getter:note', {
-                    cancelable: true,
-                    detail: {
-                        mode,
-                        note,
-                        passage: { bookId: passage.bookId, chapter: passage.chapter, start: passage.start, end: passage.end },
-                        reference,
-                        code,
-                        passageHtml,
-                        others: mode === 'add' ? noteOthers() : [],
-                        returnFocus: opener,
-                    },
-                });
-                if (!document.dispatchEvent(request)) return;
-                setDataStatus('The note editor isn’t available.', true);
-            }
-
-            function openAddNote(opener) {
-                if (!selection || !reading) return;
-                openNotePanel({
-                    mode: 'add',
-                    passage: { bookId: reading.bookId, bookName: reading.bookName, chapter: reading.chapter, start: selection.start, end: selection.end },
-                    code: selection.translationCode,
-                    opener,
-                });
-            }
-
-            // The editor's overlay is the Rust side's: looked up when asked.
+            // The note editor's overlay is the Rust side's: looked up when
+            // asked.
             function noteOpen() {
                 const overlay = document.getElementById('note-overlay');
                 return !!overlay && !overlay.hidden;
-            }
-
-            // What the editor did, its notes already refreshed.
-            document.addEventListener('gospel-getter:note-done', function (event) {
-                const { action, note } = event.detail;
-                if (action === 'deleted') {
-                    if (verseActions.isConnected) {
-                        setActionStatus('Note deleted · ', false, { undo: () => restoreNote(note), duration: UNDO_MS });
-                    } else {
-                        setDataStatus(`Deleted the note on ${note.reference}.`);
-                    }
-                } else if (verseActions.isConnected) {
-                    setActionStatus(action === 'saved' ? 'Note saved' : 'Note added', false);
-                }
-            });
-
-            // Undo: the same passage, text and dates.
-            async function restoreNote(note) {
-                const attempt = ++actionAttempt;
-                try {
-                    await invoke('restore_note', {
-                        bookId: note.bookId,
-                        chapter: note.chapter,
-                        verseStart: note.verseStart,
-                        verseEnd: note.verseEnd,
-                        body: note.body,
-                        createdAt: note.createdAt,
-                        updatedAt: note.updatedAt,
-                    });
-                } catch (e) {
-                    console.error('Failed to restore the note', e);
-                    if (attempt === actionAttempt) setActionStatus(`Couldn’t restore the note: ${errorText(e)}`, true);
-                    return;
-                }
-                await refreshNotes();
-                if (attempt === actionAttempt) setActionStatus('Note restored', false);
             }
 
             // ---- Back up or move your data: export and import bookmarks,
@@ -5426,11 +4450,12 @@
                 if (!exportNotesBtn) return;
                 if (exportNotesBtn.disabled || !allNotes.length) return;
                 const code = currentTranslation();
+                const shown = askCard({ action: 'state' });
                 const request = new CustomEvent('gospel-getter:export-notes', {
                     cancelable: true,
                     detail: {
                         noteCount: allNotes.length,
-                        bookId: reading ? reading.bookId : null,
+                        bookId: shown && shown.chapter ? shown.chapter.bookId : null,
                         translationCode: code,
                         translationName: translationName(code),
                     },
@@ -5490,8 +4515,9 @@
                     });
                 }
                 await refreshLibrary('bookmarks');
-                await refreshHighlights();
-                await refreshNotes();
+                await askCard({ action: 'highlights' });
+                await refreshLibrary('highlights');
+                await askCard({ action: 'notes' });
                 askReader({ action: 'notice', message });
                 setDataStatus(message);
             });
@@ -5528,16 +4554,18 @@
                 setDataStatus('The welcome isn’t available.', true);
             }
 
-            // What the welcome's fresh-install rule needs, from boot.
+            // What the welcome's fresh-install rule needs, from boot (the
+            // bookmarks and highlights the card has).
             function askWelcomeAtStartup(home) {
+                const card = askCard({ action: 'state' }) || {};
                 const detail = {
                     startup: true,
                     install: {
                         hasSavedPosition: !!home.hasSavedPosition,
-                        bookmarksLoaded,
-                        bookmarks: bookmarks.length,
-                        highlightsLoaded,
-                        highlights: highlights.size,
+                        bookmarksLoaded: !!card.bookmarksLoaded,
+                        bookmarks: card.bookmarks || 0,
+                        highlightsLoaded: !!card.highlightsLoaded,
+                        highlights: card.highlights || 0,
                         notesLoaded,
                         notes: allNotes.length,
                     },
@@ -5555,12 +4583,6 @@
                 welcomeWaiting = null;
                 if (home) libraryResent.then(() => askWelcomeAtStartup(home));
             });
-
-            // The welcome's overlay is the Rust side's: looked up when asked.
-            function welcomeOpen() {
-                const overlay = document.getElementById('welcome-overlay');
-                return !!overlay && !overlay.hidden;
-            }
 
             document.getElementById('welcome-btn').addEventListener('click', () => openWelcome(menuToggle));
 
@@ -5611,11 +4633,10 @@
             // disclosures, their chips and credit links. What crosses is
             // documented in ui-leptos/src/bridge.rs. This page asks it for
             // chapters (askReader: boot, the keys, the selection card's Go
-            // to, an import, the translation changing), and hears each
-            // chapter it shows, as a snapshot, which the selection card,
-            // copying and the verses' marks act on. Without the Rust pieces
-            // nothing answers; the small fallback at the end of the page
-            // shows the chapter as plain text instead.
+            // to, an import, the translation changing); the selection card
+            // hears what it shows from it. Without the Rust pieces nothing
+            // answers; the small fallback at the end of the page shows the
+            // chapter as plain text instead.
 
             // Asks the reader. Resolves to whether a chapter was put on
             // screen; null when nothing answered (the Rust pieces aren't
@@ -5653,56 +4674,6 @@
                 return new Promise((resolve) => {
                     document.addEventListener('gospel-getter:reader-ready', () => resolve(ask()), { once: true });
                 });
-            }
-
-            // The reader has asked for another chapter or translation: drop
-            // the selection now, not when the new text arrives, so nothing
-            // (Ctrl+C included) acts on it in the meantime.
-            document.addEventListener('gospel-getter:chapter-loading', clearSelection);
-
-            // The reader has put a chapter on screen (#reading-pane-inner is
-            // new): the copy text, the selection and the verses' marks follow.
-            document.addEventListener('gospel-getter:chapter-shown', function (event) {
-                const shown = event.detail;
-                reading = {
-                    bookId: shown.bookId,
-                    bookName: shown.bookName,
-                    chapter: shown.chapter,
-                    translationCode: shown.translationCode,
-                    columns: shown.columns,
-                };
-                chapterVerses = shown.currentVerses;
-                compareFirst = shown.compareFirst;
-                closeCopyMenu();
-                // Copy chapter copies the translation being read (while
-                // comparing, the left column).
-                fetchCopy('chapter', { translationCode: reading.translationCode, bookId: reading.bookId, chapter: reading.chapter });
-                selection = null;
-                renderSelection();
-                applyBookmarkMarkers();
-                applyHighlightMarkers();
-                applyNoteMarkers();
-                refreshChapterNotes();
-            });
-
-            // A passage the reader opened (a jump, Back or Forward) whose
-            // verses are numbered: selected, in the middle of the window.
-            // The reader learns what's selected, for its history.
-            document.addEventListener('gospel-getter:chapter-select', function (event) {
-                const { translationCode, start, end } = event.detail;
-                selectVerses(translationCode, start, end);
-                const el = verseElement(translationCode, start);
-                if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
-                placeCard();
-                event.detail.selection = selection ? { start: selection.start, end: selection.end } : null;
-            });
-
-            // The card's verses (without note markers) and footnotes, as the
-            // reader draws them (see VerseText in Rust), one string each.
-            function markup(detail) {
-                const request = new CustomEvent('gospel-getter:verse-markup', { detail });
-                document.dispatchEvent(request);
-                return request.detail.html || [];
             }
 
             // ---- The keyboard shortcuts sheet is one of the page's pieces
@@ -5782,10 +4753,10 @@
                     exportBusy: exportDataBtn.disabled,
                     importBusy: importDataBtn.disabled,
                     checking: !!updateCheckBtn && updateCheckBtn.disabled,
-                    chapterCopy: !!copies.chapter,
                     chapterShown: !!document.querySelector('.chapter-copy-btn'),
                     // The chapters and books around and the history are the
-                    // reader's to say (ui-leptos/src/reader.rs).
+                    // reader's to say (ui-leptos/src/reader.rs), and whether
+                    // the chapter's text is ready to copy is the card's.
                 };
             });
 
@@ -5796,8 +4767,8 @@
             // size, a translation and Compare with are Aa's own, also the
             // Rust side's.)
             const PAGE_COMMANDS = {
-                'copy-chapter': () => copyPassage('chapter', 'reference'),
-                'copy-chapter-as': () => openCopyMenu('chapter', document.querySelector('.chapter-copy-btn')),
+                'copy-chapter': () => askCard({ action: 'copy-chapter' }),
+                'copy-chapter-as': () => askCard({ action: 'copy-as-open', slot: 'chapter' }),
                 'next-chapter': () => turnChapter('next'),
                 'previous-chapter': () => turnChapter('prev'),
                 'next-book': () => stepBook('next'),
@@ -5837,47 +4808,46 @@
                     return;
                 }
 
+                // The selection card's controls, Copy as… and Copy chapter… are
+                // the card's (ui-leptos/src/card.rs), asked within the click
+                // (copying needs that).
                 if (event.target.closest('.verse-copy-btn')) {
-                    copySelection();
+                    askCard({ action: 'copy' });
                     return;
                 }
                 const copyItem = event.target.closest('.copy-as-item');
                 if (copyItem) {
-                    chooseCopyFormat(copyItem);
+                    askCard({ action: 'copy-format', format: copyItem.dataset.format });
                     return;
                 }
                 const copyAs = event.target.closest('.verse-copy-as-btn, .chapter-copy-btn');
                 if (copyAs) {
                     const slot = copyAs.classList.contains('chapter-copy-btn') ? 'chapter' : 'selection';
-                    if (copyMenuFor === slot) closeCopyMenu({ focusOpener: true });
-                    else openCopyMenu(slot, copyAs);
+                    askCard({ action: 'copy-as', slot, opener: copyAs });
                     return;
                 }
                 // Any other click closes Copy as….
-                closeCopyMenu();
+                askCard({ action: 'close-copy-menu' });
                 if (event.target.closest('.verse-bookmark-btn')) {
-                    toggleSelectionBookmark();
+                    askCard({ action: 'bookmark' });
                     return;
                 }
                 const swatch = event.target.closest('.highlight-swatch');
                 if (swatch) {
-                    highlightSelection(swatch.dataset.color);
+                    askCard({ action: 'highlight', color: swatch.dataset.color });
                     return;
                 }
                 if (event.target.closest('.highlight-remove')) {
-                    highlightSelection(null);
+                    askCard({ action: 'highlight', color: null });
                     return;
                 }
                 const noteAdd = event.target.closest('.verse-note-btn');
                 if (noteAdd) {
-                    openAddNote(noteAdd);
+                    askCard({ action: 'note', opener: noteAdd });
                     return;
                 }
                 if (event.target.closest('.status-undo')) {
-                    const undo = actionUndo;
-                    setActionStatus('', false);
-                    noteAddBtn.focus({ preventScroll: true });
-                    if (undo) undo();
+                    askCard({ action: 'undo' });
                     return;
                 }
                 if (event.target.closest('.verse-actions')) {
@@ -5888,24 +4858,16 @@
                 // of one's text; "Show all" shows every one.
                 const noteEdit = event.target.closest('.note-edit');
                 if (noteEdit) {
-                    const note = selectionNotes.find((n) => String(n.id) === noteEdit.dataset.noteId);
-                    if (note && selection) openNotePanel({ mode: 'edit', note, code: selection.translationCode, opener: noteEdit });
+                    askCard({ action: 'note-edit', noteId: noteEdit.dataset.noteId, opener: noteEdit });
                     return;
                 }
                 const noteMore = event.target.closest('.note-more');
                 if (noteMore) {
-                    const body = document.getElementById(noteMore.getAttribute('aria-controls'));
-                    const expanded = noteMore.getAttribute('aria-expanded') !== 'true';
-                    body.classList.toggle('is-expanded', expanded);
-                    noteMore.setAttribute('aria-expanded', String(expanded));
-                    noteMore.textContent = expanded ? 'less' : 'more';
+                    askCard({ action: 'note-more', button: noteMore });
                     return;
                 }
                 if (event.target.closest('.note-show-all')) {
-                    showAllNotes = true;
-                    renderNotesSection();
-                    const next = notesSection.querySelectorAll('.note-edit')[NOTES_SHOWN];
-                    if (next) next.focus();
+                    askCard({ action: 'show-all' });
                     return;
                 }
                 // A cross-reference chip in the card shows that passage in
@@ -5913,7 +4875,7 @@
                 // returns).
                 const citation = event.target.closest('#selection-card .xref-citation');
                 if (citation) {
-                    toggleXrefPreview(citation);
+                    askCard({ action: 'xref', chip: citation });
                     return;
                 }
                 const go = event.target.closest('#selection-card .xref-preview-go');
@@ -5948,7 +4910,7 @@
                 const markedVerse = marker && marker.closest(SELECTABLE);
                 if (markedVerse && !event.shiftKey) {
                     const number = Number(markedVerse.dataset.verse);
-                    selectVerses(markedVerse.dataset.translation, number, number);
+                    askCard({ action: 'select', translationCode: markedVerse.dataset.translation, anchor: number, focus: number });
                     return;
                 }
 
@@ -5963,11 +4925,7 @@
                     const number = Number(verse.dataset.verse);
                     const code = verse.dataset.translation;
                     if (event.shiftKey) {
-                        if (!selection) {
-                            selectVerses(code, number, number);
-                        } else if (selection.translationCode === code) {
-                            selectVerses(code, selection.anchor, number);
-                        }
+                        askCard({ action: 'extend', translationCode: code, verse: number });
                         return;
                     }
                     // A click that ends a drag-highlight is the reader
@@ -5976,17 +4934,12 @@
                     if (textSelection && !textSelection.isCollapsed) {
                         return;
                     }
-                    if (selection && selection.translationCode === code
-                        && selection.start === number && selection.end === number) {
-                        clearSelection();
-                    } else {
-                        selectVerses(code, number, number);
-                    }
+                    askCard({ action: 'toggle', translationCode: code, verse: number });
                     return;
                 }
 
                 // Anything else is a click away from the current selection.
-                clearSelection();
+                askCard({ action: 'clear' });
             });
 
             // Shift-click is for verse ranges in the chapter being read, so
@@ -5995,61 +4948,6 @@
                 if (event.shiftKey && event.target.closest(SELECTABLE)) {
                     event.preventDefault();
                 }
-            });
-
-            // Holding Shift makes the selection card a ghost: faint, and
-            // clicks go through it, so a Shift-click reaches a verse it
-            // covers and extends the selection. Shift is followed from the
-            // keyboard (keydown and keyup), and let go of on blur or when
-            // the window is hidden, so a Shift released elsewhere never
-            // leaves the card a ghost. It's only visual: the card stays in
-            // the accessibility tree and focus doesn't move.
-            let shiftHeld = false;
-
-            // Whether Shift may ghost the card now. Not while Shift is for
-            // something else: typing in a field, the search box or palette,
-            // a dialog or sheet, Copy as… or another menu or popover, or
-            // focus in the card itself (Shift+Tab moves through it).
-            function cardGhostAllowed() {
-                if (!selectionCard.isConnected) return false;
-                if (importOpen() || aboutOpen() || noteOpen()
-                    || exportNotesOpen() || shortcutsOpen() || welcomeOpen()) {
-                    return false;
-                }
-                if (!searchPanel.hidden || !copyMenu.hidden) return false;
-                const active = document.activeElement;
-                if (!active || active === document.body) return true;
-                if (selectionCard.contains(active)) return false;
-                if (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable) return false;
-                return !active.closest('[role="dialog"], [role="menu"], .popover');
-            }
-
-            function syncCardGhost() {
-                selectionCard.classList.toggle('is-ghost', shiftHeld && cardGhostAllowed());
-            }
-
-            window.addEventListener('keydown', function (event) {
-                shiftHeld = event.shiftKey || event.key === 'Shift';
-                syncCardGhost();
-            }, true);
-            window.addEventListener('keyup', function (event) {
-                shiftHeld = event.key === 'Shift' ? false : event.shiftKey;
-                syncCardGhost();
-            }, true);
-            function releaseShift() {
-                shiftHeld = false;
-                syncCardGhost();
-            }
-            window.addEventListener('blur', releaseShift);
-            document.addEventListener('visibilitychange', function () {
-                if (document.hidden) releaseShift();
-            });
-            // Focus moving (into a sheet Shift+? opened, Copy as… from
-            // Ctrl+Shift+C, a field) can end the ghost while Shift is
-            // still held, or allow it again.
-            document.addEventListener('focusin', syncCardGhost);
-            document.addEventListener('focusout', function () {
-                setTimeout(syncCardGhost, 0);
             });
 
             // Keyboard: arrow keys leaf through the whole Bible a chapter
@@ -6086,11 +4984,7 @@
                     if (!searchPanel.hidden) {
                         setSearchOpen(false);
                         event.preventDefault();
-                    } else if (previewChip && !surfaceOpen()) {
-                        closeXrefPreview({ focusChip: selectionCard.contains(document.activeElement) });
-                        event.preventDefault();
-                    } else if (selection && !surfaceOpen()) {
-                        clearSelection();
+                    } else if (!surfaceOpen() && askCard({ action: 'escape' })) {
                         event.preventDefault();
                     } else if (!surfaces() && root.dataset.readerMode === 'on') {
                         unavailable('reader-exit');
@@ -6127,9 +5021,8 @@
                 // reader has highlighted some text, which copies as usual.
                 if (ctrl && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c') {
                     const textSelection = window.getSelection();
-                    if (selection && (!textSelection || textSelection.isCollapsed)) {
+                    if ((!textSelection || textSelection.isCollapsed) && askCard({ action: 'copy' })) {
                         event.preventDefault();
-                        copySelection();
                     }
                     return;
                 }
@@ -6137,9 +5030,8 @@
                 // Ctrl+Shift+C (Cmd+Shift+C) opens Copy as… for the selected
                 // verses.
                 if (ctrl && !event.altKey && event.shiftKey && event.key.toLowerCase() === 'c') {
-                    if (selection) {
+                    if (askCard({ action: 'copy-as-open', slot: 'selection' })) {
                         event.preventDefault();
-                        openCopyMenu('selection', verseActions.querySelector('.verse-copy-as-btn'));
                     }
                     return;
                 }
@@ -6153,11 +5045,12 @@
                 }
 
                 // N writes a note on the selected verses.
-                if (plain && !event.shiftKey && (event.key === 'n' || event.key === 'N') && selection) {
-                    event.preventDefault();
+                if (plain && !event.shiftKey && (event.key === 'n' || event.key === 'N')) {
                     const active = document.activeElement;
-                    openAddNote(active && active !== document.body ? active : null);
-                    return;
+                    if (askCard({ action: 'note', opener: active && active !== document.body ? active : null })) {
+                        event.preventDefault();
+                        return;
+                    }
                 }
 
                 // G opens the book and chapter picker, as the reference
@@ -6232,15 +5125,19 @@
             // first verse in view and k the last. With `extend` (Shift),
             // the selection's moving end goes instead, as Shift-click
             // moves it. The page scrolls only as far as the verse needs.
+            // The chapter and the selection are the card's, asked for here.
             function stepSelection(step, extend) {
-                if (!reading) return;
-                const code = reading.translationCode;
-                const numbers = columnVerses(code).map((v) => v.number).sort((a, b) => a - b);
+                const state = askCard({ action: 'state' });
+                if (!state || !state.chapter) return;
+                const { selection } = state;
+                const code = state.chapter.translationCode;
+                const select = (anchor, focus) => askCard({ action: 'select', translationCode: code, anchor, focus });
+                const numbers = state.chapter.numbers.slice().sort((a, b) => a - b);
                 if (!numbers.length) return;
                 if (!selection || selection.translationCode !== code) {
                     const n = verseInView(code, step > 0 ? 'first' : 'last')
                         ?? (step > 0 ? numbers[0] : numbers[numbers.length - 1]);
-                    selectVerses(code, n, n);
+                    select(n, n);
                     revealVerse(code, n);
                     return;
                 }
@@ -6248,8 +5145,8 @@
                 const from = extend ? moving : (step > 0 ? selection.end : selection.start);
                 const next = numbers[numbers.indexOf(from) + step];
                 if (next == null) return;
-                if (extend) selectVerses(code, selection.anchor, next);
-                else selectVerses(code, next, next);
+                if (extend) select(selection.anchor, next);
+                else select(next, next);
                 revealVerse(code, next);
             }
 
@@ -6260,6 +5157,10 @@
             // At least this much of a verse shows for it to count as in
             // view: a line, not the last few pixels of one under the bar.
             const IN_VIEW = 24;
+
+            // A revealed verse keeps this far from the window's edges (the
+            // card's gap, ui-leptos/src/card_text.rs).
+            const CARD_GAP = 8;
 
             // The first or last verse of the column that's in view, or
             // null when none is (or there's no layout to tell).
@@ -6328,7 +5229,8 @@
                     startHere = Array.isArray(home.startHere) ? home.startHere : [];
                     await startReader(home);
                     await refreshLibrary('bookmarks');
-                    await refreshHighlights();
+                    await askCard({ action: 'highlights' });
+                    await refreshLibrary('highlights');
                     await refreshLibrary('notes');
                     // Lists asked for before the pieces loaded, asked again.
                     await libraryResent;

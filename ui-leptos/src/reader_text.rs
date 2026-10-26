@@ -14,6 +14,7 @@
 //! italics or raised where the backend's parts say, never changed.
 
 use crate::dto::{ChapterSide, Compare, Edge, Reading, Translation, Verse, Xref};
+use crate::passage_reference::verse_range;
 use crate::verse_parts::{Footnote, PartKind, SegmentKind};
 
 // ---- Text as markup.
@@ -687,15 +688,6 @@ pub const COMPARE_FAILED: &str =
     "The translations couldn't be compared for this chapter, so it's shown in one translation.";
 
 // ---- Opening a passage.
-
-/// "16", or "16–18" for a range.
-pub fn verse_range(start: i64, end: i64) -> String {
-    if start == end {
-        start.to_string()
-    } else {
-        format!("{start}–{end}")
-    }
-}
 
 /// Said when a passage opened isn't numbered in the translation being
 /// read (`name`): past the chapter's end there (it ends at `last`), or a

@@ -8,6 +8,10 @@ pub mod db;
 pub mod domain;
 pub mod notes_export;
 pub mod passage_copy;
+// How a passage is named ("John 3:16–18"), shared with the page's Rust
+// pieces (ui-leptos), which compile the same file.
+#[path = "../../shared/passage_reference.rs"]
+pub mod passage_reference;
 // The saved settings' one table, shared with the page's Rust pieces
 // (ui-leptos), which compile the same file.
 #[path = "../../shared/preferences.rs"]

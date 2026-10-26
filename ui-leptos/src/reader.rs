@@ -12,9 +12,9 @@
 //! the two disclosures, the chapter's cross-references and their credit
 //! links.
 //!
-//! What's left of the page's reader (the selection card, copying, the
-//! verses' marks, the keyboard and boot) reaches it only as `bridge` says:
-//! requests in, and each chapter shown out, as a snapshot. A stale answer
+//! The selection card (`card`) hears each chapter loading and shown, and
+//! each passage to select, from here; what's left of the page's reader (the
+//! keyboard and boot) reaches it only as `bridge` says: requests in. A stale answer
 //! never overwrites a newer one: each load has its token, as the page's
 //! `loadToken`, each step back or forward its own, and a position is saved
 //! only for a chapter put on screen, in the order they were shown.
@@ -43,18 +43,18 @@ use web_sys::{
 
 use crate::aa;
 use crate::bridge;
+use crate::card;
 use crate::dom;
 use crate::dto::{Compare, CompareArgs, Home, Position, Reading, ReadingArgs, Verse};
 use crate::ipc;
 use crate::palette::PaletteState;
 use crate::reader_text::{self as text, Disclosure, History, Opened, Place, Which};
-use crate::verse_parts::Footnote;
 
 /// A load, a jump or a step: whether it put a chapter on screen.
 type Load = Pin<Box<dyn Future<Output = bool>>>;
 
 /// A passage opened: whether it put its chapter on screen, and the verses
-/// the page then had selected (`bridge::chapter_select`).
+/// the selection card then had selected (`card::select_passage`).
 type OpenedPassage = Pin<Box<dyn Future<Output = (bool, Option<(i64, i64)>)>>>;
 
 /// The chapter on screen, as the page's `reading` named it.
@@ -68,11 +68,10 @@ struct Here {
 
 #[derive(Default)]
 struct State {
-    /// The last `get_reading` and `get_compare` answers, read and as they
-    /// came (the page's snapshot carries the verses as they came), so
-    /// Compare going on or off draws the chapter again without reading it.
-    last_dto: Option<(Rc<Reading>, JsValue)>,
-    last_compare: Option<(Rc<Compare>, JsValue)>,
+    /// The last `get_reading` and `get_compare` answers, so Compare going
+    /// on or off draws the chapter again without reading it.
+    last_dto: Option<Rc<Reading>>,
+    last_compare: Option<Rc<Compare>>,
     reading: Option<Here>,
     /// The verse numbers of each column on screen, by translation.
     columns: Vec<(String, Vec<i64>)>,
@@ -282,14 +281,9 @@ struct Credits<'a> {
 
 // ---- Putting a chapter on screen.
 
-/// A command's answer's property, as it came.
-fn raw(value: &JsValue, key: &str) -> JsValue {
-    js_sys::Reflect::get(value, &JsValue::from_str(key)).unwrap_or(JsValue::UNDEFINED)
-}
-
 /// Puts the last reading (and the comparison, while comparing and it's
 /// this chapter's in the translations wanted) on screen, then tells the
-/// page (`bridge::CHAPTER_SHOWN_EVENT`).
+/// selection card (`card::shown`).
 fn render_current() {
     let Some(pane) = by_id("reading-pane") else {
         return;
@@ -301,39 +295,29 @@ fn render_current() {
             s.reading.clone(),
         )
     });
-    let (Some((dto, dto_raw)), Some(here)) = (dto, here) else {
+    let (Some(dto), Some(here)) = (dto, here) else {
         return;
     };
     let codes = compare_codes();
-    let compare = compare.filter(|(c, _)| {
+    let compare = compare.filter(|c| {
         is_comparing()
             && text::compare_is_current(c, dto.current_book_id, dto.current_chapter, &codes)
     });
     let compare_first = with(|s| {
         s.last_compare
             .as_ref()
-            .and_then(|(c, _)| c.columns.first())
+            .and_then(|c| c.columns.first())
             .map(|c| c.code.clone())
     });
 
     // The columns on screen: the translation being read, then (while
     // comparing) each column, which replaces it where it's the same one.
     let numbers = |verses: &[Verse]| verses.iter().map(|v| v.number).collect::<Vec<_>>();
-    let current_verses = raw(&dto_raw, "currentVerses");
-    let mut columns = vec![(
-        here.translation_code.clone(),
-        current_verses.clone(),
-        numbers(&dto.current_verses),
-    )];
-    if let Some((compare, compare_raw)) = &compare {
-        let raw_columns = raw(compare_raw, "columns");
-        for (i, column) in compare.columns.iter().enumerate() {
-            let verses = raw(
-                &js_sys::Reflect::get_u32(&raw_columns, i as u32).unwrap_or_default(),
-                "verses",
-            );
-            let entry = (column.code.clone(), verses, numbers(&column.verses));
-            match columns.iter_mut().find(|(code, _, _)| *code == column.code) {
+    let mut columns = vec![(here.translation_code.clone(), numbers(&dto.current_verses))];
+    if let Some(compare) = &compare {
+        for column in &compare.columns {
+            let entry = (column.code.clone(), numbers(&column.verses));
+            match columns.iter_mut().find(|(code, _)| *code == column.code) {
                 Some(found) => *found = entry,
                 None => columns.push(entry),
             }
@@ -342,7 +326,7 @@ fn render_current() {
 
     pane.set_inner_html(&text::reading_pane(
         &dto,
-        compare.as_ref().map(|(c, _)| c.as_ref()),
+        compare.as_deref(),
         &here.translation_code,
         opened(),
     ));
@@ -357,26 +341,10 @@ fn render_current() {
         let count = grid.get_attribute("data-columns").unwrap_or_default();
         let _ = grid.style().set_property("--compare-columns", &count);
     }
-    with(|s| {
-        s.columns = columns
-            .iter()
-            .map(|(code, _, numbers)| (code.clone(), numbers.clone()))
-            .collect();
-    });
-    update_reference(&here, compare.as_ref().map(|(c, _)| c.as_ref()));
+    with(|s| s.columns = columns);
+    update_reference(&here, compare.as_deref());
     bridge::show_picker_current(here.book_id, here.chapter);
-    bridge::chapter_shown(&bridge::ChapterShown {
-        book_id: here.book_id,
-        book_name: &here.book_name,
-        chapter: here.chapter,
-        translation_code: &here.translation_code,
-        columns: columns
-            .iter()
-            .map(|(code, verses, _)| (code.as_str(), verses))
-            .collect(),
-        current_verses: &current_verses,
-        compare_first: compare_first.as_deref(),
-    });
+    card::shown(dto, compare, &here.translation_code, compare_first);
 }
 
 /// The comparison of the chapter in the translations Compare shows now, or
@@ -434,7 +402,7 @@ fn load_sent(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
         s.load_token += 1;
         s.load_token
     });
-    bridge::chapter_loading();
+    card::loading();
     let translation_code = bridge::translation_code();
     let layout = compare_layout();
     let reading = match sent {
@@ -544,9 +512,9 @@ fn answered(
     };
     let compared = compare.is_some();
     with(|s| {
-        s.last_dto = Some((Rc::new(dto), dto_raw));
+        s.last_dto = Some(Rc::new(dto));
         if let Some(compare) = compare {
-            s.last_compare = Some((Rc::new(compare), compare_raw));
+            s.last_compare = Some(Rc::new(compare));
         }
         s.reading = Some(here.clone());
     });
@@ -651,7 +619,7 @@ fn send_position(position: &Position) -> Result<js_sys::Promise, JsValue> {
 /// screen in the new layout, fetching the comparison only if it isn't the
 /// one there already (and dropping it if a load has begun meanwhile).
 fn on_compare_change() {
-    let Some((dto, _)) = with(|s| s.last_dto.clone()) else {
+    let Some(dto) = with(|s| s.last_dto.clone()) else {
         return;
     };
     if !is_comparing() {
@@ -661,7 +629,7 @@ fn on_compare_change() {
     }
     let codes = compare_codes();
     let current = with(|s| {
-        s.last_compare.as_ref().is_some_and(|(c, _)| {
+        s.last_compare.as_ref().is_some_and(|c| {
             text::compare_is_current(c, dto.current_book_id, dto.current_chapter, &codes)
         })
     });
@@ -680,7 +648,7 @@ fn on_compare_change() {
             .then(|| serde_wasm_bindgen::from_value::<Compare>(compare_raw.clone()).ok())
             .flatten();
         match compare {
-            Some(compare) => with(|s| s.last_compare = Some((Rc::new(compare), compare_raw))),
+            Some(compare) => with(|s| s.last_compare = Some(Rc::new(compare))),
             None => show_notice(text::COMPARE_FAILED),
         }
         render_current();
@@ -690,7 +658,7 @@ fn on_compare_change() {
 // ---- Passages and the history.
 
 /// Opens a chapter and selects `start`–`end` in it, in the translation
-/// being read (the page selects them, `bridge::CHAPTER_SELECT_EVENT`), for
+/// being read (the selection card selects them, `card::select_passage`), for
 /// every jump and for going back and forward to one. If that translation
 /// doesn't number them, the chapter opens and the notice says so, rather
 /// than selecting other verses. Whether it opened, and what the page then
@@ -714,7 +682,7 @@ fn open_passage(book_id: i64, chapter: i64, start: Option<i64>, end: Option<i64>
                 .unwrap_or_default()
         });
         if numbers.contains(&start) && numbers.contains(&end) {
-            let selected = bridge::chapter_select(&here.translation_code, start, end);
+            let selected = card::select_passage(&here.translation_code, start, end);
             return (loaded, selected);
         }
         // Past the chapter's end in this translation, or a verse it leaves
@@ -826,8 +794,8 @@ pub fn jump(book_id: i64, chapter: i64, top: bool) {
 
 /// A Library row or a search result opens its passage (the Library or the
 /// search box already closed), as a jump, its verses selected; with a
-/// `note` (a note's Edit, as `list_all_notes` gave it), the page then opens
-/// the note editor on it (`bridge::NOTE_EDIT_EVENT`).
+/// `note` (a note's Edit, as `list_all_notes` gave it), the selection card
+/// then opens the note editor on it (`card::edit_note`).
 pub fn open(passage: &bridge::OpenPassage, note: JsValue) {
     let load = jump_to(
         passage.book_id,
@@ -839,7 +807,7 @@ pub fn open(passage: &bridge::OpenPassage, note: JsValue) {
     spawn_local(async move {
         let _ = load.await;
         if !note.is_null() && !note.is_undefined() && with(|s| s.reading.is_some()) {
-            bridge::edit_note(&note);
+            card::edit_note(&note);
         }
     });
 }
@@ -857,7 +825,7 @@ pub fn palette_facts(state: &mut PaletteState) {
     state.next_chapter = has("data-next-book");
     state.previous_chapter = has("data-prev-book");
     with(|s| {
-        let dto = s.last_dto.as_ref().map(|(dto, _)| dto);
+        let dto = s.last_dto.as_ref();
         state.next_book = dto.is_some_and(|d| d.next_book.is_some());
         state.previous_book = dto.is_some_and(|d| d.prev_book.is_some());
         state.back = s.history.can_go(-1);
@@ -957,7 +925,7 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
                 return Box::pin(async { false });
             };
             let found = with(|s| {
-                let (dto, _) = s.last_dto.as_ref()?;
+                let dto = s.last_dto.as_ref()?;
                 let here = s.reading.as_ref()?;
                 let book = match which {
                     Which::Prev => dto.prev_book.as_ref(),
@@ -1016,34 +984,6 @@ fn from_top(load: Load, top: bool) -> Load {
         }
         loaded
     })
-}
-
-/// The page's selection card asks for verses or footnotes as markup
-/// (`bridge::VERSE_MARKUP_EVENT`): verses without note markers (as the card
-/// and the note editor quote them), footnotes as the lists show them.
-fn on_markup(event: CustomEvent) {
-    #[derive(Deserialize)]
-    struct Asked {
-        #[serde(default)]
-        verses: Vec<Verse>,
-        #[serde(default)]
-        footnotes: Vec<Footnote>,
-    }
-    let asked: Asked = match bridge::detail(&event) {
-        Ok(asked) => asked,
-        Err(e) => {
-            ipc::log_error("The verses to show can't be read", &e);
-            return;
-        }
-    };
-    let html: js_sys::Array = asked
-        .verses
-        .iter()
-        .map(|v| text::verse_html(v, false))
-        .chain(asked.footnotes.iter().map(text::footnote_html))
-        .map(|html| JsValue::from_str(&html))
-        .collect();
-    bridge::markup_answer(&event, &html);
 }
 
 // ---- The pane's own controls.
@@ -1129,11 +1069,12 @@ struct CreditArgs<'a> {
     which: &'a str,
 }
 
-/// Listens for the page's requests and the markup it asks for, Compare's
+/// Listens for the page's requests, Compare's
 /// changes, clicks on the pane's controls and on Try again, and the mouse's
 /// back and forward buttons; then tells the page it's there
 /// (`bridge::READER_READY_EVENT`), so boot's chapter needn't wait for the
-/// other pieces to mount. Called right after Aa's (whose records it fills).
+/// other pieces to mount. Called right after Aa's (whose records it fills)
+/// and the selection card's (which it tells about each chapter).
 pub fn mount() {
     let Some(document) = bridge::document() else {
         return;
@@ -1148,7 +1089,6 @@ pub fn mount() {
         }
     });
     dom::on_document_event(bridge::READER_EVENT, on_request);
-    dom::on_document_event(bridge::VERSE_MARKUP_EVENT, on_markup);
     dom::on_document_event(aa::COMPARE_CHANGE_EVENT, |_| on_compare_change());
     // After the page's own click handler on the body, which ignores these.
     if let Some(body) = document.body() {
