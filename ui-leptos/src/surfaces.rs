@@ -37,7 +37,9 @@
 //! as it did. Since then, main's #116, #118 and #121 (D14): a resize across
 //! 1200px keeps the reading place the reader last saw ([`on_shape_change`],
 //! [`note_painted_place`]), even right after a scroll, and in Chromium,
-//! whatever place its scroll anchoring kept ([`SCROLL_BEFORE_RESIZE`]).
+//! whatever place its scroll anchoring kept ([`SCROLL_BEFORE_RESIZE`]),
+//! also when the scroll's own events came after the resize's
+//! ([`SCROLLED_AFTER_RESIZE`]).
 
 use std::cell::{Cell, RefCell};
 
@@ -74,6 +76,11 @@ thread_local! {
     /// [`SCROLL_SEEN`] as the last resize's event came, before the scroll
     /// event of anything that scrolled for it ([`on_shape_change`]).
     static SCROLL_BEFORE_RESIZE: Cell<Option<f64>> = const { Cell::new(None) };
+    /// A scroll ended (`scrollend`) after the last resize's event: a scroll
+    /// with no frame between it and the resize, whose events come after
+    /// the resize's, so [`SCROLL_BEFORE_RESIZE`] is older than the
+    /// reader's place. Chromium's anchoring scrolls without one.
+    static SCROLLED_AFTER_RESIZE: Cell<bool> = const { Cell::new(false) };
 }
 
 // ---- The page's elements.
@@ -197,12 +204,34 @@ pub fn sync_picker() {
 const PLACE_MARKS: &str =
     ".chapter-main .chapter-heading, .chapter-main .verse[data-verse], .chapter-main .compare-gap";
 
+/// Every heading and verse of the reading row, the faded chapters'
+/// beside it too, in page order: what Chromium's scroll anchoring keeps in
+/// place ([`scroll_before_anchoring`]).
+const ROW_MARKS: &str = ".reading-row .chapter-heading, .reading-row .chapter-heading-link, \
+     .reading-row .edge-card-title, .reading-row .edge-card-detail, \
+     .reading-row .verse[data-verse], .reading-row .compare-gap";
+
 /// The marks a reading place can be, in order.
 fn place_marks() -> Vec<HtmlElement> {
+    matching(PLACE_MARKS)
+}
+
+fn matching(selector: &str) -> Vec<HtmlElement> {
     bridge::document()
-        .and_then(|document| document.query_selector_all(PLACE_MARKS).ok())
+        .and_then(|document| document.query_selector_all(selector).ok())
         .map(|found| dom::elements(&found))
         .unwrap_or_default()
+}
+
+/// Each element's top and bottom in the page, scrolled to `y`.
+fn page_boxes(elements: &[HtmlElement], y: f64) -> Vec<(f64, f64)> {
+    elements
+        .iter()
+        .map(|element| {
+            let rect = element.get_bounding_client_rect();
+            (rect.top() + y, rect.bottom() + y)
+        })
+        .collect()
 }
 
 /// The reader's place: the first heading or verse of the chapter being
@@ -221,6 +250,10 @@ struct PaintedLayout {
     marks: Vec<HtmlElement>,
     /// Each mark's top and bottom in the page, in order.
     at: Vec<(f64, f64)>,
+    /// The reading row's marks ([`ROW_MARKS`]), and each one's top and
+    /// bottom in the page.
+    row: Vec<HtmlElement>,
+    row_at: Vec<(f64, f64)>,
 }
 
 /// The reader's place as the page is laid out now, if anything of the
@@ -260,17 +293,15 @@ fn note_painted_place() {
         };
         let y = window.scroll_y().unwrap_or(0.0);
         let marks = place_marks();
-        let at = marks
-            .iter()
-            .map(|mark| {
-                let rect = mark.get_bounding_client_rect();
-                (rect.top() + y, rect.bottom() + y)
-            })
-            .collect();
+        let at = page_boxes(&marks, y);
+        let row = matching(ROW_MARKS);
+        let row_at = page_boxes(&row, y);
         PAINTED_LAYOUT.set(Some(PaintedLayout {
             bar_bottom: bar.get_bounding_client_rect().bottom(),
             marks,
             at,
+            row,
+            row_at,
         }));
     });
     let asked = web_sys::window().is_some_and(|window| {
@@ -295,6 +326,29 @@ fn painted_place_at(y: f64) -> Option<Place> {
             mark: mark.clone(),
             top,
         })
+    })
+}
+
+/// The scroll position the page had before Chromium's anchoring scrolled
+/// it for a resize: the one at which the painted layout's first mark of
+/// the reading row under the bar, Chromium's anchor, stood where it stands
+/// now (`surfaces_text::scroll_before_anchoring`). None with no layout
+/// painted, or no mark that fits.
+fn scroll_before_anchoring() -> Option<f64> {
+    let height = web_sys::window()?.inner_height().ok()?.as_f64()?;
+    PAINTED_LAYOUT.with_borrow(|layout| {
+        let layout = layout.as_ref()?;
+        let now: Vec<_> = layout
+            .row
+            .iter()
+            .map(|mark| {
+                mark.is_connected().then(|| {
+                    let rect = mark.get_bounding_client_rect();
+                    (rect.top(), rect.bottom())
+                })
+            })
+            .collect();
+        text::scroll_before_anchoring(layout.bar_bottom, height, &layout.row_at, &now)
     })
 }
 
@@ -378,8 +432,16 @@ pub fn open_picker(toggle: bool) {
 /// the page's last `scroll` event found as the resize's event came
 /// ([`SCROLL_BEFORE_RESIZE`]): the anchoring's own scroll event comes after
 /// it. Measured now instead, the first verse under the bar would be
-/// wherever Chromium's place left it. With no layout painted yet, or a
-/// place no longer on the page, it's the place found now. The close is
+/// wherever Chromium's place left it. But a scroll with no frame between
+/// it and the resize has its events after the resize's too (a browser
+/// fires a frame's resize events before its scroll events), so then the
+/// position seen is older than the reader's, and restoring the place there
+/// would take the reader back to it (to the top of the chapter, after a
+/// jump down it). Its `scrollend` says so ([`SCROLLED_AFTER_RESIZE`]; the
+/// anchoring's scroll has none), and the position is found from the
+/// anchoring instead ([`scroll_before_anchoring`]): the newest scroll
+/// always wins. With no layout painted yet, a place no longer on the page,
+/// or no position found, it's the place found now. The close is
 /// inside [`keep_reading_place`] too: it syncs the picker itself, so
 /// outside it the new shape would reflow the page before the place was
 /// kept.
@@ -389,10 +451,15 @@ fn on_shape_change() {
     };
     let focus_was_inside = contains(&picker, active().as_deref());
     let before_resize = SCROLL_BEFORE_RESIZE.take();
-    let place = web_sys::window()
-        .and_then(|window| window.scroll_y().ok())
-        .map(|now| text::scroll_read_at(anchors_on_resize(), before_resize, now))
-        .and_then(painted_place_at);
+    let anchors = anchors_on_resize();
+    let place = if anchors && SCROLLED_AFTER_RESIZE.replace(false) {
+        scroll_before_anchoring().and_then(painted_place_at)
+    } else {
+        web_sys::window()
+            .and_then(|window| window.scroll_y().ok())
+            .map(|now| text::scroll_read_at(anchors, before_resize, now))
+            .and_then(painted_place_at)
+    };
     keep_reading_place(
         || {
             if CURRENT.get() == Some(Surface::Picker) {
@@ -652,7 +719,8 @@ fn export_surfaces() {
 /// Notes the painted layout after a scroll, a resize, or a reflow of the
 /// reading pane (a chapter put on screen, or reflowed: text size, fonts),
 /// and once now. Each scroll's position is noted at once ([`SCROLL_SEEN`]),
-/// and a resize notes it as its event comes ([`SCROLL_BEFORE_RESIZE`]).
+/// a resize notes it as its event comes ([`SCROLL_BEFORE_RESIZE`]), and a
+/// scroll that ends after that, that it did ([`SCROLLED_AFTER_RESIZE`]).
 fn watch_painted_place() {
     if let Some(window) = web_sys::window() {
         SCROLL_SEEN.set(window.scroll_y().unwrap_or(0.0));
@@ -670,8 +738,20 @@ fn watch_painted_place() {
             &passive,
         );
         scrolled.forget();
+        let ended = Closure::<dyn Fn()>::new(|| {
+            if SCROLL_BEFORE_RESIZE.get().is_some() {
+                SCROLLED_AFTER_RESIZE.set(true);
+            }
+        });
+        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
+            "scrollend",
+            ended.as_ref().unchecked_ref(),
+            &passive,
+        );
+        ended.forget();
         let resized = Closure::<dyn Fn()>::new(|| {
             SCROLL_BEFORE_RESIZE.set(Some(SCROLL_SEEN.get()));
+            SCROLLED_AFTER_RESIZE.set(false);
             note_painted_place();
         });
         let _ = window.add_event_listener_with_callback("resize", resized.as_ref().unchecked_ref());
