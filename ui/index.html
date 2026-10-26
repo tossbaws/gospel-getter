@@ -2965,7 +2965,7 @@
         /* Every verse of the chapter being read is selectable (click, then
            Shift-click to extend). The faded neighbors aren't: they stay
            plain text. */
-        .chapter-main .chapter-text > .verse {
+        .chapter-main .chapter-text > .verse[data-translation] {
             cursor: pointer;
         }
 
@@ -3021,7 +3021,9 @@
             box-decoration-break: clone;
         }
 
-        :root[data-layout="flowing"] .chapter-main .chapter-text > .verse:hover {
+        /* :where() keeps the wash's specificity at the selection tint's,
+           so a selected verse under the pointer keeps its tint. */
+        :root[data-layout="flowing"] .chapter-main .chapter-text > .verse:where([data-translation]):hover {
             background: rgba(var(--accent-rgb), 0.06);
         }
 

@@ -93,6 +93,53 @@ test('without the pieces, no dialog answers or says anything, and the chapter sh
         assert.deepEqual(app.consoleErrors, []);
     }));
 
+// The page's rules that make a verse look clickable: the pointer, and a
+// wash under it (each `:hover` rule, as if the pointer were there).
+function clickableRules(app) {
+    return [...app.document.styleSheets]
+        .flatMap((sheet) => [...sheet.cssRules])
+        .filter((rule) => rule.selectorText && (rule.style.cursor === 'pointer' || rule.selectorText.includes(':hover')))
+        .flatMap((rule) => rule.selectorText.split(','))
+        .map((selector) => selector.trim().replaceAll(':hover', ''))
+        .filter((selector) => !selector.includes('::'));
+}
+
+// In both layouts, Flowing having the wash.
+function looksClickable(app, verse) {
+    const root = app.document.documentElement;
+    const layout = root.dataset.layout;
+    try {
+        return ['flowing', 'verse'].map((name) => {
+            root.dataset.layout = name;
+            return clickableRules(app).filter((selector) => verse.matches(selector));
+        });
+    } finally {
+        if (layout === undefined) delete root.dataset.layout;
+        else root.dataset.layout = layout;
+    }
+}
+
+test('only the reader’s verses look clickable: the plain-text fallback’s get no pointer and no wash (G7)', async () => {
+    await withApp({ book: 'John', chapter: 3 }, async (app) => {
+        await app.idle();
+        const [flowing, verseByVerse] = looksClickable(app, app.verse(16));
+        assert.ok(flowing.includes('.chapter-main .chapter-text > .verse[data-translation]'), 'the pointer');
+        assert.ok(flowing.some((s) => s.includes('[data-layout="flowing"]') && s.endsWith('.verse:where([data-translation])')), 'Flowing’s wash');
+        assert.ok(verseByVerse.includes('.chapter-main .chapter-text > .verse[data-translation]'), 'the pointer in every layout');
+    });
+    await withApp({ book: 'John', chapter: 3, leptos: false }, async (app) => {
+        await app.idle();
+        await readsAsPlainText(app, 'John', 3);
+        const verses = [...app.document.querySelectorAll('.chapter-main .chapter-text > .verse')];
+        assert.equal(verses.length, 36);
+        for (const verse of verses) {
+            assert.equal(verse.hasAttribute('data-translation'), false);
+            assert.deepEqual(looksClickable(app, verse), [[], []], verse.textContent);
+        }
+        assert.deepEqual(app.consoleErrors, []);
+    });
+});
+
 const VERSION = JSON.parse(
     readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
 ).version;
