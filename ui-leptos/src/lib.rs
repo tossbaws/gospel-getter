@@ -13,8 +13,10 @@
 //! and the header's popovers and panels themselves, with the picker's two
 //! shapes (`surfaces`), which open and close all of these; and the reader
 //! (`reader`, with its markup and rules in `reader_text`): the chapter on
-//! screen, how it gets there, and the passage history. The page talks to
-//! them only as `bridge` says.
+//! screen, how it gets there, and the passage history; and the selection
+//! card (`card`, with its markup and rules in `card_text`): the verse
+//! selection, copying, and the card's bookmark, highlight and notes. The
+//! page talks to them only as `bridge` says.
 //!
 //! If this module fails to load, the chapter still shows, as plain text, in
 //! the saved look (the page's small fallback reads it, and its pre-paint
@@ -29,6 +31,8 @@ mod aa;
 mod aa_text;
 mod about;
 mod bridge;
+mod card;
+mod card_text;
 mod dom;
 mod dto;
 mod export_notes;
@@ -41,6 +45,10 @@ mod library_text;
 mod note_editor;
 mod note_text;
 mod palette;
+// How a passage is named, shared with the backend, which compiles the same
+// file.
+#[path = "../../shared/passage_reference.rs"]
+pub mod passage_reference;
 mod picker;
 mod picker_text;
 // The saved settings' one table, shared with the backend (src-tauri), which
@@ -78,8 +86,10 @@ pub fn start() {
     // Aa and the saved settings next: their records (the `<select>`s) are
     // filled before any piece reads them.
     aa::mount();
-    // The reader, before the rest: boot's chapter is on its way (or in),
+    // The selection card, which the reader tells about each chapter, and
+    // the reader, before the rest: boot's chapter is on its way (or in),
     // and is drawn now.
+    card::mount();
     reader::mount();
     // The table of shortcuts, where the page had it.
     bridge::export_shortcuts();

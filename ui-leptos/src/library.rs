@@ -32,6 +32,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge;
+use crate::card;
 use crate::dom;
 use crate::dto::{
     Bookmark, HighlightPassage, Note, PassageArgs, RemoveBookmarkArgs, TranslationArgs,
@@ -466,7 +467,10 @@ impl Library {
                 );
                 return;
             }
-            bridge::refresh_highlights().await;
+            // The reader's highlights, then this list (as the page's
+            // `refreshHighlights` did).
+            card::refresh_highlights().await;
+            self.reload(List::Highlights).await;
             // Keep keyboard focus in the list, on the next passage, or on
             // the filter once the list is empty.
             let buttons = buttons();

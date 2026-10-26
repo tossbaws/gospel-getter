@@ -407,11 +407,13 @@ mod tests {
             migrate.contains(&format!("color IN ({})", quoted.join(", "))),
             "the highlights table's CHECK should list exactly these colors"
         );
-        let html = include_str!("../../../ui/index.html");
+        // The swatches are the selection card's (ui-leptos/src/card_text.rs).
+        let card = include_str!("../../../ui-leptos/src/card_text.rs");
+        let double_quoted: Vec<String> = names.iter().map(|n| format!("\"{n}\"")).collect();
         assert!(
-            html.contains(&format!(
-                "const HIGHLIGHT_COLORS = [{}];",
-                quoted.join(", ")
+            card.contains(&format!(
+                "pub const HIGHLIGHT_COLORS: [&str; 4] = [{}];",
+                double_quoted.join(", ")
             )),
             "the frontend's swatches should offer exactly these colors"
         );

@@ -304,6 +304,50 @@ Write-Output $class
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+/// Windows: the text on the clipboard, as the selection card's Copy left
+/// it (`Get-Clipboard`). It travels as UTF-8 in base64, so PowerShell's
+/// console code page can't change a character of it. The script is written
+/// to `work_dir` and run with `-File`, as above.
+pub async fn windows_clipboard(work_dir: &Path) -> Result<String> {
+    use base64::Engine as _;
+    const SCRIPT: &str = r#"
+$ErrorActionPreference = 'Stop'
+$text = Get-Clipboard -Raw
+if ($null -eq $text) { $text = '' }
+[Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($text))
+"#;
+    let script = work_dir.join("read-clipboard.ps1");
+    tokio::fs::write(&script, SCRIPT)
+        .await
+        .with_context(|| format!("writing {}", script.display()))?;
+    let script = script.to_str().context("the script path is not UTF-8")?;
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            script,
+        ])
+        .stdin(Stdio::null())
+        .kill_on_drop(true)
+        .output()
+        .await
+        .context("running PowerShell")?;
+    if !output.status.success() {
+        bail!(
+            "Get-Clipboard failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let encoded = String::from_utf8_lossy(&output.stdout);
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .context("the clipboard's text didn't come back as base64")?;
+    String::from_utf8(bytes).context("the clipboard's text isn't UTF-8")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

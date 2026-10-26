@@ -55,11 +55,18 @@ pub enum Check {
     TryAgain = 43,
     PlainText = 44,
     DisclosuresKept = 45,
+    SelectVerses = 46,
+    CopyFormats = 47,
+    CardBookmark = 48,
+    CardHighlight = 49,
+    CardNote = 50,
+    XrefPreview = 51,
+    ShiftGhost = 52,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 38] = [
+    pub const SHIPPED: [Check; 45] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -97,6 +104,13 @@ impl Check {
         Check::BackForward,
         Check::LongChapter,
         Check::TryAgain,
+        Check::SelectVerses,
+        Check::CopyFormats,
+        Check::CardBookmark,
+        Check::CardHighlight,
+        Check::CardNote,
+        Check::XrefPreview,
+        Check::ShiftGhost,
         Check::PlainText,
     ];
 
@@ -161,6 +175,13 @@ impl Check {
             Check::TryAgain => "try-again",
             Check::PlainText => "plain-text-fallback",
             Check::DisclosuresKept => "disclosures-kept",
+            Check::SelectVerses => "select-verses",
+            Check::CopyFormats => "copy-and-copy-as",
+            Check::CardBookmark => "card-bookmark",
+            Check::CardHighlight => "card-highlight",
+            Check::CardNote => "card-note",
+            Check::XrefPreview => "xref-preview",
+            Check::ShiftGhost => "shift-ghost",
         }
     }
 
