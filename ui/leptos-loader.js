@@ -8,14 +8,14 @@
 //
 // The module is fetched and compiled while the page is still loading (the
 // reader draws the chapter, so the sooner it's there the sooner the
-// chapter is), and started once the page has been read and its scripts
-// have run (DOMContentLoaded): the pieces find the page's markup, and the
-// page's listeners, there.
+// chapter is), and started once the page has been read (DOMContentLoaded):
+// the pieces find the page's markup there, and boot's prefetch (the script
+// before this one), whose commands are already on their way.
 //
 // If anything here fails, it says so on the page, as
 // `gospel-getter:pieces-failed` on `document`, once the page is read: the
-// page then shows the chapter as plain text, and each piece says it isn't
-// available when asked for. The frontend test harness doesn't run this: it
+// page's fallback then shows the chapter as plain text, and nothing else
+// answers. The frontend test harness doesn't run this: it
 // hands the glue the .wasm bytes itself (jsdom has no fetch), and says the
 // same when it loads no pieces; see tests/frontend/harness.mjs.
 (function () {

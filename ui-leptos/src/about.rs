@@ -9,8 +9,8 @@
 //! back on ☰ when it closes, and says `gospel-getter:surface-close`. This
 //! renders it, fills it, and has its keys: Escape closes it and Tab stays
 //! inside it, on the overlay as the head script had them; the reader's
-//! shortcuts wait meanwhile (the page's keyboard dispatcher looks the
-//! overlay up). Its `hidden` is `surfaces`' alone.
+//! shortcuts wait meanwhile (the keyboard dispatcher, `keyboard`, looks
+//! the overlay up). Its `hidden` is `surfaces`' alone.
 //!
 //! This is the page's About markup and its version, Release notes and
 //! credits scripts (`ui/index.html` at 41e04f3) as a Leptos component: the

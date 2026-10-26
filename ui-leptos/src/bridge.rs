@@ -1,251 +1,101 @@
-//! The whole bridge between this crate and the page's JavaScript
-//! (`ui/index.html`), in one place. Everything the two sides share is
-//! listed here; nothing else crosses. The model is custom events on
-//! `document`, with what the other side needs as a snapshot in their
-//! `detail`, so neither reads the other's variables. The page's half is
-//! the short blocks in `ui/index.html` that dispatch and listen for these
-//! names, each pointing here.
+//! What this crate shares with the page's JavaScript, and the events its
+//! pieces send each other, in one place.
 //!
-//! Page to Rust (requests to open; each is cancelable, and the piece
-//! cancels it to say it has it; if nothing does, the WebAssembly didn't
-//! load, and the page says that piece isn't available):
-//! - [`OPEN_EVENT`] (`gospel-getter:export-notes`): Export notes…, with an
-//!   [`OpenRequest`].
-//! - [`SHORTCUTS_EVENT`] (`gospel-getter:shortcuts`): the keyboard
-//!   shortcuts sheet, no snapshot (the table is this crate's,
-//!   `shortcut_table`).
-//! - [`WELCOME_EVENT`] (`gospel-getter:welcome`): the welcome, asked at the
-//!   end of boot (with what the fresh-install rule needs) or opened from
-//!   ☰, with the places to start ([`WelcomeRequest`]). A startup request
-//!   nobody answered (boot beat the module) is sent again on
-//!   [`READY_EVENT`].
-//! - [`IMPORT_EVENT`] (`gospel-getter:import`): Import data…, no detail.
-//! - `detail.returnFocus` on the sheet's and welcome's requests: the element
-//!   focus goes back to ([`return_focus`]).
-//! - [`LAUNCH_CHECK_EVENT`] (`gospel-getter:update-check`): boot is done, so
-//!   the updater runs its quiet launch check, unless `html[data-update-check]`
-//!   is `off` ([`launch_check_on`]). Sent again on [`READY_EVENT`] if nobody
-//!   answered (boot beat the module).
-//! - [`LIBRARY_REFRESH_EVENT`] (`gospel-getter:library-refresh`): the one way
-//!   the page has the Library's lists reloaded (a bookmark or highlight
-//!   changed in the reader, a translation switch, a note saved, an import,
-//!   boot), `{ lists }` naming them. The Library cancels it and puts in
-//!   `detail.done` a promise that settles once each list has its answer;
-//!   asked before the module loaded, the page asks again on [`READY_EVENT`].
-//!   The card sends it too (a bookmark or highlight changed, a note
-//!   restored), and asks again on [`READY_EVENT`] in the same way.
-//! - [`SEARCH_EVENT`] (`gospel-getter:search`): `{ open }`, the page opens
-//!   the search box (`/`, Ctrl+K) or closes it (Escape outside it, a click
-//!   away, a dialog opening); the search box cancels it to say it has it.
-//! - [`PALETTE_STATE_EVENT`] (`gospel-getter:palette-state`): asked by this
-//!   crate (see Rust to page), answered by the page within the event:
-//!   `detail.state` is a [`PaletteState`], what the palette's commands need
-//!   of the page (Aa's settings, comparing, the chapter shown, the passage
-//!   history, a busy export), as it is at that moment.
-//! - [`PICKER_BOOKS_EVENT`] (`gospel-getter:picker-books`): `{ otBooks,
-//!   ntBooks }`, the books as `get_home` listed them, from boot, for the
-//!   book and chapter picker's lists; sent again on [`READY_EVENT`].
-//! - [`READER_EVENT`] (`gospel-getter:reader`): the one way the page asks
-//!   the reader (`reader`) for anything, `{ action, ... }`: `start` (boot's,
-//!   with `home`, `get_home`'s answer: the translations, then the chapter
-//!   the reader was on, then the history from there, and `reading`, that
-//!   chapter's `get_reading` already sent by boot, a promise, or `null`
-//!   while comparing, with `answered` (`{ dto }`) once it has answered; asked
-//!   again on [`READER_READY_EVENT`] if nobody answered), `load` (`{ bookId, chapter,
-//!   translationCode, top }`: ← and →, by `#reading-pane-inner`'s
-//!   `data-prev-*` and `data-next-*`, and an import's position), `book`
-//!   (`{ which }`, `prev` or `next`: `[` and `]`), `translation`
-//!   (the translation changed: the chapter on screen in it), `jump`
-//!   (`{ bookId, chapter, start, end }`: the selection card's Go to),
-//!   `history` (`{ step }`, -1 or 1: Alt+← and Alt+→) and `notice`
-//!   (`{ message }`, for above the chapter). The reader cancels it to say
-//!   it has it, and puts in `detail.done` a promise of whether a chapter
-//!   was put on screen. Nothing answers without this module.
-//! - [`CARD_EVENT`] (`gospel-getter:card`): the one way the page asks the
-//!   selection card (`card`) for anything, `{ action, ... }`, answered
-//!   within the event in `detail.answer` (the card cancels it to say it has
-//!   it; nothing answers without this module). Asked by the page's click
-//!   and keyboard dispatchers, its boot, its import and its palette
-//!   commands, each within the click or key it's for (copying needs that):
-//!   - the selection: `select` (`{ translationCode, anchor, focus }`: a
-//!     footnote marker's verse, j and k), `extend` (`{ translationCode,
-//!     verse }`: Shift-click), `toggle` (the same: a click on a verse),
-//!     `clear` (a click away) and `escape` (Escape with no surface open: the
-//!     preview, then the selection; `answer` is whether it did either);
-//!   - copying: `copy` (Copy, Ctrl+C; `answer` is whether there was a
-//!     selection to copy), `copy-chapter` (the palette's Copy chapter),
-//!     `copy-as` (`{ slot, opener }`, `selection` or `chapter`: its button
-//!     clicked, which opens or closes it), `copy-as-open` (`{ slot }`:
-//!     Ctrl+Shift+C and the palette's Copy chapter as…; `answer` is whether
-//!     it could), `copy-format` (`{ format }`: an item clicked; Enter and
-//!     Space click it) and `close-copy-menu` (any other click);
-//!   - the card's other controls: `bookmark`, `highlight` (`{ color }`, or
-//!     `null` for Remove highlight), `note` (`{ opener }`: + Add note, or N;
-//!     `answer` is whether there was a selection), `undo` (the status line's
-//!     Undo), `note-edit` (`{ noteId, opener }`), `note-more`
-//!     (`{ button }`), `show-all` and `xref` (`{ chip }`: a cross-reference
-//!     chip, whose preview opens or closes in the card; its Go to is the
-//!     reader's `jump`);
-//!   - `state`: `answer` is `{ chapter: { bookId, translationCode, numbers }
-//!     | null, selection: { translationCode, anchor, start, end } | null,
-//!     bookmarksLoaded, bookmarks, highlightsLoaded, highlights }`, what j
-//!     and k, Export notes and the welcome's fresh-install rule need;
-//!   - `highlights` and `notes` (boot and an import): reloaded, `answer` a
-//!     promise of the end (the Library's lists are the page's to reload, as
-//!     before).
+//! The page's JavaScript is now four small inline scripts, none of which
+//! reads this crate's variables or this crate theirs:
+//! - the pre-paint script (`<head>`): the saved look, as `<html>`'s data
+//!   attributes, before the first frame (see `preferences`);
+//! - boot's prefetch (`<head>`): boot's first two commands, sent at once so
+//!   they're on their way while the module loads: `get_home`, then, with its
+//!   answer, the chapter the reader was on (`get_reading`, unless
+//!   comparing). This crate takes them over with [`BOOT_EVENT`]
+//!   ([`boot_prefetch`], `boot`);
+//! - the loader (Trunk inlines `ui/leptos-loader.js` in `<head>`), which
+//!   fetches, compiles and starts this module, and says
+//!   `gospel-getter:pieces-failed` on `document` (no `detail`) if it can't;
+//! - the plain-text fallback (the end of `<body>`), which hears that and
+//!   shows the chapter as plain text. Nothing in this crate hears it.
 //!
-//! Rust to page:
-//! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): the module has loaded
-//!   and every piece is listening.
-//! - [`SURFACE_OPEN_EVENT`] (`gospel-getter:surface-open`) and
-//!   [`SURFACE_CLOSE_EVENT`] (`gospel-getter:surface-close`): `{ name }`, a
-//!   header surface opened or closed (`surfaces`: "translation", "aa",
-//!   "library", "menu", "about" or "picker"). This crate hears them too:
-//!   one opening closes the search box, and About closing part way through
-//!   an install brings the banner back.
-//! - [`PICKER_SHOWN_EVENT`] (`gospel-getter:picker-shown`): no `detail`,
-//!   the picker has appeared (the sidebar or the popover, `surfaces`), so
-//!   it scrolls to the book being read (`picker`).
-//! - [`TOAST_EVENT`] (`gospel-getter:toast`): `{ message, isError }` for
-//!   the page's toast (`setDataStatus`).
-//! - [`MODAL_OPENING_EVENT`] (`gospel-getter:modal-opening`): a piece is
-//!   about to open on its own (the welcome at startup, the import preview
-//!   once a file is chosen): popovers and panels go, and the search box
-//!   with `closeSearch`.
-//! - [`READER_READY_EVENT`] (`gospel-getter:reader-ready`): the reader has
-//!   loaded and listens, before the other pieces mount, so boot's chapter
-//!   needn't wait for them.
-//! - [`NOTE_EVENT`] (`gospel-getter:note`), within this crate: the card
-//!   opens the note editor (+ Add note, N, a note's Edit, the Library's
-//!   Edit) with a [`NoteRequest`] (the passage quoted as markup), the note
-//!   itself and `returnFocus` ([`return_focus`]); it's cancelable, and the
-//!   editor cancels it (if it hasn't mounted, the card says the editor
-//!   isn't available). [`NOTE_OTHERS_EVENT`] (`gospel-getter:note-others`)
-//!   follows the selection's notes while it may be open, and
-//!   [`NOTE_DONE_EVENT`] (`gospel-getter:note-done`), `{ action, note }`,
-//!   says what the editor did, its notes refreshed (`card::refresh_notes`):
-//!   the card's status line, and a deletion's Undo.
-//! - [`PICKER_CURRENT_EVENT`] (`gospel-getter:picker-current`): `{ bookId,
-//!   chapter }`, sent within this crate by the reader each time it puts a
-//!   chapter on screen, and again on [`READY_EVENT`] (the picker mounts after
-//!   the reader): the picker marks it and shows its book's chapters.
-//! - [`ABOUT_CREDITS_EVENT`] (`gospel-getter:about-credits`): `{ credits }`,
-//!   each bundled translation's credit for About, sent within this crate by
-//!   the reader from boot's answer, and again on [`READY_EVENT`] (About
-//!   mounts after the reader).
-//! - [`DATA_BUSY_EVENT`] (`gospel-getter:data-busy`): `{ busy }`, the ☰
-//!   Export and Import items disabled while an import runs.
-//! - [`IMPORTED_EVENT`] (`gospel-getter:imported`): `{ position, message }`
-//!   after an import: the page reloads the position, bookmarks, highlights
-//!   and notes, then says `message`.
-//! - [`LIBRARY_LOADED_EVENT`] (`gospel-getter:library-loaded`): `{ list,
-//!   items }` each time the Library's bookmarks or notes have loaded (or
-//!   failed to: `items` is `null`), the answer as the backend gave it: the
-//!   page's own copy of the notes, for the welcome's fresh-install facts and
-//!   Export notes (the bookmarks are heard within this crate, by the card,
-//!   for its markers and its Bookmark button). So neither asks the backend
-//!   for them itself.
-//! - [`PALETTE_STATE_EVENT`]: `{}`, asked whenever the palette is drawn or
-//!   a command is chosen; the page fills in `detail.state` (above).
-//! - [`COMMAND_EVENT`] (`gospel-getter:command`): `{ command }`, a
-//!   palette command whose code is the page's (copy the chapter, Copy
-//!   as…, turn the chapter or the book, Back and Forward, the shortcuts
-//!   sheet), run within the click or key that chose it (the clipboard needs
-//!   that), after the box has closed and focus has gone back (the turns and
-//!   Back and Forward come back to the reader as [`READER_EVENT`]s, as the
-//!   keys' do). The commands
-//!   whose controls are on the page are run by clicking them (see Page
-//!   controls); text size, a translation and Compare with are Aa's own.
-//! - [`aa::COMPARE_CHANGE_EVENT`](crate::aa::COMPARE_CHANGE_EVENT)
-//!   (`gospel-getter:compare-change`): no `detail`, Compare went on or off,
-//!   or what it compares with changed: the reader shows the chapter in the
-//!   new layout (heard within this crate).
-//! - [`aa::LAYOUT_CHANGE_EVENT`](crate::aa::LAYOUT_CHANGE_EVENT)
-//!   (`gospel-getter:layout-change`): no `detail`, the layout changed: the
-//!   card moves to its verses' new place (heard within this crate).
+//! So these cross, and only these: [`BOOT_EVENT`] (page to Rust: a
+//! cancelable `CustomEvent` on `document` whose `detail` is `{}`; the
+//! prefetch cancels it and puts in `detail.boot` its state, [`Prefetch`])
+//! and `gospel-getter:pieces-failed` (loader to fallback). Without this
+//! module nothing else answers anything: the reader sees the chapter as
+//! plain text with the fallback's line saying the rest isn't available, and
+//! every control does nothing.
 //!
-//! Page globals this crate calls (small, named, existing or exposed for it):
-//! - `window.gospelGetterComparePartner()` (the page's, its rule still the
-//!   page's): the translation Compare shows beside the one being read, for
-//!   Aa's "with" choices and the reader's comparisons.
+//! Globals this crate sets for the frontend tests and the GUI checks (the
+//! page reads none of them): `window.gospelGetterShortcuts`, the table of
+//! shortcuts (`shortcut_table`, [`export_shortcuts`]);
+//! `window.gospelGetterPreferences` (`aa`): `current()`, the display
+//! settings an export carries, and `apply(values)`; and
+//! `window.gospelGetterSurfaces` (`surfaces`): `current()`, the open
+//! header surface's name or `null`.
 //!
-//! Page globals this crate sets: `window.gospelGetterShortcuts`, the table
-//! of shortcuts (`shortcut_table`), as the page had it, for its frontend
-//! tests ([`export_shortcuts`]); `window.gospelGetterPreferences` (`aa`):
-//! `current()`, the display settings an export carries, which the page's
-//! Export data… reads, and `apply(values)`; and
-//! `window.gospelGetterSurfaces` (`surfaces`), the header surfaces for the
-//! page's reader: `current()` (the open one's name, or `null`),
-//! `close(restoreFocus)`, `toggle(name)` and `openPicker()`, each answered
-//! within the call. Without this module none of them is there, and the page
-//! says what isn't available.
+//! Within this crate, the pieces send each other custom events on
+//! `document` (a `detail` snapshot each, as below), so a piece mounted
+//! later hears what it missed when [`READY_EVENT`] comes:
+//! - Requests to open, each cancelable; the piece cancels it to say it has
+//!   it, and if nothing does (it hasn't mounted yet), the asker says it
+//!   isn't available (`page`): [`OPEN_EVENT`] (`gospel-getter:export-notes`,
+//!   Export notes…, an [`OpenRequest`]); [`SHORTCUTS_EVENT`]
+//!   (`gospel-getter:shortcuts`, the sheet); [`WELCOME_EVENT`]
+//!   (`gospel-getter:welcome`, at the end of boot with what the
+//!   fresh-install rule needs, or from ☰, with the places to start, a
+//!   [`WelcomeRequest`]; boot's is asked again on [`READY_EVENT`] if nobody
+//!   answered); [`IMPORT_EVENT`] (`gospel-getter:import`, no detail);
+//!   [`SEARCH_EVENT`] (`gospel-getter:search`, `{ open }`); and
+//!   `detail.returnFocus` on the sheet's and welcome's ([`return_focus`]).
+//! - [`LAUNCH_CHECK_EVENT`] (`gospel-getter:update-check`): boot is done,
+//!   so the updater runs its quiet launch check, unless
+//!   `html[data-update-check]` is `off` ([`launch_check_on`]); asked again
+//!   on [`READY_EVENT`] if nobody answered.
+//! - [`LIBRARY_REFRESH_EVENT`] (`gospel-getter:library-refresh`): the one
+//!   way to have the Library's lists reloaded (boot, an import, a
+//!   translation switch, the card's bookmark, highlight and restored note),
+//!   `{ lists }`; the Library cancels it and puts in `detail.done` a promise
+//!   that settles once each list has its answer. Asked before the Library
+//!   has mounted, it's asked again on [`READY_EVENT`] ([`refresh_library`]).
+//!   [`LIBRARY_LOADED_EVENT`] (`gospel-getter:library-loaded`, `{ list,
+//!   items }`) answers with the bookmarks (the card's markers) and the notes
+//!   (`page`'s copy, for the welcome and Export notes).
+//! - [`PICKER_BOOKS_EVENT`] (`gospel-getter:picker-books`, `{ otBooks,
+//!   ntBooks }`, boot's, sent again on [`READY_EVENT`]),
+//!   [`PICKER_CURRENT_EVENT`] (`gospel-getter:picker-current`, the
+//!   reader's chapter on screen) and [`PICKER_SHOWN_EVENT`]
+//!   (`gospel-getter:picker-shown`, `surfaces` showed the picker): the
+//!   picker's.
+//! - [`ABOUT_CREDITS_EVENT`] (`gospel-getter:about-credits`, `{ credits }`,
+//!   the reader's from boot, again on [`READY_EVENT`]): About's.
+//! - [`SURFACE_OPEN_EVENT`] and [`SURFACE_CLOSE_EVENT`]
+//!   (`gospel-getter:surface-open`, `-close`, `{ name }`): a header surface
+//!   opened or closed (`surfaces`); one opening closes the search box, and
+//!   About closing part way through an install brings the banner back.
+//! - [`NOTE_EVENT`] (`gospel-getter:note`, a [`NoteRequest`], cancelable):
+//!   the card opens the note editor; [`NOTE_OTHERS_EVENT`]
+//!   (`gospel-getter:note-others`) follows the selection's notes while it
+//!   may be open; [`NOTE_DONE_EVENT`] (`gospel-getter:note-done`, `{ action,
+//!   note }`) says what the editor did.
+//! - `aa::COMPARE_CHANGE_EVENT` (`gospel-getter:compare-change`) and
+//!   `aa::LAYOUT_CHANGE_EVENT` (`gospel-getter:layout-change`): Compare or
+//!   the layout changed (the reader and the card).
+//! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): every piece has
+//!   mounted.
 //!
-//! Aa's settings' records, the hidden `<select>`s `#theme-select`,
-//! `#text-size-select`, `#line-spacing-select`, `#width-select` and
-//! `#layout-select`, are this crate's (`aa` fills them from the one table
-//! and keeps them), where the page's other scripts read them as before;
-//! choosing sends their `change` as before. Aa draws inside the page's
-//! `#aa-popover` and `#translation-popover`, and answers their controls,
-//! `#reader-exit` and the size keys.
+//! Direct calls, where the page's script used to be in between: the toast
+//! ([`toast`], `page`), a modal opening ([`modal_opening`]), the ☰ items
+//! kept disabled ([`data_busy`]), an import's reloads ([`imported`]), what
+//! the palette's commands need ([`palette_state`]) and the commands whose
+//! code was the page's ([`page_command`]); and the reader's and the card's
+//! own `reader::ask` and `card::ask`.
 //!
-//! The header's popovers and panels (`#translation-popover`,
-//! `#aa-popover`, `#library-panel`, `#app-menu`, About's `#about-overlay`,
-//! and `#picker` as the popover) are the page's markup, shown and hidden
-//! here (`surfaces`): their `hidden`, their buttons' `aria-expanded`
-//! (`#translation-toggle`, `#aa-toggle`, `#library-toggle`,
-//! `#menu-toggle`, `#ref-btn`, `#sidebar-toggle`), the picker's `role` and
-//! `#ref-btn`'s `aria-haspopup`, and `html[data-wide]` and
-//! `html[data-picker]` after the pre-paint script's first ones. This
-//! answers those buttons, `#library-close`, `#about-btn`, the ☰ menu's
-//! keys, a click outside a popover, Escape (after the page's keyboard
-//! dispatcher, which marks an Escape it used as handled) and the window
-//! crossing 1200px.
-//!
-//! The reading pane (`#reading-pane`'s contents: `#reading-pane-inner`
-//! with its `data-current-*`, `data-prev-*` and `data-next-*`, the verses,
-//! the chapter's end and its lists), the notice above it
-//! (`#reader-notice`, with Try again), the reference button's text and
-//! label (`#ref-text`, `#ref-btn`), the window title, the translation
-//! button's text and label (`#translation-toggle`) and its record's options
-//! (`#translation-select`) are the reader's, drawn and kept here. The page
-//! reads the pane's markup as before (its `.verse[data-translation]`s, for
-//! its click and keyboard dispatchers), and its click handler on the body,
-//! which runs first, leaves the reader's controls in the pane (the chapter
-//! steps, a neighbor's heading, the disclosures, the cross-reference chips
-//! and credit links) to the reader's own, also on the body.
-//!
-//! The selection card (`#selection-card`, with its actions, footnotes,
-//! notes, cross-references and the preview `#xref-preview`) and Copy as…
-//! (`#copy-as-menu`) are the card's elements (`card`), moved in and out of
-//! the reading pane as before: the card after the last selected verse, Copy
-//! as… after the card's actions or after `.chapter-copy`. The verses' marks
-//! are the card's too (`verse-selected`, `is-bookmarked`, `has-notes` with
-//! its `.note-cue`, and `data-highlight`, also on the faded neighbors'
-//! verses). Copy as…'s keys are on the menu itself; the Shift ghost's are
-//! capturing listeners on `window`. The disclosures' state is the reader's in local storage
-//! (`gospel-getter-footnotes`, `gospel-getter-cross-references`: `open` or
-//! `closed`).
-//!
-//! If this module fails to load, the page's loader says so with
-//! `gospel-getter:pieces-failed` on `document`, no `detail`; the page's
-//! small inline fallback then shows the chapter as plain text (see
-//! `ui/index.html`). Nothing in this crate hears it.
-//!
-//! Page controls this crate uses as a reader would: `#theme-select`, read
-//! and changed (with a `change` event, as Aa does) for the welcome's looks
-//! ([`theme`], [`choose_theme`]); the page's focus home
-//! (`#aa-toggle` in reading mode, else `#menu-toggle`, [`focus_home`]);
-//! `#translation-select`, the translation button's record of the
-//! translation, read for the Library's previews and the search
-//! ([`translation_code`]), and listened to (`change`: an open search runs
-//! again in the new translation); for the editor's focus going back, the
-//! selection card's `.verse-notes .note-edit[data-note-id]`,
-//! `.verse-actions .verse-note-btn` and `.chapter-main .chapter-heading`
-//! (the card's and the reader's);
-//! and, for the search box, `#search-panel` (the page's, whose `hidden`
-//! this crate keeps; the page reads it to know the box is open) and
-//! `#search-toggle` (its click, its `aria-expanded`, focus back to it),
-//! and the controls the palette's commands click as a reader would: by id
+//! Page markup this crate uses as a reader would: `#theme-select`, read and
+//! changed (with a `change` event, as Aa does) for the welcome's looks
+//! ([`theme`], [`choose_theme`]); the page's focus home (`#aa-toggle` in
+//! reading mode, else `#menu-toggle`, [`focus_home`]); `#translation-select`,
+//! the translation button's record ([`translation_code`]), whose `change`
+//! the reader and the Library hear first (`page`), then the search box; the
+//! controls the palette's commands click as a reader would, by id
 //! (`#compare-btn`, `#reader-mode-btn`, `#reader-exit`,
 //! `#random-chapter-btn`, `#sidebar-toggle`, `#export-notes-btn`,
 //! `#export-data-btn`, `#import-data-btn`, `#welcome-btn`, `#about-btn`
@@ -254,67 +104,35 @@
 //! `#theme-choices`.
 //!
 //! The pieces' overlays (`#export-notes-overlay`, `#shortcuts-overlay`,
-//! `#welcome-overlay`, `#import-overlay`, `#note-overlay`) keep their
-//! `hidden` truthful: the page's keyboard dispatcher and the card's Shift
-//! ghost read them, looked up by id when asked, to know a modal is open.
-//! Each piece has the keyboard while it's open: a capturing `keydown` on
-//! `window` that stops every other handler.
-//!
-//! The Library's tabs and lists (`#library-panel`'s tablist and tab
-//! panels, with `#export-notes-btn`, whose click stays the page's) are this
-//! crate's elements, put inside the page's panel, which `surfaces` opens
-//! and closes, focusing its chosen tab.
-//!
-//! The search box's contents (`#search-input`, `#search-status`,
-//! `#search-results` and `#search-more`) are this crate's elements, put
-//! inside the page's `#search-panel`. The page's keyboard dispatcher
-//! ignores keys there, as before.
-//!
-//! The book and chapter picker's books and chapters (the `.book-item`s in
-//! `#ot-book-list` and `#nt-book-list`, and `#picker-chapters`) are this
-//! crate's elements, drawn inside the page's `#picker`, whose clicks and
-//! keys this crate answers (Random chapter, `#random-chapter-btn`, is the
-//! page's button). Its two shapes are `surfaces`': it shows and hides
-//! `#picker` as the sidebar or the popover (one of the surfaces, `picker`),
-//! keeps the reading place as the sidebar comes and goes, and focuses the
-//! chapter being read (or its book, or Random chapter) by the marks drawn
-//! here.
-//!
-//! About (`#about-overlay`) and the update banner (`#update-banner`) are
-//! this crate's elements too, put where the page had them. About's `hidden`
-//! is `surfaces`' (it shows and hides it as a surface, looking it up when
-//! it does); its keys are on the overlay itself, as they were. The
-//! page looks the banner up for its toast, which sits above it. The launch
-//! check's setting, `#update-check-toggle`, is drawn here and kept here too
-//! (`gospel-getter-update-check`, applied as `html[data-update-check]`),
-//! by a listener for its `change` on the document (`aa`).
+//! `#welcome-overlay`, `#import-overlay`, `#note-overlay`, `#about-overlay`)
+//! keep their `hidden` truthful: the keyboard dispatcher (`keyboard`) and
+//! the card's Shift ghost read them, looked up by id when asked, to know a
+//! modal is open. Each piece has the keyboard while it's open: a capturing
+//! `keydown` on `window` that stops every other handler, and so runs
+//! before the keyboard dispatcher (on `document`).
 //!
 //! Local storage: the saved settings' keys are this crate's to write
-//! (`prefs`), as the one table says (`preferences`); the page's pre-paint
-//! script only reads them. The welcome reads the `gospel-getter-*` keys
-//! (the fresh-install rule) and writes [`WELCOME_KEY`].
+//! (`prefs`), as the one table says (`preferences`); the pre-paint script
+//! only reads them. The welcome reads the `gospel-getter-*` keys (the
+//! fresh-install rule) and writes [`WELCOME_KEY`]; the reader keeps the
+//! disclosures' (`gospel-getter-footnotes`, `gospel-getter-cross-references`).
 //!
 //! Shared with the backend, not the page: the commands the pieces invoke,
-//! through the same `window.__TAURI__.core.invoke` the page uses (see
-//! `ipc.rs`; their shapes are in `dto.rs`).
+//! through the same `window.__TAURI__.core.invoke` the page's scripts use
+//! (see `ipc.rs`; their shapes are in `dto.rs`).
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use web_sys::{CustomEvent, CustomEventInit, Document, HtmlElement};
 
-use crate::ipc;
 use crate::palette::PaletteState;
 
-/// The page asks the dialog to open: `document.dispatchEvent(new
-/// CustomEvent('gospel-getter:export-notes', { cancelable: true, detail }))`.
+/// Export notes… asks its dialog to open (`page`): a cancelable
+/// `CustomEvent` whose `detail` is an [`OpenRequest`].
 pub const OPEN_EVENT: &str = "gospel-getter:export-notes";
 
-/// The dialog has something to say in the page's toast.
-pub const TOAST_EVENT: &str = "gospel-getter:toast";
-
-/// What the page knows and the dialog needs, taken when the button is
-/// clicked: how many notes there are (none: nothing to export), the book
+/// What the dialog needs, taken when the button is clicked: how many notes there are (none: nothing to export), the book
 /// being read (ticked first, if it has notes), and the translation whose
 /// text the file quotes (the one chosen with the translation button).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -326,32 +144,16 @@ pub struct OpenRequest {
     pub translation_name: String,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Toast<'a> {
-    message: &'a str,
-    is_error: bool,
-}
-
 /// The page's document, when there is one (there always is in the webview;
 /// this crate never assumes it).
 pub fn document() -> Option<Document> {
     web_sys::window().and_then(|w| w.document())
 }
 
-/// Says `message` in the page's toast; an error stays longer and is red.
+/// Says `message` in the page's toast (`#data-status`, `page`); an error
+/// stays longer and is red.
 pub fn toast(message: &str, is_error: bool) {
-    let Some(document) = document() else {
-        return;
-    };
-    let Ok(detail) = serde_wasm_bindgen::to_value(&Toast { message, is_error }) else {
-        return;
-    };
-    let init = CustomEventInit::new();
-    init.set_detail(&detail);
-    if let Ok(event) = CustomEvent::new_with_event_init_dict(TOAST_EVENT, &init) {
-        let _ = document.dispatch_event(&event);
-    }
+    crate::page::set_data_status(message, is_error);
 }
 
 /// The Library's Export notes… button, if the page has it.
@@ -391,14 +193,14 @@ pub fn open_request(event: &CustomEvent) -> Result<OpenRequest, JsValue> {
     serde_wasm_bindgen::from_value(event.detail()).map_err(|e| JsValue::from(e.to_string()))
 }
 
-/// The page asks the shortcuts sheet to open (`?`, ☰ → Keyboard shortcuts,
-/// the palette's command): a cancelable `CustomEvent` whose `detail` is
+/// The shortcuts sheet is asked to open (`?`, ☰ → Keyboard shortcuts, the
+/// palette's command; `page`): a cancelable `CustomEvent` whose `detail` is
 /// `{ returnFocus }` (see [`return_focus`]).
 pub const SHORTCUTS_EVENT: &str = "gospel-getter:shortcuts";
 
-/// Puts the table of shortcuts where the page had it,
-/// `window.gospelGetterShortcuts`: an array of `{ id, group, keys, aria,
-/// does, handles }`, as `SHORTCUTS` was.
+/// Puts the table of shortcuts where the page had it, for the frontend
+/// tests and the GUI checks: `window.gospelGetterShortcuts`, an array of
+/// `{ id, group, keys, aria, does, handles }`, as `SHORTCUTS` was.
 pub fn export_shortcuts() {
     let Some(window) = web_sys::window() else {
         return;
@@ -424,7 +226,7 @@ pub fn return_focus(event: &CustomEvent) -> Option<HtmlElement> {
         .ok()
 }
 
-/// Sends the page `name` as a `CustomEvent` on `document`, with `detail`.
+/// Sends `name` as a `CustomEvent` on `document`, with `detail`.
 pub fn dispatch(name: &str, detail: &impl Serialize) {
     let Some(document) = document() else {
         return;
@@ -439,9 +241,10 @@ pub fn dispatch(name: &str, detail: &impl Serialize) {
     }
 }
 
-/// This module has loaded and every piece is listening: a `CustomEvent`
-/// on `document`, no `detail`. The page then sends again any request it
-/// made before (the welcome's, at the end of a boot that beat the module).
+/// Every piece has mounted and is listening: a `CustomEvent` on `document`,
+/// no `detail`. What was asked before a piece mounted is asked again (boot's
+/// Library lists, welcome, picker books and launch check; the reader's
+/// credits and chapter; the card's Library lists).
 pub const READY_EVENT: &str = "gospel-getter:pieces-ready";
 
 /// Says [`READY_EVENT`].
@@ -451,31 +254,21 @@ pub fn ready() {
     }
 }
 
-/// A modal of this crate is about to open: put the page's popovers and
-/// panels away (`closeSurfaces(false)`, focus left alone) and, with
-/// `closeSearch`, the search box. A `CustomEvent` on `document`; the page
-/// does it at once, before the modal takes focus.
-pub const MODAL_OPENING_EVENT: &str = "gospel-getter:modal-opening";
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ModalOpening {
-    close_search: bool,
-}
-
-/// Says [`MODAL_OPENING_EVENT`].
+/// A modal of this crate is about to open: the header's popovers and panels
+/// go (focus left alone) and, with `close_search`, the search box; at once,
+/// before the modal takes focus (`page`).
 pub fn modal_opening(close_search: bool) {
-    dispatch(MODAL_OPENING_EVENT, &ModalOpening { close_search });
+    crate::page::modal_opening(close_search);
 }
 
-/// The page asks the welcome to open: a cancelable `CustomEvent` whose
+/// The welcome is asked to open (`page`): a cancelable `CustomEvent` whose
 /// `detail` is a [`WelcomeRequest`] plus `returnFocus`. At the end of boot
 /// it is a question (`startup`, with the facts the fresh-install rule needs;
 /// the welcome opens only for a fresh install); from ☰ → Show welcome it
 /// opens. Either way the welcome cancels it to say it has it.
 pub const WELCOME_EVENT: &str = "gospel-getter:welcome";
 
-/// What the welcome needs from the page.
+/// What the welcome is told.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WelcomeRequest {
@@ -559,54 +352,22 @@ pub fn welcome_seen() {
     }
 }
 
-/// The page asks the import to begin (its ☰ → Import data…): a cancelable
+/// The import is asked to begin (☰ → Import data…, `page`): a cancelable
 /// `CustomEvent`, no `detail`. The import cancels it to say it has it.
 pub const IMPORT_EVENT: &str = "gospel-getter:import";
 
-/// Import or export is under way, or done: a `CustomEvent` whose `detail`
-/// is `{ busy }`. The page disables (or enables) its two ☰ items for it
-/// (`setDataBusy`), as it does for its own export.
-pub const DATA_BUSY_EVENT: &str = "gospel-getter:data-busy";
-
-#[derive(Debug, Serialize)]
-struct DataBusy {
-    busy: bool,
-}
-
-/// Says [`DATA_BUSY_EVENT`].
+/// Import is under way, or done: ☰'s Export data… and Import data… are
+/// disabled (or enabled) for it, as for an export (`page`).
 pub fn data_busy(busy: bool) {
-    dispatch(DATA_BUSY_EVENT, &DataBusy { busy });
+    crate::page::set_data_busy(busy);
 }
 
-/// An import has changed the reader's data: a `CustomEvent` whose `detail`
-/// is `{ position, message }`. The page reloads what it shows of it, in
-/// order: the chapter at `position` (`{ translationCode, bookId, chapter }`,
-/// or `null` to stay put), then the bookmarks, highlights and notes; then
-/// it says `message` in its notice and its toast.
-pub const IMPORTED_EVENT: &str = "gospel-getter:imported";
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ImportedPosition<'a> {
-    translation_code: &'a str,
-    book_id: i64,
-    chapter: i64,
-}
-
-#[derive(Debug, Serialize)]
-struct Imported<'a> {
-    position: Option<ImportedPosition<'a>>,
-    message: &'a str,
-}
-
-/// Says [`IMPORTED_EVENT`].
+/// An import has changed the reader's data: what's shown of it is reloaded,
+/// in order: the chapter at `position` (or none, to stay put), then the
+/// bookmarks, highlights and notes; then `message` is said above the
+/// chapter and in the toast (`page`).
 pub fn imported(position: Option<&crate::dto::PositionPreview>, message: &str) {
-    let position = position.map(|p| ImportedPosition {
-        translation_code: &p.translation_code,
-        book_id: p.book_id,
-        chapter: p.chapter,
-    });
-    dispatch(IMPORTED_EVENT, &Imported { position, message });
+    crate::page::imported(position.cloned(), message.to_owned());
 }
 
 /// The card opens the note editor (its + Add note and Edit, N, the
@@ -711,8 +472,7 @@ pub fn note_done(action: &str, note: &JsValue) {
     }
 }
 
-/// The page's boot is done: run the quiet launch check (unless it's turned
-/// off). A cancelable `CustomEvent` on `document`, no `detail`; the updater
+/// Boot is done: run the quiet launch check (unless it's turned off). A cancelable `CustomEvent` on `document`, no `detail`; the updater
 /// cancels it to say it has it.
 pub const LAUNCH_CHECK_EVENT: &str = "gospel-getter:update-check";
 
@@ -725,7 +485,7 @@ pub fn launch_check_on() -> bool {
         .is_none_or(|html| html.get_attribute("data-update-check").as_deref() != Some("off"))
 }
 
-/// The page has the bundled texts' credits for About: a `CustomEvent`
+/// The reader has the bundled texts' credits for About: a `CustomEvent`
 /// whose `detail` is `{ credits }`, each translation's credit in order.
 pub const ABOUT_CREDITS_EVENT: &str = "gospel-getter:about-credits";
 
@@ -752,13 +512,13 @@ pub fn surface_closed(event: &CustomEvent) -> Option<String> {
     detail::<SurfaceClosed>(event).ok().map(|s| s.name)
 }
 
-/// The page asks the Library to reload lists: a cancelable `CustomEvent`
+/// The Library is asked to reload lists: a cancelable `CustomEvent`
 /// whose `detail` is `{ lists }`, each `bookmarks`, `highlights` or `notes`
 /// (`library_text::List`). The Library cancels it to say it has it and sets
 /// `detail.done` to a promise that settles once every list named has its
 /// answer, shown (or dropped, when a newer reload of the same list has
 /// already been asked for: only the latest of overlapping reloads shows).
-/// The page waits for it where it waited for its own reloads.
+/// Whoever asked waits for it where the page waited for its reloads.
 pub const LIBRARY_REFRESH_EVENT: &str = "gospel-getter:library-refresh";
 
 #[derive(Debug, Deserialize)]
@@ -804,8 +564,8 @@ pub struct OpenPassage {
     pub verse_end: Option<i64>,
 }
 
-/// Has the Library reload `lists` (`bookmarks`, `highlights`, `notes`), as
-/// the page does: a cancelable [`LIBRARY_REFRESH_EVENT`] sent now; the
+/// Has the Library reload `lists` (`bookmarks`, `highlights`, `notes`): a
+/// cancelable [`LIBRARY_REFRESH_EVENT`] sent now; the
 /// promise the Library answers with, or `None` if nothing answered (the
 /// Library isn't there yet).
 pub fn refresh_library(lists: &[&str]) -> Option<js_sys::Promise> {
@@ -842,7 +602,7 @@ pub fn dispatch_object(name: &str, detail: &JsValue) {
 
 /// The translation chosen with the translation button
 /// (`#translation-select`'s value), whose text the Library previews, as the
-/// page's `currentTranslation` reads it.
+/// page's `currentTranslation` read it.
 pub fn translation_code() -> String {
     document()
         .and_then(|d| d.get_element_by_id("translation-select"))
@@ -851,9 +611,10 @@ pub fn translation_code() -> String {
         .unwrap_or_default()
 }
 
-/// The page opens or closes the search box: a cancelable `CustomEvent`
+/// The search box is asked to open (`/`, Ctrl+K) or close (Escape outside
+/// it, a click away, a dialog opening; `page`): a cancelable `CustomEvent`
 /// whose `detail` is `{ open }`. The search box cancels it to say it has
-/// it; when nothing does (the module didn't load), the page says search
+/// it; when nothing does (it hasn't mounted yet), opening says search
 /// isn't available.
 pub const SEARCH_EVENT: &str = "gospel-getter:search";
 
@@ -870,55 +631,23 @@ pub fn search_request(event: &CustomEvent) -> Result<bool, JsValue> {
 /// A header surface opened (`surfaces`): `{ name }`.
 pub const SURFACE_OPEN_EVENT: &str = "gospel-getter:surface-open";
 
-/// This crate asks what the palette's commands need of the page: a
-/// `CustomEvent` whose `detail` is `{}`; the page's listener sets
-/// `detail.state` (a [`PaletteState`]) before the dispatch returns.
-pub const PALETTE_STATE_EVENT: &str = "gospel-getter:palette-state";
-
-/// The page as the palette's commands need it now (the default, all off and
-/// empty, if the page didn't say, or said something unreadable, which is
-/// logged).
+/// What the palette's commands need now: the page's settings and controls
+/// (`page`), the reader's chapters and history, and whether the card has the
+/// chapter's text ready to copy.
 pub fn palette_state() -> PaletteState {
-    let Some(document) = document() else {
-        return PaletteState::default();
-    };
-    let detail = js_sys::Object::new();
-    let init = CustomEventInit::new();
-    init.set_detail(&detail);
-    let Ok(event) = CustomEvent::new_with_event_init_dict(PALETTE_STATE_EVENT, &init) else {
-        return PaletteState::default();
-    };
-    let _ = document.dispatch_event(&event);
-    let state = js_sys::Reflect::get(&detail, &JsValue::from_str("state")).unwrap_or_default();
-    if state.is_undefined() {
-        return PaletteState::default();
-    }
-    let mut state = serde_wasm_bindgen::from_value(state).unwrap_or_else(|e| {
-        ipc::log_error("The page's palette state can't be read", &JsValue::from(e));
-        PaletteState::default()
-    });
+    let mut state = crate::page::palette_state();
     crate::reader::palette_facts(&mut state);
     crate::card::palette_facts(&mut state);
     state
 }
 
-/// A palette command the page runs: a `CustomEvent` whose `detail` is
-/// `{ command }` (`palette::Run::Page`): `copy-chapter`,
-/// `copy-chapter-as`, `next-chapter`, `previous-chapter`, `next-book`,
-/// `previous-book`, `back`, `forward` and `shortcuts`.
-pub const COMMAND_EVENT: &str = "gospel-getter:command";
-
-#[derive(Debug, Serialize)]
-struct PageCommand<'a> {
-    command: &'a str,
-}
-
-/// Says [`COMMAND_EVENT`]: the page runs it before this returns.
+/// Runs a palette command whose code was the page's (`palette::Run::Page`):
+/// `copy-chapter`, `copy-chapter-as`, `next-chapter`, `previous-chapter`,
+/// `next-book`, `previous-book`, `back`, `forward` and `shortcuts`, within
+/// the click or key that chose it (the clipboard needs that), after the box
+/// has closed and focus has gone back (`page`).
 pub fn page_command(command: &str) {
-    let Ok(detail) = ipc::args(&PageCommand { command }) else {
-        return;
-    };
-    dispatch_object(COMMAND_EVENT, &detail);
+    crate::page::run_command(command);
 }
 
 /// Boot's books for the picker: a `CustomEvent` whose `detail` is
@@ -972,53 +701,80 @@ pub fn picker_current(event: &CustomEvent) -> Result<(i64, i64), JsValue> {
 /// no `detail`.
 pub const PICKER_SHOWN_EVENT: &str = "gospel-getter:picker-shown";
 
-/// The page asks the reader: a cancelable `CustomEvent` whose `detail` is
-/// `{ action, ... }` (`reader::Request`). The reader cancels it to say it
-/// has it, and sets `detail.done` ([`reader_done`]).
-pub const READER_EVENT: &str = "gospel-getter:reader";
+/// Boot's prefetch is asked for what it has sent (`boot`): a cancelable
+/// `CustomEvent` on `document`, its `detail` `{}`. The page's prefetch
+/// script cancels it and puts in `detail.boot` its state ([`Prefetch`]).
+pub const BOOT_EVENT: &str = "gospel-getter:boot";
 
-/// Boot's `get_reading` a `start` [`READER_EVENT`] carries: answered
-/// (`detail.answered`, `{ dto }`, when the page has had the answer by then),
-/// or on its way (`detail.reading`, a promise, adopted so any will do, one
-/// from another realm too), or neither (`null`, while comparing).
-pub fn start_reading(event: &CustomEvent) -> Option<crate::reader::Sent> {
-    let detail = event.detail();
-    let present = |value: &JsValue| !value.is_null() && !value.is_undefined();
-    let answered = js_sys::Reflect::get(&detail, &JsValue::from_str("answered")).ok();
-    if let Some(answered) = answered.filter(present) {
-        let dto =
-            js_sys::Reflect::get(&answered, &JsValue::from_str("dto")).unwrap_or(JsValue::NULL);
-        return Some(crate::reader::Sent::Answered(dto));
+/// What boot's prefetch (the page's script in `<head>`) has sent, and what
+/// has come back: `{ asked, home, failed, error, reading, answered }`, as it
+/// is now (it fills in as the answers come).
+pub struct Prefetch(JsValue);
+
+impl Prefetch {
+    fn field(&self, name: &str) -> Option<JsValue> {
+        js_sys::Reflect::get(&self.0, &JsValue::from_str(name))
+            .ok()
+            .filter(|value| !value.is_null() && !value.is_undefined())
     }
-    js_sys::Reflect::get(&detail, &JsValue::from_str("reading"))
+
+    /// Settles once `get_home` has answered (or failed) and, with its
+    /// answer, `get_reading` has been sent; never rejects. Adopted, so any
+    /// promise will do (one from another realm too, as the frontend tests'
+    /// `invoke` answers).
+    pub fn asked(&self) -> Option<js_sys::Promise> {
+        self.field("asked")
+            .map(|asked| js_sys::Promise::resolve(&asked))
+    }
+
+    /// `get_home`'s answer, once it's in.
+    pub fn home(&self) -> Option<JsValue> {
+        self.field("home")
+    }
+
+    /// `get_home`'s failure (or the prefetch's own, reading its answer),
+    /// once it's in: what it was thrown as.
+    pub fn failure(&self) -> Option<JsValue> {
+        self.field("failed")
+            .filter(JsValue::is_truthy)
+            .map(|_| self.field("error").unwrap_or(JsValue::UNDEFINED))
+    }
+
+    /// The chapter's `get_reading`, as boot's reader takes it: answered, or
+    /// on its way, or neither (comparing: the reader asks for it beside the
+    /// comparison).
+    pub fn reading(&self) -> Option<crate::reader::Sent> {
+        if let Some(answered) = self.field("answered") {
+            let dto =
+                js_sys::Reflect::get(&answered, &JsValue::from_str("dto")).unwrap_or(JsValue::NULL);
+            return Some(crate::reader::Sent::Answered(dto));
+        }
+        self.field("reading")
+            .map(|reading| crate::reader::Sent::Asked(js_sys::Promise::resolve(&reading)))
+    }
+}
+
+/// Boot's prefetch, if the page has it ([`BOOT_EVENT`]).
+pub fn boot_prefetch() -> Option<Prefetch> {
+    let detail = js_sys::Object::new();
+    if !request(BOOT_EVENT, &detail) {
+        return None;
+    }
+    js_sys::Reflect::get(&detail, &JsValue::from_str("boot"))
         .ok()
-        .filter(present)
-        .map(|reading| crate::reader::Sent::Asked(js_sys::Promise::resolve(&reading)))
+        .filter(JsValue::is_object)
+        .map(Prefetch)
 }
 
-/// Answers a [`READER_EVENT`]: `detail.done = done`, a promise of whether a
-/// chapter was put on screen.
-pub fn reader_done(event: &CustomEvent, done: &js_sys::Promise) {
-    let _ = js_sys::Reflect::set(&event.detail(), &JsValue::from_str("done"), done);
-}
-
-/// The reader has loaded and listens: a `CustomEvent`, no `detail`, before
-/// the other pieces have mounted. A boot that beat it asks again then.
-pub const READER_READY_EVENT: &str = "gospel-getter:reader-ready";
-
-/// Says [`READER_READY_EVENT`].
-pub fn reader_ready() {
-    if let (Some(document), Ok(event)) = (document(), CustomEvent::new(READER_READY_EVENT)) {
-        let _ = document.dispatch_event(&event);
-    }
-}
-
-/// The page asks the selection card: a cancelable `CustomEvent` whose
-/// `detail` is `{ action, ... }` (`card`). The card cancels it to say it has
-/// it, and answers within it ([`card_answer`]).
-pub const CARD_EVENT: &str = "gospel-getter:card";
-
-/// Answers a [`CARD_EVENT`]: `detail.answer = answer`.
-pub fn card_answer(event: &CustomEvent, answer: &JsValue) {
-    let _ = js_sys::Reflect::set(&event.detail(), &JsValue::from_str("answer"), answer);
+/// Sends `name` on `document` as a cancelable `CustomEvent` with `detail`
+/// as it is: whether something cancelled it (has it).
+pub fn request(name: &str, detail: &JsValue) -> bool {
+    let Some(document) = document() else {
+        return false;
+    };
+    let init = CustomEventInit::new();
+    init.set_cancelable(true);
+    init.set_detail(detail);
+    CustomEvent::new_with_event_init_dict(name, &init)
+        .is_ok_and(|event| !document.dispatch_event(&event).unwrap_or(true))
 }

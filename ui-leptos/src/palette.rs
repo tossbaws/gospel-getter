@@ -7,7 +7,7 @@
 //!
 //! What a command can and can't do now depends on the page: whether it's
 //! comparing, reading mode, Aa's settings, the chapter shown, the passage
-//! history, a busy export. The page hands that over as a [`PaletteState`]
+//! history, a busy export. That's read as a [`PaletteState`]
 //! each time the palette is drawn or a command chosen (see
 //! `bridge::palette_state`), so the reasons are always the page's state at
 //! that moment, as they were.
@@ -29,7 +29,7 @@ pub struct Choice {
 }
 
 /// What the page knows that the commands need, taken when the palette is
-/// drawn or a command is chosen (`bridge::PALETTE_STATE_EVENT`).
+/// drawn or a command is chosen (`bridge::palette_state`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PaletteState {
@@ -96,8 +96,8 @@ pub enum Run {
     Translation(String),
     /// Compares with this translation, as Compare's "with" does.
     CompareWith(String),
-    /// The page's own code for it, through `bridge::COMMAND_EVENT`: the
-    /// command's name there.
+    /// The code that was the page's (`page::run_command`): the command's
+    /// name there.
     Page(&'static str),
 }
 

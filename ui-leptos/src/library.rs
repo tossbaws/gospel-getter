@@ -11,9 +11,10 @@
 //! note editor);
 //! removing a bookmark or a highlight keeps focus in the list.
 //!
-//! The page asks for the lists to be reloaded with
-//! `bridge::LIBRARY_REFRESH_EVENT`, and gets back what the reader's own
-//! marks need with `bridge::LIBRARY_LOADED_EVENT`: each list is asked of
+//! Boot, an import, a translation switch and the card ask for the lists to
+//! be reloaded with `bridge::LIBRARY_REFRESH_EVENT`, and get back what the
+//! reader's own marks and the welcome need with
+//! `bridge::LIBRARY_LOADED_EVENT`: each list is asked of
 //! the backend here, once per reload, never there too. Only the latest of
 //! overlapping reloads of a list is shown, as before (each list has its own
 //! token).
@@ -177,7 +178,7 @@ impl Library {
     }
 
     /// Arrow keys, Home and End move between the tabs, and are no chapter
-    /// turn: they stop here, before the page's keyboard handler.
+    /// turn: they stop here, before the keyboard dispatcher (`keyboard`).
     fn on_tab_key(self, event: &KeyboardEvent) {
         let Some(index) = target_of(event).and_then(|el| self.tab_index(&el)) else {
             return;
@@ -302,7 +303,7 @@ impl Library {
         }
     }
 
-    /// The page asks for lists: each named starts reloading now, and
+    /// Lists asked for: each named starts reloading now, and
     /// `detail.done` settles once all have.
     fn on_refresh(self, event: CustomEvent) {
         event.prevent_default();

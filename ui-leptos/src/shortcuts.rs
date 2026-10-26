@@ -172,7 +172,7 @@ fn row_view(row: &'static Shortcut) -> impl IntoView {
     }
 }
 
-/// The keyboard shortcuts sheet, mounted once, hidden until the page asks.
+/// The keyboard shortcuts sheet, mounted once, hidden until it's asked for.
 #[component]
 pub fn Shortcuts() -> impl IntoView {
     let sheet = Sheet {

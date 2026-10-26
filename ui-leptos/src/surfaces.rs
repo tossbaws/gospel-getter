@@ -24,10 +24,12 @@
 //! (`about`, whose own keys close it through here). The ☰ menu's items
 //! are the page's, and this crate's for About.
 //!
-//! The page (its reader, still JavaScript) reaches them through
-//! `window.gospelGetterSurfaces` ([`export_surfaces`]), and hears them open
-//! and close (`bridge::SURFACE_OPEN_EVENT`, `bridge::SURFACE_CLOSE_EVENT`).
-//! Without this module, nothing opens, and the page says so.
+//! The keyboard (`keyboard`) and the page's glue (`page`) open and close
+//! them here ([`current`], [`close`], [`toggle_surface`], [`open_picker`]);
+//! the other pieces hear them open and close (`bridge::SURFACE_OPEN_EVENT`,
+//! `bridge::SURFACE_CLOSE_EVENT`). The frontend tests and the GUI checks
+//! read which is open from `window.gospelGetterSurfaces.current()`
+//! ([`export_surfaces`]). Without this module, nothing opens.
 //!
 //! This is the head script's surfaces controller (`ui/index.html` at
 //! 49736df, from `isWide` to its Escape handler) in Rust: the same ids,
@@ -339,7 +341,7 @@ fn set_sidebar(open: bool) {
 /// it, if it was hidden); otherwise the popover, which the button also
 /// closes (`toggle`). Focus goes to the chapter being read. The books are
 /// `picker`'s: until boot has handed them over, it says they aren't there.
-fn open_picker(toggle: bool) {
+pub fn open_picker(toggle: bool) {
     if is_wide() && !is_reader_mode() {
         if CURRENT.get().is_some_and(Surface::popover) {
             close(false);
@@ -584,9 +586,9 @@ fn on_menu_toggle_key(event: &KeyboardEvent) {
 
 /// Escape backs out one step at a time: first the search panel, then
 /// whichever popover or panel is open, then a verse selection, then reading
-/// mode. The page's keyboard dispatcher runs first (it's registered before
-/// this module loads) and marks an Escape that closed search or cleared a
-/// verse selection as handled; About's own Escape is handled on it.
+/// mode. The keyboard dispatcher (`keyboard`) runs first (it's registered
+/// before this) and marks an Escape that closed search or cleared a verse
+/// selection as handled; About's own Escape is handled on it.
 fn on_escape(event: &KeyboardEvent) {
     if event.key() != "Escape" || event.default_prevented() {
         return;
@@ -629,10 +631,9 @@ fn on_key_of(id: &str, handler: impl Fn(&KeyboardEvent) + 'static) {
     }
 }
 
-/// `window.gospelGetterSurfaces`, for the page's reader: `current()`, the
-/// open surface's name or `null`; `close(restoreFocus)` (focus goes back
-/// unless `restoreFocus` is `false`); `toggle(name)`, as its button; and
-/// `openPicker()`, as G. Answered within the call.
+/// `window.gospelGetterSurfaces`, for the frontend tests and the GUI
+/// checks: `current()`, the open surface's name or `null`, answered within
+/// the call.
 fn export_surfaces() {
     let Some(window) = web_sys::window() else {
         return;
@@ -643,28 +644,9 @@ fn export_surfaces() {
             .get()
             .map_or(JsValue::NULL, |s| JsValue::from_str(s.name()))
     });
-    let close = Closure::<dyn Fn(JsValue)>::new(|restore_focus: JsValue| {
-        close(restore_focus.as_bool() != Some(false));
-    });
-    let toggle = Closure::<dyn Fn(JsValue)>::new(|name: JsValue| {
-        if let Some(surface) = name.as_string().as_deref().and_then(Surface::by_name) {
-            toggle_surface(surface, None);
-        }
-    });
-    let open_picker = Closure::<dyn Fn()>::new(|| open_picker(false));
-    for (name, function) in [
-        ("current", current.as_ref()),
-        ("close", close.as_ref()),
-        ("toggle", toggle.as_ref()),
-        ("openPicker", open_picker.as_ref()),
-    ] {
-        let _ = js_sys::Reflect::set(&global, &JsValue::from_str(name), function);
-    }
+    let _ = js_sys::Reflect::set(&global, &JsValue::from_str("current"), current.as_ref());
     let _ = js_sys::Reflect::set(&window, &JsValue::from_str("gospelGetterSurfaces"), &global);
     current.forget();
-    close.forget();
-    toggle.forget();
-    open_picker.forget();
 }
 
 /// Notes the painted layout after a scroll, a resize, or a reflow of the
@@ -710,8 +692,9 @@ fn watch_painted_place() {
 
 /// Takes the picker's shape, listens to the header's buttons, the menu's
 /// keys, the window's width and Escape, and puts
-/// `window.gospelGetterSurfaces` where the page reads it. Called first of
-/// all the pieces, as the head script ran before them.
+/// `window.gospelGetterSurfaces` where the tests read it. Called first of
+/// all the pieces (after the page's own listeners, `page`), as the head
+/// script ran before them.
 pub fn mount() {
     let Some(document) = bridge::document() else {
         return;

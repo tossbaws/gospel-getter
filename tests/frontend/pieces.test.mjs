@@ -1,8 +1,10 @@
 // The page's Rust pieces (ui-leptos) arriving late or not at all: a fresh
 // install whose pieces load after boot still gets its welcome, and the
 // launch check for updates, About's credits and the chapter itself once
-// they come; without them each piece says it isn't available (and no
-// update is looked for), and the chapter shows as plain text, read-only —
+// they come; without them the chapter shows as plain text, read-only, with
+// the fallback's line saying the rest isn't available, and that line is
+// all that's said: no control answers (the page has no script left to say
+// a piece isn't there), nothing opens, and no update is looked for —
 // against the real backend and database.
 
 import { after, test } from 'node:test';
@@ -23,6 +25,9 @@ async function withApp(options, body) {
 
 const $ = (app, id) => app.document.getElementById(id);
 const toast = (app) => ({ text: app.toast().textContent, error: app.toast().classList.contains('is-error') });
+// What the toast says when nothing answers a control (step 7c: the page's
+// main script, which said "… isn't available.", is gone with the rest).
+const NOTHING = { text: '', error: false };
 
 // Without the pieces, the chapter shows as plain text (step 7 F2): the
 // saved position, read once, with a line saying the rest isn't there;
@@ -32,6 +37,7 @@ const PLAIN_TEXT = 'This chapter is shown as plain text: the rest of the reader 
 async function readsAsPlainText(app, book, chapter) {
     assert.equal(app.heading(), `${book} ${chapter}`);
     assert.equal(app.notice(), PLAIN_TEXT);
+    assert.ok(app.toast().classList.contains('is-hidden'), 'and nothing else is said');
     assert.equal(app.document.querySelectorAll('.chapter-main .verse[data-translation]').length, 0, 'nothing to select');
     const verses = [...app.document.querySelectorAll('.chapter-main .verse .verse-text')];
     assert.equal(verses[15].textContent, (await shownVerse('kjv', book, chapter, 16)).text, 'the verses as the backend sends them');
@@ -62,7 +68,7 @@ test('pieces that load after boot on an install that isn’t fresh open nothing'
         assert.deepEqual(app.consoleErrors, []);
     }));
 
-test('without the pieces, each says it isn’t available, and the chapter shows as plain text', () =>
+test('without the pieces, no dialog answers or says anything, and the chapter shows as plain text', () =>
     withApp({ book: 'John', chapter: 3, leptos: false }, async (app) => {
         await app.idle();
         for (const id of ['shortcuts-overlay', 'welcome-overlay', 'import-overlay', 'note-overlay', 'export-notes-overlay']) {
@@ -70,17 +76,17 @@ test('without the pieces, each says it isn’t available, and the chapter shows 
         }
 
         app.key('?', { shiftKey: true });
-        assert.deepEqual(toast(app), { text: 'Keyboard shortcuts aren’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         assert.equal(app.searchPanel().hidden, true, '? still never opens search');
 
         app.open('menu');
         app.click($(app, 'welcome-btn'));
-        assert.deepEqual(toast(app), { text: 'The welcome isn’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
 
         const before = app.calls.length;
         app.open('menu');
         app.click($(app, 'import-data-btn'));
-        assert.deepEqual(toast(app), { text: 'Import isn’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         assert.deepEqual(app.calls.slice(before).map((c) => c.cmd), [], 'no file dialog');
 
         await readsAsPlainText(app, 'John', 3);
@@ -113,7 +119,7 @@ test('pieces that load after boot run the launch check then, and fill About', ()
         assert.deepEqual(app.consoleErrors, []);
     }));
 
-test('without the pieces, About says it isn’t available, no update is looked for, and the chapter shows as plain text', () =>
+test('without the pieces, About doesn’t open or say anything, no update is looked for, and the chapter shows as plain text', () =>
     withApp({ book: 'John', chapter: 3, leptos: false, update: { check: UPDATE } }, async (app) => {
         await app.idle();
         assert.equal($(app, 'about-overlay'), null);
@@ -122,7 +128,7 @@ test('without the pieces, About says it isn’t available, no update is looked f
 
         app.open('menu');
         app.click($(app, 'about-btn'));
-        assert.deepEqual(toast(app), { text: 'About isn’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         assert.equal(app.surface('menu').hidden, true, 'the menu closes as after any item');
 
         await readsAsPlainText(app, 'John', 3);
@@ -160,7 +166,7 @@ test('pieces that load after boot fill the Library then, and mark the bookmarks'
     });
 });
 
-test('without the pieces, the Library says it isn’t available, and the chapter shows as plain text', async () => {
+test('without the pieces, the Library doesn’t open or say anything, and the chapter shows as plain text', async () => {
     await seedLibrary();
     await withApp({ book: 'John', chapter: 3, keepBookmarks: true, leptos: false }, async (app) => {
         await app.idle();
@@ -169,7 +175,7 @@ test('without the pieces, the Library says it isn’t available, and the chapter
 
         app.open('library');
         assert.equal(app.surface('library').hidden, true, 'nothing opens without the pieces (E1)');
-        assert.deepEqual(toast(app), { text: 'The library isn’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
 
         app.key('Escape');
         await readsAsPlainText(app, 'John', 3);
@@ -177,17 +183,17 @@ test('without the pieces, the Library says it isn’t available, and the chapter
     });
 });
 
-test('without the pieces, search says it isn’t available, and the chapter shows as plain text', () =>
+test('without the pieces, search doesn’t open or say anything, and the chapter shows as plain text', () =>
     withApp({ book: 'John', chapter: 3, leptos: false }, async (app) => {
         await app.idle();
         assert.equal(app.searchInput(), null, 'the box is the pieces’');
         assert.equal(app.window.gospelGetterShortcuts, undefined, 'so is the table of shortcuts');
 
         app.key('/');
-        assert.deepEqual(toast(app), { text: 'Search isn’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         assert.equal(app.searchPanel().hidden, true);
         app.click($(app, 'search-toggle'));
-        assert.deepEqual(toast(app), { text: 'Search isn’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         assert.equal(app.searchPanel().hidden, true);
 
         await readsAsPlainText(app, 'John', 3);
@@ -220,7 +226,7 @@ const SAVED_LOOK = {
     'gospel-getter-compare-with': 'bsb',
 };
 
-test('without the pieces, Aa, the translations and the picker say they aren’t available; the Bible text shows in the saved look, as plain text', () =>
+test('without the pieces, Aa, the translations and the picker don’t open or say anything; the Bible text shows in the saved look, as plain text', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv', leptos: false, storage: SAVED_LOOK }, async (app) => {
         await app.idle();
         const root = app.document.documentElement.dataset;
@@ -229,23 +235,23 @@ test('without the pieces, Aa, the translations and the picker say they aren’t 
         assert.equal(app.window.gospelGetterPreferences, undefined);
 
         app.click($(app, 'aa-toggle'));
-        assert.deepEqual(toast(app), { text: 'Display settings aren’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         app.key('Escape', {}, app.document.activeElement);
         app.key('t');
-        assert.deepEqual(toast(app), { text: 'Translations aren’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         app.key('Escape', {}, app.document.activeElement);
         assert.equal(app.surface('translation').hidden, true);
 
         // The picker's books are the pieces' too: on a wide window G goes
         // into the sidebar, on a narrow one it opens the popover.
         app.key('g');
-        assert.deepEqual(toast(app), { text: 'The book list isn’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         assert.equal(app.document.querySelectorAll('#picker .book-item').length, 0);
         app.resize(900);
         app.document.body.focus();
         app.key('g');
         assert.equal(app.surface('picker').hidden, true, 'nothing opens without the pieces (E1)');
-        assert.deepEqual(toast(app), { text: 'The book list isn’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         app.key('Escape', {}, app.document.activeElement);
 
         // Nothing was saved, and the chapter shows as plain text.
@@ -261,7 +267,7 @@ test('pieces that load after boot bring Aa and the translations, with the saved 
         assert.equal(root.theme, 'beast-slayer', 'the renamed theme, from the first frame');
         assert.equal(root.textSize, 'small');
         app.click($(app, 'aa-toggle'));
-        assert.deepEqual(toast(app), { text: 'Display settings aren’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         app.key('Escape', {}, app.document.activeElement);
 
         await app.loadPieces();
@@ -279,7 +285,7 @@ test('pieces that load after boot bring Aa and the translations, with the saved 
         assert.deepEqual(app.consoleErrors, []);
     }));
 
-test('without the pieces, ☰, the sidebar’s button and reading mode’s exit say they aren’t available', () =>
+test('without the pieces, ☰, the sidebar’s button and reading mode’s exit don’t answer or say anything', () =>
     withApp({ book: 'John', chapter: 3, leptos: false, readerMode: true }, async (app) => {
         await app.idle();
         assert.equal(app.window.gospelGetterSurfaces, undefined);
@@ -287,19 +293,19 @@ test('without the pieces, ☰, the sidebar’s button and reading mode’s exit 
         assert.equal(root.readerMode, 'on', 'the saved look, from the first frame');
 
         app.click($(app, 'reader-exit'));
-        assert.deepEqual(toast(app), { text: 'Display settings aren’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         app.toast().textContent = '';
         app.document.body.focus();
         app.key('Escape');
-        assert.deepEqual(toast(app), { text: 'Display settings aren’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         assert.equal(root.readerMode, 'on', 'still reading');
 
         app.click($(app, 'menu-toggle'));
-        assert.deepEqual(toast(app), { text: 'The menu isn’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         assert.equal(app.surface('menu').hidden, true);
         assert.equal($(app, 'menu-toggle').getAttribute('aria-expanded'), 'false');
         app.click($(app, 'sidebar-toggle'));
-        assert.deepEqual(toast(app), { text: 'The book list isn’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
 
         // Nothing was saved, and the chapter shows as plain text.
         assert.deepEqual(Object.keys(app.storage()), ['gospel-getter-reader-mode']);
@@ -311,7 +317,7 @@ test('pieces that load after boot open the ☰ menu and the picker from then on'
     withApp({ book: 'John', chapter: 3, leptos: 'late', width: 900 }, async (app) => {
         await app.idle();
         app.click($(app, 'menu-toggle'));
-        assert.deepEqual(toast(app), { text: 'The menu isn’t available.', error: true });
+        assert.deepEqual(toast(app), NOTHING);
         assert.equal(app.surface('picker').hidden, true);
 
         await app.loadPieces();

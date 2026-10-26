@@ -7,8 +7,8 @@
 //! A modal, as the page's others: while open it has the keyboard (a
 //! capturing `keydown` on `window`, stopping every other handler), Escape
 //! cancels, Tab stays inside, and closing gives focus to the page's focus
-//! home (☰, where Import data… was chosen). After an import the page reloads
-//! what it shows of the reader's data (see `bridge`).
+//! home (☰, where Import data… was chosen). After an import what's shown of
+//! the reader's data is reloaded (`bridge::imported`, `page`).
 //!
 //! This is the page's import script (`ui/index.html` at fa5969d,
 //! `describePreferences` to its keydown handler) as a Leptos component:
@@ -257,7 +257,7 @@ impl Import {
     }
 
     /// Import: all or nothing in the backend; then the file's display
-    /// settings, if chosen; then the page reloads what it shows.
+    /// settings, if chosen; then what's shown is reloaded (`page`).
     fn confirm(self) {
         let Some((preview, raw_prefs)) = self.preview.get_value() else {
             return;
