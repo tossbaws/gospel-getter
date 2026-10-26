@@ -46,6 +46,13 @@ pub fn invoke_now<T: DeserializeOwned>(
     }
 }
 
+/// Sends `cmd` with `args` now, within the caller's event: the command's
+/// promise, its answer as it comes (the reader keeps some of it for the
+/// page as it came, and has several on their way at once).
+pub fn send(cmd: &str, args: JsValue) -> Result<js_sys::Promise, JsValue> {
+    invoke_promise(cmd, args)
+}
+
 /// Calls `cmd` with `args` and hands back its answer as it came, for an
 /// answer part of which goes back to the page unchanged.
 pub async fn invoke_value(cmd: &str, args: JsValue) -> Result<JsValue, JsValue> {

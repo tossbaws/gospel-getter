@@ -11,9 +11,10 @@ use gospel_getter_lib::preferences::{self, Preference, Values};
 /// modal dialogs' markup and keyboard handling, the Library's tabs and
 /// lists, the search box and its palette, the table of shortcuts, the
 /// book and chapter picker's books and chapters, Aa with the translations
-/// and the saved settings, and the header's surfaces with the picker's
-/// shapes: checks of those read them where they now live.
-const PIECES: [(&str, &str); 17] = [
+/// and the saved settings, the header's surfaces with the picker's
+/// shapes, and the reader (the chapter's markup, its loading and the
+/// passage history): checks of those read them where they now live.
+const PIECES: [(&str, &str); 19] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -54,6 +55,11 @@ const PIECES: [(&str, &str); 17] = [
     (
         "surfaces_text.rs",
         include_str!("../../ui-leptos/src/surfaces_text.rs"),
+    ),
+    ("reader.rs", include_str!("../../ui-leptos/src/reader.rs")),
+    (
+        "reader_text.rs",
+        include_str!("../../ui-leptos/src/reader_text.rs"),
     ),
 ];
 
@@ -2439,16 +2445,16 @@ fn the_reference_button_says_where_the_reader_is() {
     ] {
         assert!(button.contains(declaration), ".ref-btn: {declaration}");
     }
-    assert!(HTML.contains(
-        "refText.textContent = `${place} · ${codes.map((c) => c.toUpperCase()).join(' + ')}`;"
-    ));
-    assert!(HTML.contains(
-        "refBtn.setAttribute('aria-label', `${place}, ${spoken}. Choose a book and chapter`);"
-    ));
+    // What it says is the reader's (ui-leptos/src/reader_text.rs).
+    let reference = block_after(piece("reader_text.rs"), "pub fn reference(");
+    assert!(reference.contains(r#"let text = format!("{place} · {}", upper.join(" + "));"#));
+    assert!(
+        reference.contains(r#"label: format!("{place}, {spoken}. Choose a book and chapter"),"#)
+    );
     // Updated whenever a chapter is put on screen.
-    let render = block_after(HTML, "function renderCurrent()");
-    assert!(render.contains("updateReference(compare);"));
-    assert!(render.contains("markPickerCurrent();"));
+    let render = block_after(piece("reader.rs"), "fn render_current()");
+    assert!(render.contains("update_reference(&here, compare.as_ref().map(|(c, _)| c.as_ref()));"));
+    assert!(render.contains("bridge::show_picker_current(here.book_id, here.chapter);"));
     // G opens the picker, in the main keyboard handler, which leaves keys
     // typed into a form control alone.
     assert!(
@@ -2749,31 +2755,41 @@ fn function_body(name: &str) -> &'static str {
 /// chapter.
 #[test]
 fn the_chapter_ends_with_buttons_to_the_chapters_around_it() {
-    let end = function_body("renderChapterEnd");
-    assert!(end.contains(r#"<nav class="chapter-end" aria-label="Previous and next chapter">"#));
+    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
+    let reader = piece("reader_text.rs");
+    let end = block_after(reader, "fn chapter_end(");
     assert!(
-        end.contains("if (!side) return '';"),
+        end.contains(r#"<nav class=\"chapter-end\" aria-label=\"Previous and next chapter\">"#)
+    );
+    assert!(
+        end.contains("let Some(side) = side else {\n            return String::new();"),
         "one button per neighbour there is"
     );
-    assert!(end.contains("step(dto.prev, 'prev')}${step(dto.next, 'next')"));
-    assert!(end.contains(r#"class="chapter-step chapter-step-${which}""#));
-    assert!(end.contains(r#"data-book="${side.bookId}" data-chapter="${side.chapter}""#));
-    assert!(end.contains(r#"<p class="nav-hint">"#));
+    assert!(end.contains(
+        "step(dto.prev.as_ref(), Which::Prev),\n        step(dto.next.as_ref(), Which::Next),"
+    ));
+    assert!(end.contains(r#"class="chapter-step chapter-step-{}""#));
+    assert!(end.contains(r#"data-book="{}" data-chapter="{}" aria-label="{label}""#));
+    assert!(end.contains(r#"<p class=\"nav-hint\">"#));
     // Its three keys are caps alike; the arrows are drawn, and named.
     for key in [
-        "${hintKey('Left arrow', ARROW_LEFT)}",
-        "${hintKey('Right arrow', ARROW_RIGHT)}",
-        "${hintKey('?')}",
+        r#"hint_key("Left arrow", Some(ARROW_LEFT))"#,
+        r#"hint_key("Right arrow", Some(ARROW_RIGHT))"#,
+        r#"hint_key("?", None)"#,
     ] {
         assert!(end.contains(key), "{key}");
     }
-    let caps = function_body("hintKey");
-    assert!(caps.contains(r#"<kbd><span class="visually-hidden">${name}</span>${drawn}</kbd>"#));
-    assert!(HTML.contains(r#"const ARROW_LEFT = '<svg viewBox="0 0 16 16" aria-hidden="true""#));
-    let pane = function_body("renderReadingPane");
-    let body = pane.find("${body}").expect("the verses");
-    let after = pane.find("${renderChapterEnd(dto)}").expect("the buttons");
-    let lists = pane.find("${renderFootnoteSummary(dto, compare)}").unwrap();
+    let caps = block_after(reader, "fn hint_key(");
+    assert!(caps.contains(r#"<kbd><span class="visually-hidden">{name}</span>{drawn}</kbd>"#));
+    assert!(
+        reader.contains(
+            r##"const ARROW_LEFT: &str = r#"<svg viewBox="0 0 16 16" aria-hidden="true""##
+        )
+    );
+    let pane = block_after(reader, "pub fn reading_pane(");
+    let body = pane.find("{s28}{body}").expect("the verses");
+    let after = pane.find("{s28}{end}").expect("the buttons");
+    let lists = pane.find("{s28}{footnotes}").unwrap();
     assert!(
         body < after && after < lists,
         "after the verses, before the lists"
@@ -2824,39 +2840,45 @@ fn there_is_no_tagline() {
 /// chapter). Printing opens both.
 #[test]
 fn footnotes_and_cross_references_are_disclosures_closed_by_default() {
-    let keys = block_after(HTML, "const DISCLOSURE_KEYS =");
-    assert!(keys.contains("footnotes: 'gospel-getter-footnotes'"));
-    assert!(keys.contains("xrefs: 'gospel-getter-cross-references'"));
-    let open = function_body("disclosureOpen");
-    assert!(open.contains("=== 'open'"), "closed unless saved open");
+    // The disclosures are the reader's (ui-leptos/src/reader.rs and
+    // reader_text.rs).
+    let reader = piece("reader_text.rs");
+    let keys = block_after(reader, "pub fn key(self)");
+    assert!(keys.contains(r#"Self::Footnotes => "gospel-getter-footnotes","#));
+    assert!(keys.contains(r#"Self::Xrefs => "gospel-getter-cross-references","#));
+    let open = block_after(piece("reader.rs"), "fn opened()");
     assert!(
-        open.contains("return false;"),
+        open.contains(r#".is_some_and(|value| value == "open")"#),
+        "closed unless saved open"
+    );
+    assert!(
+        open.contains(".and_then(|s| s.get_item(kind.key()).ok().flatten())"),
         "closed when storage can't be read"
     );
-    let toggle = function_body("disclosureToggle");
+    let toggle = block_after(reader, "fn disclosure_toggle(");
     assert!(toggle.contains(r#"<button type="button" class="disclosure-toggle""#));
-    assert!(toggle.contains(r#"aria-expanded="${disclosureOpen(kind)}""#));
-    assert!(toggle.contains(r#"aria-controls="${controls}""#));
+    assert!(toggle.contains(r#"aria-expanded="{open}""#));
+    assert!(toggle.contains(r#"aria-controls="{controls}""#));
     for (function, kind, title) in [
         (
-            "renderFootnoteSummary",
-            "footnotes",
-            "`Footnotes (${count})`",
+            "fn footnote_summary(",
+            "Disclosure::Footnotes",
+            r#"format!("Footnotes ({count})")"#,
         ),
         (
-            "renderXrefSummary",
-            "xrefs",
-            "`Cross references (${count})`",
+            "fn xref_summary(",
+            "Disclosure::Xrefs",
+            r#"&format!("Cross references ({count})")"#,
         ),
     ] {
-        let body = function_body(function);
+        let body = block_after(reader, function);
         assert!(
-            body.contains(&format!("disclosureToggle('{kind}'")),
+            body.contains("disclosure_toggle(") && body.contains(kind),
             "{function}"
         );
         assert!(body.contains(title), "{function}");
         assert!(
-            body.contains(&format!("disclosureOpen('{kind}') ? '' : ' hidden'")),
+            body.contains(r#"if open { "" } else { " hidden" }"#),
             "{function}: the list is hidden while closed"
         );
     }
@@ -2867,8 +2889,8 @@ fn footnotes_and_cross_references_are_disclosures_closed_by_default() {
             && r.body.contains("display: none")),
         "closed lists must not show"
     );
-    let set = function_body("setDisclosure");
-    assert!(set.contains("localStorage.setItem(DISCLOSURE_KEYS[kind]"));
+    let set = block_after(piece("reader.rs"), "fn set_disclosure(");
+    assert!(set.contains("storage.set_item(kind.key()"));
     let print = block_after(HTML, "@media print");
     let open_in_print = print
         .find(".disclosure-body[hidden]")
@@ -3335,12 +3357,14 @@ fn side_chapters_never_squeeze_the_column_below_50_characters() {
 /// --text. It has no verses and nothing to click.
 #[test]
 fn the_bible_s_edges_have_a_quiet_card_in_the_neighbor_s_place() {
-    let pane = function_body("renderReadingPane");
-    assert!(pane.contains("${s ? renderSideChapter(s) : renderEdgeCard(edge)}"));
-    assert!(pane.contains("side(dto.prev, dto.prevEdge, 'prev')"));
-    assert!(pane.contains("side(dto.next, dto.nextEdge, 'next')"));
-    let card = function_body("renderEdgeCard");
-    assert!(card.contains("escapeHtml(edge.title)") && card.contains("escapeHtml(edge.detail)"));
+    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
+    let reader = piece("reader_text.rs");
+    let pane = block_after(reader, "pub fn reading_pane(");
+    assert!(pane.contains("Some(s) => side_chapter(s),\n            None => edge_card(edge),"));
+    assert!(pane.contains("side(dto.prev.as_ref(), dto.prev_edge.as_ref(), Which::Prev)"));
+    assert!(pane.contains("side(dto.next.as_ref(), dto.next_edge.as_ref(), Which::Next)"));
+    let card = block_after(reader, "fn edge_card(");
+    assert!(card.contains("escape_html(&edge.title)") && card.contains("escape_html(d)"));
     assert!(!card.contains("<button") && !card.contains("class=\"verse"));
     let rules = rules();
     let title = screen_rule(&rules, ".edge-card-title");
@@ -3469,12 +3493,15 @@ fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
             assert!(!selector.contains("compare"), "{selector}");
         }
     }
-    let pane = function_body("renderReadingPane");
-    assert!(pane.contains("? renderCompareGrid(dto, compare)"));
-    assert!(pane.contains(r#": `<div class="chapter-text">${dto.currentVerses.map("#));
-    assert!(!function_body("renderCompareGrid").contains("chapter-text"));
+    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
+    let reader = piece("reader_text.rs");
+    let pane = block_after(reader, "pub fn reading_pane(");
+    assert!(pane.contains("Some(compare) => compare_grid(dto, compare),"));
+    assert!(pane.contains(r##"r#"<div class="chapter-text">{}</div>"#,"##));
+    assert!(!block_after(reader, "fn compare_grid(").contains("chapter-text"));
     assert!(
-        function_body("renderSideChapter").contains(r#"<div class="chapter-text">${verses}</div>"#)
+        block_after(reader, "fn side_chapter(")
+            .contains(r#"<div class=\"chapter-text\">{verses}</div>"#)
     );
     // Nothing in print touches the verses' display: printed, Flowing
     // flows (and Verses stays a verse to a line).
@@ -3827,7 +3854,9 @@ fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
         !toggle.contains("openPassage"),
         "a chip previews; only Go to opens"
     );
-    assert!(toggle.contains("verseHtml(v, { markers: false })"));
+    // Its verses' markup is the reader's (see VERSE_MARKUP_EVENT in
+    // ui-leptos/src/bridge.rs), without note markers.
+    assert!(toggle.contains("markup({ verses: passage.verses })"));
     assert!(HTML.contains(r#"invoke('get_passage'"#));
 
     let rules = rules();
@@ -3900,11 +3929,9 @@ fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
 /// `the_quiet_accent_carries_the_quiet_jobs`). Printing doesn't style them.
 #[test]
 fn chapter_end_cross_references_are_quiet_links() {
-    let summary = function_body("renderXrefSummary");
-    assert!(
-        summary
-            .contains(r#"<button type="button" class="xref-summary-chip" data-book="${x.bookId}""#)
-    );
+    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
+    let summary = block_after(piece("reader_text.rs"), "fn xref_summary(");
+    assert!(summary.contains(r#"<button type="button" class="xref-summary-chip" data-book="{}""#));
     let rules = rules();
     let chip = screen_rule(&rules, ".xref-summary-chip");
     for declaration in [
@@ -4066,7 +4093,8 @@ fn a_footnotes_verse_number_is_set_small() {
     ] {
         assert!(rule.body.contains(declaration), "{declaration}");
     }
-    let footnote = function_body("footnoteHtml");
+    // A footnote's markup is the reader's (ui-leptos/src/reader_text.rs).
+    let footnote = block_after(piece("reader_text.rs"), "pub fn footnote_html(");
     assert!(footnote.contains(r#"<em class="footnote-alt">"#));
     assert!(footnote.contains(r#"<sup class="footnote-verse">"#));
 }
@@ -4273,7 +4301,8 @@ fn every_link_out_of_the_app_is_opened_by_the_backend() {
     }
     assert!(piece("about.rs").contains(r#"ipc::invoke_value("open_release_notes""#));
     assert!(piece("about.rs").contains(r#"ipc::invoke_value("open_support_page""#));
-    assert!(HTML.contains("invoke('open_credit_link', { which: credit.dataset.link })"));
+    // The credit links are the reader's (ui-leptos/src/reader.rs).
+    assert!(piece("reader.rs").contains(r#"ipc::send("open_credit_link", args)"#));
 }
 
 /// A Check now that times out says what the backend says when GitHub
@@ -4350,14 +4379,20 @@ fn nothing_inline_that_the_content_security_policy_would_block() {
     ] {
         assert!(!HTML.contains(blocked), "{blocked}");
     }
-    // The two inline scripts (the pre-paint script, the head's only one,
-    // and the main one) and the one stylesheet Tauri hashes.
-    assert_eq!(HTML.matches("<script>").count(), 2);
-    assert_eq!(HTML.matches("<script").count(), 2);
+    // The three inline scripts (the pre-paint script, the head's only one,
+    // the main one, and the reader's plain-text fallback) and the one
+    // stylesheet Tauri hashes.
+    assert_eq!(HTML.matches("<script>").count(), 3);
+    assert_eq!(HTML.matches("<script").count(), 3);
     assert_eq!(HTML.matches("<style>").count(), 1);
     assert_eq!(HTML.matches("<style").count(), 1);
     // The one style the markup used to carry, the compare grid's column
-    // count, is set through the CSSOM.
-    assert!(HTML.contains("data-columns=\"${compare.columns.length}\""));
-    assert!(HTML.contains("grid.style.setProperty('--compare-columns', grid.dataset.columns);"));
+    // count, is set through the CSSOM, by the reader, whose markup carries
+    // no style attribute either.
+    let reader = piece("reader_text.rs");
+    assert!(reader.contains(r#"<div class="compare-grid" data-columns="{}">"#));
+    assert!(
+        piece("reader.rs").contains(r#"grid.style().set_property("--compare-columns", &count)"#)
+    );
+    assert!(!reader.contains(" style="));
 }

@@ -11,8 +11,8 @@
 //! The panel is the page's (`#search-panel`, whose `hidden` the page reads);
 //! this draws what's inside it and opens and closes it, from its button,
 //! from the page's keys (`bridge::SEARCH_EVENT`), and when a surface opens.
-//! Opening it closes the surfaces. A result opens through the page's jump
-//! (`bridge::OPEN_PASSAGE_EVENT`), a command through its own control or the
+//! Opening it closes the surfaces. A result opens as a jump of the reader's
+//! (`reader::open`), a command through its own control or the
 //! page's code (`palette::Run`). Only the latest search's answer shows.
 //!
 //! This is the page's search script (`ui/index.html` at 201ab8f,
@@ -549,7 +549,7 @@ impl Search {
 
     // ---- Running an option.
 
-    /// Goes to the option's passage: the box closes, and the page jumps.
+    /// Goes to the option's passage: the box closes, and the reader jumps.
     fn open_result(self, option: &Element) {
         let (Some(book_id), Some(chapter)) = (
             data_number(option, "data-book"),
@@ -564,7 +564,7 @@ impl Search {
             verse_end: data_number(option, "data-verse-end"),
         };
         self.set_open(false);
-        bridge::open_passage(&passage, &JsValue::NULL);
+        crate::reader::open(&passage, JsValue::NULL);
     }
 
     /// Runs an option: goes to its passage, or runs its command once the

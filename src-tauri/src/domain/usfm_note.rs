@@ -19,8 +19,6 @@
 //! A note with anything else in it (a marker the bundled BSB doesn't use)
 //! is shown exactly as stored, markers and all.
 
-use serde::Serialize;
-
 use crate::domain::kjv_markup::{Footnote, Part, PartKind, VerseText, marker_label};
 
 /// A footnote as stored: its USFM, and how many characters into its
@@ -31,24 +29,9 @@ pub struct StoredFootnote {
     pub usfm: String,
 }
 
-/// What a [`Segment`] of a footnote is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SegmentKind {
-    /// The note's own words (`\ft`).
-    Text,
-    /// An alternative reading (`\fqa`), in italics.
-    Alt,
-    /// A verse number in the note (`\fv`).
-    Verse,
-}
-
-/// One run of a footnote, in order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Segment {
-    pub kind: SegmentKind,
-    pub text: String,
-}
+// A footnote's runs are a shape the page's Rust pieces read back (shared
+// with them; see `verse_parts`).
+pub use crate::verse_parts::{Segment, SegmentKind};
 
 /// The runs of a stored note, or `None` if it isn't one this reads (it's
 /// then shown as stored).

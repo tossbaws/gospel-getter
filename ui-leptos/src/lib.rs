@@ -11,17 +11,19 @@
 //! (`picker`); and Aa with the translation button's popover (`aa`), which
 //! keep the saved settings (`prefs`, by the one table in `preferences`);
 //! and the header's popovers and panels themselves, with the picker's two
-//! shapes (`surfaces`), which open and close all of these. The page talks
-//! to them only as `bridge` says.
+//! shapes (`surfaces`), which open and close all of these; and the reader
+//! (`reader`, with its markup and rules in `reader_text`): the chapter on
+//! screen, how it gets there, and the passage history. The page talks to
+//! them only as `bridge` says.
 //!
-//! If this module fails to load, the Bible text still shows, in the saved
-//! look (the page's pre-paint script applies it), and the page reads on;
-//! but the five dialogs, About, the Library, search, Aa, the translations,
-//! the ☰ menu and the picker say they are unavailable when asked for (see
+//! If this module fails to load, the chapter still shows, as plain text, in
+//! the saved look (the page's small fallback reads it, and its pre-paint
+//! script applies the look), with a line saying the rest of the reader
+//! isn't available: nothing in it can be selected, turned or changed. The
+//! five dialogs, About, the Library, search, Aa, the translations, the ☰
+//! menu and the picker say they are unavailable when asked for (see
 //! `bridge`), nothing opens, no setting can be changed (reading mode can't
-//! be left: its button and Escape say so), no
-//! update is offered, and no bookmark is marked in the reader (the Library
-//! loads them).
+//! be left: its button and Escape say so), and no update is offered.
 
 mod aa;
 mod aa_text;
@@ -46,6 +48,8 @@ mod picker_text;
 #[path = "../../shared/preferences.rs"]
 pub mod preferences;
 mod prefs;
+mod reader;
+mod reader_text;
 mod search;
 mod search_text;
 mod shortcut_table;
@@ -55,11 +59,16 @@ mod surfaces_text;
 mod text;
 mod update_text;
 mod updates;
+// A verse's parts and footnotes, shared with the backend, which compiles the
+// same file.
+#[path = "../../shared/verse_parts.rs"]
+pub mod verse_parts;
 mod welcome;
 
 use wasm_bindgen::prelude::*;
 
-/// Mounts every piece. Called by wasm-bindgen once the module is loaded.
+/// Mounts every piece, the reader with the first (see `mount_the_rest`).
+/// Called by wasm-bindgen once the module is loaded.
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
@@ -69,8 +78,25 @@ pub fn start() {
     // Aa and the saved settings next: their records (the `<select>`s) are
     // filled before any piece reads them.
     aa::mount();
+    // The reader, before the rest: boot's chapter is on its way (or in),
+    // and is drawn now.
+    reader::mount();
     // The table of shortcuts, where the page had it.
     bridge::export_shortcuts();
+    // The rest in a task of its own, so the chapter is shown (painted, and
+    // the window titled) before they mount, as it was before they loaded.
+    let rest = Closure::once_into_js(mount_the_rest);
+    if web_sys::window()
+        .and_then(|w| w.set_timeout_with_callback(rest.unchecked_ref()).ok())
+        .is_none()
+    {
+        mount_the_rest();
+    }
+}
+
+/// Mounts the dialogs, About, the Library, search and the picker, then says
+/// every piece is listening.
+fn mount_the_rest() {
     let Some(body) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.body())

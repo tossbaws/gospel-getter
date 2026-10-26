@@ -20,6 +20,10 @@ pub mod retry;
 pub mod start_here;
 pub mod support_link;
 pub mod updater;
+// A verse's parts and footnotes as shown, shared with the page's Rust
+// pieces (ui-leptos), which compile the same file.
+#[path = "../../shared/verse_parts.rs"]
+pub mod verse_parts;
 pub mod window;
 
 use anyhow::Context;

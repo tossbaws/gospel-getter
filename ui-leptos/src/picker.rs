@@ -11,11 +11,11 @@
 //! goes, and moves focus into it (the chapter being read, marked here). This
 //! draws the books into its lists from what boot hands over
 //! (`bridge::PICKER_BOOKS_EVENT`), a book's chapters, the marks for the
-//! chapter the page puts on screen (`bridge::PICKER_CURRENT_EVENT`), and
+//! chapter the reader puts on screen (`bridge::PICKER_CURRENT_EVENT`), and
 //! scrolls the picker (never the page) to it when the picker appears
 //! (`bridge::PICKER_SHOWN_EVENT`). A chapter chosen here, or Random
-//! chapter's, closes the popover and is read through the page's jump
-//! (`bridge::jump`): from its top, unless it's the one on screen.
+//! chapter's, closes the popover and is read as a jump of the reader's
+//! (`reader::jump`): from its top, unless it's the one on screen.
 //!
 //! This is the page's picker script (`ui/index.html` at 13911c4, from
 //! `pickRandomBookAndChapter` to the picker's keydown) in Rust: the same
@@ -275,7 +275,7 @@ impl Picker {
             surfaces::close(true);
         }
         let shown = self.reading() == Some((book_id, chapter));
-        bridge::jump(book_id, chapter, !shown);
+        crate::reader::jump(book_id, chapter, !shown);
     }
 
     fn random(self) {

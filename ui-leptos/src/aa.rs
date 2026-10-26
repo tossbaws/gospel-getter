@@ -170,7 +170,7 @@ fn choose(select: &HtmlSelectElement, value: &str) {
 /// The translation compare shows beside the one being read (the page's
 /// `window.gospelGetterComparePartner()`, whose rule is the reader's), if
 /// there's one.
-fn partner() -> Option<String> {
+pub fn partner() -> Option<String> {
     let window = web_sys::window()?;
     let partner =
         js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterComparePartner")).ok()?;

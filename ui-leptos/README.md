@@ -29,8 +29,16 @@ setting, with its rules in `src/aa_text.rs`), which keep the saved settings
 and the picker as the sidebar or the popover; one open at a time, their
 buttons, focus in and back, a click outside, Escape, the menu's keys and
 the window crossing 1200px, with its rules in `src/surfaces_text.rs`),
-which the page's reader reaches through `window.gospelGetterSurfaces`. The
-page's `<head>` keeps only its pre-paint script.
+which the page's reader reaches through `window.gospelGetterSurfaces`; and
+the reader itself (`src/reader.rs`: each chapter read from the backend and
+drawn into the reading pane, with Compare's grid, the chapter's end and its
+Footnotes and Cross references; the reference button, the window title and
+the translation button; the reading position; a chapter that couldn't be
+read, with Try again; and the passage history, Back and Forward, with the
+mouse's buttons; its markup and rules in `src/reader_text.rs`). What's
+left of the page's reader (the selection card, copying, the verses' marks,
+the keyboard and boot) asks it for chapters and hears each one it shows
+(`src/bridge.rs`). The page's `<head>` keeps only its pre-paint script.
 
 The saved settings' one table, their keys, values and names (in the page
 and in an export file), is `../shared/preferences.rs`, a file the backend
@@ -46,9 +54,12 @@ keeps the two the same.
 
 - `ui-leptos/` is its own crate (Rust 2024, `cdylib`), separate from
   `src-tauri/`: one targets `wasm32-unknown-unknown`, the other the desktop.
-  They share no code yet; `src/dto.rs` mirrors the DTOs of the commands the
-  pieces call, with the names the JSON carries, and says what a shared crate
-  would replace later.
+  They share two files, compiled into both by `#[path]`:
+  `../shared/preferences.rs` (below) and `../shared/verse_parts.rs`, a
+  verse's parts and footnotes as the backend shows them, which the reader
+  draws. `src/dto.rs` mirrors the other DTOs of the commands the pieces
+  call, with the names the JSON carries, and says what a shared crate would
+  replace later.
 - `src/ipc.rs`: Tauri commands through the same global the page uses,
   `window.__TAURI__.core.invoke` (a `wasm_bindgen` extern plus
   `serde-wasm-bindgen`), with the same command names and argument objects.
@@ -63,7 +74,8 @@ keeps the two the same.
 - `src/text.rs`, `src/import_text.rs`, `src/note_text.rs`,
   `src/install.rs`, `src/update_text.rs`, `src/library_text.rs`,
   `src/shortcut_table.rs`, `src/palette.rs`, `src/search_text.rs`,
-  `src/picker_text.rs`, `src/aa_text.rs`, `src/surfaces_text.rs`: the
+  `src/picker_text.rs`, `src/aa_text.rs`, `src/surfaces_text.rs`,
+  `src/reader_text.rs`: the
   pieces' words, numbers and rules (Export notes' filter, the import's
   sentences, the note's length rule, the welcome's fresh-install rule, the
   updater's sentences, `megabytes` and download progress, the Library's
@@ -72,7 +84,10 @@ keeps the two the same.
   sentences, active option and marked words; the picker's compact grid,
   Random chapter's pick, its keyboard moves and how far it scrolls; the
   size keys; the surfaces' table, the sidebar's rule and the ☰ menu's
-  keys), free
+  keys; the chapter's markup, byte for byte the page's former templates
+  (`fixtures/genesis-1.html` is their output, which a test compares),
+  Compare's rows, the reference, and the passage history's bookkeeping),
+  free
   of the DOM,
   unit-tested natively
   (`cargo test`). The words a search matched are the backend's to find
@@ -101,21 +116,28 @@ target (`rustup target add wasm32-unknown-unknown`). Anything that builds the
 app crate, `cargo test` in `src-tauri/` included, needs `dist/` to exist, so
 run `trunk build` once first.
 
-The page loads the pieces itself: Trunk inlines `ui/leptos-loader.js` at the
-end of `<body>`, which loads the glue (`ui-leptos.js`) and the module
-(`ui-leptos_bg.wasm`). Trunk's own loader is an ES module import, which the
+The page loads the pieces itself: Trunk inlines `ui/leptos-loader.js` in
+`<head>`, which loads the glue (`ui-leptos.js`) and fetches and compiles the
+module (`ui-leptos_bg.wasm`) while the page loads, then starts it once the
+page's scripts have run (`DOMContentLoaded`). The reader draws the chapter,
+so the module is started early, and the reader with the first pieces, the
+rest mounting in the next task; the chapter's face is preloaded (its text
+waits for it). Trunk's own loader is an ES module import, which the
 `no-modules` glue cannot be loaded by, so `Trunk.toml` turns it off. If the
-module fails to load, the Bible text still shows, in the saved look (the
-pre-paint script applies it), and the reader's own keys work; the five
-dialogs, About, the Library, search, Aa ("Display settings aren’t
-available.") and the translation button's popover ("Translations aren’t
-available.") say they are unavailable when asked for, and so does the
-picker, which lists no books ("The book list isn’t available."); no setting
-can be changed (reading mode can't be left), no update is looked for, and
-the reader marks no bookmarks (the Library loads them). The module may also load after the page has booted:
-the Library's lists, then the welcome's startup question, the launch check,
-About's credits and the picker's books and chapter being read wait for
-`gospel-getter:pieces-ready`.
+module fails to load, the loader says so (`gospel-getter:pieces-failed`),
+and the page's small inline fallback shows the chapter as plain text: the
+saved position (or Genesis 1), read once, in the saved look (the pre-paint
+script applies it), with the line "This chapter is shown as plain text: the
+rest of the reader isn’t available." Nothing in it can be selected, turned
+or changed. The five dialogs, About, the Library, search, Aa ("Display
+settings aren’t available.") and the translation button's popover
+("Translations aren’t available.") say they are unavailable when asked for,
+and so does the picker ("The book list isn’t available."); no setting can
+be changed (reading mode can't be left), and no update is looked for. The
+module may also load after the page has booted: the chapter, then the
+Library's lists, the welcome's startup question and the launch check wait
+for `gospel-getter:pieces-ready`, and the picker's books are sent again
+then.
 
 The Content Security Policy allows exactly what this needs beyond the page's
 own code: `'wasm-unsafe-eval'` in `script-src` (compiling WebAssembly) and
@@ -154,9 +176,11 @@ event, as the page did. The search box does so throughout: it opens and
 closes, and draws its list (static Leptos views, built and put in place
 at once) and its active option, within the key or click; and so does the
 picker, for its books, a book's chapters, the marks and the focus. `openApp({ leptos: 'late' })` loads the pieces only
-when the test calls `app.loadPieces()`, and `leptos: false` never
-(`pieces.test.mjs`); boot waits for the Library's bookmark list only when
-the pieces load with the page.
+when the test calls `app.loadPieces()` (which then waits for the rest of
+boot, the chapter included), and `leptos: false` never, the harness then
+saying they failed as the loader would, so the page shows its plain-text
+fallback (`pieces.test.mjs`); boot waits for the chapter and the Library's
+bookmark list only when the pieces load with the page.
 
 ## What a shared crate would replace
 

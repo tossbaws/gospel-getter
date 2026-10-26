@@ -7,6 +7,12 @@
     <!-- Generated from packaging/icon.svg by packaging/generate-icons.sh. -->
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
+    <!-- The chapter's face, fetched while the page loads: its text waits
+         for it (font-display: block), and the chapter is drawn by the
+         page's Rust pieces once they've loaded, later than the page itself
+         would ask for it. -->
+    <link rel="preload" href="fonts/literata-regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="fonts/literata-italic.woff2" as="font" type="font/woff2" crossorigin>
     <!-- Built by Trunk (Trunk.toml): the page's Rust pieces, compiled to
          WebAssembly (see ui-leptos/), and the files the page serves beside
          itself. These links are Trunk's; they do nothing in a browser. -->
@@ -4100,6 +4106,11 @@
             else delete data.picker;
         })();
     </script>
+    <!-- The page's Rust pieces (ui-leptos/, compiled to WebAssembly by Trunk):
+         Trunk inlines the loader here, which fetches and compiles them while
+         the page loads and starts them once its scripts have set up what
+         the pieces talk to. See ui-leptos/README.md. -->
+    <link data-trunk rel="inline" href="leptos-loader.js" type="js" />
 </head>
 <body>
     <div id="top-bar" class="top-bar">
@@ -4218,12 +4229,7 @@
             const invoke = window.__TAURI__.core.invoke;
 
             const root = document.documentElement;
-            const refBtn = document.getElementById('ref-btn');
-            const refText = document.getElementById('ref-text');
-            const readingPane = document.getElementById('reading-pane');
-            const readerNotice = document.getElementById('reader-notice');
             const translationSelect = document.getElementById('translation-select');
-            const translationToggle = document.getElementById('translation-toggle');
             const aaToggle = document.getElementById('aa-toggle');
             const menuToggle = document.getElementById('menu-toggle');
             const searchPanel = document.getElementById('search-panel');
@@ -4236,9 +4242,11 @@
             // The chapter in the reading column: which one, and its verses
             // in each translation on screen (just the selected one, or all
             // of them while comparing), exactly as the backend returned
-            // them. Anything that acts on a verse selection reads verse
-            // text from here, never from the rendered DOM, so verse
-            // numbers, popup labels and markup can't leak into it.
+            // them, as the reader (the page's Rust pieces) last showed it
+            // (see gospel-getter:chapter-shown below). Anything that acts on
+            // a verse selection reads verse text from here, never from the
+            // rendered DOM, so verse numbers, popup labels and markup can't
+            // leak into it.
             let reading = null;
 
             // The reader's verse selection: a contiguous, inclusive range
@@ -4265,11 +4273,12 @@
             let highlightsToken = 0;
 
 
-            // The last get_reading and get_compare results, so switching
-            // compare on or off re-renders without re-reading the chapter.
-            let lastDto = null;
-            let lastCompare = null;
-            let loadToken = 0;
+            // The chapter's verses as get_reading sent them, with their
+            // cross-references (the same in every column), and the first
+            // column of the comparison the reader last fetched: the card's
+            // references and previews read them.
+            let chapterVerses = [];
+            let compareFirst = null;
 
             // The highlighter colors, in the order the swatches show them.
             // The backend accepts exactly these.
@@ -4353,20 +4362,6 @@
                 return option ? option.textContent : code.toUpperCase();
             }
 
-            // The translation button shows the translation being read by
-            // its code ("KJV"), and names it in full ("Translation: King
-            // James Version"). Kept in step wherever the translation is
-            // set: at startup, on a switch, and by an import.
-            function showTranslation() {
-                const code = currentTranslation();
-                translationToggle.textContent = code ? code.toUpperCase() : '';
-                translationToggle.setAttribute('aria-label', code ? `Translation: ${translationName(code)}` : 'Translation');
-            }
-
-            function currentInner() {
-                return document.getElementById('reading-pane-inner');
-            }
-
             function isComparing() {
                 return root.dataset.compare === 'on';
             }
@@ -4381,10 +4376,6 @@
             function columnVerses(code) {
                 const column = reading && reading.columns[code];
                 return column ? column.verses : [];
-            }
-
-            function hasVerse(code, number) {
-                return columnVerses(code).some((v) => v.number === number);
             }
 
             function verseElement(code, number) {
@@ -4500,12 +4491,13 @@
                 const verses = selectionVerses();
                 const range = selection.start !== selection.end;
                 const notes = verses.flatMap((v) => (v.footnotes || []).map((f) => ({ v, f })));
+                const notesHtml = notes.length ? markup({ footnotes: notes.map(({ f }) => f) }) : [];
                 cardFootnotes.hidden = !notes.length;
                 cardFootnotes.innerHTML = notes.length
                     ? `<span class="xref-popup-title">Footnotes</span>
-                        ${notes.map(({ v, f }) => `<span class="footnote-entry"><span class="footnote-label">${range ? v.number : ''}${escapeHtml(f.label)}</span>${footnoteHtml(f)}</span>`).join('')}`
+                        ${notes.map(({ v, f }, i) => `<span class="footnote-entry"><span class="footnote-label">${range ? v.number : ''}${escapeHtml(f.label)}</span>${notesHtml[i]}</span>`).join('')}`
                     : '';
-                const xrefsByVerse = new Map(lastDto.currentVerses.map((v) => [v.number, v.xrefs]));
+                const xrefsByVerse = new Map(chapterVerses.map((v) => [v.number, v.xrefs]));
                 const rows = verses
                     .map((v) => ({ number: v.number, xrefs: xrefsByVerse.get(v.number) || [] }))
                     .filter((row) => row.xrefs.length);
@@ -4527,7 +4519,7 @@
             // The passage's text comes from the translation being read; while
             // comparing, from the first (left) column's.
             function previewTranslation() {
-                if (isComparing() && lastCompare && lastCompare.columns.length) return lastCompare.columns[0].code;
+                if (isComparing() && compareFirst) return compareFirst;
                 return reading.translationCode;
             }
 
@@ -4571,8 +4563,9 @@
                 // "1 John 4:9–10", as the backend names it (or, if it
                 // couldn't, the chip's citation with its dash).
                 const reference = passage ? passage.reference : chip.textContent.replace(/(\d)-(\d)/, '$1\u2013$2');
+                const texts = passage ? markup({ verses: passage.verses }) : [];
                 const verses = passage
-                    ? passage.verses.map((v) => `<span class="xref-preview-verse"><span class="xref-preview-num">${v.number}</span>${verseHtml(v, { markers: false })}</span>`).join(' ')
+                    ? passage.verses.map((v, i) => `<span class="xref-preview-verse"><span class="xref-preview-num">${v.number}</span>${texts[i]}</span>`).join(' ')
                     : '';
                 const notice = passage ? (passage.notice || '') : `Couldn't read ${reference}: ${failure}`;
                 xrefPreview.innerHTML = `<p class="xref-preview-title" id="xref-preview-title">${escapeHtml(reference)} (${escapeHtml(translationCode.toUpperCase())})</p>
@@ -4863,11 +4856,6 @@
                 if (next) next.focus();
             });
 
-            function showNotice(message) {
-                readerNotice.textContent = message;
-                readerNotice.hidden = !message;
-            }
-
             // ---- Bookmarks (GH-11)
 
             function bookmarkFor(bookId, chapter, start, end) {
@@ -5097,34 +5085,6 @@
                 }
             }
 
-            // Opens a chapter and selects a verse range in it, in the
-            // selected translation — for every jump (see jumpTo), and for
-            // going back and forward to one.
-            // If that translation doesn't number the verses, it opens the
-            // chapter and says so, rather than selecting other verses.
-            async function openPassage(bookId, chapter, start, end) {
-                const loaded = await loadReading(bookId, chapter);
-                if (!loaded || start == null) return loaded;
-                const code = reading.translationCode;
-                if (hasVerse(code, start) && hasVerse(code, end)) {
-                    selectVerses(code, start, end);
-                    const el = verseElement(code, start);
-                    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
-                    placeCard();
-                } else {
-                    // Past the chapter's end in this translation, or a verse
-                    // it leaves out in mid-chapter (as the BSB does
-                    // Matthew 17:21).
-                    const verses = columnVerses(code);
-                    const lastVerse = verses.length ? verses[verses.length - 1].number : 0;
-                    const where = start > lastVerse
-                        ? ` — ${reading.bookName} ${chapter} ends at verse ${lastVerse} there`
-                        : '';
-                    showNotice(`${reading.bookName} ${chapter}:${verseRange(start, end)} isn't numbered in the ${translationName(code)}${where}. Showing the whole chapter.`);
-                }
-                return loaded;
-            }
-
             // ---- Notes: the reader's own words on a passage. Like
             // bookmarks they belong to no translation, and a passage can
             // have any number of them. Which notes overlap a passage, and
@@ -5274,13 +5234,11 @@
             // delete, and waits; see ui-leptos/src/bridge.rs.
             window.gospelGetterRefreshNotes = refreshNotes;
 
-            // A Library row or a search result opened (the Library or the
-            // search box already closed): its chapter, with its passage
-            // selected, so a note's Notes section shows; a note's Edit then
-            // opens the note.
-            document.addEventListener('gospel-getter:open-passage', async function (event) {
-                const { bookId, chapter, verseStart, verseEnd, note } = event.detail;
-                await jumpTo(bookId, chapter, verseStart, verseEnd);
+            // A note's Edit in the Library has opened its passage (the
+            // reader jumped there, the passage selected, so its Notes
+            // section shows): the note opens.
+            document.addEventListener('gospel-getter:edit-note', function (event) {
+                const { note } = event.detail;
                 if (note && reading) {
                     openNotePanel({ mode: 'edit', note, code: selection ? selection.translationCode : reading.translationCode });
                 }
@@ -5313,8 +5271,9 @@
                     ? columnVerses(code).filter((v) => v.number >= passage.start && v.number <= passage.end).sort((a, b) => a.number - b.number)
                     : [];
                 const missing = passage.end - passage.start + 1 - verses.length;
+                const texts = verses.length ? markup({ verses }) : [];
                 const passageHtml = verses
-                    .map((v) => `<span class="note-passage-num">${v.number}</span>${verseHtml(v, { markers: false })}`)
+                    .map((v, i) => `<span class="note-passage-num">${v.number}</span>${texts[i]}`)
                     .join(' ')
                     + (missing > 0 ? ` <em>${verses.length ? 'Not all of it is' : 'It isn’t'} numbered in the ${escapeHtml(code.toUpperCase())}.</em>` : '');
                 const request = new CustomEvent('gospel-getter:note', {
@@ -5492,14 +5451,6 @@
                 if (event.detail && event.detail.closeSearch && !searchPanel.hidden) setSearchOpen(false);
             });
 
-            // A Rust piece opens a chapter (the welcome's places to start, a
-            // chapter chosen in the picker or Random chapter's): a jump, as
-            // the page's own are, recorded in its history.
-            document.addEventListener('gospel-getter:jump', function (event) {
-                const { bookId, chapter, top } = event.detail;
-                jumpTo(String(bookId), String(chapter), null, null, { top: !!top });
-            });
-
             // The dialog's overlay is the Rust side's element, made when its
             // code loads, so it is looked up when asked, never kept: the
             // keyboard dispatcher and the card's Shift ghost need to know
@@ -5531,14 +5482,17 @@
             document.addEventListener('gospel-getter:imported', async function (event) {
                 const { position, message } = event.detail;
                 if (position) {
-                    translationSelect.value = position.translationCode;
-                    showTranslation();
-                    await loadReading(position.bookId, position.chapter);
+                    await askReader({
+                        action: 'load',
+                        bookId: position.bookId,
+                        chapter: position.chapter,
+                        translationCode: position.translationCode,
+                    });
                 }
                 await refreshLibrary('bookmarks');
                 await refreshHighlights();
                 await refreshNotes();
-                showNotice(message);
+                askReader({ action: 'notice', message });
                 setDataStatus(message);
             });
 
@@ -5610,22 +5564,16 @@
 
             document.getElementById('welcome-btn').addEventListener('click', () => openWelcome(menuToggle));
 
-            // ---- Rendering: builds the same markup the old server-rendered
-            // Askama templates produced, from the plain data the Tauri
-            // commands return, so the CSS above (and the DOM-driven logic
-            // in this script) needs no changes at all.
-
             // ---- The book and chapter picker's books and chapters are the
             // page's pieces written in Rust (ui-leptos/src/picker.rs); what
             // crosses is documented in ui-leptos/src/bridge.rs. The picker
             // itself and Random chapter are this page's markup; its two
             // shapes (the sidebar and the popover) are the Rust pieces' too
-            // (ui-leptos/src/surfaces.rs). The page hands over the books,
-            // from boot, and
-            // the chapter on screen, each time one is put there; either may
-            // come before the pieces have loaded, so both go again when they
-            // say they're ready. A chapter chosen in the picker comes back as
-            // a jump (gospel-getter:jump, below).
+            // (ui-leptos/src/surfaces.rs), and so is the mark for the chapter
+            // on screen (the reader's). The page hands over the books, from
+            // boot, which may come before the pieces have loaded, so they go
+            // again when the pieces say they're ready. A chapter chosen in
+            // the picker is a jump of the reader's.
             let pickerBooks = null;
 
             function sendPickerBooks() {
@@ -5633,335 +5581,15 @@
                 document.dispatchEvent(new CustomEvent('gospel-getter:picker-books', { detail: pickerBooks }));
             }
 
-            // The picker marks the chapter on screen, and shows its book's
-            // chapters.
-            function markPickerCurrent() {
-                if (!reading) return;
-                document.dispatchEvent(new CustomEvent('gospel-getter:picker-current', { detail: { bookId: reading.bookId, chapter: reading.chapter } }));
-            }
-
-            document.addEventListener('gospel-getter:pieces-ready', function () {
-                sendPickerBooks();
-                markPickerCurrent();
-            });
-
-            // The reference button says where the reader is: the chapter
-            // being read, and its translation (or, while comparing, every
-            // translation on screen), e.g. "John 3 · KJV", named in full
-            // for screen readers. The window title says the same, so the
-            // taskbar and Alt-Tab do too (the backend copies the page's
-            // title to the window; see window.rs).
-            function updateReference(compare) {
-                const codes = compare ? compare.columns.map((c) => c.code) : [reading.translationCode];
-                const names = codes.map(translationName);
-                const place = `${reading.bookName} ${reading.chapter}`;
-                const spoken = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
-                refText.textContent = `${place} · ${codes.map((c) => c.toUpperCase()).join(' + ')}`;
-                refBtn.setAttribute('aria-label', `${place}, ${spoken}. Choose a book and chapter`);
-                document.title = `${refText.textContent} — Gospel Getter`;
-            }
-
-            function renderTranslationOptions(home) {
-                translationSelect.innerHTML = home.translations
-                    .map((t) => {
-                        const selected = t.code === home.currentTranslationCode ? ' selected' : '';
-                        const date = t.date ? ` data-date="${escapeHtml(t.date)}"` : '';
-                        return `<option value="${escapeHtml(t.code)}"${selected}${date} data-licence="${escapeHtml(t.licence)}" data-credit="${escapeHtml(t.credit)}">${escapeHtml(t.name)}</option>`;
-                    })
-                    .join('');
-                showTranslation();
-                // About credits each bundled text, in the same order, then
-                // the cross-references (its list is the Rust pieces').
-                aboutCredits = home.translations.map((t) => t.credit);
-                sendAboutCredits();
-            }
-
-            // A verse's text as the backend shaped it (see VerseText in
-            // Rust): KJV supplied words in italics and, with `markers`,
-            // each margin note as its footnote's letter where it stood.
-            // Every part is escaped. Anything without parts is its text.
-            function verseHtml(v, { markers = true } = {}) {
-                if (!Array.isArray(v.parts)) return escapeHtml(v.text);
-                return v.parts
-                    .map((part) => {
-                        if (part.kind === 'supplied') return `<em class="supplied">${escapeHtml(part.text)}</em>`;
-                        if (part.kind === 'note') {
-                            return markers ? `<sup class="fn-marker" aria-hidden="true">${escapeHtml(part.label)}</sup>` : '';
-                        }
-                        return escapeHtml(part.text);
-                    })
-                    .join('');
-            }
-
-            // Faded neighbors show supplied words in italics but no note
-            // markers: their footnotes are listed only for the chapter
-            // being read.
-            function renderSideChapter(side) {
-                if (!side) return '';
-                const verses = side.verses
-                    .map((v) => `<p class="verse" data-book="${side.bookId}" data-chapter="${side.chapter}" data-verse="${v.number}"><span class="verse-num">${v.number}</span><span class="verse-text">${verseHtml(v, { markers: false })}</span></p>`)
-                    .join('\n');
-                return `<section>
-                    <button type="button" class="chapter-heading-link" data-book="${side.bookId}" data-chapter="${side.chapter}">${escapeHtml(side.bookName)} ${side.chapter}</button>
-                    <div class="chapter-text">${verses}</div>
-                </section>`;
-            }
-
-            // Before Genesis 1 and after Revelation 22 there's no
-            // neighboring chapter: its place (so the chapter being read
-            // stays put) holds a quiet card in the neighbors' faded style,
-            // the backend's words about the Bible's shape, e.g. "The Old
-            // Testament" over "Genesis · 50 chapters". No scripture text.
-            function renderEdgeCard(edge) {
-                if (!edge) return '';
-                const detail = edge.detail ? `<p class="edge-card-detail">${escapeHtml(edge.detail)}</p>` : '';
-                return `<div class="edge-card">
-                    <p class="edge-card-title">${escapeHtml(edge.title)}</p>
-                    ${detail}
-                </div>`;
-            }
-
-            // Cross-references are keyed by verse number, not translation,
-            // so each column shows the same ones for the same number.
-            // Footnotes are the translation's own (the KJV's margin notes).
-            function renderVerse(v, bookId, chapter, code, xrefs) {
-                const hasXref = xrefs.length > 0;
-                const footnotes = v.footnotes || [];
-                const cue = footnotes.length ? '<span class="footnote-cue visually-hidden">(has footnotes) </span>' : '';
-                return `<p class="verse${hasXref ? ' has-xref' : ''}${footnotes.length ? ' has-footnotes' : ''}" data-book="${bookId}" data-chapter="${chapter}" data-verse="${v.number}" data-translation="${escapeHtml(code)}" data-code="${escapeHtml(code.toUpperCase())}"><span class="verse-num">${v.number}</span>${cue}<span class="verse-text">${verseHtml(v)}</span></p>`;
-            }
-
-            // A footnote's note as printed footnotes set it: the verse's
-            // words it's on (its lemma) in italics, then the rest as
-            // stored, "*lamp*: or, candle". The backend splits it, so the
-            // two are exactly the stored note; without a lemma, it's all
-            // plain.
-            //
-            // A USFM note (the BSB's) comes in runs instead: its words, its
-            // alternative readings in italics, and verse numbers set small
-            // and raised, as the reader's are.
-            function footnoteHtml(f) {
-                if (Array.isArray(f.segments)) {
-                    return f.segments
-                        .map((seg) => {
-                            if (seg.kind === 'alt') return `<em class="footnote-alt">${escapeHtml(seg.text)}</em>`;
-                            if (seg.kind === 'verse') return `<sup class="footnote-verse">${escapeHtml(seg.text)}</sup>`;
-                            return escapeHtml(seg.text);
-                        })
-                        .join('');
-                }
-                const lemma = f.lemma ? `<em class="footnote-lemma">${escapeHtml(f.lemma)}</em>` : '';
-                return lemma + escapeHtml(f.rest);
-            }
-
-            // ---- The chapter's Footnotes and Cross references: each is a
-            // disclosure, closed by default, and each kind remembers being
-            // opened or closed (for every chapter, not per chapter), in
-            // this webview's storage like the display settings. It isn't
-            // exported: it's how this window was left, not a setting.
-            const DISCLOSURE_KEYS = { footnotes: 'gospel-getter-footnotes', xrefs: 'gospel-getter-cross-references' };
-
-            function disclosureOpen(kind) {
-                try {
-                    return localStorage.getItem(DISCLOSURE_KEYS[kind]) === 'open';
-                } catch (e) {
-                    return false;
-                }
-            }
-
-            function disclosureToggle(kind, controls, label) {
-                return `<button type="button" class="disclosure-toggle" data-disclosure="${kind}" aria-expanded="${disclosureOpen(kind)}" aria-controls="${controls}"><span class="disclosure-chevron" aria-hidden="true"></span>${label}</button>`;
-            }
-
-            // Opens or closes every disclosure of that kind on screen (both
-            // columns' footnotes while comparing), and remembers it.
-            function setDisclosure(kind, open) {
-                try {
-                    localStorage.setItem(DISCLOSURE_KEYS[kind], open ? 'open' : 'closed');
-                } catch (e) {}
-                document.querySelectorAll(`.disclosure-toggle[data-disclosure="${kind}"]`).forEach((toggle) => {
-                    toggle.setAttribute('aria-expanded', String(open));
-                    const body = document.getElementById(toggle.getAttribute('aria-controls'));
-                    if (body) body.hidden = !open;
-                });
-            }
-
-            // The chapter's next step, after its last verse: the chapters
-            // before and after it (the backend's prev and next, so books
-            // are crossed, Genesis 50 into Exodus 1), as two large
-            // buttons; Genesis 1 has only the one forward, Revelation 22
-            // only the one back. Then the keys' hint.
-            // The hint's keys, as small key caps. The arrows are drawn: the
-            // UI sans at the hint's size falls back to a face whose arrows
-            // are tiny. Screen readers hear the key's name.
-            const ARROW_LEFT = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8H3M7 4 3 8l4 4"/></svg>';
-            const ARROW_RIGHT = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3 8h10M9 4l4 4-4 4"/></svg>';
-
-            function hintKey(name, drawn = null) {
-                return drawn ? `<kbd><span class="visually-hidden">${name}</span>${drawn}</kbd>` : `<kbd>${name}</kbd>`;
-            }
-
-            function renderChapterEnd(dto) {
-                const step = (side, which) => {
-                    if (!side) return '';
-                    const name = `${escapeHtml(side.bookName)} ${side.chapter}`;
-                    const label = `${name}, ${which === 'prev' ? 'previous' : 'next'} chapter`;
-                    const text = which === 'prev'
-                        ? `<span aria-hidden="true">&larr;</span> ${name}`
-                        : `${name} <span aria-hidden="true">&rarr;</span>`;
-                    return `<button type="button" class="chapter-step chapter-step-${which}" data-book="${side.bookId}" data-chapter="${side.chapter}" aria-label="${label}">${text}</button>`;
-                };
-                return `<nav class="chapter-end" aria-label="Previous and next chapter">${step(dto.prev, 'prev')}${step(dto.next, 'next')}</nav>
-                    <p class="nav-hint">Use ${hintKey('Left arrow', ARROW_LEFT)} and ${hintKey('Right arrow', ARROW_RIGHT)} to move a chapter at a time, and ${hintKey('?')} for all keyboard shortcuts.</p>
-                    <p class="chapter-copy"><button type="button" class="chapter-copy-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="copy-as-menu">Copy chapter…</button></p>`;
-            }
-
-            // The footnotes of the chapter being read, one row each
-            // ("119:105a lamp: or, candle"), for every column on screen
-            // that has any: the KJV's, while reading or comparing it.
-            // Named for its translation while comparing, where it could be
-            // either column's.
-            function renderFootnoteSummary(dto, compare) {
-                const columns = compare
-                    ? compare.columns
-                    : [{ code: reading.translationCode, verses: dto.currentVerses }];
-                return columns
-                    .map((c) => {
-                        const rows = c.verses
-                            .flatMap((v) => (v.footnotes || []).map((f) => `<div class="footnote-row">
-                                <span class="footnote-ref">${dto.currentChapter}:${v.number}${escapeHtml(f.label)}</span>
-                                <span class="footnote-text">${footnoteHtml(f)}</span>
-                            </div>`))
-                            .join('');
-                        if (!rows) return '';
-                        const count = c.verses.reduce((n, v) => n + (v.footnotes || []).length, 0);
-                        const code = escapeHtml(c.code.toUpperCase());
-                        const title = compare ? `${code} footnotes (${count})` : `Footnotes (${count})`;
-                        return `<div class="footnote-summary" data-code="${code}">
-                            <h3 class="footnote-summary-title">${disclosureToggle('footnotes', `footnote-list-${escapeHtml(c.code)}`, title)}</h3>
-                            <div class="footnote-list disclosure-body" id="footnote-list-${escapeHtml(c.code)}"${disclosureOpen('footnotes') ? '' : ' hidden'}>${rows}</div>
-                        </div>`;
-                    })
-                    .join('');
-            }
-
-            function renderXrefSummary(dto) {
-                if (!dto.hasChapterXrefs) return '';
-                const rows = dto.currentVerses
-                    .filter((v) => v.xrefs.length > 0)
-                    .map((v) => {
-                        const chips = v.xrefs.map((x) => {
-                            const end = x.endVerse != null ? ` data-end-verse="${x.endVerse}"` : '';
-                            return `<span class="xref-summary-item"><button type="button" class="xref-summary-chip" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${end}>${escapeHtml(x.citation)}</button></span>`;
-                        }).join('');
-                        return `<div class="xref-summary-row">
-                            <span class="xref-summary-verse">${dto.currentChapter}:${v.number}</span>
-                            <span class="xref-summary-chips">${chips}</span>
-                        </div>`;
-                    })
-                    .join('');
-                const count = dto.currentVerses.reduce((n, v) => n + v.xrefs.length, 0);
-                return `<div class="xref-summary">
-                    <h3 class="xref-summary-title">${disclosureToggle('xrefs', 'xref-summary-list', `Cross references (${count})`)}</h3>
-                    <div class="xref-summary-list disclosure-body" id="xref-summary-list"${disclosureOpen('xrefs') ? '' : ' hidden'}>${rows}</div>
-                    <p class="xref-credit">Cross-reference data from <a class="credit-link" data-link="openbible" href="https://www.openbible.info/labs/cross-references/">OpenBible.info</a>, licensed under <a class="credit-link" data-link="cc-by" href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
-                </div>`;
-            }
-
-            // Compare (GH-13): every translation side by side, one row per
-            // verse number. Where a translation doesn't number a verse the
-            // other does, its cell says so — nothing is merged, moved or
-            // renumbered to make the rows line up.
-            function renderCompareGrid(dto, compare) {
-                const xrefsByVerse = new Map(dto.currentVerses.map((v) => [v.number, v.xrefs]));
-                const numbers = [...new Set(compare.columns.flatMap((c) => c.verses.map((v) => v.number)))]
-                    .sort((a, b) => a - b);
-                const byNumber = compare.columns.map((c) => new Map(c.verses.map((v) => [v.number, v])));
-                const heads = compare.columns
-                    .map((c) => `<div class="compare-head" role="columnheader">${escapeHtml(c.name)} <span class="compare-head-code">(${escapeHtml(c.code.toUpperCase())})</span></div>`)
-                    .join('');
-                const rows = numbers
-                    .map((n) => compare.columns
-                        .map((c, i) => {
-                            const v = byNumber[i].get(n);
-                            if (v) return renderVerse(v, dto.currentBookId, dto.currentChapter, c.code, xrefsByVerse.get(n) || []);
-                            return `<p class="compare-gap" data-gap-verse="${n}" data-code="${escapeHtml(c.code.toUpperCase())}"><span class="verse-num">${n}</span><span class="compare-gap-note">Not numbered in the ${escapeHtml(c.code.toUpperCase())}</span></p>`;
-                        })
-                        .join(''))
-                    .join('');
-                return `<div class="compare-grid" data-columns="${compare.columns.length}">${heads}${rows}</div>`;
-            }
-
-            function renderReadingPane(dto, compare) {
-                const prevAttrs = dto.prev ? ` data-prev-book="${dto.prev.bookId}" data-prev-chapter="${dto.prev.chapter}"` : '';
-                const nextAttrs = dto.next ? ` data-next-book="${dto.next.bookId}" data-next-chapter="${dto.next.chapter}"` : '';
-                // The verses, in .chapter-text: a verse to a line, or, in
-                // the Flowing layout, running on as prose, a space between
-                // verses (the newlines between them, which only show when
-                // they flow). Compare's grid is a verse to a row either way.
-                const body = compare
-                    ? renderCompareGrid(dto, compare)
-                    : `<div class="chapter-text">${dto.currentVerses.map((v) => renderVerse(v, dto.currentBookId, dto.currentChapter, reading.translationCode, v.xrefs)).join('\n')}</div>`;
-                // While comparing, the columns take the place of the faded
-                // neighboring chapters; prev/next stay on the wrapper, so
-                // arrow keys work the same either way.
-                const side = (s, edge, which) => (compare
-                    ? ''
-                    : `<div class="chapter-side chapter-side-${which}">${s ? renderSideChapter(s) : renderEdgeCard(edge)}</div>`);
-                return `<div id="reading-pane-inner"
-                     data-current-book="${dto.currentBookId}"
-                     data-current-chapter="${dto.currentChapter}"${prevAttrs}${nextAttrs}
-                >
-                    <div class="reading-row${compare ? ' is-comparing' : ''}">
-                        ${side(dto.prev, dto.prevEdge, 'prev')}
-                        <section class="chapter-main">
-                            <h2 class="chapter-heading">${escapeHtml(dto.currentBookName)} ${dto.currentChapter}</h2>
-                            ${body}
-                            ${renderChapterEnd(dto)}
-                            ${renderFootnoteSummary(dto, compare)}
-                            ${renderXrefSummary(dto)}
-                        </section>
-                        ${side(dto.next, dto.nextEdge, 'next')}
-                    </div>
-                </div>`;
-            }
-
-            // Puts lastDto (and lastCompare, while comparing) on screen.
-            function renderCurrent() {
-                const compare = isComparing() && compareIsCurrent(lastCompare) ? lastCompare : null;
-                const columns = {};
-                columns[reading.translationCode] = { verses: lastDto.currentVerses };
-                if (compare) {
-                    compare.columns.forEach((c) => { columns[c.code] = { verses: c.verses }; });
-                }
-                reading.columns = columns;
-                closeCopyMenu();
-                readingPane.innerHTML = renderReadingPane(lastDto, compare);
-                // The grid's column count goes through the CSSOM, not a
-                // style attribute in the markup, which the Content Security
-                // Policy would block.
-                const grid = readingPane.querySelector('.compare-grid');
-                if (grid) grid.style.setProperty('--compare-columns', grid.dataset.columns);
-                // Copy chapter copies the translation being read (while
-                // comparing, the left column).
-                fetchCopy('chapter', { translationCode: reading.translationCode, bookId: reading.bookId, chapter: reading.chapter });
-                updateReference(compare);
-                markPickerCurrent();
-                selection = null;
-                renderSelection();
-                applyBookmarkMarkers();
-                applyHighlightMarkers();
-                applyNoteMarkers();
-                refreshChapterNotes();
-            }
+            document.addEventListener('gospel-getter:pieces-ready', sendPickerBooks);
 
             // The translation compare shows beside the one being read: the
             // one the reader chose (Aa's "with", kept in data-compare-with),
             // if it's there and isn't the one being read; otherwise the one
             // compare always showed, the KJV, or the WEB beside the KJV;
             // failing those, the first other. Null when there's no other.
-            // Aa (the page's Rust pieces, ui-leptos/src/aa.rs) marks it by
-            // this too.
+            // Aa and the reader (the page's Rust pieces, ui-leptos/src/aa.rs
+            // and reader.rs) go by this too.
             const COMPARE_DEFAULTS = ['kjv', 'web'];
 
             function comparePartner() {
@@ -5972,163 +5600,110 @@
             }
             window.gospelGetterComparePartner = comparePartner;
 
-            // The translations compare shows, left to right: the one being
-            // read, then the one beside it, or just the one if there's no
-            // other.
-            function compareCodes() {
-                const partner = comparePartner();
-                return partner ? [currentTranslation(), partner] : [currentTranslation()];
+            // ---- The reader is one of the page's pieces written in Rust
+            // (ui-leptos/src/reader.rs): it reads each chapter and draws it
+            // into #reading-pane (and Compare's grid), says where the reader
+            // is (the reference button, the window title, the translation
+            // button), keeps the reading position and the passage history,
+            // says when a chapter couldn't be read (with Try again), and
+            // answers its own controls in the pane: the chapter's steps, a
+            // neighbor's heading, the Footnotes and Cross references
+            // disclosures, their chips and credit links. What crosses is
+            // documented in ui-leptos/src/bridge.rs. This page asks it for
+            // chapters (askReader: boot, the keys, the selection card's Go
+            // to, an import, the translation changing), and hears each
+            // chapter it shows, as a snapshot, which the selection card,
+            // copying and the verses' marks act on. Without the Rust pieces
+            // nothing answers; the small fallback at the end of the page
+            // shows the chapter as plain text instead.
+
+            // Asks the reader. Resolves to whether a chapter was put on
+            // screen; null when nothing answered (the Rust pieces aren't
+            // there, or not yet).
+            function askReader(detail) {
+                const request = new CustomEvent('gospel-getter:reader', { cancelable: true, detail });
+                if (!document.dispatchEvent(request)) return Promise.resolve(request.detail.done);
+                return null;
             }
 
-            // What a chapter is fetched for: compare off, or on with
-            // these translations.
-            function compareLayout() {
-                return isComparing() ? compareCodes().join(' ') : '';
-            }
-
-            // Whether `compare` is the chapter on screen in the
-            // translations compare shows now.
-            function compareIsCurrent(compare) {
-                return !!compare && !!lastDto
-                    && compare.bookId === lastDto.currentBookId && compare.chapter === lastDto.currentChapter
-                    && compare.columns.map((c) => c.code).join(' ') === compareCodes().join(' ');
-            }
-
-            // Resolves to the comparison, or null after logging why not.
-            async function loadCompare(bookId, chapter) {
-                try {
-                    return await invoke('get_compare', {
-                        bookId: Number(bookId),
-                        chapter: Number(chapter),
-                        translationCodes: compareCodes(),
-                    });
-                } catch (e) {
-                    console.error('Failed to load comparison', e);
-                    return null;
-                }
-            }
-
-            const COMPARE_FAILED = "The translations couldn't be compared for this chapter, so it's shown in one translation.";
-
-            // ---- Loading: calls the Tauri commands and splats the
-            // rendered markup into the DOM, same shape as the old
-            // network-fetched fragment loads used to.
-
-            // A chapter that couldn't be read: the notice above the reading
-            // pane says so until a chapter is put on screen, with a Try
-            // again that asks for it once more (and starts the history, if
-            // it was the first chapter). The chapter on screen, if any,
-            // stays, and a toast says it too, however far down the reader
-            // is.
-            function showReadingFailure(message, bookId, chapter) {
-                showNotice(message);
-                const retry = document.createElement('button');
-                retry.type = 'button';
-                retry.className = 'note-link reading-retry';
-                retry.textContent = 'Try again';
-                retry.addEventListener('click', () => {
-                    loadReading(bookId, chapter).then((loaded) => {
-                        if (loaded && !places.length) startHistory();
-                    });
+            // Boot's: the translations, the chapter the reader was on, and
+            // the history from there. The chapter is asked for here, with
+            // get_home's answer, as boot always did (in the translation the
+            // translation button's record will have selected), so it's on its
+            // way while the Rust pieces load; the reader takes it from there.
+            // While comparing, the reader asks for all of it itself (Compare's
+            // partner goes by the translations it records). Boot can get this
+            // far before the reader has loaded; it then asks once the reader
+            // says it's there.
+            function startReader(home) {
+                const code = home.translations.some((t) => t.code === home.currentTranslationCode)
+                    ? home.currentTranslationCode
+                    : (home.translations.length ? home.translations[0].code : '');
+                const reading = isComparing()
+                    ? null
+                    : invoke('get_reading', { bookId: home.currentBookId, chapter: home.currentChapter, translationCode: code });
+                // Its answer, once it's in, goes with the request, so the
+                // reader can put it on screen at once; a failure is the
+                // reader's to say, once it's there.
+                let answered = null;
+                if (reading) reading.then((dto) => { answered = { dto }; }, () => {});
+                const ask = () => askReader({ action: 'start', home, reading, answered });
+                const asked = ask();
+                if (asked) return asked;
+                return new Promise((resolve) => {
+                    document.addEventListener('gospel-getter:reader-ready', () => resolve(ask()), { once: true });
                 });
-                readerNotice.append(' ', retry);
-                if (lastDto) setDataStatus(message, true);
             }
 
-            // The reading position the next launch opens at: the chapter
-            // put on screen last, in the translation it was shown in.
-            // loadReading saves it once the chapter is shown, never for an
-            // answer it dropped (get_reading itself saves nothing). One
-            // save is on its way at a time; a newer one waits, replacing
-            // any that waited before it, so they reach the backend in the
-            // order the chapters were shown and the last one wins.
-            let positionSaving = false;
-            let positionWaiting = null;
+            // The reader has asked for another chapter or translation: drop
+            // the selection now, not when the new text arrives, so nothing
+            // (Ctrl+C included) acts on it in the meantime.
+            document.addEventListener('gospel-getter:chapter-loading', clearSelection);
 
-            async function savePosition(bookId, chapter, translationCode) {
-                positionWaiting = { bookId, chapter, translationCode };
-                if (positionSaving) return;
-                positionSaving = true;
-                while (positionWaiting) {
-                    const position = positionWaiting;
-                    positionWaiting = null;
-                    try {
-                        await invoke('save_reading_position', position);
-                    } catch (e) {
-                        // The next chapter shown saves again.
-                        console.error('Failed to save the reading position', e);
-                    }
-                }
-                positionSaving = false;
-            }
-
-            // Returns whether the chapter was put on screen. A chapter the
-            // Bible doesn't have (no answer) changes nothing; one that
-            // couldn't be read says so (showReadingFailure), unless a newer
-            // request has started since.
-            async function loadReading(bookId, chapter) {
-                const token = ++loadToken;
-                // The reader has asked for another chapter or translation:
-                // drop the selection now, not when the new text arrives, so
-                // nothing (Ctrl+C included) acts on it in the meantime.
-                clearSelection();
-                try {
-                    const translationCode = currentTranslation();
-                    const layout = compareLayout();
-                    const [dto, compare] = await Promise.all([
-                        invoke('get_reading', {
-                            bookId: Number(bookId),
-                            chapter: Number(chapter),
-                            translationCode,
-                        }),
-                        isComparing() ? loadCompare(bookId, chapter) : null,
-                    ]);
-                    // A newer navigation has started; let it win.
-                    if (token !== loadToken || !dto) return false;
-                    // Compare was switched (or its translations changed)
-                    // while this was on its way: what came back is for the
-                    // old layout, so the chapter is asked for again.
-                    if (compareLayout() !== layout) return loadReading(bookId, chapter);
-                    lastDto = dto;
-                    if (compare) lastCompare = compare;
-                    reading = {
-                        bookId: dto.currentBookId,
-                        bookName: dto.currentBookName,
-                        chapter: dto.currentChapter,
-                        translationCode,
-                        columns: {},
-                    };
-                    showNotice(isComparing() && !compare ? COMPARE_FAILED : '');
-                    renderCurrent();
-                    savePosition(reading.bookId, reading.chapter, translationCode);
-                    return true;
-                } catch (e) {
-                    console.error('Failed to load reading pane', e);
-                    if (token === loadToken) showReadingFailure(errorText(e), bookId, chapter);
-                    return false;
-                }
-            }
-
-            // Compare switched on or off (from the translation button's
-            // popover or its shortcut — Aa, the page's Rust pieces in
-            // ui-leptos/src/aa.rs, owns the setting), or what it compares
-            // with changed: re-render the chapter on screen in the new
-            // layout.
-            document.addEventListener('gospel-getter:compare-change', async function () {
-                if (!lastDto) return;
-                if (isComparing()) {
-                    if (!compareIsCurrent(lastCompare)) {
-                        const token = loadToken;
-                        const compare = await loadCompare(lastDto.currentBookId, lastDto.currentChapter);
-                        if (token !== loadToken) return;
-                        if (compare) lastCompare = compare;
-                        else showNotice(COMPARE_FAILED);
-                    }
-                } else {
-                    showNotice('');
-                }
-                renderCurrent();
+            // The reader has put a chapter on screen (#reading-pane-inner is
+            // new): the copy text, the selection and the verses' marks follow.
+            document.addEventListener('gospel-getter:chapter-shown', function (event) {
+                const shown = event.detail;
+                reading = {
+                    bookId: shown.bookId,
+                    bookName: shown.bookName,
+                    chapter: shown.chapter,
+                    translationCode: shown.translationCode,
+                    columns: shown.columns,
+                };
+                chapterVerses = shown.currentVerses;
+                compareFirst = shown.compareFirst;
+                closeCopyMenu();
+                // Copy chapter copies the translation being read (while
+                // comparing, the left column).
+                fetchCopy('chapter', { translationCode: reading.translationCode, bookId: reading.bookId, chapter: reading.chapter });
+                selection = null;
+                renderSelection();
+                applyBookmarkMarkers();
+                applyHighlightMarkers();
+                applyNoteMarkers();
+                refreshChapterNotes();
             });
+
+            // A passage the reader opened (a jump, Back or Forward) whose
+            // verses are numbered: selected, in the middle of the window.
+            // The reader learns what's selected, for its history.
+            document.addEventListener('gospel-getter:chapter-select', function (event) {
+                const { translationCode, start, end } = event.detail;
+                selectVerses(translationCode, start, end);
+                const el = verseElement(translationCode, start);
+                if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+                placeCard();
+                event.detail.selection = selection ? { start: selection.start, end: selection.end } : null;
+            });
+
+            // The card's verses (without note markers) and footnotes, as the
+            // reader draws them (see VerseText in Rust), one string each.
+            function markup(detail) {
+                const request = new CustomEvent('gospel-getter:verse-markup', { detail });
+                document.dispatchEvent(request);
+                return request.detail.html || [];
+            }
 
             // ---- The keyboard shortcuts sheet is one of the page's pieces
             // written in Rust (ui-leptos/src/shortcuts.rs); what crosses is
@@ -6181,11 +5756,10 @@
 
             // What the palette's commands need of this page, whenever it's
             // drawn or a command is chosen: Aa's settings, comparing, the
-            // chapter shown, the passage history, a busy export.
+            // chapter shown, a busy export.
             document.addEventListener('gospel-getter:palette-state', function (event) {
                 const choices = (id) => [...document.getElementById(id).options].map((o) => ({ value: o.value, label: o.textContent }));
                 const valueOf = (id) => document.getElementById(id).value;
-                const inner = currentInner();
                 const exportNotes = exportNotesButton();
                 const updateCheckBtn = document.getElementById('update-check-btn');
                 event.detail.state = {
@@ -6210,12 +5784,8 @@
                     checking: !!updateCheckBtn && updateCheckBtn.disabled,
                     chapterCopy: !!copies.chapter,
                     chapterShown: !!document.querySelector('.chapter-copy-btn'),
-                    nextChapter: !!(inner && inner.dataset.nextBook),
-                    previousChapter: !!(inner && inner.dataset.prevBook),
-                    nextBook: !!(lastDto && lastDto.nextBook),
-                    previousBook: !!(lastDto && lastDto.prevBook),
-                    back: canGoHistory(-1),
-                    forward: canGoHistory(1),
+                    // The chapters and books around and the history are the
+                    // reader's to say (ui-leptos/src/reader.rs).
                 };
             });
 
@@ -6246,15 +5816,9 @@
             // selecting verses. (The book and chapter picker has its own
             // handler, above.)
             document.body.addEventListener('click', function (event) {
-                // The cross references' credit links: the page never opens
-                // a browser itself. The backend opens the link's fixed page
-                // (its href, shown so it reads as a link). A key press on a
-                // link arrives here as a click too.
-                const credit = event.target.closest('a.credit-link');
-                if (credit) {
-                    event.preventDefault();
-                    invoke('open_credit_link', { which: credit.dataset.link })
-                        .catch((e) => setDataStatus(errorText(e), true));
+                // The cross references' credit links are the reader's, which
+                // has the backend open them (ui-leptos/src/reader.rs).
+                if (event.target.closest('a.credit-link')) {
                     return;
                 }
 
@@ -6357,45 +5921,17 @@
                     jumpTo(go.dataset.book, go.dataset.chapter, Number(go.dataset.verse), Number(go.dataset.endVerse));
                     return;
                 }
-                // So does a citation in the chapter's Cross references list.
-                const listed = event.target.closest('.xref-summary-chip');
-                if (listed) {
-                    jumpTo(
-                        listed.dataset.book,
-                        listed.dataset.chapter,
-                        Number(listed.dataset.verse),
-                        Number(listed.dataset.endVerse || listed.dataset.verse),
-                    );
+                // So does a citation in the chapter's Cross references list;
+                // it and the chapter's other controls (its steps, a neighbor's
+                // heading, the lists' disclosures) are the reader's, which
+                // answers them after this (ui-leptos/src/reader.rs). None is a
+                // click away from the selection.
+                if (event.target.closest('.xref-summary-chip, .chapter-step, .disclosure-toggle, .chapter-heading-link')) {
                     return;
                 }
                 // The rest of the card (its footnotes and notes, to read
                 // and select) is never a click away from the selection.
                 if (event.target.closest('#selection-card')) {
-                    return;
-                }
-
-                // The chapter's end: the chapter before or after, from its
-                // top.
-                const step = event.target.closest('.chapter-step');
-                if (step) {
-                    loadReading(step.dataset.book, step.dataset.chapter).then((loaded) => {
-                        if (loaded) window.scrollTo(0, 0);
-                    });
-                    return;
-                }
-                const disclosure = event.target.closest('.disclosure-toggle');
-                if (disclosure) {
-                    setDisclosure(disclosure.dataset.disclosure, disclosure.getAttribute('aria-expanded') !== 'true');
-                    return;
-                }
-
-                // Clicking a neighboring chapter's heading jumps there, same
-                // as pressing the corresponding arrow key would. The rest of
-                // that chapter's text is plain, selectable text — only the
-                // heading is a navigation control.
-                const sideHeading = event.target.closest('.chapter-heading-link');
-                if (sideHeading) {
-                    loadReading(sideHeading.dataset.book, sideHeading.dataset.chapter);
                     return;
                 }
 
@@ -6670,29 +6206,23 @@
 
             // The chapter before ('prev') or after ('next') the one on
             // screen, as ← and → (and the palette's commands) turn to it.
+            // The pane's #reading-pane-inner says which they are (the
+            // backend's prev and next, so books are crossed).
             function turnChapter(which) {
-                const inner = currentInner();
+                const inner = document.getElementById('reading-pane-inner');
                 if (!inner) return;
                 if (which === 'prev' && inner.dataset.prevBook) {
-                    loadReading(inner.dataset.prevBook, inner.dataset.prevChapter);
+                    askReader({ action: 'load', bookId: Number(inner.dataset.prevBook), chapter: Number(inner.dataset.prevChapter) });
                 } else if (which === 'next' && inner.dataset.nextBook) {
-                    loadReading(inner.dataset.nextBook, inner.dataset.nextChapter);
+                    askReader({ action: 'load', bookId: Number(inner.dataset.nextBook), chapter: Number(inner.dataset.nextChapter) });
                 }
             }
 
             // [ and ]: chapter 1 of the book before or after, from the top
-            // (the backend names them; see prevBook and nextBook). Not a
-            // jump: like ← and →, it moves on from where the reader is.
+            // (the backend names them), or a toast at the Bible's ends. Not
+            // a jump: like ← and →, it moves on from where the reader is.
             function stepBook(which) {
-                if (!lastDto || !reading) return;
-                const book = which === 'prev' ? lastDto.prevBook : lastDto.nextBook;
-                if (!book) {
-                    setDataStatus(`${reading.bookName} is the Bible’s ${which === 'prev' ? 'first' : 'last'} book.`);
-                    return;
-                }
-                loadReading(book.bookId, book.chapter).then((loaded) => {
-                    if (loaded) window.scrollTo(0, 0);
-                });
+                askReader({ action: 'book', which });
             }
 
             // j and k: the verse after or before the selection, in the
@@ -6753,154 +6283,50 @@
                 else if (r.bottom > window.innerHeight - CARD_GAP) window.scrollBy(0, Math.min(r.bottom - window.innerHeight + CARD_GAP, r.top - top));
             }
 
-            // ---- Passage history, for this session only. It records
-            // jumps: going somewhere by choosing it (a chapter in the
-            // picker, Random chapter, a search result or Go to, a
-            // cross-reference, a Library row, the welcome's places to
-            // start), all through jumpTo. Moving on from where you are
-            // isn't a jump: ← and →, [ and ], the end-of-chapter buttons
-            // and a neighbor's heading, switching translation or compare,
-            // or scrolling. Alt+← goes back and Alt+→ forward (and the
+            // ---- Passage history, for this session only, is the reader's
+            // (ui-leptos/src/reader.rs). It records jumps: going somewhere
+            // by choosing it (a chapter in the picker, Random chapter, a
+            // search result or Go to, a cross-reference, a Library row, the
+            // welcome's places to start). Moving on from where you are isn't
+            // a jump: ← and →, [ and ], the end-of-chapter buttons and a
+            // neighbor's heading, switching translation or compare, or
+            // scrolling. Alt+← goes back and Alt+→ forward (and the
             // palette's Back and Forward, and a mouse's back and forward
-            // buttons).
-            //
-            // Each entry is a place: a chapter, the verses a jump landed on
-            // (if it selected any), and where the page was scrolled when
-            // the reader left it, so going back returns to where they were
-            // reading. Stepping on from a place (→ to the next chapter, say)
-            // moves the entry with them, so Back returns to where they
-            // actually left. A jump after going back drops the places
-            // ahead, as a browser does; the oldest go past 50.
-            //
-            // It's kept here, in memory, not in the webview's History API:
-            // nothing else is in that history (so its own Back does
-            // nothing), and the 50-place limit and restoring the scroll
-            // need a list this page owns.
-            const HISTORY_LIMIT = 50;
-            const places = [];
-            let placeIndex = -1;
-            // Whether places[placeIndex] is what's on screen: not while a
-            // jump, or a step back or forward, is on its way.
-            let placeShown = false;
-            let historyToken = 0;
+            // buttons, which the reader hears itself), each place opened
+            // with its verses selected and scrolled where the reader left it.
 
-            function startHistory() {
-                places.length = 0;
-                places.push({ bookId: reading.bookId, chapter: reading.chapter, start: null, end: null, scrollY: null });
-                placeIndex = 0;
-                placeShown = true;
+            // A jump: the selection card's Go to.
+            function jumpTo(bookId, chapter, start, end) {
+                askReader({ action: 'jump', bookId: Number(bookId), chapter: Number(chapter), start, end });
             }
 
-            // Brings the place on screen up to date as the reader leaves
-            // it: the chapter they're on now, and how far down they are.
-            function rememberLeaving() {
-                if (!placeShown || placeIndex < 0 || !reading) return;
-                const place = places[placeIndex];
-                if (place.bookId !== reading.bookId || place.chapter !== reading.chapter) {
-                    Object.assign(place, { bookId: reading.bookId, chapter: reading.chapter, start: null, end: null });
-                }
-                place.scrollY = window.scrollY;
+            // Back (-1) or forward (1).
+            function goHistory(step) {
+                askReader({ action: 'history', step });
             }
 
-            // A jump: opens the chapter (selecting `start`–`end`, if given
-            // and numbered; from the top, with `top`) and records it.
-            async function jumpTo(bookId, chapter, start = null, end = null, { top = false } = {}) {
-                rememberLeaving();
-                placeShown = false;
-                historyToken += 1;
-                const loaded = await openPassage(bookId, chapter, start, end);
-                if (loaded) {
-                    if (top) window.scrollTo(0, 0);
-                    const landed = start != null && selection && selection.start === Number(start) && selection.end === Number(end);
-                    const place = {
-                        bookId: reading.bookId,
-                        chapter: reading.chapter,
-                        start: landed ? selection.start : null,
-                        end: landed ? selection.end : null,
-                        scrollY: null,
-                    };
-                    const here = places[placeIndex];
-                    const same = here && here.bookId === place.bookId && here.chapter === place.chapter
-                        && here.start === place.start && here.end === place.end;
-                    if (!same) {
-                        places.splice(placeIndex + 1);
-                        places.push(place);
-                        if (places.length > HISTORY_LIMIT) places.splice(0, places.length - HISTORY_LIMIT);
-                        placeIndex = places.length - 1;
-                    }
-                }
-                placeShown = true;
-                return loaded;
-            }
-
-            function canGoHistory(step) {
-                const target = placeIndex + step;
-                return target >= 0 && target < places.length;
-            }
-
-            const HISTORY_ENDS = {
-                '-1': 'Nothing earlier in this session',
-                1: 'Nothing later in this session',
-            };
-
-            // Back (-1) or forward (1): the place, its verses selected, and
-            // the page scrolled where the reader left it.
-            async function goHistory(step) {
-                if (!canGoHistory(step)) {
-                    setDataStatus(`${HISTORY_ENDS[step]}.`);
-                    return false;
-                }
-                rememberLeaving();
-                placeIndex += step;
-                placeShown = false;
-                const token = ++historyToken;
-                const place = places[placeIndex];
-                const loaded = await openPassage(place.bookId, place.chapter, place.start, place.end);
-                // A newer Back, Forward or jump has taken over.
-                if (token !== historyToken) return false;
-                if (loaded) {
-                    if (place.scrollY != null) window.scrollTo(0, place.scrollY);
-                    else if (place.start == null) window.scrollTo(0, 0);
-                }
-                placeShown = true;
-                return loaded;
-            }
-
-            // A mouse's back and forward buttons.
-            window.addEventListener('mouseup', function (event) {
-                if (event.button !== 3 && event.button !== 4) return;
-                event.preventDefault();
-                goHistory(event.button === 3 ? -1 : 1);
-            });
-
-            // Switching translations re-reads whatever chapter is currently
-            // on screen, in the newly selected translation, refreshes the
-            // bookmark and highlight previews; the search box (the Rust
-            // pieces', which listen for this change) reruns any search. Once
-            // it's shown, it's the reader's position too (see
-            // savePosition), so reopening the app comes back to it.
+            // Switching translations has the reader read whatever chapter is
+            // on screen again, in the newly selected translation (once it's
+            // shown, it's the reader's position too, so reopening the app
+            // comes back to it), and refreshes the bookmark and highlight
+            // previews; the search box (the Rust pieces', which listen for
+            // this change) reruns any search.
             translationSelect.addEventListener('change', function () {
-                showTranslation();
-                const inner = currentInner();
-                const bookId = inner ? inner.dataset.currentBook : 1;
-                const chapter = inner ? inner.dataset.currentChapter : 1;
-                loadReading(bookId, chapter);
+                askReader({ action: 'translation' });
                 refreshLibrary('bookmarks', 'highlights');
             });
 
             // Initial load: fetch the book/translation lists and whichever
-            // chapter the reader was last on, then read it the same way any
-            // other navigation would — so there's exactly one code path for
-            // rendering a chapter, at startup or afterward.
+            // chapter the reader was last on, then have the reader read it
+            // the same way any other navigation would — so there's exactly
+            // one code path for rendering a chapter, at startup or afterward.
             async function boot() {
                 try {
                     const home = await invoke('get_home');
                     pickerBooks = { otBooks: home.otBooks, ntBooks: home.ntBooks };
                     sendPickerBooks();
-                    renderTranslationOptions(home);
                     startHere = Array.isArray(home.startHere) ? home.startHere : [];
-                    await loadReading(home.currentBookId, home.currentChapter);
-                    if (reading) startHistory();
+                    await startReader(home);
                     await refreshLibrary('bookmarks');
                     await refreshHighlights();
                     await refreshLibrary('notes');
@@ -6918,18 +6344,11 @@
             // script's surfaces (it opens and closes it); the pieces draw it
             // with its version, Updates section, credits and Release notes
             // link, and the update banner, and run the checks and installs.
-            // The page hands over what it alone has, from boot: each bundled
-            // text's credit, and the moment boot is done, when the launch check
-            // runs (unless the reader turned it off). Either may come before
-            // the pieces have loaded, so both go again when they say they're
-            // ready.
-            let aboutCredits = null;
-
-            function sendAboutCredits() {
-                if (!aboutCredits) return;
-                document.dispatchEvent(new CustomEvent('gospel-getter:about-credits', { detail: { credits: aboutCredits } }));
-            }
-
+            // The page hands over the moment boot is done, when the launch
+            // check runs (unless the reader turned it off), which may come
+            // before the pieces have loaded, so it goes again when they say
+            // they're ready. (Each bundled text's credit comes from the
+            // reader, from boot.)
             let updateCheckWaiting = false;
 
             function askUpdateCheck() {
@@ -6938,7 +6357,6 @@
             }
 
             document.addEventListener('gospel-getter:pieces-ready', function () {
-                sendAboutCredits();
                 if (updateCheckWaiting) askUpdateCheck();
             });
 
@@ -6956,9 +6374,49 @@
             boot().then(askUpdateCheck);
         })();
     </script>
-    <!-- The page's Rust pieces (ui-leptos/, compiled to WebAssembly by Trunk):
-         Trunk inlines the loader here, so it runs once the scripts above have
-         set up what the pieces talk to. See ui-leptos/README.md. -->
-    <link data-trunk rel="inline" href="leptos-loader.js" type="js" />
+    <script>
+        // If the page's Rust pieces fail to load (their loader, in <head>,
+        // says so once the page is read), the chapter still shows, as plain
+        // text: the reading position the app saved (or Genesis 1), read
+        // once, with a line saying the rest of the reader isn't available.
+        // Only that: nothing in it can be selected, turned or changed. With
+        // the pieces, the reader is theirs (ui-leptos/src/reader.rs).
+        document.addEventListener('gospel-getter:pieces-failed', function () {
+            'use strict';
+            var invoke = window.__TAURI__.core.invoke;
+            var notice = document.getElementById('reader-notice');
+            notice.textContent = 'This chapter is shown as plain text: the rest of the reader isn’t available.';
+            notice.hidden = false;
+            invoke('get_home').then(function (home) {
+                return { bookId: home.currentBookId, chapter: home.currentChapter, translationCode: home.currentTranslationCode };
+            }, function () {
+                return { bookId: 1, chapter: 1 };
+            }).then(function (position) {
+                return invoke('get_reading', position);
+            }).then(function (dto) {
+                if (!dto) return;
+                var make = function (tag, className, text) {
+                    var el = document.createElement(tag);
+                    el.className = className;
+                    if (text != null) el.textContent = text;
+                    return el;
+                };
+                var verses = make('div', 'chapter-text');
+                dto.currentVerses.forEach(function (v, i) {
+                    var verse = make('p', 'verse');
+                    verse.append(make('span', 'verse-num', String(v.number)), make('span', 'verse-text', v.text));
+                    if (i) verses.append('\n');
+                    verses.append(verse);
+                });
+                var main = make('section', 'chapter-main');
+                main.append(make('h2', 'chapter-heading', dto.currentBookName + ' ' + dto.currentChapter), verses);
+                var row = make('div', 'reading-row');
+                row.append(main);
+                document.getElementById('reading-pane').replaceChildren(row);
+            }).catch(function (e) {
+                console.error('Failed to read the chapter', e);
+            });
+        }, { once: true });
+    </script>
 </body>
 </html>

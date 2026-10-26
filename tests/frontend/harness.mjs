@@ -226,8 +226,9 @@ export async function openApp({
     setUp = () => {},
     // The page's Rust pieces: loaded at once (as the app usually has them
     // by the end of boot), not until the test calls `app.loadPieces()`
-    // ('late': after boot, as on a slow start), or never (false: as when
-    // the WebAssembly fails to load).
+    // ('late': after boot, as on a slow start; the chapter comes with
+    // them), or never (false: as when the WebAssembly fails to load, which
+    // the page's loader then says).
     leptos = true,
 } = {}) {
     await backend('__reset', fresh
@@ -331,6 +332,8 @@ export async function openApp({
     const { window } = dom;
     const document = window.document;
     if (leptos === true) await loadLeptos(window);
+    // Without them, the page's loader says they failed, as in the app.
+    if (leptos === false) document.dispatchEvent(new window.CustomEvent('gospel-getter:pieces-failed'));
     const SELECTABLE = '.chapter-main .verse[data-translation]';
 
     const app = {
@@ -339,10 +342,15 @@ export async function openApp({
         calls,
         clipboardWrites,
         consoleErrors: errors,
-        /** Loads the page's Rust pieces now (with `leptos: 'late'`). */
+        /**
+         * Loads the page's Rust pieces now (with `leptos: 'late'`), and
+         * waits for what they let go on (the rest of boot: the chapter, the
+         * Library's lists, the welcome, the launch check).
+         */
         async loadPieces() {
             await loadLeptos(window);
             await settle();
+            await app.idle();
         },
         /** The page's local storage, to carry into the next openApp (a restart). */
         storage() {
@@ -567,8 +575,12 @@ export async function openApp({
         },
     };
 
-    // The chapter, or the notice saying it couldn't be read.
-    await until(() => document.getElementById('reading-pane-inner') || app.notice(), 'reading pane');
+    // The chapter, or the notice saying it couldn't be read (or, without
+    // the pieces, that it's shown as plain text). Pieces that load late draw
+    // the chapter then.
+    if (leptos !== 'late') {
+        await until(() => document.getElementById('reading-pane-inner') || app.notice(), 'reading pane');
+    }
     // Boot loads the bookmark list, then the highlights; wait for all of
     // it to finish. The list is the Rust pieces' (the Library), so there is
     // none to wait for without them.

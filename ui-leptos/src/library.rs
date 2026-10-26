@@ -7,7 +7,8 @@
 //! time and focuses the chosen tab when it opens. This draws what's
 //! inside it (put there by [`place`]), switches the tabs, loads the lists
 //! and acts on their rows: opening a row closes the Library and has the
-//! page jump to the passage (a note's Edit then opens the note editor);
+//! reader jump to the passage (a note's Edit then has the page open the
+//! note editor);
 //! removing a bookmark or a highlight keeps focus in the list.
 //!
 //! The page asks for the lists to be reloaded with
@@ -344,17 +345,17 @@ impl Library {
     }
 
     /// Opens a passage: the Library closes (focus back to its button, or
-    /// left for the editor), and the page jumps there.
+    /// left for the editor), and the reader jumps there.
     fn open(passage: PassageArgs, note: &JsValue) {
         surfaces::close(note.is_null());
-        bridge::open_passage(
+        crate::reader::open(
             &bridge::OpenPassage {
                 book_id: passage.book_id,
                 chapter: passage.chapter,
                 verse_start: Some(passage.verse_start),
                 verse_end: Some(passage.verse_end),
             },
-            note,
+            note.clone(),
         );
     }
 

@@ -108,7 +108,7 @@ impl Run<'_> {
 
     /// Opens the search box with `/`, from the reading view (focus off any
     /// control first, as a reader's would be).
-    async fn open_search_by_key(&self) -> Result<Value> {
+    pub(super) async fn open_search_by_key(&self) -> Result<Value> {
         let ui = &self.ui;
         ui.js("window.scrollTo(0, 0); return null;", Vec::new())
             .await?;
@@ -138,7 +138,7 @@ impl Run<'_> {
     }
 
     /// Types `text` into the search box (which has focus), as keys.
-    async fn type_in_box(&self, text: &str) -> Result<()> {
+    pub(super) async fn type_in_box(&self, text: &str) -> Result<()> {
         self.ui
             .press(&format!("type \"{text}\" into the box"), text)
             .await

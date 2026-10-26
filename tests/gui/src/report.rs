@@ -47,11 +47,19 @@ pub enum Check {
     GSidebar = 35,
     ResizePlace = 36,
     ScrollThenResize = 37,
+    ChapterSteps = 38,
+    CompareGrid = 39,
+    Disclosures = 40,
+    BackForward = 41,
+    LongChapter = 42,
+    TryAgain = 43,
+    PlainText = 44,
+    DisclosuresKept = 45,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 31] = [
+    pub const SHIPPED: [Check; 38] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -83,11 +91,18 @@ impl Check {
         Check::GSidebar,
         Check::ResizePlace,
         Check::ScrollThenResize,
+        Check::ChapterSteps,
+        Check::CompareGrid,
+        Check::Disclosures,
+        Check::BackForward,
+        Check::LongChapter,
+        Check::TryAgain,
+        Check::PlainText,
     ];
 
-    /// The check on the app as shipped started again, on the first
+    /// The checks on the app as shipped started again, on the first
     /// session's data (the second session).
-    pub const RELAUNCH: [Check; 1] = [Check::AaRestart];
+    pub const RELAUNCH: [Check; 2] = [Check::AaRestart, Check::DisclosuresKept];
 
     /// The updater's checks, on the GUI checks' test build against the
     /// run's own update server (the third session).
@@ -138,6 +153,14 @@ impl Check {
             Check::GSidebar => "g-and-sidebar",
             Check::ResizePlace => "resize-reading-place",
             Check::ScrollThenResize => "scroll-then-resize",
+            Check::ChapterSteps => "chapter-steps",
+            Check::CompareGrid => "compare-grid",
+            Check::Disclosures => "disclosures",
+            Check::BackForward => "back-forward",
+            Check::LongChapter => "long-chapter",
+            Check::TryAgain => "try-again",
+            Check::PlainText => "plain-text-fallback",
+            Check::DisclosuresKept => "disclosures-kept",
         }
     }
 
