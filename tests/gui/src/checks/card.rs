@@ -105,10 +105,34 @@ impl Run<'_> {
             .await
     }
 
+    /// John 3 read afresh: going there redraws the pane even when it's
+    /// on screen already, so this waits for the new pane (not just the
+    /// heading, which may say John 3 before), and nothing clicked after it
+    /// finds a verse about to be replaced.
+    async fn fresh_john_3(&self) -> Result<()> {
+        self.ui
+            .js(
+                "const inner = document.getElementById('reading-pane-inner');
+                 if (inner) inner.dataset.guiCheckOld = '1'; return null;",
+                Vec::new(),
+            )
+            .await?;
+        self.go_to("John 3", "John 3").await?;
+        self.ui
+            .wait(
+                "John 3's pane drawn afresh",
+                "const inner = document.getElementById('reading-pane-inner');
+                 return [!!inner && inner.dataset.guiCheckOld === undefined
+                     && inner.dataset.currentChapter === '3', null];",
+            )
+            .await?;
+        Ok(())
+    }
+
     /// John 3, at its top, nothing selected, then verses `start` to `end`
     /// selected with the mouse (a click, and a Shift-click for a range).
     async fn select_in_john_3(&self, start: u32, end: u32) -> Result<Value> {
-        self.go_to("John 3", "John 3").await?;
+        self.fresh_john_3().await?;
         self.plain_reading().await?;
         self.click_verse(start).await?;
         if end != start {
@@ -279,7 +303,7 @@ impl Run<'_> {
     /// by them: beside the selected verses, never over them unless docked,
     /// inside their column.
     pub(super) async fn select_verses(&mut self) -> Result<String> {
-        self.go_to("John 3", "John 3").await?;
+        self.fresh_john_3().await?;
         self.plain_reading().await?;
         self.click_verse(16).await?;
         let one = self.wait_for_selection(16, 16).await?;
@@ -633,7 +657,7 @@ impl Run<'_> {
                          { neighbor: v ? v.dataset.highlight || null : 'none', next: other ? other.dataset.highlight || null : 'none' }];",
             )
             .await?;
-        self.go_to("John 3", "John 3").await?;
+        self.fresh_john_3().await?;
         self.plain_reading().await?;
         self.click_verse(1).await?;
         self.wait_for_selection(1, 1).await?;
