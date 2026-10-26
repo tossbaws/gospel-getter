@@ -604,10 +604,10 @@ pub struct NoteRequest {
     pub reference: String,
     /// The translation whose text is quoted.
     pub code: String,
-    /// The passage quoted, as markup the page rendered with its own
-    /// `verseHtml` (KJV supplied words in italics, no note markers; text
-    /// escaped by the page), with what the translation doesn't number said
-    /// at the end. Shown as it is.
+    /// The passage quoted, as markup: its verses as the reader draws them
+    /// for the page ([`VERSE_MARKUP_EVENT`]: KJV supplied words in italics,
+    /// no note markers, escaped), with what the translation doesn't number
+    /// said at the end (escaped by the page). Shown as it is.
     pub passage_html: String,
     /// When adding, the other notes on these verses, read-only.
     pub others: Vec<OtherNote>,

@@ -16,10 +16,12 @@
 #
 # Checks 1 to 8, 14 to 16 (the Library), 17 to 19 (search and the
 # palette), 20 to 24 (the book and chapter picker), 25 to 29 (Aa, the
-# translations, Compare and reading mode) and 30 to 37 (the header's
+# translations, Compare and reading mode), 30 to 37 (the header's
 # popovers and panels, the ☰ menu's keys, About's Tab, G and the sidebar,
-# and the window crossing 1200 px, also right after a scroll) run on the
-# app given; for 26 it
+# and the window crossing 1200 px, also right after a scroll) and 38 to 44
+# (the reader: the chapter's end, Compare's grid, the chapter's lists, a
+# cross-reference with the mouse's back and forward buttons, Psalm 119, Try
+# again and the plain-text fallback) run on the app given; for 26 and 45 it
 # is closed and started again on the same data. The updater's checks (9 to 13) run on
 # GUI_CHECK_UPDATER_APP: the GUI checks' test build (cargo build --release
 # --features gui-test-updater), against the checks' own local update

@@ -543,16 +543,18 @@ pub(super) async fn restart(
     // can't see what the first one saved; the app itself always uses the
     // one folder. Not run there.
     if config.xvfb.is_none() {
-        report
-            .record(
-                Check::AaRestart,
-                Ok("not run on Windows: Edge WebDriver gives each session's WebView2 a fresh user data \
-                    folder (WEBVIEW2_USER_DATA_FOLDER, a new scoped_dir per session), so the app started \
-                    again in a new session can't see the first session's local storage (the app as \
-                    shipped keeps one folder)"
-                    .to_owned()),
-            )
-            .await;
+        for check in Check::RELAUNCH {
+            report
+                .record(
+                    check,
+                    Ok("not run on Windows: Edge WebDriver gives each session's WebView2 a fresh user data \
+                        folder (WEBVIEW2_USER_DATA_FOLDER, a new scoped_dir per session), so the app started \
+                        again in a new session can't see the first session's local storage (the app as \
+                        shipped keeps one folder)"
+                        .to_owned()),
+                )
+                .await;
+        }
         return;
     }
     log_line(started, "start the app again, on the same data (check 26)");
@@ -563,6 +565,12 @@ pub(super) async fn restart(
                 .record(
                     Check::AaRestart,
                     Err(e.context("no WebDriver session on the app started again")),
+                )
+                .await;
+            report
+                .fail_the_rest(
+                    &Check::RELAUNCH,
+                    "not run: no WebDriver session on the app started again",
                 )
                 .await;
             return;
@@ -578,6 +586,11 @@ pub(super) async fn restart(
         run.failure_screenshot(Check::AaRestart).await;
     }
     report.record(Check::AaRestart, result).await;
+    let kept = run.disclosures_kept().await;
+    if kept.is_err() {
+        run.failure_screenshot(Check::DisclosuresKept).await;
+    }
+    report.record(Check::DisclosuresKept, kept).await;
 
     log_line(started, "close the app (end the second WebDriver session)");
     let driver = run.ui.into_driver();

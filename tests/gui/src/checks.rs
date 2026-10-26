@@ -13,16 +13,20 @@
 //! and every Aa control (25, `display`); the header's popovers and panels:
 //! one at a time, Escape's order, a click outside, the ☰ menu by keyboard,
 //! About's Tab, G and the sidebar's button, and the window crossing 1200 px
-//! (30 to 37, `surfaces`); screenshots in Chi Rho and Vellum (4, most taken
-//! by the other checks).
-//! Then the app started again on the same data, keeping Aa's settings (26,
-//! a second session); and, in a third session on the GUI checks' test
-//! build, the updater (9 to 13, `updates`).
+//! (30 to 37, `surfaces`); the reader: the chapter's end, Compare's grid,
+//! the chapter's lists, a cross-reference and the mouse's back and forward
+//! buttons, Psalm 119, Try again, and, last, the plain-text fallback (38 to
+//! 44, `reader`); screenshots in Chi Rho and Vellum (4, most taken by the
+//! other checks).
+//! Then the app started again on the same data, keeping Aa's settings (26)
+//! and the chapter's lists as left (45), a second session; and, in a third
+//! session on the GUI checks' test build, the updater (9 to 13, `updates`).
 
 mod dialogs;
 mod display;
 mod library;
 mod picker;
+mod reader;
 mod search;
 mod surfaces;
 mod updates;
@@ -204,7 +208,7 @@ async fn start_update_server(config: &Config) -> Result<UpdateServer> {
     Ok(server)
 }
 
-/// Checks 1 to 8, 14 to 25 and 27 to 37, on the app as shipped; what
+/// Checks 1 to 8, 14 to 25 and 27 to 44, on the app as shipped; what
 /// check 25 left, for check 26 (or why there's nothing).
 async fn shipped(
     config: &Config,
@@ -325,6 +329,12 @@ async fn shipped(
             (Check::GSidebar, run.g_and_sidebar().await),
             (Check::ResizePlace, run.resize_reading_place().await),
             (Check::ScrollThenResize, run.scroll_then_resize().await),
+            (Check::ChapterSteps, run.chapter_steps().await),
+            (Check::CompareGrid, run.compare_grid().await),
+            (Check::Disclosures, run.disclosures().await),
+            (Check::BackForward, run.back_forward().await),
+            (Check::LongChapter, run.long_chapter().await),
+            (Check::TryAgain, run.try_again().await),
         ] {
             if result.is_err() {
                 run.failure_screenshot(check).await;
@@ -355,6 +365,12 @@ async fn shipped(
         };
         looks = left;
         report.record(Check::AaControls, controls).await;
+        // Last: it leaves the page showing the fallback.
+        let plain = run.plain_text_fallback().await;
+        if plain.is_err() {
+            run.failure_screenshot(Check::PlainText).await;
+        }
+        report.record(Check::PlainText, plain).await;
         let expected: Vec<&'static str> = SHOTS
             .into_iter()
             .filter(|name| config.xvfb.is_some() || *name != IMPORT_SHOT)
@@ -368,6 +384,7 @@ async fn shipped(
                     .filter(|name| config.xvfb.is_some() || !name.starts_with("21-")),
             )
             .chain(display::DISPLAY_SHOTS)
+            .chain(reader::READER_SHOTS)
             // The popover on a narrow window, only where the window can be
             // wide enough first (check 36).
             .chain(surfaces::SURFACES_SHOTS.into_iter().filter(|name| {
@@ -1021,6 +1038,7 @@ impl Run<'_> {
         self.search_vellum_screenshots().await?;
         self.picker_vellum_screenshots().await?;
         self.display_vellum_screenshots().await?;
-        self.surfaces_vellum_screenshots().await
+        self.surfaces_vellum_screenshots().await?;
+        self.reader_vellum_screenshots().await
     }
 }
