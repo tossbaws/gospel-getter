@@ -17,8 +17,10 @@ Usage, from the repository root:
 The first prints `deploy=true` or `deploy=false` (for $GITHUB_OUTPUT), and
 the reason on stderr. Each --published is a published release's tag (the
 latest release's, and the one that started the deploy, if any); the newest
-one counts. The second prints the version the site shows. Either exits 2
-if the site's version can't be read.
+one counts. A pre-release's tag (v2.19.0-beta.1) is ignored: the site's
+download links never serve a pre-release, so it never shows one. The second
+prints the version the site shows. Either exits 2 if the site's version
+can't be read.
 """
 
 import argparse
@@ -29,6 +31,7 @@ from pathlib import Path
 
 VERSION = re.compile(r"\bVersion (\d+\.\d+\.\d+)\b")
 TAG = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
+PRERELEASE = re.compile(r"v?\d+\.\d+\.\d+-\S+")
 
 
 def parse(version):
@@ -70,9 +73,13 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         site = site_version(args.site.read_text(encoding="utf-8"))
-        published = [tag for tag in args.published if tag.strip()]
-        for tag in published:
+        published = []
+        for tag in filter(str.strip, args.published):
+            if PRERELEASE.fullmatch(tag.strip()):
+                print(f"site_version_gate: {tag} is a pre-release, so it's ignored", file=sys.stderr)
+                continue
             parse(tag)
+            published.append(tag)
     except (OSError, ValueError) as e:
         print(f"site_version_gate: {e}", file=sys.stderr)
         return 2
