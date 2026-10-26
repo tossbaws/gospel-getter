@@ -67,7 +67,8 @@ mod welcome;
 
 use wasm_bindgen::prelude::*;
 
-/// Mounts every piece. Called by wasm-bindgen once the module is loaded.
+/// Mounts every piece, the reader with the first (see [`mount_the_rest`]).
+/// Called by wasm-bindgen once the module is loaded.
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
@@ -77,11 +78,25 @@ pub fn start() {
     // Aa and the saved settings next: their records (the `<select>`s) are
     // filled before any piece reads them.
     aa::mount();
-    // The reader, before the rest: boot's chapter is on its way, and needn't
-    // wait for every other piece to mount (it's drawn once they have).
+    // The reader, before the rest: boot's chapter is on its way (or in),
+    // and is drawn now.
     reader::mount();
     // The table of shortcuts, where the page had it.
     bridge::export_shortcuts();
+    // The rest in a task of its own, so the chapter is shown (painted, and
+    // the window titled) before they mount, as it was before they loaded.
+    let rest = Closure::once_into_js(mount_the_rest);
+    if web_sys::window()
+        .and_then(|w| w.set_timeout_with_callback(rest.unchecked_ref()).ok())
+        .is_none()
+    {
+        mount_the_rest();
+    }
+}
+
+/// Mounts the dialogs, About, the Library, search and the picker, then says
+/// every piece is listening.
+fn mount_the_rest() {
     let Some(body) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.body())
