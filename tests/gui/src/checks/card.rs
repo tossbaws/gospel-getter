@@ -261,7 +261,12 @@ impl Run<'_> {
     /// Waits for the clipboard to hold `want` (the paste reads what's there
     /// once the copy's promise has settled).
     async fn expect_clipboard(&self, what: &str, want: &str) -> Result<()> {
-        let got = self.clipboard().await?;
+        let mut got = self.clipboard().await?;
+        if self.config.xvfb.is_none() {
+            // Windows keeps the clipboard's text with CRLF line breaks
+            // (WebView2 writes them so); the text is otherwise as written.
+            got = got.replace("\r\n", "\n");
+        }
         ensure!(
             got == want,
             "{what}: the clipboard holds {got:?}, not the backend's {want:?}"
