@@ -3569,7 +3569,7 @@ fn flowing_verses_wash_and_select_at_aa_in_every_theme() {
     let rules = rules();
     let hover = screen_rule(
         &rules,
-        r#":root[data-layout="flowing"] .chapter-main .chapter-text > .verse:hover"#,
+        r#":root[data-layout="flowing"] .chapter-main .chapter-text > .verse:where([data-translation]):hover"#,
     );
     assert!(
         hover
@@ -3606,6 +3606,67 @@ fn flowing_verses_wash_and_select_at_aa_in_every_theme() {
                 );
             }
         }
+    }
+}
+
+/// Only verses that can be selected look clickable: the pointer (every
+/// layout) and Flowing's wash select `.verse[data-translation]`, the
+/// attribute the reader's verses carry (SELECTABLE). The plain-text
+/// fallback's verses (step 7 F2) carry none, so they get neither. The
+/// wash's `:where()` keeps it below the selection tint, which comes after
+/// it at the same specificity.
+#[test]
+fn only_selectable_verses_look_clickable() {
+    let rules = rules();
+    let pointer = screen_rule(
+        &rules,
+        ".chapter-main .chapter-text > .verse[data-translation]",
+    );
+    assert!(pointer.body.contains("cursor: pointer"));
+    let wash = screen_rule(
+        &rules,
+        r#":root[data-layout="flowing"] .chapter-main .chapter-text > .verse:where([data-translation]):hover"#,
+    );
+    assert!(wash.body.contains("background"));
+    let at = |selector: &str| {
+        rules
+            .iter()
+            .position(|r| r.at_rule.is_none() && r.selector == selector)
+            .unwrap_or_else(|| panic!("expected a `{selector}` rule"))
+    };
+    assert!(
+        at(&wash.selector)
+            < at(
+                r#":root[data-layout="flowing"] .chapter-main .chapter-text > .verse.verse-selected"#
+            ),
+        "the selection tint comes after the wash"
+    );
+    // No other rule gives a bare verse the pointer or a hover.
+    for rule in rules.iter().filter(|r| r.at_rule.is_none()) {
+        for selector in selectors(rule) {
+            assert!(
+                !selector.ends_with(".verse:hover"),
+                "`{selector}` washes every verse"
+            );
+            assert!(
+                !(selector.ends_with("> .verse") && rule.body.contains("cursor")),
+                "`{selector}` gives every verse a cursor"
+            );
+        }
+    }
+    // The reader's verses carry the attribute; the fallback's don't.
+    assert!(
+        piece("keyboard.rs")
+            .contains(r#"pub const SELECTABLE: &str = ".chapter-main .verse[data-translation]";"#)
+    );
+    assert!(piece("reader_text.rs").contains(r#"data-translation="{code}""#));
+    let fallback = block_after(
+        HTML,
+        "document.addEventListener('gospel-getter:pieces-failed'",
+    );
+    assert!(fallback.contains("var verse = make('p', 'verse');"));
+    for attribute in ["data-translation", "dataset", "setAttribute"] {
+        assert!(!fallback.contains(attribute), "{attribute}");
     }
 }
 
