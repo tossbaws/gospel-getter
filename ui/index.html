@@ -7,6 +7,12 @@
     <!-- Generated from packaging/icon.svg by packaging/generate-icons.sh. -->
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
+    <!-- The chapter's face, fetched while the page loads: its text waits
+         for it (font-display: block), and the chapter is drawn by the
+         page's Rust pieces once they've loaded, later than the page itself
+         would ask for it. -->
+    <link rel="preload" href="fonts/literata-regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="fonts/literata-italic.woff2" as="font" type="font/woff2" crossorigin>
     <!-- Built by Trunk (Trunk.toml): the page's Rust pieces, compiled to
          WebAssembly (see ui-leptos/), and the files the page serves beside
          itself. These links are Trunk's; they do nothing in a browser. -->
@@ -4100,6 +4106,11 @@
             else delete data.picker;
         })();
     </script>
+    <!-- The page's Rust pieces (ui-leptos/, compiled to WebAssembly by Trunk):
+         Trunk inlines the loader here, which fetches and compiles them while
+         the page loads and starts them once its scripts have set up what
+         the pieces talk to. See ui-leptos/README.md. -->
+    <link data-trunk rel="inline" href="leptos-loader.js" type="js" />
 </head>
 <body>
     <div id="top-bar" class="top-bar">
@@ -6364,12 +6375,12 @@
         })();
     </script>
     <script>
-        // If the page's Rust pieces fail to load (their loader, below, says
-        // so), the chapter still shows, as plain text: the reading position
-        // the app saved (or Genesis 1), read once, with a line saying the rest
-        // of the reader isn't available. Only that: nothing in it can be
-        // selected, turned or changed. With the pieces, the reader is theirs
-        // (ui-leptos/src/reader.rs).
+        // If the page's Rust pieces fail to load (their loader, in <head>,
+        // says so once the page is read), the chapter still shows, as plain
+        // text: the reading position the app saved (or Genesis 1), read
+        // once, with a line saying the rest of the reader isn't available.
+        // Only that: nothing in it can be selected, turned or changed. With
+        // the pieces, the reader is theirs (ui-leptos/src/reader.rs).
         document.addEventListener('gospel-getter:pieces-failed', function () {
             'use strict';
             var invoke = window.__TAURI__.core.invoke;
@@ -6407,9 +6418,5 @@
             });
         }, { once: true });
     </script>
-    <!-- The page's Rust pieces (ui-leptos/, compiled to WebAssembly by Trunk):
-         Trunk inlines the loader here, so it runs once the scripts above have
-         set up what the pieces talk to. See ui-leptos/README.md. -->
-    <link data-trunk rel="inline" href="leptos-loader.js" type="js" />
 </body>
 </html>

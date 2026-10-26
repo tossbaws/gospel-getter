@@ -116,9 +116,13 @@ target (`rustup target add wasm32-unknown-unknown`). Anything that builds the
 app crate, `cargo test` in `src-tauri/` included, needs `dist/` to exist, so
 run `trunk build` once first.
 
-The page loads the pieces itself: Trunk inlines `ui/leptos-loader.js` at the
-end of `<body>`, which loads the glue (`ui-leptos.js`) and the module
-(`ui-leptos_bg.wasm`). Trunk's own loader is an ES module import, which the
+The page loads the pieces itself: Trunk inlines `ui/leptos-loader.js` in
+`<head>`, which loads the glue (`ui-leptos.js`) and fetches and compiles the
+module (`ui-leptos_bg.wasm`) while the page loads, then starts it once the
+page's scripts have run (`DOMContentLoaded`). The reader draws the chapter,
+so the module is started early, and the reader with the first pieces, the
+rest mounting in the next task; the chapter's face is preloaded (its text
+waits for it). Trunk's own loader is an ES module import, which the
 `no-modules` glue cannot be loaded by, so `Trunk.toml` turns it off. If the
 module fails to load, the loader says so (`gospel-getter:pieces-failed`),
 and the page's small inline fallback shows the chapter as plain text: the
