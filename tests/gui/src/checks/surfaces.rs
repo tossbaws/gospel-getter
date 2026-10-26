@@ -990,6 +990,10 @@ impl Run<'_> {
                 .reading_place(&format!("the first verse under the bar, at {width} px"))
                 .await?;
             let seen = self.ui.js(SEEN_JS, Vec::new()).await?;
+            // In the steps log every time, passed or not: the order the page
+            // saw the scroll, resize and media query events in.
+            self.ui
+                .log(&format!("  the page saw: {}", Self::seen_list(&seen)));
             let held = released["held"].as_u64().unwrap_or(0);
             let steps = || {
                 format!(
