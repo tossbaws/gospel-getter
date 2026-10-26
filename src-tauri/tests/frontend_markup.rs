@@ -13,9 +13,11 @@ use gospel_getter_lib::preferences::{self, Preference, Values};
 /// book and chapter picker's books and chapters, Aa with the translations
 /// and the saved settings, the header's surfaces with the picker's
 /// shapes, the reader (the chapter's markup, its loading and the passage
-/// history), and the selection card (copying, and the card's bookmark,
-/// highlight and notes): checks of those read them where they now live.
-const PIECES: [(&str, &str); 21] = [
+/// history), the selection card (copying, and the card's bookmark,
+/// highlight and notes), and what was the page's main script (the keyboard
+/// and click dispatchers, boot, and the page's glue): checks of those read
+/// them where they now live.
+const PIECES: [(&str, &str); 27] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -66,6 +68,21 @@ const PIECES: [(&str, &str); 21] = [
     (
         "card_text.rs",
         include_str!("../../ui-leptos/src/card_text.rs"),
+    ),
+    (
+        "keyboard.rs",
+        include_str!("../../ui-leptos/src/keyboard.rs"),
+    ),
+    (
+        "keyboard_text.rs",
+        include_str!("../../ui-leptos/src/keyboard_text.rs"),
+    ),
+    ("clicks.rs", include_str!("../../ui-leptos/src/clicks.rs")),
+    ("boot.rs", include_str!("../../ui-leptos/src/boot.rs")),
+    ("page.rs", include_str!("../../ui-leptos/src/page.rs")),
+    (
+        "page_text.rs",
+        include_str!("../../ui-leptos/src/page_text.rs"),
     ),
 ];
 
@@ -829,12 +846,11 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
 }
 
 /// The exit control must be a real, labeled, keyboard-focusable button,
-/// and Escape must also leave reading mode. None of it is the main
-/// script's: the exit and the toggle are Aa's (the page's Rust pieces),
-/// Escape's last step is the surfaces' (Rust too), which asks Aa, and the
-/// `<head>` script (only the pre-paint one now) doesn't touch the Tauri
-/// bridge. Without the Rust pieces reading mode can't be left (the
-/// owner's E1: the exit and Escape say Aa isn't available).
+/// and Escape must also leave reading mode. None of it was ever the main
+/// script's (now gone): the exit and the toggle are Aa's (the page's Rust
+/// pieces), Escape's last step is the surfaces' (Rust too), which asks Aa,
+/// and the pre-paint script doesn't touch the Tauri bridge. Without the
+/// Rust pieces reading mode can't be left (the exit and Escape do nothing).
 #[test]
 fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
     let tag_start = HTML
@@ -857,11 +873,13 @@ fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
         "reading-mode toggle should expose its state"
     );
 
-    let head_end = HTML.find("</head>").unwrap();
-    let head_script = &HTML[HTML.find("<script>").unwrap()..head_end];
+    // The pre-paint script, the head's first (boot's prefetch, after it,
+    // asks the backend; the look never waits for it).
+    let head_start = HTML.find("<script>").unwrap();
+    let head_script = &HTML[head_start..head_start + HTML[head_start..].find("</script>").unwrap()];
     assert!(
         !head_script.contains("__TAURI__.core"),
-        "the head scripts must not depend on the Tauri bridge"
+        "the pre-paint script must not depend on the Tauri bridge"
     );
     let escape = block_after(piece("surfaces.rs"), "fn on_escape(");
     for wiring in [
@@ -1153,7 +1171,10 @@ fn release_notes_link_matches_the_backend() {
 /// select, and must not also turn the page to another chapter.
 #[test]
 fn arrow_key_navigation_ignores_focused_form_controls() {
-    assert!(HTML.contains("/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)"));
+    assert!(
+        piece("keyboard.rs")
+            .contains(r#"matches!(target.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")"#)
+    );
 }
 
 /// Printing stays black on white at the default size and spacing whatever
@@ -2467,12 +2488,10 @@ fn the_reference_button_says_where_the_reader_is() {
     let render = block_after(piece("reader.rs"), "fn render_current()");
     assert!(render.contains("update_reference(&here, compare.as_deref());"));
     assert!(render.contains("bridge::show_picker_current(here.book_id, here.chapter);"));
-    // G opens the picker, in the main keyboard handler, which leaves keys
+    // G opens the picker, in the keyboard dispatcher, which leaves keys
     // typed into a form control alone.
     assert!(
-        HTML.contains(
-            "if (plain && !event.shiftKey && (event.key === 'g' || event.key === 'G')) {"
-        )
+        piece("keyboard_text.rs").contains(r#"if plain && !shift && (key == "g" || key == "G") {"#)
     );
 }
 
@@ -2753,11 +2772,6 @@ fn the_picker_uses_tested_theme_colors() {
 }
 
 // ---- Tier 2: the reading flow ----------------------------------------
-
-/// The script's source from `needle` to the end of that function's body.
-fn function_body(name: &str) -> &'static str {
-    block_after(HTML, &format!("function {name}("))
-}
 
 /// The chapter ends with a next step: the backend's previous and next
 /// chapters (so books are crossed) as two large buttons in the UI sans,
@@ -3718,9 +3732,11 @@ fn the_welcome_is_one_accessible_card() {
     assert!(card.contains(r#""ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown""#));
     assert!(card.contains(r#"key == "Tab""#));
     assert!(card.contains("panel.focus()"));
-    // The places to start are the backend's, kept by the page from boot
-    // and shown as text (no markup is made from them).
-    assert!(HTML.contains("startHere = Array.isArray(home.startHere) ? home.startHere : [];"));
+    // The places to start are the backend's, kept from boot (`page`) and
+    // shown as text (no markup is made from them).
+    assert!(
+        piece("page.rs").contains("let start_here = if js_sys::Array::is_array(&start_here) {")
+    );
     assert!(card.contains(r#"<span class="welcome-start-title">{title}</span>"#));
     assert!(card.contains(r#"<span class="welcome-start-line">{line}</span>"#));
     assert!(!card.contains("inner_html"));
@@ -4186,10 +4202,7 @@ fn shortcut_table_handles() -> Vec<String> {
 #[test]
 fn every_handled_key_is_in_the_shortcuts_table() {
     let handled: Vec<String> = [
-        block_after(
-            HTML,
-            "document.addEventListener('keydown', function (event) {\n                // Keys typed into a form control",
-        ),
+        block_after(piece("keyboard_text.rs"), "pub fn route("),
         block_after(piece("aa_text.rs"), "pub fn size_key("),
         block_after(piece("surfaces.rs"), "fn on_escape("),
     ]
@@ -4221,8 +4234,8 @@ fn every_handled_key_is_in_the_shortcuts_table() {
     // And the sheet is that table, grouped: it reads the table itself (the
     // page's request to open says only where focus goes back to), and
     // lists each group's rows.
-    let open = function_body("openShortcuts");
-    assert!(open.contains("detail: { returnFocus }"));
+    let open = block_after(piece("page.rs"), "pub fn open_shortcuts(");
+    assert!(open.contains(r#"&[("returnFocus", &element_or_null(return_focus))],"#));
     let sheet = piece("shortcuts.rs");
     assert!(sheet.contains("shortcut_table::GROUPS"));
     assert!(sheet.contains("shortcut_table::in_group(group)"));
@@ -4411,9 +4424,10 @@ fn nothing_inline_that_the_content_security_policy_would_block() {
     ] {
         assert!(!HTML.contains(blocked), "{blocked}");
     }
-    // The three inline scripts (the pre-paint script, the head's only one,
-    // the main one, and the reader's plain-text fallback) and the one
-    // stylesheet Tauri hashes.
+    // The three inline scripts (the pre-paint script and boot's prefetch in
+    // the head, and the reader's plain-text fallback at the end of the
+    // body; the main script is gone, step 7c) and the one stylesheet Tauri
+    // hashes.
     assert_eq!(HTML.matches("<script>").count(), 3);
     assert_eq!(HTML.matches("<script").count(), 3);
     assert_eq!(HTML.matches("<style>").count(), 1);

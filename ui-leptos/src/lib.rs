@@ -15,24 +15,30 @@
 //! (`reader`, with its markup and rules in `reader_text`): the chapter on
 //! screen, how it gets there, and the passage history; and the selection
 //! card (`card`, with its markup and rules in `card_text`): the verse
-//! selection, copying, and the card's bookmark, highlight and notes. The
-//! page talks to them only as `bridge` says.
+//! selection, copying, and the card's bookmark, highlight and notes; and
+//! what the page's main script was: the keyboard (`keyboard`, with its
+//! rules in `keyboard_text`), the clicks (`clicks`), boot (`boot`) and the
+//! page's glue (`page`, with its words and rules in `page_text`): the
+//! toast, Export and Import data…, the welcome, the shortcuts sheet and
+//! search opened, the palette's page commands, the launch check. What the
+//! page's few remaining scripts share with this is in `bridge`.
 //!
 //! If this module fails to load, the chapter still shows, as plain text, in
 //! the saved look (the page's small fallback reads it, and its pre-paint
 //! script applies the look), with a line saying the rest of the reader
-//! isn't available: nothing in it can be selected, turned or changed. The
-//! five dialogs, About, the Library, search, Aa, the translations, the ☰
-//! menu and the picker say they are unavailable when asked for (see
-//! `bridge`), nothing opens, no setting can be changed (reading mode can't
-//! be left: its button and Escape say so), and no update is offered.
+//! isn't available. That line is all a reader is told: nothing else on the
+//! page answers a click or a key (there is no script left to say what isn't
+//! available), nothing opens, no setting can be changed, and no update is
+//! offered.
 
 mod aa;
 mod aa_text;
 mod about;
+mod boot;
 mod bridge;
 mod card;
 mod card_text;
+mod clicks;
 mod dom;
 mod dto;
 mod export_notes;
@@ -40,10 +46,14 @@ mod import_preview;
 mod import_text;
 mod install;
 mod ipc;
+mod keyboard;
+mod keyboard_text;
 mod library;
 mod library_text;
 mod note_editor;
 mod note_text;
+mod page;
+mod page_text;
 mod palette;
 // How a passage is named, shared with the backend, which compiles the same
 // file.
@@ -80,17 +90,23 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
-    // The popovers and panels, and the picker's shape, first: they were the
-    // page's head script's, which ran before the other pieces' code.
+    // The page's own listeners first, where its main script's were: the ☰
+    // items, the click dispatcher, the keyboard dispatcher. Each runs before
+    // any piece's listener for the same event on the same element, as the
+    // main script's did.
+    page::mount();
+    // The popovers and panels, and the picker's shape: they were the page's
+    // head script's, which ran before the other pieces' code.
     surfaces::mount();
     // Aa and the saved settings next: their records (the `<select>`s) are
     // filled before any piece reads them.
     aa::mount();
     // The selection card, which the reader tells about each chapter, and
-    // the reader, before the rest: boot's chapter is on its way (or in),
-    // and is drawn now.
+    // the reader, before the rest; then boot: its chapter is on its way (or
+    // in, and drawn now, within this call).
     card::mount();
     reader::mount();
+    boot::start();
     // The table of shortcuts, where the page had it.
     bridge::export_shortcuts();
     // The rest in a task of its own, so the chapter is shown (painted, and

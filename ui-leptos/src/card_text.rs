@@ -74,17 +74,6 @@ pub enum Slot {
     Chapter,
 }
 
-impl Slot {
-    /// `selection` or `chapter`, as the page names them.
-    pub fn named(name: &str) -> Option<Self> {
-        match name {
-            "selection" => Some(Self::Selection),
-            "chapter" => Some(Self::Chapter),
-            _ => None,
-        }
-    }
-}
-
 // ---- Markup.
 
 /// The card's actions: Copy, Copy as…, Bookmark, + Add note, the
@@ -768,8 +757,6 @@ mod tests {
         );
         assert!(copy_format("rtf").is_none());
         assert_eq!(copy_failed("denied"), "Couldn't copy: denied");
-        assert_eq!(Slot::named("chapter"), Some(Slot::Chapter));
-        assert_eq!(Slot::named("book"), None);
     }
 
     #[test]

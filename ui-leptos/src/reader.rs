@@ -13,8 +13,9 @@
 //! links.
 //!
 //! The selection card (`card`) hears each chapter loading and shown, and
-//! each passage to select, from here; what's left of the page's reader (the
-//! keyboard and boot) reaches it only as `bridge` says: requests in. A stale answer
+//! each passage to select, from here; boot (`boot`), the keyboard
+//! (`keyboard`), the click dispatcher (`clicks`) and the page's glue
+//! (`page`) ask it for chapters ([`start`], [`ask`]). A stale answer
 //! never overwrites a newer one: each load has its token, as the page's
 //! `loadToken`, each step back or forward its own, and a position is saved
 //! only for a chapter put on screen, in the order they were shown.
@@ -33,13 +34,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{
-    CustomEvent, Element, HtmlElement, HtmlOptionElement, HtmlSelectElement, MouseEvent,
-};
+use web_sys::{Element, HtmlElement, HtmlOptionElement, HtmlSelectElement, MouseEvent};
 
 use crate::aa;
 use crate::bridge;
@@ -51,7 +50,7 @@ use crate::palette::PaletteState;
 use crate::reader_text::{self as text, Disclosure, History, Opened, Place, Which};
 
 /// A load, a jump or a step: whether it put a chapter on screen.
-type Load = Pin<Box<dyn Future<Output = bool>>>;
+pub type Load = Pin<Box<dyn Future<Output = bool>>>;
 
 /// A passage opened: whether it put its chapter on screen, and the verses
 /// the selection card then had selected (`card::select_passage`).
@@ -116,7 +115,7 @@ fn data_number(el: &Element, name: &str) -> Option<i64> {
 
 /// The pane's `#reading-pane-inner`, which says which chapter is on screen
 /// and which are around it (`data-current-*`, `data-prev-*`,
-/// `data-next-*`), as the page's keys read it.
+/// `data-next-*`), as the keys read it (`keyboard`).
 fn pane_inner() -> Option<Element> {
     bridge::document()?.get_element_by_id("reading-pane-inner")
 }
@@ -130,7 +129,7 @@ fn translation_select() -> Option<HtmlSelectElement> {
 
 /// A translation's name, as the translation button's record has it (its
 /// code in capitals if it isn't there).
-fn translation_name(code: &str) -> String {
+pub fn translation_name(code: &str) -> String {
     let options = translation_select().map(|select| select.options());
     options
         .and_then(|options| {
@@ -833,42 +832,32 @@ pub fn palette_facts(state: &mut PaletteState) {
     });
 }
 
-// ---- The page's requests.
+// ---- What boot, the keys, the clicks and the page's glue ask.
 
-/// What the page asks of the reader (`bridge::READER_EVENT`).
-#[derive(Debug, Deserialize)]
-#[serde(
-    tag = "action",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-enum Request {
-    /// Boot's: the translations and the chapter the reader was on, then
-    /// the history from there. The chapter's `get_reading` may already be
-    /// on its way (`detail.reading`, boot's, sent with `get_home`'s answer;
-    /// `null` while comparing), or answered (`detail.answered`).
+/// What the keyboard, the selection card's Go to, an import, the
+/// translation changing and the palette ask of the reader ([`ask`]).
+#[derive(Debug)]
+pub enum Request {
+    /// Boot's ([`start`]): the translations and the chapter the reader was
+    /// on, then the history from there.
     Start { home: Home },
     /// A chapter, not a jump (← and →, an import's position): in
     /// `translation_code`, if given; from the top, with `top`.
     Load {
         book_id: i64,
         chapter: i64,
-        #[serde(default)]
         translation_code: Option<String>,
-        #[serde(default)]
         top: bool,
     },
     /// `[` and `]`: chapter 1 of the book before or after, from the top.
-    Book { which: String },
+    Book { which: Which },
     /// The translation changed: the chapter on screen again, in it.
     Translation,
     /// A jump, recorded in the history (the selection card's Go to).
     Jump {
         book_id: i64,
         chapter: i64,
-        #[serde(default)]
         start: Option<i64>,
-        #[serde(default)]
         end: Option<i64>,
     },
     /// Back (-1) or forward (1).
@@ -877,20 +866,18 @@ enum Request {
     Notice { message: String },
 }
 
-fn on_request(event: CustomEvent) {
-    let request: Request = match bridge::detail(&event) {
-        Ok(request) => request,
-        Err(e) => {
-            ipc::log_error("The reader's request can't be read", &e);
-            return;
-        }
-    };
-    event.prevent_default();
-    let sent = bridge::start_reading(&event);
-    let load = run(request, sent);
-    let done =
-        wasm_bindgen_futures::future_to_promise(async move { Ok(JsValue::from_bool(load.await)) });
-    bridge::reader_done(&event, &done);
+/// Boot's chapter: the translations from `home` (`get_home`'s answer), then
+/// the chapter the reader was on, whose `get_reading` boot may already have
+/// sent (`sent`: on its way, or answered, which is put on screen at once,
+/// within this call), then the history from there. Its end is the load's.
+pub fn start(home: Home, sent: Option<Sent>) -> Load {
+    run(Request::Start { home }, sent)
+}
+
+/// Starts what `request` asks for, now (anything it sends is sent within
+/// this call); its end is the load's: whether a chapter was put on screen.
+pub fn ask(request: Request) -> Load {
+    run(request, None)
 }
 
 /// Starts what `request` asks for, now; its end is the load's. `sent` is
@@ -921,9 +908,6 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
             from_top(load_reading(book_id, chapter), top)
         }
         Request::Book { which } => {
-            let Some(which) = Which::named(&which) else {
-                return Box::pin(async { false });
-            };
             let found = with(|s| {
                 let dto = s.last_dto.as_ref()?;
                 let here = s.reading.as_ref()?;
@@ -988,10 +972,10 @@ fn from_top(load: Load, top: bool) -> Load {
 
 // ---- The pane's own controls.
 
-/// A click in the reading pane on one of the reader's controls. The page's
-/// click handler (on the body too, registered first) has already done what
-/// any click does there (closing the search box and Copy as…) and left
-/// these alone.
+/// A click in the reading pane on one of the reader's controls. The click
+/// dispatcher (`clicks`, on the body too, registered first) has already
+/// done what any click does there (closing the search box and Copy as…)
+/// and left these alone.
 fn on_click(event: &MouseEvent) {
     let Some(target) = event
         .target()
@@ -1069,12 +1053,11 @@ struct CreditArgs<'a> {
     which: &'a str,
 }
 
-/// Listens for the page's requests, Compare's
-/// changes, clicks on the pane's controls and on Try again, and the mouse's
-/// back and forward buttons; then tells the page it's there
-/// (`bridge::READER_READY_EVENT`), so boot's chapter needn't wait for the
-/// other pieces to mount. Called right after Aa's (whose records it fills)
-/// and the selection card's (which it tells about each chapter).
+/// Listens for Compare's changes, clicks on the pane's controls and on Try
+/// again, and the mouse's back and forward buttons. Called right after Aa's
+/// (whose records it fills) and the selection card's (which it tells about
+/// each chapter), and before boot (`boot`), which asks it for the first
+/// chapter at once, so it needn't wait for the other pieces to mount.
 pub fn mount() {
     let Some(document) = bridge::document() else {
         return;
@@ -1088,9 +1071,9 @@ pub fn mount() {
             bridge::show_picker_current(here.book_id, here.chapter);
         }
     });
-    dom::on_document_event(bridge::READER_EVENT, on_request);
     dom::on_document_event(aa::COMPARE_CHANGE_EVENT, |_| on_compare_change());
-    // After the page's own click handler on the body, which ignores these.
+    // After the click dispatcher on the body (`clicks`), which ignores
+    // these.
     if let Some(body) = document.body() {
         dom::on(&body, "click", |event| {
             if let Some(event) = event.dyn_ref::<MouseEvent>() {
@@ -1124,5 +1107,4 @@ pub fn mount() {
             spawn(go_history(step));
         });
     }
-    bridge::reader_ready();
 }

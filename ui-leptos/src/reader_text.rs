@@ -253,14 +253,6 @@ impl Which {
             Self::Next => "next",
         }
     }
-
-    pub fn named(name: &str) -> Option<Self> {
-        match name {
-            "prev" => Some(Self::Prev),
-            "next" => Some(Self::Next),
-            _ => None,
-        }
-    }
 }
 
 /// The chapter's next step, after its last verse: the chapters before and

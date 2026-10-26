@@ -1,9 +1,10 @@
 # ui-leptos: the page's Rust pieces
 
-Gospel Getter's page (`ui/index.html`) is being moved to Rust a piece at a
-time. This crate holds the pieces so far, written with [Leptos] and compiled
-to WebAssembly; they run inside the same Tauri app, next to the page's
-JavaScript, which stays as it is everywhere else. The pieces are the page's
+Gospel Getter's page (`ui/index.html`) has been moved to Rust a piece at a
+time. This crate holds the pieces, written with [Leptos] and compiled to
+WebAssembly; they run inside the same Tauri app. The page keeps only three
+small inline scripts of its own (the pre-paint script, boot's prefetch and
+the plain-text fallback) and the loader. The pieces are the page's
 modal dialogs: Export notes (`src/export_notes.rs`, the first), the
 keyboard shortcuts sheet (`src/shortcuts.rs`), the welcome
 (`src/welcome.rs`), the import preview (`src/import_preview.rs`) and the
@@ -29,16 +30,24 @@ setting, with its rules in `src/aa_text.rs`), which keep the saved settings
 and the picker as the sidebar or the popover; one open at a time, their
 buttons, focus in and back, a click outside, Escape, the menu's keys and
 the window crossing 1200px, with its rules in `src/surfaces_text.rs`),
-which the page's reader reaches through `window.gospelGetterSurfaces`; and
-the reader itself (`src/reader.rs`: each chapter read from the backend and
+and the reader itself (`src/reader.rs`: each chapter read from the backend and
 drawn into the reading pane, with Compare's grid, the chapter's end and its
 Footnotes and Cross references; the reference button, the window title and
 the translation button; the reading position; a chapter that couldn't be
 read, with Try again; and the passage history, Back and Forward, with the
-mouse's buttons; its markup and rules in `src/reader_text.rs`). What's
-left of the page's reader (the selection card, copying, the verses' marks,
-the keyboard and boot) asks it for chapters and hears each one it shows
-(`src/bridge.rs`). The page's `<head>` keeps only its pre-paint script.
+mouse's buttons; its markup and rules in `src/reader_text.rs`); and the
+selection card (`src/card.rs`: the verse selection, Copy and Copy as…, the
+card's bookmark, highlight and notes, the verses' marks and the Shift
+ghost, with its markup and rules in `src/card_text.rs`); and what was the
+page's main script: the keyboard dispatcher (`src/keyboard.rs`, its rules
+in `src/keyboard_text.rs`), the click dispatcher (`src/clicks.rs`), boot
+(`src/boot.rs`, which takes over the `get_home` and `get_reading` the
+page's prefetch script sent from `<head>`) and the page's glue
+(`src/page.rs`, its words and rules in `src/page_text.rs`: the toast,
+Export and Import data…, the welcome, the shortcuts sheet and search
+opened, the palette's page commands, the launch check). What the page's
+remaining scripts share with this, and the events the pieces send each
+other, are in `src/bridge.rs`.
 
 The saved settings' one table, their keys, values and names (in the page
 and in an export file), is `../shared/preferences.rs`, a file the backend
@@ -63,19 +72,20 @@ keeps the two the same.
 - `src/ipc.rs`: Tauri commands through the same global the page uses,
   `window.__TAURI__.core.invoke` (a `wasm_bindgen` extern plus
   `serde-wasm-bindgen`), with the same command names and argument objects.
-- `src/bridge.rs`: everything the Rust side and the page share, in one
-  place: the custom events each way (requests to open with a snapshot in
-  their `detail`, the page's one request to reload the Library's lists;
-  toasts, jumps, refreshes and the lists' answers back), the page globals
-  it calls, and the page controls it uses. The page's half is the short
-  blocks in `ui/index.html` that dispatch and listen for those names.
+- `src/bridge.rs`: what crosses to the page's remaining scripts (boot's
+  prefetch, `gospel-getter:boot`; the loader's
+  `gospel-getter:pieces-failed`, heard by the fallback alone), the globals
+  set for the tests, the custom events the pieces send each other (requests
+  to open with a snapshot in their `detail`, the one request to reload the
+  Library's lists and their answers back), and the page controls they use.
 - `src/dom.rs`: the DOM helpers the pieces share (focus that never
   scrolls, the modals' Tab trap, listening).
 - `src/text.rs`, `src/import_text.rs`, `src/note_text.rs`,
   `src/install.rs`, `src/update_text.rs`, `src/library_text.rs`,
   `src/shortcut_table.rs`, `src/palette.rs`, `src/search_text.rs`,
   `src/picker_text.rs`, `src/aa_text.rs`, `src/surfaces_text.rs`,
-  `src/reader_text.rs`: the
+  `src/reader_text.rs`, `src/card_text.rs`, `src/keyboard_text.rs`,
+  `src/page_text.rs`: the
   pieces' words, numbers and rules (Export notes' filter, the import's
   sentences, the note's length rule, the welcome's fresh-install rule, the
   updater's sentences, `megabytes` and download progress, the Library's
@@ -86,7 +96,10 @@ keeps the two the same.
   size keys; the surfaces' table, the sidebar's rule and the ☰ menu's
   keys; the chapter's markup, byte for byte the page's former templates
   (`fixtures/genesis-1.html` is their output, which a test compares),
-  Compare's rows, the reference, and the passage history's bookkeeping),
+  Compare's rows, the reference, and the passage history's bookkeeping; the
+  card's markup and placement; which key does what, j and k's steps and
+  how far a verse is scrolled into view; the toast's words, Export data…'s
+  summary and Compare's partner),
   free
   of the DOM,
   unit-tested natively
@@ -94,10 +107,13 @@ keeps the two the same.
   (`query::term_marks`, beside the search's own terms); the box only draws
   them. The update check's time limit and its "couldn't reach
   GitHub" message are the backend's (`check_for_update`).
-- `src/lib.rs`: mounts the pieces when the module loads (About and the
-  banner are moved to where the page had them, for focus order, and the
-  Library's tabs and lists into its panel), then tells the page they're
-  listening (`gospel-getter:pieces-ready`).
+- `src/lib.rs`: mounts the pieces when the module loads: the page's own
+  listeners first (`page`, `clicks`, `keyboard`, where the main script's
+  were), then the surfaces, Aa, the card and the reader, then boot (its
+  chapter drawn at once if its answer is in), then the rest in the next task
+  (About and the banner are moved to where the page had them, for focus
+  order, and the Library's tabs and lists into its panel), then tells the
+  pieces every one is listening (`gospel-getter:pieces-ready`).
 
 ## Building and running
 
@@ -119,7 +135,10 @@ run `trunk build` once first.
 The page loads the pieces itself: Trunk inlines `ui/leptos-loader.js` in
 `<head>`, which loads the glue (`ui-leptos.js`) and fetches and compiles the
 module (`ui-leptos_bg.wasm`) while the page loads, then starts it once the
-page's scripts have run (`DOMContentLoaded`). The reader draws the chapter,
+page has been read (`DOMContentLoaded`). Boot's first two commands don't
+wait for it: the prefetch script in `<head>` sends `get_home` as the page
+loads and, with its answer, the chapter's `get_reading` (unless comparing),
+which boot takes over (`gospel-getter:boot`). The reader draws the chapter,
 so the module is started early, and the reader with the first pieces, the
 rest mounting in the next task; the chapter's face is preloaded (its text
 waits for it). Trunk's own loader is an ES module import, which the
@@ -128,22 +147,22 @@ module fails to load, the loader says so (`gospel-getter:pieces-failed`),
 and the page's small inline fallback shows the chapter as plain text: the
 saved position (or Genesis 1), read once, in the saved look (the pre-paint
 script applies it), with the line "This chapter is shown as plain text: the
-rest of the reader isn’t available." Nothing in it can be selected, turned
-or changed. The five dialogs, About, the Library, search, Aa ("Display
-settings aren’t available.") and the translation button's popover
-("Translations aren’t available.") say they are unavailable when asked for,
-and so does the picker ("The book list isn’t available."); no setting can
-be changed (reading mode can't be left), and no update is looked for. The
-module may also load after the page has booted: the chapter, then the
-Library's lists, the welcome's startup question and the launch check wait
-for `gospel-getter:pieces-ready`, and the picker's books are sent again
-then.
+rest of the reader isn’t available." That line is all a reader is told.
+Nothing in the chapter can be selected, turned or changed, and nothing
+else answers: no button, menu or key opens anything or says anything (the
+page has no script left to), no setting can be changed (reading mode can't
+be left), and no update is looked for. The module may also load after the
+page has read: boot's two commands are on their way (or answered) by then,
+and the chapter is drawn as it starts; the Library's lists, the welcome's
+startup question and the launch check are asked again once every piece
+has mounted (`gospel-getter:pieces-ready`), and the picker's books are
+sent again then.
 
 The Content Security Policy allows exactly what this needs beyond the page's
 own code: `'wasm-unsafe-eval'` in `script-src` (compiling WebAssembly) and
 `'self'` in `connect-src` (fetching the module). The glue and the inlined
-loader are covered as the page's scripts are: `'self'` and Tauri's
-build-time hashes.
+loader are covered as the page's three inline scripts are: `'self'` and
+Tauri's build-time hashes.
 
 Size matters: the module is fetched on every launch. The release profile is
 `opt-level = "z"`, `lto`, one codegen unit and `panic = "abort"`, and Trunk
@@ -179,8 +198,10 @@ picker, for its books, a book's chapters, the marks and the focus. `openApp({ le
 when the test calls `app.loadPieces()` (which then waits for the rest of
 boot, the chapter included), and `leptos: false` never, the harness then
 saying they failed as the loader would, so the page shows its plain-text
-fallback (`pieces.test.mjs`); boot waits for the chapter and the Library's
-bookmark list only when the pieces load with the page.
+fallback and nothing else answers (`pieces.test.mjs`); boot's prefetch
+runs either way, as it does in the app, and the harness waits for the
+chapter and the Library's bookmark list only when the pieces load with the
+page.
 
 ## What a shared crate would replace
 

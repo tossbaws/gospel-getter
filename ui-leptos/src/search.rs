@@ -10,10 +10,12 @@
 //!
 //! The panel is the page's (`#search-panel`, whose `hidden` the page reads);
 //! this draws what's inside it and opens and closes it, from its button,
-//! from the page's keys (`bridge::SEARCH_EVENT`), and when a surface opens.
+//! from the keys and a click away (`bridge::SEARCH_EVENT`, `page`), and
+//! when a surface opens.
 //! Opening it closes the surfaces. A result opens as a jump of the reader's
 //! (`reader::open`), a command through its own control or the
-//! page's code (`palette::Run`). Only the latest search's answer shows.
+//! code that was the page's (`palette::Run`, `page`). Only the latest
+//! search's answer shows.
 //!
 //! This is the page's search script (`ui/index.html` at 201ab8f,
 //! `setSearchOpen` to the panel's keydown) in Rust: the same ids, classes,
@@ -762,7 +764,7 @@ impl Search {
 }
 
 /// Runs a command's action: its control, clicked as a reader would, or the
-/// page's code for it.
+/// code that was the page's (`page::run_command`).
 fn run(action: &Run) {
     let click = |id: &str| {
         if let Some(control) = by_id(id) {

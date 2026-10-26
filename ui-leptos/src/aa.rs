@@ -167,19 +167,24 @@ fn choose(select: &HtmlSelectElement, value: &str) {
     sync_aa();
 }
 
-/// The translation compare shows beside the one being read (the page's
-/// `window.gospelGetterComparePartner()`, whose rule is the reader's), if
-/// there's one.
+/// The translation Compare shows beside the one being read
+/// (`page_text::partner`): the one chosen with Aa's "with"
+/// (`html[data-compare-with]`), if it's there and isn't the one being read;
+/// otherwise the KJV, or the WEB beside the KJV; failing those, the first
+/// other. `None` when there's no other.
 pub fn partner() -> Option<String> {
-    let window = web_sys::window()?;
-    let partner =
-        js_sys::Reflect::get(&window, &JsValue::from_str("gospelGetterComparePartner")).ok()?;
-    partner
-        .dyn_into::<js_sys::Function>()
-        .ok()?
-        .call0(&JsValue::NULL)
-        .ok()?
-        .as_string()
+    let codes: Vec<String> = translation_select()
+        .map(|s| {
+            options_of(&s)
+                .iter()
+                .map(HtmlOptionElement::value)
+                .collect()
+        })
+        .unwrap_or_default();
+    let chosen = bridge::document()
+        .and_then(|d| d.document_element())
+        .and_then(|html| html.get_attribute("data-compare-with"));
+    crate::page_text::partner(chosen.as_deref(), &bridge::translation_code(), &codes)
 }
 
 /// Compare's "with": chooses `code`, unless it's already the one.
@@ -504,7 +509,7 @@ fn draw_choices() {
 /// Every display setting as an export file has it, from what's in effect
 /// now: Compare's "with" only once chosen, and only a translation this
 /// install has.
-fn current() -> JsValue {
+pub fn current() -> JsValue {
     let out = js_sys::Object::new();
     let known: Vec<String> = translation_select()
         .map(|s| {

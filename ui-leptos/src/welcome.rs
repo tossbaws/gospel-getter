@@ -1,9 +1,9 @@
 //! The welcome: one card over the open chapter. It opens by itself only on
-//! a fresh install (the page asks at the end of its boot, with what it
-//! loaded; `install` decides), and whenever ☰ → Show welcome is chosen. It
+//! a fresh install (boot asks at its end, with what it loaded; `install`
+//! decides), and whenever ☰ → Show welcome is chosen. It
 //! offers a look (Chi Rho or Vellum, picked through Aa's own control) and a
-//! few places to start reading (the backend's `startHere` list, which the
-//! page hands over). Closing it any way (Skip, ×, Escape, or a place to
+//! few places to start reading (the backend's `startHere` list, which boot
+//! keeps). Closing it any way (Skip, ×, Escape, or a place to
 //! start) records that it has been seen, in local storage beside the
 //! display settings.
 //!
@@ -208,7 +208,7 @@ impl Welcome {
     }
 }
 
-/// The welcome card, mounted once, hidden until the page asks.
+/// The welcome card, mounted once, hidden until it's asked for.
 #[component]
 pub fn WelcomeCard() -> impl IntoView {
     let welcome = Welcome {

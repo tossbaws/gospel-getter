@@ -17,12 +17,14 @@
 //! The reader (`reader`) tells this what it shows: a chapter loading
 //! ([`loading`]) and shown ([`shown`]), a passage to select
 //! ([`select_passage`]) and a Library note to edit ([`edit_note`]). The
-//! page's click and keyboard dispatchers, its boot, its import and its
-//! palette commands ask this for what they need with `bridge::CARD_EVENT`
-//! (see `bridge`): select, extend or clear the selection, copy, bookmark,
-//! highlight, the notes' controls, and what the selection is. The Library
+//! click and keyboard dispatchers (`clicks`, `keyboard`) and the palette's
+//! page commands (`page`) ask this for what they need ([`ask`]): select,
+//! extend or clear the selection, copy, bookmark, highlight and the notes'
+//! controls; they, boot (`boot`) and an import (`page`) read what the
+//! selection is ([`facts`]) and have the highlights and notes reloaded
+//! ([`refresh_highlights`], [`refresh_notes`]). The Library
 //! hands over its bookmarks (`bridge::LIBRARY_LOADED_EVENT`) and has the
-//! highlights refreshed ([`refresh_highlights`]); the note editor opens
+//! highlights refreshed; the note editor opens
 //! from here (`bridge::NOTE_EVENT`), has the notes refreshed
 //! ([`refresh_notes`]) and says what it did (`bridge::NOTE_DONE_EVENT`).
 //!
@@ -1090,7 +1092,7 @@ fn choose_format(format: &str) {
 }
 
 /// Enter and Space choose an item by clicking it, so the copy happens
-/// within that click (the page's click handler asks for it).
+/// within that click (the click dispatcher, `clicks`, asks for it).
 fn on_menu_keydown(menu: &HtmlElement, event: &KeyboardEvent) {
     let items = query_all(menu, ".copy-as-item");
     let len = items.len() as i64;
@@ -2022,40 +2024,42 @@ pub fn palette_facts(state: &mut PaletteState) {
     state.chapter_copy = with(|s| s.copy_chapter.is_some());
 }
 
-// ---- The page's requests (`bridge::CARD_EVENT`).
+// ---- What the click and keyboard dispatchers, boot, an import and the
+// palette ask ([`ask`], [`facts`]).
 
 /// What the card says it is: the chapter it acts on, the selection, and
 /// what the welcome's fresh-install rule counts.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Facts {
-    chapter: Option<ChapterFacts>,
-    selection: Option<SelectionFacts>,
-    bookmarks_loaded: bool,
-    bookmarks: usize,
-    highlights_loaded: bool,
-    highlights: usize,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Facts {
+    pub chapter: Option<ChapterFacts>,
+    pub selection: Option<SelectionFacts>,
+    pub bookmarks_loaded: bool,
+    pub bookmarks: usize,
+    pub highlights_loaded: bool,
+    pub highlights: usize,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ChapterFacts {
-    book_id: i64,
-    translation_code: String,
+/// The chapter the card acts on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChapterFacts {
+    pub book_id: i64,
+    pub translation_code: String,
     /// The verse numbers of the column being read, in the backend's order.
-    numbers: Vec<i64>,
+    pub numbers: Vec<i64>,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SelectionFacts {
-    translation_code: String,
-    anchor: i64,
-    start: i64,
-    end: i64,
+/// The selection: its column, the verse it started from, and its ends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionFacts {
+    pub translation_code: String,
+    pub anchor: i64,
+    pub start: i64,
+    pub end: i64,
 }
 
-fn facts() -> Facts {
+/// What the card is now: what j and k, Export notes and the welcome's
+/// fresh-install rule need.
+pub fn facts() -> Facts {
     with(|s| Facts {
         chapter: s.chapter.as_ref().map(|c| ChapterFacts {
             book_id: c.book_id,
@@ -2079,61 +2083,95 @@ fn facts() -> Facts {
     })
 }
 
-fn element(detail: &JsValue, key: &str) -> Option<HtmlElement> {
-    get(detail, key).dyn_into::<HtmlElement>().ok()
-}
-
-fn number(detail: &JsValue, key: &str) -> Option<i64> {
-    get(detail, key).as_f64().map(|n| n as i64)
-}
-
 fn has_selection() -> bool {
     with(|s| s.selection.is_some())
 }
 
-/// Answers one of the page's requests (`bridge::CARD_EVENT`), within it.
-fn on_request(event: &CustomEvent) {
-    let detail = event.detail();
-    let action = js_text(&get(&detail, "action"));
-    let slot = || {
-        get(&detail, "slot")
-            .as_string()
-            .as_deref()
-            .and_then(Slot::named)
-    };
-    let verse = || {
-        get(&detail, "translationCode")
-            .as_string()
-            .zip(number(&detail, "verse"))
-    };
-    let answer = match action.as_str() {
-        // Copy, and Ctrl+C: the selection, in the first format.
-        "copy" => {
+/// What the click and keyboard dispatchers (`clicks`, `keyboard`) and the
+/// palette's page commands (`page`) ask of the card, each within the click
+/// or key it's for (copying needs that).
+#[derive(Debug, Clone)]
+pub enum Ask {
+    /// Copy, and Ctrl+C: the selection, in the first format.
+    Copy,
+    /// The palette's Copy chapter.
+    CopyChapter,
+    /// Copy as…'s button (or Copy chapter…) clicked: opens it, or closes it
+    /// if it's open for that.
+    CopyAs {
+        slot: Slot,
+        opener: Option<HtmlElement>,
+    },
+    /// Ctrl+Shift+C, and the palette's Copy chapter as…: opens it.
+    CopyAsOpen(Slot),
+    /// One of Copy as…'s formats clicked (Enter and Space click it).
+    CopyFormat(String),
+    /// Any other click: Copy as… closes.
+    CloseCopyMenu,
+    Bookmark,
+    /// A swatch (its colour), or Remove highlight (`None`).
+    Highlight(Option<String>),
+    /// + Add note, or N: the note editor, focus going back to `opener`.
+    Note(Option<HtmlElement>),
+    /// The status line's Undo.
+    Undo,
+    /// A note's Edit.
+    NoteEdit {
+        note_id: String,
+        opener: Option<HtmlElement>,
+    },
+    /// A note's "more" (or "less").
+    NoteMore(HtmlElement),
+    /// The notes' Show all.
+    ShowAll,
+    /// A cross-reference chip: its preview opens or closes in the card.
+    Xref(HtmlElement),
+    /// These verses: a footnote marker's, or j and k's.
+    Select {
+        translation_code: String,
+        anchor: i64,
+        focus: i64,
+    },
+    /// Shift-click on a verse.
+    Extend {
+        translation_code: String,
+        verse: i64,
+    },
+    /// A click on a verse.
+    Toggle {
+        translation_code: String,
+        verse: i64,
+    },
+    /// A click away.
+    Clear,
+    /// Escape with no surface open: the preview, then the selection.
+    Escape,
+}
+
+/// Does what `ask` asks, within the caller's event. Whether there was
+/// something to do it to, where that matters (`Copy`: a selection to copy;
+/// `CopyAsOpen`: whether it could open; `Note`: a selection; `Escape`: a
+/// preview or a selection), else `true`.
+pub fn ask(ask: Ask) -> bool {
+    match ask {
+        Ask::Copy => {
             let selected = has_selection();
             copy_passage(Slot::Selection, "reference");
-            JsValue::from_bool(selected)
+            selected
         }
-        "copy-chapter" => {
+        Ask::CopyChapter => {
             copy_passage(Slot::Chapter, "reference");
-            JsValue::TRUE
+            true
         }
-        // Copy as… clicked: opens, or closes if it's open for that.
-        "copy-as" => {
-            let Some(slot) = slot() else {
-                return;
-            };
+        Ask::CopyAs { slot, opener } => {
             if with(|s| s.menu_for) == Some(slot) {
                 close_menu(true);
             } else {
-                open_menu(slot, element(&detail, "opener"));
+                open_menu(slot, opener);
             }
-            JsValue::TRUE
+            true
         }
-        // Ctrl+Shift+C, and the palette's Copy chapter as…: opens it.
-        "copy-as-open" => {
-            let Some(slot) = slot() else {
-                return;
-            };
+        Ask::CopyAsOpen(slot) => {
             let opener = match slot {
                 Slot::Selection => elements().and_then(|els| {
                     els.actions
@@ -2148,34 +2186,33 @@ fn on_request(event: &CustomEvent) {
             if can {
                 open_menu(slot, opener);
             }
-            JsValue::from_bool(can)
+            can
         }
-        "copy-format" => {
-            choose_format(&js_text(&get(&detail, "format")));
-            JsValue::TRUE
+        Ask::CopyFormat(format) => {
+            choose_format(&format);
+            true
         }
-        "close-copy-menu" => {
+        Ask::CloseCopyMenu => {
             close_menu(false);
-            JsValue::TRUE
+            true
         }
-        "bookmark" => {
+        Ask::Bookmark => {
             spawn_local(toggle_bookmark());
-            JsValue::TRUE
+            true
         }
-        "highlight" => {
-            spawn_local(highlight_selection(get(&detail, "color").as_string()));
-            JsValue::TRUE
+        Ask::Highlight(color) => {
+            spawn_local(highlight_selection(color));
+            true
         }
-        // + Add note, or N (which goes on to other keys without a
-        // selection).
-        "note" => {
+        // N goes on to other keys without a selection.
+        Ask::Note(opener) => {
             let selected = has_selection();
             if selected {
-                open_add_note(element(&detail, "opener"));
+                open_add_note(opener);
             }
-            JsValue::from_bool(selected)
+            selected
         }
-        "undo" => {
+        Ask::Undo => {
             let undo = with(|s| s.undo.clone());
             status("", false);
             if let Some(els) = elements() {
@@ -2184,40 +2221,35 @@ fn on_request(event: &CustomEvent) {
             if let Some(note) = undo {
                 spawn_local(restore_note(note));
             }
-            JsValue::TRUE
+            true
         }
-        // The selection's notes: Edit opens one; "more" shows all of one's
-        // text; "Show all" shows every one.
-        "note-edit" => {
-            let id = js_text(&get(&detail, "noteId"));
+        Ask::NoteEdit { note_id, opener } => {
             let found = with(|s| {
                 let selection = s.selection.as_ref()?;
                 let note = s
                     .selection_notes
                     .iter()
-                    .find(|n| n.note.id.to_string() == id)?;
+                    .find(|n| n.note.id.to_string() == note_id)?;
                 Some((note.raw.clone(), selection.translation_code.clone()))
             });
             if let Some((note, code)) = found {
-                edit(note, &code, element(&detail, "opener"));
+                edit(note, &code, opener);
             }
-            JsValue::TRUE
+            true
         }
-        "note-more" => {
-            if let Some(more) = element(&detail, "button") {
-                let expanded = more.get_attribute("aria-expanded").as_deref() != Some("true");
-                if let Some(body) = more
-                    .get_attribute("aria-controls")
-                    .and_then(|id| by_id(&id))
-                {
-                    toggle_class(&body, "is-expanded", expanded);
-                }
-                let _ = more.set_attribute("aria-expanded", &expanded.to_string());
-                more.set_text_content(Some(if expanded { "less" } else { "more" }));
+        Ask::NoteMore(more) => {
+            let expanded = more.get_attribute("aria-expanded").as_deref() != Some("true");
+            if let Some(body) = more
+                .get_attribute("aria-controls")
+                .and_then(|id| by_id(&id))
+            {
+                toggle_class(&body, "is-expanded", expanded);
             }
-            JsValue::TRUE
+            let _ = more.set_attribute("aria-expanded", &expanded.to_string());
+            more.set_text_content(Some(if expanded { "less" } else { "more" }));
+            true
         }
-        "show-all" => {
+        Ask::ShowAll => {
             with(|s| s.show_all_notes = true);
             render_notes_section();
             if let Some(next) = elements().and_then(|els| {
@@ -2227,44 +2259,43 @@ fn on_request(event: &CustomEvent) {
             }) {
                 focus_scrolling(&next);
             }
-            JsValue::TRUE
+            true
         }
-        // A cross-reference chip in the card shows that passage in the card.
-        "xref" => {
-            if let Some(chip) = element(&detail, "chip") {
-                toggle_preview(chip);
-            }
-            JsValue::TRUE
+        Ask::Xref(chip) => {
+            toggle_preview(chip);
+            true
         }
-        // Verse clicks: a footnote marker's verse, a Shift-click, a click.
-        "select" => {
-            if let (Some(code), Some(anchor), Some(focus)) = (
-                get(&detail, "translationCode").as_string(),
-                number(&detail, "anchor"),
-                number(&detail, "focus"),
-            ) {
-                select_verses(&code, anchor, focus);
-            }
-            JsValue::TRUE
+        Ask::Select {
+            translation_code,
+            anchor,
+            focus,
+        } => {
+            select_verses(&translation_code, anchor, focus);
+            true
         }
-        "extend" => {
-            if let Some((code, n)) = verse() {
-                apply(with(|s| text::extend(s.selection.as_ref(), &code, n)));
-            }
-            JsValue::TRUE
+        Ask::Extend {
+            translation_code,
+            verse,
+        } => {
+            apply(with(|s| {
+                text::extend(s.selection.as_ref(), &translation_code, verse)
+            }));
+            true
         }
-        "toggle" => {
-            if let Some((code, n)) = verse() {
-                apply(with(|s| text::toggle(s.selection.as_ref(), &code, n)));
-            }
-            JsValue::TRUE
+        Ask::Toggle {
+            translation_code,
+            verse,
+        } => {
+            apply(with(|s| {
+                text::toggle(s.selection.as_ref(), &translation_code, verse)
+            }));
+            true
         }
-        "clear" => {
+        Ask::Clear => {
             clear_selection();
-            JsValue::TRUE
+            true
         }
-        // Escape (no surface open): the preview, then the selection.
-        "escape" => {
+        Ask::Escape => {
             let (preview, selected) = with(|s| (s.preview_chip.is_some(), s.selection.is_some()));
             if preview {
                 let in_card = elements().is_some_and(|els| contains_focus(&els.card));
@@ -2272,19 +2303,9 @@ fn on_request(event: &CustomEvent) {
             } else if selected {
                 clear_selection();
             }
-            JsValue::from_bool(preview || selected)
+            preview || selected
         }
-        "state" => ipc::args(&facts()).unwrap_or(JsValue::NULL),
-        // After an import, and at boot: reloaded, a promise of the end.
-        "highlights" => to_promise(Box::pin(refresh_highlights())).into(),
-        "notes" => to_promise(Box::pin(refresh_notes())).into(),
-        _ => {
-            ipc::log_error("The card's request can't be read", &detail);
-            return;
-        }
-    };
-    event.prevent_default();
-    bridge::card_answer(event, &answer);
+    }
 }
 
 // ---- Mounting.
@@ -2380,7 +2401,6 @@ pub fn mount() {
     });
     ELEMENTS.with_borrow_mut(|e| *e = Some(made));
 
-    dom::on_document_event(bridge::CARD_EVENT, |event| on_request(&event));
     dom::on_document_event(bridge::LIBRARY_LOADED_EVENT, |event| {
         on_library_loaded(&event)
     });

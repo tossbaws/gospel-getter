@@ -25,6 +25,7 @@ pub enum Surface {
 
 impl Surface {
     /// Every surface.
+    #[cfg(test)]
     pub const ALL: [Surface; 6] = [
         Surface::Translation,
         Surface::Aa,
@@ -45,11 +46,6 @@ impl Surface {
             Surface::About => "about",
             Surface::Picker => "picker",
         }
-    }
-
-    /// The surface the page calls `name`.
-    pub fn by_name(name: &str) -> Option<Surface> {
-        Surface::ALL.into_iter().find(|s| s.name() == name)
     }
 
     /// Its element's id. About's is this crate's (`about`), made when the
@@ -196,15 +192,6 @@ pub fn scroll_shift(before: f64, after: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_surfaces_by_name() {
-        for surface in Surface::ALL {
-            assert_eq!(Surface::by_name(surface.name()), Some(surface));
-        }
-        assert_eq!(Surface::by_name("search"), None);
-        assert_eq!(Surface::by_name(""), None);
-    }
 
     #[test]
     fn the_surfaces_elements_and_buttons() {

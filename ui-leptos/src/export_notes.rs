@@ -423,7 +423,7 @@ fn inputs(list: &NodeList) -> Vec<HtmlInputElement> {
         .collect()
 }
 
-/// The Export notes dialog, mounted once, hidden until the page asks for it.
+/// The Export notes dialog, mounted once, hidden until it's asked for.
 #[component]
 pub fn ExportNotes() -> impl IntoView {
     let dialog = Dialog::new();
