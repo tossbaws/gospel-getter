@@ -92,7 +92,12 @@ impl Run<'_> {
     }
 
     /// Goes to `reference` through the search box (`/`, the reference,
-    /// Enter), and waits for `heading` to be read.
+    /// Enter), and waits for `heading` to be read in a pane drawn afresh.
+    /// Going to the chapter on screen redraws its pane too, after the
+    /// heading already says it, and the redraw clears the selection: so the
+    /// pane on screen is marked first, and the wait is for one without the
+    /// mark. Nothing done after it (a click, j) lands on a pane about to be
+    /// replaced.
     pub(super) async fn go_to(&self, reference: &str, heading: &str) -> Result<Value> {
         self.plain_reading().await?;
         self.open_search_by_key().await?;
@@ -105,13 +110,22 @@ impl Run<'_> {
                 Vec::new(),
             )
             .await?;
+        self.ui
+            .js(
+                "const inner = document.getElementById('reading-pane-inner');
+                 if (inner) inner.dataset.guiCheckOld = '1'; return null;",
+                Vec::new(),
+            )
+            .await?;
         self.ui.press("press Enter (go there)", Key::Enter).await?;
         self.ui
             .wait_with(
-                &format!("{heading} to be read, the box closed"),
+                &format!("{heading} to be read in a pane drawn afresh, the box closed"),
                 &format!(
                     "const seen = (() => {{ {HERE_JS} }})();
+                     const inner = document.getElementById('reading-pane-inner');
                      return [seen.heading === arguments[0] && seen.title === `${{seen.reference}} — Gospel Getter`
+                         && !!inner && inner.dataset.guiCheckOld === undefined
                          && document.getElementById('search-panel').hidden, seen];"
                 ),
                 vec![json!(heading)],
