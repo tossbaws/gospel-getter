@@ -5,10 +5,10 @@
 # this binary links against, the generated icon set) and there's no
 # placeholder repo URL left. It has NOT been build-tested via `makepkg`
 # and has NOT been submitted to the AUR. `source=` points at the GitHub
-# tag for this pkgver (v$pkgver); it only resolves once that tag has been
-# pushed. Before this can be submitted to the AUR:
+# tag for this version (v$_pkgver); it only resolves once that tag has
+# been pushed. Before this can be submitted to the AUR:
 #
-#   1. Confirm the v$pkgver tag exists on GitHub (it's created as part of
+#   1. Confirm the v$_pkgver tag exists on GitHub (it's created as part of
 #      cutting a GitHub release at this version).
 #   2. Refresh the checksum against that tag (needs network access to
 #      github.com):
@@ -33,7 +33,13 @@
 # normal windowed app that only runs while it's open.
 
 pkgname=gospel-getter
-pkgver=2.18.1
+# The release's own version, as its tag has it (v$_pkgver). pkgver can't
+# hold a '-', so a pre-release drops it and the dots after it
+# (2.19.0-beta.1 is 2.19.0beta1), which vercmp still sorts before the
+# release itself: 2.18.1 < 2.19.0beta1 < 2.19.0. A release has the same
+# version in both.
+_pkgver=2.19.0-beta.1
+pkgver=2.19.0beta1
 pkgrel=1
 pkgdesc="A Bible reader with KJV, BSB and WEB translations, faded surrounding chapters, and quick keyboard navigation"
 arch=('x86_64' 'aarch64')
@@ -42,16 +48,16 @@ license=('MIT')
 depends=('webkit2gtk-4.1' 'gtk3')
 makedepends=('cargo')
 backup=()
-source=("$pkgname-$pkgver.tar.gz::https://github.com/tossbaws/gospel-getter/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP') # replace with `updpkgsums` against the v$pkgver tag; never hand-write
+source=("$pkgname-$_pkgver.tar.gz::https://github.com/tossbaws/gospel-getter/archive/refs/tags/v$_pkgver.tar.gz")
+sha256sums=('SKIP') # replace with `updpkgsums` against the v$_pkgver tag; never hand-write
 
 build() {
-  cd "$pkgname-$pkgver/src-tauri"
+  cd "$pkgname-$_pkgver/src-tauri"
   cargo build --release --locked
 }
 
 package() {
-  cd "$pkgname-$pkgver/src-tauri"
+  cd "$pkgname-$_pkgver/src-tauri"
 
   install -Dm755 target/release/gospel_getter "$pkgdir/usr/bin/gospel_getter"
 
