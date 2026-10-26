@@ -597,6 +597,55 @@ test('resizing across 1200px in Chromium keeps the place seen before it, not the
         assert.deepEqual(app.consoleErrors, []);
     }));
 
+test('resizing across 1200px in Chromium right after a scroll it had no frame for keeps the place scrolled to', () =>
+    withApp({ book: 'John', chapter: 3, width: 1280, chromium: true }, async (app) => {
+        const { window } = app;
+        const root = app.document.documentElement;
+        const layout = scrolledLayout(app);
+        // A verse of John 2, faded beside the chapter and before it in the
+        // page: what Chromium's anchoring keeps in place. At scrollY 3000
+        // it's the first of the reading row under the bar, 20px down.
+        const beside = app.document.querySelector('.chapter-side-prev .verse[data-verse="12"]');
+        const besidePage = { 'wide-sidebar': 3020, 'narrow-sidebar': 3135, 'narrow-popover': 3020 };
+        beside.getBoundingClientRect = () => {
+            const shape = root.dataset.picker === 'sidebar' ? 'sidebar' : 'popover';
+            const top = besidePage[`${layout.width >= 1200 ? 'wide' : 'narrow'}-${shape}`] - layout.y;
+            return { top, bottom: top + 40 };
+        };
+        // The reader sees verse 6, 30px down, and that frame is painted.
+        window.dispatchEvent(new window.Event('scroll'));
+        await frame(app);
+
+        // Scrolled to verse 20, 30px down (scrollY 3000), and the window
+        // narrowed with no frame between: Chromium lays the page out at the
+        // new width and anchors John 2:12, scrolling to 3115. The scroll's
+        // events come after the resize's (its scroll event, with the
+        // anchoring's, then its scrollend), so the position seen as the
+        // resize came is still 0, verse 6's: restored there, the reader
+        // would be back at the top. The scrollend says it's older than the
+        // reader's place, which is found from John 2:12 instead.
+        layout.y = 3115;
+        layout.width = 1000;
+        app.resize(1000, { events: ['resize', 'scroll', 'scrollend'] });
+        assert.equal(root.dataset.picker, undefined);
+        assert.deepEqual(layout.scrolls, [[0, -115]], 'not [[0, -3115]]: back to verse 6');
+        assert.equal(layout.top(20), 30);
+
+        // A scrollend from before the resize's event says nothing: the
+        // place is the one seen, as before.
+        window.dispatchEvent(new window.Event('scroll'));
+        await frame(app);
+        layout.scrolls.length = 0;
+        window.dispatchEvent(new window.Event('scrollend'));
+        layout.width = 1280;
+        layout.y += 115;
+        app.resize(1280, { events: ['resize', 'scroll'] });
+        assert.equal(root.dataset.picker, 'sidebar');
+        assert.deepEqual(layout.scrolls, [[0, -115]]);
+        assert.equal(layout.top(20), 30);
+        assert.deepEqual(app.consoleErrors, []);
+    }));
+
 // ---- The keyboard
 
 test('G opens the picker, but not while typing', async () => {
