@@ -33,10 +33,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 
-use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen_futures::spawn_local;
 use web_sys::{
     CustomEvent, Element, HtmlElement, HtmlOptionElement, HtmlSelectElement, MouseEvent,
 };
@@ -411,9 +411,25 @@ fn load_reading(book_id: i64, chapter: i64) -> Load {
     load_sent(book_id, chapter, None)
 }
 
+/// Boot's `get_reading` for its chapter, sent before this module loaded:
+/// on its way, or already answered (when the page has had the answer by the
+/// time it asks the reader).
+pub enum Sent {
+    Asked(js_sys::Promise),
+    Answered(JsValue),
+}
+
+/// What a load's answers came to: a chapter on screen or not, or (Compare
+/// changed on the way) a reason to ask again.
+enum Outcome {
+    Done(bool),
+    Again,
+}
+
 /// [`load_reading`], with its `get_reading` already sent, if `sent` is (boot
-/// asks for its chapter before this module has loaded).
-fn load_sent(book_id: i64, chapter: i64, sent: Option<js_sys::Promise>) -> Load {
+/// asks for its chapter before this module has loaded). An answer already
+/// in is put on screen now, within the request.
+fn load_sent(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
     let token = with(|s| {
         s.load_token += 1;
         s.load_token
@@ -428,12 +444,29 @@ fn load_sent(book_id: i64, chapter: i64, sent: Option<js_sys::Promise>) -> Load 
             chapter,
             translation_code: &translation_code,
         })
-        .and_then(|args| ipc::send("get_reading", args)),
+        .and_then(|args| ipc::send("get_reading", args))
+        .map(Sent::Asked),
     };
     let compare = is_comparing().then(|| load_compare(book_id, chapter));
+    if let (Ok(Sent::Answered(dto_raw)), None) = (&reading, &compare) {
+        let answer = answered(
+            token,
+            book_id,
+            chapter,
+            translation_code,
+            &layout,
+            dto_raw.clone(),
+            JsValue::NULL,
+        );
+        return match answer {
+            Outcome::Done(loaded) => Box::pin(async move { loaded }),
+            Outcome::Again => load_reading(book_id, chapter),
+        };
+    }
     Box::pin(async move {
         let answer = match reading {
-            Ok(promise) => JsFuture::from(promise).await,
+            Ok(Sent::Asked(promise)) => JsFuture::from(promise).await,
+            Ok(Sent::Answered(dto)) => Ok(dto),
             Err(e) => Err(e),
         };
         let dto_raw = match answer {
@@ -447,60 +480,88 @@ fn load_sent(book_id: i64, chapter: i64, sent: Option<js_sys::Promise>) -> Load 
             Some(promise) => JsFuture::from(promise).await.unwrap_or(JsValue::NULL),
             None => JsValue::NULL,
         };
-        // A newer load has begun: let it win.
-        if with(|s| s.load_token) != token || dto_raw.is_null() || dto_raw.is_undefined() {
-            return false;
-        }
-        // Compare was switched (or its translations changed) on the way:
-        // what came back is for the old layout, so it's asked for again.
-        if compare_layout() != layout {
-            return load_reading(book_id, chapter).await;
-        }
-        let dto: Reading = match serde_wasm_bindgen::from_value(dto_raw.clone()) {
-            Ok(dto) => dto,
-            Err(e) => {
-                failed(token, &JsValue::from(e.to_string()), book_id, chapter);
-                return false;
-            }
-        };
-        let compare = if compare_raw.is_null() {
-            None
-        } else {
-            match serde_wasm_bindgen::from_value::<Compare>(compare_raw.clone()) {
-                Ok(compare) => Some(compare),
-                Err(e) => {
-                    ipc::log_error("Failed to load comparison", &JsValue::from(e.to_string()));
-                    None
-                }
-            }
-        };
-        let here = Here {
-            book_id: dto.current_book_id,
-            book_name: dto.current_book_name.clone(),
-            chapter: dto.current_chapter,
-            translation_code: translation_code.clone(),
-        };
-        let compared = compare.is_some();
-        with(|s| {
-            s.last_dto = Some((Rc::new(dto), dto_raw));
-            if let Some(compare) = compare {
-                s.last_compare = Some((Rc::new(compare), compare_raw));
-            }
-            s.reading = Some(here.clone());
-        });
-        show_notice(if is_comparing() && !compared {
-            text::COMPARE_FAILED
-        } else {
-            ""
-        });
-        render_current();
-        save_position(Position {
-            book_id: here.book_id,
-            chapter: here.chapter,
+        let answer = answered(
+            token,
+            book_id,
+            chapter,
             translation_code,
-        });
-        true
+            &layout,
+            dto_raw,
+            compare_raw,
+        );
+        match answer {
+            Outcome::Done(loaded) => loaded,
+            Outcome::Again => load_reading(book_id, chapter).await,
+        }
     })
+}
+
+/// A load's answers (the reading, and the comparison or `null`), sent with
+/// `token` in the translation `translation_code` for the layout `layout`:
+/// put on screen, and the position saved, unless a newer load has begun,
+/// the chapter isn't there, or Compare changed on the way.
+fn answered(
+    token: u64,
+    book_id: i64,
+    chapter: i64,
+    translation_code: String,
+    layout: &str,
+    dto_raw: JsValue,
+    compare_raw: JsValue,
+) -> Outcome {
+    // A newer load has begun: let it win.
+    if with(|s| s.load_token) != token || dto_raw.is_null() || dto_raw.is_undefined() {
+        return Outcome::Done(false);
+    }
+    // Compare was switched (or its translations changed) on the way: what
+    // came back is for the old layout, so it's asked for again.
+    if compare_layout() != layout {
+        return Outcome::Again;
+    }
+    let dto: Reading = match serde_wasm_bindgen::from_value(dto_raw.clone()) {
+        Ok(dto) => dto,
+        Err(e) => {
+            failed(token, &JsValue::from(e.to_string()), book_id, chapter);
+            return Outcome::Done(false);
+        }
+    };
+    let compare = if compare_raw.is_null() {
+        None
+    } else {
+        match serde_wasm_bindgen::from_value::<Compare>(compare_raw.clone()) {
+            Ok(compare) => Some(compare),
+            Err(e) => {
+                ipc::log_error("Failed to load comparison", &JsValue::from(e.to_string()));
+                None
+            }
+        }
+    };
+    let here = Here {
+        book_id: dto.current_book_id,
+        book_name: dto.current_book_name.clone(),
+        chapter: dto.current_chapter,
+        translation_code: translation_code.clone(),
+    };
+    let compared = compare.is_some();
+    with(|s| {
+        s.last_dto = Some((Rc::new(dto), dto_raw));
+        if let Some(compare) = compare {
+            s.last_compare = Some((Rc::new(compare), compare_raw));
+        }
+        s.reading = Some(here.clone());
+    });
+    show_notice(if is_comparing() && !compared {
+        text::COMPARE_FAILED
+    } else {
+        ""
+    });
+    render_current();
+    save_position(Position {
+        book_id: here.book_id,
+        chapter: here.chapter,
+        translation_code,
+    });
+    Outcome::Done(true)
 }
 
 /// A load that failed: logged, and, unless a newer one has begun, said.
@@ -817,7 +878,7 @@ enum Request {
     /// Boot's: the translations and the chapter the reader was on, then
     /// the history from there. The chapter's `get_reading` may already be
     /// on its way (`detail.reading`, boot's, sent with `get_home`'s answer;
-    /// `null` while comparing).
+    /// `null` while comparing), or answered (`detail.answered`).
     Start { home: Home },
     /// A chapter, not a jump (← and →, an import's position): in
     /// `translation_code`, if given; from the top, with `top`.
@@ -857,11 +918,7 @@ fn on_request(event: CustomEvent) {
         }
     };
     event.prevent_default();
-    // Adopted, so any promise will do (one from another realm, say).
-    let sent = js_sys::Reflect::get(&event.detail(), &JsValue::from_str("reading"))
-        .ok()
-        .filter(|reading| !reading.is_null() && !reading.is_undefined())
-        .map(|reading| js_sys::Promise::resolve(&reading));
+    let sent = bridge::start_reading(&event);
     let load = run(request, sent);
     let done =
         wasm_bindgen_futures::future_to_promise(async move { Ok(JsValue::from_bool(load.await)) });
@@ -869,8 +926,8 @@ fn on_request(event: CustomEvent) {
 }
 
 /// Starts what `request` asks for, now; its end is the load's. `sent` is
-/// boot's `get_reading`, already on its way.
-fn run(request: Request, sent: Option<js_sys::Promise>) -> Load {
+/// boot's `get_reading`, already on its way, or answered.
+fn run(request: Request, sent: Option<Sent>) -> Load {
     match request {
         Request::Start { home } => {
             show_translations(&home);
@@ -1081,11 +1138,14 @@ pub fn mount() {
     let Some(document) = bridge::document() else {
         return;
     };
-    // About is mounted after this: it gets its credits again once every
-    // piece is.
+    // About and the picker are mounted after this: they hear its credits
+    // and the chapter on screen again once every piece is.
     dom::on_document_event(bridge::READY_EVENT, |_| {
-        let credits = with(|s| s.credits.clone());
+        let (credits, here) = with(|s| (s.credits.clone(), s.reading.clone()));
         send_credits(&credits);
+        if let Some(here) = here {
+            bridge::show_picker_current(here.book_id, here.chapter);
+        }
     });
     dom::on_document_event(bridge::READER_EVENT, on_request);
     dom::on_document_event(bridge::VERSE_MARKUP_EVENT, on_markup);

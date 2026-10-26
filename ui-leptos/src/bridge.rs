@@ -52,8 +52,8 @@
 //!   with `home`, `get_home`'s answer: the translations, then the chapter
 //!   the reader was on, then the history from there, and `reading`, that
 //!   chapter's `get_reading` already sent by boot, a promise, or `null`
-//!   while comparing; asked again on [`READER_READY_EVENT`] if nobody
-//!   answered), `load` (`{ bookId, chapter,
+//!   while comparing, with `answered` (`{ dto }`) once it has answered; asked
+//!   again on [`READER_READY_EVENT`] if nobody answered), `load` (`{ bookId, chapter,
 //!   translationCode, top }`: ← and →, by `#reading-pane-inner`'s
 //!   `data-prev-*` and `data-next-*`, and an import's position), `book`
 //!   (`{ which }`, `prev` or `next`: `[` and `]`), `translation`
@@ -109,7 +109,8 @@
 //!   editor on it (as `list_all_notes` gave it).
 //! - [`PICKER_CURRENT_EVENT`] (`gospel-getter:picker-current`): `{ bookId,
 //!   chapter }`, sent within this crate by the reader each time it puts a
-//!   chapter on screen: the picker marks it and shows its book's chapters.
+//!   chapter on screen, and again on [`READY_EVENT`] (the picker mounts after
+//!   the reader): the picker marks it and shows its book's chapters.
 //! - [`ABOUT_CREDITS_EVENT`] (`gospel-getter:about-credits`): `{ credits }`,
 //!   each bundled translation's credit for About, sent within this crate by
 //!   the reader from boot's answer, and again on [`READY_EVENT`] (About
@@ -966,6 +967,25 @@ pub const PICKER_SHOWN_EVENT: &str = "gospel-getter:picker-shown";
 /// `{ action, ... }` (`reader::Request`). The reader cancels it to say it
 /// has it, and sets `detail.done` ([`reader_done`]).
 pub const READER_EVENT: &str = "gospel-getter:reader";
+
+/// Boot's `get_reading` a `start` [`READER_EVENT`] carries: answered
+/// (`detail.answered`, `{ dto }`, when the page has had the answer by then),
+/// or on its way (`detail.reading`, a promise, adopted so any will do, one
+/// from another realm too), or neither (`null`, while comparing).
+pub fn start_reading(event: &CustomEvent) -> Option<crate::reader::Sent> {
+    let detail = event.detail();
+    let present = |value: &JsValue| !value.is_null() && !value.is_undefined();
+    let answered = js_sys::Reflect::get(&detail, &JsValue::from_str("answered")).ok();
+    if let Some(answered) = answered.filter(present) {
+        let dto =
+            js_sys::Reflect::get(&answered, &JsValue::from_str("dto")).unwrap_or(JsValue::NULL);
+        return Some(crate::reader::Sent::Answered(dto));
+    }
+    js_sys::Reflect::get(&detail, &JsValue::from_str("reading"))
+        .ok()
+        .filter(present)
+        .map(|reading| crate::reader::Sent::Asked(js_sys::Promise::resolve(&reading)))
+}
 
 /// Answers a [`READER_EVENT`]: `detail.done = done`, a promise of whether a
 /// chapter was put on screen.

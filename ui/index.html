@@ -5631,9 +5631,12 @@
                 const reading = isComparing()
                     ? null
                     : invoke('get_reading', { bookId: home.currentBookId, chapter: home.currentChapter, translationCode: code });
-                // A failure is the reader's to say, once it's there.
-                if (reading) reading.catch(() => {});
-                const ask = () => askReader({ action: 'start', home, reading });
+                // Its answer, once it's in, goes with the request, so the
+                // reader can put it on screen at once; a failure is the
+                // reader's to say, once it's there.
+                let answered = null;
+                if (reading) reading.then((dto) => { answered = { dto }; }, () => {});
+                const ask = () => askReader({ action: 'start', home, reading, answered });
                 const asked = ask();
                 if (asked) return asked;
                 return new Promise((resolve) => {
