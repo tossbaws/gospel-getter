@@ -181,6 +181,41 @@ pub fn scroll_read_at(anchors: bool, before_resize: Option<f64>, now: f64) -> f6
     }
 }
 
+/// The scroll position the page had before Chromium's scroll anchoring
+/// scrolled it for a resize, found from where its anchor is now. Chromium
+/// keeps the first heading or verse of the reading row that reaches below
+/// the bar (`bar_bottom`, its scroll padding) where it was on screen: the
+/// faded chapter beside first, as it comes first in the page. Of the
+/// row's marks (`painted`: each one's top and bottom in the painted page,
+/// in order; `now`: each one's top and bottom on screen now, none if it's
+/// gone), it's the first on screen now (above `height`) that, scrolled
+/// back to where it was, is the first to reach below the bar. Chromium
+/// scrolls by whole pixels, so it can be half a pixel off where it was.
+/// None if no mark is.
+pub fn scroll_before_anchoring(
+    bar_bottom: f64,
+    height: f64,
+    painted: &[(f64, f64)],
+    now: &[Option<(f64, f64)>],
+) -> Option<f64> {
+    let first_at = |y: f64| first_below(bar_bottom, painted.iter().map(|&(_, bottom)| bottom - y));
+    painted
+        .iter()
+        .zip(now)
+        .enumerate()
+        .find_map(|(index, (&(page_top, _), now))| {
+            let &(top, bottom) = now.as_ref()?;
+            if bottom <= bar_bottom || top >= height {
+                return None;
+            }
+            let y = page_top - top;
+            [y, y - 0.5, y + 0.5]
+                .into_iter()
+                .any(|at| first_at(at) == Some(index))
+                .then_some(y)
+        })
+}
+
 /// How far to scroll to put back a mark that was `before` px down the
 /// screen and now is `after`: nothing if it hasn't moved (or a box gave no
 /// number).
@@ -331,6 +366,51 @@ mod tests {
         assert_eq!(scroll_read_at(false, Some(2000.0), 2115.0), 2115.0);
         // No resize seen: now.
         assert_eq!(scroll_read_at(true, None, 2115.0), 2115.0);
+    }
+
+    #[test]
+    fn the_scroll_before_chromium_anchored_after_a_scroll_it_hadnt_seen() {
+        // The reading row by page position, as painted at 1280px with the
+        // sidebar: Psalms 118:22 (faded, beside: it comes first), then
+        // Psalms 119:31 to 33; the bar ends 54.4px down the screen.
+        let painted = [
+            (2024.1, 2093.3),
+            (1915.1, 1972.2),
+            (1980.2, 2037.3),
+            (2045.3, 2102.4),
+        ];
+        // Scrolled to 2000 with no frame before the window narrowed to
+        // 1000px: Chromium kept 118:22 24.3px down and scrolled to 2115.
+        // Laid out narrower, 119:33 is now 215px down.
+        let now = [
+            Some((24.3, 93.5)),
+            Some((-180.0, -120.0)),
+            Some((-110.0, -50.0)),
+            Some((215.0, 280.0)),
+        ];
+        let y = scroll_before_anchoring(54.4, 681.0, &painted, &now).unwrap();
+        assert!((y - 1999.8).abs() < 1e-9, "{y}");
+        // There, the reader's place is 119:33, 45.5px down.
+        let main = &painted[1..];
+        let (index, top) = place_at(54.4, main, y).unwrap();
+        assert_eq!(index, 2);
+        assert!((top - 45.5).abs() < 1e-9, "{top}");
+
+        // A mark on screen now that wasn't the first below the bar where
+        // it says the page was isn't the anchor: 119:33 alone says 1830.3,
+        // where 118:22 was first.
+        let alone = [None, None, None, Some((215.0, 280.0))];
+        assert_eq!(scroll_before_anchoring(54.4, 681.0, &painted, &alone), None);
+        // Chromium scrolls by whole pixels: a verse that ended 0.2px below
+        // the bar, kept 0.3px higher and taller now, still says 2000.3.
+        let edge = [(1990.0, 2054.6)];
+        let y = scroll_before_anchoring(54.4, 681.0, &edge, &[Some((-10.3, 80.0))]).unwrap();
+        assert!((y - 2000.3).abs() < 1e-9, "{y}");
+        assert_eq!(first_below(54.4, [edge[0].1 - y]), None);
+        // Below the window, or nothing painted: none.
+        let below = [Some((700.0, 760.0)), None, None, None];
+        assert_eq!(scroll_before_anchoring(54.4, 681.0, &painted, &below), None);
+        assert_eq!(scroll_before_anchoring(54.4, 681.0, &[], &[]), None);
     }
 
     #[test]
