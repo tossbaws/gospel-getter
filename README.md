@@ -308,14 +308,15 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.18.0?** Each updates itself to 2.18.1: it
+**Coming from 2.6.0 through 2.18.1?** Each updates itself to 2.19.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
-update themselves.
+update themselves. The 2.19.0 pre-release updates itself to 2.19.0 the
+same way.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.18.1 by hand once, from the
+Install 2.19.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -383,9 +384,10 @@ so it seeds again.
 ## How it's put together
 
 - **Two parts:** `src-tauri/` is the Rust backend (Tauri 2, `sqlx`/SQLite),
-  and `ui/index.html` is the whole frontend in plain HTML, CSS and
-  JavaScript, with no framework or build step. The frontend calls typed
-  Tauri commands, not HTTP.
+  and the frontend is built in Rust too: `ui-leptos/` (Leptos, compiled to
+  WebAssembly), which [Trunk](https://trunkrs.dev) builds with
+  `ui/index.html`, the page's markup and styles, into `dist/`. The
+  frontend calls typed Tauri commands, not HTTP.
 - **Data model:** book structure is shared between translations, but each
   translation keeps its own verse text and numbering. They number a few
   verses differently, which is expected; the BSB leaves 16 verses

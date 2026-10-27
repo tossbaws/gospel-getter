@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Capture the landing page's screenshots from the real app UI.
 
-Loads the real ui/index.html in WebKitGTK (the engine the Linux app uses),
-offscreen, and answers its Tauri `invoke` calls with the app's real command
+Loads the real page as Trunk builds it (dist/: ui/index.html with its Rust
+pieces, from `trunk build --release`) in WebKitGTK (the engine the Linux app
+uses), offscreen, and answers its Tauri `invoke` calls with the app's real command
 code and the real bundled KJV, BSB and WEB text, through the same test-only bridge
 the frontend tests use (src-tauri/examples/frontend_bridge.rs, against a
 throwaway database). Each scene sets the display preferences the app keeps
@@ -10,6 +11,7 @@ in local storage, then drives the page's own controls with DOM events, as
 the frontend tests do. Nothing is drawn over or composited in.
 
 Usage, from the repository root:
+    trunk build --release
     cargo build --manifest-path src-tauri/Cargo.toml --example frontend_bridge
     PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py --all
     PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py OUT_DIR [--theme NAME] [SCENE ...]
@@ -453,7 +455,7 @@ def capture(out_dir, *, readme, theme, only=()):
     into `out_dir`."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    server = serve(str(ROOT / "ui"))
+    server = serve(str(ROOT / "dist"))
     with tempfile.TemporaryDirectory() as tmp:
         bridge = Bridge(Path(tmp) / "gospel_getter.db")
         capturer = Capturer(out_dir, f"http://127.0.0.1:{server.server_port}/index.html", bridge,
