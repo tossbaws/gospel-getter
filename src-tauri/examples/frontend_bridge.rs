@@ -14,10 +14,14 @@
 //!
 //! Updates can't be checked or installed here either (they need the real
 //! app and GitHub), so a test scripts them with `__set_update`: what
-//! `check_for_update` answers (no update, an update, or a problem) and what
-//! `install_update` does (the progress events it sends, then a restart,
-//! which never answers, or a problem). Problems answer with the app's own
-//! messages (`updater::check_message` and `install_message`). Progress
+//! `check_for_update` answers (no update, an update, a problem, or nothing
+//! at all: `{ noAnswer: true }`) and what `install_update` does (the
+//! progress events it sends, then a restart, which never answers, or a
+//! problem). The check runs under the app's own time limit
+//! (`updater::within_check_time`, 20 s), which `checkTimeoutMs` shortens,
+//! so a check that never answers is given up on as the app gives it up.
+//! Problems answer with the app's own messages (`updater::check_message`
+//! and `install_message`). Progress
 //! events are written as their own lines, `{"id": 1, "channel": "onEvent",
 //! "message": ...}`, before the answer, as a Tauri `Channel` delivers them.
 //!
@@ -374,8 +378,19 @@ async fn dispatch(
         }
         "check_for_update" => {
             let script = update_script()?;
-            match script.get("check") {
+            let limit = script
+                .get("checkTimeoutMs")
+                .and_then(Value::as_u64)
+                .map_or(updater::CHECK_TIMEOUT, std::time::Duration::from_millis);
+            let answer = match script.get("check") {
                 None | Some(Value::Null) => Ok(Value::Null),
+                Some(check) if check.get("noAnswer") == Some(&Value::Bool(true)) => {
+                    return Ok(updater::within_check_time(
+                        limit,
+                        std::future::pending::<Result<Value, String>>(),
+                    )
+                    .await);
+                }
                 Some(check) => match check.get("problem").and_then(Value::as_str) {
                     Some(name) => Err(updater::check_message(problem(name)?).to_string()),
                     None => {
@@ -388,11 +403,12 @@ async fn dispatch(
                         Ok(to_value(info)?)
                     }
                 },
-            }
+            };
+            updater::within_check_time(limit, async move { answer }).await
         }
         // Opening a browser is the system's job; the call itself is what
         // the tests check.
-        "open_download_page" | "open_release_notes" => Ok(Value::Null),
+        "open_download_page" | "open_release_notes" | "open_support_page" => Ok(Value::Null),
         // The app's own table decides which keys open anything.
         "open_credit_link" => {
             let which: String = arg(args, "which")?;

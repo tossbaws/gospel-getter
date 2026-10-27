@@ -19,7 +19,13 @@ import { JSDOM } from 'jsdom';
 
 const root = new URL('../../', import.meta.url);
 const site = new URL('site/', root);
-const VERSION = JSON.parse(readFileSync(new URL('src-tauri/tauri.conf.json', root), 'utf8')).version;
+// The site never shows a pre-release: the Website workflow and its gate
+// (tools/release/site_version_gate.py) ignore them, so a pre-release's
+// site shows the release it leads to (2.19.0-beta.1's shows 2.19.0). That
+// can merge safely: the gate holds any deploy whose version isn't
+// published yet.
+const VERSION = JSON.parse(readFileSync(new URL('src-tauri/tauri.conf.json', root), 'utf8'))
+    .version.replace(/[-+].*$/, '');
 const REPO = 'https://github.com/tossbaws/gospel-getter';
 const DOWNLOAD = `${REPO}/releases/latest/download/`;
 

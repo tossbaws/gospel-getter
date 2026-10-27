@@ -1,4 +1,6 @@
 target/
+# Trunk's output: the built page (see Trunk.toml).
+dist/
 **/*.rs.bck
 .env
 .env.*

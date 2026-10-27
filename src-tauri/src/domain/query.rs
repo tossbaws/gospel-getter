@@ -194,6 +194,57 @@ pub fn search_terms(input: &str) -> Vec<String> {
     terms
 }
 
+/// Where `terms` (a text search's, as [`search_terms`] gives them) are in a
+/// verse's `text`, to be marked in its result: the byte ranges of the
+/// words of `text` that are one of them, in order. A word is a run of
+/// letters, digits and private-use characters, as SQLite's FTS5 tokenizer
+/// splits the text it indexes (`db::search`), and two words are the same
+/// if they are once decomposed (NFD), without their marks, and lowercased.
+/// Every word is looked at, so a term marks each place it is in the verse.
+/// This is the one rule for it: the page draws the marks where it says.
+pub fn term_marks(text: &str, terms: &[String]) -> Vec<(usize, usize)> {
+    let wanted: Vec<String> = terms.iter().map(|t| folded(t)).collect();
+    let mut marks = Vec::new();
+    let mut start = None;
+    for (i, c) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), ' ')))
+    {
+        let in_word = i < text.len() && word_char(c);
+        match (start, in_word) {
+            (None, true) => start = Some(i),
+            (Some(from), false) => {
+                if wanted.contains(&folded(&text[from..i])) {
+                    marks.push((from, i));
+                }
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    marks
+}
+
+/// A character words are made of: a letter, a digit or a private-use
+/// character (`\p{L}`, `\p{N}`, `\p{Co}`).
+fn word_char(c: char) -> bool {
+    use unicode_properties::{GeneralCategory, GeneralCategoryGroup, UnicodeGeneralCategory};
+    matches!(
+        c.general_category_group(),
+        GeneralCategoryGroup::Letter | GeneralCategoryGroup::Number
+    ) || c.general_category() == GeneralCategory::PrivateUse
+}
+
+/// `word` decomposed (NFD), without its marks, lowercased.
+fn folded(word: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
+    word.nfd()
+        .filter(|c| c.general_category_group() != GeneralCategoryGroup::Mark)
+        .collect::<String>()
+        .to_lowercase()
+}
+
 /// Split off a trailing chapter/verse specification: the longest run at the
 /// end of `input` made only of digits, separators and spaces, starting at a
 /// digit. Returns `(book part, spec)`; the spec is empty when there's none.
@@ -520,6 +571,39 @@ mod tests {
         assert_eq!(interpret("", &books), Interpretation::Empty);
         assert_eq!(interpret("   ", &books), Interpretation::Empty);
         assert_eq!(interpret("!?\u{2014}", &books), Interpretation::Empty);
+    }
+
+    #[test]
+    fn term_marks_find_each_word_a_term_is() {
+        let text = "And now abideth faith, hope, charity, these three; but the greatest of these is charity.";
+        let terms = search_terms("Charity faith");
+        let marked: Vec<&str> = term_marks(text, &terms)
+            .into_iter()
+            .map(|(from, to)| &text[from..to])
+            .collect();
+        assert_eq!(marked, ["faith", "charity", "charity"]);
+        // Whole words only: "these" isn't "the", nor "greatest" "great".
+        assert_eq!(term_marks(text, &search_terms("the great")), [(55, 58)]);
+        assert!(term_marks(text, &[]).is_empty());
+        assert!(term_marks("", &search_terms("love")).is_empty());
+    }
+
+    #[test]
+    fn term_marks_fold_case_and_accents_and_keep_the_texts_bytes() {
+        // "Élie" typed plainly; the verse's own letters stay as they are.
+        let text = "Élie dit: «Ô Éternel!» ÉLIE.";
+        let marks = term_marks(text, &search_terms("elie eternel"));
+        let marked: Vec<&str> = marks.iter().map(|&(from, to)| &text[from..to]).collect();
+        assert_eq!(marked, ["Élie", "Éternel", "ÉLIE"]);
+        // A decomposed accent is a mark, not part of a word, as in the
+        // index: "e\u{301}" is "e" and an accent, so "elie" isn't there.
+        assert!(term_marks("e\u{301}lie", &search_terms("elie")).is_empty());
+        assert_eq!(term_marks("e\u{301}lie", &search_terms("lie")), [(3, 6)]);
+        // Digits are words too.
+        assert_eq!(
+            term_marks("Psalm 23, verse 1", &search_terms("23")),
+            [(6, 8)]
+        );
     }
 
     #[test]

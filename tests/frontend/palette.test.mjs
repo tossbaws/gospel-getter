@@ -194,6 +194,14 @@ test('commands match word prefixes, in any order, ignoring case', () =>
         assert.deepEqual(commandLabels(app), []);
     }));
 
+test('accents are ignored in what’s typed, as case is', () =>
+    withApp({}, async (app) => {
+        await type(app, 'thème ma');
+        assert.deepEqual(commandLabels(app), ['Theme: Matrix']);
+        await type(app, '>RÉADING MÖDE');
+        assert.deepEqual(commandLabels(app), ['Reading mode']);
+    }));
+
 test('commands show their keys', () =>
     withApp({}, async (app) => {
         await type(app, '>');

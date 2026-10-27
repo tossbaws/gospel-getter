@@ -264,7 +264,11 @@ release AppImage and adds a launcher and icon to your desktop.
 changing the code. You'll need Rust and the Tauri CLI
 (`cargo install tauri-cli --version "^2.0.0" --locked`).
 
-**Run from source.** `cd src-tauri && cargo tauri dev`.
+**Run from source.** `cd src-tauri && cargo tauri dev`. The page's Rust
+pieces (`ui-leptos/`, compiled to WebAssembly) are built first by
+[Trunk](https://trunkrs.dev): you'll need it (`cargo install trunk --locked`)
+and the target (`rustup target add wasm32-unknown-unknown`). See
+`ui-leptos/README.md`.
 
 **Arch Linux.** `packaging/PKGBUILD` is a draft. It hasn't been tested with
 `makepkg` and is **not published to the AUR**; the file lists what's left
@@ -417,8 +421,10 @@ so it seeds again.
 
 ```bash
 # From the repository root; each line runs on its own.
+trunk build --release                          # the page, into dist/ (the backend embeds it)
+(cd ui-leptos && cargo test)                   # the page's Rust pieces: their pure logic
 (cd src-tauri && cargo test)                   # backend: database, upgrades, search, references
-(cd tests/frontend && npm ci && npm test)      # frontend behavior
+(cd tests/frontend && npm ci && npm test)      # frontend behavior (builds the page itself)
 ```
 
 The frontend tests load the real `ui/index.html` into jsdom and answer its

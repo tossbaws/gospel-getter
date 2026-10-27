@@ -148,16 +148,16 @@ test('the color filter shows one color at a time, says when it has none, and is 
     await withApp({ book: 'John', chapter: 3, translation: 'kjv', keepBookmarks: true }, async (app) => {
         app.openLibrary('highlights');
         const before = app.calls.length;
-        app.click(filterButton(app, 'Green'));
+        await app.click(filterButton(app, 'Green'));
         assert.equal(app.calls.length, before, 'filtering needs no backend call');
         assert.deepEqual(summary(app), [`John 3:16${EN}17 Green`, 'Romans 8:28 Green']);
         assert.deepEqual(filterButtons(app).filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent), ['Green']);
 
-        app.click(filterButton(app, 'Pink'));
+        await app.click(filterButton(app, 'Pink'));
         assert.deepEqual(summary(app), ['John 3:18 Pink']);
 
         for (const color of ['yellow', 'blue']) {
-            app.click(filterButton(app, color[0].toUpperCase() + color.slice(1)));
+            await app.click(filterButton(app, color[0].toUpperCase() + color.slice(1)));
             assert.deepEqual(items(app), []);
             assert.equal(emptyText(app), `No ${color} highlights.`);
         }
@@ -168,7 +168,7 @@ test('the color filter shows one color at a time, says when it has none, and is 
         await clickAndWait(app, swatch(app, 'blue'), 'list_highlight_passages');
         assert.deepEqual(summary(app), ['John 3:1 Blue']);
 
-        app.click(filterButton(app, 'All'));
+        await app.click(filterButton(app, 'All'));
         assert.equal(items(app).length, 4);
         app.click(filterButton(app, 'Pink'));
         storage = app.storage();

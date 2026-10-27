@@ -190,7 +190,7 @@ test('a file from a newer version is refused clearly', () =>
         await clickData(app, 'import-data-btn', path);
         const invalid = () => el(app, 'import-invalid').textContent;
         assert.match(invalid(), /made by a newer version of Gospel Getter \(data format 4\)\. This version reads format 3; update Gospel Getter to import it\. Nothing was changed\.$/);
-        app.key('Escape', {}, el(app, 'import-cancel'));
+        await app.key('Escape', {}, el(app, 'import-cancel'));
         assert.ok(!overlayOpen(app), 'Escape closes it');
         const garbage = writeFile('this is not json');
         await clickData(app, 'import-data-btn', garbage);

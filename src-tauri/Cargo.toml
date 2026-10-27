@@ -1,6 +1,6 @@
 [package]
 name = "gospel_getter"
-version = "2.18.1"
+version = "2.19.0-beta.1"
 description = "Read the Bible, book by book, chapter by chapter"
 license = "MIT"
 repository = "https://github.com/tossbaws/gospel-getter"
@@ -15,6 +15,15 @@ rust-version = "1.94"
 [lib]
 name = "gospel_getter_lib"
 path = "src/lib.rs"
+
+# Off in every build but one. `gui-test-updater` is the GUI checks' test
+# build (scripts/gui-check.sh, tests/gui): its updater reads where to check,
+# with which key, in which mode and how long to wait from a test settings
+# file (`updater/test_hook.rs`), accepts the checks' plain-HTTP server, and
+# never installs what it downloads. No release, installer or packaging build
+# enables it; tests/packaging_config.rs fails if one does.
+[features]
+gui-test-updater = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -39,6 +48,11 @@ semver = "1"
 # from, and its date presets go to, the frontend as "YYYY-MM-DD"); the rest
 # of chrono's defaults aren't needed.
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
+# The words a search matched, marked in its results (`query::term_marks`):
+# letters, digits and private-use characters (general categories), compared
+# decomposed (NFD) without their marks. Both were already in the tree.
+unicode-normalization = "0.1.25"
+unicode-properties = { version = "0.1.4", default-features = false, features = ["general-category"] }
 
 # Desktop only: the in-app updater, and opening the releases page in the
 # system browser for builds that can't update themselves. See `updater.rs`.

@@ -1,7 +1,8 @@
 // About Gospel Getter, from the ☰ menu: the app's name, the version it
 // reports about itself (which must be the one tauri.conf.json declares),
-// Updates, and a Release notes link to that version's release page, which
-// the backend opens. The version line stays quietly empty, and the link
+// Updates, a Release notes link to that version's release page, and a
+// Support Gospel Getter link to the Ko-fi page, both of which the backend
+// opens. The version line stays quietly empty, and the Release notes link
 // hidden, if the version can't be read.
 
 import { after, test } from 'node:test';
@@ -27,6 +28,7 @@ async function withApp(options, body) {
 const $ = (app, id) => app.document.getElementById(id);
 const versionLine = (app) => $(app, 'app-version');
 const link = (app) => $(app, 'release-notes-link');
+const supportLink = (app) => $(app, 'support-link');
 
 test(`About shows the icon, the name and "Version ${VERSION}", as a modal like the import dialog`, () =>
     withApp({}, async (app) => {
@@ -77,6 +79,40 @@ test('a release page that can’t be opened says so', () =>
         assert.equal($(app, 'release-notes-status').textContent, 'Couldn’t open the release notes in your browser.');
     }));
 
+test('the Support Gospel Getter link is the Ko-fi page, opened by the backend', () =>
+    withApp({}, async (app) => {
+        await app.idle(0, 'get_app_version');
+        app.open('about');
+        const support = supportLink(app);
+        assert.equal(support.hidden, false);
+        assert.equal(support.textContent, 'Support Gospel Getter');
+        assert.equal(support.getAttribute('href'), 'https://ko-fi.com/crcllc');
+        assert.ok(support.closest('#about-panel .about-links'), 'among About’s links');
+
+        const before = app.calls.length;
+        const click = new app.window.MouseEvent('click', { bubbles: true, cancelable: true });
+        support.dispatchEvent(click);
+        assert.ok(click.defaultPrevented, 'the page doesn’t navigate itself');
+        await app.idle(before, 'open_support_page');
+        // Called once, with no URL from the page: the backend opens its own.
+        const calls = app.calls.slice(before).filter((c) => c.cmd === 'open_support_page');
+        assert.equal(calls.length, 1);
+        assert.deepEqual(Object.keys(calls[0].args), []);
+        assert.equal($(app, 'support-status').textContent, '');
+        assert.equal(app.surface('about').hidden, false, 'About stays open');
+    }));
+
+test('a Support Gospel Getter page that can’t be opened says so', () =>
+    withApp({ failing: { open_support_page: 'Couldn’t open the link in your browser.' } }, async (app) => {
+        await app.idle(0, 'get_app_version');
+        app.open('about');
+        const before = app.calls.length;
+        app.click(supportLink(app));
+        await app.idle(before, 'open_support_page');
+        assert.equal($(app, 'support-status').textContent, 'Couldn’t open the link in your browser.');
+        assert.equal($(app, 'support-status').hidden, false);
+    }));
+
 test('Check now in About works, and About keeps the keyboard while open', () =>
     withApp({}, async (app) => {
         await app.idle(0, 'get_app_version');
@@ -87,7 +123,8 @@ test('Check now in About works, and About keeps the keyboard while open', () =>
         assert.equal($(app, 'update-check-status').textContent, `Gospel Getter ${VERSION} is the latest version.`);
 
         // Modal: Tab wraps, shortcuts wait, the page behind can't be clicked away to.
-        const last = link(app);
+        // Support Gospel Getter is About's last control.
+        const last = supportLink(app);
         last.focus();
         assert.ok(app.key('Tab', {}, last).defaultPrevented);
         assert.equal(app.document.activeElement, $(app, 'about-close'));

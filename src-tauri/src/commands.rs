@@ -23,6 +23,7 @@ use crate::domain::kjv_markup::{PartKind, VerseText};
 use crate::domain::query::{self, Interpretation};
 use crate::notes_export::NotesFilter;
 use crate::passage_copy::{self, CopyFormat};
+use crate::passage_reference::passage_reference;
 use crate::reader_data::{
     self, BookmarkRecord, HighlightRecord, NewBookmark, NewPosition, NoteRecord, PositionRecord,
     Preferences, ReaderData, ValidatedImport,
@@ -944,15 +945,6 @@ fn verse_list(runs: &[(i64, i64)]) -> String {
         .join(", ")
 }
 
-/// "John 3", "John 3:16" or "John 3:16–18".
-fn passage_reference(book_name: &str, chapter: i64, verses: Option<(i64, i64)>) -> String {
-    match verses {
-        None => format!("{book_name} {chapter}"),
-        Some((first, last)) if first == last => format!("{book_name} {chapter}:{first}"),
-        Some((first, last)) => format!("{book_name} {chapter}:{first}\u{2013}{last}"),
-    }
-}
-
 fn translation_name(state: &AppState, translation_id: i64) -> &str {
     state
         .translations
@@ -1316,6 +1308,9 @@ pub struct NoteDto {
     /// Plain text, as the reader wrote it (trimmed).
     pub body: String,
     pub created_at: String,
+    /// The day it was written, as the app shows it ("Oct 9, 2026", in the
+    /// reader's time zone; see `notes_export::stored_date`).
+    pub created_at_display: String,
     pub updated_at: String,
 }
 
@@ -1334,6 +1329,7 @@ fn note_dto(state: &AppState, note: Note) -> NoteDto {
         verse_start: note.verse_start,
         verse_end: note.verse_end,
         body: note.body,
+        created_at_display: crate::notes_export::stored_date(&note.created_at, &chrono::Local),
         created_at: note.created_at,
         updated_at: note.updated_at,
     }
@@ -1538,6 +1534,9 @@ pub struct SearchResultDto {
     pub reference: String,
     /// The verse's plain text (see `VerseText`), the text search covers.
     pub text: String,
+    /// The words of `text` the search matched, to be marked: byte ranges
+    /// `[start, end)` into its UTF-8, in order (`query::term_marks`).
+    pub marks: Vec<(usize, usize)>,
 }
 
 /// A book typed by name alone: its first chapter, to go to.
@@ -1677,16 +1676,20 @@ async fn text_search(
     let code = code_of(state, translation_id);
     let results = hits
         .into_iter()
-        .map(|h| SearchResultDto {
-            reference: passage_reference(
-                book_name(state, h.book_id).unwrap_or("?"),
-                h.chapter,
-                Some((h.verse, h.verse)),
-            ),
-            book_id: h.book_id,
-            chapter: h.chapter,
-            verse: h.verse,
-            text: VerseText::new(code, &h.text).text,
+        .map(|h| {
+            let text = VerseText::new(code, &h.text).text;
+            SearchResultDto {
+                reference: passage_reference(
+                    book_name(state, h.book_id).unwrap_or("?"),
+                    h.chapter,
+                    Some((h.verse, h.verse)),
+                ),
+                book_id: h.book_id,
+                chapter: h.chapter,
+                verse: h.verse,
+                marks: query::term_marks(&text, &terms),
+                text,
+            }
         })
         .collect();
     Ok(SearchDto::Text {
@@ -3290,6 +3293,11 @@ mod tests {
             "And now abideth faith, hope, charity, these three; but the greatest of these is \
              charity."
         );
+        // Each word the search matched, where it is in that text.
+        assert_eq!(
+            cor["marks"],
+            serde_json::json!([[16, 21], [23, 27], [29, 36], [80, 87]])
+        );
 
         let first = run_search(&state, "love", Some("web"), 0).await.unwrap();
         let second = run_search(&state, "love", Some("web"), SEARCH_PAGE_SIZE)
@@ -3504,6 +3512,17 @@ mod tests {
                 note.body.as_str()
             ),
             ("John 3:16\u{2013}18", "John", "<i>Not</i> markup.")
+        );
+        // The day it was written, as the app shows it, from the stored
+        // timestamp in the reader's time zone.
+        assert_eq!(
+            note.created_at_display,
+            crate::notes_export::display_date(crate::notes_export::local_date(
+                chrono::DateTime::parse_from_rfc3339(&note.created_at)
+                    .unwrap()
+                    .to_utc(),
+                &chrono::Local,
+            ))
         );
         let listed = notes_overlapping(&state, at(17, 17)).await.unwrap();
         assert_eq!(listed[0].id, note.id);

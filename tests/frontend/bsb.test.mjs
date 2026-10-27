@@ -166,7 +166,7 @@ test('Copy, the note panel and previews use the BSB’s text without its markers
         await app.copyButton();
         assert.equal(app.clipboardWrites.at(-1), `${storedVerse('bsb', 'Genesis', 1, 3)} ${EM} Genesis 1:3 (BSB)`);
 
-        app.click(app.actions().querySelector('.verse-note-btn'));
+        await app.click(app.actions().querySelector('.verse-note-btn'));
         const quote = el(app, 'note-passage');
         assert.equal(quote.querySelectorAll('.fn-marker').length, 0);
         assert.equal(quote.textContent, `3${storedVerse('bsb', 'Genesis', 1, 3)}`);

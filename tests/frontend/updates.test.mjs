@@ -543,75 +543,40 @@ test('a build that can’t update itself offers the download page in About', () 
         assert.equal(app.calls.filter((c) => c.cmd === 'install_update').length, 0);
     }));
 
-// Fake timers for the update check's 20-second limit: the page's timers of
-// 20 s or more wait until `fire` runs them; shorter ones run as usual.
-function longTimers() {
-    const waiting = [];
-    return {
-        waiting,
-        setUp(window) {
-            const { setTimeout: set, clearTimeout: clear } = window;
-            window.setTimeout = (fn, ms, ...args) => {
-                if (ms < 20000) return set.call(window, fn, ms, ...args);
-                waiting.push({ fn, ms, args });
-                return -waiting.length;
-            };
-            window.clearTimeout = (id) => {
-                if (id < 0) waiting[-id - 1].cleared = true;
-                else clear.call(window, id);
-            };
-        },
-        fire() {
-            for (const timer of waiting) {
-                if (timer.cleared || timer.fired) continue;
-                timer.fired = true;
-                timer.fn(...timer.args);
-            }
-        },
-    };
-}
+// The update check's 20-second limit is the backend's (check_for_update
+// gives up as offline: updater::within_check_time, which the bridge runs
+// too). A check scripted never to answer, with the limit shortened, shows
+// what the reader sees when it runs out.
+const NO_ANSWER = { check: { noAnswer: true }, checkTimeoutMs: 300 };
 
-test('Check now gives up after 20 seconds with no answer, and says GitHub couldn’t be reached', () => {
-    const timers = longTimers();
-    return withApp({ update: { check: FOUND }, storage: { 'gospel-getter-update-check': 'off' }, setUp: timers.setUp }, async (app) => {
+test('Check now gives up when GitHub doesn’t answer in time (20 seconds), and says GitHub couldn’t be reached', () =>
+    withApp({ update: NO_ANSWER, storage: { 'gospel-getter-update-check': 'off' } }, async (app) => {
         app.open('about');
-        const release = app.holdCommand('check_for_update');
         const button = $(app, 'update-check-btn');
+        const before = app.calls.length;
         app.click(button);
         assert.equal(checkStatus(app).textContent, 'Checking for updates…');
-        assert.deepEqual(timers.waiting.map((t) => t.ms), [20000]);
-        timers.fire();
-        await app.until(() => checkStatus(app).textContent === OFFLINE, 'the timeout');
+        assert.equal(button.disabled, true, 'one check at a time');
+        await app.idle(before, 'check_for_update');
+        assert.equal(checkStatus(app).textContent, OFFLINE);
         assert.ok(checkStatus(app).classList.contains('is-error'));
         assert.equal(button.disabled, false, 'Check now can be tried again');
-
-        // The answer coming after all changes nothing.
-        release();
-        await app.idle(0, 'check_for_update');
-        assert.equal(checkStatus(app).textContent, OFFLINE);
         assert.equal(aboutUpdate(app).hidden, true);
         assert.equal(banner(app).hidden, true);
 
-        // A check that answers in time clears its timer.
+        // A check that answers in time shows what it found.
+        await setUpdate({ check: FOUND });
         await click(app, button, 'check_for_update');
         assert.equal(aboutUpdate(app).hidden, false);
-        assert.ok(timers.waiting.every((t) => t.cleared || t.fired));
-    });
-});
+    }));
 
-test('the check at startup gives up after 20 seconds too, saying nothing', () => {
-    const timers = longTimers();
-    return withApp({ update: { check: FOUND }, hold: ['check_for_update'], setUp: timers.setUp }, async (app) => {
-        await app.until(() => timers.waiting.length === 1, 'the startup check');
-        timers.fire();
-        await app.idle();
-        app.release('check_for_update');
+test('the check at startup gives up in time too, saying nothing', () =>
+    withApp({ update: NO_ANSWER }, async (app) => {
         await app.idle(0, 'check_for_update');
         assert.equal(banner(app).hidden, true, 'no banner from a check given up on');
         assert.equal(checkStatus(app).textContent, '');
         assert.deepEqual(app.consoleErrors, []);
-    });
-});
+    }));
 
 test('Check now during an install from the banner leaves the banner and its progress showing', () =>
     withApp({

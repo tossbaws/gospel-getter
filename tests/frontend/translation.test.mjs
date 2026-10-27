@@ -117,7 +117,7 @@ test('T opens and closes it, focus going to the chosen translation and back to t
         const row = app.window.gospelGetterShortcuts.find((s) => s.id === 'translation');
         assert.deepEqual([...row.handles], ['t', 'T']);
         assert.equal(row.aria, button(app).getAttribute('aria-keyshortcuts'));
-        app.key('?', { shiftKey: true });
+        await app.key('?', { shiftKey: true });
         const sheetRow = app.document.querySelector('#shortcuts-panel .shortcut-row[data-shortcut="translation"]');
         assert.equal(sheetRow.textContent.replace(/\s+/g, ' ').trim(), 'T Open or close the translations and Compare');
         app.key('Escape', {}, app.document.activeElement);

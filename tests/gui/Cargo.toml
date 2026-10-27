@@ -1,0 +1,19 @@
+[package]
+name = "gui-check"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Gospel Getter's GUI smoke checks: drive the real app through tauri-driver (WebDriver)"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+# The updater checks' own update server (src/update_server.rs): a signing
+# key made for each run, and the signature as the app reads it (base64).
+base64 = "0.22"
+minisign = "0.7"
+serde_json = "1"
+# Only the WebDriver client over plain HTTP to tauri-driver on 127.0.0.1:
+# no driver manager (downloads), no TLS, no Chrome DevTools.
+thirtyfour = { version = "0.37.8", default-features = false, features = ["reqwest"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "fs", "net", "io-util"] }

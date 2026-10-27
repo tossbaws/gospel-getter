@@ -1,7 +1,8 @@
-// Loads the real ui/index.html into jsdom, runs its scripts, and answers
-// its Tauri `invoke` calls with the app's real command logic and a real
-// SQLite database, through `src-tauri/examples/frontend_bridge.rs` (built
-// by `npm test` before the tests run). Each test file gets one bridge
+// Loads the real ui/index.html into jsdom, runs its scripts and its Rust
+// pieces (ui-leptos/, compiled to WebAssembly by Trunk, see `loadLeptos`),
+// and answers its Tauri `invoke` calls with the app's real command logic
+// and a real SQLite database, through `src-tauri/examples/frontend_bridge.rs`
+// (both built by `npm test` before the tests run). Each test file gets one bridge
 // process and its own disposable database; each test resets the bookmarks
 // and reading position first. The clipboard is a stub that can succeed,
 // fail, or be missing; get_reading can be made to fail, or (for escaping
@@ -24,6 +25,16 @@ const root = new URL('../../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
 
 const HTML = read('ui/index.html');
+
+// The page's Rust pieces, as Trunk built them into dist/ (`npm test` runs
+// `trunk build` first): the wasm-bindgen glue, a classic script
+// (no-modules), and the module. jsdom runs no module scripts and has no
+// fetch, so the page's own loader (ui/leptos-loader.js) can't run here; the
+// harness runs the glue itself and hands it the bytes, where the loader
+// hands it a URL. The same files the app serves, so the tests see what it
+// ships.
+const LEPTOS_GLUE = read('dist/ui-leptos.js');
+const LEPTOS_WASM = readFileSync(new URL('dist/ui-leptos_bg.wasm', root));
 
 // The bundled translation files: the exact strings the seed step stores.
 // Tests compare what the page shows and copies against these, so they're
@@ -140,10 +151,12 @@ export async function backend(cmd, args = {}, channels = {}) {
 
 /**
  * Scripts updates for the next calls (until the next openApp): `check` is
- * null (no update), an update ({ version, notes, date, canSelfUpdate }) or
- * { problem }; `install` is { events, problem } (no problem: it restarts,
- * and never answers). Problems are the app's: offline, noReleaseInfo,
- * notForThisInstall, notVerified, notAuthorized, other.
+ * null (no update), an update ({ version, notes, date, canSelfUpdate }),
+ * { problem } or { noAnswer: true } (given up on after the app's own time
+ * limit, which `checkTimeoutMs` shortens); `install` is { events, problem }
+ * (no problem: it restarts, and never answers). Problems are the app's:
+ * offline, noReleaseInfo, notForThisInstall, notVerified, notAuthorized,
+ * other.
  */
 export function setUpdate(script) {
     return backend('__set_update', script);
@@ -211,6 +224,12 @@ export async function openApp({
     alter = {},
     // Called with the page's window before its scripts run (fake timers).
     setUp = () => {},
+    // The page's Rust pieces: loaded at once (as the app usually has them
+    // by the end of boot), not until the test calls `app.loadPieces()`
+    // ('late': after boot, as on a slow start; the chapter comes with
+    // them), or never (false: as when the WebAssembly fails to load, which
+    // the page's loader then says).
+    leptos = true,
 } = {}) {
     await backend('__reset', fresh
         ? { translationCode: translation, keepBookmarks }
@@ -312,6 +331,9 @@ export async function openApp({
     });
     const { window } = dom;
     const document = window.document;
+    if (leptos === true) await loadLeptos(window);
+    // Without them, the page's loader says they failed, as in the app.
+    if (leptos === false) document.dispatchEvent(new window.CustomEvent('gospel-getter:pieces-failed'));
     const SELECTABLE = '.chapter-main .verse[data-translation]';
 
     const app = {
@@ -320,6 +342,16 @@ export async function openApp({
         calls,
         clipboardWrites,
         consoleErrors: errors,
+        /**
+         * Loads the page's Rust pieces now (with `leptos: 'late'`), and
+         * waits for what they let go on (the rest of boot: the chapter, the
+         * Library's lists, the welcome, the launch check).
+         */
+        async loadPieces() {
+            await loadLeptos(window);
+            await settle();
+            await app.idle();
+        },
         /** The page's local storage, to carry into the next openApp (a restart). */
         storage() {
             const out = {};
@@ -504,18 +536,23 @@ export async function openApp({
         heading() {
             return document.querySelector('.chapter-heading').textContent;
         },
+        /**
+         * Clicks `el` (mousedown, mouseup, click). Returns the mousedown
+         * event, which can also be awaited: see `flushed`.
+         */
         click(el, opts = {}) {
             const init = { bubbles: true, cancelable: true, button: 0, ...opts };
             const down = new window.MouseEvent('mousedown', init);
             el.dispatchEvent(down);
             el.dispatchEvent(new window.MouseEvent('mouseup', init));
             el.dispatchEvent(new window.MouseEvent('click', init));
-            return down;
+            return flushed(down);
         },
+        /** Presses `key` on `target`. Returns the keydown event, which can also be awaited: see `flushed`. */
         key(key, opts = {}, target = document.body) {
             const event = new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...opts });
             target.dispatchEvent(event);
-            return event;
+            return flushed(event);
         },
         type(input, text) {
             input.value = text;
@@ -538,13 +575,48 @@ export async function openApp({
         },
     };
 
-    // The chapter, or the notice saying it couldn't be read.
-    await until(() => document.getElementById('reading-pane-inner') || app.notice(), 'reading pane');
+    // The chapter, or the notice saying it couldn't be read (or, without
+    // the pieces, that it's shown as plain text). Pieces that load late draw
+    // the chapter then.
+    if (leptos !== 'late') {
+        await until(() => document.getElementById('reading-pane-inner') || app.notice(), 'reading pane');
+    }
     // Boot loads the bookmark list, then the highlights; wait for all of
-    // it to finish.
-    await until(() => document.querySelector('#bookmark-list li'), 'bookmark list');
+    // it to finish. The list is the Rust pieces' (the Library), so there is
+    // none to wait for without them.
+    if (leptos === true) await until(() => document.querySelector('#bookmark-list li'), 'bookmark list');
     await app.idle();
     return app;
+}
+
+/**
+ * Runs the page's Rust pieces in `window`, as the page's loader does in the
+ * app: the glue as a classic script, then the module, which mounts them.
+ * `wasm_bindgen` is the glue's top-level binding, and the options object
+ * has to be the window's own (the glue tells it from the bytes by its
+ * prototype), so the call is made from inside the window.
+ */
+async function loadLeptos(window) {
+    const script = window.document.createElement('script');
+    script.textContent = LEPTOS_GLUE;
+    window.document.head.append(script);
+    await window.eval('(bytes) => wasm_bindgen({ module_or_path: bytes })')(LEPTOS_WASM);
+}
+
+/**
+ * The event `app.click` or `app.key` dispatched, which can also be awaited:
+ * `await app.click(el)` resolves to it once the page's pending DOM updates
+ * have flushed. The page's scripts update the DOM within the click or key
+ * itself; its Rust pieces update it after the current task, so a test that
+ * looks at them right after a click or key awaits it. Not awaited, it is
+ * the event, as before.
+ */
+function flushed(event) {
+    event.then = (resolve, reject) => {
+        delete event.then;
+        settle().then(() => resolve(event), reject);
+    };
+    return event;
 }
 
 export async function settle() {

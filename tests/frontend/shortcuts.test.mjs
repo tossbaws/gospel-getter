@@ -25,7 +25,7 @@ test('? opens the sheet, not search; Escape closes it, focus going back', () =>
     withApp({}, async (app) => {
         const toggle = app.document.getElementById('search-toggle');
         toggle.focus();
-        const event = app.key('?', { shiftKey: true }, toggle);
+        const event = await app.key('?', { shiftKey: true }, toggle);
         assert.ok(event.defaultPrevented, '? is never typed anywhere');
         assert.ok(isOpen(app));
         assert.equal(app.searchPanel().hidden, true, 'not search');
@@ -34,7 +34,7 @@ test('? opens the sheet, not search; Escape closes it, focus going back', () =>
         assert.equal(app.document.getElementById(panel(app).getAttribute('aria-labelledby')).textContent, 'Keyboard shortcuts');
         assert.equal(app.document.activeElement, app.document.getElementById('shortcuts-close'));
 
-        const esc = app.key('Escape', {}, app.document.activeElement);
+        const esc = await app.key('Escape', {}, app.document.activeElement);
         assert.ok(esc.defaultPrevented);
         assert.ok(!isOpen(app));
         assert.equal(app.document.activeElement, toggle);
@@ -47,7 +47,7 @@ test('? opens the sheet, not search; Escape closes it, focus going back', () =>
 
 test('the sheet lists every shortcut in its groups, with key caps', () =>
     withApp({}, async (app) => {
-        app.key('?', { shiftKey: true });
+        await app.key('?', { shiftKey: true });
         const groups = [...panel(app).querySelectorAll('.shortcut-group')];
         assert.deepEqual(groups.map((g) => g.querySelector('h3').textContent), ['Reading', 'Selection', 'Search & palette', 'Panels', 'Text & display', 'History']);
         for (const g of groups) assert.equal(app.document.getElementById(g.getAttribute('aria-labelledby')), g.querySelector('h3'));
@@ -86,7 +86,7 @@ test('the palette’s key hints come from the same table', () =>
 
 test('Tab stays in the sheet, and the reader’s keys wait while it’s open', () =>
     withApp({ book: 'John', chapter: 3 }, async (app) => {
-        app.key('?', { shiftKey: true });
+        await app.key('?', { shiftKey: true });
         const close = app.document.getElementById('shortcuts-close');
         const body = app.document.getElementById('shortcuts-body');
         assert.equal(body.tabIndex, 0, 'the list scrolls by keyboard');
@@ -105,7 +105,7 @@ test('Tab stays in the sheet, and the reader’s keys wait while it’s open', (
         assert.equal(app.heading(), 'John 3');
         assert.ok(isOpen(app));
 
-        app.click(close);
+        await app.click(close);
         assert.ok(!isOpen(app));
     }));
 
@@ -115,7 +115,7 @@ test('☰ → Keyboard shortcuts opens it, and closing returns to ☰; so does t
         const item = app.document.getElementById('shortcuts-btn');
         assert.equal(item.getAttribute('role'), 'menuitem');
         assert.equal(item.getAttribute('aria-keyshortcuts'), '?');
-        app.click(item);
+        await app.click(item);
         assert.ok(isOpen(app));
         assert.ok(app.surface('menu').hidden, 'the menu closes');
         app.key('Escape', {}, app.document.activeElement);
@@ -129,6 +129,6 @@ test('☰ → Keyboard shortcuts opens it, and closing returns to ☰; so does t
         assert.ok(isOpen(app));
         assert.equal(app.searchPanel().hidden, true);
         // A click on the dimmed page closes it.
-        app.click(overlay(app));
+        await app.click(overlay(app));
         assert.ok(!isOpen(app));
     }));

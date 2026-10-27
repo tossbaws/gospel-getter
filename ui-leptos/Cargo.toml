@@ -1,0 +1,73 @@
+[package]
+name = "ui-leptos"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Gospel Getter's Leptos pieces: Rust compiled to WebAssembly, living beside the page's JavaScript"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+leptos = { version = "0.8.22", features = ["csr"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "AddEventListenerOptions",
+    "console",
+    "CssStyleDeclaration",
+    "CustomEvent",
+    "CustomEventInit",
+    "Document",
+    "DomRect",
+    "DomRectList",
+    "DomStringMap",
+    "DomTokenList",
+    "Element",
+    "Event",
+    "EventInit",
+    "EventTarget",
+    "FocusOptions",
+    "HtmlDetailsElement",
+    "HtmlButtonElement",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlOptionElement",
+    "HtmlOptionsCollection",
+    "HtmlParagraphElement",
+    "HtmlProgressElement",
+    "HtmlSelectElement",
+    "HtmlTextAreaElement",
+    "HtmlUListElement",
+    "KeyboardEvent",
+    "MediaQueryList",
+    "MouseEvent",
+    "Node",
+    "NodeList",
+    "ResizeObserver",
+    "Selection",
+    "Storage",
+    "Window",
+] }
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+# The palette's word matching (`palette::fold_word`, `words_of`), as the
+# page's: decomposed (NFD) without marks, split at what isn't a letter or a
+# digit (general categories).
+unicode-properties = { version = "0.1.4", default-features = false, features = ["general-category"] }
+console_error_panic_hook = "0.1"
+
+# Natively (the tests) only: in the webview the palette decomposes words
+# with the engine's own `normalize` (`palette::decomposed`).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+unicode-normalization = "0.1.25"
+
+# Size first: the .wasm ships inside the app and is fetched on every launch.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"

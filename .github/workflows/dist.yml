@@ -8,6 +8,18 @@ name: Distribution Artifacts
 # main (a release's installers come from the run on its release commit),
 # on every pull request, and by hand (workflow_dispatch).
 #
+# Then the GUI checks (scripts/gui-check.sh, tests/gui) drive the built
+# app through its own webview with tauri-driver: gui-linux on the AppImage
+# for every run, advisory (not a required check); gui-windows on the NSIS
+# install only by hand (workflow_dispatch) or for a pull request from a
+# release/ branch, before a release. Their updater checks run on the GUI
+# checks' test build of the app (feature gui-test-updater: its updater
+# reads a test settings file, talks to the checks' own local server, and
+# never installs), which each job builds after its installers are uploaded,
+# into an artifact of its own (gui-check-test-app-*). It is never an
+# installer and never released; tests/packaging_config.rs fails if any
+# installer or packaging build enables the feature.
+#
 # This workflow never creates a GitHub release, tag, or otherwise publishes
 # anything — it only produces downloadable workflow-run artifacts, so a
 # human can review real installers before anything goes out the door.
@@ -55,6 +67,16 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          # The page's Rust pieces (ui-leptos/) compile to WebAssembly.
+          targets: wasm32-unknown-unknown
+
+      # `cargo tauri build` runs Trunk first (build.beforeBuildCommand in
+      # tauri.conf.json) to build the page into dist/.
+      - name: Install Trunk
+        uses: jetli/trunk-action@v0.5.1
+        with:
+          version: "v0.21.14"
 
       # webkit2gtk/gtk3 headers to build against, plus the bundling
       # toolchain: patchelf (rpath rewriting), libfuse2 (AppImages are
@@ -70,7 +92,9 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            ui-leptos
 
       - name: Decide on updater signing
         id: signing
@@ -199,6 +223,23 @@ jobs:
             ${{ steps.artifacts.outputs.deb_sig }}
           if-no-files-found: error
 
+      # Last, after the installers above are uploaded: the GUI checks' test
+      # build (see the top of this file), for gui-linux's updater checks.
+      - name: Build the GUI-check test app
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --features gui-test-updater
+          mkdir -p "$RUNNER_TEMP/gui-check-test-app"
+          cp target/release/gospel_getter "$RUNNER_TEMP/gui-check-test-app/"
+
+      - name: Upload the GUI-check test app
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-check-test-app-linux
+          path: ${{ runner.temp }}/gui-check-test-app
+          if-no-files-found: error
+          retention-days: 7
+
   windows:
     name: Windows (NSIS installer)
     runs-on: windows-latest
@@ -210,11 +251,23 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          # The page's Rust pieces (ui-leptos/) compile to WebAssembly.
+          targets: wasm32-unknown-unknown
+
+      # `cargo tauri build` runs Trunk first (build.beforeBuildCommand in
+      # tauri.conf.json) to build the page into dist/.
+      - name: Install Trunk
+        uses: jetli/trunk-action@v0.5.1
+        with:
+          version: "v0.21.14"
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            ui-leptos
 
       - name: Decide on updater signing
         id: signing
@@ -352,3 +405,227 @@ jobs:
             ${{ steps.artifacts.outputs.msi }}
             ${{ steps.artifacts.outputs.msi_sig }}
           if-no-files-found: error
+
+      # Last, after the installers above are uploaded, and only when
+      # gui-windows runs: the GUI checks' test build (see the top of this
+      # file), for its updater checks.
+      - name: Build the GUI-check test app
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+        shell: pwsh
+        run: |
+          cargo build --release --locked --features gui-test-updater
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/gui-check-test-app" | Out-Null
+          Copy-Item target/release/gospel_getter.exe "$env:RUNNER_TEMP/gui-check-test-app/"
+
+      - name: Upload the GUI-check test app
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-check-test-app-windows
+          path: ${{ runner.temp }}/gui-check-test-app
+          if-no-files-found: error
+          retention-days: 7
+
+  gui-linux:
+    name: GUI checks (Linux)
+    # The AppImage the linux job built, driven through its own webview by
+    # tauri-driver and WebKitWebDriver on a private Xvfb display. Advisory:
+    # not a required check (yet). The AppImage is tested as shipped: the
+    # script has its own runtime extract it (--appimage-extract, so no FUSE)
+    # and starts its AppRun.
+    needs: linux
+    # The same Ubuntu as the build: the AppImage was built against its
+    # WebKitGTK, and webkit2gtk-driver comes from it.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      # A CI runner is slower than a desktop; still bounded.
+      GUI_CHECK_BUDGET: "300"
+      GUI_CHECK_STEP_TIMEOUT: "20"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # ImageMagick: a picture of the private display when a check fails
+      # (the native dialogs, which WebDriver can't see).
+      # The test build is a plain binary (not an AppImage), so it runs on
+      # the system's WebKitGTK and GTK.
+      - name: Install Xvfb, xdotool, WebKitWebDriver, ImageMagick and the app's runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool webkit2gtk-driver dbus imagemagick \
+            libwebkit2gtk-4.1-0 libgtk-3-0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tests/gui
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --version 2.1.0 --locked
+
+      - name: Check formatting and lints (tests/gui)
+        working-directory: tests/gui
+        run: |
+          cargo fmt -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Download the AppImage
+        uses: actions/download-artifact@v4
+        with:
+          name: gospel-getter-linux-appimage
+          path: appimage
+
+      - name: Download the GUI-check test app
+        uses: actions/download-artifact@v4
+        with:
+          name: gui-check-test-app-linux
+          path: gui-check-test-app
+
+      - name: Run the GUI checks on the AppImage (and the updater's on the test app)
+        run: |
+          set -euo pipefail
+          appimage="$(find appimage -maxdepth 1 -name '*.AppImage' | head -1)"
+          if [ -z "$appimage" ]; then
+            echo "::error::no AppImage in the downloaded artifact"
+            exit 1
+          fi
+          chmod +x gui-check-test-app/gospel_getter
+          GUI_CHECK_UPDATER_APP="$PWD/gui-check-test-app/gospel_getter" \
+            scripts/gui-check.sh "$appimage" "$RUNNER_TEMP/gui-check"
+
+      - name: Upload the results and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-check-linux
+          path: ${{ runner.temp }}/gui-check
+          if-no-files-found: warn
+
+  gui-windows:
+    name: GUI checks (Windows)
+    # The NSIS installer the windows job built, installed silently and
+    # driven through WebView2 by tauri-driver and Edge WebDriver. Before a
+    # release only: by hand, or for a pull request from a release/ branch.
+    # Windows has no private display, so this runs on the runner's desktop;
+    # the native save-dialog step stops at "the dialog appeared" (UI
+    # Automation finds and closes it).
+    needs: windows
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GUI_CHECK_BUDGET: "300"
+      GUI_CHECK_STEP_TIMEOUT: "20"
+      # The app's window comes up about 10s after launch on a cold runner.
+      GUI_CHECK_SESSION_TIMEOUT: "60"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tests/gui
+
+      # Tauri's WebDriver CI guidance: msedgedriver-tool fetches the Edge
+      # WebDriver matching the installed WebView2 runtime (pinned here).
+      - name: Install tauri-driver and a matching Edge WebDriver
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install tauri-driver --version 2.1.0 --locked
+          cargo install --git https://github.com/chippers/msedgedriver-tool \
+            --rev 8c4b34f51b45f5cf08013366d703de464ab871d1 --locked
+          mkdir -p "$RUNNER_TEMP/msedgedriver"
+          cd "$RUNNER_TEMP/msedgedriver"
+          msedgedriver-tool
+          ./msedgedriver.exe --version
+          cygpath -w "$PWD" >> "$GITHUB_PATH"
+
+      - name: Download the NSIS installer
+        uses: actions/download-artifact@v4
+        with:
+          name: gospel-getter-windows-nsis-installer
+          path: nsis
+
+      - name: Install the app (silent NSIS install)
+        id: install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $setup = Get-ChildItem -Path nsis -Filter *.exe | Select-Object -First 1
+          if (-not $setup) { Write-Error "no setup .exe in the downloaded artifact"; exit 1 }
+          Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
+          $entry = Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall", "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue |
+            Get-ItemProperty -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "*Gospel Getter*" } |
+            Select-Object -First 1
+          if (-not $entry) { Write-Error "Gospel Getter isn't registered after a silent install"; exit 1 }
+          # NSIS writes InstallLocation in quotes.
+          $location = "$($entry.InstallLocation)".Trim('"')
+          if (-not $location -or -not (Test-Path -LiteralPath $location -PathType Container)) {
+            Write-Error "the install location '$($entry.InstallLocation)' isn't a folder"; exit 1
+          }
+          $exe = Get-ChildItem -LiteralPath $location -Filter *.exe |
+            Where-Object { $_.Name -notlike "uninstall*" } | Select-Object -First 1
+          if (-not $exe) { Write-Error "no app .exe in $location"; exit 1 }
+          Write-Host "Installed: $($exe.FullName)"
+          "exe=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+
+      # Edge WebDriver asks WebView2 for a debugging port through
+      # WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS. Since WebView2 Runtime 150 an
+      # elevated host app (as everything on this runner is) ignores that
+      # variable and the HKCU policy; only the HKLM policy and the app's own
+      # arguments count (MicrosoftEdge/WebView2Feedback#5645). Without the
+      # port the session never starts ("DevToolsActivePort file doesn't
+      # exist"). Port 0: the browser picks one and writes it to
+      # DevToolsActivePort in Edge WebDriver's user-data folder, where the
+      # driver looks. Machine policy, so here on the throwaway runner only.
+      - name: Let WebView2 open a debugging port for the app (HKLM policy)
+        shell: pwsh
+        env:
+          APP_EXE: ${{ steps.install.outputs.exe }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $key = "HKLM:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments"
+          New-Item -Path $key -Force | Out-Null
+          $name = Split-Path -Leaf $env:APP_EXE
+          New-ItemProperty -Path $key -Name $name -Value "--remote-debugging-port=0" -PropertyType String -Force | Out-Null
+          Get-ItemProperty -Path $key | Format-List
+
+      - name: Download the GUI-check test app
+        uses: actions/download-artifact@v4
+        with:
+          name: gui-check-test-app-windows
+          path: gui-check-test-app
+
+      # Named as the installed app is, so the WebView2 policy above (keyed
+      # by the program's file name) lets Edge WebDriver reach it too.
+      - name: Run the GUI checks on the installed app (and the updater's on the test app)
+        shell: bash
+        env:
+          APP_EXE: ${{ steps.install.outputs.exe }}
+        run: |
+          set -euo pipefail
+          tmp="$(cygpath -u "$RUNNER_TEMP")"
+          name="$(basename "$(cygpath -u "$APP_EXE")")"
+          mkdir -p "$tmp/gui-check-test-app"
+          cp gui-check-test-app/gospel_getter.exe "$tmp/gui-check-test-app/$name"
+          GUI_CHECK_UPDATER_APP="$tmp/gui-check-test-app/$name" \
+            scripts/gui-check.sh "$(cygpath -u "$APP_EXE")" "$tmp/gui-check"
+
+      - name: Upload the results and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-check-windows
+          path: ${{ runner.temp }}/gui-check
+          if-no-files-found: warn

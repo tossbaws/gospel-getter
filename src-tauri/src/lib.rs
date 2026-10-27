@@ -8,13 +8,26 @@ pub mod db;
 pub mod domain;
 pub mod notes_export;
 pub mod passage_copy;
+// How a passage is named ("John 3:16–18"), shared with the page's Rust
+// pieces (ui-leptos), which compile the same file.
+#[path = "../../shared/passage_reference.rs"]
+pub mod passage_reference;
+// The saved settings' one table, shared with the page's Rust pieces
+// (ui-leptos), which compile the same file.
+#[path = "../../shared/preferences.rs"]
+pub mod preferences;
 pub mod reader_data;
 #[cfg(test)]
 mod reader_data_tests;
 pub mod release_notes;
 pub mod retry;
 pub mod start_here;
+pub mod support_link;
 pub mod updater;
+// A verse's parts and footnotes as shown, shared with the page's Rust
+// pieces (ui-leptos), which compile the same file.
+#[path = "../../shared/verse_parts.rs"]
+pub mod verse_parts;
 pub mod window;
 
 use anyhow::Context;
@@ -47,8 +60,19 @@ pub fn run() {
             setup_app(app).map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })
         })
         .invoke_handler(invoke_handler())
-        .run(tauri::generate_context!())
+        .run(app_context())
         .expect("error while running Gospel Getter");
+}
+
+/// The app's Tauri context: `tauri.conf.json`, compiled in, as it is. Only
+/// the GUI checks' test build (feature `gui-test-updater`) changes it, to
+/// let its updater reach their local server (see `updater::test_hook`).
+pub fn app_context() -> tauri::Context<tauri::Wry> {
+    #[cfg_attr(not(feature = "gui-test-updater"), allow(unused_mut))]
+    let mut context = tauri::generate_context!();
+    #[cfg(feature = "gui-test-updater")]
+    updater::test_hook::prepare_context(&mut context);
+    context
 }
 
 /// Every command the frontend can `invoke`.
@@ -89,6 +113,7 @@ fn invoke_handler<R: tauri::Runtime>()
         updater::open_download_page,
         updater::open_release_notes,
         credit_links::open_credit_link,
+        support_link::open_support_page,
     ]
 }
 

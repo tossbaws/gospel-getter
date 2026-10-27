@@ -241,7 +241,7 @@ test('Copy and the note panel’s quote use the plain text and italics, with no 
         app.click(app.verse(1));
         app.click(app.verse(2), { shiftKey: true });
         await app.idle(0);
-        app.click(app.actions().querySelector('.verse-note-btn'));
+        await app.click(app.actions().querySelector('.verse-note-btn'));
         const quote = app.document.getElementById('note-passage');
         assert.equal(quote.querySelectorAll('.fn-marker').length, 0);
         assert.deepEqual(supplied(quote), ['is']);

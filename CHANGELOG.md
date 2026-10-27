@@ -4,6 +4,36 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.19.0-beta.1] - 2026-10-26
+
+A pre-release, for testing 2.19.0 before it ships. No installed copy
+is offered it as an update: install it by hand from its release page.
+It never offers to take you back to 2.18.1, and once 2.19.0 is out, it
+updates itself to that.
+
+### Changed
+- **The reader now runs in Rust.** The whole interface, from the chapter
+  you read to search, the books and chapters, Library, Aa, the selection
+  card, the keyboard and About, now runs in Rust (Leptos, built to
+  WebAssembly) instead of JavaScript. It looks and works as it did, so
+  there's nothing to change or relearn. Your notes, bookmarks,
+  highlights, reading place and settings carry over as they are, and so
+  do your exports: export is still format 3, and every backup imports as
+  before. (#86, #89, #99, #100, #105, #107, #114, #115, #138, #139, #140)
+- If that part of the app ever fails to load, you still see the chapter
+  you were reading, as plain text, with the line "This chapter is shown
+  as plain text: the rest of the reader isn't available." Nothing in it
+  can be selected, and it doesn't look as if it can. (#138, #140, #142)
+- On Windows, the MSI installer lists this version as 2.18.1901 in
+  Installed apps, since Windows Installer can only number a version with
+  digits. The app, its About and the .exe installer say 2.19.0-beta.1.
+
+### Added
+- **Support Gospel Getter** in About, next to Release notes. It opens
+  the project's Ko-fi page in your browser. It's only a link: nothing
+  pops up or reminds you, and nothing changes in the reading view or the
+  menus. (#135)
+
 ## [2.18.1] - 2026-10-23
 
 ### Fixed
