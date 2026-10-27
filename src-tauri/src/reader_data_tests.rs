@@ -1379,8 +1379,9 @@ async fn notes_round_trip_in_a_format_3_export() {
             p.notes_already_present,
             p.current_notes
         ),
-        // The two identical notes on 3:16 are one note to an import.
-        (3, 1, 3, 0, 0)
+        // Both notes on 3:16 with the same text come back: each is one of
+        // the reader's.
+        (4, 0, 4, 0, 0)
     );
     let result = commands::apply_pending_import(&b, p.token, false, true)
         .await
@@ -1391,11 +1392,9 @@ async fn notes_round_trip_in_a_format_3_export() {
             result.notes_already_present,
             result.notes_removed
         ),
-        (3, 0, 0)
+        (4, 0, 0)
     );
-    let mut expected = before.clone();
-    expected.remove(2);
-    assert_eq!(note_rows(&b).await, expected);
+    assert_eq!(note_rows(&b).await, before);
 }
 
 #[tokio::test]
@@ -1404,12 +1403,16 @@ async fn merging_notes_skips_ones_already_here_and_reimporting_changes_nothing()
     commands::note_add(&state, john_3(16, 16), "Already mine.")
         .await
         .unwrap();
+    let own = note_rows(&state).await.remove(0);
+    // Without dates, a note in the file is already here if one here has its
+    // passage and text (a note with a date: see
+    // `notes_with_the_same_text_on_one_passage_all_restore`).
     let path = file(&db, "notes-merge.gospel-getter.json");
     std::fs::write(
         &path,
         v3_file_with(
             r#"{"book": 43, "book_name": "John", "chapter": 3, "verse_start": 16, "verse_end": 16,
-                "body": "  Already mine.\r\n", "created_at": "2001-01-01T00:00:00Z"},
+                "body": "  Already mine.\r\n"},
                {"book": 43, "chapter": 3, "verse_start": 16, "verse_end": 16, "body": "Another on 3:16."},
                {"book": 43, "chapter": 3, "verse_start": 16, "verse_end": 18, "body": "Already mine.",
                 "created_at": "2001-02-03T04:05:06Z"},
@@ -1458,12 +1461,206 @@ async fn merging_notes_skips_ones_already_here_and_reimporting_changes_nothing()
         (rows[3].5.as_str(), rows[3].6.as_str()),
         ("2001-02-03T04:05:06.000Z", "2001-02-03T04:05:06.000Z")
     );
-    assert_ne!(rows[1].5, "2001-01-01T00:00:00.000Z");
+    assert_eq!(rows[1], own);
 
     let after_first = note_rows(&state).await;
     let again = import(&state, &path, false).await;
     assert_eq!((again.notes_added, again.notes_already_present), (0, 4));
     assert_eq!(note_rows(&state).await, after_first);
+}
+
+/// John 3:16, `body`, written at `created_at` and last changed then.
+async fn restore_on_john_3_16(state: &AppState, body: &str, created_at: &str) {
+    commands::note_restore(state, john_3(16, 16), body, created_at, created_at)
+        .await
+        .unwrap();
+}
+
+/// Two notes alike but for their dates, and two alike to the
+/// millisecond: the export holds all four and every way of importing it
+/// keeps them (GG-20261026-1).
+#[tokio::test]
+async fn notes_with_the_same_text_on_one_passage_all_restore() {
+    let (db, a) = app("rd_notes_same_text").await;
+    restore_on_john_3_16(&a, "Remember this promise.", "2026-10-01T09:00:00.000Z").await;
+    restore_on_john_3_16(&a, "Remember this promise.", "2026-10-02T09:00:00.000Z").await;
+    restore_on_john_3_16(&a, "Same instant.", "2026-10-03T09:00:00.000Z").await;
+    restore_on_john_3_16(&a, "Same instant.", "2026-10-03T09:00:00.000Z").await;
+    let before = note_rows(&a).await;
+    assert_eq!(before.len(), 4);
+    let path = file(&db, "same-text.gospel-getter.json");
+    let ExportOutcome::Saved { notes, .. } = export_to(&a, &path, Preferences::default()).await
+    else {
+        panic!("expected saved")
+    };
+    assert_eq!(notes, 4);
+
+    // Into a fresh install: all four, with their dates.
+    let (_db_b, b) = app("rd_notes_same_text_b").await;
+    let p = preview(&b, &path).await;
+    assert_eq!(
+        (
+            p.notes_in_file,
+            p.note_duplicates_in_file,
+            p.new_notes,
+            p.notes_already_present,
+            p.current_notes
+        ),
+        (4, 0, 4, 0, 0)
+    );
+    let result = commands::apply_pending_import(&b, p.token, false, true)
+        .await
+        .unwrap();
+    assert_eq!((result.notes_added, result.notes_already_present), (4, 0));
+    assert_eq!(note_rows(&b).await, before);
+
+    // Replacing the same four with the export: all four again.
+    let p = preview(&a, &path).await;
+    assert_eq!(
+        (
+            p.notes_in_file,
+            p.note_duplicates_in_file,
+            p.new_notes,
+            p.notes_already_present,
+            p.current_notes
+        ),
+        (4, 0, 0, 4, 4)
+    );
+    let result = commands::apply_pending_import(&a, p.token, true, true)
+        .await
+        .unwrap();
+    assert_eq!((result.notes_added, result.notes_removed), (4, 4));
+    assert_eq!(note_rows(&a).await, before);
+
+    // Replacing other notes with it, likewise.
+    let (_db_c, c) = app("rd_notes_same_text_c").await;
+    restore_on_john_3_16(&c, "Remember this promise.", "2026-10-01T09:00:00.000Z").await;
+    commands::note_add(&c, john_3(17, 17), "Not in the file.")
+        .await
+        .unwrap();
+    let result = import(&c, &path, true).await;
+    assert_eq!((result.notes_added, result.notes_removed), (4, 2));
+    assert_eq!(note_rows(&c).await, before);
+}
+
+/// Merging counts copies: of each note (passage, text and date), it adds
+/// the copies the file has beyond those here, so merging the same file
+/// again adds nothing.
+#[tokio::test]
+async fn merging_adds_the_copies_not_here_yet_and_merging_again_adds_nothing() {
+    let (db, a) = app("rd_notes_copies").await;
+    restore_on_john_3_16(&a, "Remember this promise.", "2026-10-01T09:00:00.000Z").await;
+    restore_on_john_3_16(&a, "Remember this promise.", "2026-10-02T09:00:00.000Z").await;
+    restore_on_john_3_16(&a, "Same instant.", "2026-10-03T09:00:00.000Z").await;
+    restore_on_john_3_16(&a, "Same instant.", "2026-10-03T09:00:00.000Z").await;
+    let path = file(&db, "copies.gospel-getter.json");
+    export_to(&a, &path, Preferences::default()).await;
+
+    // Here: one of the two alike to the millisecond; the October 1 note;
+    // the same text as the October 2 note, but written on another day; and
+    // a note of its own.
+    let (_db_b, b) = app("rd_notes_copies_b").await;
+    restore_on_john_3_16(&b, "Same instant.", "2026-10-03T09:00:00.000Z").await;
+    restore_on_john_3_16(&b, "Remember this promise.", "2026-10-01T09:00:00.000Z").await;
+    restore_on_john_3_16(&b, "Remember this promise.", "2026-09-30T09:00:00.000Z").await;
+    commands::note_add(&b, john_3(17, 17), "Only here.")
+        .await
+        .unwrap();
+    let p = preview(&b, &path).await;
+    assert_eq!(
+        (
+            p.notes_in_file,
+            p.note_duplicates_in_file,
+            p.new_notes,
+            p.notes_already_present,
+            p.current_notes
+        ),
+        // October 2 and the second "Same instant." are new.
+        (4, 0, 2, 2, 4)
+    );
+    let first = commands::apply_pending_import(&b, p.token, false, true)
+        .await
+        .unwrap();
+    assert_eq!((first.notes_added, first.notes_already_present), (2, 2));
+    let dated: Vec<(String, String)> = note_rows(&b)
+        .await
+        .into_iter()
+        .map(|(.., body, created_at, _)| (body, created_at))
+        .collect();
+    assert_eq!(
+        dated,
+        [
+            ("Remember this promise.", "2026-09-30T09:00:00.000Z"),
+            ("Remember this promise.", "2026-10-01T09:00:00.000Z"),
+            ("Remember this promise.", "2026-10-02T09:00:00.000Z"),
+            ("Same instant.", "2026-10-03T09:00:00.000Z"),
+            ("Same instant.", "2026-10-03T09:00:00.000Z"),
+            ("Only here.", dated[5].1.as_str()),
+        ]
+        .map(|(body, at)| (body.to_string(), at.to_string()))
+    );
+
+    let after_first = note_rows(&b).await;
+    let p = preview(&b, &path).await;
+    assert_eq!(
+        (p.new_notes, p.notes_already_present, p.current_notes),
+        (0, 4, 6)
+    );
+    let again = commands::apply_pending_import(&b, p.token, false, true)
+        .await
+        .unwrap();
+    assert_eq!((again.notes_added, again.notes_already_present), (0, 4));
+    assert_eq!(note_rows(&b).await, after_first);
+}
+
+/// A file whose notes have no dates (written by hand, say) imports as it
+/// always did: a note is its passage and text.
+#[tokio::test]
+async fn notes_without_dates_match_by_passage_and_text_as_before() {
+    let (db, state) = app("rd_notes_undated").await;
+    restore_on_john_3_16(&state, "Here already.", "2026-10-01T09:00:00.000Z").await;
+    let path = file(&db, "undated.gospel-getter.json");
+    std::fs::write(
+        &path,
+        v3_file_with(
+            r#"{"book": 43, "chapter": 3, "verse_start": 16, "verse_end": 16, "body": "Here already."},
+               {"book": 43, "chapter": 3, "verse_start": 17, "verse_end": 17, "body": "Twice."},
+               {"book": 43, "chapter": 3, "verse_start": 17, "verse_end": 17, "body": "Twice."},
+               {"book": 43, "chapter": 3, "verse_start": 18, "verse_end": 18, "body": "Undated."},
+               {"book": 43, "chapter": 3, "verse_start": 18, "verse_end": 18, "body": "Undated.",
+                "created_at": "2026-10-05T09:00:00Z"}"#,
+        ),
+    )
+    .unwrap();
+    let p = preview(&state, &path).await;
+    assert_eq!(
+        (
+            p.notes_in_file,
+            p.note_duplicates_in_file,
+            p.new_notes,
+            p.notes_already_present,
+            p.current_notes
+        ),
+        // The second "Twice." repeats the first, and the undated
+        // "Undated." the dated one; "Here already." is.
+        (3, 2, 2, 1, 1)
+    );
+    let first = commands::apply_pending_import(&state, p.token, false, true)
+        .await
+        .unwrap();
+    assert_eq!((first.notes_added, first.notes_already_present), (2, 1));
+    let rows = note_rows(&state).await;
+    assert_eq!(
+        rows.iter()
+            .map(|(_, _, s, _, body, ..)| (*s, body.as_str()))
+            .collect::<Vec<_>>(),
+        [(16, "Here already."), (17, "Twice."), (18, "Undated.")]
+    );
+    assert_eq!(rows[2].5, "2026-10-05T09:00:00.000Z");
+
+    let again = import(&state, &path, false).await;
+    assert_eq!((again.notes_added, again.notes_already_present), (0, 3));
+    assert_eq!(note_rows(&state).await, rows);
 }
 
 #[tokio::test]

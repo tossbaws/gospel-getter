@@ -574,9 +574,46 @@ impl NewHighlight {
     }
 }
 
-/// The passage and text of a note: two notes with the same key are the
-/// same note, for importing.
+/// The passage and text of a note. For importing, a note is this and when
+/// it was written (see `notes_to_add`).
 pub type NoteKey = (i64, i64, i64, i64, String);
+
+/// A note already here, for matching a file's notes against: its passage
+/// and text, and when it was written.
+pub type StoredNote = (NoteKey, String);
+
+/// Which of a file's `notes` an import adds, in the file's order, given
+/// the notes already here (`stored`; none when replacing them).
+///
+/// A note is its passage, its text and when it was written. Of each such
+/// note, the import adds the copies the file has beyond those already
+/// here: replacing restores every note in the file, two notes that differ
+/// only in their dates are both kept, and merging the same file again adds
+/// nothing. A note with no date (a file written by hand, say) is already
+/// here if any note here has its passage and text.
+pub fn notes_to_add<'a>(notes: &'a [NewNote], stored: &[StoredNote]) -> Vec<&'a NewNote> {
+    let mut copies_here: HashMap<(NoteKey, &str), usize> = HashMap::new();
+    let mut passages_and_texts: HashSet<&NoteKey> = HashSet::new();
+    for (key, created_at) in stored {
+        *copies_here
+            .entry((key.clone(), created_at.as_str()))
+            .or_default() += 1;
+        passages_and_texts.insert(key);
+    }
+    notes
+        .iter()
+        .filter(|n| match n.created_at.as_deref() {
+            Some(created_at) => match copies_here.get_mut(&(n.key(), created_at)) {
+                Some(copies) if *copies > 0 => {
+                    *copies -= 1;
+                    false
+                }
+                _ => true,
+            },
+            None => !passages_and_texts.contains(&n.key()),
+        })
+        .collect()
+}
 
 /// A note ready to save, after validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -629,11 +666,12 @@ pub struct ValidatedImport {
     pub highlights: Option<Vec<NewHighlight>>,
     /// How many highlights in the file repeated a verse already in it.
     pub highlight_duplicates_in_file: usize,
-    /// De-duplicated, in the file's order. `None` for a format 1 or 2 file,
-    /// which can't hold notes, so importing it leaves them alone.
+    /// In the file's order, less repeats: every note with a date is kept,
+    /// even two alike (see `notes_to_add`). `None` for a format 1 or 2
+    /// file, which can't hold notes, so importing it leaves them alone.
     pub notes: Option<Vec<NewNote>>,
-    /// How many notes in the file repeated another one in it (the same
-    /// passage and text).
+    /// How many notes in the file had no date and repeated another one in
+    /// it (the same passage and text).
     pub note_duplicates_in_file: usize,
     pub position: Option<NewPosition>,
     pub preferences: Preferences,
@@ -843,8 +881,6 @@ pub fn validate(
     }
 
     let mut notes: Vec<NewNote> = Vec::new();
-    let mut noted: HashSet<NoteKey> = HashSet::new();
-    let mut note_duplicates_in_file = 0;
     for (i, n) in data.notes.into_iter().enumerate() {
         let label = format!("Note {}", i + 1);
         let (found, reference) = match check_passage_record(
@@ -884,13 +920,22 @@ pub fn validate(
             created_at: created_at.flatten(),
             updated_at: updated_at.flatten(),
         };
-        // The same note (passage and text) twice: the first one counts.
-        if noted.insert(new.key()) {
-            notes.push(new);
-        } else {
-            note_duplicates_in_file += 1;
-        }
+        notes.push(new);
     }
+    // Every note with a date is kept, even two alike: each is one of the
+    // reader's. One without a date repeats any other with its passage and
+    // text, so it counts only if it's the first and none has a date.
+    let dated: HashSet<NoteKey> = notes
+        .iter()
+        .filter(|n| n.created_at.is_some())
+        .map(NewNote::key)
+        .collect();
+    let mut undated: HashSet<NoteKey> = HashSet::new();
+    let file_notes = notes.len();
+    notes.retain(|n| {
+        n.created_at.is_some() || (!dated.contains(&n.key()) && undated.insert(n.key()))
+    });
+    let note_duplicates_in_file = file_notes - notes.len();
 
     let note_chars: usize = notes.iter().map(|n| n.body.chars().count()).sum();
     if note_chars > MAX_TOTAL_NOTE_CHARS {

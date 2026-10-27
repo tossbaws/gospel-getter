@@ -165,17 +165,50 @@ fn element_or_null(el: Option<HtmlElement>) -> JsValue {
 /// Says `message` in the toast (none: hides it); an error is red and stays
 /// longer.
 pub fn set_data_status(message: &str, is_error: bool) {
+    show_data_status(message, is_error, if is_error { 12000 } else { 6000 });
+}
+
+/// Says `message` in the toast with a button after it, `label` (a deleted
+/// note's Undo), for `duration` ms: the button, for its caller to answer.
+/// It's in the toast's live region, so it's heard as the toast's other
+/// messages are, and a tab stop while it shows; when the toast fades or
+/// says something else, the button goes, and focus in it goes home.
+pub fn set_data_status_with_action(
+    message: &str,
+    label: &str,
+    duration: i32,
+) -> Option<HtmlElement> {
+    let status = show_data_status(message, false, duration)?;
+    let button = bridge::document()?
+        .create_element("button")
+        .ok()?
+        .dyn_into::<HtmlElement>()
+        .ok()?;
+    let _ = button.set_attribute("type", "button");
+    button.set_class_name("note-link toast-action");
+    button.set_text_content(Some(label));
+    let _ = status.append_with_str_1(" ");
+    let _ = status.append_with_node_1(&button);
+    Some(button)
+}
+
+/// [`set_data_status`], fading after `duration` ms: the toast, unless it's
+/// hidden.
+fn show_data_status(message: &str, is_error: bool, duration: i32) -> Option<HtmlElement> {
     if let (Some(timer), Some(window)) = (with(|s| s.toast_timer.take()), web_sys::window()) {
         window.clear_timeout_with_handle(timer);
     }
-    let Some(status) = by_id("data-status") else {
-        return;
-    };
+    let status = by_id("data-status")?;
+    // An action's button, about to go with the message it ended.
+    let had_focus = dom::active_element().is_some_and(|active| status.contains(Some(&active)));
     status.set_text_content(Some(message));
+    if had_focus {
+        bridge::focus_home();
+    }
     let _ = status.class_list().toggle_with_force("is-error", is_error);
     if message.is_empty() {
         let _ = status.class_list().add_1("is-hidden");
-        return;
+        return None;
     }
     // Above the update banner, if it's up: the same assignment the page
     // made, `style.bottom`, through the CSSOM.
@@ -192,16 +225,21 @@ pub fn set_data_status(message: &str, is_error: bool) {
     let fade = Closure::once_into_js(move || {
         if let Some(status) = by_id("data-status") {
             let _ = status.class_list().add_1("is-hidden");
+            if let Ok(Some(action)) = status.query_selector(".toast-action") {
+                let had_focus = dom::active_element().is_some_and(|a| a == action);
+                action.remove();
+                if had_focus {
+                    bridge::focus_home();
+                }
+            }
         }
     });
     let timer = web_sys::window().and_then(|w| {
-        w.set_timeout_with_callback_and_timeout_and_arguments_0(
-            fade.unchecked_ref(),
-            if is_error { 12000 } else { 6000 },
-        )
-        .ok()
+        w.set_timeout_with_callback_and_timeout_and_arguments_0(fade.unchecked_ref(), duration)
+            .ok()
     });
     with(|s| s.toast_timer = timer);
+    Some(status)
 }
 
 /// ☰'s Export data… and Import data…, disabled while either runs.

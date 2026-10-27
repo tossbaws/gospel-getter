@@ -9,9 +9,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::db::notes::{NoteLimit, NoteTotals, note_totals};
 use crate::db::{Bookmark, WritePool};
-use crate::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
+use crate::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition, notes_to_add};
 
-pub use crate::reader_data::NoteKey;
+pub use crate::reader_data::StoredNote;
 
 /// Every bookmark, oldest first (the order they were made).
 pub async fn all_bookmarks(pool: &SqlitePool) -> anyhow::Result<Vec<Bookmark>> {
@@ -47,15 +47,21 @@ pub async fn highlight_coordinates(pool: &SqlitePool) -> anyhow::Result<HashSet<
     Ok(rows.into_iter().collect())
 }
 
-/// The passage and text of every note, for telling new from
-/// already-present.
-pub async fn note_keys(pool: &SqlitePool) -> anyhow::Result<HashSet<NoteKey>> {
-    let rows: Vec<NoteKey> =
-        sqlx::query_as("SELECT book_id, chapter, verse_start, verse_end, body FROM notes")
-            .fetch_all(pool)
-            .await
-            .context("Failed to read notes")?;
-    Ok(rows.into_iter().collect())
+/// The passage, text and date of every note, for telling new from
+/// already-present (`reader_data::notes_to_add`).
+pub async fn stored_notes<'c>(
+    conn: impl sqlx::SqliteExecutor<'c>,
+) -> anyhow::Result<Vec<StoredNote>> {
+    let rows: Vec<(i64, i64, i64, i64, String, String)> = sqlx::query_as(
+        "SELECT book_id, chapter, verse_start, verse_end, body, created_at FROM notes",
+    )
+    .fetch_all(conn)
+    .await
+    .context("Failed to read notes")?;
+    Ok(rows
+        .into_iter()
+        .map(|(b, c, s, e, body, created_at)| ((b, c, s, e, body), created_at))
+        .collect())
 }
 
 /// The highest verse number any installed translation has, per
@@ -102,29 +108,26 @@ impl From<anyhow::Error> for ApplyImportError {
     }
 }
 
-/// The notes there would be after importing `notes`: with `replace`, just
-/// the file's; otherwise the reader's, plus the file's that aren't already
-/// here.
-async fn notes_after_import(
+/// The file's notes importing `notes` adds (`reader_data::notes_to_add`),
+/// and the notes there would be afterwards: with `replace`, just the
+/// file's; otherwise the reader's, plus those.
+async fn notes_after_import<'a>(
     conn: &mut sqlx::SqliteConnection,
-    notes: &[NewNote],
+    notes: &'a [NewNote],
     replace: bool,
-) -> anyhow::Result<NoteTotals> {
-    let (mut totals, existing) = if replace {
-        (NoteTotals::default(), HashSet::new())
+) -> anyhow::Result<(Vec<&'a NewNote>, NoteTotals)> {
+    let (mut totals, stored) = if replace {
+        (NoteTotals::default(), Vec::new())
     } else {
-        let keys: Vec<NoteKey> =
-            sqlx::query_as("SELECT book_id, chapter, verse_start, verse_end, body FROM notes")
-                .fetch_all(&mut *conn)
-                .await
-                .context("Failed to read notes")?;
-        (note_totals(conn, None).await?, keys.into_iter().collect())
+        let stored = stored_notes(&mut *conn).await?;
+        (note_totals(conn, None).await?, stored)
     };
-    for n in notes.iter().filter(|n| !existing.contains(&n.key())) {
+    let adding = notes_to_add(notes, &stored);
+    for n in &adding {
         totals.count += 1;
         totals.chars += n.body.chars().count();
     }
-    Ok(totals)
+    Ok((adding, totals))
 }
 
 /// What an import changed.
@@ -156,10 +159,12 @@ pub struct ImportCounts {
 /// (a format 1 file, which can't hold highlights) leaves them untouched,
 /// even with `replace`.
 ///
-/// `notes` likewise: merging adds each of the file's notes unless one with
-/// the same passage and text is already here, so importing the same file
-/// again changes nothing; `replace` deletes every note first. `None` (a
-/// format 1 or 2 file, which can't hold notes) leaves them untouched.
+/// `notes` likewise, a note being its passage, text and date: merging adds
+/// each of the file's notes but those already here
+/// (`reader_data::notes_to_add`), so importing the same file again changes
+/// nothing; `replace` deletes every note first and restores every one in
+/// the file. `None` (a format 1 or 2 file, which can't hold notes) leaves
+/// them untouched.
 /// Before anything is written, the notes there would be afterwards are
 /// checked against `MAX_NOTES` and `MAX_TOTAL_NOTE_CHARS`; an import that
 /// would go past either changes nothing.
@@ -175,13 +180,16 @@ pub async fn apply_import(
         .await
         .context("Failed to start the import")?;
 
-    if let Some(notes) = notes
-        && let Some(limit) = notes_after_import(&mut tx, notes, replace)
-            .await?
-            .exceeded()
-    {
-        return Err(ApplyImportError::NoteLimit(limit));
-    }
+    let adding_notes = match notes {
+        Some(notes) => {
+            let (adding, totals) = notes_after_import(&mut tx, notes, replace).await?;
+            if let Some(limit) = totals.exceeded() {
+                return Err(ApplyImportError::NoteLimit(limit));
+            }
+            Some(adding)
+        }
+        None => None,
+    };
 
     let removed = if replace {
         sqlx::query("DELETE FROM bookmarks")
@@ -246,7 +254,7 @@ pub async fn apply_import(
 
     let mut notes_added = 0;
     let mut notes_removed = 0;
-    if let Some(notes) = notes {
+    if let Some(adding) = adding_notes {
         if replace {
             notes_removed = sqlx::query("DELETE FROM notes")
                 .execute(&mut *tx)
@@ -254,15 +262,13 @@ pub async fn apply_import(
                 .context("Failed to clear notes")?
                 .rows_affected() as usize;
         }
-        for n in notes {
+        for n in adding {
             let inserted = sqlx::query(
                 "INSERT INTO notes \
                      (book_id, chapter, verse_start, verse_end, body, created_at, updated_at) \
-                 SELECT $1, $2, $3, $4, $5, \
+                 VALUES ($1, $2, $3, $4, $5, \
                      COALESCE($6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), \
-                     COALESCE($7, $6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-                 WHERE NOT EXISTS (SELECT 1 FROM notes WHERE book_id = $1 AND chapter = $2 \
-                     AND verse_start = $3 AND verse_end = $4 AND body = $5)",
+                     COALESCE($7, $6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))",
             )
             .bind(n.book_id)
             .bind(n.chapter)

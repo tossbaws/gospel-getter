@@ -260,3 +260,56 @@ test('a failed copy says so, in the toast for a chapter', () =>
         assert.match(app.toast().textContent, /^Couldn't copy: The request is not allowed/);
         assert.ok(app.toast().classList.contains('is-error'));
     }));
+
+// GG-20261026-4: text to copy that couldn't be had is asked for again, by
+// the next render or copy; text that was had never is.
+test('a copy whose text failed asks again once the backend recovers, and text in hand is never asked for again', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'web', failing: { get_copy_text: 'simulated get_copy_text failure' } }, async (app) => {
+        const asked = () => app.calls.filter((c) => c.cmd === 'get_copy_text').length;
+        assert.equal(asked(), 1, 'the chapter’s, which failed');
+        app.failCommand('get_copy_text', null);
+        const expected = await backend('get_copy_text', { translationCode: 'web', bookId: bookId('John'), chapter: 3 });
+
+        // The same chapter rendered again (Compare on): asked again.
+        let before = app.calls.length;
+        app.key('c');
+        await app.idle(before, 'get_compare');
+        assert.ok(app.isComparing());
+        assert.equal(asked(), 2);
+        app.click(chapterCopyButton(app));
+        await choose(app, 'Plain text');
+        assert.equal(app.clipboardWrites.at(-1), expected.formats.plain);
+        assert.equal(app.toast().textContent, 'Copied John 3 as plain text');
+
+        // In hand now: rendering again (Compare off) and copying ask nothing.
+        before = app.calls.length;
+        app.key('c');
+        await app.idle(before);
+        assert.ok(!app.isComparing());
+        app.click(chapterCopyButton(app));
+        await choose(app, 'With verse numbers');
+        assert.equal(app.clipboardWrites.at(-1), expected.formats.numbered);
+        assert.equal(asked(), 2);
+    }));
+
+test('a copy whose text failed, asked for straight away, asks again and copies', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
+        const asked = () => app.calls.filter((c) => c.cmd === 'get_copy_text').length;
+        app.failCommand('get_copy_text');
+        await select(app, 16, 17);
+        const failed = asked();
+        app.failCommand('get_copy_text', null);
+        const expected = await backend('get_copy_text', { translationCode: 'web', bookId: bookId('John'), chapter: 3, start: 16, end: 17 });
+        // The card's Copy: asked again, then copied.
+        const before = app.calls.length;
+        app.click(app.document.querySelector('.verse-actions .verse-copy-btn'));
+        await app.idle(before, 'get_copy_text');
+        assert.equal(asked(), failed + 1);
+        assert.equal(app.clipboardWrites.at(-1), expected.formats.reference);
+        assert.equal(app.status().textContent, `Copied John 3:16${EN}17`);
+        // Again: in hand, so nothing is asked.
+        app.click(app.document.querySelector('.verse-actions .verse-copy-btn'));
+        await app.idle(before);
+        assert.equal(asked(), failed + 1);
+        assert.equal(app.clipboardWrites.length, 2);
+    }));

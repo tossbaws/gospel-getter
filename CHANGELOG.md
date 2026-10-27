@@ -4,6 +4,32 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Restoring a backup could leave out some of your notes. Two notes on
+  the same passage with the same words, written on different days, came
+  back as one: after Replace, or on a new install, the other note and
+  its dates were gone. Every note in the backup now comes back, each with
+  its own dates, and importing the same backup again still adds nothing.
+  Backups from earlier versions import as before. (Found in Codex's
+  review.)
+- After Back or Forward couldn't open a chapter, trying again skipped a
+  place: from Romans 8, a Back to Psalm 23 that failed went to John 3
+  the next time. A Back or Forward that fails now changes nothing, so
+  pressing it again, or Try again, opens the chapter it was going to.
+  (Found in Codex's review.)
+- Deleting a note had no Undo when the selection card wasn't there: a
+  note you edited from the Library on a verse the translation you're
+  reading doesn't number, such as Matthew 17:21 in the BSB. The message
+  at the foot of the window now has the same Undo, for as long as the
+  card's, and it brings the note back with its words and dates. (Found
+  in Codex's review.)
+- If the text for Copy or Copy chapter couldn't be read once, copying
+  the same verses or chapter kept failing after the problem had passed,
+  until you chose other verses or went to another chapter. The next copy
+  now asks for the text again. (Found in Codex's review.)
+
 ## [2.19.0] - 2026-10-26
 
 2.19.0-beta.1, the pre-release, updates itself to this release.

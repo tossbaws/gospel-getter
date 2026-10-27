@@ -228,9 +228,9 @@ impl Store {
         db::reader_data::bookmark_coordinates(self.db.read()).await
     }
 
-    /// The passage and text of every note.
-    pub async fn note_keys(&self) -> anyhow::Result<HashSet<db::reader_data::NoteKey>> {
-        db::reader_data::note_keys(self.db.read()).await
+    /// The passage, text and date of every note.
+    pub async fn stored_notes(&self) -> anyhow::Result<Vec<db::reader_data::StoredNote>> {
+        db::reader_data::stored_notes(self.db.read()).await
     }
 
     /// The highest verse number any translation has, per (book, chapter).
