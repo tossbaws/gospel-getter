@@ -4,6 +4,39 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.19.0] - 2026-10-26
+
+2.19.0-beta.1, the pre-release, updates itself to this release.
+
+### Changed
+- **The reader now runs in Rust.** The whole interface, from the chapter
+  you read to search, the books and chapters, Library, Aa, the selection
+  card, the keyboard and About, now runs in Rust (Leptos, built to
+  WebAssembly) instead of JavaScript. It looks and works as it did, so
+  there's nothing to change or relearn. Your notes, bookmarks,
+  highlights, reading place and settings carry over as they are, with no
+  change to the database, and so do your exports: export is still
+  format 3, and every backup imports as before. (#86, #89, #99, #100,
+  #105, #107, #114, #115, #138, #139, #140)
+- If that part of the app ever fails to load, you still see the chapter
+  you were reading, as plain text, with the line "This chapter is shown
+  as plain text: the rest of the reader isn't available." Nothing in it
+  can be selected, and it doesn't look as if it can. (#138, #140, #142)
+
+### Added
+- **Support Gospel Getter** in About, next to Release notes. It opens
+  the project's Ko-fi page in your browser. It's only a link: nothing
+  pops up or reminds you, and nothing changes in the reading view or the
+  menus. (#135)
+
+### Fixed
+- On Windows, moving through the chapter just before making the window
+  wider or narrower than 1200 px could send your reading place back to
+  where it was before, often the chapter's heading. That happened after
+  a Go to, a search result, Back or Forward, or a quick scroll, right
+  before a snap or a resize across 1200 px. The place you moved to now
+  stays at the top. Linux wasn't affected. (#147)
+
 ## [2.19.0-beta.1] - 2026-10-26
 
 A pre-release, for testing 2.19.0 before it ships. No installed copy

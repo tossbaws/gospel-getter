@@ -83,6 +83,7 @@ same rule.
   scripts live outside `site/` so GitHub Pages doesn't publish them.
 
   ```bash
+  trunk build --release                                                       # the page, into dist/
   cargo build --manifest-path src-tauri/Cargo.toml --example frontend_bridge
   PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py --all   # every image, in place
   ```
