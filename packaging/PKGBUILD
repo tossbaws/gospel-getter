@@ -38,8 +38,8 @@ pkgname=gospel-getter
 # (2.19.0-beta.1 is 2.19.0beta1), which vercmp still sorts before the
 # release itself: 2.18.1 < 2.19.0beta1 < 2.19.0. A release has the same
 # version in both.
-_pkgver=2.19.0
-pkgver=2.19.0
+_pkgver=2.19.1
+pkgver=2.19.1
 pkgrel=1
 pkgdesc="A Bible reader with KJV, BSB and WEB translations, faded surrounding chapters, and quick keyboard navigation"
 arch=('x86_64' 'aarch64')
