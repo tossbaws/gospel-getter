@@ -17,7 +17,7 @@ use gospel_getter_lib::preferences::{self, Preference, Values};
 /// highlight and notes), and what was the page's main script (the keyboard
 /// and click dispatchers, boot, and the page's glue): checks of those read
 /// them where they now live.
-const PIECES: [(&str, &str); 27] = [
+const PIECES: [(&str, &str); 29] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -68,6 +68,11 @@ const PIECES: [(&str, &str); 27] = [
     (
         "card_text.rs",
         include_str!("../../ui-leptos/src/card_text.rs"),
+    ),
+    ("margin.rs", include_str!("../../ui-leptos/src/margin.rs")),
+    (
+        "margin_text.rs",
+        include_str!("../../ui-leptos/src/margin_text.rs"),
     ),
     (
         "keyboard.rs",
@@ -201,6 +206,76 @@ fn print_stylesheet_hides_chrome_but_not_reading_content() {
              visible when printed"
         );
     }
+}
+
+/// Margin notes in reading mode (ui-leptos/src/margin.rs): beside the
+/// column, never in its flow (so they can't move the text), on screen only
+/// (printing leaves them out, and the markers that stand in for them), in
+/// the UI's sans and smaller than the verses, in tested theme colors. Aa's
+/// "Notes in the margin" is a pressed toggle like Reading mode's, shown with
+/// it, and the setting is this computer's, never in a backup. The margin
+/// never scrolls the page: markers, which reflow the text, go in and out
+/// through the reading place logic.
+#[test]
+fn margin_notes_sit_beside_the_text_on_screen_only() {
+    let rules = rules();
+    let screen = |selector: &str| {
+        rules
+            .iter()
+            .find(|r| r.at_rule.as_deref() == Some("@media screen") && r.selector == selector)
+            .unwrap_or_else(|| panic!("expected an `@media screen` rule for `{selector}`"))
+            .body
+            .clone()
+    };
+    let margin = screen(".margin-notes");
+    for declaration in [
+        "position: absolute;",
+        "left: calc(100% + 1.5rem);",
+        "width: var(--margin-width, 14rem);",
+        "font-family: var(--font-ui);",
+        "font-size: 0.8rem;",
+        "color: var(--text);",
+    ] {
+        assert!(margin.contains(declaration), ".margin-notes: {declaration}");
+    }
+    assert!(screen(".margin-note").contains("position: absolute;"));
+    assert!(screen(".margin-note-ref").contains("color: var(--accent-2);"));
+    assert!(screen(".margin-note-where").contains("color: var(--text-dim);"));
+    assert!(screen(".margin-rule").contains("background: var(--accent-dim);"));
+    assert!(screen(".margin-marker").contains("color: var(--verse-num-color);"));
+    let body = screen(".margin-note-body");
+    assert!(
+        body.contains("max-height: calc(var(--margin-fold-lines, 6) * 1.45em);")
+            && body.contains("white-space: pre-wrap;")
+    );
+    assert!(
+        piece("margin.rs")
+            .contains(r#"set_property("--margin-fold-lines", &text::FOLD_LINES.to_string())"#)
+    );
+    let print = block_after(HTML, "@media print");
+    assert!(print.contains(".margin-notes, .margin-marker { display: none !important; }"));
+
+    assert!(HTML.contains(
+        r#"<button type="button" id="margin-notes-btn" class="reader-mode-btn margin-notes-btn" aria-pressed="true""#
+    ));
+    assert!(
+        screen_rule(
+            &rules,
+            r#":root:not([data-reader-mode="on"]) .margin-notes-btn"#
+        )
+        .body
+        .contains("display: none;")
+    );
+    assert_eq!(preferences::MARGIN_NOTES.fallback, "on");
+    assert_eq!(
+        preferences::MARGIN_NOTES.file_name,
+        None,
+        "never in a backup"
+    );
+
+    let margin_rs = piece("margin.rs");
+    assert!(margin_rs.contains("surfaces::keep_reading_place("));
+    assert!(!margin_rs.contains("scroll_by") && !margin_rs.contains("scroll_to"));
 }
 
 /// Regression guard for GH-5: the "Random chapter" feature picks a chapter

@@ -7,12 +7,23 @@ versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Your notes in the margin, in reading mode: the notes on the chapter
+  sit in the open space to the right of the text, each beside the verse
+  it's on, like notes in a printed Bible's margin, with a thin line
+  beside a note on several verses. A long note shows its first lines and
+  "more"; clicking a note selects its verses and opens it in the card,
+  where you edit it as before. In a window too narrow for the margin, a
+  small marker after each noted verse opens it instead. Turning the
+  margin on or off never moves the text. It's on by default; Aa's "Notes
+  in the margin", with reading mode's controls, turns it off. Not while
+  comparing, and not printed.
 - Gospel Getter reopens at the verse you were reading, not just the
-  chapter: the verse at the top of the page goes back to the top, just
-  where it was, when you stop scrolling and when the window is hidden or
-  closed. A translation that doesn't number that verse opens the chapter
-  at its top. It's kept on this computer only: backups are unchanged, and
-  restoring one's reading position opens its chapter at the top.
+  chapter: the verse at the top of the page, saved as you stop scrolling
+  (and as the window is hidden or loses focus), goes back to the top,
+  just where it was. A translation that doesn't number that verse opens
+  the chapter at its top. It's kept on this computer only: backups are
+  unchanged, and restoring one's reading position opens its chapter at
+  the top.
 
 ### Changed
 - Internal cleanup, no change in use.

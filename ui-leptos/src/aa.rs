@@ -609,6 +609,7 @@ fn show_toggles() {
     for (id, pref) in [
         ("reader-mode-btn", preferences::READER_MODE),
         ("compare-btn", preferences::COMPARE),
+        ("margin-notes-btn", preferences::MARGIN_NOTES),
     ] {
         if let Some(toggle) = by_id(id) {
             let _ = toggle.set_attribute("aria-pressed", &prefs::on(&pref).to_string());
@@ -821,6 +822,15 @@ pub fn mount() {
     }
     if let Some(compare) = by_id("compare-btn") {
         dom::on_click(&compare, |_| toggle_compare());
+    }
+    // Notes in the margin, on or off: the margin (`margin`) follows the
+    // setting on `<html>`.
+    if let Some(toggle) = by_id("margin-notes-btn") {
+        dom::on_click(&toggle, |_| {
+            let on = !prefs::on(&preferences::MARGIN_NOTES);
+            prefs::set(&preferences::MARGIN_NOTES, if on { "on" } else { "off" });
+            show_toggles();
+        });
     }
     // The launch check's setting: its checkbox is About's (`updates`).
     dom::on(&document, "change", |event| {

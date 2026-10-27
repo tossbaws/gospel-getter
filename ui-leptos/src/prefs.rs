@@ -193,8 +193,9 @@ mod tests {
         );
     }
 
-    /// The table as the page's script had it: ten settings, their keys,
-    /// defaults and values, and the renamed theme.
+    /// The table as the page's script had it (ten settings), then the
+    /// margin notes' switch: their keys, defaults and values, and the
+    /// renamed theme.
     #[test]
     fn the_table_is_the_page_s() {
         let rows: Vec<(&str, &str, &str, Vec<&str>)> = PREFERENCES
@@ -261,6 +262,12 @@ mod tests {
                 (
                     "updateCheck",
                     "gospel-getter-update-check",
+                    "on",
+                    vec!["on", "off"]
+                ),
+                (
+                    "marginNotes",
+                    "gospel-getter-margin-notes",
                     "on",
                     vec!["on", "off"]
                 ),

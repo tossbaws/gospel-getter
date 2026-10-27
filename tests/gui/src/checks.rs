@@ -19,7 +19,10 @@
 //! card: verses selected with the mouse and the card placed by them, Copy
 //! and Copy as… read back from the clipboard, a bookmark, highlights and a
 //! note from the card, a cross-reference read in it, and the Shift ghost
-//! (46 to 52, `card`); and, last, the plain-text fallback (44, `reader`);
+//! (46 to 52, `card`); margin notes in reading mode: beside their verses,
+//! the switch leaving the text where it was, the markers in a narrow
+//! window, Psalm 119 with a note on every verse (60 to 63, `margin`); and,
+//! last, the plain-text fallback (44, `reader`);
 //! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
 //! Then the app started again on the same data, keeping Aa's settings (26)
 //! and the chapter's lists as left (45), at the verse the first session
@@ -31,6 +34,7 @@ mod dialogs;
 mod display;
 mod keys;
 mod library;
+mod margin;
 mod picker;
 mod place;
 mod reader;
@@ -375,6 +379,31 @@ async fn shipped(
             }
             report.record(check, result).await;
         }
+        // Margin notes (60 to 63), on notes of their own, deleted after.
+        let mut margin_left = margin::MarginLeft::default();
+        for check in [
+            Check::MarginNotes,
+            Check::MarginSwitch,
+            Check::MarginNarrow,
+            Check::MarginPsalm119,
+        ] {
+            let result = match check {
+                Check::MarginNotes => run.margin_notes(&mut margin_left).await,
+                Check::MarginSwitch => run.margin_switch().await,
+                Check::MarginNarrow => run.margin_narrow().await,
+                _ => run.margin_psalm_119(&mut margin_left).await,
+            };
+            if result.is_err() {
+                run.failure_screenshot(check).await;
+            }
+            report.record(check, result).await;
+        }
+        if let Err(e) = run.margin_clean_up(&margin_left).await {
+            log_line(
+                started,
+                &format!("putting things back after the margin checks failed: {e:#}"),
+            );
+        }
 
         if let Err(e) = run.vellum_screenshots().await {
             run.failure_screenshot(Check::Screenshots).await;
@@ -434,6 +463,13 @@ async fn shipped(
             .chain(reader::READER_SHOTS)
             .chain(card::CARD_SHOTS)
             .chain(keys::KEYS_SHOTS)
+            // The margin's own, only where there's room for it (not the
+            // Windows runner's screen; see `margin`); its markers' anywhere.
+            .chain(
+                margin::MARGIN_SHOTS
+                    .into_iter()
+                    .filter(|name| config.xvfb.is_some() || !name.starts_with("60-")),
+            )
             // The popover on a narrow window, only where the window can be
             // wide enough first (check 36).
             .chain(surfaces::SURFACES_SHOTS.into_iter().filter(|name| {

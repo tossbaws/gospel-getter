@@ -2522,6 +2522,16 @@
             display: none;
         }
 
+        /* Aa's Notes in the margin goes with reading mode: below its
+           button, while it's on. */
+        .margin-notes-btn {
+            margin-top: 0.4rem;
+        }
+
+        :root:not([data-reader-mode="on"]) .margin-notes-btn {
+            display: none;
+        }
+
         /* Screen-only, so a page printed from reading mode is laid out
            exactly like one printed normally. */
         /* On screen the page starts below the top bar, and anything
@@ -2589,6 +2599,101 @@
             /* Reading mode's one column is as wide as its container. */
             :root[data-reader-mode="on"] .chapter-main {
                 max-width: none;
+            }
+
+            /* Margin notes (ui-leptos/src/margin.rs): in reading mode, the
+               reader's notes in the open space to the right of the text,
+               each beside its first verse, like notes in a printed Bible's
+               margin. The margin is placed beside the column, never in the
+               flow, so it can't move the text; margin.rs sets its width
+               (--margin-width, from 14rem to 20rem, by the room there is),
+               how many lines a note shows before "more"
+               (--margin-fold-lines, faded at the foot) and each note's top.
+               The notes are the UI's words, not scripture's: in the UI
+               sans, smaller than the verses, the reference in the quiet
+               accent, a thin rule beside a range's verses. */
+            .margin-notes {
+                position: absolute;
+                top: 0;
+                left: calc(100% + 1.5rem);
+                width: var(--margin-width, 14rem);
+                font-family: var(--font-ui);
+                font-size: 0.8rem;
+                line-height: 1.45;
+                color: var(--text);
+            }
+
+            .margin-note {
+                position: absolute;
+                left: 0.6rem;
+                right: 0;
+                cursor: pointer;
+            }
+
+            .margin-note-ref {
+                display: block;
+                font-family: inherit;
+                font-size: 0.72rem;
+                line-height: 1.3;
+                color: var(--accent-2);
+                background: none;
+                border: none;
+                padding: 0;
+                text-align: left;
+                cursor: pointer;
+            }
+
+            .margin-note-where {
+                color: var(--text-dim);
+            }
+
+            .margin-note-body {
+                max-height: calc(var(--margin-fold-lines, 6) * 1.45em);
+                overflow: hidden;
+                margin: 0.1rem 0 0;
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+            }
+
+            .margin-note.is-folded .margin-note-body {
+                -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
+                mask-image: linear-gradient(to bottom, #000 60%, transparent);
+            }
+
+            /* Over the faded foot of a folded note, so folding changes no
+               note's height. */
+            .margin-note-more {
+                position: absolute;
+                right: 0;
+                bottom: 0;
+                font-size: 0.75rem;
+            }
+
+            .margin-rule {
+                position: absolute;
+                left: 0;
+                width: 1px;
+                background: var(--accent-dim);
+            }
+
+            /* Too narrow for the margin: a note's marker after its verse, a
+               small pencil that opens the card with the note. */
+            .margin-marker {
+                font-family: var(--font-ui);
+                font-size: 0.75em;
+                line-height: 1;
+                color: var(--verse-num-color);
+                background: none;
+                border: none;
+                padding: 0 0.15em;
+                margin-left: 0.2em;
+                cursor: pointer;
+            }
+
+            .margin-note-ref:focus-visible,
+            .margin-marker:focus-visible {
+                outline: 2px solid var(--accent);
+                outline-offset: 2px;
             }
         }
 
@@ -4024,7 +4129,9 @@
             .import-overlay,
             .welcome-overlay,
             .modal-overlay,
-            .update-banner {
+            .update-banner,
+            .margin-notes,
+            .margin-marker {
                 display: none !important;
             }
 
@@ -4088,6 +4195,7 @@
                 ['gospel-getter-compare-with', 'compareWith', '', null, {}],
                 ['gospel-getter-sidebar', 'sidebar', 'open', ['open', 'closed'], {}],
                 ['gospel-getter-update-check', 'updateCheck', 'on', ['on', 'off'], {}],
+                ['gospel-getter-margin-notes', 'marginNotes', 'on', ['on', 'off'], {}],
             ];
             SAVED.forEach(function (pref) {
                 var value = null;
@@ -4203,6 +4311,7 @@
                 </div>
                 <div class="aa-section">
                     <button type="button" id="reader-mode-btn" class="reader-mode-btn" aria-pressed="false">Reading mode</button>
+                    <button type="button" id="margin-notes-btn" class="reader-mode-btn margin-notes-btn" aria-pressed="true" title="Your notes beside the text, in reading mode">Notes in the margin</button>
                 </div>
             </div>
         </div>

@@ -38,7 +38,10 @@ read, with Try again; and the passage history, Back and Forward, with the
 mouse's buttons; its markup and rules in `src/reader_text.rs`); and the
 selection card (`src/card.rs`: the verse selection, Copy and Copy as…, the
 card's bookmark, highlight and notes, the verses' marks and the Shift
-ghost, with its markup and rules in `src/card_text.rs`); and what was the
+ghost, with its markup and rules in `src/card_text.rs`); and the notes in
+the margin in reading mode (`src/margin.rs`: placed beside their verses,
+the markers in a narrow window, with their rules and markup in
+`src/margin_text.rs`); and what was the
 page's main script: the keyboard dispatcher (`src/keyboard.rs`, its rules
 in `src/keyboard_text.rs`), the click dispatcher (`src/clicks.rs`), boot
 (`src/boot.rs`, which takes over the `get_home` and `get_reading` the
@@ -84,8 +87,8 @@ keeps the two the same.
   `src/install.rs`, `src/update_text.rs`, `src/library_text.rs`,
   `src/shortcut_table.rs`, `src/palette.rs`, `src/search_text.rs`,
   `src/picker_text.rs`, `src/aa_text.rs`, `src/surfaces_text.rs`,
-  `src/reader_text.rs`, `src/card_text.rs`, `src/keyboard_text.rs`,
-  `src/page_text.rs`: the
+  `src/reader_text.rs`, `src/card_text.rs`, `src/margin_text.rs`,
+  `src/keyboard_text.rs`, `src/page_text.rs`: the
   pieces' words, numbers and rules (Export notes' filter, the import's
   sentences, the note's length rule, the welcome's fresh-install rule, the
   updater's sentences, `megabytes` and download progress, the Library's
@@ -97,7 +100,8 @@ keeps the two the same.
   keys; the chapter's markup, byte for byte the page's former templates
   (`fixtures/genesis-1.html` is their output, which a test compares),
   Compare's rows, the reference, and the passage history's bookkeeping; the
-  card's markup and placement; which key does what, j and k's steps and
+  card's markup and placement; where a margin note sits and how notes
+  stack, and the margin's markup; which key does what, j and k's steps and
   how far a verse is scrolled into view; the toast's words, Export data…'s
   summary and Compare's partner),
   free

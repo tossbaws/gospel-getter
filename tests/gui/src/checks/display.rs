@@ -93,7 +93,7 @@ fn number(look: &Value, field: &str) -> f64 {
 
 impl Run<'_> {
     /// The look as [`LOOK_JS`] reads it.
-    async fn look(&self) -> Result<Value> {
+    pub(super) async fn look(&self) -> Result<Value> {
         self.ui.js(LOOK_JS, Vec::new()).await
     }
 
@@ -112,7 +112,7 @@ impl Run<'_> {
             .await
     }
 
-    async fn open_aa(&self) -> Result<()> {
+    pub(super) async fn open_aa(&self) -> Result<()> {
         let ui = &self.ui;
         ui.click("open Aa", "#aa-toggle").await?;
         ui.wait(
@@ -126,7 +126,7 @@ impl Run<'_> {
         Ok(())
     }
 
-    async fn close_with_escape(&self, what: &str, id: &str) -> Result<()> {
+    pub(super) async fn close_with_escape(&self, what: &str, id: &str) -> Result<()> {
         let ui = &self.ui;
         ui.press(&format!("press Escape (close {what})"), Key::Escape)
             .await?;
@@ -141,7 +141,7 @@ impl Run<'_> {
 
     /// Chooses `value` in Aa's group `group` (Aa open), and waits for the
     /// setting `name` to follow.
-    async fn aa_choose(&self, group: &str, name: &str, value: &str) -> Result<Value> {
+    pub(super) async fn aa_choose(&self, group: &str, name: &str, value: &str) -> Result<Value> {
         self.ui
             .click(&format!("Aa: choose {value}"), &choice(group, value))
             .await?;
@@ -442,7 +442,7 @@ impl Run<'_> {
 
     /// Reading mode on from Aa: the bar's other buttons go, the exit shows,
     /// with focus.
-    async fn reading_mode_on(&self) -> Result<Value> {
+    pub(super) async fn reading_mode_on(&self) -> Result<Value> {
         self.open_aa().await?;
         let ui = &self.ui;
         ui.click("Aa: Reading mode", "#reader-mode-btn").await?;
@@ -462,7 +462,7 @@ impl Run<'_> {
     }
 
     /// Waits for reading mode to be off: the exit gone, focus on Aa.
-    async fn reading_mode_off(&self, what: &str) -> Result<Value> {
+    pub(super) async fn reading_mode_off(&self, what: &str) -> Result<Value> {
         self.ui
             .wait(
                 what,
