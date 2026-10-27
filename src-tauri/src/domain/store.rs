@@ -4,11 +4,11 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::db::reader_data::{ApplyImportError, ImportCounts};
+use crate::db::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
 use crate::db::{
     self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Db, Highlight,
     HighlightColor, HighlightPassageInTranslation, Note, NoteError, Passage, SearchHit, Verse,
 };
-use crate::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
 
 /// The store handles all database access after startup: verses, the
 /// reading position, bookmarks, highlights, notes and search. The book and translation lists

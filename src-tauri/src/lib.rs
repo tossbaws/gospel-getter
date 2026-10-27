@@ -6,6 +6,7 @@ pub mod commands;
 pub mod credit_links;
 pub mod db;
 pub mod domain;
+pub mod markdown;
 pub mod notes_export;
 pub mod passage_copy;
 // How a passage is named ("John 3:16–18"), shared with the page's Rust

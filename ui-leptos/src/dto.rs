@@ -1,27 +1,30 @@
 //! The shapes the commands the pieces call exchange, mirrored from
-//! `src-tauri/src/commands.rs`, `src-tauri/src/notes_export.rs` and
+//! `src-tauri/src/commands/`, `src-tauri/src/notes_export.rs` and
 //! `src-tauri/src/reader_data.rs` with the same names the JSON carries
 //! (camelCase, except the display preferences' file names).
 //!
 //! This is the one place the pieces repeat Rust types. A later shared
 //! crate (native and wasm32, serde only) would replace: `NotedBook` and
 //! `DatePresets`/`DaySpan` (`notes_export.rs`), `NotesExportOptions` and
-//! `NotesExportOutcome` (`commands.rs`), and `NotesFilter` (`notes_export.rs`,
-//! which also carries `deny_unknown_fields` and `NaiveDate`s where this
-//! side keeps `YYYY-MM-DD` strings, as the page did); for the import,
-//! `ImportChoice`, `ImportPreviewDto`, `PositionPreviewDto` and
-//! `ImportResultDto` (`commands.rs`) and `Preferences` (`reader_data.rs`,
-//! whose enums travel as their kebab-case names, strings here); for the
-//! updater, `UpdateInfo` and `DownloadEvent` (`updater.rs`) and `Block` and
-//! `Span` (`release_notes.rs`); for the Library, `BookmarkDto`,
-//! `HighlightPassageDto` and `NoteDto` (`commands.rs`, of which these read
-//! only what the lists show); for search, `SearchDto`, `SearchResultDto`
-//! and `GoToDto` (`commands.rs`); for the reader, `HomeDto`'s translations
-//! and position, `TranslationDto`, `ReadingPaneDto`, `VerseDto` and
-//! `SimpleVerseDto`, `XrefDto`, `ChapterSideDto`, `BibleEdgeDto`,
-//! `BookStartDto`, `CompareDto` and `CompareColumnDto` (`commands.rs`); for
-//! the selection card, `NoteDto` (what the card shows of it), `PassageDto`,
-//! `CopyTextDto` and `CopyFormatsDto`, and `HighlightDto` (`commands.rs`).
+//! `NotesExportOutcome` (`commands/export_notes.rs`), and `NotesFilter`
+//! (`notes_export.rs`, which also carries `deny_unknown_fields` and
+//! `NaiveDate`s where this side keeps `YYYY-MM-DD` strings, as the page
+//! did); for the import, `ImportChoice`, `ImportPreviewDto`,
+//! `PositionPreviewDto` and `ImportResultDto` (`commands/backup.rs`) and
+//! `Preferences` (`reader_data.rs`, whose enums travel as their kebab-case
+//! names, strings here); for the updater, `UpdateInfo` and `DownloadEvent`
+//! (`updater.rs`) and `Block` and `Span` (`release_notes.rs`); for the
+//! Library, `BookmarkDto` (`commands/bookmarks.rs`), `HighlightPassageDto`
+//! (`commands/highlights.rs`) and `NoteDto` (`commands/notes.rs`), of which
+//! these read only what the lists show; for search, `SearchDto`,
+//! `SearchResultDto` and `GoToDto` (`commands/search.rs`); for the reader,
+//! `HomeDto`'s translations and position, `TranslationDto`,
+//! `ReadingPaneDto`, `VerseDto` and `SimpleVerseDto`, `XrefDto`,
+//! `ChapterSideDto`, `BibleEdgeDto` and `BookStartDto`
+//! (`commands/reading.rs`), and `CompareDto` and `CompareColumnDto`
+//! (`commands/compare.rs`); for the selection card, `NoteDto` (what the
+//! card shows of it), `PassageDto`, `CopyTextDto` and `CopyFormatsDto`
+//! (`commands/passages.rs`), and `HighlightDto` (`commands/highlights.rs`).
 //! A verse's parts and footnotes are already shared with the backend
 //! (`verse_parts`), and so is how a passage is named (`passage_reference`).
 
