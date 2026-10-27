@@ -7,7 +7,8 @@ use crate::db::reader_data::{ApplyImportError, ImportCounts};
 use crate::db::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
 use crate::db::{
     self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Db, Highlight,
-    HighlightColor, HighlightPassageInTranslation, Note, NoteError, Passage, SearchHit, Verse,
+    HighlightColor, HighlightPassageInTranslation, Note, NoteError, Passage, ReadingPlace,
+    SearchHit, TopVerse, Verse,
 };
 
 /// The store handles all database access after startup: verses, the
@@ -53,14 +54,22 @@ impl Store {
         db::get_reading_position(self.db.read()).await
     }
 
-    /// Remember the last chapter read.
+    /// The last chapter read, if any, and where in it the reader was, if
+    /// that's known for that chapter (`db::get_reading_place`).
+    pub async fn reading_place(&self) -> anyhow::Result<Option<ReadingPlace>> {
+        db::get_reading_place(self.db.read()).await
+    }
+
+    /// Remember the last chapter read, and where in it the reader was
+    /// (`at`; `None`, its top).
     pub async fn save_reading_position(
         &self,
         translation_id: i64,
         book_id: i64,
         chapter: i64,
+        at: Option<TopVerse>,
     ) -> anyhow::Result<()> {
-        db::save_reading_position(self.db.write(), translation_id, book_id, chapter).await
+        db::save_reading_position_at(self.db.write(), translation_id, book_id, chapter, at).await
     }
 
     /// Cross-references for every verse in one chapter, ordered by verse

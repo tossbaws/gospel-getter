@@ -10,8 +10,11 @@ use crate::db::WritePool;
 /// tables are some of version 1's, and `migrate` adds the rest.
 ///
 /// Every change so far has been a new table, which `CREATE ... IF NOT
-/// EXISTS` adds to any database. The first one it can't make (a new
-/// column, a changed constraint) bumps this to 2, adds a step after the
+/// EXISTS` adds to any database, and which an older app opening the same
+/// database never reads (2.20.0's `reading_place`, say: 2.19.1 keeps
+/// saving `reading_position` without it, and the place is used only while
+/// it's for the chapter saved there). The first change it can't make (a
+/// new column, a changed constraint) bumps this to 2, adds a step after the
 /// `CREATE`s that runs only when the stored version is below 2 (an
 /// `ALTER TABLE`, say), and writes 2 in place of 1 below.
 pub const SCHEMA_VERSION: i64 = 1;
@@ -80,6 +83,30 @@ pub async fn migrate(writer: &WritePool) -> anyhow::Result<()> {
     .execute(writer.pool())
     .await
     .context("Failed to create reading_position table")?;
+
+    // Single-row table (id is always 1): where in that chapter the reader
+    // was, so the app reopens at the verse at the top of the reading pane,
+    // `offset_px` below the bar (`None`: at the bar). It names its own
+    // translation, book and chapter, and is used only while they're
+    // `reading_position`'s (`queries::get_reading_place`): an older app
+    // that saves another chapter there, not knowing this table, never
+    // makes the app open on a verse of the wrong chapter. Only for
+    // reopening on this computer: an export doesn't carry it.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS reading_place (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            translation_id INTEGER NOT NULL REFERENCES translations(id),
+            book_id INTEGER NOT NULL REFERENCES books(id),
+            chapter INTEGER NOT NULL,
+            verse INTEGER NOT NULL CHECK (verse >= 1),
+            offset_px REAL
+        )
+        "#,
+    )
+    .execute(writer.pool())
+    .await
+    .context("Failed to create reading_place table")?;
 
     // Cross-references are translation-independent (they're citations
     // between passages, not text), so they're keyed only by book/chapter/

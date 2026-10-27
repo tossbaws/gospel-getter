@@ -1,12 +1,13 @@
 //! Reads (and the one write) that belong to no single feature: the books
 //! and translations, a chapter's verses and cross-references, verse
-//! ranges, and the reading position.
+//! ranges, and the reading position, with where in its chapter the reader
+//! was.
 
 use anyhow::Context;
 use sqlx::SqlitePool;
 
-use crate::db::WritePool;
 use crate::db::models::{Book, CrossReference, Translation, Verse};
+use crate::db::{WritePool, begin_write};
 use crate::domain::usfm_note::StoredFootnote;
 
 /// Get every book, in canonical order.
@@ -91,13 +92,87 @@ pub async fn get_reading_position(pool: &SqlitePool) -> anyhow::Result<Option<(i
         .context("Failed to fetch reading position")
 }
 
-/// Remember the last chapter read, overwriting whatever was there before.
+/// The verse at the top of the reading pane, and how far its top was below
+/// the bar, in pixels (`None`: at the bar's bottom).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TopVerse {
+    pub verse: i64,
+    pub offset_px: Option<f64>,
+}
+
+/// The last chapter read (translation, book, chapter) and where in it the
+/// reader was (`at`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReadingPlace {
+    pub translation_id: i64,
+    pub book_id: i64,
+    pub chapter: i64,
+    pub at: Option<TopVerse>,
+}
+
+/// The last chapter read, if the reader has ever read one, with the verse
+/// at the top of the reading pane (`reading_place`) only while it's for
+/// that translation, book and chapter: any other (an older app saved
+/// another chapter, not knowing the verse) is none, and the chapter opens
+/// at its top. One statement, so both are from the same save.
+pub async fn get_reading_place(pool: &SqlitePool) -> anyhow::Result<Option<ReadingPlace>> {
+    /// The position, and its place's verse and offset if it has one.
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        translation_id: i64,
+        book_id: i64,
+        chapter: i64,
+        verse: Option<i64>,
+        offset_px: Option<f64>,
+    }
+    let found: Option<Row> = sqlx::query_as(
+        "SELECT position.translation_id, position.book_id, position.chapter, \
+             place.verse, place.offset_px \
+         FROM reading_position AS position LEFT JOIN reading_place AS place \
+             ON place.id = 1 \
+             AND place.translation_id = position.translation_id \
+             AND place.book_id = position.book_id \
+             AND place.chapter = position.chapter \
+         WHERE position.id = 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to fetch the reading place")?;
+    Ok(found.map(|row| ReadingPlace {
+        translation_id: row.translation_id,
+        book_id: row.book_id,
+        chapter: row.chapter,
+        at: row.verse.map(|verse| TopVerse {
+            verse,
+            offset_px: row.offset_px,
+        }),
+    }))
+}
+
+/// Remember the last chapter read, at its top, overwriting whatever was
+/// there before (and forgetting where in the last one the reader was).
 pub async fn save_reading_position(
     writer: &WritePool,
     translation_id: i64,
     book_id: i64,
     chapter: i64,
 ) -> anyhow::Result<()> {
+    save_reading_position_at(writer, translation_id, book_id, chapter, None).await
+}
+
+/// Remember the last chapter read and where in it the reader was (`at`:
+/// the verse at the top of the reading pane; `None`, its top), together,
+/// overwriting both.
+pub async fn save_reading_position_at(
+    writer: &WritePool,
+    translation_id: i64,
+    book_id: i64,
+    chapter: i64,
+    at: Option<TopVerse>,
+) -> anyhow::Result<()> {
+    let mut tx = begin_write(writer)
+        .await
+        .context("Failed to start saving the reading position")?;
     sqlx::query(
         "INSERT INTO reading_position (id, translation_id, book_id, chapter) \
          VALUES (1, $1, $2, $3) \
@@ -109,9 +184,34 @@ pub async fn save_reading_position(
     .bind(translation_id)
     .bind(book_id)
     .bind(chapter)
-    .execute(writer.pool())
+    .execute(&mut *tx)
     .await
     .context("Failed to save reading position")?;
+    match at {
+        Some(TopVerse { verse, offset_px }) => sqlx::query(
+            "INSERT INTO reading_place \
+                 (id, translation_id, book_id, chapter, verse, offset_px) \
+             VALUES (1, $1, $2, $3, $4, $5) \
+             ON CONFLICT(id) DO UPDATE SET \
+                 translation_id = excluded.translation_id, \
+                 book_id = excluded.book_id, \
+                 chapter = excluded.chapter, \
+                 verse = excluded.verse, \
+                 offset_px = excluded.offset_px",
+        )
+        .bind(translation_id)
+        .bind(book_id)
+        .bind(chapter)
+        .bind(verse)
+        .bind(offset_px),
+        None => sqlx::query("DELETE FROM reading_place"),
+    }
+    .execute(&mut *tx)
+    .await
+    .context("Failed to save the reading place")?;
+    tx.commit()
+        .await
+        .context("Failed to finish saving the reading position")?;
     Ok(())
 }
 

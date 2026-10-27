@@ -35,6 +35,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 use serde::Serialize;
+use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_futures::spawn_local;
@@ -48,6 +49,7 @@ use crate::dto::{Compare, CompareArgs, Home, Position, Reading, ReadingArgs, Ver
 use crate::ipc;
 use crate::palette::PaletteState;
 use crate::reader_text::{self as text, Disclosure, History, Opened, Place, Which};
+use crate::surfaces;
 
 /// A load, a jump or a step: whether it put a chapter on screen.
 pub type Load = Pin<Box<dyn Future<Output = bool>>>;
@@ -79,6 +81,12 @@ struct State {
     /// A position is being saved; the newest one waiting goes next.
     saving: bool,
     waiting: Option<Position>,
+    /// The last position asked to be saved (a place unchanged since isn't
+    /// sent again), and the last the backend saved.
+    last_sent: Option<Position>,
+    saved: Option<Position>,
+    /// The reader is scrolling: where they are is saved once they stop.
+    place_timer: Option<i32>,
     /// The chapter Try again reads again.
     retry: Option<(i64, i64)>,
     /// Each bundled translation's credit, from boot, for About.
@@ -397,6 +405,9 @@ enum Outcome {
 /// asks for its chapter before this module has loaded). An answer already
 /// in is put on screen now, within the request.
 fn load_sent(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
+    // The reader has asked for something else: a verse put back where they
+    // were at launch stays put no longer.
+    surfaces::let_go_of_place();
     let token = with(|s| {
         s.load_token += 1;
         // A step's Try again is this load's now (see `retry`); a step's
@@ -530,7 +541,12 @@ fn answered(
         book_id: here.book_id,
         chapter: here.chapter,
         translation_code,
+        verse: None,
+        offset: None,
     });
+    // Then where in it the reader is, once the page is still: a chapter
+    // turned by ← or → is shown at the scroll position the last one had.
+    save_place_soon();
     Outcome::Done(true)
 }
 
@@ -585,11 +601,13 @@ fn retry() {
 }
 
 /// Saves the chapter put on screen as the position the next launch opens
-/// at. One save is on its way at a time; a newer one waits, replacing any
-/// that waited before it, so they reach the backend in the order the
-/// chapters were shown and the last one wins. The first is sent now.
+/// at, and where in it the reader is (see [`save_place`]). One save is on
+/// its way at a time; a newer one waits, replacing any that waited before
+/// it, so they reach the backend in the order they were made and the last
+/// one wins. The first is sent now.
 fn save_position(position: Position) {
     let first = with(|s| {
+        s.last_sent = Some(position.clone());
         s.waiting = Some(position);
         if s.saving {
             None
@@ -601,21 +619,27 @@ fn save_position(position: Position) {
     let Some(first) = first else {
         return;
     };
-    let mut sent = send_position(&first);
+    let mut sending = first;
+    let mut sent = send_position(&sending);
     spawn_local(async move {
         loop {
             let answer = match sent {
                 Ok(promise) => JsFuture::from(promise).await,
                 Err(e) => Err(e),
             };
-            if let Err(e) = answer {
-                // The next chapter shown saves again.
-                ipc::log_error("Failed to save the reading position", &e);
+            match answer {
+                Ok(_) => with(|s| s.saved = Some(sending)),
+                // The next chapter shown, or scroll, saves again.
+                Err(e) => {
+                    ipc::log_error("Failed to save the reading position", &e);
+                    with(|s| s.last_sent = None);
+                }
             }
             let Some(next) = with(|s| s.waiting.take()) else {
                 break;
             };
-            sent = send_position(&next);
+            sending = next;
+            sent = send_position(&sending);
         }
         with(|s| s.saving = false);
     });
@@ -623,6 +647,97 @@ fn save_position(position: Position) {
 
 fn send_position(position: &Position) -> Result<js_sys::Promise, JsValue> {
     ipc::args(position).and_then(|args| ipc::send("save_reading_position", args))
+}
+
+/// How long the page is left still after a scroll before where the reader
+/// is is saved: once they've stopped, not on every step of the way.
+const PLACE_SAVE_MS: i32 = 400;
+
+/// Saves where in the chapter on screen the reader is, the verse at the
+/// top of the reading pane (`surfaces::top_verse`, the place the reading
+/// place logic keeps), if it's changed since the last save: so the next
+/// launch opens there. At the chapter's heading it's the chapter's top.
+fn save_place() {
+    with(|s| {
+        if let Some(timer) = s.place_timer.take()
+            && let Some(window) = web_sys::window()
+        {
+            window.clear_timeout_with_handle(timer);
+        }
+    });
+    // Nothing to say while the reader's own pane isn't there (the page's
+    // plain-text fallback has taken its place).
+    let Some(here) = with(|s| s.reading.clone()).filter(|_| pane_inner().is_some()) else {
+        return;
+    };
+    let top = surfaces::top_verse(&here.translation_code);
+    let position = Position {
+        book_id: here.book_id,
+        chapter: here.chapter,
+        translation_code: here.translation_code,
+        verse: top.map(|(verse, _)| verse),
+        offset: top.map(|(_, offset)| text::rounded_offset(offset)),
+    };
+    if with(|s| s.last_sent.as_ref() == Some(&position)) {
+        return;
+    }
+    save_position(position);
+}
+
+/// A scroll: where the reader is is saved once the page has been still for
+/// [`PLACE_SAVE_MS`].
+fn save_place_soon() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let save = Closure::once_into_js(save_place);
+    let timer = window
+        .set_timeout_with_callback_and_timeout_and_arguments_0(save.unchecked_ref(), PLACE_SAVE_MS)
+        .ok();
+    let replaced = with(|s| std::mem::replace(&mut s.place_timer, timer));
+    if let Some(replaced) = replaced {
+        window.clear_timeout_with_handle(replaced);
+    }
+}
+
+/// Boot's chapter is on screen: the verse the reader was at goes back to
+/// the top of the reading pane, `offset` px below the bar, and is kept
+/// there as the page settles (`surfaces::hold_place`, the way the reading
+/// place logic puts one back). A verse the translation doesn't number
+/// leaves the chapter at its top, as before.
+fn reopen_at(verse: i64, offset: Option<f64>) {
+    let Some(here) = with(|s| s.reading.clone()) else {
+        return;
+    };
+    let mark = bridge::document()
+        .and_then(|d| {
+            d.query_selector(&text::verse_selector(&here.translation_code, verse))
+                .ok()
+                .flatten()
+        })
+        .and_then(|el| el.dyn_into::<HtmlElement>().ok());
+    if let Some(mark) = mark {
+        surfaces::hold_place(mark, offset.unwrap_or(0.0));
+        save_place();
+    }
+}
+
+/// `window.gospelGetterPlace.saved()`: the last position the backend saved
+/// (`save_reading_position`'s arguments), or `null`. For the GUI checks,
+/// which wait for it before closing the app.
+fn export_place() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let global = js_sys::Object::new();
+    let saved = Closure::<dyn Fn() -> JsValue>::new(|| {
+        with(|s| s.saved.clone())
+            .and_then(|saved| ipc::args(&saved).ok())
+            .unwrap_or(JsValue::NULL)
+    });
+    let _ = js_sys::Reflect::set(&global, &JsValue::from_str("saved"), saved.as_ref());
+    let _ = js_sys::Reflect::set(&window, &JsValue::from_str("gospelGetterPlace"), &global);
+    saved.forget();
 }
 
 /// Compare went on or off, or what it compares with changed: the chapter on
@@ -904,11 +1019,17 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
     match request {
         Request::Start { home } => {
             show_translations(&home);
+            let at = home
+                .current_verse
+                .map(|verse| (verse, home.current_verse_offset));
             let load = load_sent(home.current_book_id, home.current_chapter, sent);
             Box::pin(async move {
                 let loaded = load.await;
                 if with(|s| s.reading.is_some()) {
                     start_history();
+                }
+                if let (true, Some((verse, offset))) = (loaded, at) {
+                    reopen_at(verse, offset);
                 }
                 loaded
             })
@@ -1110,6 +1231,32 @@ pub fn mount() {
             }
         });
     }
+    // Where the reader is, saved once they stop scrolling, and at once as
+    // the window is hidden or loses focus, or the pointer leaves the page
+    // (for the window's close button, say: a window closing destroys its
+    // webview without a `pagehide`).
+    if let Some(window) = web_sys::window() {
+        let passive = web_sys::AddEventListenerOptions::new();
+        passive.set_passive(true);
+        let scrolled = Closure::<dyn Fn()>::new(save_place_soon);
+        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
+            "scroll",
+            scrolled.as_ref().unchecked_ref(),
+            &passive,
+        );
+        scrolled.forget();
+        dom::on(&window, "pagehide", |_| save_place());
+        dom::on(&window, "blur", |_| save_place());
+    }
+    dom::on(&document, "visibilitychange", |_| {
+        if bridge::document().is_some_and(|d| d.hidden()) {
+            save_place();
+        }
+    });
+    if let Some(html) = document.document_element() {
+        dom::on(&html, "mouseleave", |_| save_place());
+    }
+    export_place();
     // A mouse's back and forward buttons.
     if let Some(window) = web_sys::window() {
         dom::on(&window, "mouseup", |event| {

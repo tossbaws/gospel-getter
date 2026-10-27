@@ -348,12 +348,39 @@ mod ipc_tests {
             (&json!("web"), &json!(43), &json!(3))
         );
         assert_eq!(
+            (&home["currentVerse"], &home["currentVerseOffset"]),
+            (&Value::Null, &Value::Null)
+        );
+        // Where in the chapter the reader was comes back with it.
+        assert_eq!(
+            invoke(
+                &webview,
+                "save_reading_position",
+                json!({ "bookId": 43, "chapter": 3, "translationCode": "web", "verse": 16, "offset": -12.5 }),
+            )
+            .unwrap(),
+            Value::Null
+        );
+        let home = invoke(&webview, "get_home", json!({})).unwrap();
+        assert_eq!(
+            (&home["currentVerse"], &home["currentVerseOffset"]),
+            (&json!(16), &json!(-12.5))
+        );
+        assert_eq!(
             invoke(
                 &webview,
                 "save_reading_position",
                 json!({ "bookId": 43, "chapter": 22, "translationCode": "web" }),
             ),
             Err(json!("John has no chapter 22."))
+        );
+        assert_eq!(
+            invoke(
+                &webview,
+                "save_reading_position",
+                json!({ "bookId": 43, "chapter": 3, "translationCode": "web", "verse": 37 }),
+            ),
+            Err(json!("John 3 has no verse 37."))
         );
 
         let passage = invoke(

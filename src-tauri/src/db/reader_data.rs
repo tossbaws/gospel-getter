@@ -410,6 +410,12 @@ pub async fn apply_import(
         .execute(&mut *tx)
         .await
         .context("Failed to save the reading position")?;
+        // A backup has no place in its chapter (only this computer keeps
+        // one): the restored chapter opens at its top.
+        sqlx::query("DELETE FROM reading_place")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to forget the reading place")?;
     }
 
     tx.commit().await.context("Failed to finish the import")?;

@@ -161,11 +161,13 @@ async fn dispatch(
                 Err(e) => Err(e),
             }
         }
-        "save_reading_position" => commands::remember_position(
+        "save_reading_position" => commands::remember_place(
             state,
             arg(args, "bookId")?,
             arg(args, "chapter")?,
             code.unwrap_or_default(),
+            arg(args, "verse")?,
+            arg(args, "offset")?,
         )
         .await
         .map(|()| Value::Null),
@@ -433,10 +435,11 @@ async fn dispatch(
             )
             .await?,
         )?),
-        // Test setup, not an app command: forget the reading position
-        // (and bookmarks, highlights and notes, unless `keepBookmarks` — a restart
-        // rather than a new test), then optionally save a reading position (what the
-        // app would reopen at).
+        // Test setup, not an app command: forget the reading position and
+        // the place in it (and bookmarks, highlights and notes, unless
+        // `keepBookmarks` — a restart rather than a new test), then optionally
+        // save a reading position (what the app would reopen at). With
+        // `keepPosition`, a restart: the position and place stay as saved.
         "__reset" => {
             *state
                 .pending_import
@@ -462,7 +465,14 @@ async fn dispatch(
                     .execute(writer.pool())
                     .await?;
             }
+            // A restart (`keepPosition`) opens where the last session left.
+            if arg::<Option<bool>>(args, "keepPosition")?.unwrap_or(false) {
+                return Ok(Ok(Value::Null));
+            }
             sqlx::query("DELETE FROM reading_position")
+                .execute(writer.pool())
+                .await?;
+            sqlx::query("DELETE FROM reading_place")
                 .execute(writer.pool())
                 .await?;
             if let Some(book_id) = arg::<Option<i64>>(args, "bookId")? {
@@ -473,7 +483,7 @@ async fn dispatch(
                     .map_or(1, |t| t.id);
                 state
                     .store
-                    .save_reading_position(translation_id, book_id, arg(args, "chapter")?)
+                    .save_reading_position(translation_id, book_id, arg(args, "chapter")?, None)
                     .await?;
             }
             Ok(Value::Null)

@@ -73,6 +73,11 @@ thread_local! {
     static LAYOUT_PENDING: Cell<bool> = const { Cell::new(false) };
     /// The scroll position the page's last `scroll` event found.
     static SCROLL_SEEN: Cell<f64> = const { Cell::new(0.0) };
+    /// A verse put back where the reader was ([`hold_place`]), kept there
+    /// as the page settles until the reader scrolls.
+    static HELD: RefCell<Option<Held>> = const { RefCell::new(None) };
+    /// [`hold_place`]'s scroll listener is there (it stays, idle, after).
+    static LISTENING_FOR_HELD: Cell<bool> = const { Cell::new(false) };
     /// [`SCROLL_SEEN`] as the last resize's event came, before the scroll
     /// event of anything that scrolled for it ([`on_shape_change`]).
     static SCROLL_BEFORE_RESIZE: Cell<Option<f64>> = const { Cell::new(None) };
@@ -378,6 +383,133 @@ pub fn keep_reading_place(change: impl FnOnce(), place: Option<Place>) {
         window.scroll_by_with_x_and_y(0.0, shift);
     }
     note_painted_place();
+}
+
+/// The verse at the top of the reading pane, in `code`'s column, and how far
+/// its top is below the bar's bottom: the reader's place as
+/// [`keep_reading_place`] keeps it, from the painted layout at the scroll
+/// position now ([`painted_place_at`]), or, with none painted (or not this
+/// chapter's), measured now ([`reading_place`]). None when the place is the
+/// chapter's heading or a gap in Compare's columns (the chapter's top, as
+/// far as reopening goes), or nothing of the chapter reaches below the bar.
+pub fn top_verse(code: &str) -> Option<(i64, f64)> {
+    let y = web_sys::window()?.scroll_y().ok()?;
+    let painted = PAINTED_LAYOUT
+        .with_borrow(|layout| layout.as_ref().map(|layout| layout.bar_bottom))
+        .and_then(|bar_bottom| Some((painted_place_at(y)?, bar_bottom)));
+    let (place, bar_bottom) = match painted {
+        Some(found) => found,
+        None => (
+            reading_place()?,
+            by_id("top-bar")?.get_bounding_client_rect().bottom(),
+        ),
+    };
+    if place.mark.get_attribute("data-translation").as_deref() != Some(code) {
+        return None;
+    }
+    let verse = place.mark.get_attribute("data-verse")?.parse().ok()?;
+    Some((verse, place.top - bar_bottom))
+}
+
+/// Scrolls so `mark`'s top is `offset` px below the bar's bottom, as
+/// [`keep_reading_place`] puts a place back: to the nearest whole pixel
+/// (`surfaces_text::whole_pixel_top`), as the page can only scroll by one.
+fn put_place(mark: HtmlElement, offset: f64) {
+    let Some(bar) = by_id("top-bar") else {
+        return;
+    };
+    let wanted = bar.get_bounding_client_rect().bottom() + offset;
+    let top = text::whole_pixel_top(mark.get_bounding_client_rect().top(), wanted);
+    keep_reading_place(|| {}, Some(Place { mark, top }));
+}
+
+/// A verse put back where the reader was ([`hold_place`]): the scroll
+/// position that left it there, and what sees the reading pane change size.
+struct Held {
+    mark: HtmlElement,
+    offset: f64,
+    y: f64,
+    observer: ResizeObserver,
+}
+
+/// Puts `mark` (a verse) `offset` px below the bar ([`put_place`]) and keeps
+/// it there as the page settles, the fonts arriving or the verses' marks
+/// changing their lines: whenever the reading pane changes size, as long
+/// as the page is still where this left it. The reader scrolling, or
+/// another chapter drawn ([`let_go_of_place`]), ends it.
+pub fn hold_place(mark: HtmlElement, offset: f64) {
+    let_go_of_place();
+    put_place(mark.clone(), offset);
+    let (Some(window), Some(pane)) = (web_sys::window(), by_id("reading-pane")) else {
+        return;
+    };
+    if !js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false) {
+        return;
+    }
+    let resized = Closure::<dyn Fn()>::new(|| {
+        let held = HELD.with_borrow(|held| held.as_ref().map(|h| (h.mark.clone(), h.offset, h.y)));
+        let Some((mark, offset, y)) = held else {
+            return;
+        };
+        if !mark.is_connected() || scroll_y() != Some(y) {
+            let_go_of_place();
+            return;
+        }
+        put_place(mark, offset);
+        note_held_scroll();
+    });
+    let Ok(observer) = ResizeObserver::new(resized.as_ref().unchecked_ref()) else {
+        return;
+    };
+    resized.forget();
+    observer.observe(&pane);
+    HELD.set(Some(Held {
+        mark,
+        offset,
+        y: scroll_y().unwrap_or(0.0),
+        observer,
+    }));
+    LISTENING_FOR_HELD.with(|listening| {
+        if listening.replace(true) {
+            return;
+        }
+        let scrolled = Closure::<dyn Fn()>::new(|| {
+            let moved = HELD.with_borrow(|held| held.as_ref().map(|h| h.y)) != scroll_y()
+                && HELD.with_borrow(Option::is_some);
+            if moved {
+                let_go_of_place();
+            }
+        });
+        let passive = AddEventListenerOptions::new();
+        passive.set_passive(true);
+        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
+            "scroll",
+            scrolled.as_ref().unchecked_ref(),
+            &passive,
+        );
+        scrolled.forget();
+    });
+}
+
+/// The scroll position the held verse was put back at.
+fn note_held_scroll() {
+    let y = scroll_y();
+    HELD.with_borrow_mut(|held| {
+        if let (Some(held), Some(y)) = (held.as_mut(), y) {
+            held.y = y;
+        }
+    });
+}
+
+/// Stops keeping a verse in place ([`hold_place`]).
+pub fn let_go_of_place() {
+    if let Some(held) = HELD.take() {
+        held.observer.disconnect();
+    }
+}
+
+fn scroll_y() -> Option<f64> {
+    web_sys::window()?.scroll_y().ok()
 }
 
 /// Shows or hides the sidebar, and remembers it (the saved settings').

@@ -521,7 +521,8 @@ impl Run<'_> {
 
 /// The second session: the app closed and started again, on the same data.
 /// Check 58: a cold start goes straight to the chapter the first session
-/// left (`saved`). Check 26 (check 25 left its settings): the page and Aa
+/// left (`saved`). Check 59: at the verse it left at the top (`left_at`,
+/// see `place`). Check 26 (check 25 left its settings): the page and Aa
 /// show every setting as it was left; then they're put back as they were
 /// before check 25. Check 45: the lists check 40 left open are open.
 pub(super) async fn restart(
@@ -530,6 +531,7 @@ pub(super) async fn restart(
     started: std::time::Instant,
     looks: Result<Looks, String>,
     saved: Option<String>,
+    left_at: Result<Value, String>,
 ) {
     let kept_here = [Check::AaRestart, Check::DisclosuresKept];
     // Windows: Edge WebDriver starts each session's WebView2 with a user
@@ -565,7 +567,7 @@ pub(super) async fn restart(
     };
     log_line(
         started,
-        "start the app again, on the same data (checks 58, 26 and 45)",
+        "start the app again, on the same data (checks 58, 59, 26 and 45)",
     );
     let driver = match start_session(config, &config.app, started).await {
         Ok(driver) => driver,
@@ -595,6 +597,16 @@ pub(super) async fn restart(
         run.failure_screenshot(Check::ColdStart).await;
     }
     report.record(Check::ColdStart, cold).await;
+    let reopened = match &left_at {
+        Ok(left) => run.reopened_at_verse(left).await,
+        Err(why) => Err(anyhow::anyhow!(
+            "not run: the first session didn't leave the reader at a verse: {why}"
+        )),
+    };
+    if reopened.is_err() {
+        run.failure_screenshot(Check::ReopenAtVerse).await;
+    }
+    report.record(Check::ReopenAtVerse, reopened).await;
     if let (false, Some(looks)) = (windows, looks) {
         let result = run.restored(&looks).await;
         if result.is_err() {

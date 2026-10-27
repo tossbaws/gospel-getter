@@ -14,7 +14,8 @@ use crate::db::test_support::{
     TempDb, bundled, fill_notes, fresh_database, other_tables_snapshot, verses_snapshot,
 };
 use crate::reader_data::{
-    Layout, LineSpacing, MAX_SHOWN_FILE_CHARS, Preferences, TextSize, Theme, TranslationCode, Width,
+    self, Layout, LineSpacing, MAX_SHOWN_FILE_CHARS, Preferences, TextSize, Theme, TranslationCode,
+    Width,
 };
 
 async fn app(label: &str) -> (TempDb, AppState) {
@@ -313,6 +314,66 @@ async fn restoring_the_position_is_optional() {
         .unwrap();
     assert!(result.position.is_none());
     assert_eq!(personal(&state).await.1, Some((1, 1, 1)));
+}
+
+/// The verse the reader was at is only for reopening on this computer
+/// (R10): an export with one saved is byte for byte the export without it,
+/// in the same format, its position the chapter alone.
+#[tokio::test]
+async fn an_export_is_the_same_with_or_without_the_verse_read() {
+    let (_db, state) = app("rd_export_place").await;
+    commands::bookmark_passage(&state, 43, 3, 16, 16)
+        .await
+        .unwrap();
+    commands::remember_position(&state, 43, 3, "web")
+        .await
+        .unwrap();
+    let at_the_top = build_reader_data(&state, matrix_prefs()).await.unwrap();
+    commands::remember_place(&state, 43, 3, "web", Some(16), Some(-12.5))
+        .await
+        .unwrap();
+    let mut at_the_verse = build_reader_data(&state, matrix_prefs()).await.unwrap();
+    at_the_verse.exported_at = at_the_top.exported_at.clone();
+    let top = reader_data::to_file_contents(&at_the_top).unwrap();
+    let verse = reader_data::to_file_contents(&at_the_verse).unwrap();
+    assert_eq!(verse, top);
+    let json: Value = serde_json::from_str(&verse).unwrap();
+    assert_eq!(json["format_version"], reader_data::FORMAT_VERSION);
+    assert_eq!(
+        json["reading_position"],
+        serde_json::json!({"translation": "web", "book": 43, "book_name": "John", "chapter": 3})
+    );
+}
+
+/// Restoring a backup's position opens its chapter at the top, even when
+/// it's the chapter the reader was in (a backup has no verse); not
+/// restoring it keeps the reader's place.
+#[tokio::test]
+async fn restoring_a_backups_position_forgets_the_verse() {
+    let (db, state) = app("rd_import_place").await;
+    let path = file(&db, "pos.gospel-getter.json");
+    std::fs::write(
+        &path,
+        file_with("", r#"{"translation": "web", "book": 43, "chapter": 3}"#),
+    )
+    .unwrap();
+    for restore in [false, true] {
+        commands::remember_place(&state, 43, 3, "web", Some(16), Some(-12.5))
+            .await
+            .unwrap();
+        let p = preview(&state, &path).await;
+        commands::apply_pending_import(&state, p.token, false, restore)
+            .await
+            .unwrap();
+        let home = commands::home(&state).await;
+        assert_eq!(
+            (home.current_book_id, home.current_chapter),
+            (43, 3),
+            "restore {restore}"
+        );
+        let verse = if restore { None } else { Some(16) };
+        assert_eq!(home.current_verse, verse, "restore {restore}");
+    }
 }
 
 /// A display preference this version can't apply (here a theme from a

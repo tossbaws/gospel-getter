@@ -455,14 +455,20 @@ pub struct SearchVerse {
 // ---- The reader.
 
 /// What the reader takes from `get_home`'s answer (`commands::HomeDto`):
-/// the translations and where the reader was.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// the translations and where the reader was: the chapter, and the verse
+/// at the top of the reading pane, its top `current_verse_offset` px below
+/// the bar (none: the chapter's top).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Home {
     pub translations: Vec<Translation>,
     pub current_translation_code: String,
     pub current_book_id: i64,
     pub current_chapter: i64,
+    #[serde(default)]
+    pub current_verse: Option<i64>,
+    #[serde(default)]
+    pub current_verse_offset: Option<f64>,
 }
 
 /// A bundled translation (`commands::TranslationDto`).
@@ -593,13 +599,19 @@ pub struct CompareArgs<'a> {
     pub translation_codes: &'a [String],
 }
 
-/// `save_reading_position`'s arguments.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// `save_reading_position`'s arguments: the chapter on screen, and where in
+/// it the reader is (the verse at the top of the reading pane, its top
+/// `offset` px below the bar), left out at the chapter's top.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Position {
     pub book_id: i64,
     pub chapter: i64,
     pub translation_code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verse: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<f64>,
 }
 
 // ---- The selection card.

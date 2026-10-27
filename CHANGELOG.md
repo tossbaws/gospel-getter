@@ -6,6 +6,14 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Gospel Getter reopens at the verse you were reading, not just the
+  chapter: the verse at the top of the page goes back to the top, just
+  where it was, when you stop scrolling and when the window is hidden or
+  closed. A translation that doesn't number that verse opens the chapter
+  at its top. It's kept on this computer only: backups are unchanged, and
+  restoring one's reading position opens its chapter at the top.
+
 ### Changed
 - Internal cleanup, no change in use.
 

@@ -2,11 +2,12 @@
 //! `get_reading` and `save_reading_position`, with the DTOs they answer
 //! with (a verse as shown, the neighboring chapters, the Bible's edges).
 
+use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
 
 use super::{AppState, book_name, code_of, failed, resolve_translation};
-use crate::db::{self, Book, Translation};
+use crate::db::{self, Book, TopVerse, Translation};
 use crate::domain::bible::{self, ChapterRef};
 use crate::domain::kjv_markup::{PartKind, VerseText};
 use crate::start_here::{StartHereDto, start_here};
@@ -72,6 +73,12 @@ pub struct HomeDto {
     pub has_saved_position: bool,
     /// The welcome card's places to start reading (see `start_here`).
     pub start_here: Vec<StartHereDto>,
+    /// Where in that chapter the reader was: the verse at the top of the
+    /// reading pane, its top `current_verse_offset` px below the bar's
+    /// bottom (`None`: at it). `None` opens the chapter at its top, as when
+    /// the place was saved for another chapter, or not at all.
+    pub current_verse: Option<i64>,
+    pub current_verse_offset: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -432,13 +439,16 @@ pub async fn home(state: &AppState) -> HomeDto {
         .collect();
 
     let default_translation_id = resolve_translation(state, None);
-    let ((translation_id, book_id, chapter), has_saved_position) =
-        match state.store.reading_position().await {
-            Ok(Some(position)) => (position, true),
-            Ok(None) => ((default_translation_id, 1, 1), false),
+    let ((translation_id, book_id, chapter, at), has_saved_position) =
+        match state.store.reading_place().await {
+            Ok(Some(place)) => (
+                (place.translation_id, place.book_id, place.chapter, place.at),
+                true,
+            ),
+            Ok(None) => ((default_translation_id, 1, 1, None), false),
             Err(e) => {
                 tracing::error!("Failed to load reading position: {e}");
-                ((default_translation_id, 1, 1), true)
+                ((default_translation_id, 1, 1, None), true)
             }
         };
     let current_translation_code = state
@@ -457,6 +467,8 @@ pub async fn home(state: &AppState) -> HomeDto {
         current_chapter: chapter,
         has_saved_position,
         start_here: start_here(&state.books),
+        current_verse: at.map(|at| at.verse),
+        current_verse_offset: at.and_then(|at| at.offset_px),
     }
 }
 
@@ -513,10 +525,13 @@ pub async fn reading(
 }
 
 /// Remember a chapter as the reader's position, so reopening the app
-/// returns there. The page calls this once it has put the chapter on
+/// returns there, and where in it the reader was: `verse`, the verse at the
+/// top of the reading pane, its top `offset` px below the bar (none, the
+/// chapter's top). The page calls this once it has put the chapter on
 /// screen (`get_reading` saves nothing, so an answer the page asked for
-/// and then dropped never moves the position), and sends one at a time,
-/// in the order it showed them, so the chapter shown last is the one
+/// and then dropped never moves the position), with no verse, and again
+/// with the verse when the reader stops scrolling or the window is hidden;
+/// it sends one at a time, in order, so the place shown last is the one
 /// kept. With two copies of the app open, the last save from either is.
 #[tauri::command]
 pub async fn save_reading_position(
@@ -524,18 +539,33 @@ pub async fn save_reading_position(
     book_id: i64,
     chapter: i64,
     translation_code: String,
+    verse: Option<i64>,
+    offset: Option<f64>,
 ) -> Result<(), String> {
-    remember_position(&state, book_id, chapter, &translation_code).await
+    remember_place(&state, book_id, chapter, &translation_code, verse, offset).await
 }
 
-/// The logic behind `save_reading_position`: an error, as a sentence for
-/// the reader, for a translation, book or chapter that isn't there, or a
-/// position that couldn't be saved.
+/// [`remember_place`] at the chapter's top.
 pub async fn remember_position(
     state: &AppState,
     book_id: i64,
     chapter: i64,
     translation_code: &str,
+) -> Result<(), String> {
+    remember_place(state, book_id, chapter, translation_code, None, None).await
+}
+
+/// The logic behind `save_reading_position`: an error, as a sentence for
+/// the reader, for a translation, book, chapter or verse that isn't there,
+/// or a position that couldn't be saved. An offset that isn't a number is
+/// left out (the verse goes at the bar).
+pub async fn remember_place(
+    state: &AppState,
+    book_id: i64,
+    chapter: i64,
+    translation_code: &str,
+    verse: Option<i64>,
+    offset: Option<f64>,
 ) -> Result<(), String> {
     let translation = state
         .translations
@@ -550,9 +580,27 @@ pub async fn remember_position(
     if !(1..=book.chapter_count).contains(&chapter) {
         return Err(format!("{} has no chapter {chapter}.", book.name));
     }
+    let at = match verse {
+        Some(verse) => {
+            let last = state
+                .store
+                .chapter_last_verse(book_id, chapter)
+                .await
+                .with_context(|| format!("Failed to read {} {chapter}", book.name))
+                .map_err(failed("The reading position couldn't be saved."))?;
+            if !(1..=last).contains(&verse) {
+                return Err(format!("{} {chapter} has no verse {verse}.", book.name));
+            }
+            Some(TopVerse {
+                verse,
+                offset_px: offset.filter(|o| o.is_finite()),
+            })
+        }
+        None => None,
+    };
     state
         .store
-        .save_reading_position(translation.id, book_id, chapter)
+        .save_reading_position(translation.id, book_id, chapter, at)
         .await
         .map_err(failed("The reading position couldn't be saved."))
 }

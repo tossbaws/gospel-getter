@@ -68,6 +68,7 @@ pub enum Check {
     KeyHistoryNote = 56,
     PalettePageCommands = 57,
     ColdStart = 58,
+    ReopenAtVerse = 59,
 }
 
 impl Check {
@@ -127,7 +128,12 @@ impl Check {
 
     /// The checks on the app as shipped started again, on the first
     /// session's data (the second session).
-    pub const RELAUNCH: [Check; 3] = [Check::ColdStart, Check::AaRestart, Check::DisclosuresKept];
+    pub const RELAUNCH: [Check; 4] = [
+        Check::ColdStart,
+        Check::ReopenAtVerse,
+        Check::AaRestart,
+        Check::DisclosuresKept,
+    ];
 
     /// The updater's checks, on the GUI checks' test build against the
     /// run's own update server (the third session).
@@ -199,6 +205,7 @@ impl Check {
             Check::KeyHistoryNote => "key-history-and-note",
             Check::PalettePageCommands => "palette-page-commands",
             Check::ColdStart => "cold-start",
+            Check::ReopenAtVerse => "reopen-at-verse",
         }
     }
 

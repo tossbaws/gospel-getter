@@ -216,6 +216,14 @@ pub fn scroll_before_anchoring(
         })
 }
 
+/// Where to say a mark was, to put it back `wanted` px down the screen
+/// from `now`: the nearest top a whole-pixel scroll reaches. WebKitGTK
+/// scrolls by whole pixels and drops a fraction, so a scroll of 889.998px
+/// would be 889px, a pixel short.
+pub fn whole_pixel_top(now: f64, wanted: f64) -> f64 {
+    now - (now - wanted).round()
+}
+
 /// How far to scroll to put back a mark that was `before` px down the
 /// screen and now is `after`: nothing if it hasn't moved (or a box gave no
 /// number).
@@ -420,5 +428,17 @@ mod tests {
         assert_eq!(scroll_shift(29.7, 29.7), None);
         assert_eq!(scroll_shift(f64::NAN, 10.0), None);
         assert_eq!(scroll_shift(10.0, f64::NAN), None);
+    }
+
+    #[test]
+    fn a_place_is_put_back_by_a_whole_pixel_scroll() {
+        // 943.53 down, wanted 53.53 above a 54px bar's bottom (0.47): a
+        // scroll of 943.06 would be 943 in WebKitGTK; 943 is asked for.
+        let top = whole_pixel_top(943.53, 0.47);
+        assert_eq!(scroll_shift(top, 943.53), Some(943.0));
+        assert!((top - 0.53).abs() < 1e-9);
+        // Already whole: unchanged.
+        assert_eq!(whole_pixel_top(100.0, 40.0), 40.0);
+        assert_eq!(scroll_shift(whole_pixel_top(40.0, 40.0), 40.0), None);
     }
 }

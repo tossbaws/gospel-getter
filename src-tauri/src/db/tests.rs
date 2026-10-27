@@ -19,8 +19,9 @@ use super::test_support::{
     prepared_database, table_names, verses_snapshot, write_v2_1_0_database,
 };
 use super::{
-    BookmarkError, Db, HighlightColor, NoteBodyError, NoteError, ensure_search_index, migrate,
-    prepare,
+    BookmarkError, Db, HighlightColor, NoteBodyError, NoteError, ReadingPlace, TopVerse,
+    ensure_search_index, get_reading_place, migrate, prepare, save_reading_position,
+    save_reading_position_at,
 };
 
 const KJV: i64 = 1;
@@ -88,6 +89,7 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
         "verses",
         "footnotes",
         "reading_position",
+        "reading_place",
         "cross_references",
         "bookmarks",
         "highlights",
@@ -1471,5 +1473,157 @@ async fn notes_stay_within_their_total_size() {
     assert_eq!(
         note_totals(pool.read()).await.1,
         (MAX_TOTAL_NOTE_CHARS - 999) as i64
+    );
+}
+
+/// What 2.19.1 runs to save the chapter on screen (its
+/// `save_reading_position`, word for word): it knows nothing of
+/// `reading_place`.
+async fn save_as_2_19_1(pool: &Db, translation_id: i64, book_id: i64, chapter: i64) {
+    sqlx::query(
+        "INSERT INTO reading_position (id, translation_id, book_id, chapter) \
+         VALUES (1, $1, $2, $3) \
+         ON CONFLICT(id) DO UPDATE SET \
+             translation_id = excluded.translation_id, \
+             book_id = excluded.book_id, \
+             chapter = excluded.chapter",
+    )
+    .bind(translation_id)
+    .bind(book_id)
+    .bind(chapter)
+    .execute(pool.write().pool())
+    .await
+    .unwrap();
+}
+
+fn place(translation_id: i64, book_id: i64, chapter: i64, at: Option<TopVerse>) -> ReadingPlace {
+    ReadingPlace {
+        translation_id,
+        book_id,
+        chapter,
+        at,
+    }
+}
+
+/// The verse at the top of the reading pane is saved with its chapter and
+/// read back with it; a chapter saved at its top forgets it, and saving
+/// that chapter again doesn't bring it back.
+#[tokio::test]
+async fn the_reading_place_is_saved_and_read_with_its_chapter() {
+    let (_db, pool) = fresh_database("reading_place").await;
+    assert_eq!(get_reading_place(pool.read()).await.unwrap(), None);
+
+    let at = TopVerse {
+        verse: 16,
+        offset_px: Some(-12.5),
+    };
+    save_reading_position_at(pool.write(), WEB, 43, 3, Some(at))
+        .await
+        .unwrap();
+    assert_eq!(
+        get_reading_place(pool.read()).await.unwrap(),
+        Some(place(WEB, 43, 3, Some(at)))
+    );
+    // Without an offset: the verse at the bar.
+    let at_the_bar = TopVerse {
+        verse: 17,
+        offset_px: None,
+    };
+    save_reading_position_at(pool.write(), WEB, 43, 3, Some(at_the_bar))
+        .await
+        .unwrap();
+    assert_eq!(
+        get_reading_place(pool.read()).await.unwrap(),
+        Some(place(WEB, 43, 3, Some(at_the_bar)))
+    );
+
+    save_reading_position(pool.write(), WEB, 43, 4)
+        .await
+        .unwrap();
+    assert_eq!(
+        get_reading_place(pool.read()).await.unwrap(),
+        Some(place(WEB, 43, 4, None))
+    );
+    save_reading_position(pool.write(), WEB, 43, 3)
+        .await
+        .unwrap();
+    assert_eq!(
+        get_reading_place(pool.read()).await.unwrap(),
+        Some(place(WEB, 43, 3, None))
+    );
+    // The position alone reads as it always has.
+    assert_eq!(
+        super::get_reading_position(pool.read()).await.unwrap(),
+        Some((WEB, 43, 3))
+    );
+}
+
+/// A place is used only for the translation, book and chapter it was saved
+/// with: once an older app has saved another chapter or translation over
+/// the position, the chapter opens at its top.
+#[tokio::test]
+async fn a_place_for_another_chapter_or_translation_is_never_used() {
+    let (_db, pool) = fresh_database("reading_place_guard").await;
+    let at = TopVerse {
+        verse: 16,
+        offset_px: Some(-3.0),
+    };
+    for (translation_id, book_id, chapter) in [(KJV, 43, 3), (WEB, 43, 4), (WEB, 44, 3)] {
+        save_reading_position_at(pool.write(), WEB, 43, 3, Some(at))
+            .await
+            .unwrap();
+        save_as_2_19_1(&pool, translation_id, book_id, chapter).await;
+        assert_eq!(
+            get_reading_place(pool.read()).await.unwrap(),
+            Some(place(translation_id, book_id, chapter, None)),
+            "{translation_id} {book_id}:{chapter}"
+        );
+    }
+}
+
+/// 2.19.1 opening a database this version saved a place in: its schema is
+/// there as it knows it (the new table is one more, and the version stays
+/// 1, so its `migrate` changes nothing), it reads and saves the position as
+/// it always has, and this version then opens its chapter at the top.
+#[tokio::test]
+async fn an_older_app_opens_and_saves_a_database_with_a_place_in_it() {
+    let (db, pool) = fresh_database("reading_place_2_19_1").await;
+    save_reading_position_at(
+        pool.write(),
+        WEB,
+        43,
+        3,
+        Some(TopVerse {
+            verse: 16,
+            offset_px: Some(-12.5),
+        }),
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
+    // 2.19.1: its `migrate` (every statement is `CREATE ... IF NOT EXISTS`,
+    // and it writes the version only when it's below 1), then its read and
+    // its save.
+    let pool = db.connect().await;
+    assert_eq!(user_version(pool.read()).await, 1);
+    assert_eq!(SCHEMA_VERSION, 1);
+    let read: Option<(i64, i64, i64)> = sqlx::query_as(
+        "SELECT translation_id, book_id, chapter FROM reading_position WHERE id = 1",
+    )
+    .fetch_optional(pool.read())
+    .await
+    .unwrap();
+    assert_eq!(read, Some((WEB, 43, 3)));
+    save_as_2_19_1(&pool, WEB, 45, 8).await;
+    pool.close().await;
+
+    // This version again: Romans 8, from its top.
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
+    assert_eq!(
+        get_reading_place(pool.read()).await.unwrap(),
+        Some(place(WEB, 45, 8, None))
     );
 }

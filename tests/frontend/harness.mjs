@@ -193,6 +193,8 @@ export async function closeBridge() {
  * or 'missing'; `compare` and `readerMode` preset those display settings;
  * `failing` maps commands to the error they reject with from the start.
  * `fresh` starts with no saved reading position, as a new install does;
+ * `keepPosition` keeps the one the last session saved (with where in its
+ * chapter the reader was), as a restart does;
  * `storage` presets the page's local storage (see `app.storage()`);
  * `update` scripts updates from the start (see `setUpdate`);
  * `hold` lists commands held from the start, until `app.release(cmd)`
@@ -212,6 +214,7 @@ export async function openApp({
     keepBookmarks = false,
     failing = {},
     fresh = false,
+    keepPosition = false,
     storage = {},
     update = null,
     hold = [],
@@ -233,7 +236,7 @@ export async function openApp({
 } = {}) {
     await backend('__reset', fresh
         ? { translationCode: translation, keepBookmarks }
-        : { bookId: bookId(book), chapter, translationCode: translation, keepBookmarks });
+        : { bookId: bookId(book), chapter, translationCode: translation, keepBookmarks, keepPosition });
     if (update) await setUpdate(update);
 
     const calls = [];
