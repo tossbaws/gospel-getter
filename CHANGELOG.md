@@ -4,7 +4,10 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.19.1] - 2026-10-27
+
+Four fixes from an outside review, and nothing else changes: updating
+keeps your bookmarks, highlights, notes, reading position and settings.
 
 ### Fixed
 - Restoring a backup could leave out some of your notes. Two notes on
