@@ -754,12 +754,19 @@ pub fn history_end(step: i32) -> &'static str {
 /// by choosing it), each a [`Place`]. Moving on from a place (a chapter
 /// turn) moves the place with the reader, so Back returns to where they
 /// actually left. A jump after going back drops the places ahead, as a
-/// browser does.
+/// browser does. A step back or forward that can't be read leaves the
+/// history as it was.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct History {
     places: Vec<Place>,
-    /// The place on screen (or on its way), or none yet.
+    /// The place on screen, or none yet.
     index: Option<usize>,
+    /// The place a step back or forward is on its way to: it's the one on
+    /// screen only once it's read ([`Self::end_go`]).
+    going: Option<usize>,
+    /// The place a step couldn't read, which Try again takes the step to
+    /// ([`Self::begin_retry`]), until anything else is read.
+    failed: Option<usize>,
     /// Whether `places[index]` is what's on screen: not while a jump, or a
     /// step back or forward, is on its way.
     shown: bool,
@@ -773,6 +780,8 @@ impl History {
     pub fn start(&mut self, book_id: i64, chapter: i64) {
         self.places = vec![Place::chapter(book_id, chapter)];
         self.index = Some(0);
+        self.going = None;
+        self.failed = None;
         self.shown = true;
     }
 
@@ -799,6 +808,8 @@ impl History {
 
     /// A jump begins (the reader is leaving, see [`Self::remember_leaving`]).
     pub fn begin_jump(&mut self) {
+        self.going = None;
+        self.failed = None;
         self.shown = false;
         self.token += 1;
     }
@@ -832,21 +843,55 @@ impl History {
         self.target(step).is_some()
     }
 
+    /// From the place a step is on its way to, if one is: a second Back
+    /// before the first is read goes back two.
     fn target(&self, step: i32) -> Option<usize> {
-        let index = self.index.map_or(-1, |i| i as i64) + i64::from(step);
+        let from = self.going.or(self.index);
+        let index = from.map_or(-1, |i| i as i64) + i64::from(step);
         usize::try_from(index)
             .ok()
             .filter(|&i| i < self.places.len())
     }
 
     /// Steps back or forward: the place to open, and the step's token, or
-    /// `None` at the history's end.
+    /// `None` at the history's end. The place is the one on screen only
+    /// once it's read ([`Self::end_go`]).
     pub fn begin_go(&mut self, step: i32) -> Option<(u64, Place)> {
         let target = self.target(step)?;
-        self.index = Some(target);
+        Some(self.go_to(target))
+    }
+
+    fn go_to(&mut self, target: usize) -> (u64, Place) {
+        self.going = Some(target);
+        self.failed = None;
         self.shown = false;
         self.token += 1;
-        Some((self.token, self.places[target].clone()))
+        (self.token, self.places[target].clone())
+    }
+
+    /// Whether Try again on `book_id` `chapter` takes a step that couldn't
+    /// be read again ([`Self::begin_retry`]).
+    pub fn can_retry(&self, book_id: i64, chapter: i64) -> bool {
+        self.failed
+            .and_then(|i| self.places.get(i))
+            .is_some_and(|p| p.book_id == book_id && p.chapter == chapter)
+    }
+
+    /// Try again on `book_id` `chapter`, after a step to it couldn't be
+    /// read: the step again, as [`Self::begin_go`], or `None` if that isn't
+    /// what couldn't be read.
+    pub fn begin_retry(&mut self, book_id: i64, chapter: i64) -> Option<(u64, Place)> {
+        if !self.can_retry(book_id, chapter) {
+            return None;
+        }
+        let target = self.failed?;
+        Some(self.go_to(target))
+    }
+
+    /// Something other than a step is being read (a chapter turn, say), so
+    /// Try again is no longer for a step.
+    pub fn forget_failed(&mut self) {
+        self.failed = None;
     }
 
     /// Whether the step with `token` is still the latest.
@@ -854,8 +899,21 @@ impl History {
         self.token == token
     }
 
-    /// The step (or jump) is done: the place is on screen.
-    pub fn shown(&mut self) {
+    /// The step with `token` is done, its place read (`loaded`) or not.
+    /// Read, it's the place on screen. Not, the place left is still on
+    /// screen and the history is as it was, the place left included, so
+    /// trying again (or Try again) reaches the same place. A step a newer
+    /// step or jump has taken over from changes nothing.
+    pub fn end_go(&mut self, token: u64, loaded: bool) {
+        if !self.current(token) {
+            return;
+        }
+        let going = self.going.take();
+        if loaded {
+            self.index = going.or(self.index);
+        } else {
+            self.failed = going;
+        }
         self.shown = true;
     }
 }
@@ -1231,10 +1289,10 @@ mod tests {
                 ..Place::chapter(45, 9)
             }
         );
-        h.shown();
-        let (_, first) = h.begin_go(-1).unwrap();
+        h.end_go(token, true);
+        let (token, first) = h.begin_go(-1).unwrap();
         assert_eq!(first.scroll_y, Some(120.0));
-        h.shown();
+        h.end_go(token, true);
         assert!(!h.can_go(-1) && h.can_go(1));
         // A jump from here drops the places ahead.
         h.begin_jump();
@@ -1266,5 +1324,122 @@ mod tests {
         let before = h.clone();
         h.remember_leaving(Some((2, 2)), 9.0);
         assert_eq!(h, before);
+    }
+
+    /// John 3, then jumps to Psalm 23 and Romans 8, read from 300 down.
+    fn three_places() -> History {
+        let mut h = History::default();
+        h.start(43, 3);
+        h.remember_leaving(Some((43, 3)), 100.0);
+        h.begin_jump();
+        h.end_jump(landed(19, 23, None));
+        h.remember_leaving(Some((19, 23)), 200.0);
+        h.begin_jump();
+        h.end_jump(landed(45, 8, None));
+        h.remember_leaving(Some((45, 8)), 300.0);
+        h
+    }
+
+    fn at(chapter: (i64, i64), scroll_y: f64) -> Place {
+        Place {
+            scroll_y: Some(scroll_y),
+            ..Place::chapter(chapter.0, chapter.1)
+        }
+    }
+
+    /// GG-20261026-2: Back that couldn't read Psalm 23, then Back again.
+    #[test]
+    fn a_failed_back_leaves_the_history_as_it_was_and_trying_again_reaches_the_place() {
+        let mut h = three_places();
+        let before = h.places.clone();
+        let (token, place) = h.begin_go(-1).unwrap();
+        assert_eq!(place, at((19, 23), 200.0));
+        h.end_go(token, false);
+        assert_eq!(h.places, before);
+        assert_eq!(h.index, Some(2), "Romans 8 is still the place on screen");
+        // Leaving Romans 8 again (still on screen) keeps it Romans 8.
+        h.remember_leaving(Some((45, 8)), 310.0);
+        assert_eq!(h.places[1], at((19, 23), 200.0), "Psalm 23 is kept");
+        assert_eq!(h.places[2], at((45, 8), 310.0));
+        let (token, place) = h.begin_go(-1).unwrap();
+        assert_eq!(place, at((19, 23), 200.0), "not John 3");
+        h.end_go(token, true);
+        let (token, place) = h.begin_go(1).unwrap();
+        assert_eq!(place, at((45, 8), 310.0));
+        h.end_go(token, true);
+        assert!(!h.can_go(1));
+    }
+
+    #[test]
+    fn a_failed_forward_leaves_the_history_as_it_was_and_trying_again_reaches_the_place() {
+        let mut h = three_places();
+        for _ in 0..2 {
+            let (token, _) = h.begin_go(-1).unwrap();
+            h.end_go(token, true);
+        }
+        h.remember_leaving(Some((43, 3)), 150.0);
+        let before = h.places.clone();
+        let (token, place) = h.begin_go(1).unwrap();
+        assert_eq!(place, at((19, 23), 200.0));
+        h.end_go(token, false);
+        assert_eq!((h.places.clone(), h.index), (before, Some(0)));
+        assert!(!h.can_go(-1));
+        h.remember_leaving(Some((43, 3)), 160.0);
+        let (token, place) = h.begin_go(1).unwrap();
+        assert_eq!(place, at((19, 23), 200.0), "not Romans 8");
+        h.end_go(token, true);
+        let (token, place) = h.begin_go(-1).unwrap();
+        assert_eq!(place, at((43, 3), 160.0));
+        h.end_go(token, true);
+    }
+
+    #[test]
+    fn a_late_failure_never_undoes_a_newer_step_or_jump() {
+        // Back twice, the second read first; then the first fails.
+        let mut h = three_places();
+        let (older, _) = h.begin_go(-1).unwrap();
+        let (newer, place) = h.begin_go(-1).unwrap();
+        assert_eq!(place, at((43, 3), 100.0), "two Backs go back two");
+        h.end_go(newer, true);
+        h.end_go(older, false);
+        assert_eq!(h.index, Some(0));
+        assert!(h.shown && h.failed.is_none());
+        // A newer step that fails leaves the history as before both.
+        let mut h = three_places();
+        let (older, _) = h.begin_go(-1).unwrap();
+        let (newer, _) = h.begin_go(-1).unwrap();
+        h.end_go(newer, false);
+        h.end_go(older, true);
+        assert_eq!(h.index, Some(2));
+        // A jump on its way takes over from a step: it's recorded after
+        // the place on screen, and the step's late answer changes nothing.
+        let mut h = three_places();
+        let (step, _) = h.begin_go(-1).unwrap();
+        h.begin_jump();
+        h.end_jump(landed(1, 1, None));
+        h.end_go(step, false);
+        assert_eq!(h.places.len(), 4);
+        assert_eq!((h.index, h.places[3].chapter), (Some(3), 1));
+        assert!(h.failed.is_none());
+    }
+
+    #[test]
+    fn try_again_after_a_failed_step_takes_the_step() {
+        let mut h = three_places();
+        let (token, _) = h.begin_go(-1).unwrap();
+        h.end_go(token, false);
+        assert!(!h.can_retry(45, 8) && h.can_retry(19, 23));
+        assert!(h.begin_retry(45, 8).is_none());
+        let (token, place) = h.begin_retry(19, 23).unwrap();
+        assert_eq!(place, at((19, 23), 200.0));
+        h.end_go(token, true);
+        assert_eq!(h.index, Some(1));
+        assert!(!h.can_retry(19, 23));
+        // Anything else read since, and Try again is that load's own.
+        let mut h = three_places();
+        let (token, _) = h.begin_go(-1).unwrap();
+        h.end_go(token, false);
+        h.forget_failed();
+        assert!(h.begin_retry(19, 23).is_none());
     }
 }

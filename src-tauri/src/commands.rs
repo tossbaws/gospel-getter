@@ -1906,14 +1906,15 @@ pub struct ImportPreviewDto {
     /// Whether the file's format can hold notes (format 3 on). An older
     /// file never touches the reader's notes, even when replacing.
     pub has_notes: bool,
-    /// Distinct notes in the file.
+    /// The notes in the file, less repeats (`reader_data::validate`).
     pub notes_in_file: usize,
-    /// Note entries that repeated another one in the file (ignored).
+    /// Note entries without a date that repeated another one in the file
+    /// (ignored).
     pub note_duplicates_in_file: usize,
     /// How many of them aren't here yet.
     pub new_notes: usize,
-    /// How many are here already (the same passage and text; merge skips
-    /// those).
+    /// How many are here already (the same passage, text and date; merge
+    /// skips those: `reader_data::notes_to_add`).
     pub notes_already_present: usize,
     /// How many notes there are here now (what replacing removes).
     pub current_notes: usize,
@@ -2219,12 +2220,9 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
         .iter()
         .filter(|h| !highlighted.contains(&h.coordinates()))
         .count();
-    let noted = state.store.note_keys().await?;
+    let stored_notes = state.store.stored_notes().await?;
     let file_notes = import.notes.as_deref().unwrap_or_default();
-    let new_notes = file_notes
-        .iter()
-        .filter(|n| !noted.contains(&n.key()))
-        .count();
+    let new_notes = reader_data::notes_to_add(file_notes, &stored_notes).len();
     let preview = ImportPreviewDto {
         token: state.next_import_token.fetch_add(1, Ordering::Relaxed),
         file_name,
@@ -2252,7 +2250,7 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
         note_duplicates_in_file: import.note_duplicates_in_file,
         new_notes,
         notes_already_present: file_notes.len() - new_notes,
-        current_notes: noted.len(),
+        current_notes: stored_notes.len(),
         position: import.position.as_ref().map(PositionPreviewDto::from),
         preferences: import.preferences.clone(),
         skipped_preferences_notice: reader_data::skipped_preferences_notice(

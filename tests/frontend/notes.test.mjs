@@ -733,3 +733,63 @@ test('the note panel never scrolls the page: every focus it moves is preventScro
         const scrolling = calls.filter((c) => !(c.options && c.options.preventScroll));
         assert.deepEqual(scrolling.map((c) => c.el.id || c.el.className), []);
     }));
+
+// GG-20261026-3: a Library note's Edit on a verse the translation being read
+// doesn't number (the BSB leaves out Matthew 17:21) opens no selection, so
+// there's no card: deleting the note says so in the toast, with the card's
+// timed Undo.
+test('a note deleted with no card has the same timed Undo, in the toast', () =>
+    withNotes([[21, 21, 'Prayer and fasting.', bookId('Matthew'), 17]], { translation: 'bsb' }, async (app) => {
+        const [note] = await allNotes();
+        const toast = app.toast();
+        const deleteFromLibrary = async () => {
+            app.openLibrary('notes');
+            await clickAndWait(app, app.document.querySelector('#note-list .note-list-edit'), 'get_reading');
+            await app.idle();
+            assert.equal(app.heading(), 'Matthew 17');
+            assert.deepEqual(app.selectedVerseNumbers(), [], 'nothing to select');
+            assert.equal(app.actions(), null, 'no card');
+            assert.ok(panelOpen(app));
+            assert.equal(el(app, 'note-input').value, 'Prayer and fasting.');
+            await clickAndWait(app, el(app, 'note-delete'), 'list_all_notes');
+            assert.ok(!panelOpen(app));
+            assert.deepEqual(await allNotes(), []);
+        };
+
+        await deleteFromLibrary();
+        assert.equal(toast.textContent, 'Deleted the note on Matthew 17:21. Undo');
+        assert.ok(!toast.classList.contains('is-hidden'));
+        // In the toast's live region, heard as the card's is; a real button,
+        // so a tab stop that Enter and Space press.
+        assert.equal(toast.getAttribute('role'), 'status');
+        assert.equal(toast.getAttribute('aria-live'), 'polite');
+        const undo = toast.querySelector('button.toast-action');
+        assert.equal(undo.getAttribute('type'), 'button');
+        assert.equal(undo.textContent, 'Undo');
+        assert.ok(undo.classList.contains('note-link'), 'styled as the card’s Undo');
+        assert.ok(!undo.disabled && undo.tabIndex === 0);
+        undo.focus();
+        assert.equal(app.document.activeElement, undo);
+        await clickAndWait(app, undo, 'list_all_notes');
+        assert.equal(toast.textContent, 'Note restored');
+        assert.notEqual(app.document.activeElement, undo, 'focus left the button as it went');
+        assert.ok(app.document.activeElement !== app.document.body);
+        const [restored] = await allNotes();
+        assert.deepEqual(
+            [restored.reference, restored.body, restored.createdAt, restored.updatedAt],
+            [note.reference, note.body, note.createdAt, note.updatedAt],
+        );
+        assert.equal(el(app, 'note-count').textContent, '1');
+
+        // It lasts as long as the card's Undo (longer than the toast's
+        // 6 s), then goes, button and all.
+        await deleteFromLibrary();
+        assert.ok(toast.querySelector('.toast-action'));
+        await new Promise((resolve) => setTimeout(resolve, 6500));
+        assert.ok(!toast.classList.contains('is-hidden'), 'still there after 6.5 s');
+        assert.ok(toast.querySelector('.toast-action'));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        assert.ok(toast.classList.contains('is-hidden'), 'gone after 8 s');
+        assert.equal(toast.querySelector('.toast-action'), null);
+        assert.deepEqual(await allNotes(), []);
+    }));

@@ -156,6 +156,13 @@ pub fn toast(message: &str, is_error: bool) {
     crate::page::set_data_status(message, is_error);
 }
 
+/// [`toast`] with a button after the message, `label`, for `duration` ms
+/// (`page::set_data_status_with_action`): the button, for the caller to
+/// answer.
+pub fn toast_with_action(message: &str, label: &str, duration: i32) -> Option<HtmlElement> {
+    crate::page::set_data_status_with_action(message, label, duration)
+}
+
 /// The Library's Export notes… button, if the page has it.
 pub fn export_button() -> Option<HtmlElement> {
     document()?

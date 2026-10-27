@@ -342,3 +342,49 @@ test('a chapter from the picker or Random chapter starts at its top, as [ and ] 
         assert.deepEqual(where(app), ['Jude 1', []]);
         assert.equal(scroll.get(), 650);
     }));
+
+// GG-20261026-2: a step that can't be read leaves the history as it was.
+test('a Back that fails changes nothing: Back again reaches the place it skipped, and Forward returns', () =>
+    withApp({ book: 'John', chapter: 3 }, async (app) => {
+        await waitFor(app, () => app.click(pickerChapter(app, 'Psalms', 23)));
+        await waitFor(app, () => app.click(pickerChapter(app, 'Romans', 8)));
+        assert.equal(app.heading(), 'Romans 8');
+        app.failReading();
+        await back(app);
+        assert.equal(app.heading(), 'Romans 8', 'still on screen');
+        assert.match(app.notice(), /simulated get_reading failure/);
+        app.failReading(false);
+        await back(app);
+        assert.deepEqual(where(app), ['Psalms 23', []], 'not John 3');
+        await forward(app);
+        assert.deepEqual(where(app), ['Romans 8', []]);
+        await nothingThere(app, 'ArrowRight', 'Nothing later in this session.');
+        await back(app);
+        await back(app);
+        assert.deepEqual(where(app), ['John 3', []]);
+    }));
+
+test('a Forward that fails changes nothing either, and Try again takes the step', () =>
+    withApp({ book: 'John', chapter: 3 }, async (app) => {
+        await waitFor(app, () => app.click(pickerChapter(app, 'Psalms', 23)));
+        await waitFor(app, () => app.click(pickerChapter(app, 'Romans', 8)));
+        await back(app);
+        await back(app);
+        assert.equal(app.heading(), 'John 3');
+        app.failReading();
+        await forward(app);
+        assert.equal(app.heading(), 'John 3');
+        await nothingThere(app, 'ArrowLeft', 'Nothing earlier in this session.');
+        app.failReading(false);
+        // Try again reads Psalm 23 as the step it was, not as a chapter
+        // turn from John 3 (which would put Psalm 23 in John 3's place).
+        const retry = app.document.querySelector('#reader-notice .reading-retry');
+        assert.equal(retry.textContent, 'Try again');
+        await waitFor(app, () => app.click(retry));
+        assert.equal(app.heading(), 'Psalms 23');
+        await back(app);
+        assert.equal(app.heading(), 'John 3');
+        await forward(app);
+        await forward(app);
+        assert.equal(app.heading(), 'Romans 8');
+    }));

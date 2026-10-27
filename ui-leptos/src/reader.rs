@@ -399,6 +399,9 @@ enum Outcome {
 fn load_sent(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
     let token = with(|s| {
         s.load_token += 1;
+        // A step's Try again is this load's now (see `retry`); a step's
+        // own load begins after it's taken.
+        s.history.forget_failed();
         s.load_token
     });
     card::loading();
@@ -565,6 +568,14 @@ fn retry() {
     let Some((book_id, chapter)) = with(|s| s.retry) else {
         return;
     };
+    // After a step back or forward that couldn't be read, the step again.
+    if with(|s| s.history.can_retry(book_id, chapter)) {
+        remember_leaving();
+        if let Some(going) = with(|s| s.history.begin_retry(book_id, chapter)) {
+            spawn(open_step(going));
+        }
+        return;
+    }
     let load = load_reading(book_id, chapter);
     spawn_local(async move {
         if load.await && !with(|s| s.history.started()) {
@@ -756,9 +767,16 @@ fn go_history(step: i32) -> Load {
         return Box::pin(async { false });
     }
     remember_leaving();
-    let Some((token, place)) = with(|s| s.history.begin_go(step)) else {
+    let Some(going) = with(|s| s.history.begin_go(step)) else {
         return Box::pin(async { false });
     };
+    open_step(going)
+}
+
+/// Opens the place a step back or forward (with its token) is going to.
+/// Only once it's read is it the place on screen; one that can't be read
+/// leaves the history as it was (`History::end_go`).
+fn open_step((token, place): (u64, Place)) -> Load {
     let open = open_passage(place.book_id, place.chapter, place.start, place.end);
     Box::pin(async move {
         let (loaded, _) = open.await;
@@ -772,7 +790,7 @@ fn go_history(step: i32) -> Load {
                 scroll_to(0.0);
             }
         }
-        with(|s| s.history.shown());
+        with(|s| s.history.end_go(token, loaded));
         loaded
     })
 }

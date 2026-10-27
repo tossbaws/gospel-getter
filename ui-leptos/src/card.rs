@@ -906,10 +906,19 @@ fn place_card() {
 // chapter is shown: WebKitGTK only allows `writeText` during the click or
 // keydown that asked for it, so the text must already be here by then.
 // Should it not be yet, the copy waits for it and tries anyway, and says so
-// if that fails.
+// if that fails. An answer that failed is asked for again, by the next
+// render or copy.
 
+/// Asks for `slot`'s text with `args`, unless it's already been asked for
+/// (on its way, or in) and didn't fail. Each answer goes to its own entry,
+/// so a late one never replaces a newer entry's.
 fn fetch_copy(slot: Slot, args: CopyTextArgs) {
-    if with(|s| s.copy(slot).as_ref().is_some_and(|e| e.args == args)) {
+    let asked = with(|s| {
+        s.copy(slot)
+            .as_ref()
+            .is_some_and(|e| e.args == args && !answer_failed(&e.answer.borrow()))
+    });
+    if asked {
         return;
     }
     let answer_cell = Rc::new(RefCell::new(None));
@@ -930,6 +939,11 @@ fn fetch_copy(slot: Slot, args: CopyTextArgs) {
         done,
     };
     with(|s| *s.copy(slot) = Some(entry));
+}
+
+/// Whether a copy's text was asked for and couldn't be had.
+fn answer_failed(answer: &Option<Result<CopyText, JsValue>>) -> bool {
+    matches!(answer, Some(Err(_)))
 }
 
 /// `navigator.clipboard` and its `writeText`, or why not.
@@ -965,9 +979,18 @@ fn copy_passage(slot: Slot, format: &str) {
     if !ready {
         return;
     }
-    let Some(entry) = with(|s| s.copy(slot).clone()) else {
+    let Some(mut entry) = with(|s| s.copy(slot).clone()) else {
         return;
     };
+    // Text that couldn't be had is asked for again, and the copy waits for
+    // it, as for text not in yet.
+    if answer_failed(&entry.answer.borrow()) {
+        fetch_copy(slot, entry.args.clone());
+        let Some(again) = with(|s| s.copy(slot).clone()) else {
+            return;
+        };
+        entry = again;
+    }
     let Some(copy_format) = text::copy_format(format) else {
         return;
     };
@@ -1814,21 +1837,41 @@ fn on_note_done(event: &CustomEvent) {
         "deleted" if card_open => {
             set_action_status(text::NOTE_DELETED, false, Some(note), text::UNDO_MS);
         }
-        "deleted" => {
-            bridge::toast(
-                &text::note_deleted_elsewhere(&js_text(&get(&note, "reference"))),
-                false,
-            );
-        }
+        "deleted" => deleted_elsewhere(note),
         "saved" if card_open => status(text::NOTE_SAVED, false),
         _ if card_open => status(text::NOTE_ADDED, false),
         _ => {}
     }
 }
 
-/// Undo: the same passage, text and dates (each as the note had it).
-fn restore_note(note: JsValue) -> Task {
+/// A note deleted with the card gone (a Library note's Edit on a verse
+/// the translation doesn't number, say): the toast says so, with the card's
+/// timed Undo, which restores it the same way and says how that went there.
+fn deleted_elsewhere(note: JsValue) {
+    let message = text::note_deleted_elsewhere(&js_text(&get(&note, "reference")));
+    let Some(undo) = bridge::toast_with_action(&message, "Undo", text::UNDO_MS) else {
+        return;
+    };
+    dom::on_click(&undo, move |_| {
+        bridge::toast("", false);
+        spawn_local(restore_note(note.clone(), |message, is_error| {
+            bridge::toast(&message, is_error);
+        }));
+    });
+}
+
+/// The card's Undo: [`restore_note`], said in its status line if nothing
+/// newer has been.
+fn restore_note_in_card(note: JsValue) -> Task {
     let attempt = with(State::attempt);
+    restore_note(note, move |message, is_error| {
+        status_for(attempt, message, is_error);
+    })
+}
+
+/// Undo: the same passage, text and dates (each as the note had it), and
+/// `say` says how it went.
+fn restore_note(note: JsValue, say: impl Fn(String, bool) + 'static) -> Task {
     let args = js_sys::Object::new();
     for (key, from) in [
         ("bookId", "bookId"),
@@ -1845,11 +1888,11 @@ fn restore_note(note: JsValue) -> Task {
     Box::pin(async move {
         if let Err(e) = answer(sent).await {
             ipc::log_error("Failed to restore the note", &e);
-            status_for(attempt, text::restore_failed(&ipc::error_text(&e)), true);
+            say(text::restore_failed(&ipc::error_text(&e)), true);
             return;
         }
         refresh_notes().await;
-        status_for(attempt, text::NOTE_RESTORED, false);
+        say(text::NOTE_RESTORED.to_string(), false);
     })
 }
 
@@ -2219,7 +2262,7 @@ pub fn ask(ask: Ask) -> bool {
                 dom::focus(&els.note_add);
             }
             if let Some(note) = undo {
-                spawn_local(restore_note(note));
+                spawn_local(restore_note_in_card(note));
             }
             true
         }
