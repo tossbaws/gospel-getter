@@ -540,6 +540,18 @@ mod tests {
         assert!(is_offered(&v("2.6.0-rc.1"), &v("2.6.0")));
     }
 
+    /// 2.19.0-beta.1 reads releases/latest, 2.18.1 until 2.19.0 is out:
+    /// SemVer puts 2.18.1 < 2.19.0-beta.1 < 2.19.0.
+    #[test]
+    fn the_beta_is_offered_its_release_and_not_the_one_before() {
+        let beta = v("2.19.0-beta.1");
+        assert!(!is_offered(&beta, &v("2.18.1")), "never back to 2.18.1");
+        assert!(is_offered(&beta, &v("2.19.0")));
+        assert!(is_offered(&beta, &v("2.19.1")));
+        // 2.18.1 never sees the beta (it's not in latest.json either).
+        assert!(!is_offered(&v("2.18.1"), &beta));
+    }
+
     #[test]
     fn problems_have_messages_for_the_reader() {
         assert_eq!(check_message(Problem::Offline), messages::OFFLINE);

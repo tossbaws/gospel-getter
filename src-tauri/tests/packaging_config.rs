@@ -89,11 +89,66 @@ fn tauri_conf_icon_paths_all_exist_on_disk() {
 #[test]
 fn pkgbuild_version_tracks_cargo_toml() {
     let cargo_ver = cargo_package_version();
-    let expected = format!("pkgver={cargo_ver}");
+    let version = semver::Version::parse(&cargo_ver).expect("Cargo.toml's version is SemVer");
+    // `_pkgver` is the version as the tag has it. pkgver can't hold a '-',
+    // so a pre-release drops it and the pre-release's dots (2.19.0-beta.1
+    // is 2.19.0beta1), which vercmp sorts before the release itself.
+    let pkgver = format!(
+        "{}.{}.{}{}",
+        version.major,
+        version.minor,
+        version.patch,
+        version.pre.as_str().replace('.', "")
+    );
+    // Whole lines, since `pkgver=` is also the end of `_pkgver=`.
+    for expected in [format!("_pkgver={cargo_ver}"), format!("pkgver={pkgver}")] {
+        assert!(
+            PKGBUILD.lines().any(|line| line == expected),
+            "PKGBUILD's versions should track Cargo.toml's ({cargo_ver}); \
+             expected a `{expected}` line"
+        );
+    }
+}
+
+/// Windows Installer only takes a version of numbers, so the MSI target
+/// refuses a pre-release such as `2.19.0-beta.1` unless
+/// `bundle.windows.wix.version` gives the MSI its own. That version has to
+/// sort below the release itself, so the release's MSI installs over the
+/// pre-release's as an upgrade (Windows Installer compares only the first
+/// three fields). A release has no such version: its MSI is numbered as
+/// the app is.
+#[test]
+fn only_a_pre_release_gives_the_msi_its_own_version() {
+    let conf: Value = serde_json::from_str(TAURI_CONF).unwrap();
+    let app = semver::Version::parse(&cargo_package_version()).unwrap();
+    let msi = conf["bundle"]["windows"]["wix"]["version"].as_str();
+    if app.pre.is_empty() {
+        assert_eq!(
+            msi, None,
+            "a release's MSI is numbered as the app is: remove bundle.windows.wix.version"
+        );
+        return;
+    }
+    let msi = msi.expect("a pre-release needs bundle.windows.wix.version for the MSI");
+    let fields: Vec<u64> = msi
+        .split('.')
+        .map(|field| field.parse().expect("the MSI version is numbers only"))
+        .collect();
+    assert_eq!(
+        fields.len(),
+        3,
+        "major.minor.patch: the fourth field doesn't order MSIs"
+    );
     assert!(
-        PKGBUILD.contains(&expected),
-        "PKGBUILD's pkgver should track Cargo.toml's version ({cargo_ver}); \
-         expected a `{expected}` line"
+        fields[0] <= 255 && fields[1] <= 255 && fields[2] <= 65535,
+        "Windows Installer's limits are 255.255.65535, not {msi}"
+    );
+    assert!(
+        (fields[0], fields[1], fields[2]) < (app.major, app.minor, app.patch),
+        "the MSI version {msi} must sort below the release {}.{}.{}",
+        app.major,
+        app.minor,
+        app.patch
     );
 }
 
