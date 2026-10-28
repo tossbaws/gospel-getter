@@ -79,16 +79,23 @@ needed.
   N) to write about it, in a panel that shows the verses. A passage can
   have several notes, and they show in every translation. A small ✎ marks
   verses with notes, selecting verses shows every note on them, and the
-  Notes tab in the Library lists them all in Bible order. Deleting a note
-  offers **Undo**. **Export notes…** (in the Library's Notes tab) saves
-  them as a Markdown file, with each note's verses quoted in the
+  Notes tab in the Library lists them all in Bible order, with a box to
+  search them. Notes take a little Markdown (bold, italics, lists and
+  links), and a reference you type, like "Rom 5:8", becomes a link that
+  goes there. If the app quits, or you close a note with **Keep for
+  later**, what you typed is kept as a draft to restore, on this computer
+  only: backups don't include drafts. Deleting a note offers **Undo**, and
+  **Copy as Markdown** copies one with its verses quoted. **Export
+  notes…** (in the Library's Notes tab) saves them as a Markdown file, or
+  with **One file per book (a folder)** a file for each book, as notes
+  apps such as Obsidian keep them, with each note's verses quoted in the
   translation you're reading. Pick which books to include, a chapter range
   when you pick one book, and when the notes were written (All time, Last
   7 days, Last 30 days, This year or Custom dates); a live count shows
   how many notes match. In the KJV, translator-supplied words appear in
   italics, as in printed KJVs, and the margin notes are left out.
 
-  ![John 3:16 to 21 selected in the WEB in the Chi Rho theme, with ✎ marks after verses 16, 17, 18 and 21. The card under verse 21 has Copy, Copy as…, Bookmark and + Add note buttons, four highlight color swatches and the citation "John 3:16–21 (WEB)", then a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and an Edit link. The card floats over the verses after the selection](screenshots/notes.png)
+  ![John 3:16 to 21 selected in the WEB in the Chi Rho theme, with ✎ marks after verses 16, 17, 18 and 21. The card under verse 21 has Copy, Copy as…, Bookmark and + Add note buttons, four highlight color swatches and the citation "John 3:16–21 (WEB)", then a Notes (3) section listing a note on John 3:16, one on John 3:16–18 and one on John 3:21, each with its date and Edit and Copy as Markdown links. The note on John 3:16 shows its Markdown: "Love's measure:" in bold, "gave" in italics, and the references it names, Rom 5:8 and 1 John 4:9-10, underlined as links. The card floats over the verses after the selection](screenshots/notes.png)
 - **Compare any two translations.** Press `C` (or **Compare** under the
   translation button) to see the translation you're reading beside
   another, one row per verse number. **Compare (C) with**, under the same
@@ -125,7 +132,7 @@ needed.
   its verses and open it in the card. **Notes in the margin**, under
   **Aa** with reading mode, turns them off.
 
-  ![John 3 in the KJV in reading mode, in the Chi Rho theme: no sidebar, and the bar holds only the reference button, "Exit reading mode (Esc)", KJV, Aa and search. The verses run down the middle, with ✎ marks after verses 2, 3 and 5 to 8 and small letters after verses 3 and 7 marking their footnotes. In the margin to the right, each beside its first verse, are three notes under their references: John 3:2, "He comes by night, a ruler of the Jews. By 19:39 he brings myrrh and aloes to bury Jesus."; John 3:3, "“Again” is anothen, which also means “from above” (as in v. 31). Nicodemus hears only “a second time”."; and John 3:5–8, "Water and Spirit together recall Ezekiel 36:25–27: clean water, a new heart, God's Spirit within. A teacher of Israel should have known it (v. 10).", with a thin line beside verses 5 to 8](screenshots/margin-notes.png)
+  ![John 3 in the KJV in reading mode, in the Chi Rho theme: no sidebar, and the bar holds only the reference button, "Exit reading mode (Esc)", KJV, Aa and search. The verses run down the middle, with ✎ marks after verses 2, 3 and 5 to 8 and small letters after verses 3 and 7 marking their footnotes. In the margin to the right, each beside its first verse, are three notes under their references: John 3:2, "He comes by night, a ruler of the Jews. By 19:39 he brings myrrh and aloes to bury Jesus."; John 3:3, "“Again” is anothen, which also means “from above” (as in v. 31). Nicodemus hears only “a second time”."; and John 3:5–8, "Water and Spirit together recall Ezekiel 36:25–27: clean water, a new heart, God's Spirit within. A teacher of Israel should have known it (v. 10).", its Ezekiel 36:25–27 underlined as a link, with a thin line beside verses 5 to 8](screenshots/margin-notes.png)
 - **Verses or Flowing.** **Layout** under **Aa** sets the verses one to a
   line (**Verses**, the default) or runs each chapter on as prose with
   small raised verse numbers (**Flowing**), in the chapter you're reading,
@@ -316,15 +323,15 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.19.1?** Each updates itself to 2.20.0: it
+**Coming from 2.6.0 through 2.20.0?** Each updates itself to 2.21.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
-update themselves. The 2.19.0 pre-release updates itself to 2.20.0 the
+update themselves. The 2.19.0 pre-release updates itself to 2.21.0 the
 same way.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.20.0 by hand once, from the
+Install 2.21.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -354,6 +361,9 @@ Upgrading keeps your data.
 - The verse you were reading, which the app reopens at, is kept with your
   reading position in the database, on this computer only: backups don't
   include it, and restoring one opens its chapter at the top.
+- Note drafts (what you typed in a note and haven't saved) are kept in the
+  app's web storage, on this computer only, for 30 days (the 20 newest).
+  Backups and **Export notes…** don't include them.
 - The window's size and place are kept in `window-state.json`, beside the
   database, and aren't exported either.
 - Coming from the old browser-based Gospel Getter (the local server on

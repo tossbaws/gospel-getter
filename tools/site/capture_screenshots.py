@@ -353,8 +353,10 @@ def readme_scenes(theme):
              position=("John", 3, "kjv"), steps="window.scrollTo(0, 0);"),
         # The same in reading mode, with three notes in the margin beside
         # their verses (Aa's "Notes in the margin" is on by default): two
-        # on single verses, stacked, and one on 5-8 with its rule.
-        dict(name="margin-notes", size=(1280, 850), prefs={**look, "gospel-getter-reader-mode": "on"},
+        # on single verses, stacked, and one on 5-8 with its rule. 1320
+        # wide, not 1280: the margin needs 17.5rem beside the text (14rem,
+        # its gap and 2rem to the edge), and at 1280 there's 274px.
+        dict(name="margin-notes", size=(1320, 850), prefs={**look, "gospel-getter-reader-mode": "on"},
              position=("John", 3, "kjv"),
              notes=[
                  ("John", 3, 2, 2,
@@ -415,11 +417,12 @@ def readme_scenes(theme):
         # citation and cross-references.
         dict(name="copy-verse-range", size=(1280, 850), prefs=look, position=("John", 3, "web"),
              steps=SCROLL_TO % ("__gg.verse(12)", 8) + SELECT % (16, 18)),
-        # John 3:16-21 selected, its card showing the range's three notes.
+        # John 3:16-21 selected, its card showing the range's three notes;
+        # the one on 3:16 has bold, italics and two references, as links.
         dict(name="notes", size=(1280, 850), prefs=look, position=("John", 3, "web"),
              notes=[
                  ("John", 3, 16, 16,
-                  "The whole gospel in one verse: God loves first, and his love gives."),
+                  "**Love's measure:** he *gave*. See Rom 5:8 and 1 John 4:9-10."),
                  ("John", 3, 16, 18,
                   "Verse 17 matters as much as 16: he came to save, not to condemn. "
                   "The judgment in 18 is what unbelief already chooses."),
@@ -427,7 +430,9 @@ def readme_scenes(theme):
                   "Coming to the light is something you do, not only something you believe."),
              ],
              steps=SCROLL_TO % ("__gg.verse(16)", 4) + SELECT % (16, 21) + """
-                await __gg.until(() => document.querySelectorAll('#selection-card .note-card').length === 3, 'notes');
+                await __gg.until(() => document.querySelectorAll('#selection-card .note-card').length === 3
+                    && document.querySelectorAll('#selection-card .note-card strong, #selection-card .note-card em').length === 2
+                    && document.querySelectorAll('#selection-card .note-card .note-ref-link').length === 2, 'notes');
              """),
         # Psalm 23 in the KJV, verse 6 selected by its footnote marker, the
         # card under it showing its footnote.
