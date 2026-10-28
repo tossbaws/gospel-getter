@@ -4,10 +4,13 @@
 //! as in a printed Bible's margin. Which verse a note sits beside, how
 //! notes that would overlap stack, whether there's room for the margin, and
 //! the markup for the margin and for the markers that take its place in a
-//! window too narrow for it. Notes are the reader's own words, escaped and
-//! shown as written; nothing here touches scripture.
+//! window too narrow for it. Notes are the reader's own words, shown as
+//! the card shows them (`note_markdown`: the Markdown subset, everything
+//! else escaped, the references typed in them links to their passages);
+//! nothing here touches scripture.
 
 use crate::dto::SelectionNote;
+use crate::note_markdown::{self, Layout};
 use crate::reader_text::escape_html;
 
 /// The narrowest the margin is drawn, in rem (224px at the page's 16px).
@@ -19,8 +22,9 @@ pub const MAX_WIDTH_REM: f64 = 20.0;
 /// Between the text and the margin (the reading column's own padding, so
 /// the margin starts at its container's edge), in rem.
 pub const GAP_REM: f64 = 1.5;
-/// Kept free between the margin and the window's right edge, in rem.
-pub const EDGE_REM: f64 = 1.0;
+/// Kept free between the margin and the window's right edge, in rem: room
+/// for the notes to breathe at the margin's narrowest.
+pub const EDGE_REM: f64 = 2.0;
 /// Between two notes stacked because they'd overlap, in px.
 pub const STACK_GAP_PX: f64 = 8.0;
 /// A note longer than this many lines shows them, faded at the foot, with
@@ -126,9 +130,9 @@ pub fn label(reference: &str) -> String {
 pub const NOT_NUMBERED: &str = "not numbered in this translation";
 
 /// One note in the margin: its reference (small; a button that opens the
-/// card with it), then its words, folded past [`FOLD_LINES`] with "more"
-/// (which `margin` shows only where the words are cut short). A note beside
-/// a verse it isn't on says so after its reference.
+/// card with it), then its words as Markdown, folded past [`FOLD_LINES`]
+/// with "more" (which `margin` shows only where the words are cut short).
+/// A note beside a verse it isn't on says so after its reference.
 pub fn note_html(note: &SelectionNote, anchor: Anchor) -> String {
     let id = note.id;
     let reference = escape_html(&note.reference);
@@ -141,9 +145,9 @@ pub fn note_html(note: &SelectionNote, anchor: Anchor) -> String {
         )
     };
     format!(
-        r#"<article class="margin-note{class}" data-note-id="{id}" aria-label="{label}"><button type="button" class="margin-note-ref" data-note-id="{id}">{reference}{aside}</button><p class="margin-note-body" id="margin-note-body-{id}">{body}</p><button type="button" class="margin-note-more note-link" data-note-id="{id}" aria-label="More of the note on {reference}" hidden>more</button></article>"#,
+        r#"<article class="margin-note{class}" data-note-id="{id}" aria-label="{label}"><button type="button" class="margin-note-ref" data-note-id="{id}">{reference}{aside}</button><div class="margin-note-body note-text" id="margin-note-body-{id}">{body}</div><button type="button" class="margin-note-more note-link" data-note-id="{id}" aria-label="More of the note on {reference}" hidden>more</button></article>"#,
         label = escape_html(&label(&note.reference)),
-        body = escape_html(&note.body),
+        body = note_markdown::note_html(&note.body, &note.links, &[], Layout::Blocks),
     )
 }
 
@@ -195,6 +199,7 @@ mod tests {
             body: body.to_string(),
             created_at: "2026-10-27T00:00:00.000Z".to_string(),
             created_at_display: "Oct 27, 2026".to_string(),
+            links: Vec::new(),
         }
     }
 
@@ -316,10 +321,11 @@ mod tests {
 
     #[test]
     fn the_margin_needs_14rem_beside_the_text() {
-        // 16px rem: the gap and the edge take 40px.
-        assert_eq!(width(264.0, 16.0), Some(224.0));
-        assert_eq!(width(263.9, 16.0), None);
-        assert_eq!(width(300.0, 16.0), Some(260.0));
+        // 16px rem: the gap and the edge take 56px (the edge 2rem, room
+        // for the notes to breathe).
+        assert_eq!(width(280.0, 16.0), Some(224.0));
+        assert_eq!(width(279.9, 16.0), None);
+        assert_eq!(width(300.0, 16.0), Some(244.0));
         assert_eq!(width(1000.0, 16.0), Some(320.0), "at most 20rem");
         assert_eq!(width(0.0, 16.0), None);
     }
@@ -345,11 +351,10 @@ mod tests {
         assert!(html.contains(
             r#"<button type="button" class="margin-note-ref" data-note-id="1">John 3:16–18</button>"#
         ));
-        // The reader's words, escaped, as written (line breaks kept by the
-        // CSS).
+        // The reader's words, as the card shows them: Markdown, anything
+        // else escaped, a line break kept.
         assert!(html.contains(
-            r#"<p class="margin-note-body" id="margin-note-body-1">For &lt;God&gt; &amp; &quot;world&quot;
-so loved</p>"#
+            r#"<div class="margin-note-body note-text" id="margin-note-body-1"><p>For &lt;God&gt; &amp; &quot;world&quot;<br>so loved</p></div>"#
         ));
         assert!(
             html.contains(r#"aria-label="More of the note on John 3:16–18" hidden>more</button>"#)

@@ -1,14 +1,16 @@
-//! Exporting the reader's notes as Markdown (the file itself is
-//! `crate::notes_export`'s).
+//! Exporting the reader's notes as Markdown, as one file or as one file per
+//! book in a folder (the files themselves are `crate::notes_export`'s).
 
 use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::Ordering;
 
 use super::{AppState, failed, run_dialog, write_atomically};
 use crate::db::{self, Note};
-use crate::notes_export::NotesFilter;
+use crate::notes_export::{BookFile, NotesExport, NotesFilter};
 
 // ---- Export notes as Markdown: readable, for a notes app or printing,
 // never imported back (see `notes_export`).
@@ -85,17 +87,44 @@ pub async fn count_notes_to_export<Tz: chrono::TimeZone>(
     Ok(notes.iter().filter(|n| filter.matches(n, tz)).count())
 }
 
-/// The reader's notes as Markdown, with each note's verses quoted in the
-/// translation `translation_code`: those `filter` asks for. Dates (the
-/// notes', the filter's, the export's and the file name's) are in `tz`.
-/// Each chapter a note is on is read once, however many notes it has.
-pub async fn build_notes_export<Tz: chrono::TimeZone>(
-    state: &AppState,
+/// What an export is made from, read once: the translation its verses are
+/// quoted in, every note, and the verses of each chapter a note in scope
+/// is on.
+struct ExportData<'a> {
+    translation: &'a db::Translation,
+    notes: Vec<Note>,
+    verses: HashMap<(i64, i64), Vec<db::Verse>>,
+}
+
+impl ExportData<'_> {
+    fn export<'b>(
+        &'b self,
+        state: &'b AppState,
+        filter: &'b NotesFilter,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> NotesExport<'b> {
+        NotesExport {
+            notes: &self.notes,
+            books: &state.books,
+            verses: &self.verses,
+            translation_code: &self.translation.code,
+            translation_name: &self.translation.name,
+            filter,
+            exported_at: now,
+        }
+    }
+}
+
+/// Reads what an export of the notes `filter` asks for (their dates read
+/// in `tz`) is made from, quoting the translation `translation_code`, or
+/// says why there's nothing to export. Each chapter a note is on is read
+/// once, however many notes it has.
+async fn export_data<'a, Tz: chrono::TimeZone>(
+    state: &'a AppState,
     translation_code: &str,
     filter: &NotesFilter,
-    now: chrono::DateTime<chrono::Utc>,
     tz: &Tz,
-) -> Result<NotesFile, String> {
+) -> Result<ExportData<'a>, String> {
     let translation = state
         .translations
         .iter()
@@ -103,28 +132,25 @@ pub async fn build_notes_export<Tz: chrono::TimeZone>(
         .ok_or_else(|| format!("There's no translation \u{201c}{translation_code}\u{201d}."))?;
     filter.check(&state.books)?;
     let all = notes_to_export(state).await?;
-    let mut export = crate::notes_export::NotesExport {
-        notes: &all,
-        books: &state.books,
-        verses: &HashMap::new(),
-        translation_code: &translation.code,
-        translation_name: &translation.name,
-        filter,
-        exported_at: now,
+    let mut data = ExportData {
+        translation,
+        notes: all,
+        verses: HashMap::new(),
     };
-    let notes = export.notes_in_scope(tz);
+    let notes = data
+        .export(state, filter, chrono::Utc::now())
+        .notes_in_scope(tz);
     if notes.is_empty() {
-        return Err(if all.is_empty() {
+        return Err(if data.notes.is_empty() {
             "There are no notes to export."
         } else {
             "No notes match these filters."
         }
         .to_string());
     }
-    let mut verses: HashMap<(i64, i64), Vec<db::Verse>> = HashMap::new();
     for note in &notes {
         let key = (note.book_id, note.chapter);
-        if verses.contains_key(&key) {
+        if data.verses.contains_key(&key) {
             continue;
         }
         let chapter = state
@@ -133,14 +159,173 @@ pub async fn build_notes_export<Tz: chrono::TimeZone>(
             .await
             .context("Failed to read verses to export")
             .map_err(failed(NOTES_UNREADABLE))?;
-        verses.insert(key, chapter);
+        data.verses.insert(key, chapter);
     }
-    export.verses = &verses;
+    Ok(data)
+}
+
+/// The reader's notes as Markdown, with each note's verses quoted in the
+/// translation `translation_code`: those `filter` asks for. Dates (the
+/// notes', the filter's, the export's and the file name's) are in `tz`.
+pub async fn build_notes_export<Tz: chrono::TimeZone>(
+    state: &AppState,
+    translation_code: &str,
+    filter: &NotesFilter,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+) -> Result<NotesFile, String> {
+    let data = export_data(state, translation_code, filter, tz).await?;
+    let export = data.export(state, filter, now);
+    let notes = export.notes_in_scope(tz).len();
     Ok(NotesFile {
         file_name: export.file_name(tz),
         contents: export.render(tz),
-        notes: notes.len(),
+        notes,
     })
+}
+
+/// The same notes as [`build_notes_export`], as one file per book.
+pub async fn build_notes_export_by_book<Tz: chrono::TimeZone>(
+    state: &AppState,
+    translation_code: &str,
+    filter: &NotesFilter,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+) -> Result<Vec<BookFile>, String> {
+    let data = export_data(state, translation_code, filter, tz).await?;
+    Ok(data.export(state, filter, now).by_book(tz))
+}
+
+// ---- One file per book, in a folder the reader chooses.
+
+/// How exporting notes as one file per book ended (or paused).
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum NotesFolderOutcome {
+    /// The reader closed the folder dialog, or chose not to replace the
+    /// files already there; nothing was written.
+    Cancelled,
+    /// Some of the files (`existing`, by name) are already in `folder`:
+    /// nothing is written until the reader says whether to replace them
+    /// (`confirm_notes_export_by_book` with `token`).
+    Exists {
+        token: u64,
+        folder: String,
+        existing: Vec<String>,
+    },
+    /// Every file was completely written.
+    Saved {
+        folder: String,
+        files: usize,
+        notes: usize,
+    },
+}
+
+/// An export as one file per book waiting for the reader to say whether
+/// to replace the files of it already in the folder they chose. Only one
+/// at a time; another export replaces it.
+pub struct PendingNotesFolder {
+    token: u64,
+    folder: PathBuf,
+    files: Vec<BookFile>,
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The reader chose `folder` for `files`: they're written, unless any is
+/// already there, which is never replaced without asking (the export
+/// waits, see [`NotesFolderOutcome::Exists`]).
+pub async fn notes_folder_chosen(
+    state: &AppState,
+    files: Vec<BookFile>,
+    folder: PathBuf,
+) -> Result<NotesFolderOutcome, String> {
+    let existing: Vec<String> = files
+        .iter()
+        .filter(|f| folder.join(&f.file_name).exists())
+        .map(|f| f.file_name.clone())
+        .collect();
+    if existing.is_empty() {
+        return save_notes_folder(&files, &folder).await;
+    }
+    let token = state.next_import_token.fetch_add(1, Ordering::Relaxed);
+    let shown = folder.display().to_string();
+    *lock(&state.pending_notes_folder) = Some(PendingNotesFolder {
+        token,
+        folder,
+        files,
+    });
+    Ok(NotesFolderOutcome::Exists {
+        token,
+        folder: shown,
+        existing,
+    })
+}
+
+/// The reader's answer to [`NotesFolderOutcome::Exists`]: Replace writes
+/// every file (those there replaced), Cancel writes none.
+pub async fn confirm_notes_folder(
+    state: &AppState,
+    token: u64,
+    replace: bool,
+) -> Result<NotesFolderOutcome, String> {
+    let pending = lock(&state.pending_notes_folder).take_if(|p| p.token == token);
+    let Some(pending) = pending else {
+        return Err(
+            "That export isn\u{2019}t waiting any more. Export the notes again.".to_string(),
+        );
+    };
+    if !replace {
+        return Ok(NotesFolderOutcome::Cancelled);
+    }
+    save_notes_folder(&pending.files, &pending.folder).await
+}
+
+/// Writes each of `files` into `folder`, each completely or not at all
+/// (as `save_reader_data` does), in order; a failure says how many were
+/// written first.
+async fn save_notes_folder(
+    files: &[BookFile],
+    folder: &Path,
+) -> Result<NotesFolderOutcome, String> {
+    let total = files.len();
+    let notes = files.iter().map(|f| f.notes).sum();
+    let shown = folder.display().to_string();
+    let (to_write, target) = (files.to_vec(), folder.to_path_buf());
+    let written = tokio::task::spawn_blocking(move || {
+        for (done, file) in to_write.iter().enumerate() {
+            write_atomically(&target.join(&file.file_name), file.contents.as_bytes())
+                .map_err(|e| (done, e))?;
+        }
+        Ok::<(), (usize, anyhow::Error)>(())
+    })
+    .await
+    .map_err(|e| format!("The files couldn't be saved: {e}"))?;
+    match written {
+        Ok(()) => Ok(NotesFolderOutcome::Saved {
+            folder: shown,
+            files: total,
+            notes,
+        }),
+        Err((0, e)) => {
+            tracing::error!("Notes export by book failed: {e:#}");
+            Err(format!("The files couldn't be saved: {e:#}"))
+        }
+        Err((done, e)) => {
+            tracing::error!("Notes export by book failed after {done} files: {e:#}");
+            Err(format!(
+                "Saved {done} of {total} files to {shown}, then this went wrong: {e:#}"
+            ))
+        }
+    }
 }
 
 /// Write a notes export to `path`, completely or not at all (as
@@ -158,6 +343,47 @@ pub async fn save_notes_export(
         path: path.display().to_string(),
         notes: file.notes,
     })
+}
+
+/// Export the reader's notes (those `filter` asks for) as one Markdown file
+/// per book, with their verses quoted in `translation_code`, into a folder
+/// they choose with the native folder dialog. Files already there are
+/// replaced only once the reader says so (`confirm_notes_export_by_book`).
+#[tauri::command]
+pub async fn export_notes_by_book<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    translation_code: String,
+    filter: NotesFilter,
+) -> Result<NotesFolderOutcome, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let files = build_notes_export_by_book(
+        &state,
+        &translation_code,
+        &filter,
+        chrono::Utc::now(),
+        &chrono::Local,
+    )
+    .await?;
+    let dialog = app
+        .dialog()
+        .file()
+        .set_title("Export notes: choose a folder for one file per book");
+    let Some(folder) = run_dialog(move || dialog.blocking_pick_folder()).await? else {
+        return Ok(NotesFolderOutcome::Cancelled);
+    };
+    notes_folder_chosen(&state, files, folder).await
+}
+
+/// The reader's Replace (`replace`) or Cancel for the folder export
+/// `token`, which found some of its files already there.
+#[tauri::command]
+pub async fn confirm_notes_export_by_book(
+    state: tauri::State<'_, AppState>,
+    token: u64,
+    replace: bool,
+) -> Result<NotesFolderOutcome, String> {
+    confirm_notes_folder(&state, token, replace).await
 }
 
 /// What the export dialog offers: the books with notes, and date presets
@@ -560,5 +786,164 @@ mod tests {
                 "{book} {chapter}:{verse}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn one_file_per_book_writes_each_books_section_and_asks_before_replacing() {
+        use crate::notes_export::NotesFilter;
+        let (db, state) = app_state("cmd_notes_export_by_book").await;
+        let tz = chrono::FixedOffset::west_opt(6 * 3600).unwrap();
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-12T18:00:00Z")
+            .unwrap()
+            .to_utc();
+        for (book_id, chapter, verse, body) in [
+            (43, 3, 16, "Loved."),
+            (19, 23, 1, "Shepherd."),
+            (43, 1, 1, "Word."),
+            (62, 1, 9, "Confess."),
+        ] {
+            let passage = Passage {
+                book_id,
+                chapter,
+                verse_start: verse,
+                verse_end: verse,
+            };
+            note_add(&state, passage, body).await.unwrap();
+        }
+        let every = NotesFilter::default();
+        let files = build_notes_export_by_book(&state, "kjv", &every, now, &tz)
+            .await
+            .unwrap();
+        assert_eq!(
+            files
+                .iter()
+                .map(|f| (f.file_name.as_str(), f.notes))
+                .collect::<Vec<_>>(),
+            [("19 Psalms.md", 1), ("43 John.md", 2), ("62 1 John.md", 1)]
+        );
+        // Each is that book's export alone, byte for byte.
+        for file in &files {
+            let id: i64 = file.file_name[..2].parse().unwrap();
+            let alone = NotesFilter {
+                books: vec![id],
+                ..NotesFilter::default()
+            };
+            let single = build_notes_export(&state, "kjv", &alone, now, &tz)
+                .await
+                .unwrap();
+            assert_eq!(file.contents, single.contents, "{}", file.file_name);
+        }
+        // The filters hold: one book's chapters, dates.
+        let john_3 = NotesFilter {
+            books: vec![43],
+            chapters: Some((3, 3)),
+            ..NotesFilter::default()
+        };
+        let one = build_notes_export_by_book(&state, "kjv", &john_3, now, &tz)
+            .await
+            .unwrap();
+        assert_eq!(one.len(), 1);
+        assert!(one[0].contents.starts_with("# Notes on John 3\n"));
+        assert!(one[0].contents.contains("Loved.") && !one[0].contents.contains("Word."));
+        assert_eq!(
+            build_notes_export_by_book(
+                &state,
+                "kjv",
+                &NotesFilter {
+                    books: vec![1],
+                    ..NotesFilter::default()
+                },
+                now,
+                &tz
+            )
+            .await
+            .unwrap_err(),
+            "No notes match these filters."
+        );
+
+        // An empty folder: every file written, said how many.
+        let folder = db.path().with_file_name("vault");
+        std::fs::create_dir_all(&folder).unwrap();
+        let outcome = notes_folder_chosen(&state, files.clone(), folder.clone())
+            .await
+            .unwrap();
+        assert!(matches!(
+            &outcome,
+            NotesFolderOutcome::Saved { files: 3, notes: 4, folder: shown } if *shown == folder.display().to_string()
+        ));
+        assert_eq!(serde_json::to_value(&outcome).unwrap()["status"], "saved");
+        for file in &files {
+            assert_eq!(
+                std::fs::read(folder.join(&file.file_name)).unwrap(),
+                file.contents.as_bytes()
+            );
+        }
+
+        // Some there already: nothing written until the reader answers.
+        std::fs::write(folder.join("43 John.md"), "my own edits").unwrap();
+        std::fs::remove_file(folder.join("19 Psalms.md")).unwrap();
+        let outcome = notes_folder_chosen(&state, files.clone(), folder.clone())
+            .await
+            .unwrap();
+        let NotesFolderOutcome::Exists {
+            token, existing, ..
+        } = &outcome
+        else {
+            panic!("expected a question, got {outcome:?}");
+        };
+        assert_eq!(existing, &["43 John.md", "62 1 John.md"]);
+        assert_eq!(serde_json::to_value(&outcome).unwrap()["status"], "exists");
+        assert!(!folder.join("19 Psalms.md").exists(), "nothing written yet");
+        assert_eq!(
+            std::fs::read_to_string(folder.join("43 John.md")).unwrap(),
+            "my own edits"
+        );
+        // Cancel: still nothing written, and the question is gone.
+        assert!(matches!(
+            confirm_notes_folder(&state, *token, false).await,
+            Ok(NotesFolderOutcome::Cancelled)
+        ));
+        assert!(!folder.join("19 Psalms.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(folder.join("43 John.md")).unwrap(),
+            "my own edits"
+        );
+        assert_eq!(
+            confirm_notes_folder(&state, *token, true)
+                .await
+                .unwrap_err(),
+            "That export isn\u{2019}t waiting any more. Export the notes again."
+        );
+        // Asked again, Replace: every file written.
+        let NotesFolderOutcome::Exists { token, .. } =
+            notes_folder_chosen(&state, files.clone(), folder.clone())
+                .await
+                .unwrap()
+        else {
+            panic!("expected a question");
+        };
+        assert!(
+            confirm_notes_folder(&state, token + 1, true).await.is_err(),
+            "another token"
+        );
+        assert!(matches!(
+            confirm_notes_folder(&state, token, true).await,
+            Ok(NotesFolderOutcome::Saved { files: 3, .. })
+        ));
+        assert_eq!(
+            std::fs::read(folder.join("43 John.md")).unwrap(),
+            files[1].contents.as_bytes()
+        );
+        assert!(folder.join("19 Psalms.md").exists());
+
+        // A folder that can't be written says so.
+        let missing = folder.join("not-there").join("deeper");
+        let failed = notes_folder_chosen(&state, files, missing)
+            .await
+            .unwrap_err();
+        assert!(
+            failed.starts_with("The files couldn't be saved: "),
+            "{failed}"
+        );
     }
 }

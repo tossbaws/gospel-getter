@@ -21,6 +21,28 @@ versions follow [Semantic Versioning](https://semver.org/).
   Saving or discarding the note forgets the draft, and so does deleting
   the note. Drafts stay on this computer: they're in neither a backup
   nor Export notes, and they're kept for 30 days (the 20 newest).
+- Notes understand a little Markdown: **bold**, *italics*, bulleted and
+  numbered lists, `code`, and links (`[text](https://…)` or a bare
+  https:// address), in the card, the Library and the margin. A web link
+  opens in your browser; nothing else opens, and HTML in a note shows as
+  you typed it. Your notes are still stored, backed up and edited as the
+  plain text you typed.
+- References you type in a note ("see Rom 5:8", "John 3:16-18", "1 Cor
+  13", "Ps 23") become links that go there, as Go to does: Back returns.
+  A verse the translation you're reading doesn't number opens its
+  chapter.
+- Copy as Markdown, on each note in the card and the Library: the note's
+  reference as a heading, its verses quoted in the translation you're
+  reading (as Copy as… quotes them), then your note as you wrote it.
+- Export notes can write one file per book into a folder you choose
+  (for a notes app such as Obsidian): "43 John.md" and so on, each like
+  that book's part of the single file, with the same choices of books,
+  chapters and dates. It asks before replacing any file already there.
+  One file is still the default, and unchanged.
+
+### Changed
+- In reading mode, the notes in the margin keep more room from the
+  window's edge.
 
 ## [2.20.0] - 2026-10-27
 

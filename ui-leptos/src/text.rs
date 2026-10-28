@@ -37,6 +37,30 @@ pub fn count_line(count: u64) -> String {
     }
 }
 
+/// What's said once an export as one file per book is written: "Saved 12
+/// files to /home/me/Notes."
+pub fn saved_files(files: u64, folder: &str) -> String {
+    format!("Saved {} to {folder}.", plural(files, "file"))
+}
+
+/// The question when some of an export's files are already in the folder
+/// chosen: the first three by name, then how many more.
+pub fn replace_question(existing: &[String], folder: &str) -> String {
+    let names = match existing {
+        [] => return String::new(),
+        [one] => return format!("{one} is already in {folder}. Replace it?"),
+        [first @ .., last] if existing.len() <= 3 => {
+            format!("{} and {last}", first.join(", "))
+        }
+        _ => format!(
+            "{} and {} more",
+            existing[..3].join(", "),
+            thousands(existing.len() as u64 - 3)
+        ),
+    };
+    format!("{names} are already in {folder}. Replace them?")
+}
+
 /// A chapter field's number, held to the book's chapters; an empty or
 /// unreadable one is `fallback` (the book's first or last chapter with
 /// notes). As the page did: `Math.round(Number(value))`, clamped to
@@ -235,5 +259,43 @@ mod tests {
         fields.when = "nonsense".to_string();
         let f = build_filter(&[&john], 2, &fields, &dates());
         assert_eq!((f.written_from, f.written_to), (None, None));
+    }
+
+    #[test]
+    fn a_folder_export_says_what_it_wrote_and_asks_before_replacing() {
+        assert_eq!(
+            saved_files(12, "/home/me/Notes"),
+            "Saved 12 files to /home/me/Notes."
+        );
+        assert_eq!(saved_files(1, "C:\\Notes"), "Saved 1 file to C:\\Notes.");
+        let names = |n: usize| -> Vec<String> {
+            [
+                "43 John.md",
+                "45 Romans.md",
+                "62 1 John.md",
+                "64 3 John.md",
+                "66 Revelation.md",
+            ][..n]
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
+        };
+        assert_eq!(
+            replace_question(&names(1), "/v"),
+            "43 John.md is already in /v. Replace it?"
+        );
+        assert_eq!(
+            replace_question(&names(2), "/v"),
+            "43 John.md and 45 Romans.md are already in /v. Replace them?"
+        );
+        assert_eq!(
+            replace_question(&names(3), "/v"),
+            "43 John.md, 45 Romans.md and 62 1 John.md are already in /v. Replace them?"
+        );
+        assert_eq!(
+            replace_question(&names(5), "/v"),
+            "43 John.md, 45 Romans.md, 62 1 John.md and 2 more are already in /v. Replace them?"
+        );
+        assert_eq!(replace_question(&[], "/v"), "");
     }
 }

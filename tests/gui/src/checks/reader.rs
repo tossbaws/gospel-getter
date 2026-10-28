@@ -286,7 +286,9 @@ impl Run<'_> {
         );
         self.shot("screenshot: Compare with the BSB, Chi Rho", READER_SHOTS[1])
             .await;
-        // Back as it was: the WEB beside the KJV, Compare off.
+        // Back as it was: the WEB beside the KJV, Compare off. The grid is
+        // drawn again for the WEB first: a click on the heading before then
+        // can land on the one being replaced.
         self.open_translations().await?;
         self.ui
             .click(
@@ -295,6 +297,11 @@ impl Run<'_> {
             )
             .await?;
         self.close_translations().await?;
+        self.grid(
+            "the KJV and the WEB side by side again",
+            &["King James Version (KJV)", "World English Bible (WEB)"],
+        )
+        .await?;
         let ui = &self.ui;
         ui.click(
             "click the chapter heading (focus off any control)",

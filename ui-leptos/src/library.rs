@@ -15,7 +15,10 @@
 //! list (on the notes already loaded, once typing pauses for
 //! `SEARCH_DELAY_MS`), says how many of how many it shows, and marks what
 //! it found in each row; Escape in it clears it first. What finds a note
-//! and what's marked is `library_text`'s.
+//! and what's marked is `library_text`'s. A note's row shows its start as
+//! Markdown, run onto one line (`note_markdown`), beside the row's link
+//! rather than in it, so the links in the note are links of their own;
+//! its Edit and Copy as Markdown follow.
 //!
 //! Boot, an import, a translation switch and the card ask for the lists to
 //! be reloaded with `bridge::LIBRARY_REFRESH_EVENT`, and get back what the
@@ -47,6 +50,7 @@ use crate::dto::{
 };
 use crate::ipc;
 use crate::library_text::{self as text, List};
+use crate::note_markdown::{self, Layout};
 use crate::surfaces;
 
 /// A list as last shown: its rows, or why it couldn't be loaded (or a row
@@ -524,10 +528,39 @@ impl Library {
         });
     }
 
+    /// The note row `el` is in, as listed.
+    fn note_row(self, el: &Element) -> Option<NoteRow> {
+        let id = data_number::<i64>(&closest(el, ".note-item")?, "data-note-id")?;
+        self.notes.with_untracked(|s| {
+            s.as_ref()?
+                .items
+                .iter()
+                .find(|row| row.note.id == id)
+                .cloned()
+        })
+    }
+
+    /// The pointer or focus came to a note's row: its Markdown is asked
+    /// for, so Copy as Markdown can write it within its click.
+    fn on_note_near(self, event: &web_sys::Event) {
+        if let Some(row) = target_of(event).and_then(|el| self.note_row(&el)) {
+            crate::note_copy::prefetch(row.note.id, &row.note.body);
+        }
+    }
+
     /// Opening a note's row works as opening a bookmark: its chapter, with
     /// its passage selected, so its Notes section shows. Edit does the
-    /// same, then opens the note.
+    /// same, then opens the note. Copy as Markdown copies it, and says so
+    /// in the toast.
     fn on_note_click(self, target: Element) {
+        if closest(&target, ".note-list-copy").is_some() {
+            if let Some(NoteRow { note, .. }) = self.note_row(&target) {
+                crate::note_copy::copy(note.id, note.reference, &note.body, |message, is_error| {
+                    bridge::toast(&message, is_error);
+                });
+            }
+            return;
+        }
         let edit = closest(&target, ".note-list-edit");
         let Some(button) = edit.clone().or_else(|| closest(&target, ".bookmark-open")) else {
             return;
@@ -787,24 +820,32 @@ fn note_rows(shown: Option<Shown<NoteRow>>, query: &str) -> AnyView {
         .filter_map(|index| items[index].take())
         .map(|NoteRow { note, .. }| {
             let id = note.id.to_string();
+            let (row_id, open_id, edit_id) = (id.clone(), id.clone(), id.clone());
             let label = format!("Edit note on {}", note.reference);
-            let preview = text::note_preview(&note.body);
+            let copy_label = format!("Copy the note on {} as Markdown", note.reference);
+            let preview_id = format!("note-preview-{id}");
             let reference = with_marks(
                 &note.reference,
                 &text::reference_marks(&note.reference, note.book_id, &words),
             );
-            let preview = with_marks(&preview, &text::text_marks(&preview, &words));
+            let preview = note_markdown::note_html(&note.body, &note.links, &words, Layout::OneLine);
             view! {
-                <li class="bookmark-item">
-                    <button type="button" class="bookmark-open" data-note-id=id.clone()>
-                        <span class="bookmark-ref">{reference}</span>
-                        " "
-                        <span class="note-preview">{preview}</span>
-                    </button>
+                <li class="bookmark-item note-item" data-note-id=row_id>
+                    <div class="note-item-main">
+                        <button type="button" class="bookmark-open" data-note-id=open_id aria-describedby=preview_id.clone()>
+                            <span class="bookmark-ref">{reference}</span>
+                        </button>
+                        <div class="note-preview note-text" id=preview_id inner_html=preview></div>
+                    </div>
                     " "
-                    <button type="button" class="note-list-edit" data-note-id=id aria-label=label title="Edit note">
-                        "Edit"
-                    </button>
+                    <span class="note-item-actions">
+                        <button type="button" class="note-list-edit" data-note-id=edit_id aria-label=label title="Edit note">
+                            "Edit"
+                        </button>
+                        <button type="button" class="note-list-copy" data-note-id=id aria-label=copy_label title="Copy as Markdown">
+                            "Copy as Markdown"
+                        </button>
+                    </span>
                 </li>
             }
         })
@@ -839,6 +880,11 @@ pub fn mount() {
             dom::on_click(&list, move |event| {
                 Library::on_list_click(&event, |target| on_button(library, target));
             });
+        }
+    }
+    if let Some(list) = library.note_list.get_untracked() {
+        for name in ["pointerover", "focusin"] {
+            dom::on(&list, name, move |event| library.on_note_near(&event));
         }
     }
     dom::on_document_event(bridge::LIBRARY_REFRESH_EVENT, move |event| {

@@ -2084,6 +2084,27 @@
             color: var(--text-dim);
         }
 
+        /* Save as: one file, or one file per book in a folder. */
+        .export-notes-layouts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.2rem 1rem;
+        }
+
+        .export-notes-layout-option {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+
+        /* Files of a folder export already there: asked, as the note
+           editor asks before discarding. */
+        .export-notes-replace .note-discard-question {
+            flex: 1 1 100%;
+        }
+
         .export-notes-books input {
             flex: none;
             accent-color: var(--accent);
@@ -2286,20 +2307,41 @@
 
         /* My notes: the Bookmarks list's look, with the start of each note
            (two lines, clipped visually, never shortened) in place of the
-           verse text, and a small Edit beside it. */
+           verse text, and a small Edit and Copy as Markdown beside it. The
+           start is the note as Markdown run onto one line, under the row's
+           link (not in it: the links in a note are links of their own). */
+        .note-item-main {
+            flex: 1 1 auto;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .note-item-main .bookmark-open {
+            padding-bottom: 0.1rem;
+        }
+
+        /* Two lines' height, cut there: WebKit's line-clamp misplaces its
+           ellipsis among the note's inline links. */
         .note-preview {
-            display: -webkit-box;
-            -webkit-box-orient: vertical;
-            -webkit-line-clamp: 2;
-            line-clamp: 2;
+            max-height: calc(2 * 1.35em);
             overflow: hidden;
             overflow-wrap: anywhere;
             font-size: 0.75rem;
             line-height: 1.35;
             color: var(--text-dim);
+            margin: 0 0.2rem 0.4rem;
         }
 
-        .note-list-edit {
+        .note-item-actions {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+
+        .note-list-edit,
+        .note-list-copy {
             flex: 0 0 auto;
             font-family: inherit;
             font-size: 0.8rem;
@@ -2311,7 +2353,8 @@
             cursor: pointer;
         }
 
-        .note-list-edit:hover {
+        .note-list-edit:hover,
+        .note-list-copy:hover {
             color: var(--accent);
             border-color: var(--accent-dim);
         }
@@ -2730,7 +2773,6 @@
                 max-height: calc(var(--margin-fold-lines, 6) * 1.45em);
                 overflow: hidden;
                 margin: 0.1rem 0 0;
-                white-space: pre-wrap;
                 overflow-wrap: anywhere;
             }
 
@@ -3619,7 +3661,6 @@
             -webkit-line-clamp: 3;
             line-clamp: 3;
             overflow: hidden;
-            white-space: pre-wrap;
             overflow-wrap: anywhere;
             color: var(--text);
             margin: 0.15rem 0;
@@ -3633,7 +3674,8 @@
 
         .note-card-actions {
             display: flex;
-            gap: 0.8rem;
+            flex-wrap: wrap;
+            gap: 0.2rem 0.8rem;
         }
 
         .note-link {
@@ -3650,9 +3692,59 @@
 
         .note-link:focus-visible,
         .verse-note-btn:focus-visible,
-        .note-list-edit:focus-visible {
+        .note-list-edit:focus-visible,
+        .note-list-copy:focus-visible {
             outline: 2px solid var(--accent);
             outline-offset: 2px;
+        }
+
+        /* A note's text as Markdown (ui-leptos/src/note_markdown.rs),
+           wherever it shows (the card, the margin, the Library): its
+           paragraphs and lists close together, lists indented, code in the
+           UI's face (no third face, as About's), its links in the quiet
+           accent, underlined; a reference (a link to a passage, which
+           stays in the app) dotted, a web link solid. */
+        .note-text p,
+        .note-text ul,
+        .note-text ol {
+            margin: 0;
+        }
+
+        .note-text > * + * {
+            margin-top: 0.35em;
+        }
+
+        .note-text ul,
+        .note-text ol {
+            padding-left: 1.3em;
+        }
+
+        .note-text code {
+            font-family: inherit;
+            color: var(--accent);
+            background: rgba(var(--accent-rgb), 0.1);
+            border-radius: var(--radius-s);
+            padding: 0 0.2em;
+        }
+
+        .note-text a {
+            color: var(--accent-2);
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            overflow-wrap: anywhere;
+        }
+
+        .note-text a.note-ref-link {
+            text-decoration-style: dotted;
+        }
+
+        .note-text a:hover {
+            color: var(--accent);
+        }
+
+        .note-text a:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
         }
 
         .note-show-all {

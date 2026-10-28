@@ -124,6 +124,41 @@ pub enum ExportOutcome {
     Saved { path: String, notes: u64 },
 }
 
+/// `export_notes_by_book`'s and `confirm_notes_export_by_book`'s answer
+/// (`commands::NotesFolderOutcome`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum FolderOutcome {
+    /// The reader closed the folder dialog, or chose not to replace the
+    /// files already there; nothing was written.
+    Cancelled,
+    /// Some of the files are already in the folder; nothing is written
+    /// until the reader answers, with `token`.
+    Exists {
+        token: u64,
+        folder: String,
+        existing: Vec<String>,
+    },
+    /// Every file was completely written.
+    Saved {
+        folder: String,
+        files: u64,
+        notes: u64,
+    },
+}
+
+/// `confirm_notes_export_by_book`'s arguments: the export waiting, and the
+/// reader's answer.
+#[derive(Debug, Serialize)]
+pub struct ConfirmFolderArgs {
+    pub token: u64,
+    pub replace: bool,
+}
+
 /// What choosing a file to import found (`commands::ImportChoice`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(
@@ -354,6 +389,26 @@ pub struct Note {
     pub verse_end: i64,
     pub reference: String,
     pub body: String,
+    /// The references typed in it, which its text shows as links.
+    #[serde(default)]
+    pub links: Vec<NoteLink>,
+}
+
+/// A reference typed in a note ("see Rom 5:8"), as the backend found it
+/// (`commands::NoteLinkDto`): where it is in the note's text (byte
+/// offsets, `start..end`) and the passage it names, its verses or none
+/// for the whole chapter.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteLink {
+    pub start: usize,
+    pub end: usize,
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: Option<i64>,
+    pub verse_end: Option<i64>,
+    /// "Romans 5:8".
+    pub reference: String,
 }
 
 /// The arguments of `list_bookmarks` and `list_highlight_passages`: the
@@ -634,6 +689,9 @@ pub struct SelectionNote {
     pub created_at: String,
     /// "Oct 9, 2026", the backend's (`notes_export::display_date`).
     pub created_at_display: String,
+    /// The references typed in it, which its text shows as links.
+    #[serde(default)]
+    pub links: Vec<NoteLink>,
 }
 
 /// A cross-reference's passage, as `get_passage` answers

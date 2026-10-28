@@ -1,9 +1,13 @@
 //! Export notes…: the notes chosen by book, chapters and when they were
 //! written, as a readable Markdown file with each note's verses quoted in
-//! the translation being read. The backend works out the choices when the
-//! dialog opens (the books with notes, and date presets in local days),
-//! counts the notes the choices match as they change, builds the file, asks
-//! where to save it and writes it, all by one filter; this only shows them.
+//! the translation being read, or (Save as "One file per book") as a
+//! folder of files, one a book, for a notes app such as Obsidian. The
+//! backend works out the choices when the dialog opens (the books with
+//! notes, and date presets in local days), counts the notes the choices
+//! match as they change, builds the files, asks where to save them and
+//! writes them, all by one filter; this only shows them. Files already in
+//! the folder chosen are replaced only once the reader says so: the dialog
+//! stays open for a folder, and asks (Replace or Cancel).
 //!
 //! A small modal, as the page's note panel: it has the keyboard while open
 //! (a capturing `keydown` on `window`, stopping every other handler), Escape
@@ -26,9 +30,27 @@ use web_sys::{CustomEvent, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEv
 
 use crate::bridge::{self, OpenRequest};
 use crate::dom::{self, focus, inside_hidden};
-use crate::dto::{CountArgs, ExportArgs, ExportOptions, ExportOutcome, Filter, NotedBook};
+use crate::dto::{
+    ConfirmFolderArgs, CountArgs, ExportArgs, ExportOptions, ExportOutcome, Filter, FolderOutcome,
+    NotedBook,
+};
 use crate::ipc;
-use crate::text::{Fields, build_filter, chapter_value, count_line, plural, thousands};
+use crate::text::{
+    Fields, build_filter, chapter_value, count_line, plural, replace_question, saved_files,
+    thousands,
+};
+
+/// Save as: one file (as always), or one file per book in a folder.
+const ONE_FILE: &str = "one";
+const BY_BOOK: &str = "books";
+
+/// An export as one file per book waiting for the reader to say whether
+/// to replace the files already in their folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReplaceQuestion {
+    token: u64,
+    question: String,
+}
 
 /// What is under way, outside the reactive graph (nothing renders from it).
 #[derive(Debug, Clone, Copy, Default)]
@@ -69,6 +91,13 @@ struct Dialog {
     /// How many notes the choices match, once the backend has said; `None`
     /// while it hasn't, or when the choices are wrong. Export needs some.
     matches: RwSignal<Option<u64>>,
+    /// Save as: [`ONE_FILE`] or [`BY_BOOK`].
+    layout: RwSignal<String>,
+    /// An export to a folder is under way (the dialog stays open for it).
+    working: RwSignal<bool>,
+    /// The question while a folder already holds some of the files.
+    replace: RwSignal<Option<ReplaceQuestion>>,
+    replace_no: NodeRef<html::Button>,
     busy: StoredValue<Busy>,
     overlay: NodeRef<html::Div>,
     panel: NodeRef<html::Div>,
@@ -110,6 +139,10 @@ impl Dialog {
             error: RwSignal::new(String::new()),
             count: RwSignal::new(String::new()),
             matches: RwSignal::new(None),
+            layout: RwSignal::new(ONE_FILE.to_string()),
+            working: RwSignal::new(false),
+            replace: RwSignal::new(None),
+            replace_no: NodeRef::new(),
             busy: StoredValue::new(Busy::default()),
             overlay: NodeRef::new(),
             panel: NodeRef::new(),
@@ -263,6 +296,9 @@ impl Dialog {
             self.date_to.set(String::new());
             self.error.set(String::new());
             self.count.set(String::new());
+            self.layout.set(ONE_FILE.to_string());
+            self.working.set(false);
+            self.replace.set(None);
             self.sync_chapters();
             self.open.set(true);
             // The checklist is on screen once the reactive system has
@@ -335,6 +371,10 @@ impl Dialog {
             .request
             .with_untracked(|r| r.as_ref().map(|r| r.translation_code.clone()))
             .unwrap_or_default();
+        if self.layout.get_untracked() == BY_BOOK {
+            self.export_by_book(translation_code, filter);
+            return;
+        }
         self.close();
         self.busy.update_value(|b| b.exporting = true);
         spawn_local(async move {
@@ -364,15 +404,100 @@ impl Dialog {
         });
     }
 
+    /// One file per book: the backend builds the files, asks for a folder
+    /// and writes them there, or asks first if some are there already.
+    /// The dialog stays open meanwhile.
+    fn export_by_book(self, translation_code: String, filter: Filter) {
+        if self.working.get_untracked() {
+            return;
+        }
+        self.working.set(true);
+        self.busy.update_value(|b| b.exporting = true);
+        spawn_local(async move {
+            let args = ExportArgs {
+                translation_code: &translation_code,
+                filter: &filter,
+            };
+            let result = match ipc::args(&args) {
+                Ok(args) => ipc::invoke::<FolderOutcome>("export_notes_by_book", args).await,
+                Err(e) => Err(e),
+            };
+            self.folder_answer(result).await;
+        });
+    }
+
+    /// Replace (`replace`) or Cancel, for the files already in the folder.
+    fn answer_replace(self, replace: bool) {
+        let Some(question) = self.replace.get_untracked() else {
+            return;
+        };
+        self.replace.set(None);
+        self.working.set(true);
+        spawn_local(async move {
+            let args = ConfirmFolderArgs {
+                token: question.token,
+                replace,
+            };
+            let result = match ipc::args(&args) {
+                Ok(args) => {
+                    ipc::invoke::<FolderOutcome>("confirm_notes_export_by_book", args).await
+                }
+                Err(e) => Err(e),
+            };
+            self.folder_answer(result).await;
+        });
+    }
+
+    /// How the folder export went: written (said in the toast), cancelled
+    /// (nothing said), a question (asked in the dialog), or why it failed.
+    async fn folder_answer(self, result: Result<FolderOutcome, JsValue>) {
+        self.working.set(false);
+        match result {
+            Ok(FolderOutcome::Exists {
+                token,
+                folder,
+                existing,
+            }) => {
+                self.replace.set(Some(ReplaceQuestion {
+                    token,
+                    question: replace_question(&existing, &folder),
+                }));
+                tick().await;
+                if let Some(no) = self.replace_no.get_untracked() {
+                    focus(&no);
+                }
+                return;
+            }
+            Ok(FolderOutcome::Saved { folder, files, .. }) => {
+                self.close();
+                bridge::toast(&saved_files(files, &folder), false);
+            }
+            Ok(FolderOutcome::Cancelled) => self.close(),
+            Err(e) => {
+                ipc::log_error("Notes export by book failed", &e);
+                self.close();
+                bridge::toast(&format!("Export failed: {}", ipc::error_text(&e)), true);
+            }
+        }
+        self.busy.update_value(|b| b.exporting = false);
+    }
+
     /// While the dialog is open it has the keyboard, before any other
-    /// handler sees a key: Escape closes it (and only it), and Tab stays
-    /// inside. Listens on `window`, capturing, as the page's modals do.
+    /// handler sees a key: Escape closes it (and only it; with the
+    /// question about files already in a folder, Escape is its Cancel),
+    /// and Tab stays inside. Listens on `window`, capturing, as the page's
+    /// modals do.
     fn on_keydown(self, event: KeyboardEvent) {
         if !self.open.get_untracked() {
             return;
         }
         event.stop_propagation();
         match event.key().as_str() {
+            "Escape" if self.replace.with_untracked(Option::is_some) => {
+                event.prevent_default();
+                self.answer_replace(false);
+            }
+            "Escape" if self.working.get_untracked() => event.prevent_default(),
             "Escape" => {
                 event.prevent_default();
                 self.close();
@@ -665,6 +790,33 @@ pub fn ExportNotes() -> impl IntoView {
                             </div>
                         </div>
                     </fieldset>
+                    <fieldset class="export-notes-group">
+                        <legend class="export-notes-legend">"Save as"</legend>
+                        <div class="export-notes-layouts">
+                            <label class="export-notes-layout-option">
+                                <input
+                                    type="radio"
+                                    name="export-notes-layout"
+                                    id="export-notes-one-file"
+                                    value=ONE_FILE
+                                    prop:checked=move || dialog.layout.get() == ONE_FILE
+                                    on:change=move |_| dialog.layout.set(ONE_FILE.to_string())
+                                />
+                                <span>"One file"</span>
+                            </label>
+                            <label class="export-notes-layout-option">
+                                <input
+                                    type="radio"
+                                    name="export-notes-layout"
+                                    id="export-notes-by-book"
+                                    value=BY_BOOK
+                                    prop:checked=move || dialog.layout.get() == BY_BOOK
+                                    on:change=move |_| dialog.layout.set(BY_BOOK.to_string())
+                                />
+                                <span>"One file per book (a folder)"</span>
+                            </label>
+                        </div>
+                    </fieldset>
                     <p id="export-notes-error" class="note-error" role="alert">
                         {move || dialog.error.get()}
                     </p>
@@ -672,12 +824,12 @@ pub fn ExportNotes() -> impl IntoView {
                         {move || dialog.count.get()}
                     </p>
                 </div>
-                <div class="modal-buttons">
+                <div class="modal-buttons" hidden=move || dialog.replace.with(Option::is_some)>
                     <button
                         type="button"
                         id="export-notes-confirm"
                         class="import-confirm"
-                        disabled=move || dialog.matches.get().unwrap_or(0) == 0
+                        disabled=move || dialog.matches.get().unwrap_or(0) == 0 || dialog.working.get()
                         on:click=move |_| dialog.export()
                     >
                         "Export…"
@@ -686,7 +838,36 @@ pub fn ExportNotes() -> impl IntoView {
                         type="button"
                         id="export-notes-cancel"
                         class="reader-mode-btn"
+                        disabled=move || dialog.working.get()
                         on:click=move |_| dialog.close()
+                    >
+                        "Cancel"
+                    </button>
+                </div>
+                <div
+                    id="export-notes-replace"
+                    class="modal-buttons export-notes-replace"
+                    hidden=move || dialog.replace.with(Option::is_none)
+                >
+                    <p id="export-notes-replace-question" class="note-discard-question" role="alert">
+                        {move || dialog.replace.with(|r| r.as_ref().map(|r| r.question.clone()).unwrap_or_default())}
+                    </p>
+                    <button
+                        type="button"
+                        id="export-notes-replace-yes"
+                        class="import-confirm"
+                        aria-describedby="export-notes-replace-question"
+                        on:click=move |_| dialog.answer_replace(true)
+                    >
+                        "Replace"
+                    </button>
+                    <button
+                        type="button"
+                        id="export-notes-replace-no"
+                        class="reader-mode-btn"
+                        aria-describedby="export-notes-replace-question"
+                        node_ref=dialog.replace_no
+                        on:click=move |_| dialog.answer_replace(false)
                     >
                         "Cancel"
                     </button>

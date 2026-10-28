@@ -68,14 +68,32 @@ test('a click anywhere on a Highlights row opens its passage; × stays separate'
         assert.deepEqual(app.selectedVerseNumbers(), [1]);
     }));
 
+// A note's row: its link (named by its reference, described by the
+// note's start beside it, which is Markdown and may hold links of its own,
+// so it can't be inside the row's link), then Edit and Copy as Markdown.
+// No control holds another.
+function assertNoteRowSemantics(row) {
+    const controls = [...row.querySelectorAll('button, a, input, [tabindex], [role="button"], [role="link"]')];
+    assert.deepEqual(controls.map((c) => c.className), ['bookmark-open', 'note-list-edit', 'note-list-copy']);
+    for (const control of controls) {
+        assert.equal(control.querySelector('button, a, input, [tabindex]'), null, `${control.className} holds no control`);
+        assert.equal(control.closest('.bookmark-item'), row);
+    }
+    assert.equal(row.getAttribute('role'), null, 'the row itself is a plain list item');
+    assert.equal(row.hasAttribute('tabindex'), false, 'and isn’t a tab stop');
+}
+
 test('a click anywhere on a Notes row opens its passage; Edit is a separate, secondary button', () =>
     withLibrary(async (app) => {
         app.openLibrary('notes');
         const [row] = rowsOf(app, 'note');
-        assertRowSemantics(row, 'note-list-edit');
+        assertNoteRowSemantics(row);
         const open = row.querySelector('.bookmark-open');
-        // One activatable row, named by its reference and note.
-        assert.equal(open.textContent.replace(/\s+/g, ' ').trim(), 'John 3:21 Light: coming to it is the whole of it.');
+        // One activatable row, named by its reference, described by its note.
+        assert.equal(open.textContent.replace(/\s+/g, ' ').trim(), 'John 3:21');
+        const preview = row.querySelector('.note-preview');
+        assert.equal(open.getAttribute('aria-describedby'), preview.id);
+        assert.equal(preview.textContent, 'Light: coming to it is the whole of it.');
         const edit = row.querySelector('.note-list-edit');
         assert.equal(edit.textContent, 'Edit');
         assert.equal(edit.getAttribute('aria-label'), 'Edit note on John 3:21');
@@ -84,6 +102,11 @@ test('a click anywhere on a Notes row opens its passage; Edit is a separate, sec
         assert.equal(app.heading(), 'John 3');
         assert.deepEqual(app.selectedVerseNumbers(), [21]);
         assert.ok(app.document.getElementById('note-overlay').hidden, 'opening isn’t editing');
+        // On the note's start, beside the link: the same.
+        app.openLibrary('notes');
+        await clickRow(app, rowsOf(app, 'note')[0].querySelector('.note-preview'));
+        assert.deepEqual(app.selectedVerseNumbers(), [21]);
+        assert.ok(app.surface('library').hidden);
 
         // Edit opens the note itself, and the row's click doesn't also fire.
         app.openLibrary('notes');
@@ -100,6 +123,6 @@ test('the keyboard reaches each row’s link and its secondary button, in that o
         app.openLibrary('notes');
         const [row] = rowsOf(app, 'note');
         const focusable = [...app.document.querySelectorAll('#note-list button')];
-        assert.deepEqual(focusable, [row.querySelector('.bookmark-open'), row.querySelector('.note-list-edit')]);
+        assert.deepEqual(focusable, [row.querySelector('.bookmark-open'), row.querySelector('.note-list-edit'), row.querySelector('.note-list-copy')]);
         assert.ok(focusable.every((b) => b.tabIndex === 0 && b.type === 'button'));
     }));

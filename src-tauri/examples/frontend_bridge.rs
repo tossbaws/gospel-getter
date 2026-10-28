@@ -9,8 +9,10 @@
 //!
 //! The native file dialogs of export and import can't run here, so a test
 //! scripts the next one's answer with `__set_picker` (a path, or `null` for
-//! the reader cancelling); the export and import logic behind them is the
-//! app's own, reading and writing real files.
+//! the reader cancelling; a folder, for the notes export's one file per
+//! book); the export and import logic behind them is the app's own,
+//! reading and writing real files. A note's web link isn't opened either:
+//! the app's own rule (`web_link::web_address`) accepts or refuses it.
 //!
 //! Updates can't be checked or installed here either (they need the real
 //! app and GitHub), so a test scripts them with `__set_update`: what
@@ -41,6 +43,7 @@ use gospel_getter_lib::credit_links;
 use gospel_getter_lib::db::{self, Passage, WritePool};
 use gospel_getter_lib::domain::kjv_markup::VerseText;
 use gospel_getter_lib::updater::{self, Problem, UpdateInfo};
+use gospel_getter_lib::web_link;
 
 /// The scripted answer for the next file dialog: `Some(None)` is a
 /// cancel. Taken (and cleared) by the dialog it answers.
@@ -257,6 +260,10 @@ async fn dispatch(
             answer(commands::note_update(state, arg(args, "id")?, &body).await)?
         }
         "delete_note" => answer(commands::note_delete(state, arg(args, "id")?).await)?,
+        "get_note_markdown" => {
+            let code: String = arg(args, "translationCode")?;
+            answer(commands::note_markdown_text(state, arg(args, "id")?, &code).await)?
+        }
         "restore_note" => {
             let body: String = arg(args, "body")?;
             let created_at: String = arg(args, "createdAt")?;
@@ -314,6 +321,30 @@ async fn dispatch(
                 },
             }
         }
+        "export_notes_by_book" => {
+            let code: String = arg(args, "translationCode")?;
+            let (now, tz) = clock()?;
+            match commands::build_notes_export_by_book(
+                state,
+                &code,
+                &arg(args, "filter")?,
+                now,
+                &tz,
+            )
+            .await
+            {
+                Err(message) => Err(message),
+                Ok(files) => match pick()? {
+                    None => Ok(to_value(commands::NotesFolderOutcome::Cancelled)?),
+                    Some(folder) => {
+                        answer(commands::notes_folder_chosen(state, files, folder).await)?
+                    }
+                },
+            }
+        }
+        "confirm_notes_export_by_book" => answer(
+            commands::confirm_notes_folder(state, arg(args, "token")?, arg(args, "replace")?).await,
+        )?,
         "choose_import_file" => match pick()? {
             None => Ok(to_value(commands::ImportChoice::Cancelled)?),
             Some(path) => Ok(to_value(commands::prepare_import(state, &path).await?)?),
@@ -411,6 +442,14 @@ async fn dispatch(
         // Opening a browser is the system's job; the call itself is what
         // the tests check.
         "open_download_page" | "open_release_notes" | "open_support_page" => Ok(Value::Null),
+        // The app's own rule decides which addresses open; nothing opens.
+        "open_web_link" => {
+            let url: String = arg(args, "url")?;
+            match web_link::web_address(&url) {
+                Ok(_) => Ok(Value::Null),
+                Err(message) => Err(message.to_string()),
+            }
+        }
         // The app's own table decides which keys open anything.
         "open_credit_link" => {
             let which: String = arg(args, "which")?;

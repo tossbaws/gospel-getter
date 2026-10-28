@@ -76,7 +76,12 @@ impl Run<'_> {
     }
 
     /// Presses `key` with `modifiers` held, all at once.
-    async fn chord(&self, what: &str, modifiers: &[Key], key: impl Into<TypingData>) -> Result<()> {
+    pub(super) async fn chord(
+        &self,
+        what: &str,
+        modifiers: &[Key],
+        key: impl Into<TypingData>,
+    ) -> Result<()> {
         let key = key.into();
         let pressed = self
             .ui

@@ -17,7 +17,7 @@ use gospel_getter_lib::preferences::{self, Preference, Values};
 /// highlight and notes), and what was the page's main script (the keyboard
 /// and click dispatchers, boot, and the page's glue): checks of those read
 /// them where they now live.
-const PIECES: [(&str, &str); 29] = [
+const PIECES: [(&str, &str); 31] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -73,6 +73,14 @@ const PIECES: [(&str, &str); 29] = [
     (
         "margin_text.rs",
         include_str!("../../ui-leptos/src/margin_text.rs"),
+    ),
+    (
+        "note_markdown.rs",
+        include_str!("../../ui-leptos/src/note_markdown.rs"),
+    ),
+    (
+        "note_links.rs",
+        include_str!("../../ui-leptos/src/note_links.rs"),
     ),
     (
         "keyboard.rs",
@@ -246,8 +254,12 @@ fn margin_notes_sit_beside_the_text_on_screen_only() {
     let body = screen(".margin-note-body");
     assert!(
         body.contains("max-height: calc(var(--margin-fold-lines, 6) * 1.45em);")
-            && body.contains("white-space: pre-wrap;")
+            && body.contains("overflow: hidden;")
     );
+    // Its words as the card's: Markdown, line breaks as `<br>`, so no
+    // `pre-wrap` to break them twice.
+    assert!(!body.contains("white-space"));
+    assert!(piece("margin_text.rs").contains("note_markdown::note_html(&note.body, &note.links"));
     assert!(
         piece("margin.rs")
             .contains(r#"set_property("--margin-fold-lines", &text::FOLD_LINES.to_string())"#)
@@ -1727,6 +1739,8 @@ fn notes_use_tested_theme_colors() {
         (".verse-notes-title", "--text-dim"),
         (".note-card-ref", "--accent"),
         (".note-link", "--accent-2"),
+        (".note-text a", "--accent-2"),
+        (".note-text code", "--accent"),
     ] {
         assert!(
             screen_rule(&rules, selector)
@@ -4540,13 +4554,20 @@ fn the_shortcuts_sheet_is_a_modal_dialog_aa_in_every_theme() {
 
 /// The page never opens a web page itself: no anchor opens a new window,
 /// and each link out of the app (Release notes, Support Gospel Getter, the
-/// cross references' credits) is one the backend opens, through a click
-/// handler. The page and its Rust pieces (About, with Release notes and
-/// Support Gospel Getter, is `about.rs`) together.
+/// cross references' credits, a note's web links) is one the backend
+/// opens, through a click handler. A note's references are links in the
+/// app (`href="#"`), which go to a passage. The page and its Rust pieces
+/// (About, with Release notes and Support Gospel Getter, is `about.rs`; a
+/// note's links are drawn by `note_markdown.rs` and followed by
+/// `note_links.rs`) together; the pieces' shipped code, not their tests.
 #[test]
 fn every_link_out_of_the_app_is_opened_by_the_backend() {
+    let shipped = |source: &'static str| match source.find("#[cfg(test)]") {
+        Some(tests) => &source[..tests],
+        None => source,
+    };
     let sources: Vec<&str> = std::iter::once(HTML)
-        .chain(PIECES.iter().map(|(_, source)| *source))
+        .chain(PIECES.iter().map(|(_, source)| shipped(source)))
         .collect();
     let mut anchors: Vec<&str> = Vec::new();
     for source in &sources {
@@ -4564,15 +4585,25 @@ fn every_link_out_of_the_app_is_opened_by_the_backend() {
                 .map(|(at, _)| &source[at..at + source[at..].find('>').unwrap()]),
         );
     }
-    assert_eq!(anchors.len(), 4, "{anchors:#?}");
+    assert_eq!(anchors.len(), 6, "{anchors:#?}");
     for anchor in anchors {
         assert!(
             anchor.contains("id=\"release-notes-link\"")
                 || anchor.contains("id=\"support-link\"")
-                || anchor.contains("class=\"credit-link\" data-link="),
+                || anchor.contains("class=\"credit-link\" data-link=")
+                || anchor.contains(r#"class=\"note-web-link\" href=\"{address}\""#)
+                || anchor.contains(r##"class=\"note-ref-link\" href=\"#\""##),
             "{anchor}"
         );
     }
+    // A note's links: a capturing click handler keeps every click on them
+    // from the page, has the backend open a web link, and goes to a
+    // reference's passage itself.
+    let links = piece("note_links.rs");
+    assert!(links.contains(r#"const LINKS: &str = "a.note-ref-link, a.note-web-link";"#));
+    assert!(links.contains("event.prevent_default();"));
+    assert!(links.contains(r#"ipc::send("open_web_link", args)"#));
+    assert!(links.contains("crate::reader::open("));
     assert!(piece("about.rs").contains(r#"ipc::invoke_value("open_release_notes""#));
     assert!(piece("about.rs").contains(r#"ipc::invoke_value("open_support_page""#));
     // The credit links are the reader's (ui-leptos/src/reader.rs).

@@ -1,9 +1,9 @@
 //! The Library's words and rules (`library`), free of the DOM so they are
 //! tested natively (`cargo test`): the highlighter colors and their names,
 //! the lists' empty and error rows, a preview the translation doesn't
-//! number, a note's one-line preview, which highlights the color filter
-//! shows, which notes the Notes tab's search shows and what it marks in
-//! them, and the tabs' and the lists' focus arithmetic. The words that
+//! number, which highlights the color filter shows, which notes the Notes
+//! tab's search shows and what it marks in them, and the tabs' and the
+//! lists' focus arithmetic. The words that
 //! were the page's are its (`ui/index.html` at 6d8d9a5), byte for byte.
 
 use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
@@ -119,42 +119,6 @@ pub fn partly_numbered(code: &str) -> String {
 /// The row that says removing `reference` failed, with why.
 pub fn remove_failed(reference: &str, error: &str) -> String {
     format!("Couldn't remove {reference}: {error}")
-}
-
-/// A note's text on one line: each run of white space one space, as the
-/// page's `replace(/\s+/g, ' ')` (JavaScript's white space and line
-/// terminators, which differ from Rust's `char::is_whitespace` in two
-/// characters). Not trimmed: the backend already trims notes.
-pub fn note_preview(body: &str) -> String {
-    let mut out = String::with_capacity(body.len());
-    let mut in_space = false;
-    for c in body.chars() {
-        if is_js_space(c) {
-            if !in_space {
-                out.push(' ');
-            }
-            in_space = true;
-        } else {
-            out.push(c);
-            in_space = false;
-        }
-    }
-    out
-}
-
-/// What JavaScript's `\s` matches.
-fn is_js_space(c: char) -> bool {
-    matches!(
-        c,
-        '\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r' | ' ' | '\u{A0}' | '\u{1680}' | '\u{2000}'
-            ..='\u{200A}'
-                | '\u{2028}'
-                | '\u{2029}'
-                | '\u{202F}'
-                | '\u{205F}'
-                | '\u{3000}'
-                | '\u{FEFF}'
-    )
 }
 
 // ---- The Notes tab's search: the box at its top filters the list as it's
@@ -479,15 +443,6 @@ mod tests {
         assert_eq!(shown(colors, ALL), [0, 1, 2]);
         assert_eq!(shown(colors, "green"), [0, 2]);
         assert_eq!(shown(colors, "blue"), Vec::<usize>::new());
-    }
-
-    #[test]
-    fn a_note_preview_is_one_line_as_javascript_would_make_it() {
-        assert_eq!(note_preview("One\n\n  two\tthree"), "One two three");
-        assert_eq!(note_preview("a\u{A0}\u{2003}b\u{FEFF}c"), "a b c");
-        // Rust's white space, not JavaScript's: kept.
-        assert_eq!(note_preview("a\u{85}b"), "a\u{85}b");
-        assert_eq!(note_preview(" edge "), " edge ");
     }
 
     fn note(book_id: i64, book: &str, chapter: i64, verses: (i64, i64), body: &str) -> Searchable {

@@ -4,7 +4,8 @@
 //! one) and Psalm 119 (a note on every verse). In reading mode with the
 //! Narrow width, in the app's default 1280 px window:
 //!
-//! - 60: the margin is a landmark beside the column, never over it; each
+//! - 60: the margin is a landmark beside the column, never over it, at
+//!   least 2rem from the window's edge (its scroll bar left out); each
 //!   note's top is its verse's (within 2 px) unless it would overlap the
 //!   note above, when it's just below it; no two notes overlap; the range's
 //!   rule runs beside its verses; the long note is folded with "more"; in
@@ -40,6 +41,9 @@ pub(super) const MARGIN_SHOTS: [&str; 5] = [
 
 /// The window the margin is checked in: the app's default.
 const MARGIN_WINDOW: u32 = 1280;
+/// The room kept between the margin and the window's edge, in rem
+/// (`margin_text::EDGE_REM`).
+const EDGE_REM: f64 = 2.0;
 /// A window too narrow for it.
 const NARROW_WINDOW: u32 = 1000;
 
@@ -91,6 +95,12 @@ const DELETE_NOTES_JS: &str =
 const NOTES_DONE_JS: &str = "const s = window.__guiCheckNotes;
     return [!!s && s.done, s ? { done: s.done, count: s.ids.length, error: s.error, ids: s.done ? s.ids : null } : null];";
 
+/// Starts counting two animation frames, kept in
+/// `window.__guiCheckFrames`.
+const TWO_FRAMES_JS: &str = "const s = window.__guiCheckFrames = { done: false };
+    requestAnimationFrame(() => requestAnimationFrame(() => { s.done = true; }));
+    return null;";
+
 /// How long adding or deleting Psalm 119's 176 notes may take.
 const NOTES_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -127,6 +137,8 @@ const MARGIN_JS: &str = "const [added, code] = arguments;
     }) : [];
     const box = aside ? aside.getBoundingClientRect() : null;
     return { shown, flowing, innerWidth: window.innerWidth, screen: `${screen.width}x${screen.height}`,
+             clientWidth: document.documentElement.clientWidth,
+             rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
              role: aside && aside.getAttribute('role'), label: aside && aside.getAttribute('aria-label'),
              column: { left: column.left, right: column.right, width: column.width },
              aside: box && { left: box.left, width: box.width }, notes, rules,
@@ -201,6 +213,16 @@ impl Run<'_> {
     /// Waits until the margin has settled for what there's room for: the
     /// margin with every note placed, or the markers.
     async fn margin_settled(&self, notes: usize) -> Result<(Room, Value)> {
+        // The margin is placed at most once a frame after what changed it
+        // (Aa's layout, say): two frames on, a placing already asked for has
+        // run, so what's seen next is the new one, not the one before.
+        self.ui.js(TWO_FRAMES_JS, Vec::new()).await?;
+        self.ui
+            .wait(
+                "two frames to pass (the margin is placed at most once a frame)",
+                "const s = window.__guiCheckFrames; return [!!s && s.done, null];",
+            )
+            .await?;
         let seen = self
             .ui
             .wait_with(
@@ -324,6 +346,7 @@ impl Run<'_> {
             notes.len()
         );
         let mut worst = 0.0_f64;
+        let mut edge = f64::INFINITY;
         let mut stacked = 0;
         let mut previous_bottom = f64::NEG_INFINITY;
         for note in &notes {
@@ -336,10 +359,15 @@ impl Run<'_> {
                 top >= previous_bottom - 0.5,
                 "notes overlap: {note} under {previous_bottom}"
             );
+            // Room to breathe at the window's edge: at least 2rem
+            // (`margin_text::EDGE_REM`) between a note and the edge (its
+            // scroll bar left out).
             ensure!(
-                num(&note["right"]) <= num(&seen["innerWidth"]),
-                "a note runs off the window: {note}"
+                num(&note["right"])
+                    <= num(&seen["clientWidth"]) - EDGE_REM * num(&seen["rem"]) + 0.5,
+                "a note has less than {EDGE_REM}rem of room at the window's edge: {note} in {seen}"
             );
+            edge = edge.min(num(&seen["clientWidth"]) - num(&note["right"]));
             if anchor >= previous_bottom + 8.0 - 0.5 {
                 worst = worst.max((top - anchor).abs());
                 ensure!(
@@ -374,9 +402,9 @@ impl Run<'_> {
         );
         Ok(format!(
             "{} notes beside the column (margin {}px wide from x={aside_left:.0}, the column ending at \
-             {column_right:.0}): unstacked ones within {worst:.2}px of their verse{}, {stacked} stacked just \
-             below the note above, none overlapping; the range's rule beside its verses; the long note folded \
-             with more; placed in {:.2} ms",
+             {column_right:.0}, {edge:.0}px of room at the window's edge): unstacked ones within {worst:.2}px \
+             of their verse{}, {stacked} stacked just below the note above, none overlapping; the range's rule \
+             beside its verses; the long note folded with more; placed in {:.2} ms",
             notes.len(),
             num(&seen["aside"]["width"]),
             if seen["flowing"] == true {

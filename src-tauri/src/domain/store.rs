@@ -200,6 +200,11 @@ impl Store {
         db::notes::delete_note(self.db.write(), id).await
     }
 
+    /// Note `id`, if there is one.
+    pub async fn note(&self, id: i64) -> anyhow::Result<Option<Note>> {
+        db::notes::note(self.db.read(), id).await
+    }
+
     /// Every note overlapping a passage, in the order they're shown.
     pub async fn notes_overlapping(&self, passage: &Passage) -> anyhow::Result<Vec<Note>> {
         db::notes::notes_overlapping(self.db.read(), passage).await

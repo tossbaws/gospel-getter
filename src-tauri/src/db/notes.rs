@@ -423,6 +423,19 @@ pub async fn delete_note(writer: &WritePool, id: i64) -> anyhow::Result<Option<N
     .context("Failed to delete note")
 }
 
+/// Note `id`, if there is one.
+pub async fn note(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<Note>> {
+    sqlx::query_as::<_, Note>(concat!(
+        "SELECT ",
+        note_columns!(),
+        " FROM notes WHERE id = $1"
+    ))
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .context("Failed to read the note")
+}
+
 /// Every note that overlaps `passage`, in the order they're shown (see
 /// `overlapping`).
 pub async fn notes_overlapping(pool: &SqlitePool, passage: &Passage) -> anyhow::Result<Vec<Note>> {

@@ -41,7 +41,12 @@ card's bookmark, highlight and notes, the verses' marks and the Shift
 ghost, with its markup and rules in `src/card_text.rs`); and the notes in
 the margin in reading mode (`src/margin.rs`: placed beside their verses,
 the markers in a narrow window, with their rules and markup in
-`src/margin_text.rs`); and what was the
+`src/margin_text.rs`); a note's text as Markdown wherever it shows
+(`src/note_markdown.rs`: the subset, everything else escaped, the
+references the backend found in it as links), the links in it
+(`src/note_links.rs`: a reference goes to its passage, a web link opens
+through the backend) and Copy as Markdown (`src/note_copy.rs`); and what
+was the
 page's main script: the keyboard dispatcher (`src/keyboard.rs`, its rules
 in `src/keyboard_text.rs`), the click dispatcher (`src/clicks.rs`), boot
 (`src/boot.rs`, which takes over the `get_home` and `get_reading` the
@@ -91,6 +96,7 @@ keeps the two the same.
   `src/shortcut_table.rs`, `src/palette.rs`, `src/search_text.rs`,
   `src/picker_text.rs`, `src/aa_text.rs`, `src/surfaces_text.rs`,
   `src/reader_text.rs`, `src/card_text.rs`, `src/margin_text.rs`,
+  `src/note_markdown.rs`,
   `src/keyboard_text.rs`, `src/page_text.rs`: the
   pieces' words, numbers and rules (Export notes' filter, the import's
   sentences, the note's length rule and its drafts, the welcome's
@@ -104,7 +110,7 @@ keeps the two the same.
   (`fixtures/genesis-1.html` is their output, which a test compares),
   Compare's rows, the reference, and the passage history's bookkeeping; the
   card's markup and placement; where a margin note sits and how notes
-  stack, and the margin's markup; which key does what, j and k's steps and
+  stack, and the margin's markup; a note's Markdown (`note_markdown`); which key does what, j and k's steps and
   how far a verse is scrolled into view; the toast's words, Export data…'s
   summary and Compare's partner),
   free
