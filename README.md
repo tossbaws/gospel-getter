@@ -433,9 +433,11 @@ so it seeds again.
   as…, Copy chapter and the notes export's quotes. The page fetches it
   ahead and writes it with the webview's own clipboard API, with no plugin
   or extra permission.
-- **Links:** the page never opens a web page itself. Release notes and the
-  cross-references' credits open in your browser through the backend,
-  which opens only addresses on its own fixed list.
+- **Links:** the page never opens a web page itself. Release notes, the
+  cross-references' credits and the Support link open in your browser
+  through the backend, which opens only addresses on its own fixed list.
+  A link you put in one of your own notes opens in your browser only when
+  you click it, and only if it's a web address (http or https).
 - **Content Security Policy:** the webview loads only the app's own
   scripts, styles, fonts and images, and nothing in the page can reach
   the network; only the app's backend can.

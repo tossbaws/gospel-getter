@@ -353,10 +353,8 @@ def readme_scenes(theme):
              position=("John", 3, "kjv"), steps="window.scrollTo(0, 0);"),
         # The same in reading mode, with three notes in the margin beside
         # their verses (Aa's "Notes in the margin" is on by default): two
-        # on single verses, stacked, and one on 5-8 with its rule. 1320
-        # wide, not 1280: the margin needs 17.5rem beside the text (14rem,
-        # its gap and 2rem to the edge), and at 1280 there's 274px.
-        dict(name="margin-notes", size=(1320, 850), prefs={**look, "gospel-getter-reader-mode": "on"},
+        # on single verses, stacked, and one on 5-8 with its rule.
+        dict(name="margin-notes", size=(1280, 850), prefs={**look, "gospel-getter-reader-mode": "on"},
              position=("John", 3, "kjv"),
              notes=[
                  ("John", 3, 2, 2,
