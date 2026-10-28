@@ -8,10 +8,120 @@ use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 
 use crate::db::notes::{NoteLimit, NoteTotals, note_totals};
-use crate::db::{Bookmark, WritePool};
-use crate::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition, notes_to_add};
+use crate::db::{Bookmark, HighlightColor, WritePool};
 
-pub use crate::reader_data::StoredNote;
+/// A bookmark ready to insert, after validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewBookmark {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    /// Normalized to the database's own format; `None` means "now".
+    pub created_at: Option<String>,
+}
+
+impl NewBookmark {
+    pub fn coordinates(&self) -> (i64, i64, i64, i64) {
+        (self.book_id, self.chapter, self.verse_start, self.verse_end)
+    }
+}
+
+/// A highlight ready to save, after validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewHighlight {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse: i64,
+    pub color: HighlightColor,
+    /// Normalized to the database's own format; `None` means "now".
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl NewHighlight {
+    pub fn coordinates(&self) -> (i64, i64, i64) {
+        (self.book_id, self.chapter, self.verse)
+    }
+}
+
+/// The passage and text of a note. For importing, a note is this and when
+/// it was written (see `notes_to_add`).
+pub type NoteKey = (i64, i64, i64, i64, String);
+
+/// A note already here, for matching a file's notes against: its passage
+/// and text, and when it was written.
+pub type StoredNote = (NoteKey, String);
+
+/// Which of a file's `notes` an import adds, in the file's order, given
+/// the notes already here (`stored`; none when replacing them).
+///
+/// A note is its passage, its text and when it was written. Of each such
+/// note, the import adds the copies the file has beyond those already
+/// here: replacing restores every note in the file, two notes that differ
+/// only in their dates are both kept, and merging the same file again adds
+/// nothing. A note with no date (a file written by hand, say) is already
+/// here if any note here has its passage and text.
+pub fn notes_to_add<'a>(notes: &'a [NewNote], stored: &[StoredNote]) -> Vec<&'a NewNote> {
+    let mut copies_here: HashMap<(NoteKey, &str), usize> = HashMap::new();
+    let mut passages_and_texts: HashSet<&NoteKey> = HashSet::new();
+    for (key, created_at) in stored {
+        *copies_here
+            .entry((key.clone(), created_at.as_str()))
+            .or_default() += 1;
+        passages_and_texts.insert(key);
+    }
+    notes
+        .iter()
+        .filter(|n| match n.created_at.as_deref() {
+            Some(created_at) => match copies_here.get_mut(&(n.key(), created_at)) {
+                Some(copies) if *copies > 0 => {
+                    *copies -= 1;
+                    false
+                }
+                _ => true,
+            },
+            None => !passages_and_texts.contains(&n.key()),
+        })
+        .collect()
+}
+
+/// A note ready to save, after validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewNote {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    /// Normalized, as it's stored.
+    pub body: String,
+    /// Normalized to the database's own format; `None` means "now".
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl NewNote {
+    pub fn key(&self) -> NoteKey {
+        (
+            self.book_id,
+            self.chapter,
+            self.verse_start,
+            self.verse_end,
+            self.body.clone(),
+        )
+    }
+}
+
+/// A reading position ready to save, after validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewPosition {
+    pub translation_id: i64,
+    pub translation_code: String,
+    pub translation_name: String,
+    pub book_id: i64,
+    pub book_name: String,
+    pub chapter: i64,
+}
 
 /// Every bookmark, oldest first (the order they were made).
 pub async fn all_bookmarks(pool: &SqlitePool) -> anyhow::Result<Vec<Bookmark>> {
@@ -300,6 +410,12 @@ pub async fn apply_import(
         .execute(&mut *tx)
         .await
         .context("Failed to save the reading position")?;
+        // A backup has no place in its chapter (only this computer keeps
+        // one): the restored chapter opens at its top.
+        sqlx::query("DELETE FROM reading_place")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to forget the reading place")?;
     }
 
     tx.commit().await.context("Failed to finish the import")?;

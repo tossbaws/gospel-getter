@@ -63,6 +63,7 @@ use crate::dto::{
     PassageTextArgs, Reading, RemoveBookmarkArgs, SelectionNote, SetHighlightArgs, Verse,
 };
 use crate::ipc;
+use crate::margin;
 use crate::palette::PaletteState;
 
 /// Every verse the reader can select: the chapter being read, in each
@@ -181,16 +182,6 @@ struct NoteRow {
     raw: JsValue,
 }
 
-/// A note's verses (for the markers).
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NoteSpan {
-    book_id: i64,
-    chapter: i64,
-    verse_start: i64,
-    verse_end: i64,
-}
-
 #[derive(Default)]
 struct State {
     chapter: Option<Chapter>,
@@ -221,7 +212,9 @@ struct State {
     highlights: HashMap<(i64, i64, i64), String>,
     highlights_loaded: bool,
     highlights_token: u64,
-    chapter_notes: Vec<NoteSpan>,
+    /// The chapter's notes, each with the backend's own object for it (for
+    /// the margin, which may open one in the note editor).
+    chapter_notes: Vec<(SelectionNote, JsValue)>,
     chapter_notes_token: u64,
     selection_notes: Vec<NoteRow>,
     selection_notes_error: String,
@@ -1435,8 +1428,8 @@ fn apply_note_markers() {
         s.chapter.as_ref().map(|c| {
             s.chapter_notes
                 .iter()
-                .filter(|n| n.book_id == c.book_id && n.chapter == c.chapter)
-                .map(|n| (n.verse_start, n.verse_end))
+                .filter(|(n, _)| n.book_id == c.book_id && n.chapter == c.chapter)
+                .map(|(n, _)| (n.verse_start, n.verse_end))
                 .collect::<Vec<_>>()
         })
     });
@@ -1470,11 +1463,16 @@ fn apply_note_markers() {
 fn refresh_chapter_notes() -> Task {
     let (token, args) = with(|s| {
         s.chapter_notes_token += 1;
+        // Every note on the chapter, those past the last verse on screen
+        // too (the margin shows them beside it).
         let args = s.chapter.as_ref().map(|c| PassageArgs {
             book_id: c.book_id,
             chapter: c.chapter,
             verse_start: 1,
-            verse_end: c.all_numbers().into_iter().fold(1, i64::max),
+            verse_end: c
+                .all_numbers()
+                .into_iter()
+                .fold(PAST_EVERY_LAST_VERSE, i64::max),
         });
         (s.chapter_notes_token, args)
     });
@@ -1483,7 +1481,11 @@ fn refresh_chapter_notes() -> Task {
     };
     let sent = send("list_notes", &args);
     Box::pin(async move {
-        let got = answer(sent).await.and_then(read::<Vec<NoteSpan>>);
+        let got = answer(sent).await.and_then(|raw| {
+            let notes: Vec<SelectionNote> = read(raw.clone())?;
+            let raw = js_sys::Array::from(&raw);
+            Ok(notes.into_iter().zip(raw.iter()).collect::<Vec<_>>())
+        });
         if with(|s| s.chapter_notes_token) != token {
             return;
         }
@@ -1493,7 +1495,30 @@ fn refresh_chapter_notes() -> Task {
         });
         with(|s| s.chapter_notes = notes);
         apply_note_markers();
+        show_margin();
     })
+}
+
+/// A verse number past any chapter's last (Psalm 119 has 176): the end of
+/// the chapter's notes asked for.
+const PAST_EVERY_LAST_VERSE: i64 = 999;
+
+/// The chapter's notes, to the margin (`margin`), which shows them in
+/// reading mode.
+fn show_margin() {
+    let found = with(|s| {
+        let c = s.chapter.as_ref()?;
+        let notes = s
+            .chapter_notes
+            .iter()
+            .filter(|(n, _)| n.book_id == c.book_id && n.chapter == c.chapter)
+            .cloned()
+            .collect::<Vec<_>>();
+        Some((c.book_id, c.chapter, c.translation_code.clone(), notes))
+    });
+    if let Some((book_id, chapter, code, notes)) = found {
+        margin::notes(book_id, chapter, &code, notes);
+    }
 }
 
 fn refresh_selection_notes() -> Task {
@@ -2046,6 +2071,7 @@ pub fn shown(
     apply_bookmark_markers();
     apply_highlight_markers();
     apply_note_markers();
+    show_margin();
     spawn_local(refresh_chapter_notes());
 }
 
@@ -2059,6 +2085,17 @@ pub fn select_passage(code: &str, start: i64, end: i64) -> Option<(i64, i64)> {
     }
     place_card();
     with(|s| s.selection.as_ref().map(|sel| (sel.start, sel.end)))
+}
+
+/// A note opened from the margin (`margin`): its verses `start`–`end`
+/// selected, the card with their notes beside them, and the first verse
+/// scrolled into view if it isn't.
+pub fn select_for_note(code: &str, start: i64, end: i64) {
+    select_verses(code, start, end);
+    if let Some(el) = verse_element(code, start) {
+        scroll_into_view(&el, "nearest");
+    }
+    place_card();
 }
 
 /// What the palette's commands need of this: the chapter's text is ready

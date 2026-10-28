@@ -93,7 +93,7 @@ fn number(look: &Value, field: &str) -> f64 {
 
 impl Run<'_> {
     /// The look as [`LOOK_JS`] reads it.
-    async fn look(&self) -> Result<Value> {
+    pub(super) async fn look(&self) -> Result<Value> {
         self.ui.js(LOOK_JS, Vec::new()).await
     }
 
@@ -112,7 +112,7 @@ impl Run<'_> {
             .await
     }
 
-    async fn open_aa(&self) -> Result<()> {
+    pub(super) async fn open_aa(&self) -> Result<()> {
         let ui = &self.ui;
         ui.click("open Aa", "#aa-toggle").await?;
         ui.wait(
@@ -126,7 +126,7 @@ impl Run<'_> {
         Ok(())
     }
 
-    async fn close_with_escape(&self, what: &str, id: &str) -> Result<()> {
+    pub(super) async fn close_with_escape(&self, what: &str, id: &str) -> Result<()> {
         let ui = &self.ui;
         ui.press(&format!("press Escape (close {what})"), Key::Escape)
             .await?;
@@ -141,7 +141,7 @@ impl Run<'_> {
 
     /// Chooses `value` in Aa's group `group` (Aa open), and waits for the
     /// setting `name` to follow.
-    async fn aa_choose(&self, group: &str, name: &str, value: &str) -> Result<Value> {
+    pub(super) async fn aa_choose(&self, group: &str, name: &str, value: &str) -> Result<Value> {
         self.ui
             .click(&format!("Aa: choose {value}"), &choice(group, value))
             .await?;
@@ -442,7 +442,7 @@ impl Run<'_> {
 
     /// Reading mode on from Aa: the bar's other buttons go, the exit shows,
     /// with focus.
-    async fn reading_mode_on(&self) -> Result<Value> {
+    pub(super) async fn reading_mode_on(&self) -> Result<Value> {
         self.open_aa().await?;
         let ui = &self.ui;
         ui.click("Aa: Reading mode", "#reader-mode-btn").await?;
@@ -462,7 +462,7 @@ impl Run<'_> {
     }
 
     /// Waits for reading mode to be off: the exit gone, focus on Aa.
-    async fn reading_mode_off(&self, what: &str) -> Result<Value> {
+    pub(super) async fn reading_mode_off(&self, what: &str) -> Result<Value> {
         self.ui
             .wait(
                 what,
@@ -521,7 +521,8 @@ impl Run<'_> {
 
 /// The second session: the app closed and started again, on the same data.
 /// Check 58: a cold start goes straight to the chapter the first session
-/// left (`saved`). Check 26 (check 25 left its settings): the page and Aa
+/// left (`saved`). Check 59: at the verse it left at the top (`left_at`,
+/// see `place`). Check 26 (check 25 left its settings): the page and Aa
 /// show every setting as it was left; then they're put back as they were
 /// before check 25. Check 45: the lists check 40 left open are open.
 pub(super) async fn restart(
@@ -530,6 +531,7 @@ pub(super) async fn restart(
     started: std::time::Instant,
     looks: Result<Looks, String>,
     saved: Option<String>,
+    left_at: Result<Value, String>,
 ) {
     let kept_here = [Check::AaRestart, Check::DisclosuresKept];
     // Windows: Edge WebDriver starts each session's WebView2 with a user
@@ -565,7 +567,7 @@ pub(super) async fn restart(
     };
     log_line(
         started,
-        "start the app again, on the same data (checks 58, 26 and 45)",
+        "start the app again, on the same data (checks 58, 59, 26 and 45)",
     );
     let driver = match start_session(config, &config.app, started).await {
         Ok(driver) => driver,
@@ -595,6 +597,16 @@ pub(super) async fn restart(
         run.failure_screenshot(Check::ColdStart).await;
     }
     report.record(Check::ColdStart, cold).await;
+    let reopened = match &left_at {
+        Ok(left) => run.reopened_at_verse(left).await,
+        Err(why) => Err(anyhow::anyhow!(
+            "not run: the first session didn't leave the reader at a verse: {why}"
+        )),
+    };
+    if reopened.is_err() {
+        run.failure_screenshot(Check::ReopenAtVerse).await;
+    }
+    report.record(Check::ReopenAtVerse, reopened).await;
     if let (false, Some(looks)) = (windows, looks) {
         let result = run.restored(&looks).await;
         if result.is_err() {

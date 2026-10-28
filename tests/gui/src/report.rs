@@ -68,11 +68,16 @@ pub enum Check {
     KeyHistoryNote = 56,
     PalettePageCommands = 57,
     ColdStart = 58,
+    ReopenAtVerse = 59,
+    MarginNotes = 60,
+    MarginSwitch = 61,
+    MarginNarrow = 62,
+    MarginPsalm119 = 63,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 50] = [
+    pub const SHIPPED: [Check; 54] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -122,12 +127,21 @@ impl Check {
         Check::KeyCopy,
         Check::KeyHistoryNote,
         Check::PalettePageCommands,
+        Check::MarginNotes,
+        Check::MarginSwitch,
+        Check::MarginNarrow,
+        Check::MarginPsalm119,
         Check::PlainText,
     ];
 
     /// The checks on the app as shipped started again, on the first
     /// session's data (the second session).
-    pub const RELAUNCH: [Check; 3] = [Check::ColdStart, Check::AaRestart, Check::DisclosuresKept];
+    pub const RELAUNCH: [Check; 4] = [
+        Check::ColdStart,
+        Check::ReopenAtVerse,
+        Check::AaRestart,
+        Check::DisclosuresKept,
+    ];
 
     /// The updater's checks, on the GUI checks' test build against the
     /// run's own update server (the third session).
@@ -199,6 +213,11 @@ impl Check {
             Check::KeyHistoryNote => "key-history-and-note",
             Check::PalettePageCommands => "palette-page-commands",
             Check::ColdStart => "cold-start",
+            Check::ReopenAtVerse => "reopen-at-verse",
+            Check::MarginNotes => "margin-notes",
+            Check::MarginSwitch => "margin-switch",
+            Check::MarginNarrow => "margin-narrow",
+            Check::MarginPsalm119 => "margin-psalm-119",
         }
     }
 

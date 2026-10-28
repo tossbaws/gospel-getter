@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::Verse;
 use crate::domain::kjv_markup::{self, PartKind, VerseText};
-use crate::notes_export::{escape_block, escape_inline};
+use crate::markdown::{escape_block, escape_inline};
 
 /// What Copy as… offers, in the menu's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

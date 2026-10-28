@@ -17,7 +17,7 @@ use gospel_getter_lib::preferences::{self, Preference, Values};
 /// highlight and notes), and what was the page's main script (the keyboard
 /// and click dispatchers, boot, and the page's glue): checks of those read
 /// them where they now live.
-const PIECES: [(&str, &str); 27] = [
+const PIECES: [(&str, &str); 29] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -69,6 +69,11 @@ const PIECES: [(&str, &str); 27] = [
         "card_text.rs",
         include_str!("../../ui-leptos/src/card_text.rs"),
     ),
+    ("margin.rs", include_str!("../../ui-leptos/src/margin.rs")),
+    (
+        "margin_text.rs",
+        include_str!("../../ui-leptos/src/margin_text.rs"),
+    ),
     (
         "keyboard.rs",
         include_str!("../../ui-leptos/src/keyboard.rs"),
@@ -115,7 +120,11 @@ fn matching_brace_end(src: &str, open_brace_at: usize) -> usize {
     panic!("unclosed block starting at byte {open_brace_at}");
 }
 
-fn block_after<'a>(src: &'a str, needle: &str) -> &'a str {
+/// The block (from its `{`, without the `}` that closes it) after the first
+/// `needle` in `src`, with every run of whitespace made one space, so a
+/// check reads the same however the stylesheet or source is indented and
+/// wrapped.
+fn block_after(src: &str, needle: &str) -> String {
     let start = src
         .find(needle)
         .unwrap_or_else(|| panic!("expected to find `{needle}` in ui/index.html"));
@@ -124,7 +133,13 @@ fn block_after<'a>(src: &'a str, needle: &str) -> &'a str {
         .map(|i| start + i)
         .unwrap_or_else(|| panic!("expected `{{` after `{needle}`"));
     let close = matching_brace_end(src, open);
-    &src[open..close]
+    one_space(&src[open..close])
+}
+
+/// `text` with each run of whitespace (spaces, tabs, line breaks) one
+/// space, and none at either end.
+fn one_space(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Regression guard for GH-1: on narrow screens the reader must only see
@@ -143,7 +158,7 @@ fn mobile_breakpoint_hides_chapter_side_neighbors() {
             .find(side)
             .unwrap_or_else(|| panic!("{query} should hide {side}"));
         assert!(
-            block[rule..].starts_with(&format!("{side} {{\n                display: none;")),
+            block[rule..].starts_with(&format!("{side} {{ display: none;")),
             "{query} should hide {side} instead of re-stacking it"
         );
     }
@@ -191,6 +206,76 @@ fn print_stylesheet_hides_chrome_but_not_reading_content() {
              visible when printed"
         );
     }
+}
+
+/// Margin notes in reading mode (ui-leptos/src/margin.rs): beside the
+/// column, never in its flow (so they can't move the text), on screen only
+/// (printing leaves them out, and the markers that stand in for them), in
+/// the UI's sans and smaller than the verses, in tested theme colors. Aa's
+/// "Notes in the margin" is a pressed toggle like Reading mode's, shown with
+/// it, and the setting is this computer's, never in a backup. The margin
+/// never scrolls the page: markers, which reflow the text, go in and out
+/// through the reading place logic.
+#[test]
+fn margin_notes_sit_beside_the_text_on_screen_only() {
+    let rules = rules();
+    let screen = |selector: &str| {
+        rules
+            .iter()
+            .find(|r| r.at_rule.as_deref() == Some("@media screen") && r.selector == selector)
+            .unwrap_or_else(|| panic!("expected an `@media screen` rule for `{selector}`"))
+            .body
+            .clone()
+    };
+    let margin = screen(".margin-notes");
+    for declaration in [
+        "position: absolute;",
+        "left: calc(100% + 1.5rem);",
+        "width: var(--margin-width, 14rem);",
+        "font-family: var(--font-ui);",
+        "font-size: 0.8rem;",
+        "color: var(--text);",
+    ] {
+        assert!(margin.contains(declaration), ".margin-notes: {declaration}");
+    }
+    assert!(screen(".margin-note").contains("position: absolute;"));
+    assert!(screen(".margin-note-ref").contains("color: var(--accent-2);"));
+    assert!(screen(".margin-note-where").contains("color: var(--text-dim);"));
+    assert!(screen(".margin-rule").contains("background: var(--accent-dim);"));
+    assert!(screen(".margin-marker").contains("color: var(--verse-num-color);"));
+    let body = screen(".margin-note-body");
+    assert!(
+        body.contains("max-height: calc(var(--margin-fold-lines, 6) * 1.45em);")
+            && body.contains("white-space: pre-wrap;")
+    );
+    assert!(
+        piece("margin.rs")
+            .contains(r#"set_property("--margin-fold-lines", &text::FOLD_LINES.to_string())"#)
+    );
+    let print = block_after(HTML, "@media print");
+    assert!(print.contains(".margin-notes, .margin-marker { display: none !important; }"));
+
+    assert!(HTML.contains(
+        r#"<button type="button" id="margin-notes-btn" class="reader-mode-btn margin-notes-btn" aria-pressed="true""#
+    ));
+    assert!(
+        screen_rule(
+            &rules,
+            r#":root:not([data-reader-mode="on"]) .margin-notes-btn"#
+        )
+        .body
+        .contains("display: none;")
+    );
+    assert_eq!(preferences::MARGIN_NOTES.fallback, "on");
+    assert_eq!(
+        preferences::MARGIN_NOTES.file_name,
+        None,
+        "never in a backup"
+    );
+
+    let margin_rs = piece("margin.rs");
+    assert!(margin_rs.contains("surfaces::keep_reading_place("));
+    assert!(!margin_rs.contains("scroll_by") && !margin_rs.contains("scroll_to"));
 }
 
 /// Regression guard for GH-5: the "Random chapter" feature picks a chapter
@@ -334,11 +419,52 @@ fn stylesheet() -> String {
 }
 
 /// One style rule: its selector list, its declarations, and the at-rule
-/// (e.g. `@media print`) it's nested in, if any.
+/// (e.g. `@media print`) it's nested in, if any. `body` is the declarations
+/// as parsed (`declarations`), each written `name: value;` and separated by
+/// one space, so a check like `body.contains("color: var(--text)")` compares
+/// declarations, not the stylesheet's spacing or line breaks.
 struct Rule {
     at_rule: Option<String>,
     selector: String,
     body: String,
+}
+
+/// A rule's `name: value` declarations, in order: split at the `;`s outside
+/// quotes and brackets, each name and value trimmed and their whitespace
+/// runs made one space (see `one_space`).
+fn declarations(body: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let (mut depth, mut quote, mut start) = (0usize, None, 0);
+    let mut push = |decl: &str| {
+        if let Some((name, value)) = decl.split_once(':') {
+            out.push((one_space(name), one_space(value)));
+        }
+    };
+    for (i, c) in body.char_indices() {
+        match (quote, c) {
+            (Some(q), _) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '\'' | '"') => quote = Some(c),
+            (None, '(' | '[') => depth += 1,
+            (None, ')' | ']') => depth = depth.saturating_sub(1),
+            (None, ';') if depth == 0 => {
+                push(&body[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    push(&body[start..]);
+    out
+}
+
+/// `declarations` written back one way: `name: value;`, one space apart.
+fn written(declarations: &[(String, String)]) -> String {
+    declarations
+        .iter()
+        .map(|(name, value)| format!("{name}: {value};"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn rules_in(css: &str, at_rule: Option<&str>, out: &mut Vec<Rule>) {
@@ -349,16 +475,56 @@ fn rules_in(css: &str, at_rule: Option<&str>, out: &mut Vec<Rule>) {
         let selector = css[cursor..open].trim().to_owned();
         let body = &css[open + 1..close];
         if selector.starts_with('@') {
-            rules_in(body, Some(&selector), out);
+            rules_in(body, Some(&one_space(&selector)), out);
         } else {
             out.push(Rule {
                 at_rule: at_rule.map(str::to_owned),
-                selector,
-                body: body.to_owned(),
+                selector: one_space(&selector),
+                body: written(&declarations(body)),
             });
         }
         cursor = close + 1;
     }
+}
+
+/// The checks read declarations, not the stylesheet's spacing: the same
+/// rules, indented and wrapped or run together on one line, parse alike, and
+/// a `;` inside quotes or brackets doesn't end a declaration.
+#[test]
+fn css_checks_ignore_how_the_stylesheet_is_spaced() {
+    let wrapped = ".a,\n        .b {\n    color: var(--text);\n    content: ';';\n    \
+                   background:\n        url(\"x;y\")\n}\n@media   print {\n    .a {\n        \
+                   display:  none !important;\n    }\n}\n";
+    let one_line = ".a, .b{color:var(--text);content:';';background:url(\"x;y\");}\
+                    @media print{.a{display:none !important}}";
+    let parsed = |css: &str| {
+        let mut out = Vec::new();
+        rules_in(css, None, &mut out);
+        out.into_iter()
+            .map(|r| (r.at_rule, r.selector, r.body))
+            .collect::<Vec<_>>()
+    };
+    let expected = vec![
+        (
+            None,
+            ".a, .b".to_owned(),
+            "color: var(--text); content: ';'; background: url(\"x;y\");".to_owned(),
+        ),
+        (
+            Some("@media print".to_owned()),
+            ".a".to_owned(),
+            "display: none !important;".to_owned(),
+        ),
+    ];
+    assert_eq!(parsed(wrapped), expected);
+    assert_eq!(parsed(one_line), expected);
+    assert_eq!(
+        block_after(wrapped, "@media"),
+        block_after(
+            "@media print {\n.a { display: none !important; }\n}",
+            "@media"
+        ),
+    );
 }
 
 fn rules() -> Vec<Rule> {
@@ -367,7 +533,10 @@ fn rules() -> Vec<Rule> {
     out
 }
 
+/// The rule outside any at-rule whose selector list is `selector` (its
+/// whitespace runs one space, as `Rule::selector`'s are).
 fn screen_rule<'a>(rules: &'a [Rule], selector: &str) -> &'a Rule {
+    let selector = one_space(selector);
     rules
         .iter()
         .find(|r| r.at_rule.is_none() && r.selector == selector)
@@ -421,10 +590,9 @@ fn selectors(rule: &Rule) -> impl Iterator<Item = &str> {
 
 /// Every `--name: value` custom property a rule declares.
 fn custom_properties(body: &str) -> Vec<(String, String)> {
-    body.split(';')
-        .filter_map(|decl| decl.trim().split_once(':'))
-        .filter(|(name, _)| name.trim().starts_with("--"))
-        .map(|(name, value)| (name.trim().to_owned(), value.trim().to_owned()))
+    declarations(body)
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("--"))
         .collect()
 }
 
@@ -2788,12 +2956,12 @@ fn the_chapter_ends_with_buttons_to_the_chapters_around_it() {
         end.contains(r#"<nav class=\"chapter-end\" aria-label=\"Previous and next chapter\">"#)
     );
     assert!(
-        end.contains("let Some(side) = side else {\n            return String::new();"),
+        end.contains("let Some(side) = side else { return String::new();"),
         "one button per neighbour there is"
     );
-    assert!(end.contains(
-        "step(dto.prev.as_ref(), Which::Prev),\n        step(dto.next.as_ref(), Which::Next),"
-    ));
+    assert!(
+        end.contains("step(dto.prev.as_ref(), Which::Prev), step(dto.next.as_ref(), Which::Next),")
+    );
     assert!(end.contains(r#"class="chapter-step chapter-step-{}""#));
     assert!(end.contains(r#"data-book="{}" data-chapter="{}" aria-label="{label}""#));
     assert!(end.contains(r#"<p class=\"nav-hint\">"#));
@@ -3045,8 +3213,8 @@ fn the_selection_card_floats_over_the_text() {
     let chips = block_after(piece("card_text.rs"), "pub fn xrefs_html(");
     assert!(chips.contains(r#"<ul class=\"xref-chips\""#));
     assert!(chips.contains(r#"<li><button type="button" class="xref-citation""#));
-    let place = block_after(piece("card_text.rs"), "pub fn placement(");
-    let place_card = block_after(card_rs, "fn place_card()");
+    let place = &block_after(piece("card_text.rs"), "pub fn placement(");
+    let place_card = &block_after(card_rs, "fn place_card()");
     for (body, rule) in [
         (place, "below < wanted"),
         (place, "above >= wanted"),
@@ -3390,7 +3558,7 @@ fn the_bible_s_edges_have_a_quiet_card_in_the_neighbor_s_place() {
     // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
     let reader = piece("reader_text.rs");
     let pane = block_after(reader, "pub fn reading_pane(");
-    assert!(pane.contains("Some(s) => side_chapter(s),\n            None => edge_card(edge),"));
+    assert!(pane.contains("Some(s) => side_chapter(s), None => edge_card(edge),"));
     assert!(pane.contains("side(dto.prev.as_ref(), dto.prev_edge.as_ref(), Which::Prev)"));
     assert!(pane.contains("side(dto.next.as_ref(), dto.next_edge.as_ref(), Which::Next)"));
     let card = block_after(reader, "fn edge_card(");
@@ -3682,7 +3850,7 @@ fn the_selection_card_anchors_to_line_boxes_in_flowing() {
     assert!(place.contains("let last_rect = line_rect(&card_verse, false);"));
     assert!(
         block_after(piece("card_text.rs"), "pub fn card_box(")
-            .contains("let left = if flowing {\n        0.0")
+            .contains("let left = if flowing { 0.0")
     );
     let line = block_after(piece("card.rs"), "fn line_rect(");
     assert!(line.contains("verse.get_client_rects()"));
@@ -3954,7 +4122,7 @@ fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
     );
     let toggle = block_after(piece("card.rs"), "fn toggle_preview(");
     assert!(toggle.contains(
-        "\"get_passage\",\n        &PassageTextArgs {\n            translation_code: &code,\n            book_id,\n            chapter,\n            start,\n            end,"
+        "\"get_passage\", &PassageTextArgs { translation_code: &code, book_id, chapter, start, end,"
     ));
     assert!(
         !toggle.contains("reader::"),
@@ -4267,8 +4435,8 @@ fn every_handled_key_is_in_the_shortcuts_table() {
         block_after(piece("aa_text.rs"), "pub fn size_key("),
         block_after(piece("surfaces.rs"), "fn on_escape("),
     ]
-    .into_iter()
-    .flat_map(compared_keys)
+    .iter()
+    .flat_map(|handler| compared_keys(handler))
     .collect();
     for key in [
         "?",

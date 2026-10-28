@@ -16,6 +16,8 @@
 //! screen, how it gets there, and the passage history; and the selection
 //! card (`card`, with its markup and rules in `card_text`): the verse
 //! selection, copying, and the card's bookmark, highlight and notes; and
+//! the notes in the margin in reading mode (`margin`, with its rules and
+//! markup in `margin_text`); and
 //! what the page's main script was: the keyboard (`keyboard`, with its
 //! rules in `keyboard_text`), the clicks (`clicks`), boot (`boot`) and the
 //! page's glue (`page`, with its words and rules in `page_text`): the
@@ -50,6 +52,8 @@ mod keyboard;
 mod keyboard_text;
 mod library;
 mod library_text;
+mod margin;
+mod margin_text;
 mod note_editor;
 mod note_text;
 mod page;
@@ -105,6 +109,7 @@ pub fn start() {
     // the reader, before the rest; then boot: its chapter is on its way (or
     // in, and drawn now, within this call).
     card::mount();
+    margin::mount();
     reader::mount();
     boot::start();
     // The table of shortcuts, where the page had it.

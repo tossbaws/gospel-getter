@@ -300,8 +300,21 @@ pub const UPDATE_CHECK: Preference = Preference {
     file_name: None,
 };
 
+/// The reader's notes in the margin, beside the text, in reading mode
+/// (Aa's "Notes in the margin", with reading mode's controls). A display
+/// setting of this computer's, like the sidebar: no backup carries it.
+pub const MARGIN_NOTES: Preference = Preference {
+    name: "marginNotes",
+    key: "gospel-getter-margin-notes",
+    fallback: "on",
+    values: Values::Words(&["on", "off"]),
+    renamed: &[],
+    select: None,
+    file_name: None,
+};
+
 /// Every saved setting, in the order they're applied (and exported).
-pub const PREFERENCES: [Preference; 10] = [
+pub const PREFERENCES: [Preference; 11] = [
     THEME,
     TEXT_SIZE,
     LINE_SPACING,
@@ -312,6 +325,7 @@ pub const PREFERENCES: [Preference; 10] = [
     COMPARE_WITH,
     SIDEBAR,
     UPDATE_CHECK,
+    MARGIN_NOTES,
 ];
 
 /// The setting the page calls `name`.

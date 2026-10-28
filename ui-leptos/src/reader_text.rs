@@ -738,6 +738,18 @@ impl Place {
     }
 }
 
+/// The chapter's verse `verse` in `code`'s column (a bundled translation's
+/// code: letters only), as a selector.
+pub fn verse_selector(code: &str, verse: i64) -> String {
+    format!(r#".chapter-main .verse[data-verse="{verse}"][data-translation="{code}"]"#)
+}
+
+/// A verse's offset below the bar as it's saved: to a hundredth of a pixel
+/// (a layout's own fractions of one don't make a new place).
+pub fn rounded_offset(offset: f64) -> f64 {
+    (offset * 100.0).round() / 100.0
+}
+
 /// The most places the history keeps; the oldest go.
 pub const HISTORY_LIMIT: usize = 50;
 
@@ -1441,5 +1453,16 @@ mod tests {
         h.end_go(token, false);
         h.forget_failed();
         assert!(h.begin_retry(19, 23).is_none());
+    }
+
+    #[test]
+    fn where_the_reader_was_is_a_verse_of_the_column_read() {
+        assert_eq!(
+            verse_selector("kjv", 16),
+            r#".chapter-main .verse[data-verse="16"][data-translation="kjv"]"#
+        );
+        assert_eq!(rounded_offset(-12.504), -12.5);
+        assert_eq!(rounded_offset(0.004), 0.0);
+        assert_eq!(rounded_offset(33.336), 33.34);
     }
 }

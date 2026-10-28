@@ -19,10 +19,14 @@
 //! card: verses selected with the mouse and the card placed by them, Copy
 //! and Copy as… read back from the clipboard, a bookmark, highlights and a
 //! note from the card, a cross-reference read in it, and the Shift ghost
-//! (46 to 52, `card`); and, last, the plain-text fallback (44, `reader`);
+//! (46 to 52, `card`); margin notes in reading mode: beside their verses,
+//! the switch leaving the text where it was, the markers in a narrow
+//! window, Psalm 119 with a note on every verse (60 to 63, `margin`); and,
+//! last, the plain-text fallback (44, `reader`);
 //! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
 //! Then the app started again on the same data, keeping Aa's settings (26)
-//! and the chapter's lists as left (45), a second session; and, in a third
+//! and the chapter's lists as left (45), at the verse the first session
+//! left at the top (59, `place`), a second session; and, in a third
 //! session on the GUI checks' test build, the updater (9 to 13, `updates`).
 
 mod card;
@@ -30,7 +34,9 @@ mod dialogs;
 mod display;
 mod keys;
 mod library;
+mod margin;
 mod picker;
+mod place;
 mod reader;
 mod search;
 mod surfaces;
@@ -182,8 +188,8 @@ pub async fn run(config: &Config, report: &mut Report) {
         log_line(started, &format!("no updater checks: {e:#}"));
     }
 
-    let (looks, saved) = shipped(config, report, started).await;
-    display::restart(config, report, started, looks, saved).await;
+    let (looks, saved, left_at) = shipped(config, report, started).await;
+    display::restart(config, report, started, looks, saved, left_at).await;
 
     match server {
         Ok(server) => updates::run(config, report, started, &server).await,
@@ -213,14 +219,22 @@ async fn start_update_server(config: &Config) -> Result<UpdateServer> {
     Ok(server)
 }
 
+/// Where the first session leaves the reader for check 59: what the app
+/// saved (`save_reading_position`'s arguments), or why there's nothing.
+type LeftAt = std::result::Result<Value, String>;
+
 /// Checks 1 to 8, 14 to 25, 27 to 44 and 46 to 57, on the app as shipped;
-/// what check 25 left, for check 26 (or why there's nothing), and the
-/// chapter the reader is left on, for check 58.
+/// what check 25 left, for check 26 (or why there's nothing), the chapter
+/// the reader is left on, for check 58, and the verse, for check 59.
 async fn shipped(
     config: &Config,
     report: &mut Report,
     started: Instant,
-) -> (std::result::Result<display::Looks, String>, Option<String>) {
+) -> (
+    std::result::Result<display::Looks, String>,
+    Option<String>,
+    LeftAt,
+) {
     // Check 1 starts with the session; without one nothing else can run.
     let driver = match start_session(config, &config.app, started).await {
         Ok(driver) => driver,
@@ -230,11 +244,13 @@ async fn shipped(
             report
                 .fail_the_rest(&Check::SHIPPED, "not run: no WebDriver session (check 1)")
                 .await;
-            return (Err("no WebDriver session (check 1)".to_owned()), None);
+            let why = "no WebDriver session (check 1)".to_owned();
+            return (Err(why.clone()), None, Err(why));
         }
     };
     let mut looks = Err("the page did not boot (check 1)".to_owned());
     let mut saved = None;
+    let mut left_at = Err("the page did not boot (check 1)".to_owned());
     let mut run = Run {
         config,
         ui: Ui::new(driver, started, config.budget, config.step_timeout),
@@ -363,6 +379,31 @@ async fn shipped(
             }
             report.record(check, result).await;
         }
+        // Margin notes (60 to 63), on notes of their own, deleted after.
+        let mut margin_left = margin::MarginLeft::default();
+        for check in [
+            Check::MarginNotes,
+            Check::MarginSwitch,
+            Check::MarginNarrow,
+            Check::MarginPsalm119,
+        ] {
+            let result = match check {
+                Check::MarginNotes => run.margin_notes(&mut margin_left).await,
+                Check::MarginSwitch => run.margin_switch().await,
+                Check::MarginNarrow => run.margin_narrow().await,
+                _ => run.margin_psalm_119(&mut margin_left).await,
+            };
+            if result.is_err() {
+                run.failure_screenshot(check).await;
+            }
+            report.record(check, result).await;
+        }
+        if let Err(e) = run.margin_clean_up(&margin_left).await {
+            log_line(
+                started,
+                &format!("putting things back after the margin checks failed: {e:#}"),
+            );
+        }
 
         if let Err(e) = run.vellum_screenshots().await {
             run.failure_screenshot(Check::Screenshots).await;
@@ -387,6 +428,8 @@ async fn shipped(
         };
         looks = left;
         report.record(Check::AaControls, controls).await;
+        // The verse the reader is left at, the second session's check 59.
+        left_at = run.leave_at_verse().await.map_err(|e| format!("{e:#}"));
         // The chapter the reader is left on: the second session starts
         // there (check 58).
         saved = run
@@ -420,6 +463,13 @@ async fn shipped(
             .chain(reader::READER_SHOTS)
             .chain(card::CARD_SHOTS)
             .chain(keys::KEYS_SHOTS)
+            // The margin's own, only where there's room for it (not the
+            // Windows runner's screen; see `margin`); its markers' anywhere.
+            .chain(
+                margin::MARGIN_SHOTS
+                    .into_iter()
+                    .filter(|name| config.xvfb.is_some() || !name.starts_with("60-")),
+            )
             // The popover on a narrow window, only where the window can be
             // wide enough first (check 36).
             .chain(surfaces::SURFACES_SHOTS.into_iter().filter(|name| {
@@ -444,7 +494,7 @@ async fn shipped(
         Ok(Err(e)) => log_line(started, &format!("ending the session failed: {e}")),
         Err(_) => log_line(started, "ending the session timed out after 10s"),
     }
-    (looks, saved)
+    (looks, saved, left_at)
 }
 
 /// Starts `app` through tauri-driver: a WebDriver session whose browser
