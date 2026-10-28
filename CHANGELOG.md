@@ -4,7 +4,12 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.21.0] - 2026-10-28
+
+Search your notes, drafts kept while you write, Markdown and linked
+references in notes, Copy as Markdown, and exporting one file per book.
+Updating keeps your bookmarks, highlights, notes, reading position and
+settings.
 
 ### Added
 - Search your notes: a box at the top of the Library's Notes tab
