@@ -17,7 +17,9 @@
 //! card (`card`, with its markup and rules in `card_text`): the verse
 //! selection, copying, and the card's bookmark, highlight and notes; and
 //! the notes in the margin in reading mode (`margin`, with its rules and
-//! markup in `margin_text`); and
+//! markup in `margin_text`); a note's text as Markdown wherever it shows
+//! (`note_markdown`), its links (`note_links`) and Copy as Markdown
+//! (`note_copy`); and
 //! what the page's main script was: the keyboard (`keyboard`, with its
 //! rules in `keyboard_text`), the clicks (`clicks`), boot (`boot`) and the
 //! page's glue (`page`, with its words and rules in `page_text`): the
@@ -37,6 +39,10 @@ mod aa;
 mod aa_text;
 mod about;
 mod boot;
+// The books' abbreviations, shared with the backend, which compiles the same
+// file.
+#[path = "../../shared/book_aliases.rs"]
+pub mod book_aliases;
 mod bridge;
 mod card;
 mod card_text;
@@ -54,7 +60,10 @@ mod library;
 mod library_text;
 mod margin;
 mod margin_text;
+mod note_copy;
 mod note_editor;
+mod note_links;
+mod note_markdown;
 mod note_text;
 mod page;
 mod page_text;
@@ -99,6 +108,8 @@ pub fn start() {
     // any piece's listener for the same event on the same element, as the
     // main script's did.
     page::mount();
+    // Before anything under the document sees a click on a note's link.
+    note_links::mount();
     // The popovers and panels, and the picker's shape: they were the page's
     // head script's, which ran before the other pieces' code.
     surfaces::mount();

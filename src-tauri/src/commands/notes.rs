@@ -1,11 +1,13 @@
-//! Notes on passages: listed, written, changed, deleted and restored (to
-//! undo a delete).
+//! Notes on passages: listed (each with the references typed in it, for
+//! the page to link), written, changed, deleted and restored (to undo a
+//! delete), and copied as Markdown.
 
 use anyhow::Context;
 use serde::Serialize;
 
 use super::{AppState, book_name, failed, passage_error_message};
 use crate::db::{Note, NoteError, Passage};
+use crate::domain::query::references_in;
 use crate::passage_reference::passage_reference;
 use crate::reader_data;
 
@@ -25,6 +27,9 @@ pub struct NoteDto {
     pub reference: String,
     /// Plain text, as the reader wrote it (trimmed).
     pub body: String,
+    /// The references typed in it ("see Rom 5:8"), in order, which the
+    /// page shows as links to their passages.
+    pub links: Vec<NoteLinkDto>,
     pub created_at: String,
     /// The day it was written, as the app shows it ("Oct 9, 2026", in the
     /// reader's time zone; see `notes_export::stored_date`).
@@ -32,9 +37,50 @@ pub struct NoteDto {
     pub updated_at: String,
 }
 
+/// A reference typed in a note: where it is in the note's `body` (byte
+/// offsets, `start..end`) and the passage it names (see
+/// `domain::query::references_in`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteLinkDto {
+    pub start: usize,
+    pub end: usize,
+    pub book_id: i64,
+    pub chapter: i64,
+    /// Its verses, or none for the whole chapter.
+    pub verse_start: Option<i64>,
+    pub verse_end: Option<i64>,
+    /// "Romans 5:8": the passage, as the app names it.
+    pub reference: String,
+}
+
+/// The references typed in `body`, as the page links them.
+fn note_links(state: &AppState, body: &str) -> Vec<NoteLinkDto> {
+    references_in(body, &state.books)
+        .into_iter()
+        .map(|found| {
+            let p = found.passage;
+            NoteLinkDto {
+                start: found.start,
+                end: found.end,
+                book_id: p.book_id,
+                chapter: p.chapter,
+                verse_start: p.verses.map(|(first, _)| first),
+                verse_end: p.verses.map(|(_, last)| last),
+                reference: passage_reference(
+                    book_name(state, p.book_id).unwrap_or("?"),
+                    p.chapter,
+                    p.verses,
+                ),
+            }
+        })
+        .collect()
+}
+
 fn note_dto(state: &AppState, note: Note) -> NoteDto {
     let book_name = book_name(state, note.book_id).unwrap_or("?").to_string();
     NoteDto {
+        links: note_links(state, &note.body),
         reference: passage_reference(
             &book_name,
             note.chapter,
@@ -153,6 +199,39 @@ pub async fn note_restore(
         .map_err(|e| note_error_message(state, e))
 }
 
+/// Note `id` as Markdown, for Copy as Markdown, its verses quoted in the
+/// translation `translation_code` (see `notes_export::note_markdown`).
+pub async fn note_markdown_text(
+    state: &AppState,
+    id: i64,
+    translation_code: &str,
+) -> Result<String, String> {
+    let translation = state
+        .translations
+        .iter()
+        .find(|t| t.code == translation_code)
+        .ok_or_else(|| format!("There's no translation \u{201c}{translation_code}\u{201d}."))?;
+    let note = state
+        .store
+        .note(id)
+        .await
+        .with_context(|| format!("Failed to read note {id}"))
+        .map_err(failed("The note couldn't be read."))?
+        .ok_or_else(|| "That note no longer exists; it may have been deleted.".to_string())?;
+    let verses = state
+        .store
+        .chapter_verses(translation.id, note.book_id, note.chapter)
+        .await
+        .with_context(|| format!("Failed to read the verses of note {id}"))
+        .map_err(failed("The note's verses couldn't be read."))?;
+    Ok(crate::notes_export::note_markdown(
+        &note,
+        book_name(state, note.book_id).unwrap_or("?"),
+        &verses,
+        &translation.code,
+    ))
+}
+
 fn passage(book_id: i64, chapter: i64, verse_start: i64, verse_end: i64) -> Passage {
     Passage {
         book_id,
@@ -179,6 +258,17 @@ pub async fn list_all_notes(state: tauri::State<'_, AppState>) -> Result<Vec<Not
         .await
         .context("Failed to list notes")
         .map_err(failed("Notes couldn't be loaded."))
+}
+
+/// Note `id` as Markdown (Copy as Markdown), quoting its verses in
+/// `translation_code`.
+#[tauri::command]
+pub async fn get_note_markdown(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+    translation_code: String,
+) -> Result<String, String> {
+    note_markdown_text(&state, id, &translation_code).await
 }
 
 #[tauri::command]
@@ -356,6 +446,100 @@ mod tests {
                 .await
                 .unwrap_err(),
             "That note's date isn't valid, so it couldn't be restored."
+        );
+    }
+
+    #[tokio::test]
+    async fn every_note_comes_with_the_references_typed_in_it() {
+        let (_db, state) = app_state("cmd_note_links").await;
+        let at = Passage {
+            book_id: 43,
+            chapter: 3,
+            verse_start: 16,
+            verse_end: 16,
+        };
+        let body = "Éphèse first, then see Rom 5:8 and 1 Cor 13; not Job well done.";
+        let note = note_add(&state, at, body).await.unwrap();
+        let typed: Vec<&str> = note
+            .links
+            .iter()
+            .map(|l| &note.body[l.start..l.end])
+            .collect();
+        assert_eq!(typed, ["Rom 5:8", "1 Cor 13"]);
+        let link = |start, end, book_id, chapter, verses: Option<(i64, i64)>, reference: &str| {
+            NoteLinkDto {
+                start,
+                end,
+                book_id,
+                chapter,
+                verse_start: verses.map(|v| v.0),
+                verse_end: verses.map(|v| v.1),
+                reference: reference.to_string(),
+            }
+        };
+        assert_eq!(
+            note.links,
+            [
+                link(25, 32, 45, 5, Some((8, 8)), "Romans 5:8"),
+                link(37, 45, 46, 13, None, "1 Corinthians 13"),
+            ]
+        );
+        // The same in every list, and as JSON the page reads.
+        let all = notes_list(&state).await.unwrap();
+        assert_eq!(all[0].links, note.links);
+        let json = serde_json::to_value(&all[0]).unwrap();
+        assert_eq!(
+            json["links"][0],
+            serde_json::json!({ "start": 25, "end": 32, "bookId": 45, "chapter": 5,
+                                "verseStart": 8, "verseEnd": 8, "reference": "Romans 5:8" })
+        );
+        assert_eq!(json["links"][1]["verseStart"], serde_json::Value::Null);
+        assert!(notes_overlapping(&state, at).await.unwrap()[0].links == note.links);
+    }
+
+    #[tokio::test]
+    async fn copy_as_markdown_quotes_the_note_s_verses_in_the_translation_read() {
+        let (_db, state) = app_state("cmd_note_markdown").await;
+        let at = Passage {
+            book_id: 43,
+            chapter: 3,
+            verse_start: 16,
+            verse_end: 17,
+        };
+        let note = note_add(&state, at, "**Loved**, see Rom 5:8.\n- the world")
+            .await
+            .unwrap();
+        let verse = |code: &str, n: usize| {
+            crate::passage_copy::verse_markdown(
+                code,
+                &crate::db::test_support::bundled(code)[42].chapters[2][n - 1],
+            )
+        };
+        for code in ["kjv", "web"] {
+            let upper = code.to_uppercase();
+            assert_eq!(
+                note_markdown_text(&state, note.id, code).await.unwrap(),
+                format!(
+                    "## John 3:16\u{2013}17\n\n> **16** {} **17** {}\n>\n> \u{2014} John 3:16\u{2013}17 ({upper})\n\n\
+                     **Loved**, see Rom 5:8.\n- the world",
+                    verse(code, 16),
+                    verse(code, 17)
+                ),
+                "{code}"
+            );
+        }
+        assert_eq!(
+            note_markdown_text(&state, note.id, "niv")
+                .await
+                .unwrap_err(),
+            "There's no translation \u{201c}niv\u{201d}."
+        );
+        note_delete(&state, note.id).await.unwrap();
+        assert_eq!(
+            note_markdown_text(&state, note.id, "kjv")
+                .await
+                .unwrap_err(),
+            "That note no longer exists; it may have been deleted."
         );
     }
 }

@@ -1637,6 +1637,11 @@ fn render_notes_section() {
         .set_attribute("aria-label", &format!("Notes for {reference}"));
     els.notes
         .set_inner_html(&text::notes_html(&notes, &error, show_all));
+    // Copy as Markdown writes within its click: each note's Markdown is
+    // asked for now.
+    for note in &notes {
+        crate::note_copy::prefetch(note.id, &note.body);
+    }
     let _ = els.xrefs.before_with_node_1(&els.notes);
     // "more" only where the text is cut short.
     for body in query_all(&els.notes, ".note-card-body[id]") {
@@ -2202,6 +2207,8 @@ pub enum Ask {
     },
     /// A note's "more" (or "less").
     NoteMore(HtmlElement),
+    /// A note's Copy as Markdown: note `note_id`.
+    NoteCopy(i64),
     /// The notes' Show all.
     ShowAll,
     /// A cross-reference chip: its preview opens or closes in the card.
@@ -2327,6 +2334,26 @@ pub fn ask(ask: Ask) -> bool {
             }
             let _ = more.set_attribute("aria-expanded", &expanded.to_string());
             more.set_text_content(Some(if expanded { "less" } else { "more" }));
+            true
+        }
+        Ask::NoteCopy(id) => {
+            let Some(note) = with(|s| {
+                s.selection_notes
+                    .iter()
+                    .find(|n| n.note.id == id)
+                    .map(|n| n.note.clone())
+            }) else {
+                return false;
+            };
+            let attempt = with(State::attempt);
+            crate::note_copy::copy(
+                note.id,
+                note.reference,
+                &note.body,
+                move |message, is_error| {
+                    status_for(attempt, message, is_error);
+                },
+            );
             true
         }
         Ask::ShowAll => {

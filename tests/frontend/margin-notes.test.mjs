@@ -77,12 +77,19 @@ async function frame(app) {
     await settle();
 }
 
+/** A note's text as shown, its line breaks (`<br>`, the note as Markdown) as new lines. */
+function shownText(el) {
+    const copy = el.cloneNode(true);
+    for (const br of copy.querySelectorAll('br')) br.replaceWith('\n');
+    return copy.textContent;
+}
+
 const margin = (app) => app.document.querySelector('.chapter-main .margin-notes');
 const shown = (app) => app.window.gospelGetterMargin.shown();
 const marginNotes = (app) => [...app.document.querySelectorAll('.margin-notes .margin-note')].map((note) => ({
     label: note.getAttribute('aria-label'),
     reference: note.querySelector('.margin-note-ref').textContent,
-    body: note.querySelector('.margin-note-body').textContent,
+    body: shownText(note.querySelector('.margin-note-body')),
     top: note.style.top,
 }));
 const markers = (app) => [...app.document.querySelectorAll('.chapter-main .verse .margin-marker')].map((m) => ({
@@ -145,6 +152,19 @@ test('a margin note, its reference or its more opens the card with its verses se
         assert.deepEqual(app.selectedVerseNumbers(), [21]);
         assert.deepEqual(cardNotes(app), ['Light.']);
         assert.ok(!app.document.getElementById('note-overlay') || app.document.getElementById('note-overlay').hidden, 'no editor');
+    }));
+
+test('a margin note shows its Markdown, and a reference in it goes to its passage rather than opening the card', () =>
+    withMargin([[16, 16, '**Loved**: see Rom 5:8\n- the world\n- whosoever']], {}, async (app) => {
+        const body = margin(app).querySelector('.margin-note-body');
+        assert.ok(body.classList.contains('note-text'));
+        assert.equal(body.querySelector('strong').textContent, 'Loved');
+        assert.deepEqual([...body.querySelectorAll('li')].map((li) => li.textContent), ['the world', 'whosoever']);
+        const link = body.querySelector('a.note-ref-link');
+        assert.equal(link.textContent, 'Rom 5:8');
+        await clickAndWait(app, link, 'get_reading');
+        await app.waitForHeading('Romans 5');
+        assert.deepEqual(app.selectedVerseNumbers(), [8]);
     }));
 
 test('the margin follows the notes as they are added, edited, deleted and restored', () =>

@@ -4,6 +4,46 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Search your notes: a box at the top of the Library's Notes tab
+  filters the list as you type. A note is found when every word you
+  type is in its text or its reference (the book's name or its usual
+  abbreviation, like "Rom" or "Mk", the chapter, a verse), whatever the
+  capitals or accents. It says how many of your notes it shows, marks
+  the words it found, and Escape clears it.
+- Notes keep what you're typing as a draft: if the app quits, or you
+  close the note with Cancel and the new "Keep for later", the text is
+  kept on this computer, and when you open that note again (or add a
+  note on the same verses) it says "You have unsaved text from …", with
+  Restore and Discard. Nothing is restored or saved without you asking.
+  Saving or discarding the note forgets the draft, and so does deleting
+  the note. Drafts stay on this computer: they're in neither a backup
+  nor Export notes, and they're kept for 30 days (the 20 newest).
+- Notes understand a little Markdown: **bold**, *italics*, bulleted and
+  numbered lists, `code`, and links (`[text](https://…)` or a bare
+  https:// address), in the card, the Library and the margin. A web link
+  opens in your browser; nothing else opens, and HTML in a note shows as
+  you typed it. Your notes are still stored, backed up and edited as the
+  plain text you typed.
+- References you type in a note ("see Rom 5:8", "John 3:16-18", "1 Cor
+  13", "Ps 23") become links that go there, as Go to does: Back returns.
+  A verse the translation you're reading doesn't number opens its
+  chapter.
+- Copy as Markdown, on each note in the card and the Library: the note's
+  reference as a heading, its verses quoted in the translation you're
+  reading (as Copy as… quotes them), then your note as you wrote it.
+- Export notes can write one file per book into a folder you choose
+  (for a notes app such as Obsidian): "43 John.md" and so on, each like
+  that book's part of the single file, with the same choices of books,
+  chapters and dates. It asks before replacing any file already there.
+  One file is still the default, and unchanged.
+
+### Changed
+- In reading mode, the notes in the margin keep more room from the
+  window's edge.
+
 ## [2.20.0] - 2026-10-27
 
 Your notes in the margin in reading mode, and reopening at the verse you

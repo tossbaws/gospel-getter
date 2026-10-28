@@ -73,11 +73,14 @@ pub enum Check {
     MarginSwitch = 61,
     MarginNarrow = 62,
     MarginPsalm119 = 63,
+    NotesSearch = 64,
+    NoteDraft = 65,
+    NoteMarkdown = 66,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 54] = [
+    pub const SHIPPED: [Check; 56] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -131,16 +134,20 @@ impl Check {
         Check::MarginSwitch,
         Check::MarginNarrow,
         Check::MarginPsalm119,
+        Check::NotesSearch,
+        Check::NoteMarkdown,
         Check::PlainText,
     ];
 
     /// The checks on the app as shipped started again, on the first
-    /// session's data (the second session).
-    pub const RELAUNCH: [Check; 4] = [
+    /// session's data (the second session, and for check 65 a third,
+    /// after the second quits with a draft typed).
+    pub const RELAUNCH: [Check; 5] = [
         Check::ColdStart,
         Check::ReopenAtVerse,
         Check::AaRestart,
         Check::DisclosuresKept,
+        Check::NoteDraft,
     ];
 
     /// The updater's checks, on the GUI checks' test build against the
@@ -218,6 +225,9 @@ impl Check {
             Check::MarginSwitch => "margin-switch",
             Check::MarginNarrow => "margin-narrow",
             Check::MarginPsalm119 => "margin-psalm-119",
+            Check::NotesSearch => "notes-search",
+            Check::NoteDraft => "note-draft",
+            Check::NoteMarkdown => "note-markdown",
         }
     }
 

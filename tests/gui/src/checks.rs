@@ -21,13 +21,18 @@
 //! note from the card, a cross-reference read in it, and the Shift ghost
 //! (46 to 52, `card`); margin notes in reading mode: beside their verses,
 //! the switch leaving the text where it was, the markers in a narrow
-//! window, Psalm 119 with a note on every verse (60 to 63, `margin`); and,
-//! last, the plain-text fallback (44, `reader`);
+//! window, Psalm 119 with a note on every verse (60 to 63, `margin`); the
+//! Library's Notes tab searched (64, `notes`) and a note's Markdown and
+//! references in the card, the Library and the margin, and Copy as
+//! Markdown (66, `notes`); and, last, the plain-text fallback (44,
+//! `reader`);
 //! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
 //! Then the app started again on the same data, keeping Aa's settings (26)
 //! and the chapter's lists as left (45), at the verse the first session
-//! left at the top (59, `place`), a second session; and, in a third
-//! session on the GUI checks' test build, the updater (9 to 13, `updates`).
+//! left at the top (59, `place`), a second session, which quits with a
+//! note being typed, offered back as a draft when the app is started once
+//! more (65, `notes`); and, in a last session on the GUI checks' test
+//! build, the updater (9 to 13, `updates`).
 
 mod card;
 mod dialogs;
@@ -35,6 +40,7 @@ mod display;
 mod keys;
 mod library;
 mod margin;
+mod notes;
 mod picker;
 mod place;
 mod reader;
@@ -223,7 +229,7 @@ async fn start_update_server(config: &Config) -> Result<UpdateServer> {
 /// saved (`save_reading_position`'s arguments), or why there's nothing.
 type LeftAt = std::result::Result<Value, String>;
 
-/// Checks 1 to 8, 14 to 25, 27 to 44 and 46 to 57, on the app as shipped;
+/// Checks 1 to 8, 14 to 25, 27 to 44, 46 to 57, 60 to 64 and 66, on the app as shipped;
 /// what check 25 left, for check 26 (or why there's nothing), the chapter
 /// the reader is left on, for check 58, and the verse, for check 59.
 async fn shipped(
@@ -404,6 +410,18 @@ async fn shipped(
                 &format!("putting things back after the margin checks failed: {e:#}"),
             );
         }
+        // The Notes tab's search (64), on notes of its own, deleted after.
+        let search = run.notes_search().await;
+        if search.is_err() {
+            run.failure_screenshot(Check::NotesSearch).await;
+        }
+        report.record(Check::NotesSearch, search).await;
+        // A note's Markdown and references (66), on a note of its own.
+        let markdown = run.note_markdown().await;
+        if markdown.is_err() {
+            run.failure_screenshot(Check::NoteMarkdown).await;
+        }
+        report.record(Check::NoteMarkdown, markdown).await;
 
         if let Err(e) = run.vellum_screenshots().await {
             run.failure_screenshot(Check::Screenshots).await;
@@ -469,6 +487,13 @@ async fn shipped(
                 margin::MARGIN_SHOTS
                     .into_iter()
                     .filter(|name| config.xvfb.is_some() || !name.starts_with("60-")),
+            )
+            .chain(notes::NOTES_SHOTS)
+            // The margin's, only where there's room for it, as check 60's.
+            .chain(
+                notes::MARKDOWN_SHOTS
+                    .into_iter()
+                    .filter(|name| config.xvfb.is_some() || !name.contains("-margin-")),
             )
             // The popover on a narrow window, only where the window can be
             // wide enough first (check 36).

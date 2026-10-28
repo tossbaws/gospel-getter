@@ -38,12 +38,19 @@ async function withNotes(notes, options, body) {
     }
 }
 
+/** A note's text as shown, its line breaks (`<br>`, the note as Markdown) as new lines. */
+function shownText(el) {
+    const copy = el.cloneNode(true);
+    for (const br of copy.querySelectorAll('br')) br.replaceWith('\n');
+    return copy.textContent;
+}
+
 const el = (app, id) => app.document.getElementById(id);
 const panelOpen = (app) => !el(app, 'note-overlay').hidden;
 const section = (app) => app.document.querySelector('.verse-notes');
 const cards = (app) => [...app.document.querySelectorAll('.verse-notes .note-card')].map((card) => ({
     reference: card.querySelector('.note-card-ref').textContent,
-    body: card.querySelector('.note-card-body').textContent,
+    body: shownText(card.querySelector('.note-card-body')),
 }));
 const notedVerses = (app, code) => [...app.document.querySelectorAll('.chapter-main .verse.has-notes')]
     .filter((v) => !code || v.dataset.translation === code)
@@ -548,9 +555,11 @@ test('a note’s text is shown as text, never as markup', () => {
     const body = '<img src=x onerror="window.__pwned = true"><b>bold?</b>\n&amp; <script>window.__pwned = true</script>';
     return withNotes([[16, 16, body]], {}, async (app) => {
         await select(app, 16);
+        // Its HTML as typed: the note's one paragraph, its line break a
+        // <br> (Markdown, `note_markdown`), and nothing else made of it.
         const card = section(app).querySelector('.note-card-body');
-        assert.equal(card.textContent, body.trim());
-        assert.equal(card.children.length, 0);
+        assert.equal(card.textContent, body.trim().replace('\n', ''));
+        assert.deepEqual([...card.querySelectorAll('*')].map((e) => e.tagName), ['P', 'BR']);
         assert.equal(app.document.querySelector('#note-list .note-preview').textContent, body.trim().replace(/\s+/g, ' '));
         assert.equal(app.document.querySelector('#note-list .note-preview').children.length, 0);
         app.click(section(app).querySelector('.note-edit'));

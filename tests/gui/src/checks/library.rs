@@ -145,7 +145,7 @@ impl Run<'_> {
 
     /// Clicks verse `n` and waits for the selection card. Any selection
     /// goes first (Escape), as its card may cover the verse.
-    async fn select(&self, n: u32) -> Result<()> {
+    pub(super) async fn select(&self, n: u32) -> Result<()> {
         self.plain_reading().await?;
         let ui = &self.ui;
         ui.click(&format!("select verse {n}"), &verse(n)).await?;
@@ -216,7 +216,7 @@ impl Run<'_> {
 
     /// Opens the Library (if it isn't) at the tab `tab`, and waits for its
     /// panel to show.
-    async fn library_tab(&self, tab: &str) -> Result<()> {
+    pub(super) async fn library_tab(&self, tab: &str) -> Result<()> {
         let ui = &self.ui;
         let open = ui
             .js(

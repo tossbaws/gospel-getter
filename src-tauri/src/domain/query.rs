@@ -1,98 +1,16 @@
 //! Interpreting what the reader typed into the search box: either a
 //! reference to go to (`John 3:16`, `1 Cor 13`, `ps 23:1-3`) or words to
-//! search the text for. Pure — no database access — so it's tested here
-//! against the real book list without seeding anything.
+//! search the text for; and finding the references typed in a note
+//! ("see Rom 5:8"), by the same rules, for the page to link. Pure — no
+//! database access — so it's tested here against the real book list
+//! without seeding anything.
 
+use crate::book_aliases::ALIASES;
 use crate::db::Book;
 
 /// The most words one text search will match on; anything past this is
 /// ignored rather than building an ever-larger FTS query.
 pub const MAX_SEARCH_TERMS: usize = 12;
-
-/// Common abbreviations and alternative names, by canonical book number
-/// (Genesis = 1 ... Revelation = 66), in the normalized form `book_key`
-/// produces: lowercase, no spaces or periods, with a leading book number as
-/// a digit. Every book's own stored name (normalized the same way) is
-/// accepted too, so it isn't repeated here.
-const ALIASES: &[(i64, &[&str])] = &[
-    (1, &["gen", "ge", "gn"]),
-    (2, &["exod", "exo", "ex"]),
-    (3, &["lev", "le", "lv"]),
-    (4, &["num", "nu", "nm", "nb"]),
-    (5, &["deut", "deu", "de", "dt"]),
-    (6, &["josh", "jos", "jsh"]),
-    (7, &["judg", "jdg", "jg", "jdgs"]),
-    (8, &["rth", "ru"]),
-    (9, &["1sam", "1sa", "1sm"]),
-    (10, &["2sam", "2sa", "2sm"]),
-    (11, &["1kgs", "1ki", "1kin"]),
-    (12, &["2kgs", "2ki", "2kin"]),
-    (13, &["1chron", "1chr", "1ch"]),
-    (14, &["2chron", "2chr", "2ch"]),
-    (15, &["ezr"]),
-    (16, &["neh", "ne"]),
-    (17, &["esth", "est", "es"]),
-    (18, &["jb"]),
-    (19, &["psalm", "ps", "psa", "psm", "pss"]),
-    (20, &["prov", "pro", "prv", "pr"]),
-    (21, &["eccles", "eccl", "ecc", "ec", "qoh"]),
-    (
-        22,
-        &[
-            "songofsongs",
-            "song",
-            "sos",
-            "so",
-            "canticles",
-            "cant",
-            "sg",
-        ],
-    ),
-    (23, &["isa", "is"]),
-    (24, &["jer", "je", "jr"]),
-    (25, &["lam", "la"]),
-    (26, &["ezek", "eze", "ezk"]),
-    (27, &["dan", "da", "dn"]),
-    (28, &["hos", "ho"]),
-    (29, &["jl"]),
-    (30, &["am"]),
-    (31, &["obad", "ob"]),
-    (32, &["jnh", "jon"]),
-    (33, &["mic", "mc"]),
-    (34, &["nah", "na"]),
-    (35, &["hab", "hb"]),
-    (36, &["zeph", "zep", "zp"]),
-    (37, &["hag", "hg"]),
-    (38, &["zech", "zec", "zc"]),
-    (39, &["mal", "ml"]),
-    (40, &["matt", "mat", "mt"]),
-    (41, &["mrk", "mar", "mk", "mr"]),
-    (42, &["luk", "lk"]),
-    (43, &["jhn", "jn", "joh"]),
-    (44, &["act", "ac"]),
-    (45, &["rom", "ro", "rm"]),
-    (46, &["1cor", "1co"]),
-    (47, &["2cor", "2co"]),
-    (48, &["gal", "ga"]),
-    (49, &["ephes", "eph"]),
-    (50, &["phil", "php", "pp"]),
-    (51, &["col"]),
-    (52, &["1thess", "1thes", "1th"]),
-    (53, &["2thess", "2thes", "2th"]),
-    (54, &["1tim", "1ti"]),
-    (55, &["2tim", "2ti"]),
-    (56, &["tit", "ti"]),
-    (57, &["philem", "phm", "pm"]),
-    (58, &["heb"]),
-    (59, &["jas", "jm"]),
-    (60, &["1pet", "1pe", "1pt"]),
-    (61, &["2pet", "2pe", "2pt"]),
-    (62, &["1jn", "1jhn", "1jo"]),
-    (63, &["2jn", "2jhn", "2jo"]),
-    (64, &["3jn", "3jhn", "3jo"]),
-    (65, &["jud", "jd"]),
-    (66, &["rev", "re", "rv", "revelations"]),
-];
 
 /// A passage to go to: a whole chapter, or an inclusive verse range in it.
 /// Chapter numbers are checked against the book; verse numbers can only be
@@ -395,6 +313,180 @@ fn passage(book: &Book, spec: &str) -> Interpretation {
         chapter,
         verses,
     })
+}
+
+// ---- References typed in a note ("see Rom 5:8"), found so the page can
+// make each one a link to its passage.
+
+/// A reference found in a note's text by [`references_in`]: where it is
+/// (byte offsets, `start..end`) and the passage it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FoundReference {
+    pub start: usize,
+    pub end: usize,
+    pub passage: PassageRef,
+}
+
+/// Abbreviations that are everyday words too (in `book_key`'s form): "Is
+/// 5" or "So 3" is much more often a word and a number than Isaiah 5 or
+/// the Song of Solomon 3, so these name a book only with a verse ("Is
+/// 53:5"). A book's own name ("Acts 2", "Mark 4", "Job 5") always does.
+const WORD_LIKE: &[&str] = &[
+    "am", "is", "so", "re", "ex", "la", "ho", "na", "de", "ne", "es", "da", "ti", "ac", "ge", "le",
+    "nu", "ob", "pr", "ec", "je", "ga", "mar", "pro", "act", "col", "tit", "jud", "lam", "nah",
+    "hag", "mic", "sos", "song", "cant",
+];
+
+/// The most words a book's name is written with ("Song of Solomon", "1
+/// Cor", "First John").
+const MAX_NAME_WORDS: usize = 4;
+
+/// The references to passages in `text` (a note, as the reader wrote it),
+/// in order, never overlapping: each a book's name or abbreviation (as Go
+/// to reads it, `interpret`), its first letter a capital, then a space
+/// and a chapter, with a verse or a range of verses or not ("Rom 5:8",
+/// "John 3:16-18", "1 Cor 13", "Ps 23", "Jude 5"), on one line, and
+/// standing alone: no letter or digit right before or after it, nor a
+/// further ":" or "." and digits ("5:30:15"). A chapter or verse the book
+/// can't have, a range into another chapter or of chapters, and an
+/// everyday word with a chapter alone (`WORD_LIKE`) aren't references;
+/// "I Am", "Job well done", "Acts of kindness" and a time like "5:30"
+/// never are.
+pub fn references_in(text: &str, books: &[Book]) -> Vec<FoundReference> {
+    let words = word_spans(text);
+    let mut found: Vec<FoundReference> = Vec::new();
+    for i in 0..words.len() {
+        if found.last().is_some_and(|f| words[i].0 < f.end) {
+            continue;
+        }
+        if let Some(reference) = reference_at(text, &words[i..], books) {
+            found.push(reference);
+        }
+    }
+    found
+}
+
+/// The byte ranges of `text`'s runs of letters and digits.
+fn word_spans(text: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut start = None;
+    for (i, c) in text.char_indices() {
+        match (start, c.is_alphanumeric()) {
+            (None, true) => start = Some(i),
+            (Some(from), false) => {
+                spans.push((from, i));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(from) = start {
+        spans.push((from, text.len()));
+    }
+    spans
+}
+
+/// The reference starting at `words[0]`, if one does: the longest run of
+/// words naming a book that's followed by a chapter.
+fn reference_at(text: &str, words: &[(usize, usize)], books: &[Book]) -> Option<FoundReference> {
+    let start = words.first()?.0;
+    for count in (1..=MAX_NAME_WORDS.min(words.len())).rev() {
+        let name_words = &words[..count];
+        // The name's words are apart by spaces alone, on one line.
+        let spaced = name_words
+            .windows(2)
+            .all(|pair| is_spaces(&text[pair[0].1..pair[1].0]));
+        let name_end = name_words[count - 1].1;
+        let name = &text[start..name_end];
+        let capital = name
+            .chars()
+            .find(|c| c.is_alphabetic())
+            .is_some_and(char::is_uppercase);
+        if !spaced || !capital {
+            continue;
+        }
+        // An abbreviation's period, then a space or more, then a digit.
+        let after_name = name_end + usize::from(text[name_end..].starts_with('.'));
+        let gap = text[after_name..].len()
+            - text[after_name..]
+                .trim_start_matches([' ', '\t', '\u{a0}'])
+                .len();
+        let spec_start = after_name + gap;
+        if gap == 0 || !text[spec_start..].starts_with(|c: char| c.is_ascii_digit()) {
+            continue;
+        }
+        let Some(book) = find_book(&text[start..after_name], books) else {
+            continue;
+        };
+        let spec_end = spec_start + spec_length(&text[spec_start..])?;
+        let spec = &text[spec_start..spec_end];
+        if !spec.contains([':', '.']) && WORD_LIKE.contains(&book_key(name).as_str()) {
+            return None;
+        }
+        return match passage(book, spec) {
+            Interpretation::Passage(passage) => Some(FoundReference {
+                start,
+                end: spec_end,
+                passage,
+            }),
+            _ => None,
+        };
+    }
+    None
+}
+
+/// Whether `s` is one or more spaces or tabs.
+fn is_spaces(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| matches!(c, ' ' | '\t' | '\u{a0}'))
+}
+
+/// How long the chapter and verses at the start of `s` are ("3", "3:16",
+/// "3:16-18", with ":" or "." and any dash), if they stand alone: `None`
+/// for a range of chapters ("3-4") or into another chapter ("3:16-4:2"),
+/// a number too long to be a chapter or verse, or one run on into another
+/// (":30:15") or into a word.
+fn spec_length(s: &str) -> Option<usize> {
+    let digits = |from: usize| s[from..].bytes().take_while(u8::is_ascii_digit).count();
+    // A separator (":" or "." for the verse, a dash for a range) at
+    // `at`, followed by a digit: its length.
+    let separator = |at: usize, verse: bool| {
+        let c = s[at..].chars().next()?;
+        let fits = if verse {
+            matches!(c, ':' | '.')
+        } else {
+            matches!(c, '-' | '\u{2013}' | '\u{2014}')
+        };
+        let after = at + c.len_utf8();
+        (fits && s[after..].starts_with(|c: char| c.is_ascii_digit())).then_some(after - at)
+    };
+    let chapter = digits(0);
+    if !(1..=3).contains(&chapter) {
+        return None;
+    }
+    let mut end = chapter;
+    if let Some(sep) = separator(end, true) {
+        let verse = digits(end + sep);
+        if verse > 3 {
+            return None;
+        }
+        end += sep + verse;
+        if let Some(dash) = separator(end, false) {
+            let last = digits(end + dash);
+            if last > 3 {
+                return None;
+            }
+            end += dash + last;
+        }
+    } else if separator(end, false).is_some() {
+        // "John 3-4": chapters, which Go to won't open either.
+        return None;
+    }
+    // Standing alone: no more numbers run on, nor a word.
+    let rest = &s[end..];
+    let runs_on = rest.starts_with(|c: char| c.is_alphanumeric())
+        || separator(end, true).is_some()
+        || separator(end, false).is_some();
+    (!runs_on).then_some(end)
 }
 
 #[cfg(test)]
@@ -708,5 +800,125 @@ mod tests {
                 book.name
             );
         }
+    }
+
+    /// The references `references_in` finds in `text`: each as typed, and
+    /// the passage it names.
+    fn found(text: &str) -> Vec<(&str, Interpretation)> {
+        references_in(text, &books())
+            .into_iter()
+            .map(|r| (&text[r.start..r.end], Interpretation::Passage(r.passage)))
+            .collect()
+    }
+
+    #[test]
+    fn references_in_a_note_are_found_where_they_are() {
+        let text = "See Rom 5:8, and John 3:16-18; then 1 Cor 13 (love) and Ps 23.";
+        assert_eq!(
+            found(text),
+            [
+                ("Rom 5:8", at(45, 5, Some((8, 8)))),
+                ("John 3:16-18", at(43, 3, Some((16, 18)))),
+                ("1 Cor 13", at(46, 13, None)),
+                ("Ps 23", at(19, 23, None)),
+            ]
+        );
+        // Their offsets are the note's own bytes, accents and all.
+        let text = "Éphèse: Acts 19:1.";
+        let r = references_in(text, &books());
+        assert_eq!(&text[r[0].start..r[0].end], "Acts 19:1");
+    }
+
+    #[test]
+    fn every_way_go_to_reads_a_reference_is_found() {
+        for (text, expected) in [
+            ("Gen. 1:1", at(1, 1, Some((1, 1)))),
+            ("Matt. 5:3\u{2013}12", at(40, 5, Some((3, 12)))),
+            ("Romans 8:28\u{2014}30", at(45, 8, Some((28, 30)))),
+            ("John 3.16", at(43, 3, Some((16, 16)))),
+            ("1 John 4:8", at(62, 4, Some((8, 8)))),
+            ("I John 4:8", at(62, 4, Some((8, 8)))),
+            ("First John 4:8", at(62, 4, Some((8, 8)))),
+            ("1Cor 13:4", at(46, 13, Some((4, 4)))),
+            ("Song of Solomon 2:1", at(22, 2, Some((1, 1)))),
+            ("Song of Songs 2:1", at(22, 2, Some((1, 1)))),
+            ("Psalm 119", at(19, 119, None)),
+            ("Jude 5", at(65, 1, Some((5, 5)))),
+            ("Phm 6", at(57, 1, Some((6, 6)))),
+            ("Rev 21:4", at(66, 21, Some((4, 4)))),
+            ("Acts 2", at(44, 2, None)),
+            ("Mark 4", at(41, 4, None)),
+            ("Job 38:4", at(18, 38, Some((4, 4)))),
+            ("Is 53:5", at(23, 53, Some((5, 5)))),
+            ("Am 5:24", at(30, 5, Some((24, 24)))),
+        ] {
+            assert_eq!(found(text), [(text, expected)], "{text:?}");
+        }
+        // The longest name that's a book: "1 John", not "John".
+        assert_eq!(found("read 1 John 1:9")[0].0, "1 John 1:9");
+        // At the very start and end, and between other characters.
+        assert_eq!(found("(Rom 5:8)")[0].0, "Rom 5:8");
+        assert_eq!(found("\u{201c}John 3:16\u{201d}")[0].0, "John 3:16");
+        assert_eq!(found("Rom 5:8, 10")[0].0, "Rom 5:8");
+    }
+
+    #[test]
+    fn words_that_only_look_like_references_are_not_found() {
+        for text in [
+            // No chapter.
+            "I Am",
+            "I Am that I Am.",
+            "Job well done",
+            "Acts of kindness",
+            "Mark my words, John.",
+            "the Song of Solomon",
+            // A number but no book.
+            "5:30",
+            "Meet at 5:30 on 2026-10-27.",
+            "Chapter 3:16 of the manual",
+            "Room 12, page 4",
+            // An everyday word and a chapter alone.
+            "Is 5 enough?",
+            "So 3 of us went.",
+            "Am 5 minutes late",
+            "Ex 4 me",
+            // Not a capital.
+            "see rom 5:8",
+            "john 3:16",
+            // A chapter or verse the book can't have, or ranges Go to
+            // won't open.
+            "John 22",
+            "John 3:0",
+            "Jude 2:1",
+            "John 3-4",
+            "John 3:16-4:2",
+            "John 3:18-16",
+            // Run into more: a time, a longer number, a word.
+            "Mark 5:30:15",
+            "John 2026",
+            "Rom 5:8a",
+            "John 3:16th",
+            // Joined to the word before or after.
+            "XJohn 3:16",
+            "Rom5:8",
+            // Not on one line.
+            "John\n3:16",
+            "1\nJohn 3",
+        ] {
+            let found: Vec<&str> = found(text).into_iter().map(|(typed, _)| typed).collect();
+            let expected: &[&str] = match text {
+                // "John 3" alone, on its own line, is one.
+                "1\nJohn 3" => &["John 3"],
+                _ => &[],
+            };
+            assert_eq!(found, expected, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn references_never_overlap_and_keep_their_order() {
+        let text = "1 John 1:9 John 1:9 Jude 5 5:30 Rom 1:1";
+        let found: Vec<&str> = found(text).into_iter().map(|(typed, _)| typed).collect();
+        assert_eq!(found, ["1 John 1:9", "John 1:9", "Jude 5", "Rom 1:1"]);
     }
 }

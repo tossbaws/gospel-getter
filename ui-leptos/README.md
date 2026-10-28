@@ -41,7 +41,12 @@ card's bookmark, highlight and notes, the verses' marks and the Shift
 ghost, with its markup and rules in `src/card_text.rs`); and the notes in
 the margin in reading mode (`src/margin.rs`: placed beside their verses,
 the markers in a narrow window, with their rules and markup in
-`src/margin_text.rs`); and what was the
+`src/margin_text.rs`); a note's text as Markdown wherever it shows
+(`src/note_markdown.rs`: the subset, everything else escaped, the
+references the backend found in it as links), the links in it
+(`src/note_links.rs`: a reference goes to its passage, a web link opens
+through the backend) and Copy as Markdown (`src/note_copy.rs`); and what
+was the
 page's main script: the keyboard dispatcher (`src/keyboard.rs`, its rules
 in `src/keyboard_text.rs`), the click dispatcher (`src/clicks.rs`), boot
 (`src/boot.rs`, which takes over the `get_home` and `get_reading` the
@@ -66,10 +71,13 @@ keeps the two the same.
 
 - `ui-leptos/` is its own crate (Rust 2024, `cdylib`), separate from
   `src-tauri/`: one targets `wasm32-unknown-unknown`, the other the desktop.
-  They share two files, compiled into both by `#[path]`:
-  `../shared/preferences.rs` (below) and `../shared/verse_parts.rs`, a
+  They share files, compiled into both by `#[path]`:
+  `../shared/preferences.rs` (below), `../shared/verse_parts.rs`, a
   verse's parts and footnotes as the backend shows them, which the reader
-  draws. `src/dto.rs` mirrors the other DTOs of the commands the pieces
+  draws, `../shared/passage_reference.rs`, how a passage is named, and
+  `../shared/book_aliases.rs`, the books' abbreviations, by which the
+  backend reads a typed reference and the Library's notes search finds a
+  note's book. `src/dto.rs` mirrors the other DTOs of the commands the pieces
   call, with the names the JSON carries, and says what a shared crate would
   replace later.
 - `src/ipc.rs`: Tauri commands through the same global the page uses,
@@ -88,12 +96,13 @@ keeps the two the same.
   `src/shortcut_table.rs`, `src/palette.rs`, `src/search_text.rs`,
   `src/picker_text.rs`, `src/aa_text.rs`, `src/surfaces_text.rs`,
   `src/reader_text.rs`, `src/card_text.rs`, `src/margin_text.rs`,
+  `src/note_markdown.rs`,
   `src/keyboard_text.rs`, `src/page_text.rs`: the
   pieces' words, numbers and rules (Export notes' filter, the import's
-  sentences, the note's length rule, the welcome's fresh-install rule, the
-  updater's sentences, `megabytes` and download progress, the Library's
-  rows, color names, filter and focus arithmetic; the shortcuts; the
-  palette's commands, their reasons and its word matching; the search's
+  sentences, the note's length rule and its drafts, the welcome's
+  fresh-install rule, the updater's sentences, `megabytes` and download
+  progress, the Library's rows, color names, filter, notes search and
+  focus arithmetic; the shortcuts; the palette's commands, their reasons and its word matching; the search's
   sentences, active option and marked words; the picker's compact grid,
   Random chapter's pick, its keyboard moves and how far it scrolls; the
   size keys; the surfaces' table, the sidebar's rule and the ☰ menu's
@@ -101,7 +110,7 @@ keeps the two the same.
   (`fixtures/genesis-1.html` is their output, which a test compares),
   Compare's rows, the reference, and the passage history's bookkeeping; the
   card's markup and placement; where a margin note sits and how notes
-  stack, and the margin's markup; which key does what, j and k's steps and
+  stack, and the margin's markup; a note's Markdown (`note_markdown`); which key does what, j and k's steps and
   how far a verse is scrolled into view; the toast's words, Export data…'s
   summary and Compare's partner),
   free

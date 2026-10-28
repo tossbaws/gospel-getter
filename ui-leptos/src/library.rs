@@ -11,6 +11,15 @@
 //! note editor);
 //! removing a bookmark or a highlight keeps focus in the list.
 //!
+//! The Notes tab has a search box at its top: typing in it filters the
+//! list (on the notes already loaded, once typing pauses for
+//! `SEARCH_DELAY_MS`), says how many of how many it shows, and marks what
+//! it found in each row; Escape in it clears it first. What finds a note
+//! and what's marked is `library_text`'s. A note's row shows its start as
+//! Markdown, run onto one line (`note_markdown`), beside the row's link
+//! rather than in it, so the links in the note are links of their own;
+//! its Edit and Copy as Markdown follow.
+//!
 //! Boot, an import, a translation switch and the card ask for the lists to
 //! be reloaded with `bridge::LIBRARY_REFRESH_EVENT`, and get back what the
 //! reader's own marks and the welcome need with
@@ -29,6 +38,7 @@ use leptos::html;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use serde::de::DeserializeOwned;
+use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent, MouseEvent};
 
@@ -40,6 +50,7 @@ use crate::dto::{
 };
 use crate::ipc;
 use crate::library_text::{self as text, List};
+use crate::note_markdown::{self, Layout};
 use crate::surfaces;
 
 /// A list as last shown: its rows, or why it couldn't be loaded (or a row
@@ -67,11 +78,25 @@ fn count<T>(shown: Option<&Shown<T>>) -> String {
 }
 
 /// A note in the list, with the note as the backend gave it, which the
-/// page's note editor is opened on.
+/// page's note editor is opened on, and what the search looks for in it.
 #[derive(Clone)]
 struct NoteRow {
     note: Note,
     raw: JsValue,
+    search: text::Searchable,
+}
+
+impl NoteRow {
+    fn new(note: Note, raw: JsValue) -> Self {
+        let search = text::Searchable::new(
+            note.book_id,
+            &note.book_name,
+            note.chapter,
+            (note.verse_start, note.verse_end),
+            &note.body,
+        );
+        Self { note, raw, search }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -83,6 +108,12 @@ struct Library {
     notes: RwSignal<Option<Shown<NoteRow>>, LocalStorage>,
     /// The color filter: `all` or a color, for this session only.
     filter: RwSignal<String>,
+    /// What the Notes tab's search box held when typing last paused (the
+    /// list follows this), for this session only.
+    query: RwSignal<String>,
+    /// The pause being waited for, if one is.
+    search_timer: StoredValue<Option<i32>>,
+    note_search: NodeRef<html::Input>,
     /// Each list's latest reload, by `List::index`.
     tokens: StoredValue<[u64; 3]>,
     tabs: [NodeRef<html::Button>; 3],
@@ -134,6 +165,9 @@ impl Library {
             highlights: RwSignal::new(None),
             notes: RwSignal::new_local(None),
             filter: RwSignal::new(text::ALL.to_string()),
+            query: RwSignal::new(String::new()),
+            search_timer: StoredValue::new(None),
+            note_search: NodeRef::new(),
             tokens: StoredValue::new([0; 3]),
             tabs: [NodeRef::new(), NodeRef::new(), NodeRef::new()],
             panels: [NodeRef::new(), NodeRef::new(), NodeRef::new()],
@@ -266,11 +300,15 @@ impl Library {
         }
         match answer {
             Ok((items, raw)) => {
+                // Every note there is: a draft of any other goes.
+                crate::note_editor::keep_drafts_of(
+                    &items.iter().map(|note| note.id).collect::<Vec<_>>(),
+                );
                 let raw = js_sys::Array::from(&raw);
                 let rows = items
                     .into_iter()
                     .zip(raw.iter())
-                    .map(|(note, raw)| NoteRow { note, raw })
+                    .map(|(note, raw)| NoteRow::new(note, raw))
                     .collect();
                 self.notes.set(Some(Shown::rows(rows)));
                 bridge::library_loaded(List::Notes.name(), &raw);
@@ -490,10 +528,39 @@ impl Library {
         });
     }
 
+    /// The note row `el` is in, as listed.
+    fn note_row(self, el: &Element) -> Option<NoteRow> {
+        let id = data_number::<i64>(&closest(el, ".note-item")?, "data-note-id")?;
+        self.notes.with_untracked(|s| {
+            s.as_ref()?
+                .items
+                .iter()
+                .find(|row| row.note.id == id)
+                .cloned()
+        })
+    }
+
+    /// The pointer or focus came to a note's row: its Markdown is asked
+    /// for, so Copy as Markdown can write it within its click.
+    fn on_note_near(self, event: &web_sys::Event) {
+        if let Some(row) = target_of(event).and_then(|el| self.note_row(&el)) {
+            crate::note_copy::prefetch(row.note.id, &row.note.body);
+        }
+    }
+
     /// Opening a note's row works as opening a bookmark: its chapter, with
     /// its passage selected, so its Notes section shows. Edit does the
-    /// same, then opens the note.
+    /// same, then opens the note. Copy as Markdown copies it, and says so
+    /// in the toast.
     fn on_note_click(self, target: Element) {
+        if closest(&target, ".note-list-copy").is_some() {
+            if let Some(NoteRow { note, .. }) = self.note_row(&target) {
+                crate::note_copy::copy(note.id, note.reference, &note.body, |message, is_error| {
+                    bridge::toast(&message, is_error);
+                });
+            }
+            return;
+        }
         let edit = closest(&target, ".note-list-edit");
         let Some(button) = edit.clone().or_else(|| closest(&target, ".bookmark-open")) else {
             return;
@@ -521,6 +588,67 @@ impl Library {
             },
             if edit.is_some() { &row.raw } else { &none },
         );
+    }
+
+    // ---- The Notes tab's search.
+
+    fn cancel_search_timer(self) {
+        if let (Some(timer), Some(window)) = (self.search_timer.get_value(), web_sys::window()) {
+            window.clear_timeout_with_handle(timer);
+        }
+        self.search_timer.set_value(None);
+    }
+
+    /// The list follows the box once typing pauses.
+    fn on_search_input(self) {
+        self.cancel_search_timer();
+        let later = Closure::once_into_js(move || {
+            self.search_timer.set_value(None);
+            self.search_now();
+        });
+        let timer = web_sys::window().and_then(|w| {
+            w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                later.unchecked_ref(),
+                text::SEARCH_DELAY_MS,
+            )
+            .ok()
+        });
+        match timer {
+            Some(timer) => self.search_timer.set_value(Some(timer)),
+            None => self.search_now(),
+        }
+    }
+
+    /// The list follows the box now.
+    fn search_now(self) {
+        let typed = self
+            .note_search
+            .get_untracked()
+            .map(|input| input.value())
+            .unwrap_or_default();
+        if self.query.with_untracked(|q| *q != typed) {
+            self.query.set(typed);
+        }
+    }
+
+    /// Escape in the box clears it, and the list shows every note again;
+    /// with the box empty it's the page's (the Library closes). It's no
+    /// chapter turn or shortcut either way (`keyboard` leaves a text box's
+    /// keys alone).
+    fn on_search_key(self, event: &KeyboardEvent) {
+        if event.key() != "Escape" {
+            return;
+        }
+        let Some(input) = self.note_search.get_untracked() else {
+            return;
+        };
+        if input.value().is_empty() {
+            return;
+        }
+        event.prevent_default();
+        input.set_value("");
+        self.cancel_search_timer();
+        self.search_now();
     }
 
     fn on_filter_click(self, event: &MouseEvent) {
@@ -643,7 +771,28 @@ fn highlight_rows(shown: Option<Shown<HighlightPassage>>, filter: &str) -> AnyVi
         .into_any()
 }
 
-fn note_rows(shown: Option<Shown<NoteRow>>) -> AnyView {
+/// `text` with the search's marks (byte ranges) as `<mark>`s.
+fn with_marks(text: &str, marks: &[(usize, usize)]) -> AnyView {
+    if marks.is_empty() {
+        return text.to_string().into_any();
+    }
+    text::marked(text, marks)
+        .into_iter()
+        .map(|(piece, marked)| {
+            let piece = piece.to_string();
+            if marked {
+                view! { <mark class="note-search-mark">{piece}</mark> }.into_any()
+            } else {
+                piece.into_any()
+            }
+        })
+        .collect_view()
+        .into_any()
+}
+
+/// The notes the search shows (all of them while it's empty), each with
+/// what it found marked.
+fn note_rows(shown: Option<Shown<NoteRow>>, query: &str) -> AnyView {
     let Some(shown) = shown else {
         return ().into_any();
     };
@@ -653,23 +802,50 @@ fn note_rows(shown: Option<Shown<NoteRow>>) -> AnyView {
     if shown.items.is_empty() {
         return message_row(List::Notes.empty().to_string(), false);
     }
-    shown
-        .items
+    let words = text::query_words(query);
+    let found = text::found(
+        &shown
+            .items
+            .iter()
+            .map(|row| &row.search)
+            .collect::<Vec<_>>(),
+        &words,
+    );
+    if found.is_empty() {
+        return message_row(text::no_notes_match(query), false);
+    }
+    let mut items: Vec<Option<NoteRow>> = shown.items.into_iter().map(Some).collect();
+    found
         .into_iter()
+        .filter_map(|index| items[index].take())
         .map(|NoteRow { note, .. }| {
             let id = note.id.to_string();
+            let (row_id, open_id, edit_id) = (id.clone(), id.clone(), id.clone());
             let label = format!("Edit note on {}", note.reference);
+            let copy_label = format!("Copy the note on {} as Markdown", note.reference);
+            let preview_id = format!("note-preview-{id}");
+            let reference = with_marks(
+                &note.reference,
+                &text::reference_marks(&note.reference, note.book_id, &words),
+            );
+            let preview = note_markdown::note_html(&note.body, &note.links, &words, Layout::OneLine);
             view! {
-                <li class="bookmark-item">
-                    <button type="button" class="bookmark-open" data-note-id=id.clone()>
-                        <span class="bookmark-ref">{note.reference}</span>
-                        " "
-                        <span class="note-preview">{text::note_preview(&note.body)}</span>
-                    </button>
+                <li class="bookmark-item note-item" data-note-id=row_id>
+                    <div class="note-item-main">
+                        <button type="button" class="bookmark-open" data-note-id=open_id aria-describedby=preview_id.clone()>
+                            <span class="bookmark-ref">{reference}</span>
+                        </button>
+                        <div class="note-preview note-text" id=preview_id inner_html=preview></div>
+                    </div>
                     " "
-                    <button type="button" class="note-list-edit" data-note-id=id aria-label=label title="Edit note">
-                        "Edit"
-                    </button>
+                    <span class="note-item-actions">
+                        <button type="button" class="note-list-edit" data-note-id=edit_id aria-label=label title="Edit note">
+                            "Edit"
+                        </button>
+                        <button type="button" class="note-list-copy" data-note-id=id aria-label=copy_label title="Copy as Markdown">
+                            "Copy as Markdown"
+                        </button>
+                    </span>
                 </li>
             }
         })
@@ -706,6 +882,11 @@ pub fn mount() {
             });
         }
     }
+    if let Some(list) = library.note_list.get_untracked() {
+        for name in ["pointerover", "focusin"] {
+            dom::on(&list, name, move |event| library.on_note_near(&event));
+        }
+    }
     dom::on_document_event(bridge::LIBRARY_REFRESH_EVENT, move |event| {
         library.on_refresh(event);
     });
@@ -715,11 +896,26 @@ pub fn mount() {
 fn lists(library: Library) -> impl IntoView {
     let [tab_bookmarks, tab_highlights, tab_notes] = library.tabs;
     let [panel_bookmarks, panel_highlights, panel_notes] = library.panels;
-    // Export notes… needs notes to export (its click is the page's).
+    // Export notes… needs notes to export (its click is the page's), and
+    // the search notes to search.
     let no_notes = move || {
         library.notes.with(|s| {
             s.as_ref()
                 .is_none_or(|s| s.error.is_some() || s.items.is_empty())
+        })
+    };
+    // How many of how many notes the search shows, while it's searching.
+    let search_count = move || {
+        let words = library.query.with(|q| text::query_words(q));
+        if words.is_empty() {
+            return String::new();
+        }
+        library.notes.with(|s| match s {
+            Some(Shown { items, error: None }) if !items.is_empty() => {
+                let all: Vec<&text::Searchable> = items.iter().map(|row| &row.search).collect();
+                text::search_count(text::found(&all, &words).len(), items.len())
+            }
+            _ => String::new(),
         })
     };
 
@@ -789,16 +985,34 @@ fn lists(library: Library) -> impl IntoView {
             </ul>
         </div>
         <div node_ref=panel_notes id="library-notes" class="library-tabpanel" role="tabpanel" aria-labelledby="library-tab-notes" hidden>
-            <button type="button" id="export-notes-btn" class="reader-mode-btn export-notes-btn" aria-haspopup="dialog" disabled=no_notes>
-                "Export notes\u{2026}"
-            </button>
+            <div class="note-tools">
+                <input
+                    node_ref=library.note_search
+                    type="search"
+                    id="note-search"
+                    class="note-search"
+                    placeholder="Search notes"
+                    aria-label="Search notes"
+                    aria-controls="note-list"
+                    aria-describedby="note-search-count"
+                    autocomplete="off"
+                    spellcheck="false"
+                    disabled=no_notes
+                    on:input=move |_| library.on_search_input()
+                    on:keydown=move |event: KeyboardEvent| library.on_search_key(&event)
+                />
+                <button type="button" id="export-notes-btn" class="reader-mode-btn export-notes-btn" aria-haspopup="dialog" disabled=no_notes>
+                    "Export notes\u{2026}"
+                </button>
+            </div>
+            <p id="note-search-count" class="note-search-count" aria-live="polite">{search_count}</p>
             <ul
                 node_ref=library.note_list
                 id="note-list"
                 class="bookmark-list"
                 aria-labelledby="library-tab-notes"
             >
-                {move || note_rows(library.notes.get())}
+                {move || note_rows(library.notes.get(), &library.query.get())}
             </ul>
         </div>
     }

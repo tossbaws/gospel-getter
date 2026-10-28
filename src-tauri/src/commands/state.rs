@@ -5,7 +5,7 @@ use anyhow::Context;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::PendingImport;
+use super::{PendingImport, PendingNotesFolder};
 use crate::db::{self, Book, Translation};
 use crate::domain::Store;
 
@@ -28,6 +28,11 @@ pub struct AppState {
     /// them to confirm (or cancel). Only one at a time; choosing another
     /// file replaces it.
     pub pending_import: Mutex<Option<PendingImport>>,
+    /// The export as one file per book waiting for the reader to say
+    /// whether to replace the files already in their folder.
+    pub pending_notes_folder: Mutex<Option<PendingNotesFolder>>,
+    /// The next token for what waits on the reader: an import's preview,
+    /// or a folder export's question.
     pub(super) next_import_token: AtomicU64,
 }
 
@@ -48,6 +53,7 @@ impl AppState {
             translations,
             search_index: Arc::default(),
             pending_import: Mutex::new(None),
+            pending_notes_folder: Mutex::new(None),
             next_import_token: AtomicU64::new(1),
         })
     }

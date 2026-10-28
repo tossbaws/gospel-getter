@@ -11,7 +11,14 @@
 //!
 //! Rendering is a pure function of the notes, the verses they quote, the
 //! translation, the filter and a time zone (see `NotesExport::render`), so
-//! it's tested without a database or the machine's own time zone.
+//! it's tested without a database or the machine's own time zone. The
+//! same export can be written as one file per book, for a folder such as
+//! an Obsidian vault (`NotesExport::by_book`): each book's file is the
+//! export of that book alone.
+//!
+//! Copy as Markdown on one note (`note_markdown`) quotes its verses the
+//! same way, but writes the note's text as the reader wrote it: their own
+//! Markdown, which the app shows as Markdown.
 //!
 //! Note bodies and verse text are plain text: everything Markdown or HTML
 //! could read as structure is escaped, so the file shows exactly the
@@ -28,7 +35,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::notes::{grouped, in_bible_order};
 use crate::db::{Book, Note, Verse};
-use crate::passage_copy;
+use crate::passage_copy::{self, CopyFormat};
 // The escapes live in `markdown`, which Copy as… shares; named here too, as
 // they always have been.
 pub use crate::markdown::{escape_block, escape_inline};
@@ -214,6 +221,34 @@ impl NotesExport<'_> {
             .map_or("?", |b| b.name.as_str())
     }
 
+    /// The export as one file per book (Export notes' "One file per
+    /// book"): each book with notes in scope, in Bible order, in a file of
+    /// its own (see [`book_file_name`]) that is this export of that book
+    /// alone, its chapters and dates kept: its title, its date line and
+    /// its notes, each note as the single file writes it.
+    pub fn by_book<Tz: TimeZone>(&self, tz: &Tz) -> Vec<BookFile> {
+        let notes = self.notes_in_scope(tz);
+        let mut ids: Vec<i64> = notes.iter().map(|n| n.book_id).collect();
+        ids.dedup();
+        ids.into_iter()
+            .map(|id| {
+                let filter = NotesFilter {
+                    books: vec![id],
+                    ..self.filter.clone()
+                };
+                let one = NotesExport {
+                    filter: &filter,
+                    ..self.clone()
+                };
+                BookFile {
+                    file_name: book_file_name(id, self.book_name(id)),
+                    contents: one.render(tz),
+                    notes: notes.iter().filter(|n| n.book_id == id).count(),
+                }
+            })
+            .collect()
+    }
+
     /// The file: UTF-8 (no byte-order mark), LF line endings, dates in
     /// `tz`.
     pub fn render<Tz: TimeZone>(&self, tz: &Tz) -> String {
@@ -287,18 +322,8 @@ impl NotesExport<'_> {
                 passage_copy::markdown_quote(self.translation_code, &quoted)
             );
         }
-        let wanted = note.verse_end - note.verse_start + 1;
-        if (quoted.len() as i64) < wanted {
-            let code = escape_inline(&self.translation_code.to_uppercase());
-            let _ = writeln!(
-                out,
-                "\n*{} numbered in the {code}.*",
-                if quoted.is_empty() {
-                    "It isn\u{2019}t"
-                } else {
-                    "Not all of it is"
-                },
-            );
+        if let Some(missing) = not_numbered(note, quoted.len(), self.translation_code) {
+            let _ = writeln!(out, "\n{missing}");
         }
 
         let _ = writeln!(out, "\n{}", escape_block(&note.body));
@@ -311,6 +336,87 @@ impl NotesExport<'_> {
         }
         out.push_str("*\n");
     }
+}
+
+/// What a note says when the translation doesn't number all its verses
+/// (`quoted` of them are): "*It isn’t numbered in the KJV.*" or "*Not all
+/// of it is numbered in the KJV.*"; nothing when it numbers them all.
+fn not_numbered(note: &Note, quoted: usize, translation_code: &str) -> Option<String> {
+    let wanted = note.verse_end - note.verse_start + 1;
+    ((quoted as i64) < wanted).then(|| {
+        format!(
+            "*{} numbered in the {}.*",
+            if quoted == 0 {
+                "It isn\u{2019}t"
+            } else {
+                "Not all of it is"
+            },
+            escape_inline(&translation_code.to_uppercase())
+        )
+    })
+}
+
+/// One note as Markdown, for Copy as Markdown: its reference as a heading
+/// line, its verses (from `chapter_verses`, every verse its chapter has in
+/// the translation `translation_code`) quoted as Copy as… quotes them in
+/// Markdown (the notes export's quote, the KJV's supplied words in
+/// italics, then the reference and translation), what the translation
+/// doesn't number said as the export says it, then the note's text as
+/// the reader wrote it. No newline after the last line, as Copy as….
+pub fn note_markdown(
+    note: &Note,
+    book_name: &str,
+    chapter_verses: &[Verse],
+    translation_code: &str,
+) -> String {
+    let reference = passage_reference(book_name, note.chapter, note.verse_start, note.verse_end);
+    let quoted: Vec<Verse> = chapter_verses
+        .iter()
+        .filter(|v| (note.verse_start..=note.verse_end).contains(&v.verse))
+        .cloned()
+        .collect();
+    let mut out = format!("## {}\n", escape_inline(&reference));
+    if !quoted.is_empty() {
+        let citation = format!("{reference} ({})", translation_code.to_uppercase());
+        let passage = passage_copy::Passage {
+            translation_code,
+            citation: &citation,
+            verses: &quoted,
+        };
+        let _ = write!(out, "\n{}\n", passage.render(CopyFormat::Markdown));
+    }
+    if let Some(missing) = not_numbered(note, quoted.len(), translation_code) {
+        let _ = write!(out, "\n{missing}\n");
+    }
+    let _ = write!(out, "\n{}", note.body);
+    out
+}
+
+/// One book's file of an export written as one file per book.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BookFile {
+    /// Its name in the folder, e.g. "43 John.md".
+    pub file_name: String,
+    /// The Markdown.
+    pub contents: String,
+    /// How many notes it holds.
+    pub notes: usize,
+}
+
+/// A book's file name in a folder of notes: its canonical number first,
+/// two digits, so the files sort in Bible order ("01 Genesis.md", "43
+/// John.md", "62 1 John.md"), with any character a file name can't hold
+/// on some system as a hyphen.
+pub fn book_file_name(book_id: i64, book_name: &str) -> String {
+    let name: String = book_name
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '-',
+            c if c.is_control() => '-',
+            c => c,
+        })
+        .collect();
+    format!("{book_id:02} {}.md", name.trim())
 }
 
 /// "John 3:16" or "John 3:16–18", as the app writes a passage.
@@ -1351,5 +1457,156 @@ mod tests {
             "gospel-getter-notes-song-of-solomon-2026-10-09.md"
         );
         assert_eq!(file_name(None, date), "gospel-getter-notes-2026-10-09.md");
+    }
+
+    /// The export of `notes` as one file per book, quoting `chapters`, in
+    /// KJV, at -06:00, with `filter`; and the same as one file.
+    fn by_book(
+        notes: &[Note],
+        chapters: &[((i64, i64), Vec<Verse>)],
+        filter: &NotesFilter,
+    ) -> (Vec<BookFile>, String) {
+        let books = with_romans();
+        let verses: HashMap<_, _> = chapters.iter().cloned().collect();
+        let export = export(notes, &books, &verses, "kjv", filter);
+        (export.by_book(&mountain()), export.render(&mountain()))
+    }
+
+    #[test]
+    fn one_file_per_book_is_named_in_bible_order() {
+        assert_eq!(book_file_name(43, "John"), "43 John.md");
+        assert_eq!(book_file_name(1, "Genesis"), "01 Genesis.md");
+        assert_eq!(book_file_name(62, "1 John"), "62 1 John.md");
+        assert_eq!(
+            book_file_name(22, "Song of Solomon"),
+            "22 Song of Solomon.md"
+        );
+        assert_eq!(book_file_name(66, "Re/ve:la*tion?"), "66 Re-ve-la-tion-.md");
+        let (files, _) = by_book(&spread(), &[], &NotesFilter::default());
+        let names: Vec<&str> = files.iter().map(|f| f.file_name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["19 Psalms.md", "43 John.md", "45 Romans.md", "62 1 John.md"]
+        );
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, names, "a folder sorts them in Bible order");
+        assert_eq!(
+            files.iter().map(|f| f.notes).collect::<Vec<_>>(),
+            [1, 4, 1, 1]
+        );
+    }
+
+    #[test]
+    fn each_book_s_file_holds_its_notes_as_the_single_file_writes_them() {
+        let notes = spread();
+        let chapters = [((JOHN, 3), verses(1..=36)), ((19, 23), verses(1..=6))];
+        let (files, single) = by_book(&notes, &chapters, &NotesFilter::default());
+        // Every note's section, in order, is the single file's, byte for
+        // byte (a heading level apart: the single file's "###" under its
+        // book's "##" is "##" in the book's own file).
+        // (The single file's sections of one line are its books' headings.)
+        let single_notes: Vec<&str> = sections(&single)
+            .into_iter()
+            .filter(|s| s.lines().count() > 1)
+            .collect();
+        let per_book: Vec<&str> = files.iter().flat_map(|f| sections(&f.contents)).collect();
+        assert_eq!(per_book, single_notes);
+        // Each is that book's export alone: its title and date line.
+        let john = &files[1];
+        assert!(john.contents.starts_with(
+            "# Notes on John\n\n\
+             Exported Oct 10, 2026 \u{b7} Verse text: King James Version \u{b7} 4 notes\n\n\
+             ## John 1:1\n"
+        ));
+        assert_eq!(
+            john.contents,
+            render_filtered(
+                "kjv",
+                &notes,
+                &chapters,
+                &NotesFilter {
+                    books: vec![JOHN],
+                    ..NotesFilter::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn one_file_per_book_keeps_the_filter_s_books_chapters_and_dates() {
+        let notes = spread();
+        let written = NotesFilter {
+            books: vec![JOHN, 62, 19],
+            written_from: Some(day(2026, 10, 9)),
+            ..NotesFilter::default()
+        };
+        let (files, single) = by_book(&notes, &[], &written);
+        assert_eq!(
+            files
+                .iter()
+                .map(|f| f.file_name.as_str())
+                .collect::<Vec<_>>(),
+            ["43 John.md", "62 1 John.md"],
+            "Psalms has no note written since Oct 9"
+        );
+        assert!(files[0].contents.contains("\nWritten since Oct 9, 2026\n"));
+        assert_eq!(files.iter().map(|f| f.notes).sum::<usize>(), 4);
+        assert!(single.contains("4 notes"));
+        let chapters = NotesFilter {
+            books: vec![JOHN],
+            chapters: Some((3, 3)),
+            ..NotesFilter::default()
+        };
+        let (files, _) = by_book(&notes, &[], &chapters);
+        assert_eq!(files.len(), 1);
+        assert!(files[0].contents.starts_with("# Notes on John 3\n"));
+        assert_eq!(files[0].notes, 2);
+        let (files, _) = by_book(
+            &notes,
+            &[],
+            &NotesFilter {
+                books: vec![1],
+                ..NotesFilter::default()
+            },
+        );
+        assert!(files.is_empty(), "a book with no notes has no file");
+    }
+
+    #[test]
+    fn copy_as_markdown_quotes_the_verses_then_the_note_as_written() {
+        let mut n = note(1, JOHN, 3, (16, 17), "See **Rom 5:8**.\n\n- one\n- two");
+        n.created_at = "2026-10-10T15:00:00.000Z".to_string();
+        assert_eq!(
+            note_markdown(&n, "John", &verses(1..=36), "web"),
+            "## John 3:16\u{2013}17\n\n\
+             > **16** Verse 16. **17** Verse 17.\n>\n> \u{2014} John 3:16\u{2013}17 (WEB)\n\n\
+             See **Rom 5:8**.\n\n- one\n- two"
+        );
+        // The KJV's supplied words in italics, as the export has them.
+        let kjv = [Verse {
+            verse: 16,
+            text: "For God so loved the world, that he gave his {only begotten} Son".to_string(),
+            footnotes: Vec::new(),
+        }];
+        let one = note(2, JOHN, 3, (16, 16), "Loved.");
+        assert!(
+            note_markdown(&one, "John", &kjv, "kjv")
+                .contains(&crate::passage_copy::markdown_quote("kjv", &[&kjv[0]]))
+        );
+        // Verses it doesn't number are said so, as the export says it.
+        assert_eq!(
+            note_markdown(
+                &note(3, 40, 17, (21, 21), "Gap."),
+                "Matthew",
+                &verses(1..=20),
+                "bsb"
+            ),
+            "## Matthew 17:21\n\n*It isn\u{2019}t numbered in the BSB.*\n\nGap."
+        );
+        assert!(
+            note_markdown(&note(4, JOHN, 3, (36, 37), "End."), "John", &verses(1..=36), "kjv")
+                .contains("> **36** Verse 36.\n>\n> \u{2014} John 3:36\u{2013}37 (KJV)\n\n*Not all of it is numbered in the KJV.*\n\nEnd.")
+        );
     }
 }

@@ -2,6 +2,10 @@
 //! `run`; the modules are public so the frontend test bridge
 //! (`examples/frontend_bridge.rs`) can drive the same command logic.
 
+// The books' abbreviations, shared with the page's Rust pieces (ui-leptos),
+// which compile the same file.
+#[path = "../../shared/book_aliases.rs"]
+pub mod book_aliases;
 pub mod commands;
 pub mod credit_links;
 pub mod db;
@@ -25,6 +29,7 @@ pub mod retry;
 pub mod start_here;
 pub mod support_link;
 pub mod updater;
+pub mod web_link;
 // A verse's parts and footnotes as shown, shared with the page's Rust
 // pieces (ui-leptos), which compile the same file.
 #[path = "../../shared/verse_parts.rs"]
@@ -96,6 +101,7 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::remove_highlight,
         commands::list_notes,
         commands::list_all_notes,
+        commands::get_note_markdown,
         commands::add_note,
         commands::update_note,
         commands::delete_note,
@@ -106,6 +112,8 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::get_notes_export_options,
         commands::count_notes_export,
         commands::export_notes,
+        commands::export_notes_by_book,
+        commands::confirm_notes_export_by_book,
         commands::choose_import_file,
         commands::apply_import,
         commands::cancel_import,
@@ -115,6 +123,7 @@ fn invoke_handler<R: tauri::Runtime>()
         updater::open_release_notes,
         credit_links::open_credit_link,
         support_link::open_support_page,
+        web_link::open_web_link,
     ]
 }
 

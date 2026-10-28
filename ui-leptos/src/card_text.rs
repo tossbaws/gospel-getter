@@ -13,6 +13,7 @@
 //! `footnote_html`, escaped, never changed.
 
 use crate::dto::{SelectionNote, Verse, Xref};
+use crate::note_markdown::{Layout, note_html};
 use crate::passage_reference::passage_reference;
 use crate::reader_text::{escape_html, footnote_html, verse_html};
 use crate::verse_parts::Footnote;
@@ -279,9 +280,10 @@ pub fn preview_failed(reference: &str, failure: &str) -> String {
 }
 
 /// The selection's Notes section: up to [`NOTES_SHOWN`] notes (all of
-/// them with `show_all`), each with its "more" (shown by the card where
-/// the text is cut short) and Edit, then "Show all"; or why they couldn't
-/// be loaded.
+/// them with `show_all`), each its text as Markdown (`note_markdown`,
+/// the references in it links to their passages) with its "more" (shown
+/// by the card where the text is cut short), Edit and Copy as Markdown,
+/// then "Show all"; or why they couldn't be loaded.
 pub fn notes_html(notes: &[SelectionNote], error: &str, show_all: bool) -> String {
     if !error.is_empty() {
         return format!(
@@ -302,16 +304,17 @@ pub fn notes_html(notes: &[SelectionNote], error: &str, show_all: bool) -> Strin
             format!(
                 "<article class=\"note-card\" data-note-id=\"{id}\">\n\
                  {s28}<p class=\"note-card-head\"><span class=\"note-card-ref\">{reference}</span> <time class=\"note-card-date\" datetime=\"{created}\">{display}</time></p>\n\
-                 {s28}<p class=\"note-card-body\" id=\"note-card-body-{id}\">{body}</p>\n\
+                 {s28}<div class=\"note-card-body note-text\" id=\"note-card-body-{id}\">{body}</div>\n\
                  {s28}<span class=\"note-card-actions\">\n\
                  {s32}<button type=\"button\" class=\"note-link note-more\" aria-expanded=\"false\" aria-controls=\"note-card-body-{id}\" hidden>more</button>\n\
                  {s32}<button type=\"button\" class=\"note-link note-edit\" data-note-id=\"{id}\" aria-label=\"Edit note on {reference}\">Edit</button>\n\
+                 {s32}<button type=\"button\" class=\"note-link note-copy\" data-note-id=\"{id}\" aria-label=\"Copy the note on {reference} as Markdown\">Copy as Markdown</button>\n\
                  {s28}</span>\n\
                  {s24}</article>",
                 id = n.id,
                 created = escape_html(&n.created_at),
                 display = escape_html(&n.created_at_display),
-                body = escape_html(&n.body),
+                body = note_html(&n.body, &n.links, &[], Layout::Blocks),
             )
         })
         .collect();
@@ -719,6 +722,7 @@ mod tests {
             body: body.to_string(),
             created_at: "2026-10-09T12:00:00Z".to_string(),
             created_at_display: "Oct 9, 2026".to_string(),
+            links: Vec::new(),
         }
     }
 
@@ -864,7 +868,23 @@ mod tests {
         assert_eq!(html.matches("<article").count(), 3);
         assert!(html.ends_with(r#"</article><button type="button" class="note-link note-show-all">Show all 4 notes</button>"#));
         assert!(html.contains(
-            "<article class=\"note-card\" data-note-id=\"1\">\n                            <p class=\"note-card-head\"><span class=\"note-card-ref\">John 3:16</span> <time class=\"note-card-date\" datetime=\"2026-10-09T12:00:00Z\">Oct 9, 2026</time></p>\n                            <p class=\"note-card-body\" id=\"note-card-body-1\">Note &lt;1&gt;</p>\n                            <span class=\"note-card-actions\">\n                                <button type=\"button\" class=\"note-link note-more\" aria-expanded=\"false\" aria-controls=\"note-card-body-1\" hidden>more</button>\n                                <button type=\"button\" class=\"note-link note-edit\" data-note-id=\"1\" aria-label=\"Edit note on John 3:16\">Edit</button>\n                            </span>\n                        </article>"
+            "<article class=\"note-card\" data-note-id=\"1\">\n                            <p class=\"note-card-head\"><span class=\"note-card-ref\">John 3:16</span> <time class=\"note-card-date\" datetime=\"2026-10-09T12:00:00Z\">Oct 9, 2026</time></p>\n                            <div class=\"note-card-body note-text\" id=\"note-card-body-1\"><p>Note &lt;1&gt;</p></div>\n                            <span class=\"note-card-actions\">\n                                <button type=\"button\" class=\"note-link note-more\" aria-expanded=\"false\" aria-controls=\"note-card-body-1\" hidden>more</button>\n                                <button type=\"button\" class=\"note-link note-edit\" data-note-id=\"1\" aria-label=\"Edit note on John 3:16\">Edit</button>\n                                <button type=\"button\" class=\"note-link note-copy\" data-note-id=\"1\" aria-label=\"Copy the note on John 3:16 as Markdown\">Copy as Markdown</button>\n                            </span>\n                        </article>"
+        ));
+        // A note's text is Markdown, its references links.
+        let mut marked = note(5, "**See** Rom 5:8\n- one");
+        marked.links = vec![crate::dto::NoteLink {
+            start: 8,
+            end: 15,
+            book_id: 45,
+            chapter: 5,
+            verse_start: Some(8),
+            verse_end: Some(8),
+            reference: "Romans 5:8".to_string(),
+        }];
+        assert!(notes_html(&[marked], "", false).contains(
+            "<div class=\"note-card-body note-text\" id=\"note-card-body-5\"><p><strong>See</strong> \
+             <a class=\"note-ref-link\" href=\"#\" data-book=\"45\" data-chapter=\"5\" data-start=\"8\" data-end=\"8\" title=\"Go to Romans 5:8\">Rom 5:8</a></p>\
+             <ul><li>one</li></ul></div>"
         ));
         let all = notes_html(&notes, "", true);
         assert_eq!(all.matches("<article").count(), 4);
