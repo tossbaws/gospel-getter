@@ -93,10 +93,10 @@ keeps the two the same.
   `src/reader_text.rs`, `src/card_text.rs`, `src/margin_text.rs`,
   `src/keyboard_text.rs`, `src/page_text.rs`: the
   pieces' words, numbers and rules (Export notes' filter, the import's
-  sentences, the note's length rule, the welcome's fresh-install rule, the
-  updater's sentences, `megabytes` and download progress, the Library's
-  rows, color names, filter, notes search and focus arithmetic; the shortcuts; the
-  palette's commands, their reasons and its word matching; the search's
+  sentences, the note's length rule and its drafts, the welcome's
+  fresh-install rule, the updater's sentences, `megabytes` and download
+  progress, the Library's rows, color names, filter, notes search and
+  focus arithmetic; the shortcuts; the palette's commands, their reasons and its word matching; the search's
   sentences, active option and marked words; the picker's compact grid,
   Random chapter's pick, its keyboard moves and how far it scrolls; the
   size keys; the surfaces' table, the sidebar's rule and the ☰ menu's

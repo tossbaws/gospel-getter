@@ -13,6 +13,14 @@ versions follow [Semantic Versioning](https://semver.org/).
   abbreviation, like "Rom" or "Mk", the chapter, a verse), whatever the
   capitals or accents. It says how many of your notes it shows, marks
   the words it found, and Escape clears it.
+- Notes keep what you're typing as a draft: if the app quits, or you
+  close the note with Cancel and the new "Keep for later", the text is
+  kept on this computer, and when you open that note again (or add a
+  note on the same verses) it says "You have unsaved text from …", with
+  Restore and Discard. Nothing is restored or saved without you asking.
+  Saving or discarding the note forgets the draft, and so does deleting
+  the note. Drafts stay on this computer: they're in neither a backup
+  nor Export notes, and they're kept for 30 days (the 20 newest).
 
 ## [2.20.0] - 2026-10-27
 

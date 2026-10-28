@@ -32,7 +32,8 @@
 # markers in a narrow window, Psalm 119 with a note on every verse) and 64
 # (the Library's Notes tab searched) run on the app given; for 58 (a cold start to
 # the saved chapter), 59 (at the verse the reader was at), 26 and 45 it is
-# closed and started again on the same data. The updater's checks (9 to 13) run on
+# closed and started again on the same data, and for 65 (a note being typed
+# as the app quits, offered back as a draft) once more. The updater's checks (9 to 13) run on
 # GUI_CHECK_UPDATER_APP: the GUI checks' test build (cargo build --release
 # --features gui-test-updater), against the checks' own local update
 # server, with a signing key made for the run; without it they fail as not

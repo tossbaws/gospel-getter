@@ -5,6 +5,13 @@
 //! notes it shows, and marks what it found in the theme's colours; Escape
 //! clears it (every note again, the Library still open), and the next
 //! Escape closes the Library, as before. Screenshots in Chi Rho and Vellum.
+//!
+//! Check 65: a note's draft survives the app quitting. At the end of the
+//! second session a new note is typed with the keyboard on verse 2 and
+//! left in the open editor, kept as a draft once typing pauses; the app is
+//! quit (the WebDriver session ended) and started again, and + Add note on
+//! that verse offers the draft, its text box empty until Restore puts it
+//! in; Cancel, Discard then forgets it (screenshot of the offer).
 
 use anyhow::{Result, ensure};
 use serde_json::Value;
@@ -231,5 +238,124 @@ impl Run<'_> {
             self.close_with_escape("Aa", "aa-popover").await?;
         }
         Ok(())
+    }
+}
+
+/// The text check 65 types into a new note on verse 2, and looks for
+/// after the app is quit and started again.
+const DRAFT_TEXT: &str = "gui-check draft: typed, then the app was quit";
+
+/// Check 65's screenshot, in the look check 25 left.
+const DRAFT_SHOT: &str = "65-note-draft-offer.png";
+
+/// The verse check 65's draft is on.
+const DRAFT_VERSE: u32 = 2;
+
+/// The drafts the page keeps in local storage (`note_text::DRAFTS_KEY`):
+/// their keys and texts.
+const DRAFTS_JS: &str = "const kept = JSON.parse(localStorage.getItem('gospel-getter-note-drafts') || '{\"drafts\":[]}');
+    return kept.drafts.map((d) => [d.key, d.text]);";
+
+/// Where check 65 left its draft: the chapter it's in.
+pub(super) struct DraftLeft {
+    pub(super) heading: String,
+}
+
+impl Run<'_> {
+    /// Check 65, before the app quits: a new note on verse 2 of the
+    /// chapter being read, typed with the keyboard and left in the open
+    /// editor, kept as a draft once typing pauses.
+    pub(super) async fn draft_typed(&mut self) -> Result<DraftLeft> {
+        self.plain_reading().await?;
+        let heading = self.heading().await?;
+        self.select(DRAFT_VERSE).await?;
+        let ui = &self.ui;
+        ui.press("press N (write a note)", "n").await?;
+        ui.wait(
+            "the note editor to show, focus in its text box",
+            &format!(
+                "{VISIBLE_JS} return [visible(document.getElementById('note-panel'))
+                     && document.activeElement && document.activeElement.id === 'note-input', null];"
+            ),
+        )
+        .await?;
+        ui.press("type the note", DRAFT_TEXT).await?;
+        ui.wait_with(
+            "the text to be kept as a draft once typing pauses",
+            &format!(
+                "const kept = (() => {{ {DRAFTS_JS} }})();
+                 return [kept.some(([, text]) => text === arguments[0]), kept];"
+            ),
+            vec![serde_json::json!(DRAFT_TEXT)],
+        )
+        .await?;
+        Ok(DraftLeft { heading })
+    }
+
+    /// Check 65, in the app started again: + Add note on the same verse
+    /// offers the draft (the text box empty till Restore), Restore puts it
+    /// in, and Cancel, Discard forgets it.
+    pub(super) async fn draft_offered(&mut self, left: &DraftLeft) -> Result<String> {
+        let ui = &self.ui;
+        ui.wait_within(
+            "the page to boot again",
+            "const h = document.querySelector('.chapter-main .chapter-heading');
+             return [!!h && !!document.getElementById('note-input'), h ? h.textContent.trim() : null];",
+            Vec::new(),
+            Some(self.config.session_timeout),
+        )
+        .await?;
+        let here = self.heading().await?;
+        ensure!(
+            here == left.heading,
+            "the app started again at {here}, not {} where the draft was typed",
+            left.heading
+        );
+        self.select(DRAFT_VERSE).await?;
+        let ui = &self.ui;
+        ui.press("press N (write a note)", "n").await?;
+        let offer = ui
+            .wait(
+                "the editor to offer the draft, its text box empty",
+                &format!(
+                    "{VISIBLE_JS}
+                     const offer = document.getElementById('note-draft');
+                     const input = document.getElementById('note-input');
+                     const text = document.getElementById('note-draft-text');
+                     return [visible(offer) && input.value === '' && /^You have unsaved text from /.test(text.textContent),
+                         {{ shown: visible(offer), said: text.textContent, value: input.value }}];"
+                ),
+            )
+            .await?;
+        self.shot("screenshot: the note editor offering a draft", DRAFT_SHOT)
+            .await;
+        let ui = &self.ui;
+        ui.click("click Restore", "#note-draft-restore").await?;
+        let restored = ui
+            .wait_with(
+                "the draft to be in the text box",
+                "const input = document.getElementById('note-input');
+                 return [input.value === arguments[0] && document.activeElement === input, input.value];",
+                vec![serde_json::json!(DRAFT_TEXT)],
+            )
+            .await?;
+        // Put back: Cancel, Discard, and the draft is gone.
+        ui.click("click Cancel", "#note-cancel").await?;
+        ui.click("click Discard", "#note-discard-yes").await?;
+        ui.wait(
+            "the editor to close and the draft to be forgotten",
+            &format!(
+                "const kept = (() => {{ {DRAFTS_JS} }})();
+                 return [document.getElementById('note-overlay').hidden && kept.length === 0, kept];"
+            ),
+        )
+        .await?;
+        Ok(format!(
+            "typed in a new note on {}:{DRAFT_VERSE}, the app quit with the editor open and started again: \
+             + Add note there said \"{}\" with the text box empty; Restore put \"{}\" in it; Cancel, Discard forgot it",
+            left.heading,
+            offer["said"].as_str().unwrap_or_default(),
+            restored.as_str().unwrap_or_default()
+        ))
     }
 }

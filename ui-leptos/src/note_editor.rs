@@ -16,6 +16,16 @@
 //! or + Add note, or the chapter heading. No focus it moves scrolls the
 //! page.
 //!
+//! What's typed is kept as a draft (R16), in local storage on this
+//! computer only, by the note's id for an edit and by its verses for a new
+//! note (`note_text`): once typing pauses, and at once when the text box
+//! loses focus, the window is hidden or left, or the editor is closed with
+//! "Keep for later" (the discard prompt's third choice). Saving, Discard
+//! and Delete forget it. Opened again on that note (or a new note on those
+//! verses) with a draft unlike what's saved, the editor says so, with
+//! Restore and Discard; it never puts the draft in the text box by itself,
+//! and never saves it without Save.
+//!
 //! This is the page's note panel script (`ui/index.html` at fa5969d,
 //! `charCount` to its keydown trap) as a Leptos component: the same ids,
 //! classes, ARIA, `hidden` and `disabled`, text and focus order. The panel
@@ -27,7 +37,9 @@
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use wasm_bindgen::JsValue;
+use serde::Serialize;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge::{self, NoteRequest, OtherNote};
@@ -35,7 +47,70 @@ use crate::card;
 use crate::dom::{self, focus};
 use crate::dto::{AddNoteArgs, DeleteNoteArgs, UpdateNoteArgs};
 use crate::ipc;
-use crate::note_text;
+use crate::note_text::{self, DRAFTS_KEY, Draft, DraftPassage, Drafts};
+
+// ---- The drafts, as local storage keeps them.
+
+fn storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok()?
+}
+
+fn now() -> f64 {
+    js_sys::Date::now()
+}
+
+/// Every draft kept; none if there are none, or what's kept can't be read.
+fn read_drafts() -> Drafts {
+    storage()
+        .and_then(|s| s.get_item(DRAFTS_KEY).ok().flatten())
+        .and_then(|text| js_sys::JSON::parse(&text).ok())
+        .and_then(|value| serde_wasm_bindgen::from_value(value).ok())
+        .unwrap_or_default()
+}
+
+/// Keeps `drafts`. Should local storage be full, the oldest go until they
+/// fit.
+fn write_drafts(mut drafts: Drafts) {
+    let Some(storage) = storage() else {
+        return;
+    };
+    loop {
+        if drafts.drafts.is_empty() {
+            let _ = storage.remove_item(DRAFTS_KEY);
+            return;
+        }
+        let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+        let written = drafts
+            .serialize(&serializer)
+            .map_err(JsValue::from)
+            .and_then(|value| js_sys::JSON::stringify(&value))
+            .and_then(|json| storage.set_item(DRAFTS_KEY, &String::from(json)));
+        match written {
+            Ok(()) => return,
+            Err(e) => {
+                ipc::log_error("A note draft couldn't be kept; dropping the oldest", &e);
+                drafts.drafts.remove(0);
+            }
+        }
+    }
+}
+
+/// Changes the drafts with `change`, dropping those too old or too many,
+/// and keeps them if anything changed (`change` says whether it did).
+fn change_drafts(change: impl FnOnce(&mut Drafts) -> bool) {
+    let mut drafts = read_drafts();
+    let pruned = drafts.prune(now());
+    if change(&mut drafts) || pruned {
+        write_drafts(drafts);
+    }
+}
+
+/// Forgets the drafts of notes not among `ids`, every note there is: the
+/// Library calls this with each list of notes it loads, so a note deleted
+/// anywhere (or replaced by an import) takes its draft with it.
+pub fn keep_drafts_of(ids: &[i64]) {
+    change_drafts(|drafts| drafts.keep_notes(ids));
+}
 
 /// The note being written or edited, while the editor is open.
 #[derive(Clone)]
@@ -49,6 +124,16 @@ struct Session {
     /// What the editor opened with (the note's text, or nothing).
     initial: String,
     return_to: Option<HtmlElement>,
+    /// Whose draft the text is (`note_text::draft_key`), and its verses.
+    draft_key: String,
+    draft_passage: DraftPassage,
+    /// The draft offered when the editor opened, until it's restored or
+    /// discarded.
+    offered: Option<Draft>,
+    /// Whether the text has been typed in (or a draft restored) since the
+    /// editor opened: only then is it kept as a draft, so an offered draft
+    /// stays until it's answered.
+    typed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -56,15 +141,20 @@ struct Editor {
     session: StoredValue<Option<Session>, LocalStorage>,
     next_id: StoredValue<u64>,
     busy: StoredValue<bool>,
+    /// The pause in typing being waited for, to keep a draft.
+    draft_timer: StoredValue<Option<i32>>,
     title: RwSignal<String>,
     passage_html: RwSignal<String>,
     text_shown: RwSignal<String>,
     others: RwSignal<Vec<OtherNote>>,
     error: RwSignal<String>,
+    /// What the draft offer says.
+    draft_line: RwSignal<String>,
     overlay: NodeRef<html::Div>,
     panel: NodeRef<html::Div>,
     body: NodeRef<html::Div>,
     others_box: NodeRef<html::Details>,
+    draft_box: NodeRef<html::Div>,
     input: NodeRef<html::Textarea>,
     length: NodeRef<html::P>,
     buttons: NodeRef<html::Div>,
@@ -103,6 +193,9 @@ impl Editor {
     /// typed meanwhile is lost when the editor closes, and Save stays off,
     /// so one save is one note.
     fn set_busy(self, busy: bool) {
+        if busy {
+            self.cancel_draft_timer();
+        }
         self.busy.set_value(busy);
         if let Some(input) = self.input.get() {
             input.set_read_only(busy);
@@ -120,6 +213,153 @@ impl Editor {
             others_box.set_hidden(others.is_empty());
         }
         self.others.set(others);
+    }
+
+    // ---- Drafts.
+
+    fn cancel_draft_timer(self) {
+        if let (Some(timer), Some(window)) = (self.draft_timer.get_value(), web_sys::window()) {
+            window.clear_timeout_with_handle(timer);
+        }
+        self.draft_timer.set_value(None);
+    }
+
+    /// Something was typed: the text is kept as a draft once typing
+    /// pauses.
+    fn on_typed(self) {
+        self.session.update_value(|s| {
+            if let Some(s) = s {
+                s.typed = true;
+            }
+        });
+        self.update_controls();
+        self.cancel_draft_timer();
+        let later = Closure::once_into_js(move || {
+            self.draft_timer.set_value(None);
+            self.keep_draft();
+        });
+        let timer = web_sys::window().and_then(|w| {
+            w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                later.unchecked_ref(),
+                note_text::DRAFT_DELAY_MS,
+            )
+            .ok()
+        });
+        match timer {
+            Some(timer) => self.draft_timer.set_value(Some(timer)),
+            None => self.keep_draft(),
+        }
+    }
+
+    /// Keeps the text as the note's draft now, or forgets the draft when
+    /// there's nothing worth keeping (`note_text::worth_keeping`); only
+    /// once something's been typed, while the editor is open and nothing
+    /// is being saved.
+    fn keep_draft(self) {
+        self.cancel_draft_timer();
+        if !self.is_open() || self.busy.get_value() {
+            return;
+        }
+        let Some((key, passage, initial)) = self.session.with_value(|s| {
+            s.as_ref()
+                .filter(|s| s.typed)
+                .map(|s| (s.draft_key.clone(), s.draft_passage, s.initial.clone()))
+        }) else {
+            return;
+        };
+        let text = self.text();
+        if note_text::worth_keeping(&text, &initial) {
+            change_drafts(|drafts| {
+                drafts.put(Draft {
+                    key,
+                    passage,
+                    text,
+                    at: now(),
+                });
+                true
+            });
+        } else {
+            change_drafts(|drafts| drafts.remove(&key));
+        }
+    }
+
+    /// Forgets the draft `key` of the editor's opening `id`: its note was
+    /// saved, discarded or deleted. Nothing more is kept as its draft
+    /// while that opening lasts, unless something's typed again.
+    fn forget_draft(self, id: u64, key: &str) {
+        if self.same_session(id) {
+            self.cancel_draft_timer();
+            self.session.update_value(|s| {
+                if let Some(s) = s {
+                    s.typed = false;
+                }
+            });
+        }
+        change_drafts(|drafts| drafts.remove(key));
+    }
+
+    fn show_draft_offer(self, offered: Option<&Draft>) {
+        self.draft_line.set(
+            offered
+                .map(|d| note_text::draft_offer(d.at, now()))
+                .unwrap_or_default(),
+        );
+        if let Some(draft_box) = self.draft_box.get() {
+            draft_box.set_hidden(offered.is_none());
+        }
+    }
+
+    /// Restore: the draft goes in the text box, to be saved with Save (or
+    /// kept as the draft it is).
+    fn restore_draft(self) {
+        let Some(offered) = self
+            .session
+            .with_value(|s| s.as_ref().and_then(|s| s.offered.clone()))
+        else {
+            return;
+        };
+        self.session.update_value(|s| {
+            if let Some(s) = s {
+                s.offered = None;
+                s.typed = true;
+            }
+        });
+        self.show_draft_offer(None);
+        if let Some(input) = self.input.get() {
+            input.set_value(&offered.text);
+            focus(&input);
+            let end = offered.text.encode_utf16().count() as u32;
+            let _ = input.set_selection_range(end, end);
+        }
+        self.update_controls();
+        self.keep_draft();
+    }
+
+    /// Discard: the draft offered is forgotten (unless what's typed since
+    /// has taken its place), and the text box keeps what it has.
+    fn discard_draft(self) {
+        let Some((key, offered)) = self.session.with_value(|s| {
+            s.as_ref()
+                .and_then(|s| Some((s.draft_key.clone(), s.offered.clone()?)))
+        }) else {
+            return;
+        };
+        self.session.update_value(|s| {
+            if let Some(s) = s {
+                s.offered = None;
+            }
+        });
+        self.show_draft_offer(None);
+        change_drafts(|drafts| {
+            let still = drafts
+                .drafts
+                .iter()
+                .any(|d| d.key == key && d.text == offered.text);
+            still && drafts.remove(&key)
+        });
+        if let Some(input) = self.input.get() {
+            focus(&input);
+        }
     }
 
     fn show_discard_prompt(self, show: bool) {
@@ -143,6 +383,28 @@ impl Editor {
             .map(|n| n.body.clone())
             .unwrap_or_default();
         let editing = request.mode == "edit";
+        let draft_passage = DraftPassage {
+            book: request.passage.book_id,
+            chapter: request.passage.chapter,
+            start: request.passage.start,
+            end: request.passage.end,
+        };
+        let draft_key = note_text::draft_key(request.note.as_ref().map(|n| n.id), draft_passage);
+        // A draft unlike what's saved is offered; any other of this note's
+        // (what's saved now, or on other verses) is forgotten.
+        let offered = {
+            let mut drafts = read_drafts();
+            let pruned = drafts.prune(now());
+            let offered = drafts
+                .offer(&draft_key, draft_passage, &initial, now())
+                .cloned();
+            let stale = offered.is_none() && drafts.remove(&draft_key);
+            if pruned || stale {
+                write_drafts(drafts);
+            }
+            offered
+        };
+        self.cancel_draft_timer();
         let code = request.code.to_uppercase();
         self.title.set(request.reference.clone());
         self.passage_html.set(request.passage_html.clone());
@@ -154,7 +416,12 @@ impl Editor {
             note,
             initial: initial.clone(),
             return_to,
+            draft_key,
+            draft_passage,
+            offered: offered.clone(),
+            typed: false,
         }));
+        self.show_draft_offer(offered.as_ref());
         if let Some(others_box) = self.others_box.get() {
             others_box.set_open(false);
         }
@@ -192,6 +459,7 @@ impl Editor {
     }
 
     fn close(self) {
+        self.cancel_draft_timer();
         if let Some(overlay) = self.overlay.get() {
             overlay.set_hidden(true);
         }
@@ -241,6 +509,29 @@ impl Editor {
         }
     }
 
+    /// The discard prompt's Discard: the text goes, and its draft with it.
+    fn discard(self) {
+        if let Some((id, key)) = self
+            .session
+            .with_value(|s| s.as_ref().map(|s| (s.id, s.draft_key.clone())))
+        {
+            self.forget_draft(id, &key);
+        }
+        self.close();
+    }
+
+    /// The discard prompt's Keep for later: the editor closes, the text
+    /// kept as the note's draft, offered when it's opened again.
+    fn keep_for_later(self) {
+        self.session.update_value(|s| {
+            if let Some(s) = s {
+                s.typed = true;
+            }
+        });
+        self.keep_draft();
+        self.close();
+    }
+
     fn same_session(self, id: u64) -> bool {
         self.session
             .with_value(|s| s.as_ref().is_some_and(|s| s.id == id))
@@ -285,6 +576,9 @@ impl Editor {
                     }
                 }
             };
+            if result.is_ok() {
+                self.forget_draft(session.id, &session.draft_key);
+            }
             if let Err(e) = result {
                 ipc::log_error("Failed to save the note", &e);
                 if self.same_session(session.id) {
@@ -342,6 +636,7 @@ impl Editor {
                     return;
                 }
             };
+            self.forget_draft(session.id, &session.draft_key);
             card::refresh_notes().await;
             if self.same_session(session.id) {
                 self.close();
@@ -432,6 +727,23 @@ impl Editor {
             }
         });
         dom::on_window_keydown(move |event: KeyboardEvent| self.on_keydown(event));
+        // The text is kept at once when the window is hidden or closed,
+        // loses focus, or the pointer leaves the page (on its way to the
+        // window's close button: closing a window can end the page without
+        // a `pagehide`).
+        if let Some(window) = web_sys::window() {
+            for name in ["pagehide", "blur"] {
+                dom::on(&window, name, move |_| self.keep_draft());
+            }
+            if let Some(document) = window.document() {
+                dom::on(&document, "visibilitychange", move |_| {
+                    if bridge::document().is_some_and(|d| d.hidden()) {
+                        self.keep_draft();
+                    }
+                });
+                dom::on(&document, "mouseleave", move |_| self.keep_draft());
+            }
+        }
     }
 }
 
@@ -442,15 +754,18 @@ pub fn NoteEditor() -> impl IntoView {
         session: StoredValue::new_local(None),
         next_id: StoredValue::new(0),
         busy: StoredValue::new(false),
+        draft_timer: StoredValue::new(None),
         title: RwSignal::new(String::new()),
         passage_html: RwSignal::new(String::new()),
         text_shown: RwSignal::new(String::new()),
         others: RwSignal::new(Vec::new()),
         error: RwSignal::new(String::new()),
+        draft_line: RwSignal::new(String::new()),
         overlay: NodeRef::new(),
         panel: NodeRef::new(),
         body: NodeRef::new(),
         others_box: NodeRef::new(),
+        draft_box: NodeRef::new(),
         input: NodeRef::new(),
         length: NodeRef::new(),
         buttons: NodeRef::new(),
@@ -527,6 +842,29 @@ pub fn NoteEditor() -> impl IntoView {
                             if title.is_empty() { String::new() } else { format!("Your note on {title}") }
                         }}
                     </label>
+                    <div id="note-draft" class="note-draft" hidden node_ref=editor.draft_box>
+                        <p id="note-draft-text" class="note-draft-text" role="alert">{move || editor.draft_line.get()}</p>
+                        <span class="note-draft-buttons">
+                            <button
+                                type="button"
+                                id="note-draft-restore"
+                                class="import-confirm"
+                                aria-describedby="note-draft-text"
+                                on:click=move |_| editor.restore_draft()
+                            >
+                                "Restore"
+                            </button>
+                            <button
+                                type="button"
+                                id="note-draft-discard"
+                                class="reader-mode-btn"
+                                aria-describedby="note-draft-text"
+                                on:click=move |_| editor.discard_draft()
+                            >
+                                "Discard"
+                            </button>
+                        </span>
+                    </div>
                     <textarea
                         id="note-input"
                         class="note-input"
@@ -534,7 +872,8 @@ pub fn NoteEditor() -> impl IntoView {
                         aria-describedby="note-length note-error"
                         spellcheck="true"
                         node_ref=editor.input
-                        on:input=move |_| editor.update_controls()
+                        on:input=move |_| editor.on_typed()
+                        on:blur=move |_| editor.keep_draft()
                     ></textarea>
                     <p id="note-length" class="note-length" aria-live="polite" node_ref=editor.length></p>
                     <p id="note-error" class="note-error" role="alert">{move || editor.error.get()}</p>
@@ -577,7 +916,7 @@ pub fn NoteEditor() -> impl IntoView {
                         type="button"
                         id="note-discard-yes"
                         class="import-confirm"
-                        on:click=move |_| editor.close()
+                        on:click=move |_| editor.discard()
                     >
                         "Discard"
                     </button>
@@ -595,6 +934,16 @@ pub fn NoteEditor() -> impl IntoView {
                         }
                     >
                         "Keep editing"
+                    </button>
+                    <button
+                        type="button"
+                        id="note-keep-later"
+                        class="reader-mode-btn"
+                        aria-describedby="note-discard-question"
+                        title="Close, and offer this text again when the note is opened"
+                        on:click=move |_| editor.keep_for_later()
+                    >
+                        "Keep for later"
                     </button>
                 </div>
             </div>

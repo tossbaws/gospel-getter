@@ -1857,6 +1857,35 @@
             margin-bottom: 0.25rem;
         }
 
+        /* A draft kept from before (ui-leptos/src/note_editor.rs): said
+           above the text box, with Restore and Discard; never put in it
+           unasked. */
+        .note-draft:not([hidden]) {
+            display: flex;
+        }
+
+        .note-draft {
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.4rem 0.6rem;
+            font-size: 0.85rem;
+            background: rgba(var(--accent-rgb), 0.12);
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-m);
+            padding: 0.45rem 0.6rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .note-draft-text {
+            flex: 1 1 12rem;
+            color: var(--text);
+        }
+
+        .note-draft-buttons {
+            display: flex;
+            gap: 0.4rem;
+        }
+
         .note-input {
             display: block;
             width: 100%;

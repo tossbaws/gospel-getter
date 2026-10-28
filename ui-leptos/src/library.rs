@@ -296,6 +296,10 @@ impl Library {
         }
         match answer {
             Ok((items, raw)) => {
+                // Every note there is: a draft of any other goes.
+                crate::note_editor::keep_drafts_of(
+                    &items.iter().map(|note| note.id).collect::<Vec<_>>(),
+                );
                 let raw = js_sys::Array::from(&raw);
                 let rows = items
                     .into_iter()

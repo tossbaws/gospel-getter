@@ -27,8 +27,10 @@
 //! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
 //! Then the app started again on the same data, keeping Aa's settings (26)
 //! and the chapter's lists as left (45), at the verse the first session
-//! left at the top (59, `place`), a second session; and, in a third
-//! session on the GUI checks' test build, the updater (9 to 13, `updates`).
+//! left at the top (59, `place`), a second session, which quits with a
+//! note being typed, offered back as a draft when the app is started once
+//! more (65, `notes`); and, in a last session on the GUI checks' test
+//! build, the updater (9 to 13, `updates`).
 
 mod card;
 mod dialogs;

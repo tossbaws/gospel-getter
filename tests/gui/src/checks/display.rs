@@ -7,7 +7,9 @@
 //! and started again on the same data, and the page and Aa show what was
 //! chosen (26, in a session of its own; the settings are then put back as
 //! they were, for the updater's checks; not run on Windows, where Edge
-//! WebDriver gives each session a fresh WebView2 data folder). A
+//! WebDriver gives each session a fresh WebView2 data folder). That session
+//! ends with a note being typed, which the app started once more offers
+//! back (65, `notes`, in a session of its own). A
 //! translation chosen from the translation button is read (27); Compare
 //! goes on and off (28); reading mode comes and goes, by its exit button
 //! and by Escape (29). Screenshots in Chi Rho and Vellum.
@@ -525,6 +527,25 @@ impl Run<'_> {
 /// see `place`). Check 26 (check 25 left its settings): the page and Aa
 /// show every setting as it was left; then they're put back as they were
 /// before check 25. Check 45: the lists check 40 left open are open.
+/// Why checks 26, 45 and 65 aren't run on Windows.
+const NOT_ON_WINDOWS: &str = "not run on Windows: Edge WebDriver gives each session's WebView2 a fresh \
+    user data folder (WEBVIEW2_USER_DATA_FOLDER, a new scoped_dir per session), so the app started again \
+    in a new session can't see the first session's local storage (the app as shipped keeps one folder)";
+
+/// Ends `run`'s WebDriver session, which closes the app.
+async fn end_session(run: Run<'_>, started: std::time::Instant, which: &str) {
+    log_line(
+        started,
+        &format!("close the app (end the {which} WebDriver session)"),
+    );
+    let driver = run.ui.into_driver();
+    match tokio::time::timeout(std::time::Duration::from_secs(10), driver.quit()).await {
+        Ok(Ok(())) => log_line(started, "session ended, app closed"),
+        Ok(Err(e)) => log_line(started, &format!("ending the session failed: {e}")),
+        Err(_) => log_line(started, "ending the session timed out after 10s"),
+    }
+}
+
 pub(super) async fn restart(
     config: &Config,
     report: &mut Report,
@@ -543,17 +564,8 @@ pub(super) async fn restart(
     // own folder), so check 58 is.
     let windows = config.xvfb.is_none();
     if windows {
-        for check in kept_here {
-            report
-                .record(
-                    check,
-                    Ok("not run on Windows: Edge WebDriver gives each session's WebView2 a fresh user data \
-                        folder (WEBVIEW2_USER_DATA_FOLDER, a new scoped_dir per session), so the app started \
-                        again in a new session can't see the first session's local storage (the app as \
-                        shipped keeps one folder)"
-                        .to_owned()),
-                )
-                .await;
+        for check in kept_here.into_iter().chain([Check::NoteDraft]) {
+            report.record(check, Ok(NOT_ON_WINDOWS.to_owned())).await;
         }
     }
     let looks = match looks {
@@ -619,14 +631,65 @@ pub(super) async fn restart(
         }
         report.record(Check::DisclosuresKept, kept).await;
     }
+    // Check 65: a new note typed and left open as the app quits.
+    let draft = if windows {
+        None
+    } else {
+        let typed = run.draft_typed().await;
+        if typed.is_err() {
+            run.failure_screenshot(Check::NoteDraft).await;
+        }
+        Some(typed)
+    };
 
-    log_line(started, "close the app (end the second WebDriver session)");
-    let driver = run.ui.into_driver();
-    match tokio::time::timeout(std::time::Duration::from_secs(10), driver.quit()).await {
-        Ok(Ok(())) => log_line(started, "session ended, app closed"),
-        Ok(Err(e)) => log_line(started, &format!("ending the session failed: {e}")),
-        Err(_) => log_line(started, "ending the session timed out after 10s"),
+    end_session(run, started, "second").await;
+
+    match draft {
+        None => {}
+        Some(Err(e)) => {
+            report
+                .record(Check::NoteDraft, Err(e.context("typing the draft")))
+                .await;
+        }
+        Some(Ok(left)) => draft_after_restart(config, report, started, &left).await,
     }
+}
+
+/// Check 65's second half: the app started again after it quit with a
+/// draft typed, in a session of its own.
+async fn draft_after_restart(
+    config: &Config,
+    report: &mut Report,
+    started: std::time::Instant,
+    left: &super::notes::DraftLeft,
+) {
+    log_line(
+        started,
+        "start the app again, after it quit with a note being typed (check 65)",
+    );
+    let driver = match start_session(config, &config.app, started).await {
+        Ok(driver) => driver,
+        Err(e) => {
+            report
+                .record(
+                    Check::NoteDraft,
+                    Err(e.context("no WebDriver session on the app started again")),
+                )
+                .await;
+            return;
+        }
+    };
+    let mut run = Run {
+        config,
+        ui: Ui::new(driver, started, config.budget, config.step_timeout),
+        shots: Shots::default(),
+    };
+    let offered = run.draft_offered(left).await;
+    if offered.is_err() {
+        run.failure_screenshot(Check::NoteDraft).await;
+    }
+    report.record(Check::NoteDraft, offered).await;
+    end_session(run, started, "third").await;
 }
 
 impl Run<'_> {
