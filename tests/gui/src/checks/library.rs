@@ -216,7 +216,7 @@ impl Run<'_> {
 
     /// Opens the Library (if it isn't) at the tab `tab`, and waits for its
     /// panel to show.
-    async fn library_tab(&self, tab: &str) -> Result<()> {
+    pub(super) async fn library_tab(&self, tab: &str) -> Result<()> {
         let ui = &self.ui;
         let open = ui
             .js(

@@ -172,7 +172,10 @@ impl Run<'_> {
             .unwrap_or_default())
     }
 
-    async fn add_notes(&self, notes: &[(u32, u32, u32, u32, String)]) -> Result<Vec<i64>> {
+    pub(super) async fn add_notes(
+        &self,
+        notes: &[(u32, u32, u32, u32, String)],
+    ) -> Result<Vec<i64>> {
         let rows: Vec<Value> = notes
             .iter()
             .map(|(book, chapter, start, end, body)| json!([book, chapter, start, end, body]))
@@ -185,7 +188,7 @@ impl Run<'_> {
         .await
     }
 
-    async fn delete_notes(&self, ids: &[i64]) -> Result<()> {
+    pub(super) async fn delete_notes(&self, ids: &[i64]) -> Result<()> {
         self.notes_through_ipc(
             "the notes to be deleted through the page's IPC",
             DELETE_NOTES_JS,

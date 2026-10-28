@@ -347,6 +347,8 @@ pub struct HighlightPassage {
 pub struct Note {
     pub id: i64,
     pub book_id: i64,
+    /// "1 John": the book's name, which the Library's search looks in.
+    pub book_name: String,
     pub chapter: i64,
     pub verse_start: i64,
     pub verse_end: i64,

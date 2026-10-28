@@ -37,6 +37,10 @@ mod aa;
 mod aa_text;
 mod about;
 mod boot;
+// The books' abbreviations, shared with the backend, which compiles the same
+// file.
+#[path = "../../shared/book_aliases.rs"]
+pub mod book_aliases;
 mod bridge;
 mod card;
 mod card_text;

@@ -73,11 +73,12 @@ pub enum Check {
     MarginSwitch = 61,
     MarginNarrow = 62,
     MarginPsalm119 = 63,
+    NotesSearch = 64,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 54] = [
+    pub const SHIPPED: [Check; 55] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -131,6 +132,7 @@ impl Check {
         Check::MarginSwitch,
         Check::MarginNarrow,
         Check::MarginPsalm119,
+        Check::NotesSearch,
         Check::PlainText,
     ];
 
@@ -218,6 +220,7 @@ impl Check {
             Check::MarginSwitch => "margin-switch",
             Check::MarginNarrow => "margin-narrow",
             Check::MarginPsalm119 => "margin-psalm-119",
+            Check::NotesSearch => "notes-search",
         }
     }
 

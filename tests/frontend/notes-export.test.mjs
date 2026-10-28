@@ -97,11 +97,12 @@ async function toggle(app, id) {
 const OCT_12 = () => backend('__set_clock', { now: '2026-10-12T18:00:00Z', offsetMinutes: -360 });
 const written = (body, createdAt) => backend('__note_written', { body, createdAt });
 
-test('the button is at the top of the Notes tab, and disabled without notes', () =>
+test('the button is at the top of the Notes tab, after its search box, and disabled without notes', () =>
     withNotes([], {}, async (app) => {
         app.openLibrary('notes');
         const notes = el(app, 'library-notes');
-        assert.equal(notes.firstElementChild, button(app));
+        const tools = notes.firstElementChild;
+        assert.deepEqual([...tools.children], [el(app, 'note-search'), button(app)]);
         assert.equal(button(app).textContent, 'Export notes…');
         assert.ok(button(app).disabled);
         app.click(button(app));

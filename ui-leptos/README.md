@@ -66,10 +66,13 @@ keeps the two the same.
 
 - `ui-leptos/` is its own crate (Rust 2024, `cdylib`), separate from
   `src-tauri/`: one targets `wasm32-unknown-unknown`, the other the desktop.
-  They share two files, compiled into both by `#[path]`:
-  `../shared/preferences.rs` (below) and `../shared/verse_parts.rs`, a
+  They share files, compiled into both by `#[path]`:
+  `../shared/preferences.rs` (below), `../shared/verse_parts.rs`, a
   verse's parts and footnotes as the backend shows them, which the reader
-  draws. `src/dto.rs` mirrors the other DTOs of the commands the pieces
+  draws, `../shared/passage_reference.rs`, how a passage is named, and
+  `../shared/book_aliases.rs`, the books' abbreviations, by which the
+  backend reads a typed reference and the Library's notes search finds a
+  note's book. `src/dto.rs` mirrors the other DTOs of the commands the pieces
   call, with the names the JSON carries, and says what a shared crate would
   replace later.
 - `src/ipc.rs`: Tauri commands through the same global the page uses,
@@ -92,7 +95,7 @@ keeps the two the same.
   pieces' words, numbers and rules (Export notes' filter, the import's
   sentences, the note's length rule, the welcome's fresh-install rule, the
   updater's sentences, `megabytes` and download progress, the Library's
-  rows, color names, filter and focus arithmetic; the shortcuts; the
+  rows, color names, filter, notes search and focus arithmetic; the shortcuts; the
   palette's commands, their reasons and its word matching; the search's
   sentences, active option and marked words; the picker's compact grid,
   Random chapter's pick, its keyboard moves and how far it scrolls; the

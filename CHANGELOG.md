@@ -4,6 +4,16 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Search your notes: a box at the top of the Library's Notes tab
+  filters the list as you type. A note is found when every word you
+  type is in its text or its reference (the book's name or its usual
+  abbreviation, like "Rom" or "Mk", the chapter, a verse), whatever the
+  capitals or accents. It says how many of your notes it shows, marks
+  the words it found, and Escape clears it.
+
 ## [2.20.0] - 2026-10-27
 
 Your notes in the margin in reading mode, and reopening at the verse you

@@ -1941,7 +1941,56 @@
            book's chapters, and when they were written. Like the rest of
            the UI it doesn't grow with the reading text size. */
         .export-notes-btn {
+            flex: 0 0 auto;
+        }
+
+        /* The Notes tab's search box, beside Export notes…: it filters the
+           list as it's typed (ui-leptos/src/library.rs), says how many of
+           how many it shows under it, and marks what it found in each row
+           in the search results' own mark. */
+        .note-tools {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.5rem;
             margin-bottom: 0.6rem;
+        }
+
+        .note-search {
+            flex: 1 1 9rem;
+            min-width: 0;
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: var(--text);
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-m);
+            padding: 0.35rem 0.6rem;
+        }
+
+        .note-search::placeholder {
+            color: var(--text-dim);
+        }
+
+        .note-search:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .note-search-count {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin: -0.2rem 0 0.4rem;
+        }
+
+        .note-search-count:empty {
+            display: none;
+        }
+
+        .note-search-mark {
+            background: rgba(var(--accent-rgb), 0.3);
+            color: inherit;
+            border-radius: var(--radius-s);
         }
 
         .export-notes-btn:disabled {
@@ -2460,6 +2509,7 @@
         .library-tab:focus-visible,
         .about-links a:focus-visible,
         .search-input:focus-visible,
+        .note-search:focus-visible,
         .search-more:focus-visible,
         .bookmark-open:focus-visible,
         .bookmark-remove:focus-visible,

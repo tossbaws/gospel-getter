@@ -2,6 +2,10 @@
 //! `run`; the modules are public so the frontend test bridge
 //! (`examples/frontend_bridge.rs`) can drive the same command logic.
 
+// The books' abbreviations, shared with the page's Rust pieces (ui-leptos),
+// which compile the same file.
+#[path = "../../shared/book_aliases.rs"]
+pub mod book_aliases;
 pub mod commands;
 pub mod credit_links;
 pub mod db;
