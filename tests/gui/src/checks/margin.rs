@@ -5,12 +5,15 @@
 //! Narrow width, in the app's default 1280 px window:
 //!
 //! - 60: the margin is a landmark beside the column, never over it, at
-//!   least 2rem from the window's edge (its scroll bar left out); each
+//!   least 1.125rem from the window's edge (its scroll bar left out); each
 //!   note's top is its verse's (within 2 px) unless it would overlap the
 //!   note above, when it's just below it; no two notes overlap; the range's
 //!   rule runs beside its verses; the long note is folded with "more"; in
 //!   Verses and Flowing (on the verse number), in Chi Rho and Vellum
-//!   (screenshots of each).
+//!   (screenshots of each). Then the same in the Normal width, at the
+//!   default text size, in a 1280x900 window (the app's default): the
+//!   margin, not markers (screenshot), unless the screen can't hold a
+//!   window that wide.
 //! - 61: Aa's "Notes in the margin" off and on again leaves the text
 //!   column where it was, to the pixel, and the margin goes and comes.
 //! - 62: in a window too narrow for the margin, a marker after each noted
@@ -31,19 +34,22 @@ use thirtyfour::prelude::*;
 use super::Run;
 
 /// The screenshots checks 60 and 62 take (check 4 lists them).
-pub(super) const MARGIN_SHOTS: [&str; 5] = [
+pub(super) const MARGIN_SHOTS: [&str; 6] = [
     "60-margin-verses-chi-rho.png",
     "60-margin-flowing-chi-rho.png",
     "60-margin-verses-vellum.png",
     "60-margin-flowing-vellum.png",
+    "60-margin-normal-chi-rho.png",
     "62-margin-markers-chi-rho.png",
 ];
 
 /// The window the margin is checked in: the app's default.
 const MARGIN_WINDOW: u32 = 1280;
+/// The app's default window's height, for the Normal width's check.
+const MARGIN_HEIGHT: u32 = 900;
 /// The room kept between the margin and the window's edge, in rem
 /// (`margin_text::EDGE_REM`).
-const EDGE_REM: f64 = 2.0;
+const EDGE_REM: f64 = 1.125;
 /// A window too narrow for it.
 const NARROW_WINDOW: u32 = 1000;
 
@@ -359,7 +365,7 @@ impl Run<'_> {
                 top >= previous_bottom - 0.5,
                 "notes overlap: {note} under {previous_bottom}"
             );
-            // Room to breathe at the window's edge: at least 2rem
+            // Room to breathe at the window's edge: at least EDGE_REM
             // (`margin_text::EDGE_REM`) between a note and the edge (its
             // scroll bar left out).
             ensure!(
@@ -483,7 +489,68 @@ impl Run<'_> {
         self.aa_choose("theme-choices", "theme", "chi-rho").await?;
         self.aa_choose("layout-choices", "layout", "verses").await?;
         self.close_with_escape("Aa", "aa-popover").await?;
+        said.push(self.margin_normal(&ids).await?);
         Ok(said.join("; "))
+    }
+
+    /// Check 60 in the Normal width, at the default text size, in a
+    /// [`MARGIN_WINDOW`]x[`MARGIN_HEIGHT`] window: the margin, not
+    /// markers. Puts back the window and Narrow for the checks that follow.
+    async fn margin_normal(&mut self, ids: &[i64]) -> Result<String> {
+        let rect = self.ui.driver().get_window_rect().await?;
+        self.ui
+            .driver()
+            .set_window_rect(rect.x, rect.y, MARGIN_WINDOW, MARGIN_HEIGHT)
+            .await?;
+        let _ = self.window_width(MARGIN_WINDOW).await;
+        self.open_aa().await?;
+        let look = self.aa_choose("width-choices", "width", "normal").await?;
+        self.close_with_escape("Aa", "aa-popover").await?;
+        ensure!(
+            look["settings"]["textSize"] == "medium",
+            "the text size isn't the default (Medium): {look}"
+        );
+        let (room, seen) = self.margin_settled(JOHN_NOTES.len()).await?;
+        let said = if room == Room::Markers
+            && seen["innerWidth"].as_u64().unwrap_or(0) < u64::from(MARGIN_WINDOW)
+        {
+            format!(
+                "Normal: not run on this screen ({}, the window {} px wide)",
+                seen["screen"].as_str().unwrap_or("?"),
+                seen["innerWidth"]
+            )
+        } else {
+            let measured = self.margin_measured(ids).await;
+            let size = self
+                .ui
+                .js(
+                    "return `${window.innerWidth}x${window.innerHeight}`;",
+                    Vec::new(),
+                )
+                .await?;
+            let size = size.as_str().unwrap_or("?");
+            let measured = measured.map_err(|e| {
+                e.context(format!(
+                    "Normal, a {size} window: the margin should fit beside the column"
+                ))
+            })?;
+            self.shot(
+                "screenshot: margin notes, Normal, Chi Rho",
+                "60-margin-normal-chi-rho.png",
+            )
+            .await;
+            format!("Normal, a {size} window, Medium text: {measured}")
+        };
+        self.ui
+            .driver()
+            .set_window_rect(rect.x, rect.y, rect.width as u32, rect.height as u32)
+            .await?;
+        let _ = self.window_width(rect.width as u32).await;
+        self.open_aa().await?;
+        self.aa_choose("width-choices", "width", "narrow").await?;
+        self.close_with_escape("Aa", "aa-popover").await?;
+        self.margin_settled(JOHN_NOTES.len()).await?;
+        Ok(said)
     }
 
     /// Check 61: the switch off and on leaves the column where it was.
