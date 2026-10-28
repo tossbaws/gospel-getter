@@ -119,6 +119,13 @@ needed.
   spacings, three widths for the text (Narrow, Normal and Wide), a
   layout, and a distraction-free reading mode, all under **Aa**. Printing
   is always black on white.
+- **Notes in the margin.** In reading mode, your notes on the chapter sit
+  in the margin to the right of the text, each beside the verse it's on,
+  with a thin line beside a note on several verses. Click one to select
+  its verses and open it in the card. **Notes in the margin**, under
+  **Aa** with reading mode, turns them off.
+
+  ![John 3 in the KJV in reading mode, in the Chi Rho theme: no sidebar, and the bar holds only the reference button, "Exit reading mode (Esc)", KJV, Aa and search. The verses run down the middle, with ✎ marks after verses 2, 3 and 5 to 8 and small letters after verses 3 and 7 marking their footnotes. In the margin to the right, each beside its first verse, are three notes under their references: John 3:2, "He comes by night, a ruler of the Jews. By 19:39 he brings myrrh and aloes to bury Jesus."; John 3:3, "“Again” is anothen, which also means “from above” (as in v. 31). Nicodemus hears only “a second time”."; and John 3:5–8, "Water and Spirit together recall Ezekiel 36:25–27: clean water, a new heart, God's Spirit within. A teacher of Israel should have known it (v. 10).", with a thin line beside verses 5 to 8](screenshots/margin-notes.png)
 - **Verses or Flowing.** **Layout** under **Aa** sets the verses one to a
   line (**Verses**, the default) or runs each chapter on as prose with
   small raised verse numbers (**Flowing**), in the chapter you're reading,
@@ -142,8 +149,9 @@ needed.
   verse, Shift+j and Shift+k extend the selection, and `[` and `]` go to
   the previous or next book. `?` lists every shortcut (see
   [Keyboard](#keyboard)).
-- **Picks up where you left off.** Your chapter, translation, bookmarks,
-  highlights, notes and display settings are remembered between sessions.
+- **Picks up where you left off.** Gospel Getter reopens at the verse you
+  were reading. Your chapter, translation, bookmarks, highlights, notes
+  and display settings are remembered between sessions.
 - **Back up or move your data.** In the ☰ menu, **Export data…** saves your
   bookmarks, highlights, notes, reading position and display settings
   (Width, Layout and compare's translation included) to a
@@ -183,7 +191,7 @@ needed.
 
 ## A quick tour
 
-All ten screenshots in this README, including the one at the top, use
+All twelve screenshots in this README, including the one at the top, use
 Chi Rho, the default theme, in a window wide enough for the picker's
 sidebar. The other eight themes are under **Aa**.
 
@@ -308,15 +316,15 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.19.0?** Each updates itself to 2.19.1: it
+**Coming from 2.6.0 through 2.19.1?** Each updates itself to 2.20.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
-update themselves. The 2.19.0 pre-release updates itself to 2.19.1 the
+update themselves. The 2.19.0 pre-release updates itself to 2.20.0 the
 same way.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.19.1 by hand once, from the
+Install 2.20.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -343,6 +351,9 @@ Upgrading keeps your data.
   display settings stored in the app's web storage, not the database, as
   are whether the sidebar is shown and whether the chapter's Footnotes and
   Cross references are open (which aren't exported).
+- The verse you were reading, which the app reopens at, is kept with your
+  reading position in the database, on this computer only: backups don't
+  include it, and restoring one opens its chapter at the top.
 - The window's size and place are kept in `window-state.json`, beside the
   database, and aren't exported either.
 - Coming from the old browser-based Gospel Getter (the local server on

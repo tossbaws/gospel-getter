@@ -4,7 +4,11 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.20.0] - 2026-10-27
+
+Your notes in the margin in reading mode, and reopening at the verse you
+were reading. Updating keeps your bookmarks, highlights, notes, reading
+position and settings.
 
 ### Added
 - Your notes in the margin, in reading mode: the notes on the chapter

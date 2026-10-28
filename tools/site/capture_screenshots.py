@@ -33,6 +33,7 @@ the README's screenshots at 1x, at their final names and sizes (OUT_DIR
 can be screenshots/ itself). Every scene shows the picker as the app does at
 its window size: from 1200px wide the book and chapter picker is a sidebar on
 the left, and narrower it's a popover from the reference button, closed.
+The README's margin-notes scene is in reading mode, which shows no picker.
 The verses are one to a line (Verses, the default), except in the README's
 flowing scene, which sets Flowing under Aa. Scenes read the KJV or the WEB,
 except the README's bsb scene; the compare scenes read the KJV, compared with
@@ -350,6 +351,27 @@ def readme_scenes(theme):
         # The same, in the Flowing layout: each chapter as prose.
         dict(name="flowing", size=(1280, 850), prefs={**look, "gospel-getter-layout": "flowing"},
              position=("John", 3, "kjv"), steps="window.scrollTo(0, 0);"),
+        # The same in reading mode, with three notes in the margin beside
+        # their verses (Aa's "Notes in the margin" is on by default): two
+        # on single verses, stacked, and one on 5-8 with its rule.
+        dict(name="margin-notes", size=(1280, 850), prefs={**look, "gospel-getter-reader-mode": "on"},
+             position=("John", 3, "kjv"),
+             notes=[
+                 ("John", 3, 2, 2,
+                  "He comes by night, a ruler of the Jews. By 19:39 he brings myrrh and "
+                  "aloes to bury Jesus."),
+                 ("John", 3, 3, 3,
+                  "\u201cAgain\u201d is anothen, which also means \u201cfrom above\u201d (as in v. 31). "
+                  "Nicodemus hears only \u201ca second time\u201d."),
+                 ("John", 3, 5, 8,
+                  "Water and Spirit together recall Ezekiel 36:25\u201327: clean water, a new heart, "
+                  "God's Spirit within. A teacher of Israel should have known it (v. 10)."),
+             ],
+             steps="""
+                window.scrollTo(0, 0);
+                await __gg.until(() => window.gospelGetterMargin && window.gospelGetterMargin.shown() === 'margin'
+                    && document.querySelectorAll('.chapter-main .margin-notes .margin-note').length === 3, 'the margin');
+             """),
         # The same chapter in the Berean Standard Bible, with its footnote
         # markers (John 3:3's is in view).
         dict(name="bsb", size=(1280, 850), prefs=look,
