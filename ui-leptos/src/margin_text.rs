@@ -23,8 +23,11 @@ pub const MAX_WIDTH_REM: f64 = 20.0;
 /// the margin starts at its container's edge), in rem.
 pub const GAP_REM: f64 = 1.5;
 /// Kept free between the margin and the window's right edge, in rem: room
-/// for the notes to breathe at the margin's narrowest.
-pub const EDGE_REM: f64 = 2.0;
+/// for the notes to breathe at the margin's narrowest, and no more than a
+/// 1280 px window leaves beside the Normal column at the default text size
+/// (274px, or 266.5px beside Windows' scroll bar, with 15.5rem of it taken
+/// by the margin and its gap).
+pub const EDGE_REM: f64 = 1.125;
 /// Between two notes stacked because they'd overlap, in px.
 pub const STACK_GAP_PX: f64 = 8.0;
 /// A note longer than this many lines shows them, faded at the foot, with
@@ -321,13 +324,22 @@ mod tests {
 
     #[test]
     fn the_margin_needs_14rem_beside_the_text() {
-        // 16px rem: the gap and the edge take 56px (the edge 2rem, room
+        // 16px rem: the gap and the edge take 42px (the edge 1.125rem, room
         // for the notes to breathe).
-        assert_eq!(width(280.0, 16.0), Some(224.0));
-        assert_eq!(width(279.9, 16.0), None);
-        assert_eq!(width(300.0, 16.0), Some(244.0));
+        assert_eq!(width(266.0, 16.0), Some(224.0));
+        assert_eq!(width(265.9, 16.0), None);
+        assert_eq!(width(300.0, 16.0), Some(258.0));
         assert_eq!(width(1000.0, 16.0), Some(320.0), "at most 20rem");
         assert_eq!(width(0.0, 16.0), None);
+    }
+
+    #[test]
+    fn a_1280px_window_has_the_margin_beside_the_normal_column() {
+        // The Normal column (732px at the default text size) centred in a
+        // 1280 px window leaves 274px beside it; beside Windows' 15px
+        // scroll bar, 266.5px.
+        assert_eq!(width(274.0, 16.0), Some(232.0));
+        assert_eq!(width(266.5, 16.0), Some(224.5));
     }
 
     #[test]
