@@ -41,8 +41,8 @@ versions follow [Semantic Versioning](https://semver.org/).
   One file is still the default, and unchanged.
 
 ### Changed
-- In reading mode, the notes in the margin keep more room from the
-  window's edge.
+- In reading mode, the notes in the margin keep a little more room from
+  the window's edge, and still fit beside the text in a 1280 px window.
 
 ## [2.20.0] - 2026-10-27
 
