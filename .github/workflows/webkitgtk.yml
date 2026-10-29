@@ -1,0 +1,243 @@
+name: WebKitGTK for the AppImage
+
+# Builds the WebKitGTK the Linux AppImage bundles, on Ubuntu 22.04 (the
+# AppImage's glibc 2.35 floor), because no Ubuntu release ships a WebKitGTK
+# with the fix for WebKit bug 305909 (WebKitWebProcess aborts on exit; fixed
+# in 2.54.1) and jammy's is 2.50.4. The .deb keeps using the system's.
+#
+# The release tarball is checked against the pinned SHA-256 and its .sums
+# file, and its PGP signature against the WebKitGTK release signing keys
+# pinned below (https://webkitgtk.org/verifying.html). The build
+# (.github/webkitgtk/build.sh) is installed with DESTDIR into a staging tree
+# and cached under a key made of the version, the tarball's checksum and the
+# build's own files, so dist.yml (which calls this workflow) restores it
+# instead of rebuilding. A cold build takes hours; ccache is kept across
+# runs, even a failed or timed-out one, so a rerun picks up where it left.
+#
+# By hand (workflow_dispatch), configure_only stops after CMake has
+# configured the tree: a quick check of the dependencies and options.
+
+on:
+  workflow_dispatch:
+    inputs:
+      configure_only:
+        description: Stop after CMake configures (checks dependencies and options)
+        type: boolean
+        default: false
+  workflow_call:
+    outputs:
+      cache-key:
+        description: The actions/cache key of the staged WebKitGTK tree
+        value: ${{ jobs.build.outputs.cache-key }}
+      version:
+        description: The WebKitGTK version built
+        value: ${{ jobs.build.outputs.version }}
+
+permissions:
+  contents: read
+
+env:
+  WEBKITGTK_VERSION: "2.54.2"
+  WEBKITGTK_SHA256: a76345b391bef6211fb5ab6cfab2e86b285d18cda17cbb9ade595f1252b86065
+  # Primary key fingerprints of the release signers listed on
+  # https://webkitgtk.org/verifying.html (Adrián Pérez de Castro, Carlos
+  # García Campos). A signature by any other key fails the build.
+  WEBKITGTK_SIGNING_KEYS: >-
+    5AA3BC334FD7E3369E7C77B291C559DBE4C9123B
+    013A0127AC9C65B34FFA62526C1009B693975393
+  # Where the staged tree lives; dist.yml restores it to the same path.
+  WEBKITGTK_STAGE: ~/webkitgtk/stage
+
+jobs:
+  build:
+    name: WebKitGTK (Ubuntu 22.04)
+    runs-on: ubuntu-22.04
+    # A job may run 6 hours; the build step stops itself before that, so the
+    # ccache can still be saved for the next attempt.
+    timeout-minutes: 355
+    outputs:
+      cache-key: ${{ steps.key.outputs.key }}
+      version: ${{ env.WEBKITGTK_VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the cache key
+        id: key
+        run: |
+          set -euo pipefail
+          echo "key=webkitgtk-$WEBKITGTK_VERSION-${WEBKITGTK_SHA256:0:16}-jammy-${{ hashFiles('.github/webkitgtk/**') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Look for the staged tree in the cache
+        id: cached
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.WEBKITGTK_STAGE }}
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+
+      - name: Download and verify the release tarball
+        if: steps.cached.outputs.cache-hit != 'true'
+        id: tarball
+        run: |
+          set -euo pipefail
+          dl="$RUNNER_TEMP/webkitgtk-download"
+          mkdir -p "$dl"
+          cd "$dl"
+          base="https://webkitgtk.org/releases/webkitgtk-$WEBKITGTK_VERSION.tar.xz"
+          curl -fsSL --retry 3 -O "$base" -O "$base.asc" -O "$base.sums" \
+            -O https://webkitgtk.org/aperez.key -O https://webkitgtk.org/carlosgc.key
+          tarball="webkitgtk-$WEBKITGTK_VERSION.tar.xz"
+
+          actual="$(sha256sum "$tarball" | cut -d' ' -f1)"
+          listed="$(sed -n 's/^ *sha256sum: *\([0-9a-f]\{64\}\)$/\1/p' "$tarball.sums")"
+          if [ "$actual" != "$WEBKITGTK_SHA256" ] || [ "$listed" != "$WEBKITGTK_SHA256" ]; then
+            echo "::error::$tarball: SHA-256 $actual, its .sums file lists '$listed', pinned $WEBKITGTK_SHA256"
+            exit 1
+          fi
+
+          GNUPGHOME="$(mktemp -d)"
+          export GNUPGHOME
+          gpg --batch --quiet --import aperez.key carlosgc.key
+          # VALIDSIG is printed for a good signature only; its last field is
+          # the signing key's primary fingerprint.
+          signer="$(gpg --batch --status-fd 1 --verify "$tarball.asc" "$tarball" 2>/dev/null \
+            | awk '$2 == "VALIDSIG" { print $NF }')"
+          if [ -z "$signer" ]; then
+            echo "::error::$tarball.asc is not a good signature by any key webkitgtk.org lists"
+            exit 1
+          fi
+          case " $WEBKITGTK_SIGNING_KEYS " in
+            *" $signer "*) echo "Good signature by pinned key $signer; SHA-256 $actual" ;;
+            *) echo "::error::$tarball is signed by $signer, which isn't a pinned WebKitGTK release key"; exit 1 ;;
+          esac
+          echo "path=$dl/$tarball" >> "$GITHUB_OUTPUT"
+
+      # gcc-12 (12.3, jammy-updates): WebKit needs GCC 12.2 or newer, and
+      # jammy's default is 11 (see build.sh).
+      - name: Install the toolchain and WebKitGTK's build dependencies
+        if: steps.cached.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mapfile -t dev_packages < <(grep -v '^#' .github/webkitgtk/apt-dev-packages.txt)
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-12 g++-12 cmake ninja-build pkg-config ccache gperf ruby unifdef \
+            perl python3 bubblewrap xdg-dbus-proxy "${dev_packages[@]}"
+          gcc-12 --version | head -1
+          cmake --version | head -1
+
+      # The runner's own disk has about 14 GB free; the build goes on the
+      # larger temporary disk at /mnt, with swap there for the link steps.
+      - name: Prepare the build disk
+        if: steps.cached.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          df -h / /mnt
+          sudo mkdir -p /mnt/webkitgtk
+          sudo chown "$USER" /mnt/webkitgtk
+          sudo swapoff -a || true
+          sudo fallocate -l 8G /mnt/webkitgtk-swap
+          sudo chmod 600 /mnt/webkitgtk-swap
+          sudo mkswap /mnt/webkitgtk-swap
+          sudo swapon /mnt/webkitgtk-swap
+          free -h
+          echo "Runner: $(nproc) CPUs, $(free -g | awk '/^Mem:/ { print $2 }') GB RAM"
+          # The peak disk use of the build, sampled every 30 s.
+          nohup bash -c 'while :; do df -B1M --output=used /mnt / | tail -n +2 | paste -sd" " >> /mnt/webkitgtk/disk-samples; sleep 30; done' >/dev/null 2>&1 &
+
+      - name: Restore ccache
+        if: steps.cached.outputs.cache-hit != 'true' && inputs.configure_only != true
+        uses: actions/cache/restore@v4
+        with:
+          path: /mnt/webkitgtk/ccache
+          key: ccache-${{ steps.key.outputs.key }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-${{ steps.key.outputs.key }}-
+            ccache-webkitgtk-
+
+      - name: Build and stage WebKitGTK
+        if: steps.cached.outputs.cache-hit != 'true'
+        id: build
+        timeout-minutes: 330
+        env:
+          CCACHE_DIR: /mnt/webkitgtk/ccache
+          CCACHE_MAXSIZE: 5G
+          CCACHE_COMPRESS: "1"
+          CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
+          CONFIGURE_ONLY: ${{ inputs.configure_only == true && '1' || '0' }}
+          # 4 compilers at once fit the 16 GB runner (with the swap above).
+          JOBS: "4"
+        run: |
+          set -uo pipefail
+          ccache --zero-stats >/dev/null
+          started=$SECONDS
+          # The whole log goes to build.log (uploaded below); here, everything
+          # but ninja's progress lines, of which every 250th.
+          .github/webkitgtk/build.sh "${{ steps.tarball.outputs.path }}" /mnt/webkitgtk "${WEBKITGTK_STAGE/#\~/$HOME}" 2>&1 \
+            | tee /mnt/webkitgtk/build.log \
+            | awk '/^\[[0-9]+\/[0-9]+\] / { if (++n % 250) next } { print; fflush() }'
+          status="${PIPESTATUS[0]}"
+          echo "wall=$((SECONDS - started))" >> "$GITHUB_OUTPUT"
+          ccache --show-stats || true
+          exit "$status"
+
+      - name: Save ccache
+        if: always() && steps.cached.outputs.cache-hit != 'true' && inputs.configure_only != true && steps.build.conclusion != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: /mnt/webkitgtk/ccache
+          key: ccache-${{ steps.key.outputs.key }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload the build log
+        if: always() && steps.cached.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkitgtk-build-log
+          path: /mnt/webkitgtk/build.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Check and measure the staged tree
+        if: steps.cached.outputs.cache-hit != 'true' && inputs.configure_only != true
+        run: |
+          set -euo pipefail
+          stage="${WEBKITGTK_STAGE/#\~/$HOME}"
+          helpers="$stage/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1"
+          for file in "$stage/usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0" \
+            "$helpers/WebKitWebProcess" "$helpers/WebKitNetworkProcess" \
+            "$helpers/injected-bundle/libwebkit2gtkinjectedbundle.so" \
+            "$stage/usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc"; do
+            if [ ! -e "$file" ]; then
+              echo "::error::the staged tree has no ${file#"$stage"}"
+              exit 1
+            fi
+          done
+          find "$stage" -type f -o -type l | sed "s|^$stage||" | sort > "$RUNNER_TEMP/staged-files.txt"
+          wall="${{ steps.build.outputs.wall }}"
+          peak="$(awk '{ if ($1 > m) m = $1; if ($2 > r) r = $2 } END { printf "%d MB on /mnt, %d MB on /", m, r }' /mnt/webkitgtk/disk-samples)"
+          {
+            echo "### WebKitGTK $WEBKITGTK_VERSION (cold build)"
+            echo
+            echo "- Runner: ubuntu-22.04, $(nproc) CPUs, $(free -g | awk '/^Mem:/ { print $2 }') GB RAM"
+            echo "- Build step wall time: $((wall / 3600))h $((wall % 3600 / 60))m $((wall % 60))s"
+            grep -E '^(configure|build|install): ' /mnt/webkitgtk/build.log | sed 's/^/- /'
+            echo "- Peak disk used (whole disks, sampled every 30 s): $peak"
+            echo "- Build directory: $(du -sh /mnt/webkitgtk/build | cut -f1), ccache: $(du -sh /mnt/webkitgtk/ccache | cut -f1)"
+            echo "- Staged (installed) size: $(du -sh "$stage" | cut -f1); libwebkit2gtk-4.1.so.0: $(du -shL "$stage/usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0" | cut -f1)"
+            echo "- Cache key: \`${{ steps.key.outputs.key }}\`"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the staged file list
+        if: steps.cached.outputs.cache-hit != 'true' && inputs.configure_only != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkitgtk-staged-files
+          path: ${{ runner.temp }}/staged-files.txt
+          retention-days: 7
+
+      - name: Save the staged tree
+        if: steps.cached.outputs.cache-hit != 'true' && inputs.configure_only != true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WEBKITGTK_STAGE }}
+          key: ${{ steps.key.outputs.key }}

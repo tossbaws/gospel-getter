@@ -1,0 +1,47 @@
+# Ubuntu 22.04 (jammy) development packages WebKitGTK is configured against
+# (.github/webkitgtk/build.sh). webkitgtk.yml installs them to build it, and
+# dist.yml's AppImage job installs them too: the installed webkit2gtk-4.1.pc
+# names them, and linuxdeploy bundles their runtime libraries from the build
+# host. One package per line; a change here changes the cache key.
+libatk-bridge2.0-dev
+libatk1.0-dev
+libatspi2.0-dev
+libbrotli-dev
+libcairo2-dev
+libdrm-dev
+libegl-dev
+libenchant-2-dev
+libepoxy-dev
+libfontconfig-dev
+libfreetype-dev
+libgbm-dev
+libgcrypt20-dev
+libgl-dev
+libgles-dev
+libglib2.0-dev
+libgtk-3-dev
+libharfbuzz-dev
+libhyphen-dev
+libicu-dev
+libjpeg-dev
+liblcms2-dev
+libpng-dev
+libseccomp-dev
+libsoup-3.0-dev
+libsqlite3-dev
+libsysprof-capture-4-dev
+libsystemd-dev
+libtasn1-6-dev
+libwayland-dev
+libwebp-dev
+libwoff-dev
+libx11-dev
+libxcomposite-dev
+libxdamage-dev
+libxkbcommon-dev
+libxml2-dev
+libxrender-dev
+libxslt1-dev
+libxt-dev
+wayland-protocols
+zlib1g-dev
