@@ -11,8 +11,9 @@ name: WebKitGTK for the AppImage
 # (.github/webkitgtk/build.sh) is installed with DESTDIR into a staging tree
 # and cached under a key made of the version, the tarball's checksum and the
 # build's own files, so dist.yml (which calls this workflow) restores it
-# instead of rebuilding. A cold build takes hours; ccache is kept across
-# runs, even a failed or timed-out one, so a rerun picks up where it left.
+# instead of rebuilding (the key covers CLANG_VERSION too). A cold build
+# takes hours; ccache is kept across runs, even a failed or timed-out one,
+# so a rerun picks up where it left off.
 #
 # By hand (workflow_dispatch), configure_only stops after CMake has
 # configured the tree: a quick check of the dependencies and options.
@@ -54,6 +55,10 @@ env:
     013A0127AC9C65B34FFA62526C1009B693975393
   # Where the staged tree lives; dist.yml restores it to the same path.
   WEBKITGTK_STAGE: ~/webkitgtk/stage
+  # The compiler (see build.sh): Clang from apt.llvm.org, whose signing key
+  # (https://apt.llvm.org/llvm-snapshot.gpg.key) has this fingerprint.
+  CLANG_VERSION: "22"
+  LLVM_APT_KEY: 6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
 
 jobs:
   build:
@@ -72,7 +77,7 @@ jobs:
         id: key
         run: |
           set -euo pipefail
-          echo "key=webkitgtk-$WEBKITGTK_VERSION-${WEBKITGTK_SHA256:0:16}-jammy-${{ hashFiles('.github/webkitgtk/**') }}" >> "$GITHUB_OUTPUT"
+          echo "key=webkitgtk-$WEBKITGTK_VERSION-${WEBKITGTK_SHA256:0:16}-jammy-clang$CLANG_VERSION-${{ hashFiles('.github/webkitgtk/**') }}" >> "$GITHUB_OUTPUT"
 
       - name: Look for the staged tree in the cache
         id: cached
@@ -119,18 +124,32 @@ jobs:
           esac
           echo "path=$dl/$tarball" >> "$GITHUB_OUTPUT"
 
-      # gcc-12 (12.3, jammy-updates): WebKit needs GCC 12.2 or newer, and
-      # jammy's default is 11 (see build.sh).
+      # Clang from apt.llvm.org on jammy's GCC 12 libstdc++ (g++-12 brings
+      # libstdc++-12-dev); see build.sh for why.
       - name: Install the toolchain and WebKitGTK's build dependencies
         if: steps.cached.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
+          key="$RUNNER_TEMP/llvm-snapshot.gpg.key"
+          curl -fsSL --retry 3 -o "$key" https://apt.llvm.org/llvm-snapshot.gpg.key
+          fingerprint="$(gpg --show-keys --with-colons "$key" | awk -F: '$1 == "fpr" { print $10; exit }')"
+          if [ "$fingerprint" != "$LLVM_APT_KEY" ]; then
+            echo "::error::apt.llvm.org's signing key is $fingerprint, not the pinned $LLVM_APT_KEY"
+            exit 1
+          fi
+          sudo mkdir -p /etc/apt/keyrings
+          gpg --dearmor < "$key" | sudo tee /etc/apt/keyrings/apt.llvm.org.gpg >/dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.gpg] https://apt.llvm.org/jammy/ llvm-toolchain-jammy-$CLANG_VERSION main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
           mapfile -t dev_packages < <(grep -v '^#' .github/webkitgtk/apt-dev-packages.txt)
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            gcc-12 g++-12 cmake ninja-build pkg-config ccache gperf ruby unifdef \
+            "clang-$CLANG_VERSION" g++-12 cmake ninja-build pkg-config ccache gperf ruby unifdef \
             perl python3 gettext bubblewrap xdg-dbus-proxy "${dev_packages[@]}"
-          gcc-12 --version | head -1
+          "clang++-$CLANG_VERSION" --version | head -1
+          "clang++-$CLANG_VERSION" --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12 -v -E -x c++ /dev/null 2>&1 \
+            | grep -i 'selected gcc\|c++/1[0-9]$' || true
+          dpkg-query -W libstdc++6 libc6
           cmake --version | head -1
 
       # The runner's own disk has about 14 GB free; the build goes on the

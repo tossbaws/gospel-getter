@@ -4,8 +4,9 @@
 #
 #   .github/webkitgtk/build.sh <verified tarball> <work dir> <stage dir>
 #
-# CONFIGURE_ONLY=1 stops after CMake has configured the tree (a quick check
-# of the dependencies and options), JOBS sets ninja's parallelism.
+# CLANG_VERSION names the Clang (clang-N), CONFIGURE_ONLY=1 stops after
+# CMake has configured the tree (a quick check of the dependencies and
+# options), JOBS sets ninja's parallelism.
 #
 # The prefix is /usr, installed with DESTDIR into <stage dir>, not a prefix
 # of its own: Tauri's AppImage bundler copies WebKit's helper processes
@@ -24,6 +25,7 @@ tarball="$1"
 work="$2"
 stage="$3"
 jobs="${JOBS:-$(nproc)}"
+: "${CLANG_VERSION:?set CLANG_VERSION, the apt.llvm.org Clang to build with}"
 
 src="$work/src"
 build="$work/build"
@@ -39,11 +41,17 @@ options=(
     -DCMAKE_INSTALL_PREFIX=/usr
     -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu
     -DCMAKE_INSTALL_LIBEXECDIR=lib/x86_64-linux-gnu
-    # GCC 12.3 from jammy-updates: WebKit needs GCC 12.2 or newer (C++23),
-    # and jammy's default GCC is 11. Its libstdc++ is jammy's own
-    # libstdc++6, so nothing newer than jammy is needed at run time.
-    -DCMAKE_C_COMPILER=gcc-12
-    -DCMAKE_CXX_COMPILER=g++-12
+    # Clang ${CLANG_VERSION} from apt.llvm.org, on jammy's GCC 12 libstdc++
+    # (headers from libstdc++-12-dev, run time jammy's own libstdc++6 12.3),
+    # so nothing newer than jammy is needed at run time. WebKit needs C++23
+    # and GCC 12.2 or newer, or Clang; jammy's default GCC is 11, and its
+    # GCC 12.3 stops on ANGLE (a static_assert in a discarded if constexpr
+    # branch, ResourceMap.h). A newer GCC (ubuntu-toolchain-r) would bring
+    # a newer libstdc++6 than jammy's, which the AppImage would then need.
+    -DCMAKE_C_COMPILER="clang-${CLANG_VERSION}"
+    -DCMAKE_CXX_COMPILER="clang++-${CLANG_VERSION}"
+    -DCMAKE_C_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12
+    -DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12
     -DCMAKE_C_COMPILER_LAUNCHER=ccache
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
     # The 4.1 API (GTK 3, libsoup 3), which Tauri 2 links.
