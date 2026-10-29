@@ -359,7 +359,8 @@ jobs:
           (cd "$root" && "$appimage" --appimage-extract >/dev/null)
           test -x "$root/squashfs-root/AppRun"
           echo "root=$root/squashfs-root" >> "$GITHUB_OUTPUT"
-          echo "AppImage size: $(du -m "$appimage" | cut -f1) MB ($(stat -c %s "$appimage") bytes); v2.21.0's was 91 MB" \
+          bytes="$(stat -c %s "$appimage")"
+          echo "AppImage size: $((bytes / 1000000)) MB ($bytes bytes); v2.21.0's was 91 MB (91331064 bytes)" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
       # webkit_get_*_version() from the bundled library, loaded with the
