@@ -168,8 +168,11 @@ jobs:
           sudo swapon /mnt/webkitgtk-swap
           free -h
           echo "Runner: $(nproc) CPUs, $(free -g | awk '/^Mem:/ { print $2 }') GB RAM"
-          # The peak disk use of the build, sampled every 30 s.
-          nohup bash -c 'while :; do df -B1M --output=used /mnt / | tail -n +2 | paste -sd" " >> /mnt/webkitgtk/disk-samples; sleep 30; done' >/dev/null 2>&1 &
+          # The build's peak disk use, sampled every 30 s on the disk that
+          # holds /mnt (on current images that's the root disk). The first
+          # sample, taken now that the toolchain and swap are in place, is
+          # the baseline the peak is measured from.
+          nohup bash -c 'while :; do df -B1M --output=used /mnt | tail -n 1 >> /mnt/webkitgtk/disk-samples; sleep 30; done' >/dev/null 2>&1 &
 
       - name: Restore ccache
         if: steps.cached.outputs.cache-hit != 'true' && inputs.configure_only != true
@@ -240,14 +243,14 @@ jobs:
           done
           find "$stage" -type f -o -type l | sed "s|^$stage||" | sort > "$RUNNER_TEMP/staged-files.txt"
           wall="${{ steps.build.outputs.wall }}"
-          peak="$(awk '{ if ($1 > m) m = $1; if ($2 > r) r = $2 } END { printf "%d MB on /mnt, %d MB on /", m, r }' /mnt/webkitgtk/disk-samples)"
+          peak="$(awk 'NR == 1 { b = $1 } { if ($1 > m) m = $1 } END { printf "%d MB above the %d MB in use before the build", m - b, b }' /mnt/webkitgtk/disk-samples)"
           {
             echo "### WebKitGTK $WEBKITGTK_VERSION (cold build)"
             echo
             echo "- Runner: ubuntu-22.04, $(nproc) CPUs, $(free -g | awk '/^Mem:/ { print $2 }') GB RAM"
             echo "- Build step wall time: $((wall / 3600))h $((wall % 3600 / 60))m $((wall % 60))s"
             grep -E '^(configure|build|install): ' /mnt/webkitgtk/build.log | sed 's/^/- /'
-            echo "- Peak disk used (whole disks, sampled every 30 s): $peak"
+            echo "- Peak disk used by the build (sampled every 30 s): $peak"
             echo "- Build directory: $(du -sh /mnt/webkitgtk/build | cut -f1), ccache: $(du -sh /mnt/webkitgtk/ccache | cut -f1)"
             echo "- Staged (installed) size: $(du -sh "$stage" | cut -f1); libwebkit2gtk-4.1.so.0: $(du -shL "$stage/usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0" | cut -f1)"
             echo "- Cache key: \`${{ steps.key.outputs.key }}\`"
