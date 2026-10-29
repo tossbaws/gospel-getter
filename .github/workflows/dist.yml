@@ -494,6 +494,11 @@ jobs:
     # WebKitGTK installed and nothing added for the app (the README asks
     # for nothing); xvfb only if the runner lacks a display server. Its
     # WebKit processes must run from the AppImage, with its libwebkit2gtk.
+    # v2.21.0's AppImage (jammy's WebKitGTK 2.50) runs beside it as the
+    # control. The runner has no libEGL.so.1 (libglvnd's libegl1, on every
+    # desktop with Mesa or a GPU driver); the AppImage excludelist leaves
+    # the host's GL libraries out, so when it's missing both are run again
+    # with libegl1 and nothing else added.
     needs: linux-appimage
     runs-on: ubuntu-22.04
     timeout-minutes: 15
@@ -504,11 +509,17 @@ jobs:
           name: gospel-getter-linux-appimage-webkit-spike
           path: appimage
 
-      - name: Start it and check its WebKit processes
+      - name: Download v2.21.0's AppImage (the control)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v2.21.0 -R "$GITHUB_REPOSITORY" -p Gospel-Getter_amd64.AppImage -D control
+
+      - name: Start them and check their WebKit processes
         run: |
           set -euo pipefail
           lsb_release -ds
-          echo "WebKitGTK packages on this runner: $(dpkg-query -W -f '${Package} ' 'libwebkit2gtk*' 'libjavascriptcoregtk*' 2>/dev/null || true)"
+          installed="$(dpkg-query -W -f '${db:Status-Abbrev} ${Package}\n' 'libwebkit2gtk*' 'libjavascriptcoregtk*' 'libegl*' 'libfuse2*' 2>/dev/null || true)"
+          echo "Of WebKitGTK, libEGL and libfuse2, installed: $(awk '$1 == "ii" { print $2 }' <<<"$installed" | paste -sd' ')"
           # Searched from a variable: grep -q in a pipe from ldconfig can
           # stop it with SIGPIPE, which pipefail would report as no match.
           libs="$(ldconfig -p)"
@@ -517,21 +528,17 @@ jobs:
             exit 1
           fi
           command -v xvfb-run >/dev/null || { sudo apt-get update && sudo apt-get install -y xvfb; }
-          appimage="$(find appimage -maxdepth 1 -name '*.AppImage' | sed -n 1p)"
-          chmod +x "$appimage"
+          spike="$(find appimage -maxdepth 1 -name '*.AppImage' | sed -n 1p)"
+          control="control/Gospel-Getter_amd64.AppImage"
+          chmod +x "$spike" "$control"
           # FUSE-mounted, as a user runs it, when the runner has libfuse2;
           # else the AppImage runtime's own extract-and-run.
           if grep -q 'libfuse\.so\.2' <<<"$libs"; then
-            echo "Running it FUSE-mounted"
+            echo "Running them FUSE-mounted"
           else
-            echo "No libfuse2: running it with APPIMAGE_EXTRACT_AND_RUN=1"
+            echo "No libfuse2: running them with APPIMAGE_EXTRACT_AND_RUN=1"
             export APPIMAGE_EXTRACT_AND_RUN=1
           fi
-          home="$RUNNER_TEMP/app-home"
-          mkdir -p "$home"
-          HOME="$home" XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" XDG_CACHE_HOME="$home/cache" \
-            xvfb-run --auto-servernum "$PWD/$appimage" > "$RUNNER_TEMP/app.log" 2>&1 &
-          app_pid=$!
 
           # Processes by their executable's name (a 16-character name such
           # as WebKitWebProcess doesn't fit in /proc/PID/comm).
@@ -542,35 +549,95 @@ jobs:
             done
             return 0
           }
-          web=""
-          for _ in $(seq 60); do
-            web="$(pids_of WebKitWebProcess | sed -n 1p)"
-            [ -n "$web" ] && break
-            kill -0 "$app_pid" 2>/dev/null || break
-            sleep 0.5
-          done
-          sleep 5
-          status=0
-          if [ -z "$web" ] || ! kill -0 "$app_pid" 2>/dev/null; then
-            echo "::error::the AppImage didn't start a WebKitWebProcess, or exited"
-            status=1
-          else
-            app="$(pids_of gospel_getter | sed -n 1p)"
-            network="$(pids_of WebKitNetworkProcess | sed -n 1p)"
-            for pid in $app $web $network; do
-              exe="$(readlink "/proc/$pid/exe")"
-              lib="$(awk '$6 ~ /libwebkit2gtk-4\.1\.so/ { print $6; exit }' "/proc/$pid/maps")"
-              echo "$(basename "$exe") (pid $pid): $exe, with $lib"
-              case "$lib" in
-                /usr/*|/lib/*|"") echo "::error::$(basename "$exe") isn't running the AppImage's libwebkit2gtk-4.1"; status=1 ;;
-              esac
+          # check <label> <AppImage>: starts it with its own home, and
+          # succeeds when it's still running 5 s after its WebKitWebProcess
+          # appeared and its processes run its own libwebkit2gtk-4.1.
+          check() {
+            local label="$1" image="$2" home="$RUNNER_TEMP/home-$1" log="$RUNNER_TEMP/$1.log"
+            local app_pid web="" app network pid exe lib ok=0
+            rm -rf "$home"
+            mkdir -p "$home"
+            HOME="$home" XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" XDG_CACHE_HOME="$home/cache" \
+              xvfb-run --auto-servernum "$PWD/$image" > "$log" 2>&1 &
+            app_pid=$!
+            for _ in $(seq 60); do
+              web="$(pids_of WebKitWebProcess | sed -n 1p)"
+              [ -n "$web" ] && break
+              kill -0 "$app_pid" 2>/dev/null || break
+              sleep 0.5
             done
+            sleep 5
+            echo "--- $label"
+            if [ -z "$web" ] || ! kill -0 "$app_pid" 2>/dev/null; then
+              echo "$label: no WebKitWebProcess, or it exited"
+              ok=1
+            else
+              app="$(pids_of gospel_getter | sed -n 1p)"
+              network="$(pids_of WebKitNetworkProcess | sed -n 1p)"
+              for pid in $app $web $network; do
+                exe="$(readlink "/proc/$pid/exe")"
+                lib="$(awk '$6 ~ /libwebkit2gtk-4\.1\.so/ { print $6; exit }' "/proc/$pid/maps")"
+                echo "$(basename "$exe") (pid $pid): $exe, with $lib"
+                case "$lib" in
+                  /usr/*|/lib/*|"") echo "$label: $(basename "$exe") isn't running the AppImage's libwebkit2gtk-4.1"; ok=1 ;;
+                esac
+              done
+            fi
+            # Stop it and every process it started (xvfb-run, the app and
+            # its WebKit processes) before the next run.
+            kill "$app_pid" 2>/dev/null || true
+            wait "$app_pid" 2>/dev/null || true
+            for pid in $(pids_of gospel_getter) $(pids_of WebKitWebProcess) $(pids_of WebKitNetworkProcess); do
+              kill "$pid" 2>/dev/null || true
+            done
+            echo "--- $label: its log"
+            cat "$log"
+            return "$ok"
+          }
+          result() { if check "$@"; then echo started; else echo failed; fi; }
+
+          bare_control="$(result control-bare "$control" | tee /dev/stderr | tail -1)"
+          bare_spike="$(result spike-bare "$spike" | tee /dev/stderr | tail -1)"
+          egl_control="not run"
+          egl_spike="not run"
+          if ! grep -q 'libEGL\.so\.1' <<<"$libs"; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends libegl1
+            egl_control="$(result control-libegl1 "$control" | tee /dev/stderr | tail -1)"
+            egl_spike="$(result spike-libegl1 "$spike" | tee /dev/stderr | tail -1)"
           fi
-          kill "$app_pid" 2>/dev/null || true
-          wait "$app_pid" 2>/dev/null || true
-          echo "--- app.log"
-          cat "$RUNNER_TEMP/app.log"
-          exit "$status"
+          {
+            echo "### The AppImage on a plain Ubuntu 22.04 ($(lsb_release -ds))"
+            echo
+            echo "| | v2.21.0 (WebKitGTK 2.50, the control) | this AppImage (our WebKitGTK) |"
+            echo "|---|---|---|"
+            echo "| as the runner comes | $bare_control | $bare_spike |"
+            echo "| with libegl1 added | $egl_control | $egl_spike |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          # It must start with nothing added that v2.21.0 doesn't need too.
+          if [ "$bare_spike" != started ] && [ "$bare_control" = started ]; then
+            echo "::error::this AppImage fails on the plain runner where v2.21.0's starts"
+            exit 1
+          fi
+          if [ "$bare_spike" != started ] && [ "$egl_spike" != started ]; then
+            echo "::error::this AppImage didn't start, even with libegl1"
+            exit 1
+          fi
+
+      - name: Compare v2.21.0's glibc and libstdc++ floor
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/control"
+          cd "$RUNNER_TEMP/control"
+          "$GITHUB_WORKSPACE/control/Gospel-Getter_amd64.AppImage" --appimage-extract > /dev/null
+          : > symbols.txt
+          while IFS= read -r -d '' file; do
+            [ "$(head -c 4 "$file" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ] || continue
+            objdump -T "$file" >> symbols.txt 2>/dev/null || true
+          done < <(find squashfs-root -type f -print0)
+          max="$({ grep -o 'GLIBC_[0-9][0-9.]*' symbols.txt || true; } | sed 's/^GLIBC_//' | sort -uV | tail -1)"
+          max_cxx="$({ grep -o 'GLIBCXX_[0-9][0-9.]*' symbols.txt || true; } | sed 's/^GLIBCXX_//' | sort -uV | tail -1)"
+          echo "- v2.21.0's AppImage: highest GLIBC_ needed: $max; highest GLIBCXX_: $max_cxx" | tee -a "$GITHUB_STEP_SUMMARY"
 
   windows:
     name: Windows (NSIS installer)
