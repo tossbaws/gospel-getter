@@ -495,10 +495,11 @@ jobs:
     # for nothing); xvfb only if the runner lacks a display server. Its
     # WebKit processes must run from the AppImage, with its libwebkit2gtk.
     # v2.21.0's AppImage (jammy's WebKitGTK 2.50) runs beside it as the
-    # control. The runner has no libEGL.so.1 (libglvnd's libegl1, on every
-    # desktop with Mesa or a GPU driver); the AppImage excludelist leaves
-    # the host's GL libraries out, so when it's missing both are run again
-    # with libegl1 and nothing else added.
+    # control. The runner has no GL stack at all (no libEGL.so.1 or
+    # libGLESv2.so.2: libglvnd and Mesa, on every Ubuntu desktop), and the
+    # AppImage excludelist leaves the host's GL libraries out, so when
+    # libEGL is missing both are run again with Mesa's GL stack added and
+    # nothing else.
     needs: linux-appimage
     runs-on: ubuntu-22.04
     timeout-minutes: 15
@@ -568,14 +569,21 @@ jobs:
             done
             sleep 5
             echo "--- $label"
+            # Looked for again: a web process that crashed may be gone.
+            [ -n "$web" ] && web="$(pids_of WebKitWebProcess | sed -n 1p)"
             if [ -z "$web" ] || ! kill -0 "$app_pid" 2>/dev/null; then
-              echo "$label: no WebKitWebProcess, or it exited"
+              echo "$label: no WebKitWebProcess 5 s after it started, or the app exited"
               ok=1
             else
               app="$(pids_of gospel_getter | sed -n 1p)"
               network="$(pids_of WebKitNetworkProcess | sed -n 1p)"
               for pid in $app $web $network; do
-                exe="$(readlink "/proc/$pid/exe")"
+                exe="$(readlink "/proc/$pid/exe" || true)"
+                if [ -z "$exe" ]; then
+                  echo "$label: process $pid exited"
+                  ok=1
+                  continue
+                fi
                 lib="$(awk '$6 ~ /libwebkit2gtk-4\.1\.so/ { print $6; exit }' "/proc/$pid/maps")"
                 echo "$(basename "$exe") (pid $pid): $exe, with $lib"
                 case "$lib" in
@@ -598,13 +606,14 @@ jobs:
 
           bare_control="$(result control-bare "$control" | tee /dev/stderr | tail -1)"
           bare_spike="$(result spike-bare "$spike" | tee /dev/stderr | tail -1)"
-          egl_control="not run"
-          egl_spike="not run"
+          gl_control="not run"
+          gl_spike="not run"
+          gl_packages=(libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri)
           if ! grep -q 'libEGL\.so\.1' <<<"$libs"; then
             sudo apt-get update
-            sudo apt-get install -y --no-install-recommends libegl1
-            egl_control="$(result control-libegl1 "$control" | tee /dev/stderr | tail -1)"
-            egl_spike="$(result spike-libegl1 "$spike" | tee /dev/stderr | tail -1)"
+            sudo apt-get install -y --no-install-recommends "${gl_packages[@]}"
+            gl_control="$(result control-gl "$control" | tee /dev/stderr | tail -1)"
+            gl_spike="$(result spike-gl "$spike" | tee /dev/stderr | tail -1)"
           fi
           {
             echo "### The AppImage on a plain Ubuntu 22.04 ($(lsb_release -ds))"
@@ -612,19 +621,20 @@ jobs:
             echo "| | v2.21.0 (WebKitGTK 2.50, the control) | this AppImage (our WebKitGTK) |"
             echo "|---|---|---|"
             echo "| as the runner comes | $bare_control | $bare_spike |"
-            echo "| with libegl1 added | $egl_control | $egl_spike |"
+            echo "| with Mesa's GL stack added (${gl_packages[*]}) | $gl_control | $gl_spike |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           # It must start with nothing added that v2.21.0 doesn't need too.
           if [ "$bare_spike" != started ] && [ "$bare_control" = started ]; then
             echo "::error::this AppImage fails on the plain runner where v2.21.0's starts"
             exit 1
           fi
-          if [ "$bare_spike" != started ] && [ "$egl_spike" != started ]; then
-            echo "::error::this AppImage didn't start, even with libegl1"
+          if [ "$bare_spike" != started ] && [ "$gl_spike" != started ]; then
+            echo "::error::this AppImage didn't start, even with Mesa's GL stack"
             exit 1
           fi
 
       - name: Compare v2.21.0's glibc and libstdc++ floor
+        if: success() || failure()
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/control"
