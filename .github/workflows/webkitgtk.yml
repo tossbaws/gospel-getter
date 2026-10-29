@@ -18,6 +18,13 @@ name: WebKitGTK for the AppImage
 # configured the tree: a quick check of the dependencies and options.
 
 on:
+  # Spike only: workflow_dispatch needs the workflow on the default branch,
+  # so on this branch a push that changes the build starts it.
+  push:
+    branches: [spike/webkitgtk-2.54]
+    paths:
+      - .github/webkitgtk/**
+      - .github/workflows/webkitgtk.yml
   workflow_dispatch:
     inputs:
       configure_only:
