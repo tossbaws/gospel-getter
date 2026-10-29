@@ -424,17 +424,21 @@ jobs:
             [ "$(head -c 4 "$file" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ] || continue
             elves=$((elves + 1))
             symbols="$(objdump -T "$file" 2>/dev/null || true)"
-            glibc="$(grep -o 'GLIBC_[0-9][0-9.]*' <<<"$symbols" | sed 's/^GLIBC_//' | sort -uV | tail -1)"
-            glibcxx="$(grep -o 'GLIBCXX_[0-9][0-9.]*' <<<"$symbols" | sed 's/^GLIBCXX_//' | sort -uV | tail -1)"
+            glibc="$({ grep -o 'GLIBC_[0-9][0-9.]*' <<<"$symbols" || true; } | sed 's/^GLIBC_//' | sort -uV | tail -1)"
+            glibcxx="$({ grep -o 'GLIBCXX_[0-9][0-9.]*' <<<"$symbols" || true; } | sed 's/^GLIBCXX_//' | sort -uV | tail -1)"
             echo "${glibc:-none} ${glibcxx:-none} ${file#"$ROOT/"}" >> "$report"
           done < <(find "$ROOT" -type f -print0)
-          max="$(cut -d' ' -f1 "$report" | grep -v none | sort -uV | tail -1)"
-          max_cxx="$(cut -d' ' -f2 "$report" | grep -v none | sort -uV | tail -1)"
+          max="$(cut -d' ' -f1 "$report" | { grep -v none || true; } | sort -uV | tail -1)"
+          max_cxx="$(cut -d' ' -f2 "$report" | { grep -v none || true; } | sort -uV | tail -1)"
+          if [ -z "$max" ]; then
+            echo "::error::found no ELF file in the AppImage that needs glibc"
+            exit 1
+          fi
           echo "The highest glibc symbol versions the AppImage's ELF files need:"
-          sort -rV "$report" | head -15
+          sort -rV "$report" | sed -n 1,15p
           {
             echo "- ELF files in the AppImage: $elves; highest GLIBC_ needed: $max; highest GLIBCXX_: $max_cxx"
-            echo "- Needing GLIBC_$max: $(awk -v m="$max" '$1 == m { print $3 }' "$report" | head -8 | paste -sd' ')"
+            echo "- Needing GLIBC_$max: $(awk -v m="$max" '$1 == m { print $3 }' "$report" | sed -n 1,8p | paste -sd' ')"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           if [ "$(printf '%s\n' 2.35 "$max" | sort -V | tail -1)" != 2.35 ]; then
             echo "::error::the AppImage needs glibc $max, newer than Ubuntu 22.04's 2.35"
@@ -442,6 +446,7 @@ jobs:
           fi
 
       - name: Upload the glibc report
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: appimage-glibc-report
@@ -504,16 +509,19 @@ jobs:
           set -euo pipefail
           lsb_release -ds
           echo "WebKitGTK packages on this runner: $(dpkg-query -W -f '${Package} ' 'libwebkit2gtk*' 'libjavascriptcoregtk*' 2>/dev/null || true)"
-          if ldconfig -p | grep -q 'libwebkit2gtk-4.1\.so'; then
+          # Searched from a variable: grep -q in a pipe from ldconfig can
+          # stop it with SIGPIPE, which pipefail would report as no match.
+          libs="$(ldconfig -p)"
+          if grep -q 'libwebkit2gtk-4.1\.so' <<<"$libs"; then
             echo "::error::this runner has a libwebkit2gtk-4.1 of its own, so it can't show the AppImage runs without one"
             exit 1
           fi
           command -v xvfb-run >/dev/null || { sudo apt-get update && sudo apt-get install -y xvfb; }
-          appimage="$(find appimage -maxdepth 1 -name '*.AppImage' | head -1)"
+          appimage="$(find appimage -maxdepth 1 -name '*.AppImage' | sed -n 1p)"
           chmod +x "$appimage"
           # FUSE-mounted, as a user runs it, when the runner has libfuse2;
           # else the AppImage runtime's own extract-and-run.
-          if ldconfig -p | grep -q 'libfuse\.so\.2'; then
+          if grep -q 'libfuse\.so\.2' <<<"$libs"; then
             echo "Running it FUSE-mounted"
           else
             echo "No libfuse2: running it with APPIMAGE_EXTRACT_AND_RUN=1"
@@ -536,7 +544,7 @@ jobs:
           }
           web=""
           for _ in $(seq 60); do
-            web="$(pids_of WebKitWebProcess | head -1)"
+            web="$(pids_of WebKitWebProcess | sed -n 1p)"
             [ -n "$web" ] && break
             kill -0 "$app_pid" 2>/dev/null || break
             sleep 0.5
@@ -547,8 +555,8 @@ jobs:
             echo "::error::the AppImage didn't start a WebKitWebProcess, or exited"
             status=1
           else
-            app="$(pids_of gospel_getter | head -1)"
-            network="$(pids_of WebKitNetworkProcess | head -1)"
+            app="$(pids_of gospel_getter | sed -n 1p)"
+            network="$(pids_of WebKitNetworkProcess | sed -n 1p)"
             for pid in $app $web $network; do
               exe="$(readlink "/proc/$pid/exe")"
               lib="$(awk '$6 ~ /libwebkit2gtk-4\.1\.so/ { print $6; exit }' "/proc/$pid/maps")"
@@ -753,7 +761,7 @@ jobs:
 
   gui-linux:
     name: GUI checks (Linux)
-    # The AppImage the linux job built, driven through its own webview by
+    # The AppImage the linux-appimage job built, driven through its own webview by
     # tauri-driver and WebKitWebDriver on a private Xvfb display. Advisory:
     # not a required check (yet). The AppImage is tested as shipped: the
     # script has its own runtime extract it (--appimage-extract, so no FUSE)
