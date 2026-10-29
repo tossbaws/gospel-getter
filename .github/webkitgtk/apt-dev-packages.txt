@@ -34,7 +34,6 @@ libsystemd-dev
 libtasn1-6-dev
 libwayland-dev
 libwebp-dev
-libwoff-dev
 libx11-dev
 libxcomposite-dev
 libxdamage-dev

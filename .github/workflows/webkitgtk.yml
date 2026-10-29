@@ -129,7 +129,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             gcc-12 g++-12 cmake ninja-build pkg-config ccache gperf ruby unifdef \
-            perl python3 bubblewrap xdg-dbus-proxy "${dev_packages[@]}"
+            perl python3 gettext bubblewrap xdg-dbus-proxy "${dev_packages[@]}"
           gcc-12 --version | head -1
           cmake --version | head -1
 
