@@ -10,6 +10,7 @@ use crate::db::{
     HighlightColor, HighlightPassageInTranslation, Note, NoteError, Passage, ReadingPlace,
     SearchHit, TopVerse, Verse,
 };
+use crate::domain::query::SearchQuery;
 
 /// The store handles all database access after startup: verses, the
 /// reading position, bookmarks, highlights, notes and search. The book and translation lists
@@ -225,11 +226,11 @@ impl Store {
     pub async fn search(
         &self,
         translation_id: i64,
-        terms: &[String],
+        query: &SearchQuery,
         limit: i64,
         offset: i64,
     ) -> anyhow::Result<(i64, Vec<SearchHit>)> {
-        db::search::search_verses(self.db.read(), translation_id, terms, limit, offset).await
+        db::search::search_verses(self.db.read(), translation_id, query, limit, offset).await
     }
 
     /// Every bookmark, oldest first, for export.

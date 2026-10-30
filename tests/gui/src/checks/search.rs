@@ -278,7 +278,7 @@ impl Run<'_> {
             .box_is(
                 "the box to open, focus in it, suggesting commands",
                 "seen.open && seen.focus === '#search-input' && seen.groups.join() === 'Commands'
-                 && seen.status === 'Type words to search, a reference to go there, or > for a command.'",
+                 && seen.status === 'Type words to search (\"in quotes\" for an exact phrase), a reference to go there, or > for a command.'",
             )
             .await?;
         said.push(format!(

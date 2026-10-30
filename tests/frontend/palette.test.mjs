@@ -63,7 +63,7 @@ test('the empty box suggests a few commands, and says what it takes', () =>
         assert.equal(app.searchPanel().hidden, false);
         assert.deepEqual(groupLabels(app), ['Commands']);
         assert.deepEqual(commandLabels(app), ['Compare on', 'Reading mode', 'Random chapter', 'Copy chapter', 'Export notes…']);
-        assert.equal(app.searchStatus(), 'Type words to search, a reference to go there, or > for a command.');
+        assert.equal(app.searchStatus(), 'Type words to search ("in quotes" for an exact phrase), a reference to go there, or > for a command.');
         assert.equal(active(app), null, 'nothing runs on a bare Enter');
         await enter(app);
         assert.equal(app.searchPanel().hidden, false);

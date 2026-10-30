@@ -7,8 +7,8 @@
 //! 201ab8f; Show more's label at a1219bf, #106; a book's first chapter
 //! offered with its verses at 0dad77e, #124), byte for byte.
 
-/// The empty box says what it takes.
-pub const HINT: &str = "Type words to search, a reference to go there, or > for a command.";
+/// The empty box says what it takes, words in quotes (a phrase) among it.
+pub const HINT: &str = "Type words to search (\"in quotes\" for an exact phrase), a reference to go there, or > for a command.";
 
 /// A reference was found: Enter goes there.
 pub const GO_THERE: &str = "Press Enter to go there.";

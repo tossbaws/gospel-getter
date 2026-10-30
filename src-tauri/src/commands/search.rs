@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use super::{AppState, book_name, code_of, failed, resolve_translation};
 use crate::domain::kjv_markup::VerseText;
-use crate::domain::query::{self, Interpretation};
+use crate::domain::query::{self, Interpretation, SearchQuery};
 use crate::passage_reference::passage_reference;
 
 /// How many text-search results one `search` call returns.
@@ -72,6 +72,8 @@ pub enum SearchDto {
     Unavailable { message: String },
     /// One page of matching verses, in Bible order.
     Text {
+        /// What was searched for, as the status line says it: each phrase
+        /// in curly quotes, then each word (`SearchQuery::labels`).
         terms: Vec<String>,
         total: i64,
         offset: i64,
@@ -152,12 +154,12 @@ pub async fn run_search(
     }
 }
 
-/// One page of the verses containing every one of `terms`, in Bible order,
-/// with `go_to` passed through.
+/// One page of the verses with every word and phrase of `terms`, in Bible
+/// order, with `go_to` passed through.
 async fn text_search(
     state: &AppState,
     translation_id: i64,
-    terms: Vec<String>,
+    terms: SearchQuery,
     offset: i64,
     go_to: Option<GoToDto>,
 ) -> anyhow::Result<SearchDto> {
@@ -191,7 +193,7 @@ async fn text_search(
         })
         .collect();
     Ok(SearchDto::Text {
-        terms,
+        terms: terms.labels(),
         total,
         offset,
         page_size: SEARCH_PAGE_SIZE,
