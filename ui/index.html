@@ -411,6 +411,11 @@
             --column-min: 25rem;
             --side-width: 260px;
             --side-min: 180px;
+            /* How faint the faded neighbors are at rest, and under the
+               pointer: they lighten partway, never as bright as the
+               chapter being read. */
+            --side-opacity: 0.45;
+            --side-opacity-hover: 0.7;
             --row-gap: 1.25rem;
         }
 
@@ -3120,12 +3125,12 @@
             flex: 0 50 var(--side-width);
             min-width: var(--side-min);
             max-width: var(--side-width);
-            opacity: 0.55;
+            opacity: var(--side-opacity);
             transition: opacity 0.2s;
         }
 
         .chapter-side:hover {
-            opacity: 0.95;
+            opacity: var(--side-opacity-hover);
         }
 
         .chapter-side .verse {

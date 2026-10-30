@@ -2607,20 +2607,29 @@ fn glow_is_only_on_the_neon_themes() {
 }
 
 /// The side chapters are faded, not blurred: nothing is blurred, and they
-/// sit at 0.55, lifting to 0.95 under the pointer. Vaporwave's faded
-/// outline for their verse numbers still applies.
+/// sit at `--side-opacity`, lifting partway to `--side-opacity-hover` under
+/// the pointer (both one line each, in `html`). Vaporwave's faded outline
+/// for their verse numbers still applies.
 #[test]
 fn side_chapters_fade_without_blur() {
     let rules = rules();
     assert!(!stylesheet().contains("blur("));
     let side = screen_rule(&rules, ".chapter-side");
-    assert!(side.body.contains("opacity: 0.55"));
+    assert!(side.body.contains("opacity: var(--side-opacity)"));
+    assert!(side.body.contains("transition: opacity 0.2s"));
     assert!(!side.body.contains("filter"));
     assert!(
         screen_rule(&rules, ".chapter-side:hover")
             .body
-            .contains("opacity: 0.95")
+            .contains("opacity: var(--side-opacity-hover)")
     );
+    // Calmer than they were (0.55, and 0.95 under the pointer): fainter at
+    // rest, and lightening only partway, never to the chapter's own.
+    let html = custom_properties(&screen_rule(&rules, "html").body);
+    let level = |name| property(&html, name).parse::<f64>().unwrap();
+    let (rest, hover) = (level("--side-opacity"), level("--side-opacity-hover"));
+    assert!((0.3..0.55).contains(&rest), "at rest: {rest}");
+    assert!(rest < hover && hover < 0.95, "under the pointer: {hover}");
     assert!(
         screen_rule(&rules, ".chapter-side .verse-num")
             .body
