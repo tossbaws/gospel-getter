@@ -1536,8 +1536,9 @@ fn the_bar_s_history_and_chapter_controls_are_ghost_svg_buttons() {
 /// into `#print-commentary` (a child of `<body>`, never shown on screen)
 /// and marks `<html>` while it prints, and the print stylesheet then hides
 /// every other child of `<body>` (the dialog, the app) and shows the
-/// commentary, in black, its notes' line breaks kept. Done printing, or the
-/// dialog closed, the page prints as it always has.
+/// commentary, in black, its notes' line breaks kept, each chapter's notes
+/// a grid with a hanging indent, and its book heading leading its chapters'.
+/// Done printing, or the dialog closed, the page prints as it always has.
 #[test]
 fn the_commentary_prints_alone_from_a_print_only_container() {
     let tag = tag_of("print-commentary");
@@ -1569,8 +1570,75 @@ fn the_commentary_prints_alone_from_a_print_only_container() {
     );
     let shown = print(r#":root[data-printing="commentary"] #print-commentary"#);
     assert!(shown.contains("display: block !important") && shown.contains("color: #000000"));
-    assert!(print(".print-note").contains("white-space: pre-wrap"));
+    let decl = |selector: &str, name: &str| -> String {
+        declarations(&print(selector))
+            .into_iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v)
+            .unwrap_or_else(|| panic!("{selector}: a `{name}`"))
+    };
+    // A chapter's notes hang from one column of verses, as wide as its
+    // widest label: the markup gives its width (data-hang), the page sets it
+    // as `--hang`, at least a short label's.
+    assert_eq!(decl(".print-notes", "--hang"), "2.5em");
     let export = piece("export_notes.rs");
+    let hang = block_after(export, "async fn print_commentary(");
+    assert!(hang.contains(r#"query_selector_all(".print-notes[data-hang]")"#));
+    assert!(hang.contains(r#"set_property("--hang", &format!("{hang}em"))"#));
+    // The hanging indent: each note's text, every line of it, wrapped or
+    // after a break, indented past the column, and its verses floated
+    // back into it, on one line however long ("119:105–176").
+    let (note, label) = (".print-note", ".print-verses");
+    assert_eq!(decl(note, "padding-left"), "calc(var(--hang) + 0.75em)");
+    assert_eq!(decl(label, "float"), "left");
+    assert_eq!(decl(label, "width"), "var(--hang)");
+    assert_eq!(
+        decl(label, "margin-left"),
+        "calc(-1 * (var(--hang) + 0.75em))"
+    );
+    assert_eq!(decl(label, "font-weight"), "bold");
+    assert_eq!(decl(label, "font-variant-numeric"), "tabular-nums");
+    assert_eq!(decl(label, "white-space"), "nowrap");
+    assert_eq!(decl(".print-body", "white-space"), "pre-wrap");
+    assert_eq!(decl(".print-body", "overflow-wrap"), "anywhere");
+    // A note is a block, kept whole on a page (or split between lines when
+    // longer than one). Not a grid: WebKitGTK cuts a line in two, or leaves
+    // a gap, where a grid's rows meet a page break.
+    assert_eq!(decl(note, "break-inside"), "avoid");
+    assert!(
+        !rules
+            .iter()
+            .any(|r| r.at_rule.as_deref() == Some("@media print")
+                && r.selector.contains(".print-")
+                && r.body.contains("grid")),
+        "no grid in the printed commentary"
+    );
+    // The book leads its chapters: larger, bold as they are, with more room
+    // above it, in the same face (neither sets its own).
+    let pt = |selector: &str| -> f64 {
+        decl(selector, "font-size")
+            .strip_suffix("pt")
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("{selector}: a size in pt"))
+    };
+    let above = |selector: &str| -> f64 {
+        let margin = decl(selector, "margin");
+        let top = margin.split(' ').next().unwrap();
+        top.strip_suffix("em").unwrap().parse::<f64>().unwrap() * pt(selector)
+    };
+    let (book, chapter) = (".print-book", ".print-chapter");
+    assert_eq!(decl(book, "font-weight"), "bold");
+    assert_eq!(decl(chapter, "font-weight"), "bold");
+    assert!(pt(book) >= pt(chapter) + 3.0, "the book clearly the larger");
+    assert!(above(book) > above(chapter), "less room above a chapter");
+    assert!(
+        above(chapter) >= 0.6 * above(book),
+        "but only a little less"
+    );
+    for heading in [book, chapter] {
+        assert!(!print(heading).contains("font-family"));
+        assert!(!print(heading).contains("border") && !print(heading).contains("color"));
+    }
     assert!(export.contains(r#"const PRINTING: &str = "data-printing";"#));
     assert!(export.contains("window.print()"));
     assert!(export.contains(r#"dom::on(&window, "afterprint", |_| done_printing());"#));

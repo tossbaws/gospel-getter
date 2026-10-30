@@ -618,6 +618,17 @@ async fn print_commentary(commentary: &Commentary) {
         return;
     };
     container.set_inner_html(&commentary_markup(commentary));
+    // Each chapter's notes hang from its widest label (`data-hang`, in em),
+    // set through the style object: the page's CSP allows no inline style.
+    if let Ok(chapters) = container.query_selector_all(".print-notes[data-hang]") {
+        for chapter in (0..chapters.length()).filter_map(|i| chapters.item(i)) {
+            if let Ok(chapter) = chapter.dyn_into::<HtmlElement>()
+                && let Some(hang) = chapter.get_attribute("data-hang")
+            {
+                let _ = chapter.style().set_property("--hang", &format!("{hang}em"));
+            }
+        }
+    }
     let _ = html.set_attribute(PRINTING, "commentary");
     // Not every engine has `document.fonts` (the frontend tests' hasn't).
     let fonts = js_sys::Reflect::get(&document, &JsValue::from_str("fonts"))

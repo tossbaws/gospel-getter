@@ -658,7 +658,16 @@ test('Print… prints the same commentary: only a print-only container, through 
         app.window.print = () => printed.push({
             printing: html.getAttribute('data-printing'),
             markup: container.innerHTML,
-            text: [...container.children].map((c) => [c.className, c.textContent]),
+            text: [...container.querySelectorAll('h1, h2, h3, p')].map((c) => [c.className, c.textContent]),
+            // Each chapter heading then its notes, and nothing else among them.
+            grids: [...container.children]
+                .filter((c) => c.className === 'print-notes')
+                .map((notes) => [
+                    notes.previousElementSibling.className,
+                    notes.getAttribute('data-hang'),
+                    notes.style.getPropertyValue('--hang'),
+                    [...notes.children].map((n) => [n.className, [...n.children].map((s) => s.className)]),
+                ]),
         });
         await openDialog(app);
         await clickAndWait(app, el(app, 'export-notes-all'), 'count_notes_export');
@@ -685,6 +694,15 @@ test('Print… prints the same commentary: only a print-only container, through 
             ['print-chapter', '1 John 1'],
             ['print-note', '1:9 Confess.'],
         ]);
+        // Each chapter's notes together, hanging from its widest label's width
+        // (at least a short one's), each note a label and its text.
+        const note = ['print-note', ['print-verses', 'print-body']];
+        assert.deepEqual(printed[0].grids, [
+            ['print-chapter', '2.50', '2.50em', [note]],
+            ['print-chapter', '3.85', '3.85em', [note, note]],
+            ['print-chapter', '2.50', '2.50em', [note]],
+        ], 'a chapter’s notes hang from its widest label');
+        assert.ok(![...container.children].some((c) => c.className === 'print-note'));
         // Typed markup is text: no element was made of it.
         assert.ok(!/<b>|<script>/.test(printed[0].markup));
         // The same words as the file says, line for line.

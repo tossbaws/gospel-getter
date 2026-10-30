@@ -4543,8 +4543,16 @@
 
             /* Export notes' Print…: while the page prints the commentary
                (html[data-printing]), it prints nothing else: book and
-               chapter headings, then a line per note, its verses in bold,
-               its text with its line breaks, in the reading face. */
+               chapter headings, the book's the weightier, then a line per
+               note, its verses in bold, its text with its line breaks, in
+               the reading face. Each note's verses sit in a column of
+               their own, as wide as the chapter's widest label
+               ("119:105–176"; --hang, from its data-hang), and every line
+               of its text, wrapped or after a break, hangs beside them. A
+               block with a hanging indent, not a grid: WebKitGTK prints a
+               grid's rows across a page break with a line cut in two, or a
+               gap, where it keeps a block whole (or splits it between
+               lines, when it's longer than a page). */
             :root[data-printing="commentary"] body > *:not(#print-commentary) {
                 display: none !important;
             }
@@ -4575,29 +4583,41 @@
             }
 
             .print-book {
-                font-size: 15pt;
-                font-weight: normal;
-                margin: 1.4em 0 0;
+                font-size: 16pt;
+                font-weight: bold;
+                margin: 1.3em 0 0;
                 break-after: avoid;
             }
 
             .print-chapter {
-                font-size: 12.5pt;
-                margin: 1em 0 0.4em;
+                font-size: 12pt;
+                font-weight: bold;
+                margin: 1.2em 0 0.4em;
                 break-after: avoid;
             }
 
+            .print-notes {
+                --hang: 2.5em;
+            }
+
             .print-note {
+                padding-left: calc(var(--hang) + 0.75em);
                 margin: 0 0 0.5em;
-                white-space: pre-wrap;
-                overflow-wrap: anywhere;
                 break-inside: avoid;
             }
 
             .print-verses {
+                float: left;
+                width: var(--hang);
+                margin-left: calc(-1 * (var(--hang) + 0.75em));
                 font-weight: bold;
                 font-variant-numeric: tabular-nums;
-                margin-right: 0.5em;
+                white-space: nowrap;
+            }
+
+            .print-body {
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
             }
         }
     </style>
