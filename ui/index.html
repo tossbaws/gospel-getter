@@ -60,7 +60,8 @@
            website, for everything else), one radius scale for controls and
            surfaces, and the reading-comfort presets (see the text-size and
            line-spacing blocks below). The presets only scale the reading
-           content, chapter headings and verses, never the rest of the UI,
+           content, chapter headings and verses (the interface around them
+           follows Text size at half strength, by its own --ui-scale),
            and these defaults are exactly the fixed values the verses used
            before the presets existed. */
         :root {
@@ -73,6 +74,7 @@
             --rule: color-mix(in srgb, var(--accent-2) 50%, transparent);
             --reading-scale: 1;
             --reading-leading: 1.7;
+            --ui-scale: 1;
         }
 
         /* Default theme: Chi Rho, the Chi Rho Code brand's palette (the
@@ -375,6 +377,17 @@
         :root[data-text-size="large"] { --reading-scale: 1.2; }
         :root[data-text-size="x-large"] { --reading-scale: 1.4; }
 
+        /* The words around the text grow with Text size too, at about half
+           its strength: the popovers (the translation's, Aa, ☰), the
+           Library, the book and chapter picker, search and the palette,
+           the selection card and the margin notes. Their labels never go
+           below 11px (each is max(11px, ...)). The top bar stays as it is
+           (its 36px targets, so the reference keeps its room), and Medium
+           is exactly as before (1). */
+        :root[data-text-size="small"] { --ui-scale: 0.95; }
+        :root[data-text-size="large"] { --ui-scale: 1.1; }
+        :root[data-text-size="x-large"] { --ui-scale: 1.2; }
+
         :root[data-line-spacing="compact"] { --reading-leading: 1.45; }
         :root[data-line-spacing="relaxed"] { --reading-leading: 2.05; }
 
@@ -398,6 +411,11 @@
             --column-min: 25rem;
             --side-width: 260px;
             --side-min: 180px;
+            /* How faint the faded neighbors are at rest, and under the
+               pointer: they lighten partway, never as bright as the
+               chapter being read. */
+            --side-opacity: 0.45;
+            --side-opacity-hover: 0.7;
             --row-gap: 1.25rem;
         }
 
@@ -525,7 +543,7 @@
             border: 1px solid var(--accent-dim);
             border-radius: var(--radius-l);
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
         }
 
         .popover::before {
@@ -546,13 +564,34 @@
            --on-accent on --accent when chosen, both AA in every theme. */
         .aa-popover,
         .translation-popover {
-            width: 24rem;
+            width: calc(24rem * var(--ui-scale));
+        }
+
+        /* What's in them, scrolling within the window if it must (a short
+           window, a large text size): the popover itself can't scroll, or
+           its pointer would be clipped. */
+        .popover-body {
+            max-height: calc(100vh - var(--bar-height) - 1.5rem);
+            overflow-y: auto;
+            overscroll-behavior: contain;
             padding: 0.9rem 1rem 1rem;
         }
 
         .aa-popover::before,
         .translation-popover::before {
             right: calc(1.5rem - 7px);
+        }
+
+        /* Never past the window's left edge as they grow: each hangs from
+           its button, so it has the room left of that button's right edge
+           (the bar's buttons to the right of it, its gaps and padding, all
+           a fixed size), less a little. */
+        .aa-popover {
+            max-width: calc(100vw - 10.75rem);
+        }
+
+        .translation-popover {
+            max-width: calc(100vw - 14.25rem);
         }
 
         .aa-section {
@@ -565,7 +604,7 @@
 
         .section-label {
             display: block;
-            font-size: 0.7rem;
+            font-size: max(11px, calc(0.7rem * var(--ui-scale)));
             font-weight: normal;
             text-transform: uppercase;
             letter-spacing: 0.06em;
@@ -591,7 +630,7 @@
             flex: 1 1 0;
             min-width: 0;
             font-family: inherit;
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
             color: var(--accent);
             background: var(--panel-bg);
             border: none;
@@ -653,7 +692,7 @@
             display: block;
             width: 100%;
             font-family: inherit;
-            font-size: 0.8rem;
+            font-size: max(11px, calc(0.8rem * var(--ui-scale)));
             line-height: 1.35;
             text-align: left;
             color: var(--text);
@@ -716,8 +755,8 @@
         }
 
         .stepper-btn {
-            width: 2.6rem;
-            height: 2.1rem;
+            width: calc(2.6rem * var(--ui-scale));
+            height: calc(2.1rem * var(--ui-scale));
             font-family: inherit;
             line-height: 1;
             color: var(--accent);
@@ -737,11 +776,11 @@
         }
 
         .stepper-smaller {
-            font-size: 0.8rem;
+            font-size: max(11px, calc(0.8rem * var(--ui-scale)));
         }
 
         .stepper-larger {
-            font-size: 1.2rem;
+            font-size: max(11px, calc(1.2rem * var(--ui-scale)));
         }
 
         .size-stepper output {
@@ -806,13 +845,13 @@
         .theme-name {
             margin-top: 0.4rem;
             text-align: center;
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             color: var(--text-dim);
         }
 
         /* The ☰ menu: Export, Import, Show welcome and About. */
         .app-menu {
-            width: 14rem;
+            width: calc(14rem * var(--ui-scale));
             padding: 0.35rem 0;
         }
 
@@ -825,7 +864,7 @@
             width: 100%;
             text-align: left;
             font-family: inherit;
-            font-size: 0.9rem;
+            font-size: max(11px, calc(0.9rem * var(--ui-scale)));
             color: var(--text);
             background: none;
             border: none;
@@ -853,6 +892,121 @@
             margin: 0.3rem 0;
         }
 
+        /* Back, Recent places (▾) and Forward, at the left of the bar, as
+           in a browser: ghost buttons like the bar's others, Back and
+           Forward an arrow with a shaft (the chapters turn by chevrons,
+           beside the reference), and a hairline setting them apart from
+           the reference. */
+        .history-nav {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.1rem;
+        }
+
+        .history-btn {
+            width: 2.3rem;
+        }
+
+        .history-btn svg {
+            width: 1.15rem;
+            height: 1.15rem;
+        }
+
+        .recent-toggle {
+            width: 1.75rem;
+        }
+
+        .recent-toggle svg {
+            width: 0.85rem;
+            height: 0.85rem;
+        }
+
+        /* Nowhere to go: dimmed, and no wash under the pointer. It stays in
+           the tab order, saying it's unavailable (aria-disabled). */
+        .bar-btn[aria-disabled="true"] {
+            opacity: 0.38;
+            cursor: default;
+        }
+
+        .bar-btn[aria-disabled="true"]:hover {
+            background: none;
+            color: var(--text-dim);
+        }
+
+        .bar-divider {
+            flex: none;
+            width: 1px;
+            height: 1.4rem;
+            margin: 0 0.35rem;
+            background: var(--accent-dim);
+        }
+
+        /* Recent places: the menu from ▾, hanging below Back. No pointer,
+           so it can scroll in a short window. The place the reader is at
+           is tinted and marked. */
+        .recent-menu {
+            left: 0;
+            right: auto;
+            width: max-content;
+            min-width: calc(15rem * var(--ui-scale));
+            max-width: calc(100vw - 2rem);
+            max-height: calc(100vh - var(--bar-height) - 1rem);
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            padding: 0.35rem 0;
+        }
+
+        .recent-menu::before {
+            display: none;
+        }
+
+        .recent-label {
+            font-size: max(11px, calc(0.7rem * var(--ui-scale)));
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-dim);
+            padding: 0.35rem 0.9rem 0.25rem;
+        }
+
+        .recent-item,
+        .recent-forward {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 1.5rem;
+            white-space: nowrap;
+        }
+
+        .recent-item.is-here {
+            background: rgba(var(--accent-rgb), 0.15);
+        }
+
+        .recent-here,
+        .recent-key {
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
+            color: var(--text);
+        }
+
+        .recent-forward:disabled {
+            cursor: default;
+        }
+
+        .recent-empty {
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
+            color: var(--text-dim);
+            padding: 0.4rem 0.9rem 0.5rem;
+        }
+
+        /* A narrow window: Forward folds into Recent places (first in the
+           menu), and the reference leaves out its translation, which the
+           translation button shows. */
+        @media (max-width: 759px) {
+            #history-forward,
+            .ref-codes {
+                display: none;
+            }
+        }
+
         /* Library: bookmarks, highlights and notes in a panel down the right,
            hanging from the top bar so Aa, search and ☰ stay in reach.
            Opaque --option-bg, like the popovers. */
@@ -864,12 +1018,12 @@
             z-index: 25;
             display: flex;
             flex-direction: column;
-            width: min(22.5rem, 100%);
+            width: min(calc(22.5rem * var(--ui-scale)), 100%);
             background: var(--option-bg);
             color: var(--text);
             border-left: 1px solid var(--accent-dim);
             box-shadow: -10px 0 30px rgba(0, 0, 0, 0.35);
-            font-size: 0.9rem;
+            font-size: max(11px, calc(0.9rem * var(--ui-scale)));
         }
 
         .library-head {
@@ -880,7 +1034,7 @@
         }
 
         .library-title {
-            font-size: 1.1rem;
+            font-size: max(11px, calc(1.1rem * var(--ui-scale)));
             font-weight: normal;
             color: var(--accent);
         }
@@ -911,7 +1065,7 @@
         .library-tab {
             flex: 1 1 0;
             font-family: inherit;
-            font-size: 0.9rem;
+            font-size: max(11px, calc(0.9rem * var(--ui-scale)));
             color: var(--text-dim);
             background: none;
             border: none;
@@ -926,7 +1080,7 @@
         }
 
         .tab-count {
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
         }
 
         .library-tabpanel {
@@ -942,7 +1096,7 @@
         }
 
         .library-hint {
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             color: var(--text-dim);
             padding: 0.5rem 1rem;
             border-top: 1px solid var(--accent-dim);
@@ -961,6 +1115,12 @@
             }
         }
 
+        /* Export notes' commentary, drawn to be printed: never on screen
+           (see the print stylesheet). */
+        .print-commentary {
+            display: none;
+        }
+
         /* Narrow windows: Aa and the translations become a sheet along
            the bottom (scrolling if it must), and the Library takes the
            full width. */
@@ -973,6 +1133,7 @@
                 right: 0;
                 bottom: 0;
                 width: auto;
+                max-width: none;
                 max-height: min(75vh, calc(100vh - var(--bar-height) - 0.5rem));
                 overflow-y: auto;
                 border-radius: var(--radius-l) var(--radius-l) 0 0;
@@ -982,6 +1143,13 @@
             .aa-popover::before,
             .translation-popover::before {
                 display: none;
+            }
+
+            /* The sheet scrolls, not what's in it. */
+            .aa-popover .popover-body,
+            .translation-popover .popover-body {
+                max-height: none;
+                overflow: visible;
             }
 
             .library-panel:not([hidden]) {
@@ -1173,7 +1341,7 @@
             left: 50%;
             transform: translateX(-50%);
             z-index: 30;
-            width: min(640px, calc(100vw - 2rem));
+            width: min(calc(640px * var(--ui-scale)), calc(100vw - 2rem));
             max-height: calc(100vh - 5rem);
             overflow-y: auto;
             background: var(--option-bg);
@@ -1186,7 +1354,7 @@
         .search-input {
             width: 100%;
             font-family: inherit;
-            font-size: 1rem;
+            font-size: max(11px, calc(1rem * var(--ui-scale)));
             color: var(--text);
             background: var(--panel-bg);
             border: 1px solid var(--accent-dim);
@@ -1195,7 +1363,7 @@
         }
 
         .search-status {
-            font-size: 0.8rem;
+            font-size: max(11px, calc(0.8rem * var(--ui-scale)));
             color: var(--text-dim);
             margin: 0.5rem 0 0.3rem;
             min-height: 1em;
@@ -1215,7 +1383,7 @@
 
         .palette-group-label {
             font-family: var(--font-ui);
-            font-size: 0.7rem;
+            font-size: max(11px, calc(0.7rem * var(--ui-scale)));
             font-weight: bold;
             letter-spacing: 0.06em;
             text-transform: uppercase;
@@ -1228,7 +1396,7 @@
             align-items: baseline;
             gap: 0.6rem;
             font-family: var(--font-ui);
-            font-size: 0.9rem;
+            font-size: max(11px, calc(0.9rem * var(--ui-scale)));
             line-height: 1.4;
             color: var(--text);
             padding: 0.35rem 0.6rem;
@@ -1245,7 +1413,7 @@
         }
 
         .palette-reason {
-            font-size: 0.78rem;
+            font-size: max(11px, calc(0.78rem * var(--ui-scale)));
             color: var(--text-dim);
         }
 
@@ -1259,7 +1427,7 @@
             min-width: 1.6em;
             padding: 0.05em 0.4em;
             font-family: var(--font-ui);
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             line-height: 1.4;
             text-align: center;
             color: var(--text-dim);
@@ -1302,7 +1470,7 @@
             width: 100%;
             text-align: left;
             font-family: inherit;
-            font-size: 0.9rem;
+            font-size: max(11px, calc(0.9rem * var(--ui-scale)));
             line-height: 1.5;
             color: var(--text);
             background: none;
@@ -1318,7 +1486,7 @@
 
         .search-ref {
             display: block;
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             font-weight: bold;
             color: var(--accent);
         }
@@ -1967,8 +2135,9 @@
         /* Export notes: a button at the top of the Library's Notes tab,
            and a small modal (the note panel's look) to choose which notes:
            some books (a checklist that scrolls inside the dialog), one
-           book's chapters, and when they were written. Like the rest of
-           the UI it doesn't grow with the reading text size. */
+           book's chapters, and when they were written. Like the other
+           dialogs it doesn't grow with Text size; its button, in the
+           Library, does (see --ui-scale). */
         .export-notes-btn {
             flex: 0 0 auto;
         }
@@ -1989,7 +2158,7 @@
             flex: 1 1 9rem;
             min-width: 0;
             font-family: inherit;
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
             color: var(--text);
             background: var(--panel-bg);
             border: 1px solid var(--accent-dim);
@@ -2007,7 +2176,7 @@
         }
 
         .note-search-count {
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             color: var(--text-dim);
             margin: -0.2rem 0 0.4rem;
         }
@@ -2259,7 +2428,7 @@
 
         .bookmark-ref {
             display: block;
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
             color: var(--accent);
         }
 
@@ -2271,7 +2440,7 @@
             -webkit-line-clamp: 2;
             line-clamp: 2;
             overflow: hidden;
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             line-height: 1.35;
             color: var(--text-dim);
         }
@@ -2283,14 +2452,14 @@
 
         .bookmark-partial {
             display: block;
-            font-size: 0.7rem;
+            font-size: max(11px, calc(0.7rem * var(--ui-scale)));
             color: var(--text-dim);
         }
 
         .bookmark-remove {
             flex: 0 0 auto;
             font-family: inherit;
-            font-size: 1.1rem;
+            font-size: max(11px, calc(1.1rem * var(--ui-scale)));
             line-height: 1;
             color: var(--text-dim);
             background: none;
@@ -2327,7 +2496,7 @@
             max-height: calc(2 * 1.35em);
             overflow: hidden;
             overflow-wrap: anywhere;
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             line-height: 1.35;
             color: var(--text-dim);
             margin: 0 0.2rem 0.4rem;
@@ -2344,7 +2513,7 @@
         .note-list-copy {
             flex: 0 0 auto;
             font-family: inherit;
-            font-size: 0.8rem;
+            font-size: max(11px, calc(0.8rem * var(--ui-scale)));
             color: var(--text-dim);
             background: none;
             border: 1px solid transparent;
@@ -2360,7 +2529,7 @@
         }
 
         .bookmark-empty {
-            font-size: 0.8rem;
+            font-size: max(11px, calc(0.8rem * var(--ui-scale)));
             font-style: italic;
             color: var(--text-dim);
         }
@@ -2387,7 +2556,7 @@
             align-items: center;
             gap: 0.3rem;
             font-family: inherit;
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             color: var(--accent);
             background: var(--panel-bg);
             border: 1px solid var(--accent-dim);
@@ -2417,7 +2586,7 @@
             display: inline-flex;
             align-items: center;
             gap: 0.25rem;
-            font-size: 0.7rem;
+            font-size: max(11px, calc(0.7rem * var(--ui-scale)));
             color: var(--text-dim);
         }
 
@@ -2613,6 +2782,14 @@
             width: 100%;
         }
 
+        /* In the surfaces that grow with Text size (see --ui-scale); the
+           exit button stays the top bar's size. */
+        .popover .reader-mode-btn,
+        .library-panel .reader-mode-btn,
+        .search-more {
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
+        }
+
         .reader-mode-btn[aria-pressed="true"] {
             background: var(--accent);
             color: var(--on-accent);
@@ -2679,6 +2856,9 @@
 
             :root[data-reader-mode="on"] #library-toggle,
             :root[data-reader-mode="on"] #menu-toggle,
+            :root[data-reader-mode="on"] .history-nav,
+            :root[data-reader-mode="on"] .bar-divider,
+            :root[data-reader-mode="on"] .chapter-arrow,
             :root[data-reader-mode="on"] .sidebar-toggle,
             :root[data-reader-mode="on"] .chapter-side,
             :root[data-reader-mode="on"] .nav-hint {
@@ -2691,8 +2871,10 @@
             }
 
             /* The reference stays legible over the text scrolling under
-               the (now transparent) bar. */
+               the (now transparent) bar, and with no › after it, pushes the
+               rest to the right itself. */
             :root[data-reader-mode="on"] .ref-btn {
+                margin-right: auto;
                 background: var(--bar-bg);
             }
 
@@ -2740,7 +2922,7 @@
                 left: calc(100% + 1.5rem);
                 width: var(--margin-width, 14rem);
                 font-family: var(--font-ui);
-                font-size: 0.8rem;
+                font-size: max(11px, calc(0.8rem * var(--ui-scale)));
                 line-height: 1.45;
                 color: var(--text);
             }
@@ -2755,7 +2937,7 @@
             .margin-note-ref {
                 display: block;
                 font-family: inherit;
-                font-size: 0.72rem;
+                font-size: max(11px, calc(0.72rem * var(--ui-scale)));
                 line-height: 1.3;
                 color: var(--accent-2);
                 background: none;
@@ -2787,7 +2969,7 @@
                 position: absolute;
                 right: 0;
                 bottom: 0;
-                font-size: 0.75rem;
+                font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             }
 
             .margin-rule {
@@ -2831,7 +3013,6 @@
             min-width: 0;
             max-width: min(24rem, 50vw);
             height: 2.4rem;
-            margin-right: auto;
             padding: 0 0.7rem;
             background: none;
             border: none;
@@ -2864,6 +3045,23 @@
             color: var(--accent);
         }
 
+        /* The chapter arrows hug the reference, like a calendar's month
+           stepper: ‹ before it, › after it, which pushes the rest of the
+           bar to the right. Chevrons, apart from Back and Forward's arrows.
+           Not in reading mode, which stays bare (← and → still turn). */
+        .chapter-arrow {
+            width: 2rem;
+        }
+
+        .chapter-arrow svg {
+            width: 1.1rem;
+            height: 1.1rem;
+        }
+
+        #chapter-next {
+            margin-right: auto;
+        }
+
         /* The sidebar's own show/hide button, before the reference: only
            where there's room for the sidebar. */
         :root:not([data-wide]) .sidebar-toggle {
@@ -2882,7 +3080,7 @@
             z-index: 26;
             display: flex;
             flex-direction: column;
-            width: min(20rem, calc(100vw - 1rem));
+            width: min(calc(20rem * var(--ui-scale)), calc(100vw - 1rem));
             max-height: calc(100vh - var(--bar-height) - 1rem);
             overflow-y: auto;
             overscroll-behavior: contain;
@@ -2893,7 +3091,7 @@
             border-radius: var(--radius-l);
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
             font-family: var(--font-ui);
-            font-size: 0.9rem;
+            font-size: max(11px, calc(0.9rem * var(--ui-scale)));
         }
 
         .picker-random {
@@ -2921,7 +3119,7 @@
 
         .picker-testament {
             padding: 0.9rem 0.6rem 0.3rem;
-            font-size: 0.72rem;
+            font-size: max(11px, calc(0.72rem * var(--ui-scale)));
             font-weight: 600;
             letter-spacing: 0.12em;
             text-transform: uppercase;
@@ -2992,7 +3190,7 @@
             border-radius: 50%;
             background: var(--panel-bg);
             font-family: inherit;
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
             font-variant-numeric: tabular-nums;
             color: var(--text);
             cursor: pointer;
@@ -3069,12 +3267,12 @@
             flex: 0 50 var(--side-width);
             min-width: var(--side-min);
             max-width: var(--side-width);
-            opacity: 0.55;
+            opacity: var(--side-opacity);
             transition: opacity 0.2s;
         }
 
         .chapter-side:hover {
-            opacity: 0.95;
+            opacity: var(--side-opacity-hover);
         }
 
         .chapter-side .verse {
@@ -3272,7 +3470,7 @@
             background: var(--panel-bg);
             border: 1px solid var(--accent-dim);
             border-radius: var(--radius-m);
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
             line-height: 1.4;
             cursor: default;
         }
@@ -3286,13 +3484,13 @@
             z-index: 12;
             top: 0;
             left: 0;
-            width: min(100%, 34rem);
-            max-height: min(24rem, calc(100vh - var(--bar-height) - 2rem));
+            width: min(100%, calc(34rem * var(--ui-scale)));
+            max-height: min(calc(24rem * var(--ui-scale)), calc(100vh - var(--bar-height) - 2rem));
             overflow-y: auto;
             overscroll-behavior: contain;
             padding: 0.6rem 0.8rem;
             font-family: var(--font-ui);
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
             line-height: 1.4;
             color: var(--text);
             background: var(--option-bg);
@@ -3306,7 +3504,7 @@
             position: fixed;
             top: auto;
             bottom: 0.5rem;
-            max-height: min(45vh, 20rem);
+            max-height: min(45vh, calc(20rem * var(--ui-scale)));
         }
 
         /* Holding Shift turns the card into a faint ghost that clicks go
@@ -3400,13 +3598,13 @@
         }
 
         .xref-preview-title {
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             color: var(--text-dim);
         }
 
         .xref-preview-text {
             font-family: var(--font-scripture);
-            font-size: 0.95rem;
+            font-size: max(11px, calc(0.95rem * var(--ui-scale)));
             line-height: 1.6;
             color: var(--text);
         }
@@ -3446,7 +3644,7 @@
         .verse-note-btn,
         .highlight-remove {
             font-family: inherit;
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
             color: var(--accent);
             background: var(--panel-bg);
             border: 1px solid var(--accent-dim);
@@ -3495,7 +3693,7 @@
         .copy-as-item {
             text-align: left;
             font-family: inherit;
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
             color: var(--text);
             background: none;
             border: none;
@@ -3608,7 +3806,7 @@
             background: var(--panel-bg);
             border: 1px solid var(--accent-dim);
             border-radius: var(--radius-m);
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
             line-height: 1.45;
             cursor: default;
         }
@@ -3623,7 +3821,7 @@
         }
 
         .verse-notes-title {
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             font-weight: normal;
             text-transform: uppercase;
             letter-spacing: 0.05em;
@@ -3651,7 +3849,7 @@
         }
 
         .note-card-date {
-            font-size: 0.75rem;
+            font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             color: var(--text-dim);
         }
 
@@ -3680,7 +3878,7 @@
 
         .note-link {
             font-family: inherit;
-            font-size: 0.8rem;
+            font-size: max(11px, calc(0.8rem * var(--ui-scale)));
             color: var(--accent-2);
             background: none;
             border: none;
@@ -3790,13 +3988,13 @@
         }
 
         .highlight-swatch {
-            width: 1.6rem;
-            height: 1.6rem;
+            width: calc(1.6rem * var(--ui-scale));
+            height: calc(1.6rem * var(--ui-scale));
             padding: 0;
             border: 1px solid var(--accent-dim);
             border-radius: 50%;
             font-family: inherit;
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
             line-height: 1;
             color: var(--text);
             cursor: pointer;
@@ -3928,7 +4126,7 @@
 
         .xref-popup-title {
             display: block;
-            font-size: 0.7rem;
+            font-size: max(11px, calc(0.7rem * var(--ui-scale)));
             text-transform: uppercase;
             letter-spacing: 0.05em;
             color: var(--text-dim);
@@ -3939,7 +4137,7 @@
             background: none;
             border: none;
             font-family: inherit;
-            font-size: 0.85rem;
+            font-size: max(11px, calc(0.85rem * var(--ui-scale)));
             color: var(--accent-2);
             cursor: pointer;
             padding: 0;
@@ -4276,10 +4474,14 @@
                 /* Printed type is always the default size and spacing,
                    whatever reading-comfort presets are saved on screen. */
                 --reading-scale: 1 !important;
+                --ui-scale: 1 !important;
                 --reading-leading: 1.7 !important;
             }
 
             .top-bar,
+            .history-nav,
+            .bar-divider,
+            .chapter-arrow,
             .popover,
             .library-panel,
             .toast,
@@ -4337,6 +4539,85 @@
             .disclosure-toggle {
                 padding: 0;
                 color: #000000 !important;
+            }
+
+            /* Export notes' Print…: while the page prints the commentary
+               (html[data-printing]), it prints nothing else: book and
+               chapter headings, the book's the weightier, then a line per
+               note, its verses in bold, its text with its line breaks, in
+               the reading face. Each note's verses sit in a column of
+               their own, as wide as the chapter's widest label
+               ("119:105–176"; --hang, from its data-hang), and every line
+               of its text, wrapped or after a break, hangs beside them. A
+               block with a hanging indent, not a grid: WebKitGTK prints a
+               grid's rows across a page break with a line cut in two, or a
+               gap, where it keeps a block whole (or splits it between
+               lines, when it's longer than a page). */
+            :root[data-printing="commentary"] body > *:not(#print-commentary) {
+                display: none !important;
+            }
+
+            :root[data-printing="commentary"] body {
+                padding: 0 !important;
+            }
+
+            :root[data-printing="commentary"] #print-commentary {
+                display: block !important;
+                font-family: var(--font-scripture);
+                font-size: 11pt;
+                line-height: 1.45;
+                color: #000000;
+            }
+
+            .print-title {
+                font-size: 18pt;
+                font-weight: normal;
+                margin: 0 0 0.2em;
+            }
+
+            .print-meta {
+                font-family: var(--font-ui);
+                font-size: 9pt;
+                color: #333333;
+                margin: 0;
+            }
+
+            .print-book {
+                font-size: 16pt;
+                font-weight: bold;
+                margin: 1.3em 0 0;
+                break-after: avoid;
+            }
+
+            .print-chapter {
+                font-size: 12pt;
+                font-weight: bold;
+                margin: 1.2em 0 0.4em;
+                break-after: avoid;
+            }
+
+            .print-notes {
+                --hang: 2.5em;
+            }
+
+            .print-note {
+                padding-left: calc(var(--hang) + 0.75em);
+                margin: 0 0 0.5em;
+                break-inside: avoid;
+            }
+
+            .print-verses {
+                float: left;
+                width: var(--hang);
+                margin-left: calc(-1 * (var(--hang) + 0.75em));
+                font-weight: bold;
+                font-variant-numeric: tabular-nums;
+                white-space: nowrap;
+            }
+
+            .print-body {
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
             }
         }
     </style>
@@ -4429,19 +4710,30 @@
 <body>
     <div id="top-bar" class="top-bar">
         <button type="button" id="sidebar-toggle" class="bar-btn sidebar-toggle" aria-label="Books and chapters" title="Show or hide books and chapters" aria-controls="picker" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+        <div class="bar-item history-nav" role="group" aria-label="History">
+            <button type="button" id="history-back" class="bar-btn history-btn" aria-label="Back" title="Nothing earlier in this session (Alt+←)" aria-keyshortcuts="Alt+ArrowLeft" aria-disabled="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></svg></button>
+            <button type="button" id="recent-places-toggle" class="bar-btn recent-toggle" aria-label="Recent places" title="Recent places" aria-haspopup="menu" aria-controls="recent-places-menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg></button>
+            <button type="button" id="history-forward" class="bar-btn history-btn" aria-label="Forward" title="Nothing later in this session (Alt+→)" aria-keyshortcuts="Alt+ArrowRight" aria-disabled="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></button>
+            <div id="recent-places-menu" class="popover recent-menu" role="menu" aria-label="Recent places" hidden></div>
+        </div>
+        <span class="bar-divider" aria-hidden="true"></span>
+        <button type="button" id="chapter-prev" class="bar-btn chapter-arrow" aria-label="Previous chapter" title="This is the Bible’s first chapter (←)" aria-keyshortcuts="ArrowLeft" aria-disabled="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 6l-6 6 6 6"/></svg></button>
         <button type="button" id="ref-btn" class="ref-btn" aria-label="Choose a book and chapter" title="Choose a book and chapter (G)" aria-keyshortcuts="G" aria-controls="picker" aria-expanded="false"><span id="ref-text" class="ref-text"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg></button>
+        <button type="button" id="chapter-next" class="bar-btn chapter-arrow" aria-label="Next chapter" title="This is the Bible’s last chapter (→)" aria-keyshortcuts="ArrowRight" aria-disabled="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"/></svg></button>
         <button type="button" id="reader-exit" class="reader-exit">Exit reading mode <span aria-hidden="true">(Esc)</span></button>
         <div class="bar-item">
             <button type="button" id="translation-toggle" class="bar-btn translation-toggle" aria-label="Translation" title="Translation and compare (T)" aria-keyshortcuts="T" aria-haspopup="dialog" aria-controls="translation-popover" aria-expanded="false"></button>
             <div id="translation-popover" class="popover translation-popover" role="dialog" aria-label="Translation and compare" hidden>
-                <div class="aa-section">
-                    <span class="section-label" id="translation-label">Translation</span>
-                    <div id="translation-choices" class="translation-list" role="radiogroup" aria-labelledby="translation-label"></div>
-                    <select id="translation-select" hidden></select>
-                    <div class="aa-row compare-row">
-                        <button type="button" id="compare-btn" class="reader-mode-btn compare-btn" aria-pressed="false" title="Compare the translation you're reading with another, side by side (C)">Compare <span aria-hidden="true">(C)</span></button>
-                        <span class="compare-with-label" aria-hidden="true">with</span>
-                        <div id="compare-with-choices" class="segmented" role="group" aria-label="Compare with"></div>
+                <div class="popover-body">
+                    <div class="aa-section">
+                        <span class="section-label" id="translation-label">Translation</span>
+                        <div id="translation-choices" class="translation-list" role="radiogroup" aria-labelledby="translation-label"></div>
+                        <select id="translation-select" hidden></select>
+                        <div class="aa-row compare-row">
+                            <button type="button" id="compare-btn" class="reader-mode-btn compare-btn" aria-pressed="false" title="Compare the translation you're reading with another, side by side (C)">Compare <span aria-hidden="true">(C)</span></button>
+                            <span class="compare-with-label" aria-hidden="true">with</span>
+                            <div id="compare-with-choices" class="segmented" role="group" aria-label="Compare with"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -4449,40 +4741,42 @@
         <div class="bar-item">
             <button type="button" id="aa-toggle" class="bar-btn aa-toggle" aria-label="Display" title="Text and display" aria-haspopup="dialog" aria-controls="aa-popover" aria-expanded="false">Aa</button>
             <div id="aa-popover" class="popover aa-popover" role="dialog" aria-label="Display" hidden>
-                <div class="aa-section">
-                    <span class="section-label" id="text-size-label">Text size</span>
-                    <div class="size-stepper" role="group" aria-labelledby="text-size-label">
-                        <button type="button" id="text-size-down" class="stepper-btn stepper-smaller" aria-label="Smaller text" title="Smaller text">A&minus;</button>
-                        <output id="text-size-value" aria-live="polite"></output>
-                        <button type="button" id="text-size-up" class="stepper-btn stepper-larger" aria-label="Larger text" title="Larger text">A+</button>
+                <div class="popover-body">
+                    <div class="aa-section">
+                        <span class="section-label" id="text-size-label">Text size</span>
+                        <div class="size-stepper" role="group" aria-labelledby="text-size-label">
+                            <button type="button" id="text-size-down" class="stepper-btn stepper-smaller" aria-label="Smaller text" title="Smaller text">A&minus;</button>
+                            <output id="text-size-value" aria-live="polite"></output>
+                            <button type="button" id="text-size-up" class="stepper-btn stepper-larger" aria-label="Larger text" title="Larger text">A+</button>
+                        </div>
+                        <select id="text-size-select" hidden></select>
                     </div>
-                    <select id="text-size-select" hidden></select>
-                </div>
-                <div class="aa-section">
-                    <span class="section-label" id="line-spacing-label">Line spacing</span>
-                    <div id="line-spacing-choices" class="segmented" role="group" aria-labelledby="line-spacing-label"></div>
-                    <select id="line-spacing-select" hidden></select>
-                </div>
-                <div class="aa-section">
-                    <span class="section-label" id="width-label">Width</span>
-                    <div id="width-choices" class="segmented" role="group" aria-labelledby="width-label"></div>
-                    <select id="width-select" hidden></select>
-                </div>
-                <div class="aa-section">
-                    <span class="section-label" id="layout-label">Layout</span>
-                    <div id="layout-choices" class="segmented" role="group" aria-labelledby="layout-label" aria-describedby="layout-note"></div>
-                    <p id="layout-note" class="section-note layout-note" hidden>Compare always shows a verse to a row.</p>
-                    <select id="layout-select" hidden></select>
-                </div>
-                <div class="aa-section">
-                    <span class="section-label" id="theme-label">Theme</span>
-                    <div id="theme-choices" class="theme-swatches" role="group" aria-labelledby="theme-label"></div>
-                    <p id="theme-name" class="theme-name" aria-hidden="true"></p>
-                    <select id="theme-select" hidden></select>
-                </div>
-                <div class="aa-section">
-                    <button type="button" id="reader-mode-btn" class="reader-mode-btn" aria-pressed="false">Reading mode</button>
-                    <button type="button" id="margin-notes-btn" class="reader-mode-btn margin-notes-btn" aria-pressed="true" title="Your notes beside the text, in reading mode">Notes in the margin</button>
+                    <div class="aa-section">
+                        <span class="section-label" id="line-spacing-label">Line spacing</span>
+                        <div id="line-spacing-choices" class="segmented" role="group" aria-labelledby="line-spacing-label"></div>
+                        <select id="line-spacing-select" hidden></select>
+                    </div>
+                    <div class="aa-section">
+                        <span class="section-label" id="width-label">Width</span>
+                        <div id="width-choices" class="segmented" role="group" aria-labelledby="width-label"></div>
+                        <select id="width-select" hidden></select>
+                    </div>
+                    <div class="aa-section">
+                        <span class="section-label" id="layout-label">Layout</span>
+                        <div id="layout-choices" class="segmented" role="group" aria-labelledby="layout-label" aria-describedby="layout-note"></div>
+                        <p id="layout-note" class="section-note layout-note" hidden>Compare always shows a verse to a row.</p>
+                        <select id="layout-select" hidden></select>
+                    </div>
+                    <div class="aa-section">
+                        <span class="section-label" id="theme-label">Theme</span>
+                        <div id="theme-choices" class="theme-swatches" role="group" aria-labelledby="theme-label"></div>
+                        <p id="theme-name" class="theme-name" aria-hidden="true"></p>
+                        <select id="theme-select" hidden></select>
+                    </div>
+                    <div class="aa-section">
+                        <button type="button" id="reader-mode-btn" class="reader-mode-btn" aria-pressed="false">Reading mode</button>
+                        <button type="button" id="margin-notes-btn" class="reader-mode-btn margin-notes-btn" aria-pressed="true" title="Your notes beside the text, in reading mode">Notes in the margin</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -4537,6 +4831,9 @@
         <div id="reading-pane"></div>
     </main>
 
+    <!-- Export notes' Print…: the commentary, drawn here only while it's
+         printed (ui-leptos/src/export_notes.rs). Never shown on screen. -->
+    <div id="print-commentary" class="print-commentary" aria-hidden="true"></div>
     <script>
         // If the page's Rust pieces fail to load (their loader, in <head>,
         // says so once the page is read), the chapter still shows, as plain

@@ -324,3 +324,94 @@ test('a search that fails says so', () =>
         assert.equal(app.searchStatus(), 'Search failed: Search failed.');
         assert.ok(app.document.getElementById('search-status').classList.contains('is-error'));
     }));
+
+// ---- Exact phrases: words in double quotes.
+
+test('words in quotes find that phrase: in order, side by side, marked only where they stand as it', () =>
+    withApp({ translation: 'kjv' }, async (app) => {
+        await app.search('love one another');
+        const anywhere = app.searchResults().map((r) => r.querySelector('.search-ref').textContent);
+        assert.ok(anywhere.includes('Romans 12:10'), 'the words apart, anywhere');
+
+        await app.search('"love one another"');
+        const results = app.searchResults();
+        const refs = results.map((r) => r.querySelector('.search-ref').textContent);
+        assert.ok(refs.includes('John 13:34'));
+        assert.ok(!refs.includes('Romans 12:10'), '"one to another with brotherly love" isn’t the phrase');
+        assert.ok(refs.length < anywhere.length);
+        assert.match(app.searchStatus(), /^\d+ verses in the KJV\.$/);
+        for (const r of results) {
+            const text = r.querySelector('.search-text');
+            const ref = r.querySelector('.search-ref').textContent;
+            const [, bookName, chapter, verse] = /^(.*) (\d+):(\d+)$/.exec(ref);
+            // The verse as it is, character for character; marks only.
+            assert.equal(text.textContent, (await shownVerse('kjv', bookName, Number(chapter), Number(verse))).text);
+            const marks = [...text.querySelectorAll('mark')].map((m) => m.textContent.toLowerCase());
+            assert.ok(marks.length >= 3 && marks.length % 3 === 0, `${ref}: ${marks}`);
+            for (let i = 0; i < marks.length; i += 3) {
+                assert.deepEqual(marks.slice(i, i + 3), ['love', 'one', 'another'], ref);
+            }
+        }
+        // John 13:34 has the phrase twice: six marks, and its other words
+        // ("loved", "you") none.
+        const john = results.find((r) => r.querySelector('.search-ref').textContent === 'John 13:34');
+        assert.equal(john.querySelectorAll('mark').length, 6);
+    }));
+
+test('a phrase mixes with free words, folds case, takes curly quotes, and an unclosed quote is words', () =>
+    withApp({ translation: 'kjv' }, async (app) => {
+        const refs = () => app.searchResults().map((r) => r.querySelector('.search-ref').textContent);
+        await app.search('"love one another"');
+        const phrase = refs();
+        await app.search('"love one another" commandment');
+        const mixed = refs();
+        assert.ok(mixed.includes('John 13:34'));
+        assert.ok(mixed.length < phrase.length && mixed.every((r) => phrase.includes(r)));
+        const john = app.searchResults().find((r) => r.querySelector('.search-ref').textContent === 'John 13:34');
+        assert.deepEqual(
+            [...john.querySelectorAll('mark')].map((m) => m.textContent),
+            ['commandment', 'love', 'one', 'another', 'love', 'one', 'another'],
+        );
+        for (const typed of ['“LOVE ONE ANOTHER”', '"Love One Another”', '"lóve one anóther"']) {
+            await app.search(typed);
+            assert.deepEqual(refs(), phrase, typed);
+        }
+        await app.search('"love one another');
+        await app.search('love one another');
+        const words = refs();
+        await app.search('"love one another');
+        assert.deepEqual(refs(), words, 'an unclosed quote: its words are words');
+        await app.search('"my brother’s keeper"');
+        assert.deepEqual(refs(), ['Genesis 4:9']);
+        // None: the status names the phrase as typed, in quotes.
+        await app.search('"another one love" faith');
+        assert.deepEqual(refs(), []);
+        assert.equal(app.searchStatus(), 'No verses in the KJV contain all of: “another one love”, faith.');
+    }));
+
+test('a reference in quotes is a phrase to search for; without them, a place to go', () =>
+    withApp({ translation: 'kjv' }, async (app) => {
+        await app.search('John 3:16');
+        assert.equal(app.searchStatus(), 'Press Enter to go there.');
+        await app.search('"John 3:16"');
+        assert.notEqual(app.searchStatus(), 'Press Enter to go there.');
+        assert.match(app.searchStatus(), /^No verses in the KJV contain all of: “john 3 16”\.$/);
+        assert.equal(app.document.querySelector('#search-results .search-go'), null, 'no Go to');
+        // A book's name in quotes is a word, not the book.
+        await app.search('"Psalms"');
+        assert.equal(app.document.querySelector('#search-results .search-go'), null);
+        assert.ok(app.searchResults().length > 0);
+    }));
+
+test('FTS syntax typed in quotes or out is searched as words, never run', () =>
+    withApp({ translation: 'kjv' }, async (app) => {
+        for (const typed of ['"a" OR "b"', 'NEAR(faith hope)', '"faith" NOT "works"', 'faith*', '"lov*"', 'text:faith', '"""', '(*)']) {
+            await app.search(typed);
+            assert.doesNotMatch(app.searchStatus(), /^Search failed/, typed);
+            assert.equal(app.consoleErrors.length, 0, `${typed}: ${app.consoleErrors.join(' ')}`);
+        }
+        await app.search('"faith" OR "hope"');
+        const either = app.searchResults().map((r) => r.querySelector('.search-ref').textContent);
+        await app.search('faith or hope');
+        assert.deepEqual(app.searchResults().map((r) => r.querySelector('.search-ref').textContent), either);
+    }));

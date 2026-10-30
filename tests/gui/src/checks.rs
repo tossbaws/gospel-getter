@@ -362,6 +362,8 @@ async fn shipped(
             (Check::CompareGrid, run.compare_grid().await),
             (Check::Disclosures, run.disclosures().await),
             (Check::BackForward, run.back_forward().await),
+            (Check::BarHistory, run.bar_history().await),
+            (Check::BarChapters, run.bar_chapters().await),
             (Check::LongChapter, run.long_chapter().await),
             (Check::TryAgain, run.try_again().await),
             (Check::SelectVerses, run.select_verses().await),

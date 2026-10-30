@@ -6,7 +6,8 @@
 //! reader is on the reference button and in the window's title, keeps the
 //! reading position for the next launch, says when a chapter couldn't be
 //! read (with Try again), and keeps the passage history (Back and Forward,
-//! with the mouse's back and forward buttons). It fills the translation
+//! with the mouse's back and forward buttons and the bar's, `nav`, which
+//! it tells where they go and which places to list in Recent places). It fills the translation
 //! button's record, `#translation-select`, from boot's answer, and answers
 //! its own controls in the pane: the chapter steps, a neighbor's heading,
 //! the two disclosures, the chapter's cross-references and their credit
@@ -47,6 +48,8 @@ use crate::card;
 use crate::dom;
 use crate::dto::{Compare, CompareArgs, Home, Position, Reading, ReadingArgs, Verse};
 use crate::ipc;
+use crate::nav::{self, Facts};
+use crate::nav_text::RecentPlace;
 use crate::palette::PaletteState;
 use crate::reader_text::{self as text, Disclosure, History, Opened, Place, Which};
 use crate::surfaces;
@@ -247,7 +250,9 @@ fn update_reference(here: &Here, compare: Option<&Compare>) {
     };
     let reference = text::reference(&here.book_name, here.chapter, &codes, translation_name);
     if let Some(ref_text) = by_id("ref-text") {
-        ref_text.set_text_content(Some(&reference.text));
+        // The translations apart, which a narrow window leaves out (the
+        // translation button says it).
+        ref_text.set_inner_html(&text::reference_markup(&reference));
     }
     if let Some(button) = by_id("ref-btn") {
         let _ = button.set_attribute("aria-label", &reference.label);
@@ -351,7 +356,57 @@ fn render_current() {
     with(|s| s.columns = columns);
     update_reference(&here, compare.as_deref());
     bridge::show_picker_current(here.book_id, here.chapter);
+    show_nav();
     card::shown(dto, compare, &here.translation_code, compare_first);
+}
+
+/// Tells the bar's Back, Forward, Recent places, ‹ and › (`nav`) where the
+/// reader is and where each would go.
+fn show_nav() {
+    // The chapters beside, as the pane was drawn with them (and ← and →
+    // turn to): named from the reading already in hand.
+    let side = |side: Option<&crate::dto::ChapterSide>| {
+        side.map(|s| format!("{} {}", s.book_name, s.chapter))
+    };
+    let facts = with(|s| Facts {
+        here: s.reading.as_ref().map(|r| (r.book_id, r.chapter)),
+        back: s.history.toward(-1).cloned(),
+        forward: s.history.toward(1).cloned(),
+        prev: s.last_dto.as_ref().and_then(|d| side(d.prev.as_ref())),
+        next: s.last_dto.as_ref().and_then(|d| side(d.next.as_ref())),
+    });
+    nav::show(facts);
+}
+
+/// `place`, read in `translation_code`, as a recent place.
+fn recent(place: &Place, translation_code: &str) -> RecentPlace {
+    RecentPlace {
+        book_id: place.book_id,
+        chapter: place.chapter,
+        start: place.start,
+        end: place.end,
+        translation: translation_code.to_owned(),
+    }
+}
+
+/// The place on screen, as the reader leaves it (after
+/// [`remember_leaving`]), as a recent place.
+fn recent_here() -> Option<RecentPlace> {
+    with(|s| {
+        let code = &s.reading.as_ref()?.translation_code;
+        s.history.here().map(|place| recent(place, code))
+    })
+}
+
+/// A jump or a step has landed on `place`: it and the place left are the
+/// newest recent places, in that order.
+fn record_recent(leaving: Option<RecentPlace>, place: &Place) {
+    if let Some(leaving) = leaving {
+        nav::record(leaving);
+    }
+    if let Some(code) = with(|s| s.reading.as_ref().map(|r| r.translation_code.clone())) {
+        nav::record(recent(place, &code));
+    }
 }
 
 /// The comparison of the chapter in the translations Compare shows now, or
@@ -587,8 +642,9 @@ fn retry() {
     // After a step back or forward that couldn't be read, the step again.
     if with(|s| s.history.can_retry(book_id, chapter)) {
         remember_leaving();
+        let leaving = recent_here();
         if let Some(going) = with(|s| s.history.begin_retry(book_id, chapter)) {
-            spawn(open_step(going));
+            spawn(open_step(going, leaving));
         }
         return;
     }
@@ -833,6 +889,7 @@ fn start_history() {
             s.history.start(book_id, chapter);
         }
     });
+    show_nav();
 }
 
 /// The place on screen, brought up to date as the reader leaves it.
@@ -848,6 +905,7 @@ fn remember_leaving() {
 /// numbered; from the top, with `top`) and records it in the history.
 fn jump_to(book_id: i64, chapter: i64, start: Option<i64>, end: Option<i64>, top: bool) -> Load {
     remember_leaving();
+    let leaving = recent_here();
     with(|s| s.history.begin_jump());
     let open = open_passage(book_id, chapter, start, end);
     Box::pin(async move {
@@ -868,7 +926,11 @@ fn jump_to(book_id: i64, chapter: i64, start: Option<i64>, end: Option<i64>, top
         } else {
             None
         };
+        if let Some(place) = &place {
+            record_recent(leaving, place);
+        }
         with(|s| s.history.end_jump(place));
+        show_nav();
         loaded
     })
 }
@@ -882,16 +944,19 @@ fn go_history(step: i32) -> Load {
         return Box::pin(async { false });
     }
     remember_leaving();
+    let leaving = recent_here();
     let Some(going) = with(|s| s.history.begin_go(step)) else {
         return Box::pin(async { false });
     };
-    open_step(going)
+    show_nav();
+    open_step(going, leaving)
 }
 
 /// Opens the place a step back or forward (with its token) is going to.
 /// Only once it's read is it the place on screen; one that can't be read
-/// leaves the history as it was (`History::end_go`).
-fn open_step((token, place): (u64, Place)) -> Load {
+/// leaves the history as it was (`History::end_go`). Read, it and the place
+/// left (`leaving`) are the newest recent places.
+fn open_step((token, place): (u64, Place), leaving: Option<RecentPlace>) -> Load {
     let open = open_passage(place.book_id, place.chapter, place.start, place.end);
     Box::pin(async move {
         let (loaded, _) = open.await;
@@ -904,8 +969,10 @@ fn open_step((token, place): (u64, Place)) -> Load {
             } else if place.start.is_none() {
                 scroll_to(0.0);
             }
+            record_recent(leaving, &place);
         }
         with(|s| s.history.end_go(token, loaded));
+        show_nav();
         loaded
     })
 }

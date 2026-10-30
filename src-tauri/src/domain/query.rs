@@ -1,6 +1,6 @@
 //! Interpreting what the reader typed into the search box: either a
 //! reference to go to (`John 3:16`, `1 Cor 13`, `ps 23:1-3`) or words to
-//! search the text for; and finding the references typed in a note
+//! search the text for, words in double quotes as a phrase; and finding the references typed in a note
 //! ("see Rom 5:8"), by the same rules, for the page to link. Pure — no
 //! database access — so it's tested here against the real book list
 //! without seeding anything.
@@ -8,9 +8,53 @@
 use crate::book_aliases::ALIASES;
 use crate::db::Book;
 
-/// The most words one text search will match on; anything past this is
-/// ignored rather than building an ever-larger FTS query.
+/// The most words one text search will match on, a phrase's words each
+/// counted; anything past this is ignored rather than building an
+/// ever-larger FTS query.
 pub const MAX_SEARCH_TERMS: usize = 12;
+
+/// What opens and closes a phrase: a straight double quote, or a curly one
+/// either way (a keyboard's smart quotes).
+const QUOTES: [char; 3] = ['"', '\u{201c}', '\u{201d}'];
+
+/// A text search: words a verse must have, anywhere, and phrases (words
+/// typed in double quotes) it must have as typed: in order, side by side.
+/// Every word is lowercased, as [`search_query`] makes them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchQuery {
+    pub words: Vec<String>,
+    pub phrases: Vec<Vec<String>>,
+}
+
+impl SearchQuery {
+    /// Free words alone, as a search without quotes is.
+    pub fn of_words(words: &[&str]) -> Self {
+        Self {
+            words: words.iter().map(|w| (*w).to_owned()).collect(),
+            phrases: Vec::new(),
+        }
+    }
+
+    /// Nothing to search for.
+    pub fn is_empty(&self) -> bool {
+        self.words.is_empty() && self.phrases.is_empty()
+    }
+
+    /// How many words, a phrase's each counted (see [`MAX_SEARCH_TERMS`]).
+    pub fn len(&self) -> usize {
+        self.words.len() + self.phrases.iter().map(Vec::len).sum::<usize>()
+    }
+
+    /// What was searched for, as the search box says it: each phrase in
+    /// curly quotes, then each word.
+    pub fn labels(&self) -> Vec<String> {
+        self.phrases
+            .iter()
+            .map(|p| format!("\u{201c}{}\u{201d}", p.join(" ")))
+            .chain(self.words.iter().cloned())
+            .collect()
+    }
+}
 
 /// A passage to go to: a whole chapter, or an inclusive verse range in it.
 /// Chapter numbers are checked against the book; verse numbers can only be
@@ -33,12 +77,12 @@ pub enum Interpretation {
     /// Recognizably a reference, but not one that exists or can be read;
     /// the message says why, for the reader.
     InvalidReference(String),
-    /// Words to search the text for, lowercased and de-duplicated.
-    Text(Vec<String>),
+    /// Words and phrases to search the text for (see [`search_query`]).
+    Text(SearchQuery),
     /// A book's name or abbreviation alone (`Psalms`, `1 cor`): words to
     /// search the text for, as `Text`, and that book's first chapter to go
     /// to as well, offered first.
-    TextOrBook(Vec<String>, PassageRef),
+    TextOrBook(SearchQuery, PassageRef),
 }
 
 /// Decide whether `input` is a reference or a text search. A reference is
@@ -55,8 +99,10 @@ pub fn interpret(input: &str, books: &[Book]) -> Interpretation {
         return Interpretation::Empty;
     }
 
+    // Quotes mean words to search for: `"John 3:16"` is a phrase.
+    let quoted = input.contains(QUOTES);
     let (book_part, spec) = split_reference(input);
-    if !spec.is_empty() {
+    if !quoted && !spec.is_empty() {
         let looks_like_verse_ref = spec.contains([':', '.']);
         if book_part.chars().any(char::is_alphabetic) {
             match find_book(book_part, books) {
@@ -76,11 +122,11 @@ pub fn interpret(input: &str, books: &[Book]) -> Interpretation {
         }
     }
 
-    let terms = search_terms(input);
+    let terms = search_query(input);
     if terms.is_empty() {
         return Interpretation::Empty;
     }
-    match find_book(input, books) {
+    match find_book(input, books).filter(|_| !quoted) {
         Some(book) => Interpretation::TextOrBook(
             terms,
             PassageRef {
@@ -93,36 +139,100 @@ pub fn interpret(input: &str, books: &[Book]) -> Interpretation {
     }
 }
 
-/// The words of a text search: runs of letters and digits, lowercased, in
-/// the order typed, without repeats, at most `MAX_SEARCH_TERMS`.
-pub fn search_terms(input: &str) -> Vec<String> {
-    let mut terms: Vec<String> = Vec::new();
-    for word in input.split(|c: char| !c.is_alphanumeric()) {
-        if word.is_empty() {
-            continue;
-        }
-        let word = word.to_lowercase();
-        if !terms.contains(&word) {
-            terms.push(word);
-        }
-        if terms.len() == MAX_SEARCH_TERMS {
-            break;
-        }
-    }
-    terms
+/// The words of `text`: runs of letters and digits, lowercased, in order.
+fn words_of(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
 }
 
-/// Where `terms` (a text search's, as [`search_terms`] gives them) are in a
+/// The words and phrases of a text search. Words typed in double quotes
+/// (straight `"`, or curly `“ ”`) are a phrase, matched only as typed; the
+/// rest are words, matched anywhere in the verse. A word is a run of
+/// letters and digits, lowercased, so a quote's other characters (an
+/// apostrophe, a comma, a single quote) only part words, as in the verse;
+/// and nothing typed is ever query syntax. An unclosed quote's words are
+/// words; a phrase of one word is that word; repeats are dropped. At most
+/// [`MAX_SEARCH_TERMS`] words in all, in the order typed: a phrase that
+/// would go past it keeps the words that fit.
+pub fn search_query(input: &str) -> SearchQuery {
+    let parts: Vec<&str> = input.split(QUOTES).collect();
+    // Split at every quote, the odd parts are inside a pair; the last part
+    // of an odd number of quotes (an even count of parts) isn't closed.
+    let closed = if parts.len().is_multiple_of(2) {
+        parts.len() - 1
+    } else {
+        parts.len()
+    };
+    let mut query = SearchQuery::default();
+    for (i, part) in parts.iter().enumerate() {
+        let room = MAX_SEARCH_TERMS - query.len();
+        if room == 0 {
+            break;
+        }
+        if i % 2 == 1 && i < closed {
+            let phrase: Vec<String> = words_of(part).take(room).collect();
+            match phrase.len() {
+                0 => {}
+                1 => push_word(&mut query.words, &phrase[0]),
+                _ if !query.phrases.contains(&phrase) => query.phrases.push(phrase),
+                _ => {}
+            }
+        } else {
+            for word in words_of(part) {
+                if query.len() == MAX_SEARCH_TERMS {
+                    break;
+                }
+                push_word(&mut query.words, &word);
+            }
+        }
+    }
+    query
+}
+
+fn push_word(words: &mut Vec<String>, word: &str) {
+    if !words.iter().any(|w| w == word) {
+        words.push(word.to_owned());
+    }
+}
+
+/// Where a text search (`query`, as [`search_query`] gives it) is in a
 /// verse's `text`, to be marked in its result: the byte ranges of the
-/// words of `text` that are one of them, in order. A word is a run of
-/// letters, digits and private-use characters, as SQLite's FTS5 tokenizer
-/// splits the text it indexes (`db::search`), and two words are the same
-/// if they are once decomposed (NFD), without their marks, and lowercased.
-/// Every word is looked at, so a term marks each place it is in the verse.
-/// This is the one rule for it: the page draws the marks where it says.
-pub fn term_marks(text: &str, terms: &[String]) -> Vec<(usize, usize)> {
-    let wanted: Vec<String> = terms.iter().map(|t| folded(t)).collect();
-    let mut marks = Vec::new();
+/// words of `text` that are one of its words, or that are a phrase's words
+/// where they stand as the phrase (in order, side by side), in order. A
+/// word is a run of letters, digits and private-use characters, as
+/// SQLite's FTS5 tokenizer splits the text it indexes (`db::search`), and
+/// two words are the same if they are once decomposed (NFD), without their
+/// marks, and lowercased; what's between two words (a space, a comma) is
+/// no word, as for the index. Every word is looked at, so a search marks
+/// each place it is in the verse. This is the one rule for it: the page
+/// draws the marks where it says.
+pub fn term_marks(text: &str, query: &SearchQuery) -> Vec<(usize, usize)> {
+    let spans = word_spans_of(text);
+    let words: Vec<String> = spans.iter().map(|&(a, b)| folded(&text[a..b])).collect();
+    let mut marked = vec![false; spans.len()];
+    let free: Vec<String> = query.words.iter().map(|w| folded(w)).collect();
+    for (i, word) in words.iter().enumerate() {
+        marked[i] |= free.contains(word);
+    }
+    for phrase in query.phrases.iter().filter(|p| !p.is_empty()) {
+        let phrase: Vec<String> = phrase.iter().map(|w| folded(w)).collect();
+        for start in 0..words.len().saturating_sub(phrase.len() - 1) {
+            if words[start..start + phrase.len()] == phrase[..] {
+                marked[start..start + phrase.len()].fill(true);
+            }
+        }
+    }
+    spans
+        .into_iter()
+        .zip(marked)
+        .filter_map(|(span, marked)| marked.then_some(span))
+        .collect()
+}
+
+/// The byte ranges of `text`'s words (see [`term_marks`]), in order.
+fn word_spans_of(text: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
     let mut start = None;
     for (i, c) in text
         .char_indices()
@@ -132,15 +242,13 @@ pub fn term_marks(text: &str, terms: &[String]) -> Vec<(usize, usize)> {
         match (start, in_word) {
             (None, true) => start = Some(i),
             (Some(from), false) => {
-                if wanted.contains(&folded(&text[from..i])) {
-                    marks.push((from, i));
-                }
+                spans.push((from, i));
                 start = None;
             }
             _ => {}
         }
     }
-    marks
+    spans
 }
 
 /// A character words are made of: a letter, a digit or a private-use
@@ -653,10 +761,9 @@ mod tests {
             ("don't", &["don", "t"]),
         ];
         for (input, terms) in cases {
-            let terms = terms.iter().map(|t| (*t).to_string()).collect();
             assert_eq!(
                 interpret(input, &books),
-                Interpretation::Text(terms),
+                Interpretation::Text(SearchQuery::of_words(terms)),
                 "input {input:?}"
             );
         }
@@ -668,32 +775,32 @@ mod tests {
     #[test]
     fn term_marks_find_each_word_a_term_is() {
         let text = "And now abideth faith, hope, charity, these three; but the greatest of these is charity.";
-        let terms = search_terms("Charity faith");
+        let terms = search_query("Charity faith");
         let marked: Vec<&str> = term_marks(text, &terms)
             .into_iter()
             .map(|(from, to)| &text[from..to])
             .collect();
         assert_eq!(marked, ["faith", "charity", "charity"]);
         // Whole words only: "these" isn't "the", nor "greatest" "great".
-        assert_eq!(term_marks(text, &search_terms("the great")), [(55, 58)]);
-        assert!(term_marks(text, &[]).is_empty());
-        assert!(term_marks("", &search_terms("love")).is_empty());
+        assert_eq!(term_marks(text, &search_query("the great")), [(55, 58)]);
+        assert!(term_marks(text, &SearchQuery::default()).is_empty());
+        assert!(term_marks("", &search_query("love")).is_empty());
     }
 
     #[test]
     fn term_marks_fold_case_and_accents_and_keep_the_texts_bytes() {
         // "Élie" typed plainly; the verse's own letters stay as they are.
         let text = "Élie dit: «Ô Éternel!» ÉLIE.";
-        let marks = term_marks(text, &search_terms("elie eternel"));
+        let marks = term_marks(text, &search_query("elie eternel"));
         let marked: Vec<&str> = marks.iter().map(|&(from, to)| &text[from..to]).collect();
         assert_eq!(marked, ["Élie", "Éternel", "ÉLIE"]);
         // A decomposed accent is a mark, not part of a word, as in the
         // index: "e\u{301}" is "e" and an accent, so "elie" isn't there.
-        assert!(term_marks("e\u{301}lie", &search_terms("elie")).is_empty());
-        assert_eq!(term_marks("e\u{301}lie", &search_terms("lie")), [(3, 6)]);
+        assert!(term_marks("e\u{301}lie", &search_query("elie")).is_empty());
+        assert_eq!(term_marks("e\u{301}lie", &search_query("lie")), [(3, 6)]);
         // Digits are words too.
         assert_eq!(
-            term_marks("Psalm 23, verse 1", &search_terms("23")),
+            term_marks("Psalm 23, verse 1", &search_query("23")),
             [(6, 8)]
         );
     }
@@ -727,11 +834,10 @@ mod tests {
             ("Jude", &["jude"], 65),
         ];
         for (input, terms, book_id) in cases {
-            let terms = terms.iter().map(|t| (*t).to_string()).collect();
             assert_eq!(
                 interpret(input, &books),
                 Interpretation::TextOrBook(
-                    terms,
+                    SearchQuery::of_words(terms),
                     PassageRef {
                         book_id: *book_id,
                         chapter: 1,
@@ -761,7 +867,179 @@ mod tests {
     #[test]
     fn search_terms_are_capped() {
         let many: Vec<String> = (0..40).map(|i| format!("w{i}")).collect();
-        assert_eq!(search_terms(&many.join(" ")).len(), MAX_SEARCH_TERMS);
+        assert_eq!(search_query(&many.join(" ")).len(), MAX_SEARCH_TERMS);
+        // A phrase's words count, each: what fits is kept, in order.
+        let query = search_query(&format!("a b c d e \"{}\" z", many.join(" ")));
+        assert_eq!(query.len(), MAX_SEARCH_TERMS);
+        assert_eq!(query.words, ["a", "b", "c", "d", "e"]);
+        assert_eq!(query.phrases, [&many[..7]]);
+        let full = search_query(&format!("{} \"love one\"", many.join(" ")));
+        assert_eq!(full.len(), MAX_SEARCH_TERMS);
+        assert!(full.phrases.is_empty());
+    }
+
+    fn phrase(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| (*w).to_owned()).collect()
+    }
+
+    #[test]
+    fn words_in_double_quotes_are_a_phrase_mixed_with_free_words() {
+        let query = search_query("\"love one another\" commandment");
+        assert_eq!(query.phrases, [phrase(&["love", "one", "another"])]);
+        assert_eq!(query.words, ["commandment"]);
+        assert_eq!(query.len(), 4);
+        assert_eq!(
+            query.labels(),
+            ["\u{201c}love one another\u{201d}", "commandment"]
+        );
+        // Curly quotes, a keyboard's smart ones, either way round, and
+        // mixed with straight ones; case is folded, as for words.
+        for typed in [
+            "\u{201c}Love One Another\u{201d}",
+            "\"LOVE one another\u{201d}",
+            "\u{201d}love one another\"",
+        ] {
+            assert_eq!(
+                search_query(typed).phrases,
+                [phrase(&["love", "one", "another"])],
+                "{typed}"
+            );
+        }
+        // Two phrases and words between; repeats once.
+        let two = search_query("grace \"by faith\" saved \"by faith\" \"not of works\" grace");
+        assert_eq!(two.words, ["grace", "saved"]);
+        assert_eq!(
+            two.phrases,
+            [phrase(&["by", "faith"]), phrase(&["not", "of", "works"])]
+        );
+        // A one-word phrase is that word; an empty one nothing.
+        assert_eq!(
+            search_query("\"Jesus\" wept"),
+            SearchQuery::of_words(&["jesus", "wept"])
+        );
+        assert_eq!(
+            search_query("\"\" \" \" love"),
+            SearchQuery::of_words(&["love"])
+        );
+        assert!(search_query("\"\"").is_empty());
+    }
+
+    #[test]
+    fn an_unclosed_quote_s_words_are_ordinary_words() {
+        assert_eq!(
+            search_query("\"love one another"),
+            SearchQuery::of_words(&["love", "one", "another"])
+        );
+        let after = search_query("\"by grace\" are ye \"saved through");
+        assert_eq!(after.phrases, [phrase(&["by", "grace"])]);
+        assert_eq!(after.words, ["are", "ye", "saved", "through"]);
+    }
+
+    #[test]
+    fn a_quote_mark_inside_a_phrase_parts_words_as_in_the_verse() {
+        // An apostrophe (straight or curly) or a single quote isn't a
+        // phrase's end: it splits the word, as the index splits the verse.
+        for typed in [
+            "\"my brother's keeper\"",
+            "\"my brother\u{2019}s keeper\"",
+            "\u{201c}my \u{2018}brother\u{2019}s\u{2019} keeper\u{201d}",
+        ] {
+            assert_eq!(
+                search_query(typed).phrases,
+                [phrase(&["my", "brother", "s", "keeper"])],
+                "{typed}"
+            );
+        }
+        // A third double quote closes the first phrase and opens another.
+        let three = search_query("\"thy word\" is a \"lamp");
+        assert_eq!(three.phrases, [phrase(&["thy", "word"])]);
+        assert_eq!(three.words, ["is", "a", "lamp"]);
+    }
+
+    #[test]
+    fn query_syntax_typed_in_quotes_or_out_is_only_words() {
+        // FTS5's operators, prefixes, columns and grouping are words, or
+        // nothing: never syntax.
+        let injected = search_query("\"a\" OR \"b\" NEAR(love hate) * text:faith ^ - +x (\"c d\")");
+        assert_eq!(
+            injected.words,
+            ["a", "or", "b", "near", "love", "hate", "text", "faith", "x"]
+        );
+        assert_eq!(injected.phrases, [phrase(&["c", "d"])]);
+        assert!(search_query("* ^ - + ( ) : ").is_empty());
+    }
+
+    #[test]
+    fn quotes_make_a_reference_a_phrase_and_a_book_name_words() {
+        let books = books();
+        assert_eq!(interpret("John 3:16", &books), at(43, 3, Some((16, 16))));
+        assert_eq!(
+            interpret("\"John 3:16\"", &books),
+            Interpretation::Text(SearchQuery {
+                words: Vec::new(),
+                phrases: vec![phrase(&["john", "3", "16"])],
+            })
+        );
+        assert_eq!(
+            interpret("\u{201c}ps 23\u{201d}", &books),
+            Interpretation::Text(SearchQuery {
+                words: Vec::new(),
+                phrases: vec![phrase(&["ps", "23"])],
+            })
+        );
+        // A book's name in quotes is a word to search for, not the book.
+        assert_eq!(
+            interpret("\"Psalms\"", &books),
+            Interpretation::Text(SearchQuery::of_words(&["psalms"]))
+        );
+        assert!(matches!(
+            interpret("Psalms", &books),
+            Interpretation::TextOrBook(..)
+        ));
+    }
+
+    #[test]
+    fn a_phrase_is_marked_only_where_it_stands_as_the_phrase() {
+        let marked = |text: &'static str, typed: &str| -> Vec<&'static str> {
+            term_marks(text, &search_query(typed))
+                .into_iter()
+                .map(|(from, to)| &text[from..to])
+                .collect()
+        };
+        let john = "A new commandment I give unto you, That ye love one another; as I have loved you, that ye also love one another.";
+        assert_eq!(
+            marked(john, "\"love one another\""),
+            ["love", "one", "another", "love", "one", "another"]
+        );
+        // Out of order, or apart, the words aren't marked.
+        let rom = "Be kindly affectioned one to another with brotherly love; in honour preferring one another;";
+        assert_eq!(marked(rom, "\"love one another\""), Vec::<&str>::new());
+        assert_eq!(marked(rom, "\"one another\""), ["one", "another"]);
+        // A free word is marked anywhere; the phrase only as the phrase.
+        assert_eq!(
+            marked(rom, "\"one another\" love"),
+            ["love", "one", "another"]
+        );
+        // What's between the words isn't a word: a comma or a line's break.
+        assert_eq!(
+            marked("Grace, mercy, and peace", "\"grace mercy\""),
+            ["Grace", "mercy"]
+        );
+        // Folding: capitals and accents, the verse's own letters kept.
+        assert_eq!(
+            marked("Élie dit: «Ô ÉTERNEL Dieu»", "\"o eternel\""),
+            ["Ô", "ÉTERNEL"]
+        );
+        // Overlapping places of the phrase are all marked.
+        assert_eq!(
+            marked("holy, holy, holy", "\"holy holy\""),
+            ["holy", "holy", "holy"]
+        );
+        // A phrase longer than the verse marks nothing.
+        assert_eq!(
+            marked("Jesus wept.", "\"jesus wept again\""),
+            Vec::<&str>::new()
+        );
     }
 
     #[test]

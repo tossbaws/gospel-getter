@@ -474,6 +474,122 @@ impl Run<'_> {
         ))
     }
 
+    /// Waits for the heading to read `heading`, after `what`.
+    async fn heading_is(&self, what: &str, heading: &str) -> Result<Value> {
+        self.ui
+            .wait_with(
+                what,
+                &format!(
+                    "const seen = (() => {{ {HERE_JS} }})();
+                     return [seen.heading === arguments[0], seen];"
+                ),
+                vec![Value::from(heading)],
+            )
+            .await
+    }
+
+    /// Check 67: the bar's Back, Forward and Recent places (▾), each
+    /// clicked, the passage changing as it should: Back and Forward as
+    /// Alt+← and Alt+→ would, and a place chosen in the menu read.
+    pub(super) async fn bar_history(&mut self) -> Result<String> {
+        self.go_to("John 3", "John 3").await?;
+        self.go_to("Psalm 23", "Psalms 23").await?;
+        let back_title = self
+            .ui
+            .js(
+                "return document.getElementById('history-back').title;",
+                Vec::new(),
+            )
+            .await?;
+        if back_title.as_str() != Some("Back to John 3 (Alt+←)") {
+            bail!("Back says {back_title}, not where it goes");
+        }
+        self.ui.click("the bar's Back", "#history-back").await?;
+        self.heading_is("Back: John 3", "John 3").await?;
+        self.ui
+            .click("the bar's Forward", "#history-forward")
+            .await?;
+        self.heading_is("Forward: Psalm 23 again", "Psalms 23")
+            .await?;
+        self.ui
+            .click("▾, Recent places", "#recent-places-toggle")
+            .await?;
+        let menu = self
+            .ui
+            .wait(
+                "Recent places to open, Psalm 23 marked",
+                "const menu = document.getElementById('recent-places-menu');
+                 const rows = [...menu.querySelectorAll('.recent-item')].map((r) => r.textContent);
+                 return [!menu.hidden && rows[0] === 'Psalms 23 · KJVyou are here' && rows[1] === 'John 3 · KJV', rows];",
+            )
+            .await?;
+        self.ui
+            .click(
+                "John 3 in Recent places",
+                "#recent-places-menu .recent-item[data-index=\"1\"]",
+            )
+            .await?;
+        let landed = self.heading_is("John 3, from the menu", "John 3").await?;
+        let closed = self
+            .ui
+            .js(
+                "return [document.getElementById('recent-places-menu').hidden,
+                         document.activeElement && document.activeElement.id];",
+                Vec::new(),
+            )
+            .await?;
+        if closed[0] != Value::Bool(true) || closed[1].as_str() != Some("recent-places-toggle") {
+            bail!("the menu stayed open, or focus didn't go back to ▾: {closed}");
+        }
+        Ok(format!(
+            "Back read John 3, Forward Psalms 23; Recent places listed {}; its John 3 read {} (the reference: {})",
+            menu,
+            landed["heading"].as_str().unwrap_or("?"),
+            landed["reference"].as_str().unwrap_or("?"),
+        ))
+    }
+
+    /// Check 68: the bar's chapter arrows, ‹ and ›, each clicked, the
+    /// chapter turning as ← and → turn it; ‹ unavailable at Genesis 1.
+    pub(super) async fn bar_chapters(&mut self) -> Result<String> {
+        self.go_to("John 3", "John 3").await?;
+        let titles = self
+            .ui
+            .js(
+                "return [document.getElementById('chapter-prev').title,
+                         document.getElementById('chapter-next').title];",
+                Vec::new(),
+            )
+            .await?;
+        ensure!(
+            titles == json!(["Previous chapter: John 2 (←)", "Next chapter: John 4 (→)"]),
+            "‹ and › say {titles}"
+        );
+        self.ui.click("the bar's ›", "#chapter-next").await?;
+        self.heading_is("›: John 4", "John 4").await?;
+        self.ui.click("the bar's ‹", "#chapter-prev").await?;
+        let back = self.heading_is("‹: John 3 again", "John 3").await?;
+        self.go_to("Genesis 1", "Genesis 1").await?;
+        let first = self
+            .ui
+            .js(
+                "const prev = document.getElementById('chapter-prev');
+                 return [prev.getAttribute('aria-disabled'), prev.title];",
+                Vec::new(),
+            )
+            .await?;
+        ensure!(
+            first[0].as_str() == Some("true"),
+            "‹ at Genesis 1 should be unavailable: {first}"
+        );
+        Ok(format!(
+            "› read John 4, ‹ {} ({}); at Genesis 1 ‹ is unavailable: {}",
+            back["heading"].as_str().unwrap_or("?"),
+            back["reference"].as_str().unwrap_or("?"),
+            first[1].as_str().unwrap_or("?"),
+        ))
+    }
+
     /// Check 42: Psalm 119, the longest chapter: all 176 verses, the last
     /// one there to read, and how long it took to show.
     pub(super) async fn long_chapter(&mut self) -> Result<String> {

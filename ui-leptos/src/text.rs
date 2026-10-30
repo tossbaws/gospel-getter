@@ -2,7 +2,8 @@
 //! fields: the pure part of what `ui/index.html`'s export-notes script did,
 //! kept free of the DOM so it is tested natively (`cargo test`).
 
-use crate::dto::{DatePresets, Filter, NotedBook};
+use crate::dto::{Commentary, DatePresets, Filter, NotedBook};
+use crate::reader_text::escape_html;
 
 /// `n.toLocaleString('en')`: digits grouped in threes with commas.
 pub fn thousands(n: u64) -> String {
@@ -135,9 +136,163 @@ pub fn build_filter(
     }
 }
 
+/// The commentary as the page prints it (`#print-commentary`, shown only on
+/// paper): its title and date lines, then each book's heading (unless the
+/// commentary is of one book), each chapter's, and each note on a line of
+/// its own, its verses then its text. Each chapter's notes say how wide its
+/// widest label prints (`data-hang`, in em), which the page sets as their
+/// `--hang`: so a chapter's verses form one column, as wide as its widest,
+/// and every line of a note's text hangs beside it. The same as the
+/// commentary file says
+/// (`notes_export::NotesExport::render_commentary`), as HTML: every word
+/// escaped, a note's line breaks kept by the stylesheet (`pre-wrap`).
+pub fn commentary_markup(commentary: &Commentary) -> String {
+    let mut out = format!(
+        r#"<h1 class="print-title">{}</h1><p class="print-meta">{}</p>"#,
+        escape_html(&commentary.title),
+        escape_html(&commentary.exported),
+    );
+    if let Some(written) = &commentary.written {
+        out.push_str(&format!(
+            r#"<p class="print-meta">{}</p>"#,
+            escape_html(written)
+        ));
+    }
+    for book in &commentary.books {
+        if commentary.book_headings {
+            out.push_str(&format!(
+                r#"<h2 class="print-book">{}</h2>"#,
+                escape_html(&book.name)
+            ));
+        }
+        for chapter in &book.chapters {
+            out.push_str(&format!(
+                r#"<h3 class="print-chapter">{}</h3>"#,
+                escape_html(&chapter.heading)
+            ));
+            let hang = chapter
+                .notes
+                .iter()
+                .map(|note| label_width(&note.verses))
+                .fold(HANG_MIN, u32::max);
+            out.push_str(&format!(
+                r#"<div class="print-notes" data-hang="{}.{:02}">"#,
+                hang / 100,
+                hang % 100
+            ));
+            for note in &chapter.notes {
+                out.push_str(&format!(
+                    r#"<p class="print-note"><span class="print-verses">{}</span> <span class="print-body">{}</span></p>"#,
+                    escape_html(&note.verses),
+                    escape_html(&note.body),
+                ));
+            }
+            out.push_str("</div>");
+        }
+    }
+    out
+}
+
+/// The narrowest a chapter's column of verse labels prints, in hundredths
+/// of an em: a short label's ("3:3") with room to spare, so most chapters'
+/// line up.
+const HANG_MIN: u32 = 250;
+
+/// How wide a verse label prints, in hundredths of an em, in the printed
+/// commentary's bold reading face (Literata Bold, tabular figures) as
+/// WebKitGTK measures it: a figure 0.58 (0.59 for a 5), a colon 0.34, an en
+/// dash 0.5. A little over each, so a label always fits the column it gives.
+fn label_width(verses: &str) -> u32 {
+    verses
+        .chars()
+        .map(|c| match c {
+            ':' => 35,
+            '\u{2013}' => 50,
+            _ => 60,
+        })
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dto::{CommentaryBook, CommentaryChapter, CommentaryNote};
+
+    fn commentary(book_headings: bool) -> Commentary {
+        let note = |verses: &str, body: &str| CommentaryNote {
+            verses: verses.into(),
+            body: body.into(),
+        };
+        Commentary {
+            title: "Commentary on John & <Romans>".into(),
+            exported: "Exported Oct 10, 2026 \u{b7} 3 notes".into(),
+            written: Some("Written since Oct 1, 2026".into()),
+            book_headings,
+            books: vec![CommentaryBook {
+                name: "John".into(),
+                chapters: vec![CommentaryChapter {
+                    heading: "John 3".into(),
+                    notes: vec![
+                        note("3:16", "# Not a heading\n<script>x</script>"),
+                        note("3:16", "Second."),
+                        note("3:16\u{2013}18", "Two lines\n\nand a gap."),
+                    ],
+                }],
+            }],
+        }
+    }
+
+    #[test]
+    fn the_commentary_prints_as_escaped_text_a_line_per_note() {
+        assert_eq!(
+            commentary_markup(&commentary(true)),
+            "<h1 class=\"print-title\">Commentary on John &amp; &lt;Romans&gt;</h1>\
+             <p class=\"print-meta\">Exported Oct 10, 2026 \u{b7} 3 notes</p>\
+             <p class=\"print-meta\">Written since Oct 1, 2026</p>\
+             <h2 class=\"print-book\">John</h2>\
+             <h3 class=\"print-chapter\">John 3</h3>\
+             <div class=\"print-notes\" data-hang=\"3.85\">\
+             <p class=\"print-note\"><span class=\"print-verses\">3:16</span> <span class=\"print-body\"># Not a heading\n&lt;script&gt;x&lt;/script&gt;</span></p>\
+             <p class=\"print-note\"><span class=\"print-verses\">3:16</span> <span class=\"print-body\">Second.</span></p>\
+             <p class=\"print-note\"><span class=\"print-verses\">3:16\u{2013}18</span> <span class=\"print-body\">Two lines\n\nand a gap.</span></p>\
+             </div>"
+        );
+        // One book: the title names it; no heading of its own.
+        assert!(!commentary_markup(&commentary(false)).contains("print-book"));
+    }
+
+    #[test]
+    fn a_chapter_s_notes_hang_from_its_widest_label() {
+        // At least each label's width as WebKitGTK prints it.
+        for (verses, printed) in [
+            ("119:105\u{2013}176", 607),
+            ("15:12\u{2013}13", 433),
+            ("3:3", 150),
+            ("0000000000", 580),
+        ] {
+            let estimate = label_width(verses);
+            assert!(
+                (printed..printed + 25).contains(&estimate),
+                "{verses}: {estimate}"
+            );
+        }
+        let mut psalm = commentary(true);
+        psalm.books[0].chapters[0].notes = ["119:1", "119:105\u{2013}176", "119:176"]
+            .map(|verses| CommentaryNote {
+                verses: verses.into(),
+                body: "A note.".into(),
+            })
+            .into();
+        assert!(
+            commentary_markup(&psalm).contains(r#"<div class="print-notes" data-hang="6.25">"#)
+        );
+        // Short labels: the narrowest column.
+        psalm.books[0].chapters[0].notes.truncate(1);
+        psalm.books[0].chapters[0].notes[0].verses = "3:3".into();
+        assert!(
+            commentary_markup(&psalm).contains(r#"<div class="print-notes" data-hang="2.50">"#)
+        );
+    }
     use crate::dto::DaySpan;
 
     fn book(id: i64, first: i64, last: i64, count: i64) -> NotedBook {

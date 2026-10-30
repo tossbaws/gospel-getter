@@ -400,7 +400,7 @@ test('Export sends the translation and the filter, and reports the file', () =>
         await app.pick(path);
         await openDialog(app);
         await clickAndWait(app, confirm(app), 'export_notes');
-        assert.deepEqual(exportCalls(app), [{ translationCode: 'kjv', filter: { ...EVERY, books: [JOHN] } }]);
+        assert.deepEqual(exportCalls(app), [{ translationCode: 'kjv', filter: { ...EVERY, books: [JOHN] }, layout: 'quoted' }]);
         assert.ok(!dialogOpen(app));
         assert.equal(app.toast().textContent, `Exported 3 notes on John to ${path}.`);
         assert.ok(!app.toast().classList.contains('is-error'));
@@ -440,7 +440,7 @@ test('Export sends the translation and the filter, and reports the file', () =>
         await clickAndWait(app, button(app), 'count_notes_export');
         await clickAndWait(app, el(app, 'export-notes-all'), 'count_notes_export');
         await clickAndWait(app, confirm(app), 'export_notes');
-        assert.deepEqual(exportCalls(app)[3], { translationCode: 'kjv', filter: EVERY });
+        assert.deepEqual(exportCalls(app)[3], { translationCode: 'kjv', filter: EVERY, layout: 'quoted' });
         assert.equal(app.toast().textContent, `Exported 5 notes to ${all}.`);
         assert.ok(readFileSync(all, 'utf8').startsWith('# Gospel Getter notes\n'));
     }));
@@ -457,7 +457,7 @@ test('in compare mode the verses come from the translation chosen in Aa, not the
         assert.ok(el(app, 'export-notes-text').textContent.endsWith('quoted in the World English Bible.'));
         await clickAndWait(app, confirm(app), 'export_notes');
         // Matthew is the only book with notes, and its only chapter: every note.
-        assert.deepEqual(exportCalls(app), [{ translationCode: 'web', filter: EVERY }]);
+        assert.deepEqual(exportCalls(app), [{ translationCode: 'web', filter: EVERY, layout: 'quoted' }]);
         const file = readFileSync(path, 'utf8');
         assert.ok(file.includes(`> **23** ${storedVerse('web', 'Matthew', 2, 23)}\n`), file);
     }));
@@ -555,4 +555,178 @@ test('every focus it moves is preventScroll', () =>
         assert.ok(calls.length >= 6, `${calls.length} focus calls`);
         const scrolling = calls.filter((c) => !(c.options && c.options.preventScroll));
         assert.deepEqual(scrolling.map((c) => c.el.id || c.el.className), []);
+    }));
+
+// ---- The commentary layout, and printing it.
+
+const HOSTILE = [
+    [JOHN, 3, 16, 16, 'Loved.'],
+    [JOHN, 3, 16, 18, '# Not a heading\n- not a list\n\n<b>bold?</b> & <script>x</script>'],
+    [JOHN, 1, 1, 1, 'In the beginning.'],
+    [FIRST_JOHN, 1, 9, 9, 'Confess.'],
+];
+
+const chooseCommentary = (app) => {
+    const radio = el(app, 'export-notes-commentary');
+    radio.checked = true;
+    radio.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+};
+
+test('the Commentary layout writes the notes by verse number, with no Bible text, by the same filter', () =>
+    withNotes(HOSTILE, {}, async (app) => {
+        await OCT_12();
+        await openDialog(app);
+        const quoted = el(app, 'export-notes-quoted');
+        const commentary = el(app, 'export-notes-commentary');
+        assert.equal(quoted.getAttribute('name'), commentary.getAttribute('name'));
+        assert.ok(quoted.checked && !commentary.checked, 'as always, unless chosen');
+        assert.equal(commentary.closest('label').textContent, 'Commentary (notes by verse number)');
+        assert.equal(commentary.closest('fieldset').querySelector('legend').textContent, 'Layout');
+        assert.ok(el(app, 'export-notes-print').hidden, 'Print is the commentary’s');
+        chooseCommentary(app);
+        await settle();
+        assert.ok(!el(app, 'export-notes-print').hidden);
+        assert.match(el(app, 'export-notes-text').textContent, /As a commentary: each note on a line of its own by its verse number/);
+
+        const path = join(dir, 'commentary.md');
+        await app.pick(path);
+        await clickAndWait(app, confirm(app), 'export_notes');
+        assert.deepEqual(exportCalls(app), [{ translationCode: 'kjv', filter: { ...EVERY, books: [JOHN] }, layout: 'commentary' }]);
+        assert.equal(app.toast().textContent, `Exported 3 notes on John to ${path}.`);
+        const file = readFileSync(path, 'utf8');
+        assert.equal(file, [
+            '# Commentary on John',
+            '',
+            'Exported Oct 12, 2026 · 3 notes',
+            '',
+            '## John 1',
+            '',
+            '1:1  In the beginning.',
+            '',
+            '## John 3',
+            '',
+            '3:16  Loved.',
+            '',
+            '3:16–18  \\# Not a heading\\',
+            '\\- not a list',
+            '',
+            '\\<b\\>bold?\\</b\\> \\& \\<script\\>x\\</script\\>',
+            '',
+        ].join('\n'));
+        assert.ok(!file.includes(storedVerse('kjv', 'John', 3, 16).slice(0, 30)), 'no Bible text');
+
+        // It opens fresh: the quoted layout again.
+        await clickAndWait(app, button(app), 'count_notes_export');
+        assert.ok(el(app, 'export-notes-quoted').checked);
+        assert.ok(el(app, 'export-notes-print').hidden);
+        app.click(el(app, 'export-notes-cancel'));
+    }));
+
+test('the commentary as one file per book: each book’s, named apart from the quoted files', () =>
+    withNotes(HOSTILE, {}, async (app) => {
+        await OCT_12();
+        const folder = mkdtempSync(join(dir, 'books-'));
+        await app.pick(folder);
+        await openDialog(app);
+        await clickAndWait(app, el(app, 'export-notes-all'), 'count_notes_export');
+        chooseCommentary(app);
+        const byBook = el(app, 'export-notes-by-book');
+        byBook.checked = true;
+        byBook.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+        await settle();
+        await clickAndWait(app, confirm(app), 'export_notes_by_book');
+        assert.deepEqual(argsOf(app, 'export_notes_by_book'), [{ translationCode: 'kjv', filter: EVERY, layout: 'commentary' }]);
+        assert.equal(
+            readFileSync(join(folder, '43 John commentary.md'), 'utf8').split('\n')[0],
+            '# Commentary on John',
+        );
+        assert.equal(
+            readFileSync(join(folder, '62 1 John commentary.md'), 'utf8'),
+            '# Commentary on 1 John\n\nExported Oct 12, 2026 · 1 note\n\n## 1 John 1\n\n1:9  Confess.\n',
+        );
+    }));
+
+test('Print… prints the same commentary: only a print-only container, through the system print dialog, put back after', () =>
+    withNotes(HOSTILE, {}, async (app) => {
+        await OCT_12();
+        const html = app.document.documentElement;
+        const container = el(app, 'print-commentary');
+        assert.equal(container.parentElement, app.document.body);
+        assert.equal(container.getAttribute('aria-hidden'), 'true');
+        assert.equal(container.innerHTML, '');
+        const printed = [];
+        app.window.print = () => printed.push({
+            printing: html.getAttribute('data-printing'),
+            markup: container.innerHTML,
+            text: [...container.querySelectorAll('h1, h2, h3, p')].map((c) => [c.className, c.textContent]),
+            // Each chapter heading then its notes, and nothing else among them.
+            grids: [...container.children]
+                .filter((c) => c.className === 'print-notes')
+                .map((notes) => [
+                    notes.previousElementSibling.className,
+                    notes.getAttribute('data-hang'),
+                    notes.style.getPropertyValue('--hang'),
+                    [...notes.children].map((n) => [n.className, [...n.children].map((s) => s.className)]),
+                ]),
+        });
+        await openDialog(app);
+        await clickAndWait(app, el(app, 'export-notes-all'), 'count_notes_export');
+        chooseCommentary(app);
+        await settle();
+        const print = el(app, 'export-notes-print');
+        assert.equal(print.textContent, 'Print…');
+        assert.equal(print.getAttribute('type'), 'button');
+        assert.ok(!print.disabled);
+        await clickAndWait(app, print, 'get_notes_commentary');
+        assert.deepEqual(argsOf(app, 'get_notes_commentary'), [{ filter: EVERY }]);
+        assert.equal(printed.length, 1, 'window.print(), once');
+        assert.equal(printed[0].printing, 'commentary', 'the page prints the commentary alone');
+        assert.deepEqual(printed[0].text, [
+            ['print-title', 'Gospel Getter commentary'],
+            ['print-meta', 'Exported Oct 12, 2026 · 4 notes'],
+            ['print-book', 'John'],
+            ['print-chapter', 'John 1'],
+            ['print-note', '1:1 In the beginning.'],
+            ['print-chapter', 'John 3'],
+            ['print-note', '3:16 Loved.'],
+            ['print-note', '3:16–18 # Not a heading\n- not a list\n\n<b>bold?</b> & <script>x</script>'],
+            ['print-book', '1 John'],
+            ['print-chapter', '1 John 1'],
+            ['print-note', '1:9 Confess.'],
+        ]);
+        // Each chapter's notes together, hanging from its widest label's width
+        // (at least a short one's), each note a label and its text.
+        const note = ['print-note', ['print-verses', 'print-body']];
+        assert.deepEqual(printed[0].grids, [
+            ['print-chapter', '2.50', '2.50em', [note]],
+            ['print-chapter', '3.85', '3.85em', [note, note]],
+            ['print-chapter', '2.50', '2.50em', [note]],
+        ], 'a chapter’s notes hang from its widest label');
+        assert.ok(![...container.children].some((c) => c.className === 'print-note'));
+        // Typed markup is text: no element was made of it.
+        assert.ok(!/<b>|<script>/.test(printed[0].markup));
+        // The same words as the file says, line for line.
+        const path = join(dir, 'same.md');
+        await app.pick(path);
+        assert.ok(dialogOpen(app), 'printing leaves the dialog open');
+        // Done printing: the page prints as it always has.
+        app.window.dispatchEvent(new app.window.Event('afterprint'));
+        assert.equal(html.getAttribute('data-printing'), null);
+        assert.equal(container.innerHTML, '');
+        await clickAndWait(app, confirm(app), 'export_notes');
+        const file = readFileSync(path, 'utf8');
+        for (const [kind, text] of printed[0].text.filter(([k]) => k === 'print-note')) {
+            const [verses, ...rest] = text.split(' ');
+            assert.ok(file.includes(`\n${verses}  `), `${kind} ${verses}`);
+            assert.ok(rest.length > 0);
+        }
+        // Closing the dialog also puts it back, should the print dialog not say it's done.
+        await clickAndWait(app, button(app), 'count_notes_export');
+        chooseCommentary(app);
+        await settle();
+        await clickAndWait(app, el(app, 'export-notes-print'), 'get_notes_commentary');
+        assert.equal(html.getAttribute('data-printing'), 'commentary');
+        app.click(el(app, 'export-notes-cancel'));
+        assert.equal(html.getAttribute('data-printing'), null);
+        assert.equal(container.innerHTML, '');
     }));

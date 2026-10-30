@@ -1,5 +1,7 @@
 //! Exporting the reader's notes as Markdown, as one file or as one file per
-//! book in a folder (the files themselves are `crate::notes_export`'s).
+//! book in a folder, each note's verses quoted or as a commentary (the
+//! files themselves are `crate::notes_export`'s); and the commentary for
+//! the page to print.
 
 use anyhow::Context;
 use serde::Serialize;
@@ -10,7 +12,7 @@ use std::sync::atomic::Ordering;
 
 use super::{AppState, failed, run_dialog, write_atomically};
 use crate::db::{self, Note};
-use crate::notes_export::{BookFile, NotesExport, NotesFilter};
+use crate::notes_export::{BookFile, Commentary, NotesExport, NotesFilter, NotesLayout};
 
 // ---- Export notes as Markdown: readable, for a notes app or printing,
 // never imported back (see `notes_export`).
@@ -184,6 +186,102 @@ pub async fn build_notes_export<Tz: chrono::TimeZone>(
     })
 }
 
+/// The notes `filter` asks for as a commentary (no Bible text, so no
+/// translation, and no verses read), or why there's nothing to show: what
+/// the file and the page's Print are made from. Dates are in `tz`.
+async fn with_commentary<Tz: chrono::TimeZone, T>(
+    state: &AppState,
+    filter: &NotesFilter,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+    make: impl FnOnce(&NotesExport<'_>) -> T,
+) -> Result<T, String> {
+    filter.check(&state.books)?;
+    let notes = notes_to_export(state).await?;
+    let verses = HashMap::new();
+    let export = NotesExport {
+        notes: &notes,
+        books: &state.books,
+        verses: &verses,
+        translation_code: "",
+        translation_name: "",
+        filter,
+        exported_at: now,
+    };
+    if export.notes_in_scope(tz).is_empty() {
+        return Err(if notes.is_empty() {
+            "There are no notes to export."
+        } else {
+            "No notes match these filters."
+        }
+        .to_string());
+    }
+    Ok(make(&export))
+}
+
+/// The notes `filter` asks for as a commentary file.
+pub async fn build_notes_commentary<Tz: chrono::TimeZone>(
+    state: &AppState,
+    filter: &NotesFilter,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+) -> Result<NotesFile, String> {
+    with_commentary(state, filter, now, tz, |export| NotesFile {
+        file_name: export.commentary_file_name(tz),
+        contents: export.render_commentary(tz),
+        notes: export.notes_in_scope(tz).len(),
+    })
+    .await
+}
+
+/// The commentary itself, for the page to print: the same as the file's.
+pub async fn notes_commentary<Tz: chrono::TimeZone>(
+    state: &AppState,
+    filter: &NotesFilter,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+) -> Result<Commentary, String> {
+    with_commentary(state, filter, now, tz, |export| export.commentary(tz)).await
+}
+
+/// The export in `layout` (the quoted one in `translation_code`), as one
+/// file.
+pub async fn build_notes_export_as<Tz: chrono::TimeZone>(
+    state: &AppState,
+    layout: NotesLayout,
+    translation_code: &str,
+    filter: &NotesFilter,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+) -> Result<NotesFile, String> {
+    match layout {
+        NotesLayout::Quoted => build_notes_export(state, translation_code, filter, now, tz).await,
+        NotesLayout::Commentary => build_notes_commentary(state, filter, now, tz).await,
+    }
+}
+
+/// The export in `layout`, as one file per book.
+pub async fn build_notes_export_by_book_as<Tz: chrono::TimeZone>(
+    state: &AppState,
+    layout: NotesLayout,
+    translation_code: &str,
+    filter: &NotesFilter,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+) -> Result<Vec<BookFile>, String> {
+    match layout {
+        NotesLayout::Quoted => {
+            build_notes_export_by_book(state, translation_code, filter, now, tz).await
+        }
+        NotesLayout::Commentary => {
+            with_commentary(state, filter, now, tz, |export| {
+                export.by_book_as(NotesLayout::Commentary, tz)
+            })
+            .await
+        }
+    }
+}
+
 /// The same notes as [`build_notes_export`], as one file per book.
 pub async fn build_notes_export_by_book<Tz: chrono::TimeZone>(
     state: &AppState,
@@ -346,19 +444,22 @@ pub async fn save_notes_export(
 }
 
 /// Export the reader's notes (those `filter` asks for) as one Markdown file
-/// per book, with their verses quoted in `translation_code`, into a folder
-/// they choose with the native folder dialog. Files already there are
-/// replaced only once the reader says so (`confirm_notes_export_by_book`).
+/// per book, with their verses quoted in `translation_code` (or, with
+/// `layout` Commentary, as a commentary), into a folder they choose with
+/// the native folder dialog. Files already there are replaced only once the
+/// reader says so (`confirm_notes_export_by_book`).
 #[tauri::command]
 pub async fn export_notes_by_book<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
     translation_code: String,
     filter: NotesFilter,
+    layout: Option<NotesLayout>,
 ) -> Result<NotesFolderOutcome, String> {
     use tauri_plugin_dialog::DialogExt;
-    let files = build_notes_export_by_book(
+    let files = build_notes_export_by_book_as(
         &state,
+        layout.unwrap_or_default(),
         &translation_code,
         &filter,
         chrono::Utc::now(),
@@ -405,20 +506,23 @@ pub async fn count_notes_export(
 }
 
 /// Export the reader's notes (those `filter` asks for) as Markdown, with
-/// their verses quoted in `translation_code`, to a file they choose with
-/// the native save dialog. Dates are in the computer's time zone.
+/// their verses quoted in `translation_code` (or, with `layout`
+/// Commentary, as a commentary), to a file they choose with the native save
+/// dialog. Dates are in the computer's time zone.
 #[tauri::command]
 pub async fn export_notes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
     translation_code: String,
     filter: NotesFilter,
+    layout: Option<NotesLayout>,
 ) -> Result<NotesExportOutcome, String> {
     use tauri_plugin_dialog::DialogExt;
     // Built before the dialog opens, so a problem is reported without
     // asking for a file name first.
-    let file = build_notes_export(
+    let file = build_notes_export_as(
         &state,
+        layout.unwrap_or_default(),
         &translation_code,
         &filter,
         chrono::Utc::now(),
@@ -438,6 +542,16 @@ pub async fn export_notes<R: tauri::Runtime>(
         tracing::error!("Notes export failed: {e:#}");
         format!("The file couldn't be saved: {e:#}")
     })
+}
+
+/// The notes `filter` asks for as a commentary, for the page to print (the
+/// same as the commentary file says), in the computer's time zone.
+#[tauri::command]
+pub async fn get_notes_commentary(
+    state: tauri::State<'_, AppState>,
+    filter: NotesFilter,
+) -> Result<Commentary, String> {
+    notes_commentary(&state, &filter, chrono::Utc::now(), &chrono::Local).await
 }
 
 #[cfg(test)]
@@ -944,6 +1058,97 @@ mod tests {
         assert!(
             failed.starts_with("The files couldn't be saved: "),
             "{failed}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_commentary_has_no_bible_text_and_print_shows_the_same() {
+        let (_db, state) = app_state("cmd_notes_commentary").await;
+        let tz = chrono::FixedOffset::west_opt(6 * 3600).unwrap();
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-10T05:00:00Z")
+            .unwrap()
+            .to_utc();
+        let all = NotesFilter::default();
+        assert_eq!(
+            build_notes_commentary(&state, &all, now, &tz)
+                .await
+                .unwrap_err(),
+            "There are no notes to export."
+        );
+        let at = |book_id, chapter, verse_start, verse_end| Passage {
+            book_id,
+            chapter,
+            verse_start,
+            verse_end,
+        };
+        for (passage, body) in [
+            (
+                at(43, 3, 16, 18),
+                "<b>Typed</b> HTML.\n\nA second paragraph.",
+            ),
+            (at(43, 3, 16, 16), "# Not a heading\n- not a list"),
+            (at(43, 1, 1, 1), "In the beginning."),
+        ] {
+            note_add(&state, passage, body).await.unwrap();
+        }
+        let file = build_notes_commentary(&state, &all, now, &tz)
+            .await
+            .unwrap();
+        assert_eq!(file.file_name, "gospel-getter-commentary-2026-10-09.md");
+        assert_eq!(file.notes, 3);
+        assert_eq!(
+            file.contents,
+            "# Gospel Getter commentary\n\
+             \n\
+             Exported Oct 9, 2026 \u{b7} 3 notes\n\
+             \n\
+             ## John\n\
+             \n\
+             ### John 1\n\
+             \n\
+             1:1  In the beginning.\n\
+             \n\
+             ### John 3\n\
+             \n\
+             3:16  \\# Not a heading\\\n\\- not a list\n\
+             \n\
+             3:16\u{2013}18  \\<b\\>Typed\\</b\\> HTML.\n\nA second paragraph.\n"
+        );
+        // No verse is quoted, in any translation.
+        let john_3_16 = &bundled("kjv")[42].chapters[2][15];
+        assert!(!file.contents.contains(&john_3_16[..20]));
+        // What the page prints is the same commentary.
+        let printed = notes_commentary(&state, &all, now, &tz).await.unwrap();
+        assert_eq!(printed.title, "Gospel Getter commentary");
+        assert_eq!(printed.books.len(), 1);
+        assert_eq!(
+            printed.books[0].chapters[1].notes[1].body,
+            "<b>Typed</b> HTML.\n\nA second paragraph."
+        );
+        // The quoted layout is as it was, whichever way it's asked for.
+        let quoted = build_notes_export(&state, "kjv", &all, now, &tz)
+            .await
+            .unwrap();
+        let as_quoted = build_notes_export_as(&state, NotesLayout::Quoted, "kjv", &all, now, &tz)
+            .await
+            .unwrap();
+        assert_eq!(quoted, as_quoted);
+        let by_book =
+            build_notes_export_by_book_as(&state, NotesLayout::Commentary, "kjv", &all, now, &tz)
+                .await
+                .unwrap();
+        assert_eq!(by_book.len(), 1);
+        assert_eq!(by_book[0].file_name, "43 John commentary.md");
+        // A filter nothing matches says so.
+        let romans = NotesFilter {
+            books: vec![45],
+            ..NotesFilter::default()
+        };
+        assert_eq!(
+            notes_commentary(&state, &romans, now, &tz)
+                .await
+                .unwrap_err(),
+            "No notes match these filters."
         );
     }
 }

@@ -19,6 +19,7 @@ use sqlx::{FromRow, SqlitePool};
 
 use crate::db::{Db, WritePool};
 use crate::domain::kjv_markup::{KJV, VerseText};
+use crate::domain::query::SearchQuery;
 
 /// What `verse_search` holds, recorded in `search_index_version`. A
 /// database with any other version (or none: 2.9.1 and older indexed the
@@ -255,29 +256,37 @@ async fn index_book_as_shown(db: &Db, translation_id: i64, book_id: i64) -> anyh
     Ok(())
 }
 
-/// The FTS5 query for `terms`: every term must appear (implicit AND), each
-/// quoted as a literal string so nothing typed is read as FTS syntax.
-fn match_expression(terms: &[String]) -> String {
-    terms
+/// The FTS5 query for `query`: every word and every phrase must appear
+/// (implicit AND). Each is one FTS5 string, in double quotes (any inside
+/// doubled), so nothing typed is read as FTS syntax: a word's string
+/// matches it anywhere; a phrase's, its words separated by spaces, matches
+/// them in order, side by side (FTS5's phrase), the tokenizer folding case
+/// and accents for both as it did for the text.
+fn match_expression(query: &SearchQuery) -> String {
+    let string = |text: &str| format!("\"{}\"", text.replace('"', "\"\""));
+    query
+        .phrases
         .iter()
-        .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
+        .map(|phrase| string(&phrase.join(" ")))
+        .chain(query.words.iter().map(|word| string(word)))
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-/// Verses in one translation containing every term, in Bible order:
-/// `limit` of them starting at `offset`, plus how many match in total.
+/// Verses in one translation with every word and phrase of `query`, in
+/// Bible order: `limit` of them starting at `offset`, plus how many match
+/// in total.
 pub async fn search_verses(
     pool: &SqlitePool,
     translation_id: i64,
-    terms: &[String],
+    query: &SearchQuery,
     limit: i64,
     offset: i64,
 ) -> anyhow::Result<(i64, Vec<SearchHit>)> {
-    if terms.is_empty() {
+    if query.is_empty() {
         return Ok((0, Vec::new()));
     }
-    let expression = match_expression(terms);
+    let expression = match_expression(query);
     let (lo, hi) = translation_rowids(translation_id);
 
     let total: i64 = sqlx::query_scalar(

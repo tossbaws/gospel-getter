@@ -16,6 +16,13 @@
 //! an Obsidian vault (`NotesExport::by_book`): each book's file is the
 //! export of that book alone.
 //!
+//! The same notes can be written as a commentary instead
+//! (`NotesLayout::Commentary`, `NotesExport::commentary`): no Bible text,
+//! only book and chapter headings and one line per note, "3:16  …", in
+//! Bible order, for preaching or teaching verse by verse. The same
+//! structure is rendered as Markdown for the file and drawn by the page to
+//! be printed, so the two say the same.
+//!
 //! Copy as Markdown on one note (`note_markdown`) quotes its verses the
 //! same way, but writes the note's text as the reader wrote it: their own
 //! Markdown, which the app shows as Markdown.
@@ -118,6 +125,76 @@ impl NotesFilter {
         ids.sort_unstable();
         ids.dedup();
         ids
+    }
+}
+
+/// How an export lays the notes out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NotesLayout {
+    /// Each note under its reference, its verses quoted (as always).
+    #[default]
+    Quoted,
+    /// A commentary: book and chapter headings, then one line per note,
+    /// "3:16  note", no Bible text.
+    Commentary,
+}
+
+/// The notes as a commentary (see [`NotesExport::commentary`]): what the
+/// file says, and what the page prints.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Commentary {
+    /// "Commentary on John", or "Gospel Getter commentary".
+    pub title: String,
+    /// "Exported Oct 10, 2026 · 3 notes".
+    pub exported: String,
+    /// "Written Oct 1 – Oct 12, 2026", when the filter limits the dates.
+    pub written: Option<String>,
+    /// Whether each book has its own heading: not when the export is of
+    /// one book, which the title names.
+    pub book_headings: bool,
+    pub books: Vec<CommentaryBook>,
+}
+
+/// One book's part of a commentary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentaryBook {
+    pub name: String,
+    pub chapters: Vec<CommentaryChapter>,
+}
+
+/// One chapter's part: its heading ("John 3") and its notes, in Bible
+/// order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentaryChapter {
+    pub heading: String,
+    pub notes: Vec<CommentaryNote>,
+}
+
+/// One note's line: its verses ("3:16", "3:16–18") and its text, as the
+/// reader wrote it (plain text).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentaryNote {
+    pub verses: String,
+    pub body: String,
+}
+
+/// A note's verses as a commentary labels them: "3:16", "3:16–18", or,
+/// across chapters, "3:36–4:2" (an en dash).
+pub fn commentary_verses(
+    (first_chapter, first_verse): (i64, i64),
+    (last_chapter, last_verse): (i64, i64),
+) -> String {
+    if first_chapter != last_chapter {
+        format!("{first_chapter}:{first_verse}\u{2013}{last_chapter}:{last_verse}")
+    } else if first_verse == last_verse {
+        format!("{first_chapter}:{first_verse}")
+    } else {
+        format!("{first_chapter}:{first_verse}\u{2013}{last_verse}")
     }
 }
 
@@ -227,6 +304,13 @@ impl NotesExport<'_> {
     /// alone, its chapters and dates kept: its title, its date line and
     /// its notes, each note as the single file writes it.
     pub fn by_book<Tz: TimeZone>(&self, tz: &Tz) -> Vec<BookFile> {
+        self.by_book_as(NotesLayout::Quoted, tz)
+    }
+
+    /// [`Self::by_book`], in `layout`: a commentary's files are named
+    /// apart ("43 John commentary.md"), so they never replace the quoted
+    /// ones in the same folder.
+    pub fn by_book_as<Tz: TimeZone>(&self, layout: NotesLayout, tz: &Tz) -> Vec<BookFile> {
         let notes = self.notes_in_scope(tz);
         let mut ids: Vec<i64> = notes.iter().map(|n| n.book_id).collect();
         ids.dedup();
@@ -240,9 +324,16 @@ impl NotesExport<'_> {
                     filter: &filter,
                     ..self.clone()
                 };
+                let (file_name, contents) = match layout {
+                    NotesLayout::Quoted => (book_file_name(id, self.book_name(id)), one.render(tz)),
+                    NotesLayout::Commentary => (
+                        book_file_name(id, &format!("{} commentary", self.book_name(id))),
+                        one.render_commentary(tz),
+                    ),
+                };
                 BookFile {
-                    file_name: book_file_name(id, self.book_name(id)),
-                    contents: one.render(tz),
+                    file_name,
+                    contents,
                     notes: notes.iter().filter(|n| n.book_id == id).count(),
                 }
             })
@@ -292,6 +383,106 @@ impl NotesExport<'_> {
             self.render_note(&mut out, note, tz);
         }
         out
+    }
+
+    /// The notes in scope as a commentary: by book, then chapter, one
+    /// line per note in Bible order (two on one verse, a line each), no
+    /// Bible text, no verse without a note. Its header is the file's, with
+    /// no translation (none is quoted).
+    pub fn commentary<Tz: TimeZone>(&self, tz: &Tz) -> Commentary {
+        let notes = self.notes_in_scope(tz);
+        let title = match self.subject() {
+            Some(subject) => format!("Commentary on {subject}"),
+            None => "Gospel Getter commentary".to_string(),
+        };
+        let count = match notes.len() {
+            1 => "1 note".to_string(),
+            n => format!("{} notes", grouped(n)),
+        };
+        let mut books: Vec<CommentaryBook> = Vec::new();
+        for note in &notes {
+            let name = self.book_name(note.book_id);
+            if books.last().is_none_or(|b| b.name != name) {
+                books.push(CommentaryBook {
+                    name: name.to_string(),
+                    chapters: Vec::new(),
+                });
+            }
+            let Some(book) = books.last_mut() else {
+                continue;
+            };
+            let heading = format!("{name} {}", note.chapter);
+            if book.chapters.last().is_none_or(|c| c.heading != heading) {
+                book.chapters.push(CommentaryChapter {
+                    heading,
+                    notes: Vec::new(),
+                });
+            }
+            if let Some(chapter) = book.chapters.last_mut() {
+                chapter.notes.push(CommentaryNote {
+                    verses: commentary_verses(
+                        (note.chapter, note.verse_start),
+                        (note.chapter, note.verse_end),
+                    ),
+                    body: note.body.clone(),
+                });
+            }
+        }
+        let book_headings = !(books.len() == 1 && self.filter.book_ids().len() == 1);
+        Commentary {
+            title,
+            book_headings,
+            exported: format!(
+                "Exported {} \u{b7} {count}",
+                display_date(local_date(self.exported_at, tz))
+            ),
+            written: self.written(),
+            books,
+        }
+    }
+
+    /// The commentary's file: its title and date lines, then with more
+    /// than one book each book's heading, each chapter's heading below it,
+    /// and each note as a paragraph of its own, "3:16  " then its text.
+    /// Escaped as the quoted layout escapes a note (plain text, its line
+    /// breaks kept). UTF-8, LF line endings.
+    pub fn render_commentary<Tz: TimeZone>(&self, tz: &Tz) -> String {
+        let commentary = self.commentary(tz);
+        let mut out = format!(
+            "# {}\n\n{}\n",
+            escape_inline(&commentary.title),
+            escape_inline(&commentary.exported)
+        );
+        if let Some(written) = &commentary.written {
+            let _ = writeln!(out, "\n{}", escape_inline(written));
+        }
+        let chapter_level = if commentary.book_headings {
+            "###"
+        } else {
+            "##"
+        };
+        for book in &commentary.books {
+            if commentary.book_headings {
+                let _ = write!(out, "\n## {}\n", escape_inline(&book.name));
+            }
+            for chapter in &book.chapters {
+                let _ = write!(
+                    out,
+                    "\n{chapter_level} {}\n",
+                    escape_inline(&chapter.heading)
+                );
+                for note in &chapter.notes {
+                    let _ = write!(out, "\n{}  {}\n", note.verses, escape_block(&note.body));
+                }
+            }
+        }
+        out
+    }
+
+    /// The name the save dialog suggests for the commentary.
+    pub fn commentary_file_name<Tz: TimeZone>(&self, tz: &Tz) -> String {
+        self.file_name(tz)
+            .replacen("gospel-getter-notes", "gospel-getter-commentary", 1)
     }
 
     fn render_note<Tz: TimeZone>(&self, out: &mut String, note: &Note, tz: &Tz) {
@@ -1006,6 +1197,330 @@ mod tests {
                 "2026-10-12T15:00:00.000Z",
             ),
         ]
+    }
+
+    /// FNV-1a, 64-bit: a fingerprint of a file's every byte.
+    fn fingerprint(text: &str) -> (usize, u64) {
+        let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+        (text.len(), hash)
+    }
+
+    /// Notes of every kind the export writes: several books, a range, two
+    /// on one verse, an edited one, verses the translation doesn't number,
+    /// the KJV's markup quoted, and bodies that look like Markdown or HTML.
+    /// Every quoted chapter's verses, by (book, chapter).
+    type Chapters = HashMap<(i64, i64), Vec<Verse>>;
+
+    fn every_kind() -> (Vec<Note>, Chapters) {
+        let mut notes = spread();
+        notes.push(note(
+            8,
+            JOHN,
+            3,
+            (16, 18),
+            "# Not a heading\n- not a list\n\n<b>not bold</b> & 1. *x*",
+        ));
+        notes.push(note(9, JOHN, 3, (16, 16), "Second on 3:16."));
+        let mut edited = note(10, 19, 23, (5, 6), "Edited.  \n  indented");
+        edited.updated_at = "2026-10-20T15:00:00.000Z".to_string();
+        notes.push(edited);
+        notes.push(note(11, 40, 17, (20, 22), "The gap."));
+        let mut quoted: Chapters = HashMap::new();
+        quoted.insert(
+            (19, 23),
+            verses_with(1..=6, "The LORD {is} my shepherd {Heb. pasture}."),
+        );
+        quoted.insert((JOHN, 1), verses(1..=51));
+        quoted.insert(
+            (JOHN, 3),
+            verses_with(1..=36, "For God so <loved> the *world*."),
+        );
+        quoted.insert((JOHN, 5), verses(1..=47));
+        quoted.insert((45, 8), verses(1..=39));
+        quoted.insert((62, 1), verses(1..=10));
+        quoted.insert((40, 17), verses([20, 22]));
+        (notes, quoted)
+    }
+
+    fn verses_with(numbers: impl IntoIterator<Item = i64>, text: &str) -> Vec<Verse> {
+        numbers
+            .into_iter()
+            .map(|verse| Verse {
+                verse,
+                text: format!("{verse}: {text}"),
+                footnotes: Vec::new(),
+            })
+            .collect()
+    }
+
+    /// The layout notes have always been exported in (each note's verses
+    /// quoted) stays byte for byte what it was before the commentary
+    /// layout came: one file of every book, one book, and one file per
+    /// book.
+    #[test]
+    fn the_quoted_layout_is_byte_for_byte_as_before() {
+        let (notes, verses) = every_kind();
+        let books = with_romans();
+        let mut books = books;
+        books.push(Book {
+            id: 40,
+            name: "Matthew".to_string(),
+            testament: "NT".to_string(),
+            chapter_count: 28,
+        });
+        books.sort_by_key(|b| b.id);
+        books.dedup_by_key(|b| b.id);
+        let all = NotesFilter::default();
+        let john = NotesFilter {
+            books: vec![JOHN],
+            ..NotesFilter::default()
+        };
+        let whole = export(&notes, &books, &verses, "kjv", &all).render(&mountain());
+        let one = export(&notes, &books, &verses, "kjv", &john).render(&mountain());
+        let files: Vec<(String, (usize, u64))> = export(&notes, &books, &verses, "kjv", &all)
+            .by_book(&mountain())
+            .into_iter()
+            .map(|f| (f.file_name, fingerprint(&f.contents)))
+            .collect();
+        // Measured on v2.21.0 (5c4d33f), before the commentary layout.
+        assert_eq!(
+            fingerprint(&whole),
+            (1562, 6_475_188_288_908_785_365),
+            "{whole}"
+        );
+        assert_eq!(
+            fingerprint(&one),
+            (854, 14_826_486_457_684_587_622),
+            "{one}"
+        );
+        let expected: [(&str, (usize, u64)); 5] = [
+            ("19 Psalms.md", (406, 18_385_015_491_155_577_116)),
+            ("40 Matthew.md", (221, 15_948_488_194_121_854_745)),
+            ("43 John.md", (854, 14_826_486_457_684_587_622)),
+            ("45 Romans.md", (177, 15_265_459_958_917_540_355)),
+            ("62 1 John.md", (174, 5_571_277_140_976_842_914)),
+        ];
+        assert_eq!(
+            files,
+            expected.map(|(name, print)| (name.to_owned(), print))
+        );
+    }
+
+    #[test]
+    fn a_commentary_labels_a_note_by_its_verses() {
+        assert_eq!(commentary_verses((1, 1), (1, 1)), "1:1");
+        assert_eq!(commentary_verses((3, 16), (3, 18)), "3:16\u{2013}18");
+        assert_eq!(commentary_verses((3, 36), (4, 2)), "3:36\u{2013}4:2");
+    }
+
+    /// The commentary of `notes` (every book, or `filter`'s), at -06:00.
+    fn commentary_of(notes: &[Note], filter: &NotesFilter) -> (Commentary, String) {
+        let books = with_romans();
+        let verses = HashMap::new();
+        let export = export(notes, &books, &verses, "kjv", filter);
+        (
+            export.commentary(&mountain()),
+            export.render_commentary(&mountain()),
+        )
+    }
+
+    #[test]
+    fn a_commentary_is_headings_and_a_line_per_note_in_bible_order() {
+        let mut notes = spread();
+        // Two on one verse, each its own line, in the order written; a
+        // range; and a later one on an earlier verse, put in its place.
+        notes.push(written(
+            note(8, JOHN, 3, (16, 16), "Second on 3:16."),
+            "2026-10-11T15:00:00.000Z",
+        ));
+        notes.push(note(9, JOHN, 3, (14, 15), "The serpent lifted up."));
+        let (commentary, file) = commentary_of(&notes, &NotesFilter::default());
+        assert_eq!(
+            file,
+            "# Gospel Getter commentary\n\
+             \n\
+             Exported Oct 10, 2026 \u{b7} 9 notes\n\
+             \n\
+             ## Psalms\n\
+             \n\
+             ### Psalms 23\n\
+             \n\
+             23:1  Psalms.\n\
+             \n\
+             ## John\n\
+             \n\
+             ### John 1\n\
+             \n\
+             1:1  John 1.\n\
+             \n\
+             ### John 3\n\
+             \n\
+             3:14\u{2013}15  The serpent lifted up.\n\
+             \n\
+             3:16  John 3.\n\
+             \n\
+             3:16  Second on 3:16.\n\
+             \n\
+             3:17  Late.\n\
+             \n\
+             ### John 5\n\
+             \n\
+             5:24  John 5.\n\
+             \n\
+             ## Romans\n\
+             \n\
+             ### Romans 8\n\
+             \n\
+             8:28  Romans.\n\
+             \n\
+             ## 1 John\n\
+             \n\
+             ### 1 John 1\n\
+             \n\
+             1:9  1 John.\n"
+        );
+        // The same, as the page prints it.
+        let john = &commentary.books[1];
+        assert_eq!(john.name, "John");
+        assert_eq!(
+            john.chapters
+                .iter()
+                .map(|c| (c.heading.as_str(), c.notes.len()))
+                .collect::<Vec<_>>(),
+            [("John 1", 1), ("John 3", 4), ("John 5", 1)]
+        );
+        assert_eq!(
+            john.chapters[1].notes[2],
+            CommentaryNote {
+                verses: "3:16".into(),
+                body: "Second on 3:16.".into(),
+            }
+        );
+        assert_eq!(commentary.exported, "Exported Oct 10, 2026 \u{b7} 9 notes");
+        assert_eq!(commentary.written, None);
+        assert!(commentary.book_headings);
+        // No Bible text, and no verse without a note.
+        assert!(!file.contains('>') && !file.contains("Verse text"));
+    }
+
+    #[test]
+    fn a_commentary_of_one_book_names_it_once_and_keeps_the_filter() {
+        let filter = NotesFilter {
+            books: vec![JOHN],
+            chapters: Some((3, 5)),
+            written_from: Some(day(2026, 10, 1)),
+            written_to: Some(day(2026, 10, 9)),
+        };
+        let (commentary, file) = commentary_of(&spread(), &filter);
+        assert_eq!(commentary.title, "Commentary on John 3\u{2013}5");
+        assert!(!commentary.book_headings);
+        assert_eq!(
+            file,
+            "# Commentary on John 3\u{2013}5\n\
+             \n\
+             Exported Oct 10, 2026 \u{b7} 2 notes\n\
+             \n\
+             Written Oct 1 \u{2013} Oct 9, 2026\n\
+             \n\
+             ## John 3\n\
+             \n\
+             3:16  John 3.\n\
+             \n\
+             3:17  Late.\n"
+        );
+    }
+
+    #[test]
+    fn a_commentary_writes_every_note_as_text_never_markup() {
+        let hostile = [
+            "# Not a heading",
+            "- not a list\n+ nor this",
+            "<script>alert(1)</script> & <b>bold</b>",
+            "First paragraph.\n\n\n\nSecond, after blank lines.\nA line of its own.",
+            "1. not a numbered list",
+            "**not bold** _nor_ `code` [no](link) ~~strike~~ | table |",
+            "   indented",
+            "> not a quote\n---",
+        ];
+        let notes: Vec<Note> = hostile
+            .iter()
+            .zip(1..)
+            .map(|(body, i)| note(i, JOHN, 3, (i, i), body))
+            .collect();
+        let (commentary, file) = commentary_of(&notes, &NotesFilter::default());
+        // What the page prints is the text as written.
+        let bodies: Vec<&str> = commentary.books[0].chapters[0]
+            .notes
+            .iter()
+            .map(|n| n.body.as_str())
+            .collect();
+        assert_eq!(bodies, hostile);
+        let lines = file.split("\n### John 3\n").nth(1).unwrap();
+        assert_eq!(
+            lines,
+            "\n3:1  \\# Not a heading\n\
+             \n3:2  \\- not a list\\\n\\+ nor this\n\
+             \n3:3  \\<script\\>alert(1)\\</script\\> \\& \\<b\\>bold\\</b\\>\n\
+             \n3:4  First paragraph.\n\nSecond, after blank lines.\\\nA line of its own.\n\
+             \n3:5  1\\. not a numbered list\n\
+             \n3:6  \\*\\*not bold\\*\\* \\_nor\\_ \\`code\\` \\[no\\](link) \\~\\~strike\\~\\~ \\| table \\|\n\
+             \n3:7  \u{a0}\u{a0}\u{a0}indented\n\
+             \n3:8  \\> not a quote\\\n\\---\n"
+        );
+    }
+
+    #[test]
+    fn a_commentary_by_book_is_each_book_s_commentary_named_apart() {
+        let notes = spread();
+        let books = with_romans();
+        let verses = HashMap::new();
+        let all = NotesFilter::default();
+        let export = export(&notes, &books, &verses, "kjv", &all);
+        let files = export.by_book_as(NotesLayout::Commentary, &mountain());
+        assert_eq!(
+            files
+                .iter()
+                .map(|f| (f.file_name.as_str(), f.notes))
+                .collect::<Vec<_>>(),
+            [
+                ("19 Psalms commentary.md", 1),
+                ("43 John commentary.md", 4),
+                ("45 Romans commentary.md", 1),
+                ("62 1 John commentary.md", 1),
+            ]
+        );
+        let john = NotesFilter {
+            books: vec![JOHN],
+            ..NotesFilter::default()
+        };
+        let alone = NotesExport {
+            filter: &john,
+            ..export.clone()
+        };
+        assert_eq!(files[1].contents, alone.render_commentary(&mountain()));
+        assert!(files[1].contents.starts_with("# Commentary on John\n"));
+        assert_eq!(
+            export.commentary_file_name(&mountain()),
+            "gospel-getter-commentary-2026-10-10.md"
+        );
+        assert_eq!(
+            alone.commentary_file_name(&mountain()),
+            "gospel-getter-commentary-john-2026-10-10.md"
+        );
+        // The quoted layout's files keep their names.
+        assert_eq!(export.by_book(&mountain())[1].file_name, "43 John.md");
+    }
+
+    #[test]
+    fn the_layout_arrives_from_the_frontend_as_json() {
+        let layout: NotesLayout = serde_json::from_str("\"commentary\"").unwrap();
+        assert_eq!(layout, NotesLayout::Commentary);
+        let layout: NotesLayout = serde_json::from_str("\"quoted\"").unwrap();
+        assert_eq!(layout, NotesLayout::Quoted);
+        assert_eq!(NotesLayout::default(), NotesLayout::Quoted);
+        assert!(serde_json::from_str::<NotesLayout>("\"docx\"").is_err());
     }
 
     fn with_romans() -> Vec<Book> {

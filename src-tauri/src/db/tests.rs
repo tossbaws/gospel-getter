@@ -23,14 +23,32 @@ use super::{
     ensure_search_index, get_reading_place, migrate, prepare, save_reading_position,
     save_reading_position_at,
 };
+use crate::domain::kjv_markup::VerseText;
+use crate::domain::query::{SearchQuery, search_query, term_marks};
 
 const KJV: i64 = 1;
 const WEB: i64 = 2;
 /// Seeded third (see `seed::SEED_ORDER`), on a new install or an upgrade.
 const BSB: i64 = 3;
 
-fn terms(words: &[&str]) -> Vec<String> {
-    words.iter().map(|w| (*w).to_string()).collect()
+fn terms(words: &[&str]) -> SearchQuery {
+    SearchQuery::of_words(words)
+}
+
+/// The (book, chapter, verse) of every verse in a translation the search
+/// `typed` finds (as the search box reads it).
+async fn found_by(
+    pool: &sqlx::SqlitePool,
+    translation_id: i64,
+    typed: &str,
+) -> Vec<(i64, i64, i64)> {
+    let (total, hits) = search_verses(pool, translation_id, &search_query(typed), 1000, 0)
+        .await
+        .unwrap_or_else(|e| panic!("{typed:?}: {e:#}"));
+    assert_eq!(total, hits.len() as i64, "{typed:?}: one page");
+    hits.iter()
+        .map(|h| (h.book_id, h.chapter, h.verse))
+        .collect()
 }
 
 /// `verses` must hold exactly the bundled text, byte for byte, numbered as
@@ -431,6 +449,111 @@ async fn search_returns_stored_text_in_bible_order_per_translation() {
             .await
             .unwrap_or_else(|e| panic!("{syntax:?} should be searched literally: {e:#}"));
     }
+}
+
+/// Words in double quotes find that phrase: its words in order, side by
+/// side (what's between them in the verse, a space or a comma, isn't a
+/// word), case and accents folded; mixed with free words, which may be
+/// anywhere. Typed FTS syntax, in quotes or out, is only ever words.
+#[tokio::test]
+async fn a_phrase_in_quotes_finds_its_words_in_order_and_side_by_side() {
+    let (_db, pool) = fresh_database("phrase").await;
+    let pool = pool.read();
+    let john_13_34 = (43, 13, 34);
+    let rom_12_10 = (45, 12, 10);
+
+    // The words anywhere: John 13:34 and Romans 12:10 ("one to another
+    // with brotherly love") both have all three.
+    let anywhere = found_by(pool, KJV, "love one another").await;
+    assert!(anywhere.contains(&john_13_34) && anywhere.contains(&rom_12_10));
+    // As a phrase, only where they stand together, in that order.
+    let phrase = found_by(pool, KJV, "\"love one another\"").await;
+    assert!(phrase.contains(&john_13_34));
+    assert!(!phrase.contains(&rom_12_10), "apart isn't the phrase");
+    assert!(phrase.len() < anywhere.len());
+    // Order matters.
+    assert!(found_by(pool, KJV, "\"another one love\"").await.is_empty());
+    // Every hit has the phrase, as its marks say.
+    for &(book, chapter, verse) in &phrase {
+        let (_, hits) = search_verses(pool, KJV, &search_query("\"love one another\""), 1000, 0)
+            .await
+            .unwrap();
+        let hit = hits
+            .iter()
+            .find(|h| (h.book_id, h.chapter, h.verse) == (book, chapter, verse))
+            .unwrap();
+        let shown = VerseText::new("kjv", &hit.text).text;
+        let marks = term_marks(&shown, &search_query("\"love one another\""));
+        assert!(
+            marks.len() >= 3 && marks.len().is_multiple_of(3),
+            "{shown}: {marks:?}"
+        );
+    }
+
+    // Case and accents fold, as for words: typed in capitals, curly
+    // quotes, or with accents the text doesn't have.
+    for typed in [
+        "\"LOVE ONE ANOTHER\"",
+        "\u{201c}Love one another\u{201d}",
+        "\"lóve oné anóther\"",
+    ] {
+        assert_eq!(found_by(pool, KJV, typed).await, phrase, "{typed}");
+    }
+
+    // A phrase with free words: the words may be anywhere in the verse.
+    let mixed = found_by(pool, KJV, "\"love one another\" commandment").await;
+    assert!(mixed.contains(&john_13_34));
+    assert!(mixed.iter().all(|v| phrase.contains(v)));
+    assert!(mixed.len() < phrase.len());
+
+    // Punctuation between the words isn't a word: "Am I my brother's
+    // keeper?" (Genesis 4:9) has "brother s keeper" side by side, and an
+    // apostrophe or a single quote typed in the phrase parts the words.
+    for typed in [
+        "\"my brother's keeper\"",
+        "\u{201c}my brother\u{2019}s keeper\u{201d}",
+    ] {
+        assert_eq!(found_by(pool, KJV, typed).await, [(1, 4, 9)], "{typed}");
+    }
+
+    // An unclosed quote's words are words.
+    assert_eq!(found_by(pool, KJV, "\"love one another").await, anywhere);
+
+    // Typed FTS syntax is words, searched for as words: it runs, never
+    // fails, and finds no more than the plain words would.
+    let either = found_by(pool, KJV, "\"faith\" OR \"hope\"").await;
+    assert_eq!(either, found_by(pool, KJV, "faith or hope").await);
+    for typed in [
+        "\"a\" OR \"b\"",
+        "NEAR(faith hope)",
+        "\"NEAR(faith hope, 2)\"",
+        "faith*",
+        "\"lov*\"",
+        "text:faith",
+        "\"faith\" NOT \"works\"",
+        "^faith",
+        "(\"faith",
+        "\"\"\"\"",
+    ] {
+        let hits = found_by(pool, KJV, typed).await;
+        let plain = search_query(typed);
+        let words = plain
+            .phrases
+            .iter()
+            .flatten()
+            .chain(&plain.words)
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let (anywhere, _) = search_verses(pool, KJV, &terms(&words), 1000, 0)
+            .await
+            .unwrap();
+        assert!(
+            hits.len() as i64 <= anywhere,
+            "{typed}: {} > {anywhere}",
+            hits.len()
+        );
+    }
+    assert!(found_by(pool, KJV, "faith*").await.contains(&(46, 13, 13)));
 }
 
 /// The version `search_index_version` records, if any.

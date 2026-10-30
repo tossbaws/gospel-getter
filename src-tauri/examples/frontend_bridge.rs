@@ -42,6 +42,7 @@ use gospel_getter_lib::commands::{self, AppState};
 use gospel_getter_lib::credit_links;
 use gospel_getter_lib::db::{self, Passage, WritePool};
 use gospel_getter_lib::domain::kjv_markup::VerseText;
+use gospel_getter_lib::notes_export::NotesLayout;
 use gospel_getter_lib::updater::{self, Problem, UpdateInfo};
 use gospel_getter_lib::web_link;
 
@@ -299,6 +300,13 @@ async fn dispatch(
                 Err(message) => Err(message),
             }
         }
+        "get_notes_commentary" => {
+            let (now, tz) = clock()?;
+            match commands::notes_commentary(state, &arg(args, "filter")?, now, &tz).await {
+                Ok(commentary) => Ok(to_value(commentary)?),
+                Err(message) => Err(message),
+            }
+        }
         "count_notes_export" => {
             let (_, tz) = clock()?;
             match commands::count_notes_to_export(state, &arg(args, "filter")?, &tz).await {
@@ -308,8 +316,18 @@ async fn dispatch(
         }
         "export_notes" => {
             let code: String = arg(args, "translationCode")?;
+            let layout: Option<NotesLayout> = arg(args, "layout")?;
             let (now, tz) = clock()?;
-            match commands::build_notes_export(state, &code, &arg(args, "filter")?, now, &tz).await
+            let filter = arg(args, "filter")?;
+            match commands::build_notes_export_as(
+                state,
+                layout.unwrap_or_default(),
+                &code,
+                &filter,
+                now,
+                &tz,
+            )
+            .await
             {
                 Err(message) => Err(message),
                 Ok(file) => match pick()? {
@@ -324,8 +342,10 @@ async fn dispatch(
         "export_notes_by_book" => {
             let code: String = arg(args, "translationCode")?;
             let (now, tz) = clock()?;
-            match commands::build_notes_export_by_book(
+            let layout: Option<NotesLayout> = arg(args, "layout")?;
+            match commands::build_notes_export_by_book_as(
                 state,
+                layout.unwrap_or_default(),
                 &code,
                 &arg(args, "filter")?,
                 now,

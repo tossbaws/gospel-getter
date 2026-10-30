@@ -1,7 +1,11 @@
 //! Export notes…: the notes chosen by book, chapters and when they were
 //! written, as a readable Markdown file with each note's verses quoted in
-//! the translation being read, or (Save as "One file per book") as a
-//! folder of files, one a book, for a notes app such as Obsidian. The
+//! the translation being read, or (Layout "Commentary") as a commentary,
+//! one line per note by verse number and no Bible text; or (Save as "One
+//! file per book") as a folder of files, one a book, for a notes app such
+//! as Obsidian. The commentary can also be printed (Print…): the page draws
+//! it into its print-only `#print-commentary` and asks the webview to
+//! print (`window.print()`, the system's print dialog). The
 //! backend works out the choices when the dialog opens (the books with
 //! notes, and date presets in local days), counts the notes the choices
 //! match as they change, builds the files, asks where to save them and
@@ -31,18 +35,27 @@ use web_sys::{CustomEvent, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEv
 use crate::bridge::{self, OpenRequest};
 use crate::dom::{self, focus, inside_hidden};
 use crate::dto::{
-    ConfirmFolderArgs, CountArgs, ExportArgs, ExportOptions, ExportOutcome, Filter, FolderOutcome,
-    NotedBook,
+    Commentary, CommentaryArgs, ConfirmFolderArgs, CountArgs, ExportArgs, ExportOptions,
+    ExportOutcome, Filter, FolderOutcome, NotedBook,
 };
 use crate::ipc;
 use crate::text::{
-    Fields, build_filter, chapter_value, count_line, plural, replace_question, saved_files,
-    thousands,
+    Fields, build_filter, chapter_value, commentary_markup, count_line, plural, replace_question,
+    saved_files, thousands,
 };
 
 /// Save as: one file (as always), or one file per book in a folder.
 const ONE_FILE: &str = "one";
 const BY_BOOK: &str = "books";
+
+/// Layout: each note with its verses quoted (as always), or a commentary
+/// (`notes_export::NotesLayout`, by these names).
+const QUOTED: &str = "quoted";
+const COMMENTARY: &str = "commentary";
+
+/// `<html>`'s attribute while the commentary is being printed: the print
+/// stylesheet then prints `#print-commentary` and nothing else.
+const PRINTING: &str = "data-printing";
 
 /// An export as one file per book waiting for the reader to say whether
 /// to replace the files already in their folder.
@@ -93,6 +106,8 @@ struct Dialog {
     matches: RwSignal<Option<u64>>,
     /// Save as: [`ONE_FILE`] or [`BY_BOOK`].
     layout: RwSignal<String>,
+    /// Layout: [`QUOTED`] or [`COMMENTARY`].
+    style: RwSignal<String>,
     /// An export to a folder is under way (the dialog stays open for it).
     working: RwSignal<bool>,
     /// The question while a folder already holds some of the files.
@@ -140,6 +155,7 @@ impl Dialog {
             count: RwSignal::new(String::new()),
             matches: RwSignal::new(None),
             layout: RwSignal::new(ONE_FILE.to_string()),
+            style: RwSignal::new(QUOTED.to_string()),
             working: RwSignal::new(false),
             replace: RwSignal::new(None),
             replace_no: NodeRef::new(),
@@ -297,6 +313,7 @@ impl Dialog {
             self.error.set(String::new());
             self.count.set(String::new());
             self.layout.set(ONE_FILE.to_string());
+            self.style.set(QUOTED.to_string());
             self.working.set(false);
             self.replace.set(None);
             self.sync_chapters();
@@ -335,6 +352,7 @@ impl Dialog {
     /// to the page's focus home if the button is gone, hidden or disabled.
     fn close(self) {
         self.open.set(false);
+        done_printing();
         self.busy.update_value(|b| b.count_token += 1);
         match bridge::export_button() {
             Some(button)
@@ -371,8 +389,9 @@ impl Dialog {
             .request
             .with_untracked(|r| r.as_ref().map(|r| r.translation_code.clone()))
             .unwrap_or_default();
+        let style = self.style.get_untracked();
         if self.layout.get_untracked() == BY_BOOK {
-            self.export_by_book(translation_code, filter);
+            self.export_by_book(translation_code, filter, style);
             return;
         }
         self.close();
@@ -381,6 +400,7 @@ impl Dialog {
             let args = ExportArgs {
                 translation_code: &translation_code,
                 filter: &filter,
+                layout: &style,
             };
             let result = match ipc::args(&args) {
                 Ok(args) => ipc::invoke::<ExportOutcome>("export_notes", args).await,
@@ -407,7 +427,7 @@ impl Dialog {
     /// One file per book: the backend builds the files, asks for a folder
     /// and writes them there, or asks first if some are there already.
     /// The dialog stays open meanwhile.
-    fn export_by_book(self, translation_code: String, filter: Filter) {
+    fn export_by_book(self, translation_code: String, filter: Filter, style: String) {
         if self.working.get_untracked() {
             return;
         }
@@ -417,12 +437,44 @@ impl Dialog {
             let args = ExportArgs {
                 translation_code: &translation_code,
                 filter: &filter,
+                layout: &style,
             };
             let result = match ipc::args(&args) {
                 Ok(args) => ipc::invoke::<FolderOutcome>("export_notes_by_book", args).await,
                 Err(e) => Err(e),
             };
             self.folder_answer(result).await;
+        });
+    }
+
+    /// Print…: the commentary of the notes the choices match, by the same
+    /// filter, from the backend (the file's own words), printed. The
+    /// dialog stays open.
+    fn print(self) {
+        if !self.open.get_untracked()
+            || self.working.get_untracked()
+            || self.matches.get_untracked().unwrap_or(0) == 0
+        {
+            return;
+        }
+        let Some(filter) = self.filter() else {
+            return;
+        };
+        self.working.set(true);
+        spawn_local(async move {
+            let args = CommentaryArgs { filter: &filter };
+            let result = match ipc::args(&args) {
+                Ok(args) => ipc::invoke::<Commentary>("get_notes_commentary", args).await,
+                Err(e) => Err(e),
+            };
+            self.working.set(false);
+            match result {
+                Ok(commentary) => print_commentary(&commentary).await,
+                Err(e) => {
+                    ipc::log_error("Printing the commentary failed", &e);
+                    self.error.set(ipc::error_text(&e));
+                }
+            }
         });
     }
 
@@ -538,6 +590,73 @@ impl Dialog {
             }
         });
         dom::on_window_keydown(move |event: KeyboardEvent| self.on_keydown(event));
+        if let Some(window) = web_sys::window() {
+            dom::on(&window, "afterprint", |_| done_printing());
+        }
+    }
+}
+
+/// The faces the printed commentary uses that the page may not have
+/// loaded yet: its verse numbers and chapter headings are bold, and a face
+/// still loading prints as nothing (`font-display: block`).
+const PRINT_FACES: [&str; 2] = ["400 16px Literata", "700 16px Literata"];
+
+/// Draws `commentary` into the page's print-only container, marks the page
+/// as printing it, waits for its faces, and asks the webview to print: the
+/// system's print dialog (WebKitGTK's GTK dialog on Linux, WebView2's
+/// print preview on Windows). Put back once printing is done
+/// (`afterprint`), or when the dialog closes, whichever comes first.
+async fn print_commentary(commentary: &Commentary) {
+    let Some(document) = bridge::document() else {
+        return;
+    };
+    let (Some(container), Some(html), Some(window)) = (
+        document.get_element_by_id("print-commentary"),
+        document.document_element(),
+        web_sys::window(),
+    ) else {
+        return;
+    };
+    container.set_inner_html(&commentary_markup(commentary));
+    // Each chapter's notes hang from its widest label (`data-hang`, in em),
+    // set through the style object: the page's CSP allows no inline style.
+    if let Ok(chapters) = container.query_selector_all(".print-notes[data-hang]") {
+        for chapter in (0..chapters.length()).filter_map(|i| chapters.item(i)) {
+            if let Ok(chapter) = chapter.dyn_into::<HtmlElement>()
+                && let Some(hang) = chapter.get_attribute("data-hang")
+            {
+                let _ = chapter.style().set_property("--hang", &format!("{hang}em"));
+            }
+        }
+    }
+    let _ = html.set_attribute(PRINTING, "commentary");
+    // Not every engine has `document.fonts` (the frontend tests' hasn't).
+    let fonts = js_sys::Reflect::get(&document, &JsValue::from_str("fonts"))
+        .ok()
+        .and_then(|fonts| fonts.dyn_into::<web_sys::FontFaceSet>().ok());
+    if let Some(fonts) = fonts {
+        for face in PRINT_FACES {
+            // A face that can't load prints in the fallback face instead.
+            let _ = wasm_bindgen_futures::JsFuture::from(fonts.load(face)).await;
+        }
+    }
+    if let Err(e) = window.print() {
+        ipc::log_error("The print dialog couldn't be opened", &e);
+        done_printing();
+    }
+}
+
+/// The page is no longer printing the commentary: the container empty, and
+/// the page prints as it always has.
+fn done_printing() {
+    let Some(document) = bridge::document() else {
+        return;
+    };
+    if let Some(html) = document.document_element() {
+        let _ = html.remove_attribute(PRINTING);
+    }
+    if let Some(container) = document.get_element_by_id("print-commentary") {
+        container.set_inner_html("");
     }
 }
 
@@ -648,9 +767,24 @@ pub fn ExportNotes() -> impl IntoView {
                     <h2 id="export-notes-title" class="note-title">"Export notes"</h2>
                     <p id="export-notes-text" class="export-notes-text">
                         "Creates a Markdown (.md) file of your notes, plain text that opens in \
-                         Notepad or any text editor. Each note has its verses quoted in the "
-                        <span id="export-notes-translation">{translation_name}</span>
-                        "."
+                         Notepad or any text editor. "
+                        {move || {
+                            if dialog.style.get() == COMMENTARY {
+                                view! {
+                                    "As a commentary: each note on a line of its own by its \
+                                     verse number, under its book and chapter, with no Bible \
+                                     text."
+                                }
+                                    .into_any()
+                            } else {
+                                view! {
+                                    "Each note has its verses quoted in the "
+                                    <span id="export-notes-translation">{translation_name}</span>
+                                    "."
+                                }
+                                    .into_any()
+                            }
+                        }}
                     </p>
                     <fieldset class="export-notes-group">
                         <legend class="export-notes-legend">"Books"</legend>
@@ -791,6 +925,33 @@ pub fn ExportNotes() -> impl IntoView {
                         </div>
                     </fieldset>
                     <fieldset class="export-notes-group">
+                        <legend class="export-notes-legend">"Layout"</legend>
+                        <div class="export-notes-layouts">
+                            <label class="export-notes-layout-option">
+                                <input
+                                    type="radio"
+                                    name="export-notes-style"
+                                    id="export-notes-quoted"
+                                    value=QUOTED
+                                    prop:checked=move || dialog.style.get() == QUOTED
+                                    on:change=move |_| dialog.style.set(QUOTED.to_string())
+                                />
+                                <span>"Notes with their verses"</span>
+                            </label>
+                            <label class="export-notes-layout-option">
+                                <input
+                                    type="radio"
+                                    name="export-notes-style"
+                                    id="export-notes-commentary"
+                                    value=COMMENTARY
+                                    prop:checked=move || dialog.style.get() == COMMENTARY
+                                    on:change=move |_| dialog.style.set(COMMENTARY.to_string())
+                                />
+                                <span>"Commentary (notes by verse number)"</span>
+                            </label>
+                        </div>
+                    </fieldset>
+                    <fieldset class="export-notes-group">
                         <legend class="export-notes-legend">"Save as"</legend>
                         <div class="export-notes-layouts">
                             <label class="export-notes-layout-option">
@@ -833,6 +994,17 @@ pub fn ExportNotes() -> impl IntoView {
                         on:click=move |_| dialog.export()
                     >
                         "Export…"
+                    </button>
+                    <button
+                        type="button"
+                        id="export-notes-print"
+                        class="reader-mode-btn"
+                        title="Print the commentary of these notes"
+                        hidden=move || dialog.style.get() != COMMENTARY
+                        disabled=move || dialog.matches.get().unwrap_or(0) == 0 || dialog.working.get()
+                        on:click=move |_| dialog.print()
+                    >
+                        "Print…"
                     </button>
                     <button
                         type="button"

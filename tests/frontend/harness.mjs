@@ -429,9 +429,9 @@ export async function openApp({
         async pick(path) {
             await backend('__set_picker', { path });
         },
-        /** The element of a header surface: 'translation', 'aa', 'library', 'menu', 'about' or 'picker'. */
+        /** The element of a header surface: 'translation', 'aa', 'library', 'menu', 'about', 'picker' or 'recent'. */
         surface(name) {
-            return document.getElementById({ translation: 'translation-popover', aa: 'aa-popover', library: 'library-panel', menu: 'app-menu', about: 'about-overlay', picker: 'picker' }[name]);
+            return document.getElementById({ translation: 'translation-popover', aa: 'aa-popover', library: 'library-panel', menu: 'app-menu', about: 'about-overlay', picker: 'picker', recent: 'recent-places-menu' }[name]);
         },
         /** Opens a header surface the way a reader would (About through the ☰ menu). */
         open(name) {
@@ -441,7 +441,7 @@ export async function openApp({
                 app.click(document.getElementById('about-btn'));
                 return;
             }
-            app.click(document.getElementById({ translation: 'translation-toggle', aa: 'aa-toggle', library: 'library-toggle', menu: 'menu-toggle' }[name]));
+            app.click(document.getElementById({ translation: 'translation-toggle', aa: 'aa-toggle', library: 'library-toggle', menu: 'menu-toggle', recent: 'recent-places-toggle' }[name]));
         },
         /** Opens the Library on its 'bookmarks' or 'highlights' tab. */
         openLibrary(tab = 'bookmarks') {

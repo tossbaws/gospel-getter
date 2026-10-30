@@ -114,6 +114,7 @@ fn invoke_handler<R: tauri::Runtime>()
         commands::export_notes,
         commands::export_notes_by_book,
         commands::confirm_notes_export_by_book,
+        commands::get_notes_commentary,
         commands::choose_import_file,
         commands::apply_import,
         commands::cancel_import,

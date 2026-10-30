@@ -17,7 +17,7 @@ use gospel_getter_lib::preferences::{self, Preference, Values};
 /// highlight and notes), and what was the page's main script (the keyboard
 /// and click dispatchers, boot, and the page's glue): checks of those read
 /// them where they now live.
-const PIECES: [(&str, &str); 31] = [
+const PIECES: [(&str, &str); 33] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -27,6 +27,11 @@ const PIECES: [(&str, &str); 31] = [
         include_str!("../../ui-leptos/src/shortcuts.rs"),
     ),
     ("welcome.rs", include_str!("../../ui-leptos/src/welcome.rs")),
+    ("nav.rs", include_str!("../../ui-leptos/src/nav.rs")),
+    (
+        "nav_text.rs",
+        include_str!("../../ui-leptos/src/nav_text.rs"),
+    ),
     (
         "import_preview.rs",
         include_str!("../../ui-leptos/src/import_preview.rs"),
@@ -241,7 +246,7 @@ fn margin_notes_sit_beside_the_text_on_screen_only() {
         "left: calc(100% + 1.5rem);",
         "width: var(--margin-width, 14rem);",
         "font-family: var(--font-ui);",
-        "font-size: 0.8rem;",
+        "font-size: max(11px, calc(0.8rem * var(--ui-scale)));",
         "color: var(--text);",
     ] {
         assert!(margin.contains(declaration), ".margin-notes: {declaration}");
@@ -938,8 +943,9 @@ fn reading_presets_default_to_the_original_typography() {
 /// Text size/spacing apply to the reading content only — verses, verse
 /// numbers, chapter headings, compare mode's "not numbered" cells (which
 /// sit in a row beside a verse), and in the note panel the verses quoted
-/// and the note being written about them — never to the rest of the UI
-/// (so the settings menu, book list etc. don't grow with it).
+/// and the note being written about them — never to the rest of the UI,
+/// which grows by its own, gentler `--ui-scale` (see
+/// `interface_text_grows_with_text_size_at_half_strength`).
 #[test]
 fn reading_presets_scale_only_reading_content() {
     for rule in rules() {
@@ -966,6 +972,262 @@ fn reading_presets_scale_only_reading_content() {
     }
 }
 
+/// Every size `--ui-scale` scales, with the value it had before it did:
+/// at Medium (`--ui-scale: 1`) each must still be exactly this. The last
+/// selector of the rule's list, the property, and the old value (or, for
+/// what's newer than the scale, its value at Medium).
+const UI_SCALED_AT_MEDIUM: &[(&str, &str, &str)] = &[
+    (".popover", "font-size", "0.85rem"),
+    (".translation-popover", "width", "24rem"),
+    (".section-label", "font-size", "0.7rem"),
+    (".segment", "font-size", "0.85rem"),
+    (".translation-choice", "font-size", "0.8rem"),
+    (".stepper-btn", "width", "2.6rem"),
+    (".stepper-btn", "height", "2.1rem"),
+    (".stepper-smaller", "font-size", "0.8rem"),
+    (".stepper-larger", "font-size", "1.2rem"),
+    (".theme-name", "font-size", "0.75rem"),
+    (".app-menu", "width", "14rem"),
+    (".menu-item", "font-size", "0.9rem"),
+    (
+        ".library-panel:not([hidden])",
+        "width",
+        "min(22.5rem, 100%)",
+    ),
+    (".library-panel:not([hidden])", "font-size", "0.9rem"),
+    (".library-title", "font-size", "1.1rem"),
+    (".library-tab", "font-size", "0.9rem"),
+    (".tab-count", "font-size", "0.75rem"),
+    (".library-hint", "font-size", "0.75rem"),
+    (".note-search", "font-size", "0.85rem"),
+    (".note-search-count", "font-size", "0.75rem"),
+    (".bookmark-ref", "font-size", "0.85rem"),
+    (".bookmark-preview", "font-size", "0.75rem"),
+    (".bookmark-partial", "font-size", "0.7rem"),
+    (".bookmark-remove", "font-size", "1.1rem"),
+    (".note-preview", "font-size", "0.75rem"),
+    (".note-list-copy", "font-size", "0.8rem"),
+    (".bookmark-empty", "font-size", "0.8rem"),
+    (".highlight-filter-btn", "font-size", "0.75rem"),
+    (".highlight-color", "font-size", "0.7rem"),
+    (
+        ".picker:not([hidden])",
+        "width",
+        "min(20rem, calc(100vw - 1rem))",
+    ),
+    (".picker:not([hidden])", "font-size", "0.9rem"),
+    (".picker-testament", "font-size", "0.72rem"),
+    (".chapter-btn", "font-size", "0.85rem"),
+    (".search-panel", "width", "min(640px, calc(100vw - 2rem))"),
+    (".search-input", "font-size", "1rem"),
+    (".search-status", "font-size", "0.8rem"),
+    (".palette-group-label", "font-size", "0.7rem"),
+    (".search-command", "font-size", "0.9rem"),
+    (".palette-reason", "font-size", "0.78rem"),
+    (".palette-key kbd", "font-size", "0.75rem"),
+    (".search-result", "font-size", "0.9rem"),
+    (".search-ref", "font-size", "0.75rem"),
+    (".verse-actions", "font-size", "0.85rem"),
+    (".selection-card", "width", "min(100%, 34rem)"),
+    (
+        ".selection-card",
+        "max-height",
+        "min(24rem, calc(100vh - var(--bar-height) - 2rem))",
+    ),
+    (".selection-card", "font-size", "0.85rem"),
+    (
+        ".selection-card.is-docked",
+        "max-height",
+        "min(45vh, 20rem)",
+    ),
+    (".xref-preview-title", "font-size", "0.75rem"),
+    (".xref-preview-text", "font-size", "0.95rem"),
+    (".highlight-remove", "font-size", "0.85rem"),
+    (".copy-as-item", "font-size", "0.85rem"),
+    (".verse-notes", "font-size", "0.85rem"),
+    (".verse-notes-title", "font-size", "0.75rem"),
+    (".note-card-date", "font-size", "0.75rem"),
+    (".note-link", "font-size", "0.8rem"),
+    (".highlight-swatch", "width", "1.6rem"),
+    (".highlight-swatch", "height", "1.6rem"),
+    (".highlight-swatch", "font-size", "0.85rem"),
+    (".xref-popup-title", "font-size", "0.7rem"),
+    (".xref-citation", "font-size", "0.85rem"),
+    (".margin-notes", "font-size", "0.8rem"),
+    (".margin-note-ref", "font-size", "0.72rem"),
+    (".margin-note-more", "font-size", "0.75rem"),
+    // What the shared button rule gave them (0.85rem), now their own.
+    (".search-more", "font-size", "0.85rem"),
+    // Recent places, the menu from the bar's ▾.
+    (".recent-menu", "min-width", "15rem"),
+    (".recent-label", "font-size", "0.7rem"),
+    (".recent-key", "font-size", "0.75rem"),
+    (".recent-empty", "font-size", "0.85rem"),
+];
+
+/// A size written with `--ui-scale`, worked out at `scale`: each
+/// `calc(<n><unit> * var(--ui-scale))` becomes `<n * scale><unit>`, and
+/// `max(11px, <n>rem)` the larger of the two (a rem is 16px).
+fn at_ui_scale(value: &str, scale: f64) -> String {
+    const SCALED: &str = " * var(--ui-scale))";
+    let mut out = value.to_owned();
+    while let Some(end) = out.find(SCALED) {
+        let start = out[..end]
+            .rfind("calc(")
+            .expect("a scaled size is a calc()");
+        let length = &out[start + 5..end];
+        let unit_at = length
+            .find(|c: char| c.is_ascii_alphabetic() || c == '%')
+            .expect("a length with a unit");
+        let number: f64 = length[..unit_at].parse().expect("a number");
+        let scaled = format!("{}{}", number * scale, &length[unit_at..]);
+        out.replace_range(start..end + SCALED.len(), &scaled);
+    }
+    if let Some(inner) = out
+        .strip_prefix("max(11px, ")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        let rem: f64 = inner
+            .strip_suffix("rem")
+            .and_then(|n| n.parse().ok())
+            .expect("a floored size in rem");
+        out = if rem * 16.0 >= 11.0 {
+            inner.to_owned()
+        } else {
+            "11px".to_owned()
+        };
+    }
+    out
+}
+
+/// The interface (the popovers, the Library, the book and chapter picker,
+/// search and the palette, the selection card and the margin notes) grows
+/// with Text size at about half its strength, through `--ui-scale`: 1 at
+/// Medium, which therefore draws every one of those sizes exactly as
+/// before; 0.95, 1.1 and 1.2 at Small, Large and Extra large. No label it
+/// scales goes below 11px, and the top bar's controls never scale (their
+/// 36px targets keep the reference its room).
+#[test]
+fn interface_text_grows_with_text_size_at_half_strength() {
+    let rules = rules();
+    let root = custom_properties(&screen_rule(&rules, ":root").body);
+    assert_eq!(property(&root, "--ui-scale"), "1");
+    let scale_at = |size: &str| -> Option<f64> {
+        let selector = format!(r#":root[data-text-size="{size}"]"#);
+        rules
+            .iter()
+            .filter(|r| r.at_rule.is_none() && r.selector == selector)
+            .flat_map(|r| custom_properties(&r.body))
+            .find(|(name, _)| name == "--ui-scale")
+            .map(|(_, value)| value.parse().expect("a number"))
+    };
+    assert_eq!(scale_at("medium"), None, "Medium is the default, 1");
+    let (sizes, fallback) = script_preset("text-size-select");
+    assert_eq!(fallback, "medium");
+    let mut scales = vec![1.0];
+    for (size, expected) in [("small", 0.95), ("large", 1.1), ("x-large", 1.2)] {
+        assert!(sizes.iter().any(|s| s == size), "{size}");
+        assert_eq!(scale_at(size), Some(expected), "{size}");
+        scales.push(expected);
+    }
+    // Printed, it's 1, as the reading presets are.
+    let print = block_after(&stylesheet(), "@media print");
+    assert!(one_space(&print).contains("--ui-scale: 1 !important;"));
+
+    let mut scaled = Vec::new();
+    for rule in &rules {
+        let in_screen = matches!(rule.at_rule.as_deref(), None | Some("@media screen"));
+        for (name, value) in declarations(&rule.body) {
+            if !value.contains("var(--ui-scale)") || name.starts_with("--") {
+                continue;
+            }
+            assert!(
+                in_screen,
+                "`{}` scales in {:?}",
+                rule.selector, rule.at_rule
+            );
+            for selector in selectors(rule) {
+                for bar in [
+                    ".top-bar",
+                    ".bar-btn",
+                    ".ref-btn",
+                    "-toggle",
+                    ".reader-exit",
+                ] {
+                    assert!(
+                        !selector.contains(bar),
+                        "`{selector}`: the top bar stays its size"
+                    );
+                }
+            }
+            if name == "font-size" {
+                assert!(
+                    value.starts_with("max(11px, calc(") && value.ends_with(" * var(--ui-scale)))"),
+                    "`{}`: a label is never below 11px: {value}",
+                    rule.selector
+                );
+                for scale in &scales {
+                    let size = at_ui_scale(&value, *scale);
+                    let px = size.strip_suffix("px").map_or_else(
+                        || size.trim_end_matches("rem").parse::<f64>().unwrap() * 16.0,
+                        |px| px.parse().unwrap(),
+                    );
+                    assert!(px >= 11.0, "`{}` at {scale}: {size}", rule.selector);
+                }
+            }
+            let last = selectors(rule).last().unwrap_or_default().to_owned();
+            scaled.push((last, name, value));
+        }
+    }
+    // Each size is one of these, exactly as it was at Medium; and each of
+    // these scales.
+    for (selector, name, value) in &scaled {
+        let pinned = UI_SCALED_AT_MEDIUM
+            .iter()
+            .filter(|(s, n, _)| s == selector && n == name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pinned.len(),
+            1,
+            "`{selector}` {name} isn't pinned at Medium"
+        );
+        assert_eq!(
+            at_ui_scale(value, 1.0),
+            pinned[0].2,
+            "`{selector}` {name} at Medium"
+        );
+    }
+    for (selector, name, _) in UI_SCALED_AT_MEDIUM {
+        assert!(
+            scaled.iter().any(|(s, n, _)| s == selector && n == name),
+            "`{selector}` {name} should grow with Text size"
+        );
+    }
+    // The popovers, the Library, the picker and the card scroll within
+    // the window rather than run off it.
+    for selector in [
+        ".popover-body",
+        ".library-tabpanel",
+        ".picker:not([hidden])",
+        ".selection-card",
+        ".search-panel",
+    ] {
+        let body = &screen_rule(&rules, selector).body;
+        assert!(body.contains("overflow-y: auto"), "{selector}");
+    }
+    for id in ["aa-popover", "translation-popover"] {
+        let open = HTML
+            .find(&format!(r#"<div id="{id}""#))
+            .expect("the popover");
+        let next = &HTML[open..];
+        let first_child = next[next.find('>').unwrap() + 1..].trim_start();
+        assert!(
+            first_child.starts_with(r#"<div class="popover-body">"#),
+            "#{id} scrolls inside its body, its pointer unclipped"
+        );
+    }
+}
+
 /// Reading mode hides navigation and chrome (the Library and ☰ buttons
 /// among it) but must keep the chapter being read, Aa, search, and its own
 /// exit control on screen.
@@ -987,6 +1249,9 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
         ".nav-hint",
         "#library-toggle",
         "#menu-toggle",
+        ".history-nav",
+        ".bar-divider",
+        ".chapter-arrow",
     ] {
         assert!(
             hidden.contains(&chrome),
@@ -1140,6 +1405,336 @@ fn header_buttons_announce_what_they_open() {
         "about-btn",
     ] {
         assert!(tag_of(item).contains(r#"role="menuitem""#), "#{item}");
+    }
+}
+
+/// Back, Recent places (▾) and Forward sit at the left of the bar, set
+/// apart by a hairline from the chapter group: ‹, the reference, ›. All in
+/// the bar's own style: ghost buttons (`.bar-btn`) with an inline SVG icon each (24px
+/// grid, stroke 2, `currentColor`), never a font glyph. Back and Forward
+/// and ‹ and › say their keys and start unavailable (`aria-disabled`, still
+/// in the tab order); ▾ opens a menu. They run the keys' own paths
+/// (`keyboard::go_history`, `keyboard::turn_chapter`), a recent place is a
+/// jump (`Request::Jump`), and they ask the backend for nothing. Reading
+/// mode and print hide them; a narrow window folds Forward into the menu and
+/// leaves the translation off the reference.
+#[test]
+fn the_bar_s_history_and_chapter_controls_are_ghost_svg_buttons() {
+    let at = |needle: &str| {
+        HTML.find(needle)
+            .unwrap_or_else(|| panic!("expected `{needle}`"))
+    };
+    let order = [
+        r#"id="sidebar-toggle""#,
+        r#"id="history-back""#,
+        r#"id="recent-places-toggle""#,
+        r#"id="history-forward""#,
+        r#"id="recent-places-menu""#,
+        r#"class="bar-divider""#,
+        r#"id="chapter-prev""#,
+        r#"id="ref-btn""#,
+        r#"id="chapter-next""#,
+        r#"id="reader-exit""#,
+    ]
+    .map(at);
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
+    for (id, label, keys) in [
+        ("history-back", "Back", Some("Alt+ArrowLeft")),
+        ("recent-places-toggle", "Recent places", None),
+        ("history-forward", "Forward", Some("Alt+ArrowRight")),
+        ("chapter-prev", "Previous chapter", Some("ArrowLeft")),
+        ("chapter-next", "Next chapter", Some("ArrowRight")),
+    ] {
+        let tag = tag_of(id);
+        assert!(tag.starts_with(r#"<button type="button""#), "#{id}");
+        assert!(tag.contains(r#"class="bar-btn"#), "#{id}");
+        assert!(tag.contains(&format!(r#"aria-label="{label}""#)), "#{id}");
+        if let Some(keys) = keys {
+            assert!(
+                tag.contains(&format!(r#"aria-keyshortcuts="{keys}""#)),
+                "#{id}"
+            );
+            assert!(tag.contains(r#"aria-disabled="true""#), "#{id}");
+            assert!(!tag.contains(" disabled"), "#{id} stays in the tab order");
+        }
+        let button = &HTML[at(&format!(r#"id="{id}""#))..];
+        let button = &button[..button.find("</button>").unwrap()];
+        let inner = &button[button.find('>').unwrap() + 1..];
+        assert!(
+            inner.starts_with(
+                r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">"#
+            ),
+            "#{id}: an inline SVG icon"
+        );
+        assert!(inner.ends_with("</svg>"), "#{id}: nothing but the icon");
+    }
+    let toggle = tag_of("recent-places-toggle");
+    assert!(toggle.contains(r#"aria-haspopup="menu""#));
+    assert!(toggle.contains(r#"aria-controls="recent-places-menu""#));
+    assert!(toggle.contains(r#"aria-expanded="false""#));
+    let menu = tag_of("recent-places-menu");
+    assert!(menu.contains(r#"class="popover recent-menu""#));
+    assert!(menu.contains(r#"role="menu""#) && menu.contains(r#"aria-label="Recent places""#));
+    assert!(menu.contains(" hidden"));
+
+    let nav = piece("nav.rs");
+    assert!(
+        nav.contains("keyboard::go_history(step)"),
+        "Back and Forward"
+    );
+    assert!(
+        nav.contains("keyboard::go_history(1)"),
+        "the menu's Forward"
+    );
+    assert!(
+        nav.contains("reader::ask(Request::Jump {"),
+        "a recent place"
+    );
+    assert!(nav.contains("keyboard::turn_chapter(which)"), "‹ and ›");
+    assert!(!nav.contains("ipc::send("), "no backend calls");
+    assert!(
+        piece("nav_text.rs").contains(r#"pub const NARROW_QUERY: &str = "(max-width: 759px)";"#)
+    );
+    assert!(
+        piece("nav_text.rs")
+            .contains(r#"pub const RECENT_KEY: &str = "gospel-getter-recent-places";"#)
+    );
+    // Kept on this computer only: not one of the saved settings (which
+    // backups carry).
+    assert!(
+        preferences::PREFERENCES
+            .iter()
+            .all(|p| !p.key.contains("recent"))
+    );
+
+    let rules = rules();
+    let narrow = rules
+        .iter()
+        .find(|r| r.at_rule.as_deref() == Some("@media (max-width: 759px)"))
+        .expect("a narrow-window rule");
+    assert_eq!(narrow.selector, "#history-forward, .ref-codes");
+    assert_eq!(narrow.body, "display: none;");
+    let print = one_space(&block_after(&stylesheet(), "@media print"));
+    for hidden in [
+        ".top-bar,",
+        ".history-nav,",
+        ".bar-divider,",
+        ".chapter-arrow,",
+        ".popover,",
+    ] {
+        assert!(print.contains(hidden), "print hides `{hidden}`");
+    }
+    let disabled = screen_rule(&rules, r#".bar-btn[aria-disabled="true"]"#);
+    assert!(disabled.body.contains("opacity: 0.38"));
+    let still = screen_rule(&rules, r#".bar-btn[aria-disabled="true"]:hover"#);
+    assert!(
+        still.body.contains("background: none") && still.body.contains("color: var(--text-dim)")
+    );
+}
+
+/// Export notes' Print… prints the commentary alone: the page draws it
+/// into `#print-commentary` (a child of `<body>`, never shown on screen)
+/// and marks `<html>` while it prints, and the print stylesheet then hides
+/// every other child of `<body>` (the dialog, the app) and shows the
+/// commentary, in black, its notes' line breaks kept, each chapter's notes
+/// a grid with a hanging indent, and its book heading leading its chapters'.
+/// Done printing, or the dialog closed, the page prints as it always has.
+#[test]
+fn the_commentary_prints_alone_from_a_print_only_container() {
+    let tag = tag_of("print-commentary");
+    assert!(tag.starts_with("<div") && tag.contains(r#"aria-hidden="true""#));
+    let body_end = HTML.rfind("</body>").unwrap();
+    let container = HTML.find(r#"id="print-commentary""#).unwrap();
+    assert!(container < body_end);
+    assert!(
+        !HTML[container..body_end].contains("<div"),
+        "a child of <body>, after the page's other elements"
+    );
+    let rules = rules();
+    assert!(
+        screen_rule(&rules, ".print-commentary")
+            .body
+            .contains("display: none")
+    );
+    let print = |selector: &str| {
+        rules
+            .iter()
+            .find(|r| r.at_rule.as_deref() == Some("@media print") && r.selector == selector)
+            .unwrap_or_else(|| panic!("a print rule for `{selector}`"))
+            .body
+            .clone()
+    };
+    assert_eq!(
+        print(r#":root[data-printing="commentary"] body > *:not(#print-commentary)"#),
+        "display: none !important;"
+    );
+    let shown = print(r#":root[data-printing="commentary"] #print-commentary"#);
+    assert!(shown.contains("display: block !important") && shown.contains("color: #000000"));
+    let decl = |selector: &str, name: &str| -> String {
+        declarations(&print(selector))
+            .into_iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v)
+            .unwrap_or_else(|| panic!("{selector}: a `{name}`"))
+    };
+    // A chapter's notes hang from one column of verses, as wide as its
+    // widest label: the markup gives its width (data-hang), the page sets it
+    // as `--hang`, at least a short label's.
+    assert_eq!(decl(".print-notes", "--hang"), "2.5em");
+    let export = piece("export_notes.rs");
+    let hang = block_after(export, "async fn print_commentary(");
+    assert!(hang.contains(r#"query_selector_all(".print-notes[data-hang]")"#));
+    assert!(hang.contains(r#"set_property("--hang", &format!("{hang}em"))"#));
+    // The hanging indent: each note's text, every line of it, wrapped or
+    // after a break, indented past the column, and its verses floated
+    // back into it, on one line however long ("119:105–176").
+    let (note, label) = (".print-note", ".print-verses");
+    assert_eq!(decl(note, "padding-left"), "calc(var(--hang) + 0.75em)");
+    assert_eq!(decl(label, "float"), "left");
+    assert_eq!(decl(label, "width"), "var(--hang)");
+    assert_eq!(
+        decl(label, "margin-left"),
+        "calc(-1 * (var(--hang) + 0.75em))"
+    );
+    assert_eq!(decl(label, "font-weight"), "bold");
+    assert_eq!(decl(label, "font-variant-numeric"), "tabular-nums");
+    assert_eq!(decl(label, "white-space"), "nowrap");
+    assert_eq!(decl(".print-body", "white-space"), "pre-wrap");
+    assert_eq!(decl(".print-body", "overflow-wrap"), "anywhere");
+    // A note is a block, kept whole on a page (or split between lines when
+    // longer than one). Not a grid: WebKitGTK cuts a line in two, or leaves
+    // a gap, where a grid's rows meet a page break.
+    assert_eq!(decl(note, "break-inside"), "avoid");
+    assert!(
+        !rules
+            .iter()
+            .any(|r| r.at_rule.as_deref() == Some("@media print")
+                && r.selector.contains(".print-")
+                && r.body.contains("grid")),
+        "no grid in the printed commentary"
+    );
+    // The book leads its chapters: larger, bold as they are, with more room
+    // above it, in the same face (neither sets its own).
+    let pt = |selector: &str| -> f64 {
+        decl(selector, "font-size")
+            .strip_suffix("pt")
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("{selector}: a size in pt"))
+    };
+    let above = |selector: &str| -> f64 {
+        let margin = decl(selector, "margin");
+        let top = margin.split(' ').next().unwrap();
+        top.strip_suffix("em").unwrap().parse::<f64>().unwrap() * pt(selector)
+    };
+    let (book, chapter) = (".print-book", ".print-chapter");
+    assert_eq!(decl(book, "font-weight"), "bold");
+    assert_eq!(decl(chapter, "font-weight"), "bold");
+    assert!(pt(book) >= pt(chapter) + 3.0, "the book clearly the larger");
+    assert!(above(book) > above(chapter), "less room above a chapter");
+    assert!(
+        above(chapter) >= 0.6 * above(book),
+        "but only a little less"
+    );
+    for heading in [book, chapter] {
+        assert!(!print(heading).contains("font-family"));
+        assert!(!print(heading).contains("border") && !print(heading).contains("color"));
+    }
+    assert!(export.contains(r#"const PRINTING: &str = "data-printing";"#));
+    assert!(export.contains("window.print()"));
+    assert!(export.contains(r#"dom::on(&window, "afterprint", |_| done_printing());"#));
+    assert!(block_after(export, "    fn close(self)").contains("done_printing();"));
+    // What's printed is the backend's commentary, as the file says it.
+    assert!(export.contains(r#"ipc::invoke::<Commentary>("get_notes_commentary", args)"#));
+}
+
+/// Back, ▾, Forward, ‹ and › use the bar button's tested colors in every
+/// theme:
+/// `--text-dim` on `--bar-bg`, `--text` on the wash under the pointer, and
+/// `--accent` on the open wash, each AA; unavailable, they're dimmed (as
+/// disabled controls may be) yet still told apart from the bar. In the
+/// menu, the place the reader is at is `--text` on the menu's own hover
+/// tint, and its heading and empty line `--text-dim` on `--option-bg`.
+#[test]
+fn history_and_chapter_buttons_use_tested_theme_colors_enabled_and_disabled() {
+    let rules = rules();
+    let alpha = |selector: &str| -> f64 {
+        screen_rule(&rules, selector)
+            .body
+            .split_once("rgba(var(--accent-rgb), ")
+            .and_then(|(_, rest)| rest.split_once(')'))
+            .map(|(alpha, _)| alpha.trim().parse().unwrap())
+            .unwrap_or_else(|| panic!("{selector}: a wash"))
+    };
+    let hover_alpha = alpha(".bar-btn:hover");
+    let open_alpha = alpha(r#".bar-btn[aria-expanded="true"]"#);
+    let here_alpha = alpha(".recent-item.is-here");
+    let opacity: f64 = screen_rule(&rules, r#".bar-btn[aria-disabled="true"]"#)
+        .body
+        .split_once("opacity: ")
+        .and_then(|(_, rest)| rest.split_once(';'))
+        .map(|(o, _)| o.parse().unwrap())
+        .unwrap();
+    let hex_rgb = |hex: &str| {
+        let hex = hex.trim_start_matches('#');
+        (0..3)
+            .map(|i| {
+                u8::from_str_radix(&hex[2 * i..2 * i + 2], 16)
+                    .unwrap()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    for class in [".history-btn", ".recent-toggle", ".chapter-arrow"] {
+        let rule = screen_rule(&rules, class);
+        assert!(
+            !rule.body.contains("color"),
+            "{class} keeps the bar button's colors"
+        );
+    }
+    for selector in [".recent-here, .recent-key", ".recent-item.is-here"] {
+        assert!(!screen_rule(&rules, selector).body.contains("--text-dim"));
+    }
+    for selector in [".recent-label", ".recent-empty"] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains("color: var(--text-dim)")
+        );
+    }
+    for (theme, props) in theme_palettes(&rules) {
+        let bar_bg = property(&props, "--bar-bg");
+        let text = property(&props, "--text");
+        let text_dim = property(&props, "--text-dim");
+        let accent = property(&props, "--accent");
+        let accent_rgb = property(&props, "--accent-rgb");
+        let option_bg = property(&props, "--option-bg");
+        let wash = |a: f64, under: &str| composite(&format!("rgba({accent_rgb}, {a})"), under);
+        let enabled = contrast_ratio(text_dim, bar_bg);
+        for (what, ratio) in [
+            ("an available history or chapter button", enabled),
+            (
+                "one under the pointer",
+                contrast_ratio(text, &wash(hover_alpha, bar_bg)),
+            ),
+            (
+                "▾ with its menu open",
+                contrast_ratio(accent, &wash(open_alpha, bar_bg)),
+            ),
+            (
+                "the place you're at",
+                contrast_ratio(text, &wash(here_alpha, option_bg)),
+            ),
+            ("the menu's heading", contrast_ratio(text_dim, option_bg)),
+        ] {
+            assert!(ratio >= 4.5, "theme `{theme}`: {what} is {ratio:.2}:1");
+        }
+        let dimmed = blend(bar_bg, &hex_rgb(text_dim), opacity);
+        let ratio = contrast_ratio(&dimmed, bar_bg);
+        assert!(
+            (1.4..enabled).contains(&ratio),
+            "theme `{theme}`: an unavailable one is {ratio:.2}:1, quieter than {enabled:.2}:1 but still seen"
+        );
     }
 }
 
@@ -2356,20 +2951,29 @@ fn glow_is_only_on_the_neon_themes() {
 }
 
 /// The side chapters are faded, not blurred: nothing is blurred, and they
-/// sit at 0.55, lifting to 0.95 under the pointer. Vaporwave's faded
-/// outline for their verse numbers still applies.
+/// sit at `--side-opacity`, lifting partway to `--side-opacity-hover` under
+/// the pointer (both one line each, in `html`). Vaporwave's faded outline
+/// for their verse numbers still applies.
 #[test]
 fn side_chapters_fade_without_blur() {
     let rules = rules();
     assert!(!stylesheet().contains("blur("));
     let side = screen_rule(&rules, ".chapter-side");
-    assert!(side.body.contains("opacity: 0.55"));
+    assert!(side.body.contains("opacity: var(--side-opacity)"));
+    assert!(side.body.contains("transition: opacity 0.2s"));
     assert!(!side.body.contains("filter"));
     assert!(
         screen_rule(&rules, ".chapter-side:hover")
             .body
-            .contains("opacity: 0.95")
+            .contains("opacity: var(--side-opacity-hover)")
     );
+    // Calmer than they were (0.55, and 0.95 under the pointer): fainter at
+    // rest, and lightening only partway, never to the chapter's own.
+    let html = custom_properties(&screen_rule(&rules, "html").body);
+    let level = |name| property(&html, name).parse::<f64>().unwrap();
+    let (rest, hover) = (level("--side-opacity"), level("--side-opacity-hover"));
+    assert!((0.3..0.55).contains(&rest), "at rest: {rest}");
+    assert!(rest < hover && hover < 0.95, "under the pointer: {hover}");
     assert!(
         screen_rule(&rules, ".chapter-side .verse-num")
             .body
@@ -2654,15 +3258,40 @@ fn the_reference_button_says_where_the_reader_is() {
     let button = &screen_rule(&rules, ".ref-btn").body;
     for declaration in [
         "font-family: var(--font-ui)",
-        "margin-right: auto",
         "color: var(--text)",
         "background: none",
     ] {
         assert!(button.contains(declaration), ".ref-btn: {declaration}");
     }
+    // What pushes the rest of the bar to the right: › right after it, or,
+    // in reading mode (no ›), the reference itself.
+    assert!(!button.contains("margin-right"));
+    assert!(
+        screen_rule(&rules, "#chapter-next")
+            .body
+            .contains("margin-right: auto")
+    );
+    let reading = rules
+        .iter()
+        .find(|r| {
+            r.at_rule.as_deref() == Some("@media screen")
+                && r.selector == r#":root[data-reader-mode="on"] .ref-btn"#
+        })
+        .expect("the reference in reading mode");
+    assert!(reading.body.contains("margin-right: auto"));
     // What it says is the reader's (ui-leptos/src/reader_text.rs).
     let reference = block_after(piece("reader_text.rs"), "pub fn reference(");
-    assert!(reference.contains(r#"let text = format!("{place} · {}", upper.join(" + "));"#));
+    assert!(reference.contains(r#"let codes = upper.join(" + ");"#));
+    assert!(reference.contains(r#"let text = format!("{place} · {codes}");"#));
+    // Its translations apart, which a narrow window leaves out.
+    let markup = block_after(piece("reader_text.rs"), "pub fn reference_markup(");
+    assert!(
+        markup.contains(r#"<span class="ref-place">{}</span><span class="ref-codes"> · {}</span>"#)
+    );
+    assert!(
+        block_after(piece("reader.rs"), "fn update_reference(")
+            .contains("ref_text.set_inner_html(&text::reference_markup(&reference));")
+    );
     assert!(
         reference.contains(r#"label: format!("{place}, {spoken}. Choose a book and chapter"),"#)
     );
@@ -2763,11 +3392,14 @@ fn psalms_get_a_compact_grid_ten_to_a_row() {
     // Room for "150" (21px of digits at 0.72rem, measured in WebKitGTK):
     // the picker's width, less its border and side padding, plus the
     // grid's reach into that padding, shared by ten cells a hairline
-    // apart. 27px in the sidebar, 30.1px in the popover, and over 24px
-    // even with a 17px Windows scrollbar.
+    // apart. 27px in the sidebar, 30.1px in the popover (more as it grows
+    // with Text size, the grid's own size staying), and over 24px even
+    // with a 17px Windows scrollbar.
     let picker = &screen_rule(&rules, ".picker:not([hidden])").body;
     assert!(picker.contains("padding: 0.5rem 0.6rem 0.9rem"));
-    assert!(picker.contains("width: min(20rem, calc(100vw - 1rem))"));
+    assert!(picker.contains("width: min(calc(20rem * var(--ui-scale)), calc(100vw - 1rem))"));
+    let compact_cell = &screen_rule(&rules, ".chapter-grid.is-compact .chapter-btn").body;
+    assert!(compact_cell.contains("font-size: 0.72rem"));
     let html = custom_properties(&screen_rule(&rules, "html").body);
     let sidebar = property(&html, "--sidebar-width")
         .strip_suffix("rem")
@@ -3247,7 +3879,7 @@ fn the_selection_card_floats_over_the_text() {
     let card = screen_rule(&rules, ".selection-card");
     for declaration in [
         "position: absolute",
-        "max-height: min(24rem, calc(100vh - var(--bar-height) - 2rem))",
+        "max-height: min(calc(24rem * var(--ui-scale)), calc(100vh - var(--bar-height) - 2rem))",
         "overflow-y: auto",
         "font-family: var(--font-ui)",
         "color: var(--text)",
