@@ -1,10 +1,11 @@
 //! The header's popovers and panels, and the book and chapter picker's two
 //! shapes: what opens and closes them. The surfaces are the translation
-//! button's popover, Aa, the Library, the ☰ menu, About, and the picker
-//! when it's a popover (`surfaces_text::Surface`). Only one is open at a
-//! time; Escape closes it, and so does a click outside a popover (the
-//! translation's, Aa's, the menu or the picker). Opening one moves focus
-//! into it, and closing it gives focus back to the button that opened it.
+//! button's popover, Aa, the Library, the ☰ menu, About, the picker when
+//! it's a popover, and Recent places (`surfaces_text::Surface`). Only one
+//! is open at a time; Escape closes it, and so does a click outside a
+//! popover (the translation's, Aa's, the menus or the picker). Opening one
+//! moves focus into it, and closing it gives focus back to the button that
+//! opened it, without scrolling the page.
 //!
 //! The picker is a sidebar down the left on a window at least 1200px wide
 //! (`preferences::WIDE_QUERY`), unless the reader hid it or is in reading
@@ -53,6 +54,7 @@ use web_sys::{
 use crate::aa;
 use crate::bridge;
 use crate::dom;
+use crate::nav;
 use crate::preferences;
 use crate::prefs;
 pub use crate::surfaces_text::Surface;
@@ -669,7 +671,7 @@ pub fn close(restore_focus: bool) {
         && focus_was_inside
         && let Some(target) = target.filter(shown)
     {
-        let _ = target.focus();
+        dom::focus(&target);
     }
     // The update banner comes back if About closes on an install
     // (`updates`).
@@ -686,8 +688,13 @@ fn focus_into(surface: Surface) {
         .iter()
         .find_map(|selector| el.query_selector(selector).ok().flatten())
         .and_then(|first| first.dyn_into::<HtmlElement>().ok());
-    if let Some(first) = first {
-        let _ = first.focus();
+    match first {
+        // A menu's items are in the fixed bar: nothing to scroll to.
+        Some(first) if surface.menu() => dom::focus(&first),
+        Some(first) => {
+            let _ = first.focus();
+        }
+        None => {}
     }
 }
 
@@ -695,8 +702,8 @@ fn focus_into(surface: Surface) {
 /// returns to on closing: the surface's own button unless given (About,
 /// opened from the ☰ menu, returns to ☰).
 pub fn open(surface: Surface, opener: Option<HtmlElement>) {
-    // The Library's button is hidden in reading mode.
-    if surface == Surface::Library && is_reader_mode() {
+    // The Library's button and Recent places' are hidden in reading mode.
+    if matches!(surface, Surface::Library | Surface::Recent) && is_reader_mode() {
         return;
     }
     if element(surface).is_none() {
@@ -709,6 +716,7 @@ pub fn open(surface: Surface, opener: Option<HtmlElement>) {
     RETURN_FOCUS.set(opener.or_else(|| toggle_of(surface)));
     // What's in them is drawn as they open, before focus moves in.
     aa::draw(surface);
+    nav::draw(surface);
     set_shown(surface, true);
     // Search closes (`search`).
     announce(bridge::SURFACE_OPEN_EVENT, surface);
@@ -723,19 +731,22 @@ pub fn toggle_surface(surface: Surface, opener: Option<HtmlElement>) {
     }
 }
 
-// ---- The ☰ menu: a menu, so ↑ and ↓ (and Home and End) move between its
-// items, Enter or Space chooses one, and Escape or Tab closes it. Choosing
-// an item closes it too.
+// ---- The menus (☰ and Recent places): ↑ and ↓ (and Home and End) move
+// between a menu's items, Enter or Space chooses one, and Escape or Tab
+// closes it. Choosing an item closes it too.
 
-fn menu_items() -> Vec<HtmlElement> {
-    element(Surface::Menu)
+fn menu_items(surface: Surface) -> Vec<HtmlElement> {
+    element(surface)
         .and_then(|menu| menu.query_selector_all(text::MENU_ITEMS).ok())
         .map(|found| dom::elements(&found))
         .unwrap_or_default()
 }
 
 fn on_menu_key(event: &KeyboardEvent) {
-    let items = menu_items();
+    let Some(surface) = CURRENT.get().filter(|s| s.menu()) else {
+        return;
+    };
+    let items = menu_items(surface);
     let active = active();
     let index = items
         .iter()
@@ -744,7 +755,7 @@ fn on_menu_key(event: &KeyboardEvent) {
         MenuKey::Move(to) => {
             event.prevent_default();
             event.stop_propagation();
-            let _ = items[to].focus();
+            dom::focus(&items[to]);
         }
         MenuKey::Nowhere => {
             event.prevent_default();
@@ -760,24 +771,25 @@ fn on_menu_key(event: &KeyboardEvent) {
     }
 }
 
-/// ↓ or ↑ on ☰ opens the menu at its first or last item.
-fn on_menu_toggle_key(event: &KeyboardEvent) {
+/// ↓ or ↑ on a menu's button (☰, ▾) opens the menu at its first or last
+/// item.
+fn on_menu_toggle_key(surface: Surface, event: &KeyboardEvent) {
     let key = event.key();
     if key != "ArrowDown" && key != "ArrowUp" {
         return;
     }
     event.prevent_default();
-    if CURRENT.get() != Some(Surface::Menu) {
-        open(Surface::Menu, None);
+    if CURRENT.get() != Some(surface) {
+        open(surface, None);
     }
-    let items = menu_items();
+    let items = menu_items(surface);
     let item = if key == "ArrowDown" {
         items.first()
     } else {
         items.last()
     };
     if let Some(item) = item {
-        let _ = item.focus();
+        dom::focus(item);
     }
 }
 
@@ -933,6 +945,7 @@ pub fn mount() {
         Surface::Aa,
         Surface::Library,
         Surface::Menu,
+        Surface::Recent,
     ] {
         if let Some(id) = surface.toggle_id() {
             on_click_of(id, move |_| toggle_surface(surface, None));
@@ -945,7 +958,13 @@ pub fn mount() {
     dom::on(&document, "click", |event| on_document_click(&event));
 
     on_key_of("app-menu", on_menu_key);
-    on_key_of("menu-toggle", on_menu_toggle_key);
+    on_key_of("recent-places-menu", on_menu_key);
+    on_key_of("menu-toggle", |event| {
+        on_menu_toggle_key(Surface::Menu, event)
+    });
+    on_key_of("recent-places-toggle", |event| {
+        on_menu_toggle_key(Surface::Recent, event);
+    });
     // Runs after the item's own action (that listener is on the item
     // itself), so an item that opened something else has already closed
     // the menu.

@@ -601,6 +601,10 @@ pub fn translation_options(translations: &[Translation], current: &str) -> Strin
 pub struct Reference {
     /// `#ref-text`: "John 3 · KJV", or "John 3 · KJV + WEB" comparing.
     pub text: String,
+    /// Its two parts: the chapter ("John 3") and the translations ("KJV +
+    /// WEB").
+    pub place: String,
+    pub codes: String,
     /// `#ref-btn`'s `aria-label`, the translations named in full.
     pub label: String,
     /// `document.title`, which the backend copies to the window.
@@ -623,12 +627,26 @@ pub fn reference(
         None => String::new(),
     };
     let upper: Vec<String> = codes.iter().map(|c| c.to_uppercase()).collect();
-    let text = format!("{place} · {}", upper.join(" + "));
+    let codes = upper.join(" + ");
+    let text = format!("{place} · {codes}");
     Reference {
         label: format!("{place}, {spoken}. Choose a book and chapter"),
         title: format!("{text} — Gospel Getter"),
         text,
+        place,
+        codes,
     }
+}
+
+/// `#ref-text`'s markup: [`Reference::text`], its translations in a part
+/// of their own (`.ref-codes`) that a narrow window hides, the translation
+/// button saying it there.
+pub fn reference_markup(reference: &Reference) -> String {
+    format!(
+        r#"<span class="ref-place">{}</span><span class="ref-codes"> · {}</span>"#,
+        escape_html(&reference.place),
+        escape_html(&reference.codes),
+    )
 }
 
 /// The translation button's text and name: "KJV", "Translation: King James
@@ -853,6 +871,21 @@ impl History {
     /// Whether there's a place `step` away (-1 back, 1 forward).
     pub fn can_go(&self, step: i32) -> bool {
         self.target(step).is_some()
+    }
+
+    /// The place `step` away (-1 back, 1 forward), as going there would
+    /// open it, if there is one: what Back and Forward name.
+    pub fn toward(&self, step: i32) -> Option<&Place> {
+        self.target(step).and_then(|i| self.places.get(i))
+    }
+
+    /// The place on screen, while it is (not while a jump or a step is on
+    /// its way): the place a jump or a step leaves, once brought up to
+    /// date ([`Self::remember_leaving`]).
+    pub fn here(&self) -> Option<&Place> {
+        self.index
+            .filter(|_| self.shown)
+            .and_then(|i| self.places.get(i))
     }
 
     /// From the place a step is on its way to, if one is: a second Back
@@ -1197,10 +1230,23 @@ mod tests {
                 text: "John 3 · KJV".into(),
                 label: "John 3, King James Version. Choose a book and chapter".into(),
                 title: "John 3 · KJV — Gospel Getter".into(),
+                place: "John 3".into(),
+                codes: "KJV".into(),
             }
         );
         let both = reference("John", 3, &["kjv", "web"], name);
         assert_eq!(both.text, "John 3 · KJV + WEB");
+        // The translations apart, for a narrow window to leave out; the
+        // text the same.
+        assert_eq!(
+            reference_markup(&both),
+            r#"<span class="ref-place">John 3</span><span class="ref-codes"> · KJV + WEB</span>"#
+        );
+        let odd = reference("<i>", 1, &["kjv"], name);
+        assert_eq!(
+            reference_markup(&odd),
+            r#"<span class="ref-place">&lt;i&gt; 1</span><span class="ref-codes"> · KJV</span>"#
+        );
         assert_eq!(
             both.label,
             "John 3, King James Version and World English Bible. Choose a book and chapter"
@@ -1357,6 +1403,32 @@ mod tests {
             scroll_y: Some(scroll_y),
             ..Place::chapter(chapter.0, chapter.1)
         }
+    }
+
+    /// What Back and Forward name, and the place a jump leaves.
+    #[test]
+    fn history_names_where_back_and_forward_go_and_the_place_on_screen() {
+        let mut h = History::default();
+        assert_eq!((h.toward(-1), h.toward(1), h.here()), (None, None, None));
+        let mut h3 = three_places();
+        assert_eq!(h3.here(), Some(&at((45, 8), 300.0)));
+        assert_eq!(h3.toward(-1), Some(&at((19, 23), 200.0)));
+        assert_eq!(h3.toward(1), None);
+        // On the way back, nothing's on screen yet; Back again goes from
+        // where the step is going, as `can_go` does.
+        let (token, _) = h3.begin_go(-1).unwrap();
+        assert_eq!(h3.here(), None);
+        assert_eq!(h3.toward(-1), Some(&at((43, 3), 100.0)));
+        h3.end_go(token, true);
+        assert_eq!(h3.here(), Some(&at((19, 23), 200.0)));
+        assert_eq!(h3.toward(1), Some(&at((45, 8), 300.0)));
+        // A jump's place carries its verses.
+        h.start(43, 3);
+        h.begin_jump();
+        assert_eq!(h.here(), None, "not while a jump is on its way");
+        h.end_jump(landed(45, 8, Some((28, 28))));
+        assert_eq!(h.here(), landed(45, 8, Some((28, 28))).as_ref());
+        assert_eq!(h.toward(-1), Some(&Place::chapter(43, 3)));
     }
 
     /// GG-20261026-2: Back that couldn't read Psalm 23, then Back again.

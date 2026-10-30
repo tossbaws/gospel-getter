@@ -17,7 +17,8 @@
 //! card (`card`, with its markup and rules in `card_text`): the verse
 //! selection, copying, and the card's bookmark, highlight and notes; and
 //! the notes in the margin in reading mode (`margin`, with its rules and
-//! markup in `margin_text`); a note's text as Markdown wherever it shows
+//! markup in `margin_text`); the top bar's Back, Forward and Recent places
+//! (`nav`, with its rules and markup in `nav_text`); a note's text as Markdown wherever it shows
 //! (`note_markdown`), its links (`note_links`) and Copy as Markdown
 //! (`note_copy`); and
 //! what the page's main script was: the keyboard (`keyboard`, with its
@@ -60,6 +61,8 @@ mod library;
 mod library_text;
 mod margin;
 mod margin_text;
+mod nav;
+mod nav_text;
 mod note_copy;
 mod note_editor;
 mod note_links;
@@ -122,6 +125,8 @@ pub fn start() {
     card::mount();
     margin::mount();
     reader::mount();
+    // Back, Forward and Recent places hear boot's books.
+    nav::mount();
     boot::start();
     // The table of shortcuts, where the page had it.
     bridge::export_shortcuts();

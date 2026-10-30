@@ -1,5 +1,5 @@
 //! The header surfaces' rules, free of the DOM so they are tested natively
-//! (`cargo test`): the six surfaces, their elements, buttons and first
+//! (`cargo test`): the seven surfaces, their elements, buttons and first
 //! focus; when the book and chapter picker is the sidebar; and the ☰
 //! menu's keys. They are the head script's (`ui/index.html` at 49736df:
 //! `SURFACES`, `sidebarShown`, `focusInto` and the menu's keydown), rule
@@ -21,18 +21,21 @@ pub enum Surface {
     /// The book and chapter picker as a popover. As the sidebar it isn't a
     /// surface: it stays while the reader reads, beside any of these.
     Picker,
+    /// Recent places, the menu from ▾ between Back and Forward (`nav`).
+    Recent,
 }
 
 impl Surface {
     /// Every surface.
     #[cfg(test)]
-    pub const ALL: [Surface; 6] = [
+    pub const ALL: [Surface; 7] = [
         Surface::Translation,
         Surface::Aa,
         Surface::Library,
         Surface::Menu,
         Surface::About,
         Surface::Picker,
+        Surface::Recent,
     ];
 
     /// The page's name for it, as `gospel-getter:surface-open` and
@@ -45,6 +48,7 @@ impl Surface {
             Surface::Menu => "menu",
             Surface::About => "about",
             Surface::Picker => "picker",
+            Surface::Recent => "recent",
         }
     }
 
@@ -58,6 +62,7 @@ impl Surface {
             Surface::Menu => "app-menu",
             Surface::About => "about-overlay",
             Surface::Picker => "picker",
+            Surface::Recent => "recent-places-menu",
         }
     }
 
@@ -71,7 +76,14 @@ impl Surface {
             Surface::Menu => Some("menu-toggle"),
             Surface::About => None,
             Surface::Picker => Some("ref-btn"),
+            Surface::Recent => Some("recent-places-toggle"),
         }
+    }
+
+    /// A menu (☰, Recent places): ↑ and ↓ move between its items, Tab
+    /// closes it, and focus moves without scrolling the page.
+    pub fn menu(self) -> bool {
+        matches!(self, Surface::Menu | Surface::Recent)
     }
 
     /// A popover, which a click outside it (and its button) closes. The
@@ -90,7 +102,7 @@ impl Surface {
             Surface::Translation => &[r#".translation-choice[aria-checked="true"]"#, "button"],
             Surface::Aa => &["button:not(:disabled)"],
             Surface::Library => &[r#"[role="tab"][aria-selected="true"]"#],
-            Surface::Menu => &[MENU_ITEMS],
+            Surface::Menu | Surface::Recent => &[MENU_ITEMS],
             Surface::About => &["#about-close"],
             Surface::Picker => &[
                 r#".chapter-btn[aria-current="page"]"#,
@@ -256,6 +268,12 @@ mod tests {
                 ("menu", "app-menu", Some("menu-toggle"), true),
                 ("about", "about-overlay", None, false),
                 ("picker", "picker", Some("ref-btn"), true),
+                (
+                    "recent",
+                    "recent-places-menu",
+                    Some("recent-places-toggle"),
+                    true
+                ),
             ]
         );
     }
@@ -267,6 +285,9 @@ mod tests {
             [r#".translation-choice[aria-checked="true"]"#, "button"]
         );
         assert_eq!(Surface::Menu.first_focus(), [MENU_ITEMS]);
+        assert_eq!(Surface::Recent.first_focus(), [MENU_ITEMS]);
+        let menus: Vec<_> = Surface::ALL.iter().filter(|s| s.menu()).collect();
+        assert_eq!(menus, [&Surface::Menu, &Surface::Recent]);
         assert_eq!(Surface::About.first_focus(), ["#about-close"]);
         assert_eq!(
             Surface::Picker.first_focus().last(),

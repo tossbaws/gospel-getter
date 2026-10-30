@@ -17,7 +17,7 @@ use gospel_getter_lib::preferences::{self, Preference, Values};
 /// highlight and notes), and what was the page's main script (the keyboard
 /// and click dispatchers, boot, and the page's glue): checks of those read
 /// them where they now live.
-const PIECES: [(&str, &str); 31] = [
+const PIECES: [(&str, &str); 33] = [
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -27,6 +27,11 @@ const PIECES: [(&str, &str); 31] = [
         include_str!("../../ui-leptos/src/shortcuts.rs"),
     ),
     ("welcome.rs", include_str!("../../ui-leptos/src/welcome.rs")),
+    ("nav.rs", include_str!("../../ui-leptos/src/nav.rs")),
+    (
+        "nav_text.rs",
+        include_str!("../../ui-leptos/src/nav_text.rs"),
+    ),
     (
         "import_preview.rs",
         include_str!("../../ui-leptos/src/import_preview.rs"),
@@ -969,7 +974,8 @@ fn reading_presets_scale_only_reading_content() {
 
 /// Every size `--ui-scale` scales, with the value it had before it did:
 /// at Medium (`--ui-scale: 1`) each must still be exactly this. The last
-/// selector of the rule's list, the property, and the old value.
+/// selector of the rule's list, the property, and the old value (or, for
+/// what's newer than the scale, its value at Medium).
 const UI_SCALED_AT_MEDIUM: &[(&str, &str, &str)] = &[
     (".popover", "font-size", "0.85rem"),
     (".translation-popover", "width", "24rem"),
@@ -1052,6 +1058,11 @@ const UI_SCALED_AT_MEDIUM: &[(&str, &str, &str)] = &[
     (".margin-note-more", "font-size", "0.75rem"),
     // What the shared button rule gave them (0.85rem), now their own.
     (".search-more", "font-size", "0.85rem"),
+    // Recent places, the menu from the bar's ▾.
+    (".recent-menu", "min-width", "15rem"),
+    (".recent-label", "font-size", "0.7rem"),
+    (".recent-key", "font-size", "0.75rem"),
+    (".recent-empty", "font-size", "0.85rem"),
 ];
 
 /// A size written with `--ui-scale`, worked out at `scale`: each
@@ -1238,6 +1249,8 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
         ".nav-hint",
         "#library-toggle",
         "#menu-toggle",
+        ".history-nav",
+        ".bar-divider",
     ] {
         assert!(
             hidden.contains(&chrome),
@@ -1391,6 +1404,208 @@ fn header_buttons_announce_what_they_open() {
         "about-btn",
     ] {
         assert!(tag_of(item).contains(r#"role="menuitem""#), "#{item}");
+    }
+}
+
+/// Back, Recent places (▾) and Forward sit at the left of the bar, before
+/// the reference and set apart from it by a hairline, in the bar's own
+/// style: ghost buttons (`.bar-btn`) with an inline SVG icon each (24px
+/// grid, stroke 2, `currentColor`), never a font glyph. Back and Forward
+/// say their keys and start unavailable (`aria-disabled`, still in the tab
+/// order); ▾ opens a menu. They run the keys' own path
+/// (`keyboard::go_history`), a recent place is a jump
+/// (`Request::Jump`), and they ask the backend for nothing. Reading mode
+/// and print hide them; a narrow window folds Forward into the menu and
+/// leaves the translation off the reference.
+#[test]
+fn the_bar_s_history_controls_are_ghost_svg_buttons_before_the_reference() {
+    let at = |needle: &str| {
+        HTML.find(needle)
+            .unwrap_or_else(|| panic!("expected `{needle}`"))
+    };
+    let order = [
+        r#"id="sidebar-toggle""#,
+        r#"id="history-back""#,
+        r#"id="recent-places-toggle""#,
+        r#"id="history-forward""#,
+        r#"id="recent-places-menu""#,
+        r#"class="bar-divider""#,
+        r#"id="ref-btn""#,
+    ]
+    .map(at);
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
+    for (id, label, keys) in [
+        ("history-back", "Back", Some("Alt+ArrowLeft")),
+        ("recent-places-toggle", "Recent places", None),
+        ("history-forward", "Forward", Some("Alt+ArrowRight")),
+    ] {
+        let tag = tag_of(id);
+        assert!(tag.starts_with(r#"<button type="button""#), "#{id}");
+        assert!(tag.contains(r#"class="bar-btn"#), "#{id}");
+        assert!(tag.contains(&format!(r#"aria-label="{label}""#)), "#{id}");
+        if let Some(keys) = keys {
+            assert!(
+                tag.contains(&format!(r#"aria-keyshortcuts="{keys}""#)),
+                "#{id}"
+            );
+            assert!(tag.contains(r#"aria-disabled="true""#), "#{id}");
+            assert!(!tag.contains(" disabled"), "#{id} stays in the tab order");
+        }
+        let button = &HTML[at(&format!(r#"id="{id}""#))..];
+        let button = &button[..button.find("</button>").unwrap()];
+        let inner = &button[button.find('>').unwrap() + 1..];
+        assert!(
+            inner.starts_with(
+                r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">"#
+            ),
+            "#{id}: an inline SVG icon"
+        );
+        assert!(inner.ends_with("</svg>"), "#{id}: nothing but the icon");
+    }
+    let toggle = tag_of("recent-places-toggle");
+    assert!(toggle.contains(r#"aria-haspopup="menu""#));
+    assert!(toggle.contains(r#"aria-controls="recent-places-menu""#));
+    assert!(toggle.contains(r#"aria-expanded="false""#));
+    let menu = tag_of("recent-places-menu");
+    assert!(menu.contains(r#"class="popover recent-menu""#));
+    assert!(menu.contains(r#"role="menu""#) && menu.contains(r#"aria-label="Recent places""#));
+    assert!(menu.contains(" hidden"));
+
+    let nav = piece("nav.rs");
+    assert!(
+        nav.contains("keyboard::go_history(step)"),
+        "Back and Forward"
+    );
+    assert!(
+        nav.contains("keyboard::go_history(1)"),
+        "the menu's Forward"
+    );
+    assert!(
+        nav.contains("reader::ask(Request::Jump {"),
+        "a recent place"
+    );
+    assert!(!nav.contains("ipc::send("), "no backend calls");
+    assert!(
+        piece("nav_text.rs").contains(r#"pub const NARROW_QUERY: &str = "(max-width: 759px)";"#)
+    );
+    assert!(
+        piece("nav_text.rs")
+            .contains(r#"pub const RECENT_KEY: &str = "gospel-getter-recent-places";"#)
+    );
+    // Kept on this computer only: not one of the saved settings (which
+    // backups carry).
+    assert!(
+        preferences::PREFERENCES
+            .iter()
+            .all(|p| !p.key.contains("recent"))
+    );
+
+    let rules = rules();
+    let narrow = rules
+        .iter()
+        .find(|r| r.at_rule.as_deref() == Some("@media (max-width: 759px)"))
+        .expect("a narrow-window rule");
+    assert_eq!(narrow.selector, "#history-forward, .ref-codes");
+    assert_eq!(narrow.body, "display: none;");
+    let print = one_space(&block_after(&stylesheet(), "@media print"));
+    for hidden in [".top-bar,", ".history-nav,", ".bar-divider,", ".popover,"] {
+        assert!(print.contains(hidden), "print hides `{hidden}`");
+    }
+    let disabled = screen_rule(&rules, r#".bar-btn[aria-disabled="true"]"#);
+    assert!(disabled.body.contains("opacity: 0.38"));
+    let still = screen_rule(&rules, r#".bar-btn[aria-disabled="true"]:hover"#);
+    assert!(
+        still.body.contains("background: none") && still.body.contains("color: var(--text-dim)")
+    );
+}
+
+/// Back, ▾ and Forward use the bar button's tested colors in every theme:
+/// `--text-dim` on `--bar-bg`, `--text` on the wash under the pointer, and
+/// `--accent` on the open wash, each AA; unavailable, they're dimmed (as
+/// disabled controls may be) yet still told apart from the bar. In the
+/// menu, the place the reader is at is `--text` on the menu's own hover
+/// tint, and its heading and empty line `--text-dim` on `--option-bg`.
+#[test]
+fn history_buttons_use_tested_theme_colors_enabled_and_disabled() {
+    let rules = rules();
+    let alpha = |selector: &str| -> f64 {
+        screen_rule(&rules, selector)
+            .body
+            .split_once("rgba(var(--accent-rgb), ")
+            .and_then(|(_, rest)| rest.split_once(')'))
+            .map(|(alpha, _)| alpha.trim().parse().unwrap())
+            .unwrap_or_else(|| panic!("{selector}: a wash"))
+    };
+    let hover_alpha = alpha(".bar-btn:hover");
+    let open_alpha = alpha(r#".bar-btn[aria-expanded="true"]"#);
+    let here_alpha = alpha(".recent-item.is-here");
+    let opacity: f64 = screen_rule(&rules, r#".bar-btn[aria-disabled="true"]"#)
+        .body
+        .split_once("opacity: ")
+        .and_then(|(_, rest)| rest.split_once(';'))
+        .map(|(o, _)| o.parse().unwrap())
+        .unwrap();
+    let hex_rgb = |hex: &str| {
+        let hex = hex.trim_start_matches('#');
+        (0..3)
+            .map(|i| {
+                u8::from_str_radix(&hex[2 * i..2 * i + 2], 16)
+                    .unwrap()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    for class in [".history-btn", ".recent-toggle"] {
+        let rule = screen_rule(&rules, class);
+        assert!(
+            !rule.body.contains("color"),
+            "{class} keeps the bar button's colors"
+        );
+    }
+    for selector in [".recent-here, .recent-key", ".recent-item.is-here"] {
+        assert!(!screen_rule(&rules, selector).body.contains("--text-dim"));
+    }
+    for selector in [".recent-label", ".recent-empty"] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains("color: var(--text-dim)")
+        );
+    }
+    for (theme, props) in theme_palettes(&rules) {
+        let bar_bg = property(&props, "--bar-bg");
+        let text = property(&props, "--text");
+        let text_dim = property(&props, "--text-dim");
+        let accent = property(&props, "--accent");
+        let accent_rgb = property(&props, "--accent-rgb");
+        let option_bg = property(&props, "--option-bg");
+        let wash = |a: f64, under: &str| composite(&format!("rgba({accent_rgb}, {a})"), under);
+        let enabled = contrast_ratio(text_dim, bar_bg);
+        for (what, ratio) in [
+            ("an available history button", enabled),
+            (
+                "one under the pointer",
+                contrast_ratio(text, &wash(hover_alpha, bar_bg)),
+            ),
+            (
+                "▾ with its menu open",
+                contrast_ratio(accent, &wash(open_alpha, bar_bg)),
+            ),
+            (
+                "the place you're at",
+                contrast_ratio(text, &wash(here_alpha, option_bg)),
+            ),
+            ("the menu's heading", contrast_ratio(text_dim, option_bg)),
+        ] {
+            assert!(ratio >= 4.5, "theme `{theme}`: {what} is {ratio:.2}:1");
+        }
+        let dimmed = blend(bar_bg, &hex_rgb(text_dim), opacity);
+        let ratio = contrast_ratio(&dimmed, bar_bg);
+        assert!(
+            (1.4..enabled).contains(&ratio),
+            "theme `{theme}`: an unavailable one is {ratio:.2}:1, quieter than {enabled:.2}:1 but still seen"
+        );
     }
 }
 
@@ -2922,7 +3137,17 @@ fn the_reference_button_says_where_the_reader_is() {
     }
     // What it says is the reader's (ui-leptos/src/reader_text.rs).
     let reference = block_after(piece("reader_text.rs"), "pub fn reference(");
-    assert!(reference.contains(r#"let text = format!("{place} · {}", upper.join(" + "));"#));
+    assert!(reference.contains(r#"let codes = upper.join(" + ");"#));
+    assert!(reference.contains(r#"let text = format!("{place} · {codes}");"#));
+    // Its translations apart, which a narrow window leaves out.
+    let markup = block_after(piece("reader_text.rs"), "pub fn reference_markup(");
+    assert!(
+        markup.contains(r#"<span class="ref-place">{}</span><span class="ref-codes"> · {}</span>"#)
+    );
+    assert!(
+        block_after(piece("reader.rs"), "fn update_reference(")
+            .contains("ref_text.set_inner_html(&text::reference_markup(&reference));")
+    );
     assert!(
         reference.contains(r#"label: format!("{place}, {spoken}. Choose a book and chapter"),"#)
     );

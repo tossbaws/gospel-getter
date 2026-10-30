@@ -1551,6 +1551,7 @@ dependencies = [
  "leptos",
  "serde",
  "serde-wasm-bindgen",
+ "serde_json",
  "unicode-normalization",
  "unicode-properties",
  "wasm-bindgen",
