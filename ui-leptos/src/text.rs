@@ -2,7 +2,8 @@
 //! fields: the pure part of what `ui/index.html`'s export-notes script did,
 //! kept free of the DOM so it is tested natively (`cargo test`).
 
-use crate::dto::{DatePresets, Filter, NotedBook};
+use crate::dto::{Commentary, DatePresets, Filter, NotedBook};
+use crate::reader_text::escape_html;
 
 /// `n.toLocaleString('en')`: digits grouped in threes with commas.
 pub fn thousands(n: u64) -> String {
@@ -135,9 +136,93 @@ pub fn build_filter(
     }
 }
 
+/// The commentary as the page prints it (`#print-commentary`, shown only on
+/// paper): its title and date lines, then each book's heading (unless the
+/// commentary is of one book), each chapter's, and each note on a line of
+/// its own, its verses then its text. The same as the commentary file says
+/// (`notes_export::NotesExport::render_commentary`), as HTML: every word
+/// escaped, a note's line breaks kept by the stylesheet (`pre-wrap`).
+pub fn commentary_markup(commentary: &Commentary) -> String {
+    let mut out = format!(
+        r#"<h1 class="print-title">{}</h1><p class="print-meta">{}</p>"#,
+        escape_html(&commentary.title),
+        escape_html(&commentary.exported),
+    );
+    if let Some(written) = &commentary.written {
+        out.push_str(&format!(
+            r#"<p class="print-meta">{}</p>"#,
+            escape_html(written)
+        ));
+    }
+    for book in &commentary.books {
+        if commentary.book_headings {
+            out.push_str(&format!(
+                r#"<h2 class="print-book">{}</h2>"#,
+                escape_html(&book.name)
+            ));
+        }
+        for chapter in &book.chapters {
+            out.push_str(&format!(
+                r#"<h3 class="print-chapter">{}</h3>"#,
+                escape_html(&chapter.heading)
+            ));
+            for note in &chapter.notes {
+                out.push_str(&format!(
+                    r#"<p class="print-note"><span class="print-verses">{}</span> <span class="print-body">{}</span></p>"#,
+                    escape_html(&note.verses),
+                    escape_html(&note.body),
+                ));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dto::{CommentaryBook, CommentaryChapter, CommentaryNote};
+
+    fn commentary(book_headings: bool) -> Commentary {
+        let note = |verses: &str, body: &str| CommentaryNote {
+            verses: verses.into(),
+            body: body.into(),
+        };
+        Commentary {
+            title: "Commentary on John & <Romans>".into(),
+            exported: "Exported Oct 10, 2026 \u{b7} 3 notes".into(),
+            written: Some("Written since Oct 1, 2026".into()),
+            book_headings,
+            books: vec![CommentaryBook {
+                name: "John".into(),
+                chapters: vec![CommentaryChapter {
+                    heading: "John 3".into(),
+                    notes: vec![
+                        note("3:16", "# Not a heading\n<script>x</script>"),
+                        note("3:16", "Second."),
+                        note("3:16\u{2013}18", "Two lines\n\nand a gap."),
+                    ],
+                }],
+            }],
+        }
+    }
+
+    #[test]
+    fn the_commentary_prints_as_escaped_text_a_line_per_note() {
+        assert_eq!(
+            commentary_markup(&commentary(true)),
+            "<h1 class=\"print-title\">Commentary on John &amp; &lt;Romans&gt;</h1>\
+             <p class=\"print-meta\">Exported Oct 10, 2026 \u{b7} 3 notes</p>\
+             <p class=\"print-meta\">Written since Oct 1, 2026</p>\
+             <h2 class=\"print-book\">John</h2>\
+             <h3 class=\"print-chapter\">John 3</h3>\
+             <p class=\"print-note\"><span class=\"print-verses\">3:16</span> <span class=\"print-body\"># Not a heading\n&lt;script&gt;x&lt;/script&gt;</span></p>\
+             <p class=\"print-note\"><span class=\"print-verses\">3:16</span> <span class=\"print-body\">Second.</span></p>\
+             <p class=\"print-note\"><span class=\"print-verses\">3:16\u{2013}18</span> <span class=\"print-body\">Two lines\n\nand a gap.</span></p>"
+        );
+        // One book: the title names it; no heading of its own.
+        assert!(!commentary_markup(&commentary(false)).contains("print-book"));
+    }
     use crate::dto::DaySpan;
 
     fn book(id: i64, first: i64, last: i64, count: i64) -> NotedBook {

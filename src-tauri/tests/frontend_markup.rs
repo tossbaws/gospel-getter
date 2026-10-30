@@ -1532,6 +1532,53 @@ fn the_bar_s_history_and_chapter_controls_are_ghost_svg_buttons() {
     );
 }
 
+/// Export notes' Print… prints the commentary alone: the page draws it
+/// into `#print-commentary` (a child of `<body>`, never shown on screen)
+/// and marks `<html>` while it prints, and the print stylesheet then hides
+/// every other child of `<body>` (the dialog, the app) and shows the
+/// commentary, in black, its notes' line breaks kept. Done printing, or the
+/// dialog closed, the page prints as it always has.
+#[test]
+fn the_commentary_prints_alone_from_a_print_only_container() {
+    let tag = tag_of("print-commentary");
+    assert!(tag.starts_with("<div") && tag.contains(r#"aria-hidden="true""#));
+    let body_end = HTML.rfind("</body>").unwrap();
+    let container = HTML.find(r#"id="print-commentary""#).unwrap();
+    assert!(container < body_end);
+    assert!(
+        !HTML[container..body_end].contains("<div"),
+        "a child of <body>, after the page's other elements"
+    );
+    let rules = rules();
+    assert!(
+        screen_rule(&rules, ".print-commentary")
+            .body
+            .contains("display: none")
+    );
+    let print = |selector: &str| {
+        rules
+            .iter()
+            .find(|r| r.at_rule.as_deref() == Some("@media print") && r.selector == selector)
+            .unwrap_or_else(|| panic!("a print rule for `{selector}`"))
+            .body
+            .clone()
+    };
+    assert_eq!(
+        print(r#":root[data-printing="commentary"] body > *:not(#print-commentary)"#),
+        "display: none !important;"
+    );
+    let shown = print(r#":root[data-printing="commentary"] #print-commentary"#);
+    assert!(shown.contains("display: block !important") && shown.contains("color: #000000"));
+    assert!(print(".print-note").contains("white-space: pre-wrap"));
+    let export = piece("export_notes.rs");
+    assert!(export.contains(r#"const PRINTING: &str = "data-printing";"#));
+    assert!(export.contains("window.print()"));
+    assert!(export.contains(r#"dom::on(&window, "afterprint", |_| done_printing());"#));
+    assert!(block_after(export, "    fn close(self)").contains("done_printing();"));
+    // What's printed is the backend's commentary, as the file says it.
+    assert!(export.contains(r#"ipc::invoke::<Commentary>("get_notes_commentary", args)"#));
+}
+
 /// Back, ▾, Forward, ‹ and › use the bar button's tested colors in every
 /// theme:
 /// `--text-dim` on `--bar-bg`, `--text` on the wash under the pointer, and

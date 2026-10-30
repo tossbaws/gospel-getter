@@ -30,6 +30,7 @@ web-sys = { version = "0.3", features = [
     "EventInit",
     "EventTarget",
     "FocusOptions",
+    "FontFaceSet",
     "HtmlDetailsElement",
     "HtmlButtonElement",
     "HtmlElement",

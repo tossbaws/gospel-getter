@@ -1115,6 +1115,12 @@
             }
         }
 
+        /* Export notes' commentary, drawn to be printed: never on screen
+           (see the print stylesheet). */
+        .print-commentary {
+            display: none;
+        }
+
         /* Narrow windows: Aa and the translations become a sheet along
            the bottom (scrolling if it must), and the Library takes the
            full width. */
@@ -4534,6 +4540,65 @@
                 padding: 0;
                 color: #000000 !important;
             }
+
+            /* Export notes' Print…: while the page prints the commentary
+               (html[data-printing]), it prints nothing else: book and
+               chapter headings, then a line per note, its verses in bold,
+               its text with its line breaks, in the reading face. */
+            :root[data-printing="commentary"] body > *:not(#print-commentary) {
+                display: none !important;
+            }
+
+            :root[data-printing="commentary"] body {
+                padding: 0 !important;
+            }
+
+            :root[data-printing="commentary"] #print-commentary {
+                display: block !important;
+                font-family: var(--font-scripture);
+                font-size: 11pt;
+                line-height: 1.45;
+                color: #000000;
+            }
+
+            .print-title {
+                font-size: 18pt;
+                font-weight: normal;
+                margin: 0 0 0.2em;
+            }
+
+            .print-meta {
+                font-family: var(--font-ui);
+                font-size: 9pt;
+                color: #333333;
+                margin: 0;
+            }
+
+            .print-book {
+                font-size: 15pt;
+                font-weight: normal;
+                margin: 1.4em 0 0;
+                break-after: avoid;
+            }
+
+            .print-chapter {
+                font-size: 12.5pt;
+                margin: 1em 0 0.4em;
+                break-after: avoid;
+            }
+
+            .print-note {
+                margin: 0 0 0.5em;
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+                break-inside: avoid;
+            }
+
+            .print-verses {
+                font-weight: bold;
+                font-variant-numeric: tabular-nums;
+                margin-right: 0.5em;
+            }
         }
     </style>
     <script>
@@ -4746,6 +4811,9 @@
         <div id="reading-pane"></div>
     </main>
 
+    <!-- Export notes' Print…: the commentary, drawn here only while it's
+         printed (ui-leptos/src/export_notes.rs). Never shown on screen. -->
+    <div id="print-commentary" class="print-commentary" aria-hidden="true"></div>
     <script>
         // If the page's Rust pieces fail to load (their loader, in <head>,
         // says so once the page is read), the chapter still shows, as plain

@@ -6,7 +6,8 @@
 //! This is the one place the pieces repeat Rust types. A later shared
 //! crate (native and wasm32, serde only) would replace: `NotedBook` and
 //! `DatePresets`/`DaySpan` (`notes_export.rs`), `NotesExportOptions` and
-//! `NotesExportOutcome` (`commands/export_notes.rs`), and `NotesFilter`
+//! `NotesExportOutcome` (`commands/export_notes.rs`), `Commentary` and its
+//! parts (`notes_export.rs`), and `NotesFilter`
 //! (`notes_export.rs`, which also carries `deny_unknown_fields` and
 //! `NaiveDate`s where this side keeps `YYYY-MM-DD` strings, as the page
 //! did); for the import, `ImportChoice`, `ImportPreviewDto`,
@@ -102,11 +103,52 @@ pub struct CountArgs<'a> {
     pub filter: &'a Filter,
 }
 
-/// `export_notes`'s arguments.
+/// `export_notes`'s arguments (and `export_notes_by_book`'s): `layout` is
+/// `quoted` or `commentary` (`notes_export::NotesLayout`).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportArgs<'a> {
     pub translation_code: &'a str,
+    pub filter: &'a Filter,
+    pub layout: &'a str,
+}
+
+/// The notes as a commentary, to print (`notes_export::Commentary`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Commentary {
+    pub title: String,
+    pub exported: String,
+    #[serde(default)]
+    pub written: Option<String>,
+    pub book_headings: bool,
+    pub books: Vec<CommentaryBook>,
+}
+
+/// One book of a [`Commentary`] (`notes_export::CommentaryBook`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CommentaryBook {
+    pub name: String,
+    pub chapters: Vec<CommentaryChapter>,
+}
+
+/// One chapter of a [`Commentary`] (`notes_export::CommentaryChapter`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CommentaryChapter {
+    pub heading: String,
+    pub notes: Vec<CommentaryNote>,
+}
+
+/// One note's line (`notes_export::CommentaryNote`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CommentaryNote {
+    pub verses: String,
+    pub body: String,
+}
+
+/// `get_notes_commentary`'s arguments.
+#[derive(Debug, Serialize)]
+pub struct CommentaryArgs<'a> {
     pub filter: &'a Filter,
 }
 
