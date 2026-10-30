@@ -157,7 +157,7 @@ test('Aa changes the real preferences live, and they persist across a restart', 
         // In this order: text size, line spacing, width, layout, theme, reading mode.
         const order = [...dialog.querySelectorAll('.section-label')].map((l) => l.textContent);
         assert.deepEqual(order, ['Text size', 'Line spacing', 'Width', 'Layout', 'Theme']);
-        assert.equal(dialog.lastElementChild.querySelector('button').id, 'reader-mode-btn');
+        assert.equal(dialog.querySelector('.popover-body').lastElementChild.querySelector('button').id, 'reader-mode-btn');
         // Compare, with the translation to compare with, under the translations.
         const compareRow = $(app, 'compare-btn').closest('.aa-row');
         assert.ok(compareRow.contains($(app, 'compare-with-choices')), 'Compare beside its "with" choices');

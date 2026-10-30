@@ -241,7 +241,7 @@ fn margin_notes_sit_beside_the_text_on_screen_only() {
         "left: calc(100% + 1.5rem);",
         "width: var(--margin-width, 14rem);",
         "font-family: var(--font-ui);",
-        "font-size: 0.8rem;",
+        "font-size: max(11px, calc(0.8rem * var(--ui-scale)));",
         "color: var(--text);",
     ] {
         assert!(margin.contains(declaration), ".margin-notes: {declaration}");
@@ -938,8 +938,9 @@ fn reading_presets_default_to_the_original_typography() {
 /// Text size/spacing apply to the reading content only — verses, verse
 /// numbers, chapter headings, compare mode's "not numbered" cells (which
 /// sit in a row beside a verse), and in the note panel the verses quoted
-/// and the note being written about them — never to the rest of the UI
-/// (so the settings menu, book list etc. don't grow with it).
+/// and the note being written about them — never to the rest of the UI,
+/// which grows by its own, gentler `--ui-scale` (see
+/// `interface_text_grows_with_text_size_at_half_strength`).
 #[test]
 fn reading_presets_scale_only_reading_content() {
     for rule in rules() {
@@ -963,6 +964,256 @@ fn reading_presets_scale_only_reading_content() {
                 "`{selector}` uses a reading preset, but only reading content should"
             );
         }
+    }
+}
+
+/// Every size `--ui-scale` scales, with the value it had before it did:
+/// at Medium (`--ui-scale: 1`) each must still be exactly this. The last
+/// selector of the rule's list, the property, and the old value.
+const UI_SCALED_AT_MEDIUM: &[(&str, &str, &str)] = &[
+    (".popover", "font-size", "0.85rem"),
+    (".translation-popover", "width", "24rem"),
+    (".section-label", "font-size", "0.7rem"),
+    (".segment", "font-size", "0.85rem"),
+    (".translation-choice", "font-size", "0.8rem"),
+    (".stepper-btn", "width", "2.6rem"),
+    (".stepper-btn", "height", "2.1rem"),
+    (".stepper-smaller", "font-size", "0.8rem"),
+    (".stepper-larger", "font-size", "1.2rem"),
+    (".theme-name", "font-size", "0.75rem"),
+    (".app-menu", "width", "14rem"),
+    (".menu-item", "font-size", "0.9rem"),
+    (
+        ".library-panel:not([hidden])",
+        "width",
+        "min(22.5rem, 100%)",
+    ),
+    (".library-panel:not([hidden])", "font-size", "0.9rem"),
+    (".library-title", "font-size", "1.1rem"),
+    (".library-tab", "font-size", "0.9rem"),
+    (".tab-count", "font-size", "0.75rem"),
+    (".library-hint", "font-size", "0.75rem"),
+    (".note-search", "font-size", "0.85rem"),
+    (".note-search-count", "font-size", "0.75rem"),
+    (".bookmark-ref", "font-size", "0.85rem"),
+    (".bookmark-preview", "font-size", "0.75rem"),
+    (".bookmark-partial", "font-size", "0.7rem"),
+    (".bookmark-remove", "font-size", "1.1rem"),
+    (".note-preview", "font-size", "0.75rem"),
+    (".note-list-copy", "font-size", "0.8rem"),
+    (".bookmark-empty", "font-size", "0.8rem"),
+    (".highlight-filter-btn", "font-size", "0.75rem"),
+    (".highlight-color", "font-size", "0.7rem"),
+    (
+        ".picker:not([hidden])",
+        "width",
+        "min(20rem, calc(100vw - 1rem))",
+    ),
+    (".picker:not([hidden])", "font-size", "0.9rem"),
+    (".picker-testament", "font-size", "0.72rem"),
+    (".chapter-btn", "font-size", "0.85rem"),
+    (".search-panel", "width", "min(640px, calc(100vw - 2rem))"),
+    (".search-input", "font-size", "1rem"),
+    (".search-status", "font-size", "0.8rem"),
+    (".palette-group-label", "font-size", "0.7rem"),
+    (".search-command", "font-size", "0.9rem"),
+    (".palette-reason", "font-size", "0.78rem"),
+    (".palette-key kbd", "font-size", "0.75rem"),
+    (".search-result", "font-size", "0.9rem"),
+    (".search-ref", "font-size", "0.75rem"),
+    (".verse-actions", "font-size", "0.85rem"),
+    (".selection-card", "width", "min(100%, 34rem)"),
+    (
+        ".selection-card",
+        "max-height",
+        "min(24rem, calc(100vh - var(--bar-height) - 2rem))",
+    ),
+    (".selection-card", "font-size", "0.85rem"),
+    (
+        ".selection-card.is-docked",
+        "max-height",
+        "min(45vh, 20rem)",
+    ),
+    (".xref-preview-title", "font-size", "0.75rem"),
+    (".xref-preview-text", "font-size", "0.95rem"),
+    (".highlight-remove", "font-size", "0.85rem"),
+    (".copy-as-item", "font-size", "0.85rem"),
+    (".verse-notes", "font-size", "0.85rem"),
+    (".verse-notes-title", "font-size", "0.75rem"),
+    (".note-card-date", "font-size", "0.75rem"),
+    (".note-link", "font-size", "0.8rem"),
+    (".highlight-swatch", "width", "1.6rem"),
+    (".highlight-swatch", "height", "1.6rem"),
+    (".highlight-swatch", "font-size", "0.85rem"),
+    (".xref-popup-title", "font-size", "0.7rem"),
+    (".xref-citation", "font-size", "0.85rem"),
+    (".margin-notes", "font-size", "0.8rem"),
+    (".margin-note-ref", "font-size", "0.72rem"),
+    (".margin-note-more", "font-size", "0.75rem"),
+    // What the shared button rule gave them (0.85rem), now their own.
+    (".search-more", "font-size", "0.85rem"),
+];
+
+/// A size written with `--ui-scale`, worked out at `scale`: each
+/// `calc(<n><unit> * var(--ui-scale))` becomes `<n * scale><unit>`, and
+/// `max(11px, <n>rem)` the larger of the two (a rem is 16px).
+fn at_ui_scale(value: &str, scale: f64) -> String {
+    const SCALED: &str = " * var(--ui-scale))";
+    let mut out = value.to_owned();
+    while let Some(end) = out.find(SCALED) {
+        let start = out[..end]
+            .rfind("calc(")
+            .expect("a scaled size is a calc()");
+        let length = &out[start + 5..end];
+        let unit_at = length
+            .find(|c: char| c.is_ascii_alphabetic() || c == '%')
+            .expect("a length with a unit");
+        let number: f64 = length[..unit_at].parse().expect("a number");
+        let scaled = format!("{}{}", number * scale, &length[unit_at..]);
+        out.replace_range(start..end + SCALED.len(), &scaled);
+    }
+    if let Some(inner) = out
+        .strip_prefix("max(11px, ")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        let rem: f64 = inner
+            .strip_suffix("rem")
+            .and_then(|n| n.parse().ok())
+            .expect("a floored size in rem");
+        out = if rem * 16.0 >= 11.0 {
+            inner.to_owned()
+        } else {
+            "11px".to_owned()
+        };
+    }
+    out
+}
+
+/// The interface (the popovers, the Library, the book and chapter picker,
+/// search and the palette, the selection card and the margin notes) grows
+/// with Text size at about half its strength, through `--ui-scale`: 1 at
+/// Medium, which therefore draws every one of those sizes exactly as
+/// before; 0.95, 1.1 and 1.2 at Small, Large and Extra large. No label it
+/// scales goes below 11px, and the top bar's controls never scale (their
+/// 36px targets keep the reference its room).
+#[test]
+fn interface_text_grows_with_text_size_at_half_strength() {
+    let rules = rules();
+    let root = custom_properties(&screen_rule(&rules, ":root").body);
+    assert_eq!(property(&root, "--ui-scale"), "1");
+    let scale_at = |size: &str| -> Option<f64> {
+        let selector = format!(r#":root[data-text-size="{size}"]"#);
+        rules
+            .iter()
+            .filter(|r| r.at_rule.is_none() && r.selector == selector)
+            .flat_map(|r| custom_properties(&r.body))
+            .find(|(name, _)| name == "--ui-scale")
+            .map(|(_, value)| value.parse().expect("a number"))
+    };
+    assert_eq!(scale_at("medium"), None, "Medium is the default, 1");
+    let (sizes, fallback) = script_preset("text-size-select");
+    assert_eq!(fallback, "medium");
+    let mut scales = vec![1.0];
+    for (size, expected) in [("small", 0.95), ("large", 1.1), ("x-large", 1.2)] {
+        assert!(sizes.iter().any(|s| s == size), "{size}");
+        assert_eq!(scale_at(size), Some(expected), "{size}");
+        scales.push(expected);
+    }
+    // Printed, it's 1, as the reading presets are.
+    let print = block_after(&stylesheet(), "@media print");
+    assert!(one_space(&print).contains("--ui-scale: 1 !important;"));
+
+    let mut scaled = Vec::new();
+    for rule in &rules {
+        let in_screen = matches!(rule.at_rule.as_deref(), None | Some("@media screen"));
+        for (name, value) in declarations(&rule.body) {
+            if !value.contains("var(--ui-scale)") || name.starts_with("--") {
+                continue;
+            }
+            assert!(
+                in_screen,
+                "`{}` scales in {:?}",
+                rule.selector, rule.at_rule
+            );
+            for selector in selectors(rule) {
+                for bar in [
+                    ".top-bar",
+                    ".bar-btn",
+                    ".ref-btn",
+                    "-toggle",
+                    ".reader-exit",
+                ] {
+                    assert!(
+                        !selector.contains(bar),
+                        "`{selector}`: the top bar stays its size"
+                    );
+                }
+            }
+            if name == "font-size" {
+                assert!(
+                    value.starts_with("max(11px, calc(") && value.ends_with(" * var(--ui-scale)))"),
+                    "`{}`: a label is never below 11px: {value}",
+                    rule.selector
+                );
+                for scale in &scales {
+                    let size = at_ui_scale(&value, *scale);
+                    let px = size.strip_suffix("px").map_or_else(
+                        || size.trim_end_matches("rem").parse::<f64>().unwrap() * 16.0,
+                        |px| px.parse().unwrap(),
+                    );
+                    assert!(px >= 11.0, "`{}` at {scale}: {size}", rule.selector);
+                }
+            }
+            let last = selectors(rule).last().unwrap_or_default().to_owned();
+            scaled.push((last, name, value));
+        }
+    }
+    // Each size is one of these, exactly as it was at Medium; and each of
+    // these scales.
+    for (selector, name, value) in &scaled {
+        let pinned = UI_SCALED_AT_MEDIUM
+            .iter()
+            .filter(|(s, n, _)| s == selector && n == name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pinned.len(),
+            1,
+            "`{selector}` {name} isn't pinned at Medium"
+        );
+        assert_eq!(
+            at_ui_scale(value, 1.0),
+            pinned[0].2,
+            "`{selector}` {name} at Medium"
+        );
+    }
+    for (selector, name, _) in UI_SCALED_AT_MEDIUM {
+        assert!(
+            scaled.iter().any(|(s, n, _)| s == selector && n == name),
+            "`{selector}` {name} should grow with Text size"
+        );
+    }
+    // The popovers, the Library, the picker and the card scroll within
+    // the window rather than run off it.
+    for selector in [
+        ".popover-body",
+        ".library-tabpanel",
+        ".picker:not([hidden])",
+        ".selection-card",
+        ".search-panel",
+    ] {
+        let body = &screen_rule(&rules, selector).body;
+        assert!(body.contains("overflow-y: auto"), "{selector}");
+    }
+    for id in ["aa-popover", "translation-popover"] {
+        let open = HTML
+            .find(&format!(r#"<div id="{id}""#))
+            .expect("the popover");
+        let next = &HTML[open..];
+        let first_child = next[next.find('>').unwrap() + 1..].trim_start();
+        assert!(
+            first_child.starts_with(r#"<div class="popover-body">"#),
+            "#{id} scrolls inside its body, its pointer unclipped"
+        );
     }
 }
 
@@ -2763,11 +3014,14 @@ fn psalms_get_a_compact_grid_ten_to_a_row() {
     // Room for "150" (21px of digits at 0.72rem, measured in WebKitGTK):
     // the picker's width, less its border and side padding, plus the
     // grid's reach into that padding, shared by ten cells a hairline
-    // apart. 27px in the sidebar, 30.1px in the popover, and over 24px
-    // even with a 17px Windows scrollbar.
+    // apart. 27px in the sidebar, 30.1px in the popover (more as it grows
+    // with Text size, the grid's own size staying), and over 24px even
+    // with a 17px Windows scrollbar.
     let picker = &screen_rule(&rules, ".picker:not([hidden])").body;
     assert!(picker.contains("padding: 0.5rem 0.6rem 0.9rem"));
-    assert!(picker.contains("width: min(20rem, calc(100vw - 1rem))"));
+    assert!(picker.contains("width: min(calc(20rem * var(--ui-scale)), calc(100vw - 1rem))"));
+    let compact_cell = &screen_rule(&rules, ".chapter-grid.is-compact .chapter-btn").body;
+    assert!(compact_cell.contains("font-size: 0.72rem"));
     let html = custom_properties(&screen_rule(&rules, "html").body);
     let sidebar = property(&html, "--sidebar-width")
         .strip_suffix("rem")
@@ -3247,7 +3501,7 @@ fn the_selection_card_floats_over_the_text() {
     let card = screen_rule(&rules, ".selection-card");
     for declaration in [
         "position: absolute",
-        "max-height: min(24rem, calc(100vh - var(--bar-height) - 2rem))",
+        "max-height: min(calc(24rem * var(--ui-scale)), calc(100vh - var(--bar-height) - 2rem))",
         "overflow-y: auto",
         "font-family: var(--font-ui)",
         "color: var(--text)",
