@@ -360,13 +360,20 @@ fn render_current() {
     card::shown(dto, compare, &here.translation_code, compare_first);
 }
 
-/// Tells the bar's Back, Forward and Recent places (`nav`) where the reader
-/// is and where Back and Forward would go.
+/// Tells the bar's Back, Forward, Recent places, ‹ and › (`nav`) where the
+/// reader is and where each would go.
 fn show_nav() {
+    // The chapters beside, as the pane was drawn with them (and ← and →
+    // turn to): named from the reading already in hand.
+    let side = |side: Option<&crate::dto::ChapterSide>| {
+        side.map(|s| format!("{} {}", s.book_name, s.chapter))
+    };
     let facts = with(|s| Facts {
         here: s.reading.as_ref().map(|r| (r.book_id, r.chapter)),
         back: s.history.toward(-1).cloned(),
         forward: s.history.toward(1).cloned(),
+        prev: s.last_dto.as_ref().and_then(|d| side(d.prev.as_ref())),
+        next: s.last_dto.as_ref().and_then(|d| side(d.next.as_ref())),
     });
     nav::show(facts);
 }

@@ -2852,6 +2852,7 @@
             :root[data-reader-mode="on"] #menu-toggle,
             :root[data-reader-mode="on"] .history-nav,
             :root[data-reader-mode="on"] .bar-divider,
+            :root[data-reader-mode="on"] .chapter-arrow,
             :root[data-reader-mode="on"] .sidebar-toggle,
             :root[data-reader-mode="on"] .chapter-side,
             :root[data-reader-mode="on"] .nav-hint {
@@ -2864,8 +2865,10 @@
             }
 
             /* The reference stays legible over the text scrolling under
-               the (now transparent) bar. */
+               the (now transparent) bar, and with no › after it, pushes the
+               rest to the right itself. */
             :root[data-reader-mode="on"] .ref-btn {
+                margin-right: auto;
                 background: var(--bar-bg);
             }
 
@@ -3004,7 +3007,6 @@
             min-width: 0;
             max-width: min(24rem, 50vw);
             height: 2.4rem;
-            margin-right: auto;
             padding: 0 0.7rem;
             background: none;
             border: none;
@@ -3035,6 +3037,23 @@
         .ref-btn[aria-haspopup="dialog"][aria-expanded="true"] {
             background: rgba(var(--accent-rgb), 0.08);
             color: var(--accent);
+        }
+
+        /* The chapter arrows hug the reference, like a calendar's month
+           stepper: ‹ before it, › after it, which pushes the rest of the
+           bar to the right. Chevrons, apart from Back and Forward's arrows.
+           Not in reading mode, which stays bare (← and → still turn). */
+        .chapter-arrow {
+            width: 2rem;
+        }
+
+        .chapter-arrow svg {
+            width: 1.1rem;
+            height: 1.1rem;
+        }
+
+        #chapter-next {
+            margin-right: auto;
         }
 
         /* The sidebar's own show/hide button, before the reference: only
@@ -4456,6 +4475,7 @@
             .top-bar,
             .history-nav,
             .bar-divider,
+            .chapter-arrow,
             .popover,
             .library-panel,
             .toast,
@@ -4612,7 +4632,9 @@
             <div id="recent-places-menu" class="popover recent-menu" role="menu" aria-label="Recent places" hidden></div>
         </div>
         <span class="bar-divider" aria-hidden="true"></span>
+        <button type="button" id="chapter-prev" class="bar-btn chapter-arrow" aria-label="Previous chapter" title="This is the Bible’s first chapter (←)" aria-keyshortcuts="ArrowLeft" aria-disabled="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 6l-6 6 6 6"/></svg></button>
         <button type="button" id="ref-btn" class="ref-btn" aria-label="Choose a book and chapter" title="Choose a book and chapter (G)" aria-keyshortcuts="G" aria-controls="picker" aria-expanded="false"><span id="ref-text" class="ref-text"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg></button>
+        <button type="button" id="chapter-next" class="bar-btn chapter-arrow" aria-label="Next chapter" title="This is the Bible’s last chapter (→)" aria-keyshortcuts="ArrowRight" aria-disabled="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"/></svg></button>
         <button type="button" id="reader-exit" class="reader-exit">Exit reading mode <span aria-hidden="true">(Esc)</span></button>
         <div class="bar-item">
             <button type="button" id="translation-toggle" class="bar-btn translation-toggle" aria-label="Translation" title="Translation and compare (T)" aria-keyshortcuts="T" aria-haspopup="dialog" aria-controls="translation-popover" aria-expanded="false"></button>

@@ -1251,6 +1251,7 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
         "#menu-toggle",
         ".history-nav",
         ".bar-divider",
+        ".chapter-arrow",
     ] {
         assert!(
             hidden.contains(&chrome),
@@ -1407,18 +1408,18 @@ fn header_buttons_announce_what_they_open() {
     }
 }
 
-/// Back, Recent places (▾) and Forward sit at the left of the bar, before
-/// the reference and set apart from it by a hairline, in the bar's own
-/// style: ghost buttons (`.bar-btn`) with an inline SVG icon each (24px
+/// Back, Recent places (▾) and Forward sit at the left of the bar, set
+/// apart by a hairline from the chapter group: ‹, the reference, ›. All in
+/// the bar's own style: ghost buttons (`.bar-btn`) with an inline SVG icon each (24px
 /// grid, stroke 2, `currentColor`), never a font glyph. Back and Forward
-/// say their keys and start unavailable (`aria-disabled`, still in the tab
-/// order); ▾ opens a menu. They run the keys' own path
-/// (`keyboard::go_history`), a recent place is a jump
-/// (`Request::Jump`), and they ask the backend for nothing. Reading mode
-/// and print hide them; a narrow window folds Forward into the menu and
+/// and ‹ and › say their keys and start unavailable (`aria-disabled`, still
+/// in the tab order); ▾ opens a menu. They run the keys' own paths
+/// (`keyboard::go_history`, `keyboard::turn_chapter`), a recent place is a
+/// jump (`Request::Jump`), and they ask the backend for nothing. Reading
+/// mode and print hide them; a narrow window folds Forward into the menu and
 /// leaves the translation off the reference.
 #[test]
-fn the_bar_s_history_controls_are_ghost_svg_buttons_before_the_reference() {
+fn the_bar_s_history_and_chapter_controls_are_ghost_svg_buttons() {
     let at = |needle: &str| {
         HTML.find(needle)
             .unwrap_or_else(|| panic!("expected `{needle}`"))
@@ -1430,7 +1431,10 @@ fn the_bar_s_history_controls_are_ghost_svg_buttons_before_the_reference() {
         r#"id="history-forward""#,
         r#"id="recent-places-menu""#,
         r#"class="bar-divider""#,
+        r#"id="chapter-prev""#,
         r#"id="ref-btn""#,
+        r#"id="chapter-next""#,
+        r#"id="reader-exit""#,
     ]
     .map(at);
     assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
@@ -1438,6 +1442,8 @@ fn the_bar_s_history_controls_are_ghost_svg_buttons_before_the_reference() {
         ("history-back", "Back", Some("Alt+ArrowLeft")),
         ("recent-places-toggle", "Recent places", None),
         ("history-forward", "Forward", Some("Alt+ArrowRight")),
+        ("chapter-prev", "Previous chapter", Some("ArrowLeft")),
+        ("chapter-next", "Next chapter", Some("ArrowRight")),
     ] {
         let tag = tag_of(id);
         assert!(tag.starts_with(r#"<button type="button""#), "#{id}");
@@ -1484,6 +1490,7 @@ fn the_bar_s_history_controls_are_ghost_svg_buttons_before_the_reference() {
         nav.contains("reader::ask(Request::Jump {"),
         "a recent place"
     );
+    assert!(nav.contains("keyboard::turn_chapter(which)"), "‹ and ›");
     assert!(!nav.contains("ipc::send("), "no backend calls");
     assert!(
         piece("nav_text.rs").contains(r#"pub const NARROW_QUERY: &str = "(max-width: 759px)";"#)
@@ -1508,7 +1515,13 @@ fn the_bar_s_history_controls_are_ghost_svg_buttons_before_the_reference() {
     assert_eq!(narrow.selector, "#history-forward, .ref-codes");
     assert_eq!(narrow.body, "display: none;");
     let print = one_space(&block_after(&stylesheet(), "@media print"));
-    for hidden in [".top-bar,", ".history-nav,", ".bar-divider,", ".popover,"] {
+    for hidden in [
+        ".top-bar,",
+        ".history-nav,",
+        ".bar-divider,",
+        ".chapter-arrow,",
+        ".popover,",
+    ] {
         assert!(print.contains(hidden), "print hides `{hidden}`");
     }
     let disabled = screen_rule(&rules, r#".bar-btn[aria-disabled="true"]"#);
@@ -1519,14 +1532,15 @@ fn the_bar_s_history_controls_are_ghost_svg_buttons_before_the_reference() {
     );
 }
 
-/// Back, ▾ and Forward use the bar button's tested colors in every theme:
+/// Back, ▾, Forward, ‹ and › use the bar button's tested colors in every
+/// theme:
 /// `--text-dim` on `--bar-bg`, `--text` on the wash under the pointer, and
 /// `--accent` on the open wash, each AA; unavailable, they're dimmed (as
 /// disabled controls may be) yet still told apart from the bar. In the
 /// menu, the place the reader is at is `--text` on the menu's own hover
 /// tint, and its heading and empty line `--text-dim` on `--option-bg`.
 #[test]
-fn history_buttons_use_tested_theme_colors_enabled_and_disabled() {
+fn history_and_chapter_buttons_use_tested_theme_colors_enabled_and_disabled() {
     let rules = rules();
     let alpha = |selector: &str| -> f64 {
         screen_rule(&rules, selector)
@@ -1556,7 +1570,7 @@ fn history_buttons_use_tested_theme_colors_enabled_and_disabled() {
             .collect::<Vec<_>>()
             .join(", ")
     };
-    for class in [".history-btn", ".recent-toggle"] {
+    for class in [".history-btn", ".recent-toggle", ".chapter-arrow"] {
         let rule = screen_rule(&rules, class);
         assert!(
             !rule.body.contains("color"),
@@ -1583,7 +1597,7 @@ fn history_buttons_use_tested_theme_colors_enabled_and_disabled() {
         let wash = |a: f64, under: &str| composite(&format!("rgba({accent_rgb}, {a})"), under);
         let enabled = contrast_ratio(text_dim, bar_bg);
         for (what, ratio) in [
-            ("an available history button", enabled),
+            ("an available history or chapter button", enabled),
             (
                 "one under the pointer",
                 contrast_ratio(text, &wash(hover_alpha, bar_bg)),
@@ -3129,12 +3143,27 @@ fn the_reference_button_says_where_the_reader_is() {
     let button = &screen_rule(&rules, ".ref-btn").body;
     for declaration in [
         "font-family: var(--font-ui)",
-        "margin-right: auto",
         "color: var(--text)",
         "background: none",
     ] {
         assert!(button.contains(declaration), ".ref-btn: {declaration}");
     }
+    // What pushes the rest of the bar to the right: › right after it, or,
+    // in reading mode (no ›), the reference itself.
+    assert!(!button.contains("margin-right"));
+    assert!(
+        screen_rule(&rules, "#chapter-next")
+            .body
+            .contains("margin-right: auto")
+    );
+    let reading = rules
+        .iter()
+        .find(|r| {
+            r.at_rule.as_deref() == Some("@media screen")
+                && r.selector == r#":root[data-reader-mode="on"] .ref-btn"#
+        })
+        .expect("the reference in reading mode");
+    assert!(reading.body.contains("margin-right: auto"));
     // What it says is the reader's (ui-leptos/src/reader_text.rs).
     let reference = block_after(piece("reader_text.rs"), "pub fn reference(");
     assert!(reference.contains(r#"let codes = upper.join(" + ");"#));

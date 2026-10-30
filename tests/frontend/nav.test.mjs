@@ -1,6 +1,7 @@
-// Behavior tests for the top bar's Back, Forward and Recent places (▾):
-// each button runs what its key runs (Alt+← and Alt+→, the history's one
-// path), says where it goes or that it can't, and Recent places lists the
+// Behavior tests for the top bar's Back, Forward and Recent places (▾),
+// and its chapter arrows (‹ ›): each button runs what its key runs (Alt+←
+// and Alt+→, the history's one path; ← and →, the chapter turn's), says
+// where it goes or that it can't, and Recent places lists the
 // places jumped to and left, newest first, kept on this computer across a
 // restart, checked as it's read back, and in no backup.
 
@@ -31,6 +32,8 @@ async function withApp(options, body) {
 const el = (app, id) => app.document.getElementById(id);
 const back = (app) => el(app, 'history-back');
 const forward = (app) => el(app, 'history-forward');
+const prev = (app) => el(app, 'chapter-prev');
+const next = (app) => el(app, 'chapter-next');
 const toggle = (app) => el(app, 'recent-places-toggle');
 const menu = (app) => el(app, 'recent-places-menu');
 const items = (app) => [...menu(app).querySelectorAll('[role="menuitem"]')];
@@ -355,4 +358,87 @@ test('reading mode is bare: Recent places doesn’t open there', () =>
         app.click(toggle(app));
         assert.ok(menu(app).hidden);
         assert.equal(app.window.gospelGetterSurfaces.current(), null);
+    }));
+
+test('‹ and › name the chapters beside the one being read, and are unavailable at the Bible’s first and last', () =>
+    withApp({ book: 'John', chapter: 3 }, async (app) => {
+        for (const [button, keys] of [[prev(app), 'ArrowLeft'], [next(app), 'ArrowRight']]) {
+            assert.equal(button.tagName, 'BUTTON');
+            assert.ok(button.classList.contains('bar-btn'));
+            assert.equal(button.getAttribute('aria-keyshortcuts'), keys);
+            assert.ok(button.querySelector('svg[aria-hidden="true"]'));
+            assert.equal(button.textContent.trim(), '');
+        }
+        assert.ok(!disabled(prev(app)) && !disabled(next(app)));
+        assert.equal(prev(app).title, 'Previous chapter: John 2 (←)');
+        assert.equal(prev(app).getAttribute('aria-label'), 'Previous chapter: John 2');
+        assert.equal(next(app).title, 'Next chapter: John 4 (→)');
+        // Right beside the reference.
+        assert.equal(prev(app).nextElementSibling, el(app, 'ref-btn'));
+        assert.equal(el(app, 'ref-btn').nextElementSibling, next(app));
+
+        await goTo(app, 'mal 4');
+        assert.equal(next(app).title, 'Next chapter: Matthew 1 (→)', 'across books, as → goes');
+        assert.equal(prev(app).title, 'Previous chapter: Malachi 3 (←)');
+        await goTo(app, 'gen 1');
+        assert.ok(disabled(prev(app)));
+        assert.ok(!prev(app).disabled, 'still in the tab order');
+        assert.equal(prev(app).title, 'This is the Bible’s first chapter (←)');
+        assert.equal(prev(app).getAttribute('aria-label'), 'Previous chapter');
+        // As ← does nothing there, neither does ‹.
+        for (const press of [() => app.click(prev(app)), () => app.key('ArrowLeft')]) {
+            const before = app.calls.length;
+            press();
+            await app.idle(before);
+            assert.deepEqual(readings(app, before), []);
+            assert.equal(app.heading(), 'Genesis 1');
+        }
+        await goTo(app, 'rev 22');
+        assert.ok(disabled(next(app)) && !disabled(prev(app)));
+        assert.equal(next(app).title, 'This is the Bible’s last chapter (→)');
+        const before = app.calls.length;
+        app.click(next(app));
+        await app.idle(before);
+        assert.deepEqual(readings(app, before), []);
+    }));
+
+test('‹ and › run exactly what ← and → run: a chapter turn, not a jump', async () => {
+    const walk = async (byButton) => {
+        let trace;
+        await withApp({ book: 'John', chapter: 3 }, async (app) => {
+            const scroll = { y: 0 };
+            Object.defineProperty(app.window, 'scrollY', { configurable: true, get: () => scroll.y });
+            app.window.scrollTo = (x, top) => { scroll.y = typeof x === 'object' ? x.top || 0 : top; };
+            const turn = (dir) => (byButton
+                ? app.click(dir < 0 ? prev(app) : next(app))
+                : app.key(dir < 0 ? 'ArrowLeft' : 'ArrowRight'));
+            const since = app.calls.length;
+            const where = [];
+            for (const dir of [1, 1, -1, 1]) {
+                scroll.y = 420;
+                await waitFor(app, () => turn(dir));
+                where.push([app.heading(), scroll.y]);
+            }
+            // Turns aren't jumps: nothing to go back to, nothing recent.
+            assert.ok(disabled(back(app)));
+            openMenu(app);
+            const recent = rows(app);
+            trace = { reads: readings(app, since), where, recent };
+        });
+        return trace;
+    };
+    const byKeys = await walk(false);
+    const byButtons = await walk(true);
+    assert.deepEqual(byButtons, byKeys);
+    assert.deepEqual(byKeys.where.map((w) => w[0]), ['John 4', 'John 5', 'John 4', 'John 5']);
+    assert.deepEqual(byKeys.recent, []);
+});
+
+test('in Compare, ‹ and › still name and turn the chapters beside', () =>
+    withApp({ book: 'Psalms', chapter: 23, compare: true }, async (app) => {
+        assert.ok(app.isComparing());
+        assert.equal(next(app).title, 'Next chapter: Psalms 24 (→)');
+        await waitFor(app, () => app.click(next(app)), 'get_compare');
+        assert.equal(app.heading(), 'Psalms 24');
+        assert.equal(prev(app).title, 'Previous chapter: Psalms 23 (←)');
     }));

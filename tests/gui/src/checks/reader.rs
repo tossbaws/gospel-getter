@@ -549,6 +549,47 @@ impl Run<'_> {
         ))
     }
 
+    /// Check 68: the bar's chapter arrows, ‹ and ›, each clicked, the
+    /// chapter turning as ← and → turn it; ‹ unavailable at Genesis 1.
+    pub(super) async fn bar_chapters(&mut self) -> Result<String> {
+        self.go_to("John 3", "John 3").await?;
+        let titles = self
+            .ui
+            .js(
+                "return [document.getElementById('chapter-prev').title,
+                         document.getElementById('chapter-next').title];",
+                Vec::new(),
+            )
+            .await?;
+        ensure!(
+            titles == json!(["Previous chapter: John 2 (←)", "Next chapter: John 4 (→)"]),
+            "‹ and › say {titles}"
+        );
+        self.ui.click("the bar's ›", "#chapter-next").await?;
+        self.heading_is("›: John 4", "John 4").await?;
+        self.ui.click("the bar's ‹", "#chapter-prev").await?;
+        let back = self.heading_is("‹: John 3 again", "John 3").await?;
+        self.go_to("Genesis 1", "Genesis 1").await?;
+        let first = self
+            .ui
+            .js(
+                "const prev = document.getElementById('chapter-prev');
+                 return [prev.getAttribute('aria-disabled'), prev.title];",
+                Vec::new(),
+            )
+            .await?;
+        ensure!(
+            first[0].as_str() == Some("true"),
+            "‹ at Genesis 1 should be unavailable: {first}"
+        );
+        Ok(format!(
+            "› read John 4, ‹ {} ({}); at Genesis 1 ‹ is unavailable: {}",
+            back["heading"].as_str().unwrap_or("?"),
+            back["reference"].as_str().unwrap_or("?"),
+            first[1].as_str().unwrap_or("?"),
+        ))
+    }
+
     /// Check 42: Psalm 119, the longest chapter: all 176 verses, the last
     /// one there to read, and how long it took to show.
     pub(super) async fn long_chapter(&mut self) -> Result<String> {

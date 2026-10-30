@@ -1,6 +1,7 @@
 //! The top bar's way-finding controls' words and rules, free of the DOM so
-//! they are tested natively (`cargo test`): Back and Forward (what each
-//! says, and whether it can go), and Recent places, the last few places the
+//! they are tested natively (`cargo test`): Back and Forward, and the
+//! chapter arrows ‹ and › beside the reference (what each says, and
+//! whether it can go), and Recent places, the last few places the
 //! reader went to on purpose (what goes in, the list as it's kept on this
 //! computer, read back and checked, and the menu that lists it). `nav`
 //! puts them on the page.
@@ -17,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::passage_reference::passage_reference;
 use crate::picker_text::Book;
-use crate::reader_text::escape_html;
+use crate::reader_text::{Which, escape_html};
 use crate::shortcut_table::shortcut;
 
 /// Recent places' key in local storage.
@@ -145,10 +146,10 @@ pub fn place_name(book_name: &str, chapter: i64, start: Option<i64>, end: Option
     passage_reference(book_name, chapter, start.zip(end.or(start)))
 }
 
-/// What Back or Forward says, as the keys do it: its name (`aria-label`),
-/// its tooltip, and whether it can go now.
+/// What a bar button (Back, Forward, ‹, ›) says, with its key: its name
+/// (`aria-label`), its tooltip, and whether it can go now.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HistoryButton {
+pub struct BarButton {
     pub label: String,
     pub title: String,
     pub disabled: bool,
@@ -157,7 +158,7 @@ pub struct HistoryButton {
 /// Back (`step` -1) or Forward (1), when it `can` go: to `to`, the place's
 /// name, if it's known ("Back to Psalms 23 (Alt+←)", or "Back (Alt+←)");
 /// otherwise nowhere ("Nothing earlier in this session (Alt+←)").
-pub fn history_button(step: i32, can: bool, to: Option<&str>) -> HistoryButton {
+pub fn history_button(step: i32, can: bool, to: Option<&str>) -> BarButton {
     let (name, id, end) = if step < 0 {
         ("Back", "back", "Nothing earlier in this session")
     } else {
@@ -165,17 +166,48 @@ pub fn history_button(step: i32, can: bool, to: Option<&str>) -> HistoryButton {
     };
     let keys = shortcut(id).map(|s| s.first_keys()).unwrap_or_default();
     match (can, to) {
-        (true, Some(place)) => HistoryButton {
+        (true, Some(place)) => BarButton {
             label: format!("{name} to {place}"),
             title: format!("{name} to {place} ({keys})"),
             disabled: false,
         },
-        (true, None) => HistoryButton {
+        (true, None) => BarButton {
             label: name.to_owned(),
             title: format!("{name} ({keys})"),
             disabled: false,
         },
-        (false, _) => HistoryButton {
+        (false, _) => BarButton {
+            label: name.to_owned(),
+            title: format!("{end} ({keys})"),
+            disabled: true,
+        },
+    }
+}
+
+/// ‹ (`Prev`) or › (`Next`), as ← and → turn: to `to`, the chapter's name
+/// ("Previous chapter: John 2 (←)"), or, at the Bible's first or last
+/// chapter, nowhere, as the palette says it.
+pub fn chapter_button(which: Which, to: Option<&str>) -> BarButton {
+    let (name, id, end) = match which {
+        Which::Prev => (
+            "Previous chapter",
+            "previous-chapter",
+            "This is the Bible\u{2019}s first chapter",
+        ),
+        Which::Next => (
+            "Next chapter",
+            "next-chapter",
+            "This is the Bible\u{2019}s last chapter",
+        ),
+    };
+    let keys = shortcut(id).map(|s| s.first_keys()).unwrap_or_default();
+    match to {
+        Some(chapter) => BarButton {
+            label: format!("{name}: {chapter}"),
+            title: format!("{name}: {chapter} ({keys})"),
+            disabled: false,
+        },
+        None => BarButton {
             label: name.to_owned(),
             title: format!("{end} ({keys})"),
             disabled: true,
@@ -395,7 +427,7 @@ mod tests {
     fn back_and_forward_name_where_they_go_and_their_keys() {
         assert_eq!(
             history_button(-1, true, Some("Psalms 23")),
-            HistoryButton {
+            BarButton {
                 label: "Back to Psalms 23".into(),
                 title: "Back to Psalms 23 (Alt+←)".into(),
                 disabled: false,
@@ -407,7 +439,7 @@ mod tests {
         );
         assert_eq!(
             history_button(-1, false, None),
-            HistoryButton {
+            BarButton {
                 label: "Back".into(),
                 title: "Nothing earlier in this session (Alt+←)".into(),
                 disabled: true,
@@ -420,6 +452,34 @@ mod tests {
         assert_eq!(forward.label, "Forward");
         assert_eq!(forward.title, "Nothing later in this session (Alt+→)");
         assert!(forward.disabled);
+    }
+
+    #[test]
+    fn the_chapter_arrows_name_the_chapters_beside_and_say_the_bible_s_ends() {
+        assert_eq!(
+            chapter_button(Which::Prev, Some("John 2")),
+            BarButton {
+                label: "Previous chapter: John 2".into(),
+                title: "Previous chapter: John 2 (←)".into(),
+                disabled: false,
+            }
+        );
+        assert_eq!(
+            chapter_button(Which::Next, Some("Acts 1")).title,
+            "Next chapter: Acts 1 (→)"
+        );
+        assert_eq!(
+            chapter_button(Which::Prev, None),
+            BarButton {
+                label: "Previous chapter".into(),
+                title: "This is the Bible’s first chapter (←)".into(),
+                disabled: true,
+            }
+        );
+        assert_eq!(
+            chapter_button(Which::Next, None).title,
+            "This is the Bible’s last chapter (→)"
+        );
     }
 
     #[test]

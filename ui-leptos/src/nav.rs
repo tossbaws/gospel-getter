@@ -1,8 +1,10 @@
-//! The top bar's way-finding controls, left of the reference: Back, ▾
-//! (Recent places) and Forward. Back and Forward do what Alt+← and Alt+→
-//! do (`keyboard::go_history`, the reader's one path for a step), and say
-//! where they go, or that there's nowhere, as the reader tells this after
-//! each chapter, jump and step ([`show`]). ▾ opens Recent places, a menu
+//! The top bar's way-finding controls: Back, ▾ (Recent places) and
+//! Forward left of the reference, and the chapter arrows ‹ and › either
+//! side of it. Back and Forward do what Alt+← and Alt+→ do
+//! (`keyboard::go_history`, the reader's one path for a step), and ‹ and ›
+//! what ← and → do (`keyboard::turn_chapter`); each says where it goes, or
+//! that there's nowhere, as the reader tells this after each chapter, jump
+//! and step ([`show`]). ▾ opens Recent places, a menu
 //! (`surfaces::Surface::Recent`, which opens and closes it and moves through
 //! it with the keys): the places jumped to and left, newest first, from
 //! `nav_text`; choosing one jumps there as the picker or search does
@@ -29,16 +31,19 @@ use crate::keyboard;
 use crate::nav_text::{self as text, RecentPlace, RecentPlaces, Stored};
 use crate::picker_text::Book;
 use crate::reader::{self, Request};
-use crate::reader_text::Place;
+use crate::reader_text::{Place, Which};
 use crate::surfaces::{self, Surface};
 
 /// What the reader says after each chapter, jump and step: the chapter on
-/// screen, and the places Back and Forward would go to.
+/// screen, the places Back and Forward would go to, and the chapters
+/// before and after, by name ("John 2"), as ← and → turn to them.
 #[derive(Debug, Clone, Default)]
 pub struct Facts {
     pub here: Option<(i64, i64)>,
     pub back: Option<Place>,
     pub forward: Option<Place>,
+    pub prev: Option<String>,
+    pub next: Option<String>,
 }
 
 #[derive(Default)]
@@ -167,7 +172,7 @@ pub fn record(place: RecentPlace) {
 // ---- Back and Forward.
 
 /// Back (-1) or Forward (1) as the facts have it: where it goes, by name.
-fn history_button(step: i32) -> text::HistoryButton {
+fn history_button(step: i32) -> text::BarButton {
     with(|s| {
         let to = if step < 0 {
             &s.facts.back
@@ -197,12 +202,25 @@ fn set_button(id: &str, label: &str, title: &str, disabled: bool) {
     }
 }
 
-/// The reader's facts, after a chapter, a jump or a step: Back and Forward
-/// say where they go, and the menu, if open, is drawn again.
+/// The reader's facts, after a chapter, a jump or a step: Back, Forward, ‹
+/// and › say where they go, and the menu, if open, is drawn again.
 pub fn show(facts: Facts) {
+    let chapters = [
+        (
+            "chapter-prev",
+            text::chapter_button(Which::Prev, facts.prev.as_deref()),
+        ),
+        (
+            "chapter-next",
+            text::chapter_button(Which::Next, facts.next.as_deref()),
+        ),
+    ];
     with(|s| s.facts = facts);
     for (id, step) in [("history-back", -1), ("history-forward", 1)] {
         let button = history_button(step);
+        set_button(id, &button.label, &button.title, button.disabled);
+    }
+    for (id, button) in chapters {
         set_button(id, &button.label, &button.title, button.disabled);
     }
     if surfaces::current() == Some(Surface::Recent) {
@@ -287,7 +305,8 @@ fn on_menu_click(event: &web_sys::Event) {
     }
 }
 
-/// Listens to Back, Forward and the menu's items, and for boot's books.
+/// Listens to Back, Forward, the menu's items, ‹ and ›, and for boot's
+/// books.
 /// Called before boot (`boot`), which hands the books over.
 pub fn mount() {
     dom::on_document_event(bridge::PICKER_BOOKS_EVENT, |event| {
@@ -314,5 +333,15 @@ pub fn mount() {
     }
     if let Some(menu) = by_id("recent-places-menu") {
         dom::on(&menu, "click", |event| on_menu_click(&event));
+    }
+    for (id, which) in [("chapter-prev", Which::Prev), ("chapter-next", Which::Next)] {
+        if let Some(button) = by_id(id) {
+            let target = button.clone();
+            dom::on_click(&button, move |_| {
+                if enabled(&target) {
+                    keyboard::turn_chapter(which);
+                }
+            });
+        }
     }
 }

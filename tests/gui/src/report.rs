@@ -77,11 +77,12 @@ pub enum Check {
     NoteDraft = 65,
     NoteMarkdown = 66,
     BarHistory = 67,
+    BarChapters = 68,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 57] = [
+    pub const SHIPPED: [Check; 58] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -118,6 +119,7 @@ impl Check {
         Check::Disclosures,
         Check::BackForward,
         Check::BarHistory,
+        Check::BarChapters,
         Check::LongChapter,
         Check::TryAgain,
         Check::SelectVerses,
@@ -231,6 +233,7 @@ impl Check {
             Check::NoteDraft => "note-draft",
             Check::NoteMarkdown => "note-markdown",
             Check::BarHistory => "bar-back-forward-recent",
+            Check::BarChapters => "bar-chapter-arrows",
         }
     }
 
