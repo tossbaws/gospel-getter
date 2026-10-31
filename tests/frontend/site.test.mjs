@@ -14,6 +14,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 
@@ -134,10 +135,6 @@ test('the Chi Rho Code LLC mark is the favicon and the header icon, and only the
     assert.equal(brand.getAttribute('src'), 'assets/brand/chirho-code-flat-48.png');
     assert.match(brand.getAttribute('srcset'), /chirho-code-flat-180\.png 2x/);
     assert.equal(brand.getAttribute('alt'), '');
-    // The hero's line above the headline is text only.
-    const eyebrow = document.querySelector('.eyebrow');
-    assert.equal(eyebrow.querySelectorAll('img').length, 0);
-    assert.equal(eyebrow.textContent, 'Gospel Getter · Free Bible reader for Windows & Linux');
     // So is the footer: no mark, no Alpha and Omega, just the credit.
     const footer = document.querySelector('.site-footer');
     assert.equal(footer.querySelectorAll('img, .ornament').length, 0);
@@ -168,25 +165,72 @@ test('the Chi Rho Code LLC mark is the favicon and the header icon, and only the
     );
 });
 
-test('the feature screenshots are in the default theme, Chi Rho; the theme strip has every theme but System, Chi Rho first', () => {
+test('the feature screenshots are in the default theme, Chi Rho; the theme demo offers every theme but System, Chi Rho first', () => {
     const { document } = pages.find((p) => p.name === 'index.html');
     for (const img of document.querySelectorAll('.hero-shot img, .feature .shot img')) {
+        if (img.getAttribute('alt') === '') continue; // the selection card's lit copy, over its described twin
         assert.match(img.getAttribute('alt'), /in the Chi Rho theme/, img.getAttribute('src'));
         assert.doesNotMatch(img.getAttribute('alt'), /Matrix|Classic Light/);
     }
-    // System has no tile: it shows Vellum or Chi Rho, as the computer is set.
-    const tiles = [...document.querySelectorAll('.themes figure')];
+    // System has no choice of its own: it shows Vellum or Chi Rho, as the computer is set.
+    const choices = [...document.querySelectorAll('#themes .control-theme input')];
     assert.deepEqual(
-        tiles.map((f) => f.querySelector('figcaption').textContent),
+        choices.map((input) => document.querySelector(`label[for="${input.id}"]`).textContent.trim()),
         ['Chi Rho', 'Vellum', 'Classic Light', 'Classic Dark', 'Vaporwave', 'Matrix', 'Beast Slayer', 'Hot Pink'],
     );
-    for (const f of tiles) {
-        const img = f.querySelector('img');
-        const slug = f.querySelector('figcaption').textContent.toLowerCase().replace(/ /g, '-');
-        assert.equal(img.getAttribute('src'), `assets/theme-${slug}.webp`);
-        assert.deepEqual([img.getAttribute('width'), img.getAttribute('height')], ['720', '435']);
-        assert.match(img.getAttribute('alt'), new RegExp(`in the ${f.querySelector('figcaption').textContent} theme`));
+    assert.deepEqual(choices.filter((input) => input.hasAttribute('checked')).map((input) => input.id), ['theme-chi-rho']);
+});
+
+test('the theme demo uses the app\'s own theme colours', () => {
+    const css = readFileSync(new URL('gospel-getter.css', site), 'utf8');
+    const app = readFileSync(new URL('ui/index.html', root), 'utf8');
+    const block = (text, selector) => {
+        const start = text.indexOf(selector);
+        assert.ok(start >= 0, `no rule for ${selector}`);
+        return text.slice(start, text.indexOf('}', start));
+    };
+    const value = (rule, property) => rule.match(new RegExp(`\\s${property}:\\s*([^;]+);`))?.[1]
+        .replace(/\s+/g, ' ').replace(/\(\s/g, '(').replace(/\s\)/g, ')').trim();
+    for (const theme of ['chi-rho', 'vellum', 'classic-light', 'classic-dark', 'vaporwave', 'matrix', 'beast-slayer', 'hot-pink']) {
+        const ours = theme === 'chi-rho' ? block(css, '\n.reader {') : block(css, `.demo:has(#theme-${theme}:checked) .reader {`);
+        const theirs = block(app, `[data-theme-preview="${theme}"]`);
+        for (const property of ['--bg', '--text', '--accent', '--accent-2', '--bar-bg']) {
+            assert.equal(value(ours, property), value(theirs, property), `${theme} ${property}`);
+        }
     }
+});
+
+test('the theme demo quotes Psalm 23 word for word from the bundled WEB', () => {
+    const { document } = pages.find((p) => p.name === 'index.html');
+    const web = JSON.parse(readFileSync(new URL('src-tauri/data/web.json', root), 'utf8'));
+    const psalm = web.find((book) => book.name === 'Psalms').chapters[22];
+    const verses = [...document.querySelectorAll('#themes .verse')].map((verse) => {
+        const number = verse.querySelector('.verse-num').textContent;
+        return [Number(number), verse.textContent.slice(number.length).trim()];
+    });
+    assert.deepEqual(verses, psalm.map((text, i) => [i + 1, text]));
+});
+
+// site/brand.css is a copy of tossbaws/chirhocode-site's site/brand.css. Its header comment names
+// the commit it came from and pins the sha256 of every line after the comment, so a change made
+// only here fails until both copies are updated together.
+test('site/brand.css is still the copy of chirhocode-site\'s brand.css that its header pins', () => {
+    const text = readFileSync(new URL('brand.css', site), 'utf8');
+    assert.ok(text.startsWith('/*') && text.includes('*/'), 'site/brand.css has no header comment');
+    const end = text.indexOf('\n', text.indexOf('*/')) + 1;
+    const header = text.slice(0, end);
+    const commit = header.match(/Source: tossbaws\/chirhocode-site, site\/brand\.css, commit ([0-9a-f]{40})\n/)?.[1];
+    const pinned = header.match(/sha256 of the lines after this comment: ([0-9a-f]{64})\n/)?.[1];
+    assert.ok(commit, 'site/brand.css\'s header doesn\'t name the chirhocode-site commit it was copied from');
+    assert.ok(pinned, 'site/brand.css\'s header doesn\'t pin the sha256 of its body');
+    const actual = createHash('sha256').update(text.slice(end)).digest('hex');
+    assert.equal(
+        actual,
+        pinned,
+        `site/brand.css differs from the copy of tossbaws/chirhocode-site's site/brand.css at ${commit}. `
+            + 'brand.css is shared: make the change in both copies, then copy it here and update the '
+            + 'commit and the pin as site/README.md says ("Updating brand.css").',
+    );
 });
 
 test('the Support section links to four Payment Links, the customer portal, Ko-fi and the refund email', () => {
