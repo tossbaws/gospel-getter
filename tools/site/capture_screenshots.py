@@ -453,7 +453,7 @@ def readme_scenes(theme):
 # Every theme, in the app's order (Aa).
 THEMES = ["chi-rho", "vellum", "system", "vaporwave", "classic-dark", "classic-light", "matrix",
           "beast-slayer", "hot-pink"]
-# The "Make it yours" strip: the same passage in each theme. System has no
+# The theme tiles on the guide page (site/guide.html): the same passage in each theme. System has no
 # tile of its own: it shows Chi Rho or Vellum, following the computer's
 # dark or light setting.
 THEME_SCENES = [

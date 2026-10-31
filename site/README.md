@@ -1,14 +1,15 @@
 # Gospel Getter website
 
-The product page for Gospel Getter: plain HTML and CSS, with no JavaScript,
-framework, build step, web fonts, analytics or cookies.
+The product page for Gospel Getter (`index.html`) and its full feature guide
+(`guide.html`): plain HTML and CSS, with no JavaScript, framework, build step,
+analytics or cookies. The fonts are self-hosted in `assets/fonts/`.
 `.github/workflows/pages.yml` publishes this folder to GitHub Pages, but
 only once the version it shows is a published release (see "Downloads and
 releases").
 
 The page is served first at `https://tossbaws.github.io/gospel-getter/` and
 later at the root of a domain, so **every internal URL is relative**
-(`styles.css`, `assets/…`, `#download`). Never start one with `/`.
+(`brand.css`, `assets/…`, `#download`). Never start one with `/`.
 
 ## Preview locally
 
@@ -70,8 +71,8 @@ same rule.
   bundled KJV, BSB and WEB text, in WebKitGTK, the engine the Linux app uses.
   The feature screenshots (hero, search, copy, bookmark and note, compare, and
   `og-image.jpg`) are in Chi Rho, the app's default theme, in a 1280×800
-  window, where the book and chapter picker is a sidebar; the "Make it
-  yours" strip shows every theme but System, which is Chi Rho or Vellum as
+  window, where the book and chapter picker is a sidebar; the theme tiles on
+  the guide page show every theme but System, which is Chi Rho or Vellum as
   the computer is set. The README's screenshots (`screenshots/`) come from
   the same script with `--readme`, at their final sizes.
   `tools/site/capture_screenshots.py` loads the page offscreen and answers
@@ -114,7 +115,7 @@ same rule.
 The Chi Rho Code LLC mark is the site's icon: the favicon (and Apple touch
 icon) and the header beside "Gospel Getter", as the flat mark. It also
 appears, large, in "About the maker" (the detailed mark). The byline under
-"Gospel Getter", the line above the headline and the footer are text only. The
+"Gospel Getter" and the footer are text only. The
 site's look follows the mark, a round stained-glass window with
 circuit-trace lead lines. (The Gospel Getter app keeps its own icon, the
 white Chi-Rho on `#14082c`, in `packaging/`; the website no longer uses it.)
@@ -144,27 +145,54 @@ the method of the earlier set drawn from C
 (`favicon/2026-10-05_chi-rho_circuit_flat.json`). The detailed mark is for
 64px and up; the flat-small one for 16 and 32.
 
-**Palette** (`styles.css`, `:root`):
+## Look and stylesheets (design of 2026-10-31)
+
+The page is built like the mark's stained-glass window: panes of flat colour
+fitted edge to edge, with 8px gaps of "lead" (`#26241b`) between them, as on
+the Chi Rho Code company site. Gospel Getter sits on the window's emerald
+side.
+
+- `brand.css` is a copy of `site/brand.css` in `tossbaws/chirhocode-site`:
+  fonts, colours, the header bar, panes, buttons and the footer frame.
+  Change both copies together.
+- `gospel-getter.css` is this site's own layout, the theme demo and the
+  guide page.
+
+**Make it yours** is the page's one interactive piece: Psalm 23 (WEB, verses
+1–6) in Literata, re-set in the app's themes, text sizes and layouts by radio
+buttons and `:has()`, with no script. Its theme colours are copied from
+`ui/index.html`, and its verses from `src-tauri/data/web.json`;
+`tests/frontend/site.test.mjs` fails if either drifts. When a theme changes
+or one is added, update `gospel-getter.css` and the radio buttons.
+
+**Keep what matters** shows the selection card cropped from
+`select-1600.webp` (640×820 at +660+66). Pointing at a note lights its part
+of the card with a `clip-path` whose percentages are of the whole capture.
+Re-measure them if that screenshot is recaptured.
+
+**Fonts** (all SIL Open Font License 1.1, licence texts beside them):
+
+| File | Face | Used for |
+|---|---|---|
+| `source-serif-4-opsz.woff2` | Source Serif 4, variable | Headings and large statements |
+| `instrument-sans-wght.woff2` | Instrument Sans, variable | Body text, buttons, navigation |
+| `literata-regular.woff2` | Literata 400 | The Psalm 23 sample, as in the app (copied from `ui/fonts/`) |
+
+**Palette** (`brand.css`, `:root`), sampled from the mark:
 
 | Token | Hex | Used for |
 |---|---|---|
-| `--bg` | `#0b0d0c` | Page background (the mark's near-black) |
-| `--bg-raised` | `#101613` | Alternate sections, header |
-| `--pane` | `#131c18` | Glass panes (download panels, columns, notes), with a faint emerald-to-teal wash |
-| `--footer-bg` | `#070908` | Footer |
-| `--text` | `#ede7d8` | Body text |
-| `--text-muted` | `#bdb6a5` | Secondary text (lede, notes, captions' context) |
-| `--gold` | `#f2c14e` | Primary buttons, eyebrow, focus rings, lead-line nodes, list markers, caution edge |
-| `--gold-pale` | `#f8e59f` | Headings, footer and caution links, the primary button's highlight |
-| `--on-gold` | `#1a140e` | Text on gold buttons |
-| `--emerald` | `#16785a` | Glass washes, the screenshots' outer frame |
-| `--teal` | `#42b8a5` | Secondary button edges, middle lead-line nodes, Alpha and Omega |
-| `--link` | `#86dccd` | Links and secondary button text |
-| `--caution-bg` | `#2a210b` | The SmartScreen warning pane |
+| `--lead` | `#26241b` | Page background, showing between the panes |
+| `--black`, `--night` | `#0b0c0a`, `#121410` | Most panes |
+| `--emerald-deep`, `--emerald` | `#0c5734`, `#0e704f` | Gospel Getter's panes |
+| `--teal-deep` | `#0b5c5f` | "Made for your computer", Linux download |
+| `--gold`, `--gold-glow` | `#f1cb75`, `#fcec9c` | The primary button, chosen controls, the open question, list markers, focus |
+| `--ink`, `--ink-soft` | `#efeeea`, `#c9c6ba` | Text and secondary text |
+| `--ink-dark`, `--ink-dark-soft` | `#0b0c0a`, `#1d2a24` | Text on gold |
 
-Every text colour meets WCAG AA (4.5:1) on every background it's used on,
-the gradient washes included; the lowest pair is `--text-muted` on a pane's
-emerald wash, 7.44:1. Recheck this when changing a colour.
+Every text colour meets WCAG AA (4.5:1) on every background it's used on;
+the lowest pair is `--ink` on `--emerald`, 5.24:1. Recheck this when
+changing a colour.
 
 ## When the site moves to its own domain
 
