@@ -414,7 +414,7 @@
 }
 
 .demo {
-    grid-column: 1 / 10;
+    grid-column: 1 / -1;
     display: grid;
     grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
     gap: var(--gap);
@@ -427,13 +427,24 @@
 }
 
 .themes-more {
-    grid-column: 10 / 13;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 1rem var(--gap);
 }
 
-/* The reader: the app's own reading view, in its own colours. Chi Rho first. */
+.themes-more h3 {
+    grid-column: 1 / 6;
+}
+
+.themes-more h3 + ul {
+    grid-column: 6 / 13;
+    margin-top: 0;
+}
+
+/* The reader: the app's own reading view, in its own colours. Chi Rho first. It takes the
+   height of the controls beside it and scrolls, as the app's page does, so no choice in the
+   demo changes the height of the panes. */
 .reader {
     --bg: #0b0d0c;
     --text: #ede7d8;
@@ -449,7 +460,7 @@
 
     display: flex;
     flex-direction: column;
-    height: clamp(30rem, 72vh, 40rem);
+    contain: size;
     background: var(--bg);
     color: var(--text);
     border-radius: 8px;
@@ -615,10 +626,6 @@
     padding: clamp(1rem, 1.5vw, 1.5rem);
     border: 0;
     background: var(--night);
-}
-
-.control-theme {
-    flex: 1;
 }
 
 .controls legend {
@@ -1360,13 +1367,10 @@
         margin-top: 1.5rem;
     }
 
-    .demo,
-    .themes-more {
-        grid-column: 1 / -1;
-    }
-
     .themes-head h2,
-    .themes-head p {
+    .themes-head p,
+    .themes-more h3,
+    .themes-more h3 + ul {
         grid-column: 1 / -1;
     }
 

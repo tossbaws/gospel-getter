@@ -154,7 +154,7 @@ side.
 
 - `brand.css` is a copy of `site/brand.css` in `tossbaws/chirhocode-site`:
   fonts, colours, the header bar, panes, buttons and the footer frame.
-  Change both copies together.
+  Change both copies together (see "Updating brand.css").
 - `gospel-getter.css` is this site's own layout, the theme demo and the
   guide page.
 
@@ -193,6 +193,36 @@ Re-measure them if that screenshot is recaptured.
 Every text colour meets WCAG AA (4.5:1) on every background it's used on;
 the lowest pair is `--ink` on `--emerald`, 5.24:1. Recheck this when
 changing a colour.
+
+### Updating brand.css
+
+Everything after `brand.css`'s header comment is the same, byte for byte, as
+`site/brand.css` in `tossbaws/chirhocode-site`. The header names the commit it
+was copied from, and pins the sha256 of every line after the comment.
+`tests/frontend/site.test.mjs` fails if the file no longer matches that pin,
+so an edit made only here can't merge.
+
+To change it, make the change in chirhocode-site first and push it. Then,
+from this repository's root, with chirhocode-site checked out at
+`../chirhocode-site`:
+
+```bash
+CHIRHO=../chirhocode-site
+C=$(git -C "$CHIRHO" rev-parse HEAD)   # or the branch or commit to copy
+# This copy's header, then chirhocode-site's file after its own header.
+{
+  awk '{ print } /\*\// { exit }' site/brand.css
+  git -C "$CHIRHO" show "$C:site/brand.css" | awk 'body; /\*\// { body = 1 }'
+} > site/brand.css.new && mv site/brand.css.new site/brand.css
+# The new pin, written into the header with the commit.
+H=$(awk 'body; /\*\// { body = 1 }' site/brand.css | sha256sum | cut -d ' ' -f 1)
+sed -i \
+  -e "s/^\(   Source: .*, commit \)[0-9a-f]\{40\}\$/\1$C/" \
+  -e "s/^\(   sha256 of the lines after this comment: \)[0-9a-f]\{64\}\$/\1$H/" \
+  site/brand.css
+git diff site/brand.css                # only the change you meant, and the two header lines
+(cd tests/frontend && node --test site.test.mjs)
+```
 
 ## When the site moves to its own domain
 

@@ -14,6 +14,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 
@@ -208,6 +209,28 @@ test('the theme demo quotes Psalm 23 word for word from the bundled WEB', () => 
         return [Number(number), verse.textContent.slice(number.length).trim()];
     });
     assert.deepEqual(verses, psalm.map((text, i) => [i + 1, text]));
+});
+
+// site/brand.css is a copy of tossbaws/chirhocode-site's site/brand.css. Its header comment names
+// the commit it came from and pins the sha256 of every line after the comment, so a change made
+// only here fails until both copies are updated together.
+test('site/brand.css is still the copy of chirhocode-site\'s brand.css that its header pins', () => {
+    const text = readFileSync(new URL('brand.css', site), 'utf8');
+    assert.ok(text.startsWith('/*') && text.includes('*/'), 'site/brand.css has no header comment');
+    const end = text.indexOf('\n', text.indexOf('*/')) + 1;
+    const header = text.slice(0, end);
+    const commit = header.match(/Source: tossbaws\/chirhocode-site, site\/brand\.css, commit ([0-9a-f]{40})\n/)?.[1];
+    const pinned = header.match(/sha256 of the lines after this comment: ([0-9a-f]{64})\n/)?.[1];
+    assert.ok(commit, 'site/brand.css\'s header doesn\'t name the chirhocode-site commit it was copied from');
+    assert.ok(pinned, 'site/brand.css\'s header doesn\'t pin the sha256 of its body');
+    const actual = createHash('sha256').update(text.slice(end)).digest('hex');
+    assert.equal(
+        actual,
+        pinned,
+        `site/brand.css differs from the copy of tossbaws/chirhocode-site's site/brand.css at ${commit}. `
+            + 'brand.css is shared: make the change in both copies, then copy it here and update the '
+            + 'commit and the pin as site/README.md says ("Updating brand.css").',
+    );
 });
 
 test('the Support section links to four Payment Links, the customer portal, Ko-fi and the refund email', () => {

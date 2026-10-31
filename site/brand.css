@@ -1,5 +1,8 @@
 /* Chi Rho Code: what every page in the family shares. This is a copy of site/brand.css in
-   tossbaws/chirhocode-site; change both together.
+   tossbaws/chirhocode-site; change both together (site/README.md, "Updating brand.css").
+   Source: tossbaws/chirhocode-site, site/brand.css, commit 5375bea35f98395c445b2abb0db7167699879b48
+   sha256 of the lines after this comment: 1ce8401a8dc8081feee0b7c4e4f7e891ec504d00973b64faa260b544d12f2581
+   tests/frontend/site.test.mjs fails if they no longer match that pin.
    The colours are sampled from the company mark: black, emerald on the left running to cyan on
    the right, gold for the one action. Pages are built as the mark's window: panes fitted edge
    to edge, with 8px gaps of lead between them. Linked before gospel-getter.css. */

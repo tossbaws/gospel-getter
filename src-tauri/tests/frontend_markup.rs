@@ -2727,9 +2727,10 @@ fn chi_rho_is_the_default_theme() {
     assert!(HTML.contains("{ 'monster-hunter': 'beast-slayer' }"));
 }
 
-/// Chi Rho and Vellum are the website's palette (site/styles.css) and its
-/// light twin: flat grounds, no gradient, and every text color, both
-/// accents included, AA on the page, the bar, the popups and the panels.
+/// Chi Rho and Vellum are the app's own palette and its light twin (the
+/// website's theme demo copies them, in site/gospel-getter.css): flat
+/// grounds, no gradient, and every text color, both accents included, AA
+/// on the page, the bar, the popups and the panels.
 #[test]
 fn chi_rho_and_vellum_use_the_brand_palette() {
     let rules = rules();
