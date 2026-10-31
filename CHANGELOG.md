@@ -4,7 +4,11 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.22.1] - 2026-10-31
+
+Fixes for holding Shift to select verses, and nothing else changes:
+updating keeps your bookmarks, highlights, notes, reading position and
+settings.
 
 ### Fixed
 - On Linux, after you held Shift to Shift-click more verses, the selection
