@@ -7,12 +7,16 @@
 //! the body runs after this); clicking a verse selects it (Shift-click, a
 //! range), a footnote marker selects its verse, and anything else is a
 //! click away from the selection. And the Shift `mousedown` that keeps a
-//! Shift-click on a verse from extending the browser's own text selection.
+//! Shift-click on a verse from extending the browser's own text selection,
+//! and makes its click a Shift-click even if Shift is let go before the
+//! button comes up.
 //!
 //! This is the main script's (`ui/index.html` at 2a9d85c: its body `click`
 //! and `mousedown` listeners and `jumpTo`) in Rust, in the same order. Its
 //! listeners are registered before any piece's (`page::mount`), as the main
 //! script's were.
+
+use std::cell::Cell;
 
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -84,7 +88,17 @@ fn jump_to(go: &Element) {
     });
 }
 
+thread_local! {
+    /// Shift was held when the last mouse button went down.
+    static PRESSED_WITH_SHIFT: Cell<bool> = const { Cell::new(false) };
+}
+
 fn on_click(event: &MouseEvent) {
+    // A click is a Shift-click if Shift was down when its button went down,
+    // as the browser's own Shift-click selection goes by: letting go of
+    // Shift a moment before the button doesn't make it a plain click. A
+    // click from the keyboard (no press, `detail` 0) goes by its own.
+    let pressed_with_shift = PRESSED_WITH_SHIFT.take() && event.detail() > 0;
     let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else {
         return;
     };
@@ -179,7 +193,7 @@ fn on_click(event: &MouseEvent) {
 
     // A selection never extends outside the chapter being read: Shift-click
     // in a faded neighbor leaves it as is.
-    let shift = event.shift_key();
+    let shift = event.shift_key() || pressed_with_shift;
     if shift && closest(&target, ".chapter-side").is_some() {
         return;
     }
@@ -242,6 +256,7 @@ pub fn mount() {
         let Some(event) = event.dyn_ref::<MouseEvent>() else {
             return;
         };
+        PRESSED_WITH_SHIFT.set(event.button() == 0 && event.shift_key());
         let on_verse = event
             .target()
             .and_then(|t| t.dyn_into::<Element>().ok())
