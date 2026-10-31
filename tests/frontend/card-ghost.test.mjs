@@ -255,42 +255,125 @@ test('the fade is quick, and only for those who haven\'t asked for less motion',
         assert.ok(!/\.selection-card[^{]*\{[^}]*transition/.test(rest), 'no fade outside the no-preference block');
     }));
 
-test('with no Shift keyup at all (Wayland with an input method), the next pointer move without Shift ends the ghost', () =>
-    withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
-        // The Captain's sequence: a verse, Shift down, two more verses.
-        app.click(app.verse(16));
-        app.key('Shift', { shiftKey: true, code: 'ShiftLeft' });
-        await shiftClick(app, app.verse(17));
-        await shiftClick(app, app.verse(18));
-        assert.deepEqual(app.selectedVerseNumbers(), [16, 17, 18]);
-        assert.ok(ghost(app), 'a ghost while Shift is held');
-        // Shift is let go, and its keyup never reaches the page; the mouse
-        // moves, its event saying Shift isn't held.
-        pointer(app, 'pointermove', app.verse(18), { shiftKey: false });
-        assert.ok(solid(app), 'the card comes back: no ghost, opacity 1, clickable');
-        const button = card(app).querySelector('.verse-copy-btn');
-        assert.notEqual(app.window.getComputedStyle(button).pointerEvents, 'none');
-        await app.copyButton();
-        assert.ok(app.clipboardWrites.at(-1).endsWith('— John 3:16–18 (WEB)'), app.clipboardWrites.at(-1));
-        assert.deepEqual(app.selectedVerseNumbers(), [16, 17, 18]);
+// The Captain's sequence with Shift's keyup never reaching the page (as on
+// Wayland with an input method), in each way of reading: the next pointer
+// move, saying Shift isn't held, ends the ghost.
+for (const [mode, options] of [
+    ['normal', {}],
+    ['Compare', { compare: true }],
+    ['Reading mode', { readerMode: true }],
+    ['Flowing', { storage: { 'gospel-getter-layout': 'flowing' } }],
+]) {
+    test(`${mode}: with no Shift keyup at all, the next pointer move without Shift ends the ghost`, () =>
+        withApp({ book: 'John', chapter: 3, translation: 'web', ...options }, async (app) => {
+            app.click(app.verse(16, 'web'));
+            app.key('Shift', { shiftKey: true, code: 'ShiftLeft' });
+            await shiftClick(app, app.verse(17, 'web'));
+            await shiftClick(app, app.verse(18, 'web'));
+            assert.deepEqual(app.selectedVerseNumbers('web'), [16, 17, 18]);
+            assert.ok(ghost(app), 'a ghost while Shift is held');
+            // Shift is let go and its keyup never comes; the mouse moves,
+            // its event saying Shift isn't held.
+            pointer(app, 'pointermove', app.verse(18, 'web'), { shiftKey: false });
+            assert.ok(solid(app), 'the card comes back: no ghost, opacity 1, clickable');
+            const button = card(app).querySelector('.verse-copy-btn');
+            assert.notEqual(app.window.getComputedStyle(button).pointerEvents, 'none', 'its controls can be reached');
+            await app.copyButton();
+            assert.ok(app.clipboardWrites.at(-1).endsWith('— John 3:16–18 (WEB)'), app.clipboardWrites.at(-1));
+            assert.deepEqual(app.selectedVerseNumbers('web'), [16, 17, 18]);
+        }));
+}
 
-        // And the wheel, or a button going down, without Shift does too.
-        for (const type of ['wheel', 'pointerdown']) {
+test('with no keyup, the wheel, a button going down or window focus without Shift end the ghost too', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
+        app.click(app.verse(16));
+        for (const end of ['wheel', 'pointerdown', 'focus']) {
             app.key('Shift', { shiftKey: true, code: 'ShiftLeft' });
             assert.ok(ghost(app));
-            if (type === 'wheel') {
+            if (end === 'wheel') {
                 const Wheel = app.window.WheelEvent || app.window.MouseEvent;
                 app.document.body.dispatchEvent(new Wheel('wheel', { bubbles: true, shiftKey: false }));
-            } else {
-                pointer(app, type, app.document.body, { shiftKey: false });
+            } else if (end === 'pointerdown') {
+                pointer(app, 'pointerdown', app.document.body, { shiftKey: false });
                 pointer(app, 'pointerup', app.document.body, { shiftKey: false });
+                await later(app);
+            } else {
+                app.window.dispatchEvent(new app.window.Event('focus'));
             }
-            assert.ok(!ghost(app), `${type} without Shift ends it`);
+            assert.ok(solid(app), `${end} ends it`);
         }
-        // Window focus coming back ends it too.
+    }));
+
+test('Shift still held when the window gets focus back is picked up by the next event that says so', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
+        app.click(app.verse(16));
         app.key('Shift', { shiftKey: true, code: 'ShiftLeft' });
+        assert.ok(ghost(app));
         app.window.dispatchEvent(new app.window.Event('focus'));
-        assert.ok(!ghost(app), 'focus ends it');
+        assert.ok(solid(app), 'focus back lets go of what was held');
+        // Shift is still down: the next pointer move says so.
+        pointer(app, 'pointermove', app.verse(17), { shiftKey: true });
+        assert.ok(ghost(app), 'a pointer move with Shift makes it a ghost again');
+        await shiftClick(app, app.verse(18));
+        assert.deepEqual(app.selectedVerseNumbers(), [16, 17, 18]);
+        assert.ok(ghost(app));
+        // And a key with Shift does too (Shift+J extends the selection).
+        app.window.dispatchEvent(new app.window.Event('focus'));
+        assert.ok(solid(app));
+        app.key('J', { shiftKey: true, code: 'KeyJ' });
+        assert.ok(ghost(app), 'a key with Shift makes it a ghost again');
+        assert.deepEqual(app.selectedVerseNumbers(), [16, 17, 18, 19]);
+        app.document.body.dispatchEvent(new app.window.KeyboardEvent('keyup',
+            { key: 'Shift', code: 'ShiftLeft', shiftKey: false, bubbles: true }));
+        assert.ok(solid(app));
+    }));
+
+// A still mouse on a ghost no keyup ended: the press is the first event to
+// say Shift isn't held, but the browser has already hit-tested it through
+// the ghost, so it and its click land on the verse beneath. jsdom lays
+// nothing out, so the card is given a box, and the events go where the
+// webview would send them.
+function stillClick(app, target, x, y) {
+    const init = { bubbles: true, cancelable: true, button: 0, detail: 1, shiftKey: false, clientX: x, clientY: y };
+    pointer(app, 'pointerdown', target, init);
+    target.dispatchEvent(new app.window.MouseEvent('mousedown', init));
+    pointer(app, 'pointerup', target, init);
+    target.dispatchEvent(new app.window.MouseEvent('mouseup', init));
+    const click = new app.window.MouseEvent('click', init);
+    target.dispatchEvent(click);
+    return click;
+}
+
+const CARD_BOX = { left: 100, top: 200, right: 500, bottom: 400, width: 400, height: 200, x: 100, y: 200 };
+
+test('a still click inside a ghost no keyup ended is the card\'s: dropped, the selection kept, the card itself for the next', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
+        app.click(app.verse(16));
+        app.key('Shift', { shiftKey: true, code: 'ShiftLeft' });
+        assert.ok(ghost(app), 'a ghost, and no keyup will come');
+        card(app).getBoundingClientRect = () => CARD_BOX;
+        const click = stillClick(app, app.verse(17), 300, 300);
+        assert.ok(click.defaultPrevented, 'the click is dropped');
+        assert.deepEqual(app.selectedVerseNumbers(), [16], 'the selection is as it was');
+        await later(app);
+        assert.ok(solid(app), 'the card is itself for the next click');
+        await app.copyButton();
+        assert.ok(app.clipboardWrites.at(-1).endsWith('— John 3:16 (WEB)'), app.clipboardWrites.at(-1));
+        // Only that one click: the next on a verse selects it.
+        app.click(app.verse(18), { detail: 1 });
+        assert.deepEqual(app.selectedVerseNumbers(), [18]);
+    }));
+
+test('a still click outside the card on a ghost no keyup ended goes to the verse as usual', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
+        app.click(app.verse(16));
+        app.key('Shift', { shiftKey: true, code: 'ShiftLeft' });
+        card(app).getBoundingClientRect = () => CARD_BOX;
+        const click = stillClick(app, app.verse(20), 50, 50);
+        assert.ok(!click.defaultPrevented);
+        assert.deepEqual(app.selectedVerseNumbers(), [20], 'a plain click on verse 20');
+        await later(app);
+        assert.ok(solid(app));
     }));
 
 test('with both Shifts held, letting go of one leaves the card a ghost; letting go of the other ends it', () =>

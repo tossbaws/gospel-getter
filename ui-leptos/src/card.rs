@@ -225,6 +225,9 @@ struct State {
     /// A button went down on the ghost and hasn't come up yet: the card
     /// stays one until it does, so the button-up lands where the press did.
     ghost_press: bool,
+    /// The click of a press that found the card a ghost no keyup had ended:
+    /// it was aimed at the card but went through it, so it's dropped.
+    swallow_click: bool,
     /// The card's height when last placed by its observer.
     last_height: i32,
     /// Library lists asked for before the Library was there.
@@ -2030,7 +2033,10 @@ fn follow_shift(event: text::ShiftEvent) -> bool {
 
 fn release_shift() {
     follow_shift(text::ShiftEvent::LetGo);
-    with(|s| s.ghost_press = false);
+    with(|s| {
+        s.ghost_press = false;
+        s.swallow_click = false;
+    });
     sync_ghost();
 }
 
@@ -2045,11 +2051,27 @@ fn on_shift_key(event: &KeyboardEvent, down: bool) {
     sync_ghost();
 }
 
+/// Whether `event` happened inside the card's box.
+fn over_card(card: &Element, event: &web_sys::MouseEvent) -> bool {
+    let rect = card.get_bounding_client_rect();
+    let (x, y) = (f64::from(event.client_x()), f64::from(event.client_y()));
+    rect.width() > 0.0
+        && rect.height() > 0.0
+        && x >= rect.left()
+        && x <= rect.right()
+        && y >= rect.top()
+        && y <= rect.bottom()
+}
+
 /// A pointer or wheel event (`MouseEvent`'s `shiftKey`). These still reach
 /// the window while the card lets clicks through, so moving the mouse after
 /// letting go of Shift ends the ghost, keyup or not. A button going down on
 /// the ghost keeps it one until that button comes up and its click is done,
-/// so Shift let go first doesn't put the card under the button-up.
+/// so Shift let go first doesn't put the card under the button-up. And a
+/// button going down without Shift, with the mouse still, on a ghost no
+/// keyup ended: the browser has already aimed it through the card at the
+/// verse beneath, but the reader meant the card, so its click is dropped
+/// (the selection stays) and the card is itself for the next one.
 fn on_shift_pointer(event: &web_sys::MouseEvent) {
     let kind = event.type_();
     // A cancelled pointer says nothing of the keys: it only ends the press.
@@ -2059,21 +2081,31 @@ fn on_shift_pointer(event: &web_sys::MouseEvent) {
         });
     match kind.as_str() {
         "pointerdown" => {
+            let Some(els) = elements() else {
+                return;
+            };
+            let was_ghost = has_class(&els.card, "is-ghost");
             if changed {
                 sync_ghost();
             }
-            if event.button() == 0
-                && let Some(els) = elements()
-                && has_class(&els.card, "is-ghost")
-            {
+            if event.button() != 0 {
+                return;
+            }
+            if has_class(&els.card, "is-ghost") {
                 with(|s| s.ghost_press = true);
+            } else if was_ghost && !event.shift_key() && over_card(&els.card, event) {
+                with(|s| s.swallow_click = true);
             }
         }
         "pointerup" | "pointercancel" => {
             sync_ghost();
-            if with(|s| s.ghost_press) {
+            if with(|s| s.ghost_press || s.swallow_click) {
+                // After the gesture's click, which comes straight after.
                 let _ = later(0, || {
-                    with(|s| s.ghost_press = false);
+                    with(|s| {
+                        s.ghost_press = false;
+                        s.swallow_click = false;
+                    });
                     sync_ghost();
                 });
             }
@@ -2619,7 +2651,16 @@ pub fn mount() {
                 on_shift_pointer(&event);
             });
         }
+        // Before the page's own click dispatcher (on the body).
+        listen_capturing(&window, "click", |event: web_sys::MouseEvent| {
+            if with(|s| std::mem::take(&mut s.swallow_click)) {
+                event.prevent_default();
+                event.stop_propagation();
+            }
+        });
         dom::on(&window, "blur", |_| release_shift());
+        // Focus back: whatever was held may have been let go elsewhere; a
+        // Shift still down is picked up by the next event that says so.
         dom::on(&window, "focus", |_| release_shift());
         // The card grows as its notes load or a status line shows.
         if js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false) {

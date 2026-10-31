@@ -16,7 +16,9 @@
 //! card, then with real input (on Linux X events on the private display,
 //! on Windows WebDriver's): the Captain's two Shift-clicks and the card back
 //! when Shift is let go, a card opened by a Shift-click a ghost at once, one
-//! of two Shifts let go, and Shift let go before the mouse button (52).
+//! of two Shifts let go (on Linux: WebDriver has one Shift state), a still
+//! click on a ghost no keyup ended, and Shift let go before the mouse
+//! button (52).
 //! Screenshots in Chi Rho and Vellum.
 
 use anyhow::{Context, Result, bail, ensure};
@@ -101,6 +103,20 @@ const PASTE_BOX_JS: &str = "let box = document.getElementById('gui-check-paste')
 const VERSE_POINT_JS: &str = "const r = document.querySelector(arguments[0]).getBoundingClientRect();
     return [Math.round(r.left + Math.min(r.width / 2, 80)), Math.round(r.top + Math.min(r.height / 2, 8))];";
 
+/// The card's citation: words, no control, over the verses beneath.
+const CARD_CITATION: &str = "#selection-card .verse-actions-ref";
+
+/// A ghost no keyup will end: Shift's keydown, sent by the page itself, its
+/// keyup never. Then what follows is counted: pointer moves, and whether the
+/// next click was dropped.
+const STALE_GHOST_JS: &str = "document.body.dispatchEvent(new KeyboardEvent('keydown',
+        { key: 'Shift', code: 'ShiftLeft', shiftKey: true, bubbles: true, cancelable: true }));
+    const seen = { moves: 0, dropped: null };
+    window.guiCheckStill = seen;
+    window.addEventListener('pointermove', () => { seen.moves += 1; }, true);
+    window.addEventListener('click', (e) => { if (seen.dropped === null) seen.dropped = e.defaultPrevented; }, true);
+    return null;";
+
 /// Where the last pointer move was, in the page (`arguments[0]` true starts
 /// listening for it).
 const LAST_POINTER_JS: &str = "if (arguments[0]) { window.guiCheckPointer = null;
@@ -121,6 +137,8 @@ enum Input {
     Up(Shift),
     /// The pointer to verse n.
     To(u32),
+    /// The pointer to the card's citation (its words, no control).
+    ToCard,
     /// The left button down, then up.
     Press,
     Lift,
@@ -930,6 +948,14 @@ impl Run<'_> {
                                 .with_context(|| format!("no verse {n}"))?;
                             chain.move_to_element_center(&target)
                         }
+                        Input::ToCard => {
+                            let target = ui
+                                .driver()
+                                .find(By::Css(CARD_CITATION))
+                                .await
+                                .context("no citation on the card")?;
+                            chain.move_to_element_center(&target)
+                        }
                         Input::Press => chain.click_and_hold(),
                         Input::Lift => chain.release(),
                     };
@@ -942,8 +968,16 @@ impl Run<'_> {
                 bail!("no window named \"… Gospel Getter\" on the private display");
             };
             xvfb.xdotool(&["windowfocus", "--sync", window]).await?;
-            // The page's origin in the window, from where a move lands.
-            let offset = self.page_offset(xvfb, window).await?;
+            // The page's origin in the window, from where a move lands; only
+            // when the pointer moves (finding it moves the pointer).
+            let moves = inputs
+                .iter()
+                .any(|input| matches!(input, Input::To(_) | Input::ToCard));
+            let offset = if moves {
+                self.page_offset(xvfb, window).await?
+            } else {
+                (0, 0)
+            };
             for input in inputs {
                 match *input {
                     Input::Down(shift) | Input::Up(shift) => {
@@ -958,10 +992,14 @@ impl Run<'_> {
                         };
                         xvfb.xdotool(&[verb, key]).await?;
                     }
-                    Input::To(n) => {
-                        let point = ui.js(VERSE_POINT_JS, vec![json!(verse(n))]).await?;
+                    Input::To(_) | Input::ToCard => {
+                        let css = match *input {
+                            Input::To(n) => verse(n),
+                            _ => CARD_CITATION.to_owned(),
+                        };
+                        let point = ui.js(VERSE_POINT_JS, vec![json!(css)]).await?;
                         let (Some(x), Some(y)) = (point[0].as_i64(), point[1].as_i64()) else {
-                            bail!("no point on verse {n}: {point}");
+                            bail!("no point on {css}: {point}");
                         };
                         let (x, y) = ((x - offset.0).to_string(), (y - offset.1).to_string());
                         xvfb.xdotool(&["mousemove", "--window", window, "--sync", &x, &y])
@@ -1056,7 +1094,7 @@ impl Run<'_> {
     /// Check 52's real input: the Captain's sequence and the card's three
     /// other Shift cases.
     async fn shift_ghost_by_hand(&mut self) -> Result<String> {
-        use Input::{Down, Lift, Press, To, Up};
+        use Input::{Down, Lift, Press, To, ToCard, Up};
         let left = Shift::Left;
         let center = |n: u32| {
             format!(
@@ -1105,27 +1143,84 @@ impl Run<'_> {
         self.input("let go of Shift", &[Up(left)]).await?;
         self.wait_for_solid("the card to be itself").await?;
 
-        // Both Shifts: letting go of one leaves the ghost.
+        // Both Shifts: letting go of one leaves the ghost. Real input only:
+        // WebDriver's key input has one Shift state, which a keyup of either
+        // Shift clears (so its events say Shift is up while the other is
+        // still down), so on Windows this can't be sent.
+        let both_shifts = self.config.xvfb.is_some();
+        if both_shifts {
+            self.plain_reading().await?;
+            self.ui.js(&center(17), Vec::new()).await?;
+            self.click_verse(16).await?;
+            self.wait_for_selection(16, 16).await?;
+            self.input(
+                "both Shifts down, the left let go",
+                &[Down(left), Down(Shift::Right), Up(left)],
+            )
+            .await?;
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            self.wait_for_range_ghost(16, 16, true).await?;
+            self.input(
+                "click verse 18, the right Shift still down",
+                &[To(18), Press, Lift],
+            )
+            .await?;
+            self.wait_for_range_ghost(16, 18, true).await?;
+            self.input("let go of the right Shift", &[Up(Shift::Right)])
+                .await?;
+            self.wait_for_solid("the card to be itself once both are let go")
+                .await?;
+        }
+
+        // A ghost no keyup ended, and a click with the mouse still, inside
+        // the card: aimed at the card, it mustn't go through to the verse.
         self.plain_reading().await?;
         self.ui.js(&center(17), Vec::new()).await?;
         self.click_verse(16).await?;
         self.wait_for_selection(16, 16).await?;
-        self.input(
-            "both Shifts down, the left let go",
-            &[Down(left), Down(Shift::Right), Up(left)],
-        )
-        .await?;
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        self.wait_for_range_ghost(16, 16, true).await?;
-        self.input(
-            "click verse 18, the right Shift still down",
-            &[To(18), Press, Lift],
-        )
-        .await?;
-        self.wait_for_range_ghost(16, 18, true).await?;
-        self.input("let go of the right Shift", &[Up(Shift::Right)])
+        self.input("the pointer onto the card's citation", &[ToCard])
             .await?;
-        self.wait_for_solid("the card to be itself once both are let go")
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        self.ui.js(STALE_GHOST_JS, Vec::new()).await?;
+        self.wait_for_ghost(true, "the card to be a ghost no keyup will end")
+            .await?;
+        self.input("click, the mouse still", &[Press, Lift]).await?;
+        let still = self
+            .wait_for_solid("the card to be itself after the still click")
+            .await?;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let kept = self.wait_for_selection(16, 16).await?;
+        ensure!(
+            kept["ghost"] == false,
+            "the card is a ghost again after the still click: {kept}"
+        );
+        let how = self
+            .ui
+            .js("return window.guiCheckStill || null;", Vec::new())
+            .await?;
+        let ended_by = if how["moves"].as_u64().unwrap_or(0) > 0 {
+            format!(
+                "a pointer move the webview sent before the press ({} moves), the press on the card",
+                how["moves"]
+            )
+        } else if how["dropped"] == true {
+            "the press itself, its click dropped".to_owned()
+        } else {
+            bail!(
+                "the still click wasn't dropped and nothing else ended the ghost: {how}, {still}"
+            );
+        };
+        self.ui
+            .click("click Copy on the card", ".verse-copy-btn")
+            .await?;
+        self.ui
+            .wait(
+                "Copy to say it copied",
+                &format!(
+                    "const seen = (() => {{ {CARD_JS} }})();
+                     return [!!seen.status && seen.status.startsWith('Copied '), seen];"
+                ),
+            )
             .await?;
 
         // Shift let go before the button comes up: the Shift-click holds.
@@ -1149,13 +1244,19 @@ impl Run<'_> {
         Ok(format!(
             "by hand ({}): two Shift-clicks, Shift let go, the card itself (opacity {}) and Copy \
              clicked on it; a card opened by a Shift-click a ghost at once; one of two Shifts let \
-             go, still a ghost; Shift let go before the button, 16–18 kept",
+             go, {}; a still click on a ghost no keyup ended: 16 kept, the card itself \
+             (ended by {ended_by}), Copy clicked on it; Shift let go before the button, 16–18 kept",
             if self.config.xvfb.is_some() {
                 "X events on the private display"
             } else {
                 "WebDriver's actions"
             },
             back["opacity"],
+            if both_shifts {
+                "still a ghost"
+            } else {
+                "not sent (WebDriver keeps one Shift state)"
+            },
         ))
     }
 

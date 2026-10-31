@@ -11,7 +11,10 @@ versions follow [Semantic Versioning](https://semver.org/).
   card could stay faint and unclickable once you let go of Shift. On
   Wayland with an input method such as fcitx5, the app may never hear
   Shift come up; it now also goes by the mouse and keyboard themselves,
-  so the card comes back at the latest when the mouse moves.
+  so the card comes back at the latest when the mouse moves. Clicking
+  the card before you've moved the mouse brings it back too, and leaves
+  your selection as it was, instead of going through to the verse
+  underneath.
 - With both Shift keys held, letting go of one brought the card back while
   the other was still down, so the next Shift-click landed on the card.
   It stays faint until you let go of both.

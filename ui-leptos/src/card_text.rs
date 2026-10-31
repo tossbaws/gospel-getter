@@ -1251,6 +1251,13 @@ mod tests {
         assert!(after(&[down(None, true)]).any());
         assert!(after(&[up(None, true)]).any());
         assert!(!after(&[pointer(true), pointer(false)]).any());
+        // Window focus back with Shift still down: let go of, then picked
+        // up again by the next pointer or key event that says Shift.
+        let refocused = [down(LEFT, true), ShiftEvent::LetGo];
+        assert!(!after(&refocused).any());
+        assert!(after(&[&refocused[..], &[pointer(true)]].concat()).any());
+        assert!(after(&[&refocused[..], &[down(None, true)]].concat()).any());
+        assert!(after(&[&refocused[..], &[down(LEFT, true)]].concat()).any());
         // Its keyup, either side, lets go of it.
         assert!(!after(&[pointer(true), up(LEFT, true)]).any());
         assert!(!after(&[pointer(true), up(RIGHT, true)]).any());
