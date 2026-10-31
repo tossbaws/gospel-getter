@@ -502,7 +502,7 @@ impl Run<'_> {
                  const nav = performance.getEntriesByType('navigation')[0];
                  const seen = { heading: heading ? heading.textContent.trim() : null, verses: verses.length,
                      inner: !!document.getElementById('reading-pane-inner'), title: document.title,
-                     notice: notice.hidden ? '' : notice.textContent,
+                     notice: notice ? (notice.hidden ? '' : notice.textContent) : null,
                      loaded: nav ? Math.round(nav.domContentLoadedEventEnd) : null };
                  return [seen.heading === arguments[0] && seen.verses > 0 && seen.inner
                      && seen.title.startsWith(arguments[0]) && seen.notice === '', seen];",

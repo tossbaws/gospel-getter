@@ -55,7 +55,7 @@ const LOOK_JS: &str = "const data = document.documentElement.dataset;
              display: style ? style.display : null,
              column: main ? parseFloat(getComputedStyle(main).maxWidth) : null,
              columnNow: main ? Math.round(main.getBoundingClientRect().width) : null,
-             background: getComputedStyle(document.body).backgroundColor };";
+             background: document.body ? getComputedStyle(document.body).backgroundColor : null };";
 
 /// What Aa shows: its choices marked, the size's name, the stepper's ends.
 const AA_JS: &str =
