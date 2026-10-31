@@ -10,7 +10,7 @@ search the whole Bible, compare any two translations verse by verse, and
 copy, bookmark or write notes on passages. No account and no network
 needed.
 
-![The reading view in the Chi Rho theme (parchment text on near-black, gold headings): John 3 in the KJV in the centre, with John 2 and John 4 faded on either side. The bar's reference button says "John 3 · KJV", its translation button "KJV" beside Aa, and the sidebar on the left lists the books, with John's chapters open and 3 marked. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes](screenshots/reading-neighboring-chapters.png)
+![The reading view in the Chi Rho theme (parchment text on near-black, gold headings): John 3 in the KJV in the centre, with John 2 and John 4 faded on either side. In the bar, Back and Forward (dimmed, with nowhere to go yet) with ▾ (Recent places) between them, then the reference button "John 3 · KJV" between the chapter arrows ‹ and ›, and the translation button "KJV" beside Aa; and the sidebar on the left lists the books, with John's chapters open and 3 marked. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes](screenshots/reading-neighboring-chapters.png)
 
 ## Features
 
@@ -23,13 +23,14 @@ needed.
   through the list. **About Gospel Getter** credits where each text
   comes from (see [Translations](#translations)).
 
-  ![John 3 in the Berean Standard Bible in the Chi Rho theme, with John 2 and John 4 faded on either side. The bar's reference button says "John 3 · BSB" and its translation button "BSB", and small letters after verses 3 and 7 mark the BSB's footnotes](screenshots/bsb.png)
+  ![John 3 in the Berean Standard Bible in the Chi Rho theme, with John 2 and John 4 faded on either side. The bar's reference button, between the chapter arrows ‹ and ›, says "John 3 · BSB" and its translation button "BSB", and small letters after verses 3 and 7 mark the BSB's footnotes](screenshots/bsb.png)
 
-  ![The translation button's popover open in the Chi Rho theme, hanging from the "KJV" button in the top bar, beside Aa, over John 3 in the KJV. Under a Translation heading, three rows: KJV · King James Version · 1611/1769 · public domain, chosen; BSB · Berean Standard Bible · 2023 · public domain; and WEB · World English Bible · public domain. Below them, Compare (C) with BSB or WEB, with WEB chosen as the one to compare with](screenshots/translation-button.png)
+  ![The translation button's popover open in the Chi Rho theme, hanging from the "KJV" button at the right of the top bar, beside Aa, over John 3 in the KJV; at the left of the bar are Back, ▾ and Forward, and the reference between ‹ and ›. Under a Translation heading, three rows: KJV · King James Version · 1611/1769 · public domain, chosen; BSB · Berean Standard Bible · 2023 · public domain; and WEB · World English Bible · public domain. Below them, Compare (C) with BSB or WEB, with WEB chosen as the one to compare with](screenshots/translation-button.png)
 - **Read in context.** The chapter you're reading sits in the middle with
   the previous and next chapters faded on either side, scrolling with it.
-  ← and → turn chapters across the whole Bible, and each chapter ends with
-  buttons for the previous and next chapter.
+  ← and → (or ‹ and › either side of the reference in the bar) turn
+  chapters across the whole Bible, and each chapter ends with buttons for
+  the previous and next chapter.
 - **Go to any chapter.** The reference button at the left of the bar
   (`John 3 · KJV`) always says where you are. It, or `G`, opens the book
   and chapter picker: **Random chapter**, then the Old and New Testament
@@ -40,7 +41,9 @@ needed.
   jumps to references such as `John 3:16`, `jn 3:16-18`, `1 Cor 13` or
   `Psalm 23`, and searches the text for anything else. Results show every
   verse in the current translation containing all your words, in Bible
-  order, with the words highlighted. Type a book's name, like `Psalms` or
+  order, with the words highlighted. Put words in quotes, like
+  `"love one another"`, to find them together in that order, with or
+  without other words. Type a book's name, like `Psalms` or
   `1 John`, to go straight to its first chapter, with the verses that
   mention it listed below. The same box runs commands: as you type, it
   lists **Go to**, **Commands** and **Verses**, in that order, and each
@@ -89,9 +92,11 @@ needed.
   notes…** (in the Library's Notes tab) saves them as a Markdown file, or
   with **One file per book (a folder)** a file for each book, as notes
   apps such as Obsidian keep them, with each note's verses quoted in the
-  translation you're reading. Pick which books to include, a chapter range
-  when you pick one book, and when the notes were written (All time, Last
-  7 days, Last 30 days, This year or Custom dates); a live count shows
+  translation you're reading, or as a **Commentary** (your notes by verse
+  number, without the Bible text), which **Print…** also prints. Pick
+  which books to include, a chapter range when you pick one book, and
+  when the notes were written (All time, Last 7 days, Last 30 days, This
+  year or Custom dates); a live count shows
   how many notes match. In the KJV, translator-supplied words appear in
   italics, as in printed KJVs, and the margin notes are left out.
 
@@ -122,8 +127,9 @@ needed.
   app. Nine themes: Chi Rho (the default), Vellum, System (which follows
   your computer's light or dark setting, as Vellum or Chi Rho), Vaporwave,
   Classic Dark, Classic Light, Matrix, Beast Slayer and Hot Pink. Four text
-  sizes (also Ctrl+= and Ctrl+-, and Ctrl+0 for Medium), three line
-  spacings, three widths for the text (Narrow, Normal and Wide), a
+  sizes (also Ctrl+= and Ctrl+-, and Ctrl+0 for Medium), which also
+  enlarge the card, menus, Library, picker, search and margin notes, three
+  line spacings, three widths for the text (Narrow, Normal and Wide), a
   layout, and a distraction-free reading mode, all under **Aa**. Printing
   is always black on white.
 - **Notes in the margin.** In reading mode, your notes on the chapter sit
@@ -142,16 +148,19 @@ needed.
 
   ![John 3 in the KJV in the Flowing layout, in the Chi Rho theme: the verses run on as paragraphs, each starting after a small raised number, with John 2 and John 4 faded on either side, also flowing. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes. The sidebar on the left lists the books, with John's chapters open and 3 marked](screenshots/flowing.png)
 - **Everything in reach, out of the way.** A slim bar at the top holds
-  the reference button (and, on wide windows, the button that hides or
-  shows the sidebar), the translation button (the translations and
-  Compare), **Aa** (text and display), the **Library**
-  (bookmarks, highlights and notes), search and the **☰** menu (export,
-  import, the welcome, the keyboard shortcuts and **About Gospel
-  Getter**). Only one panel or popover opens at a time, and Esc closes it.
-- **Back and forward through passages.** Alt+← and Alt+→ go back and
-  forward through the passages you jumped to (from the picker, search,
-  cross-references or the Library), each where you left it. Turning
-  chapters isn't a jump, and the list lasts until the app closes.
+  Back and Forward, the reference button with ‹ and › (and, on wide
+  windows, the button that hides or shows the sidebar), the translation
+  button (the translations and Compare), **Aa** (text and display), the
+  **Library** (bookmarks, highlights and notes), search and the **☰**
+  menu (export, import, the welcome, the keyboard shortcuts and **About
+  Gospel Getter**). Only one panel or popover opens at a time, and Esc
+  closes it.
+- **Back and forward through passages.** Back and Forward in the bar, or
+  Alt+← and Alt+→, go back and forward through the passages you jumped to
+  (from the picker, search, cross-references or the Library), each where
+  you left it. Turning chapters isn't a jump, and the list lasts until the
+  app closes. ▾, between them, lists **Recent places**: the last 10
+  places you went to, one per chapter, kept after the app closes.
 - **Keys for verses and books.** `j` and `k` select the next or previous
   verse, Shift+j and Shift+k extend the selection, and `[` and `]` go to
   the previous or next book. `?` lists every shortcut (see
@@ -203,11 +212,12 @@ Chi Rho, the default theme, in a window wide enough for the picker's
 sidebar. The other eight themes are under **Aa**.
 
 **Search the text, or jump straight to a reference.** Matching words are
-highlighted, and clicking a result opens and selects that verse. Type a
+highlighted, and clicking a result opens and selects that verse. Words in
+quotes, as here, are found as a phrase, together and in that order. Type a
 book's name, like `Psalms` or `1 John`, to go straight to its first
 chapter, with the verses that mention it listed below.
 
-![The search panel in the Chi Rho theme, listing under a Verses heading the World English Bible verses that contain "love one another", with the words highlighted](screenshots/search-results.png)
+![The search panel in the Chi Rho theme, with "love one another" typed in quotes: "12 verses in the WEB", listed under a Verses heading from John 13:34, each with the phrase highlighted](screenshots/search-results.png)
 
 **Compare two translations verse by verse.** Reading the KJV, compared with
 the WEB: in Romans 14 the WEB numbers three verses the KJV doesn't, and
@@ -323,15 +333,15 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.20.0?** Each updates itself to 2.21.0: it
+**Coming from 2.6.0 through 2.21.0?** Each updates itself to 2.22.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
-update themselves. The 2.19.0 pre-release updates itself to 2.21.0 the
+update themselves. The 2.19.0 pre-release updates itself to 2.22.0 the
 same way.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.21.0 by hand once, from the
+Install 2.22.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -364,6 +374,8 @@ Upgrading keeps your data.
 - Note drafts (what you typed in a note and haven't saved) are kept in the
   app's web storage, on this computer only, for 30 days (the 20 newest).
   Backups and **Export notes…** don't include them.
+- **Recent places** (the bar's ▾ list, the last 10) are kept in the app's
+  web storage, on this computer only. Backups don't include them.
 - The window's size and place are kept in `window-state.json`, beside the
   database, and aren't exported either.
 - Coming from the old browser-based Gospel Getter (the local server on

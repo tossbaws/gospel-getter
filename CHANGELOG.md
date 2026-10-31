@@ -4,6 +4,49 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.22.0] - 2026-10-30
+
+Back, Forward and Recent places in the bar, chapter arrows, exact-phrase
+search, a commentary of your notes to export or print, and panels that
+grow with Text size. Updating keeps your bookmarks, highlights, notes,
+reading position and settings.
+
+### Added
+- Back and Forward buttons in the top bar, left of the reference. They do
+  what Alt+← and Alt+→ do, and each one's tooltip says where it goes
+  ("Back to Psalms 23"); with nowhere to go, it's dimmed. Between them, ▾
+  opens Recent places: the last 10 places you went to on purpose (from
+  the picker, search, a link, the Library or Back and Forward), newest
+  first, one per chapter, each with its translation, and the one you're
+  on marked "you are here". Choosing one opens it in the translation you
+  read it in. Turning chapters adds nothing. Unlike Back and Forward,
+  the list lasts after the app closes. It's kept on this computer only,
+  and neither backups nor exports include it. In a narrow window Forward
+  is the first item in that menu.
+- ‹ and › either side of the reference turn to the previous and next
+  chapter, as ← and → do, and their tooltips name it ("Next chapter: John
+  4"). At Genesis 1 and Revelation 22 the one with nowhere to go is
+  dimmed. The bar's new buttons aren't shown in reading mode.
+- Exact-phrase search: put words in quotes, such as "love one another",
+  to find verses with those words together, in that order. Straight or
+  curly quotes both work, and a phrase mixes with other words: `"love one
+  another" commandment` finds verses with the phrase and the word. A
+  quote that isn't closed counts as ordinary words, and `"John 3:16"` in
+  quotes searches for those words instead of going to the verse.
+- Export notes has a Commentary layout, "Commentary (notes by verse
+  number)": your notes under book and chapter headings, each after its
+  verse numbers ("3:16–18"), in Bible order, without the Bible text. It
+  takes the same choices of books, chapters and dates, and works with one
+  file per book. With it chosen, Print… prints the commentary.
+
+### Changed
+- The selection card, the menus and popovers, the Library, the picker,
+  search and the notes in the margin now grow with Text size, a little
+  less than the text does. At Medium they're as before, and the top bar
+  keeps its size.
+- The neighboring chapters on either side are a little fainter, and
+  lighten more gently on hover.
+
 ## [2.21.0] - 2026-10-28
 
 Search your notes, drafts kept while you write, Markdown and linked

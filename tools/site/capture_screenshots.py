@@ -386,11 +386,11 @@ def readme_scenes(theme):
                 await __gg.until(() => !document.getElementById('translation-popover').hidden
                     && document.querySelector('#translation-choices [aria-checked="true"]'), 'the translations');
              """),
-        # Searching the words of the text.
+        # Searching the words of the text, as a phrase in quotes.
         dict(name="search-results", size=(1280, 1000), prefs=look, position=("John", 3, "web"),
              steps="""
                 __gg.click(document.getElementById('search-toggle'));
-                __gg.type(document.getElementById('search-input'), 'love one another');
+                __gg.type(document.getElementById('search-input'), '"love one another"');
                 await __gg.until(() => document.querySelector('#search-results .search-result'), 'results');
                 window.scrollTo(0, 0);
              """),

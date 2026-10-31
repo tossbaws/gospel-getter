@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "gospel_getter"
-version = "2.21.0"
+version = "2.22.0"
 dependencies = [
  "anyhow",
  "chrono",
