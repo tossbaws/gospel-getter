@@ -67,7 +67,8 @@ impl Run<'_> {
     /// the first one left (`left`, what it saved) is back at the top.
     pub(super) async fn reopened_at_verse(&mut self, left: &Value) -> Result<String> {
         const AT_JS: &str = "const want = arguments[0];
-             const bar = document.getElementById('top-bar').getBoundingClientRect().bottom;
+             const top = document.getElementById('top-bar');
+             const bar = top ? top.getBoundingClientRect().bottom : null;
              const verse = document.querySelector(
                  `.chapter-main .verse[data-verse=\"${want.verse}\"][data-translation=\"${want.translationCode}\"]`);
              const inner = document.getElementById('reading-pane-inner');
@@ -75,7 +76,7 @@ impl Run<'_> {
                  y: window.scrollY, book: inner ? Number(inner.dataset.currentBook) : null,
                  chapter: inner ? Number(inner.dataset.currentChapter) : null,
                  heading: (document.querySelector('.chapter-main .chapter-heading') || {}).textContent };
-             return [verse !== null && seen.book === want.bookId && seen.chapter === want.chapter
+             return [verse !== null && bar !== null && seen.book === want.bookId && seen.chapter === want.chapter
                  && Math.abs(seen.at - want.offset) <= 1, seen];";
         let seen = self
             .ui

@@ -488,28 +488,25 @@ impl Run<'_> {
             .await
     }
 
-    /// Clicks the reference `text` in the note at `selector`.
+    /// Clicks the reference `text` in the note at `selector`, once it's
+    /// there: a card's notes arrive after the card itself.
     async fn click_reference(&self, selector: &str, text: &str) -> Result<()> {
-        let marked = self
-            .ui
-            .js(
+        self.ui
+            .wait_with(
+                &format!("the reference {text} in {selector}"),
                 "document.querySelectorAll('[data-gui-check-target]').forEach((el) => el.removeAttribute('data-gui-check-target'));
-                 const link = [...document.querySelectorAll(arguments[0] + ' a.note-ref-link')]
-                     .find((a) => a.textContent === arguments[1]);
-                 if (!link) return false;
+                 const links = [...document.querySelectorAll(arguments[0] + ' a.note-ref-link')];
+                 const link = links.find((a) => a.textContent === arguments[1]);
+                 if (!link) return [false, { links: links.map((a) => a.textContent) }];
                  // Its note into view, not the link within it: a note's text
                  // is cut to its lines (overflow hidden), which scrolling
                  // the link into view would scroll too.
                  (link.closest('.note-item, .note-card, .margin-note') || link).scrollIntoView({ block: 'center' });
                  link.setAttribute('data-gui-check-target', '');
-                 return true;",
+                 return [true, { links: links.map((a) => a.textContent) }];",
                 vec![serde_json::json!(selector), serde_json::json!(text)],
             )
             .await?;
-        ensure!(
-            marked == Value::Bool(true),
-            "no reference {text} in {selector}"
-        );
         self.ui
             .click(
                 &format!("click the reference {text}"),

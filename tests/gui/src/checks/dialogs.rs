@@ -258,7 +258,17 @@ impl Run<'_> {
             )
             .await?;
 
-        // Unsaved text, then Escape: it asks first.
+        // Unsaved text, then Escape: it asks first. The card's notes are
+        // drawn again after the save, after the card itself.
+        ui.wait_with(
+            "the card's note to show the edit, with its Edit",
+            "const card = document.querySelector('.verse-notes .note-card-body');
+             const edit = document.querySelector('.verse-notes .note-edit');
+             return [!!card && card.textContent === arguments[0] && !!edit,
+                 { card: card && card.textContent, edit: !!edit }];",
+            vec![json!(EDITED_TEXT)],
+        )
+        .await?;
         ui.click("the card's Edit", ".verse-notes .note-edit")
             .await?;
         self.focus_on("the editor to open again, focus in its text", "note-input")

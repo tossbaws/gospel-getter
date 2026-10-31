@@ -90,6 +90,31 @@ impl Ui {
         }
     }
 
+    /// [`Ui::timed_out`] for a wait, with the error its script last threw.
+    fn wait_timed_out(
+        what: &str,
+        limit: Duration,
+        by_budget: bool,
+        seen: &Value,
+        thrown: Option<anyhow::Error>,
+    ) -> anyhow::Error {
+        let e = Self::timed_out(what, limit, by_budget, Some(seen));
+        match thrown {
+            Some(thrown) => anyhow!("{e:#}; the script last threw: {thrown:#}"),
+            None => e,
+        }
+    }
+
+    /// Whether `e` is the page's script throwing, not WebDriver failing.
+    fn script_threw(e: &anyhow::Error) -> bool {
+        e.downcast_ref::<WebDriverError>().is_some_and(|e| {
+            matches!(
+                e.as_inner(),
+                thirtyfour::error::WebDriverErrorInner::JavascriptError(_)
+            )
+        })
+    }
+
     /// Runs `action` as the step `what`, within its time limit.
     pub async fn step<T>(&self, what: &str, action: impl Future<Output = Result<T>>) -> Result<T> {
         self.step_within(what, None, action).await
@@ -136,8 +161,9 @@ impl Ui {
     }
 
     /// Waits until `script` (which returns `[ready, seen]`) says it is
-    /// ready, and returns what it saw then. On a timeout, the error has what
-    /// it saw last.
+    /// ready, and returns what it saw then. A script that throws (the page
+    /// still loading, say) isn't ready yet. On a timeout, the error has what
+    /// it saw last, and the script's last error.
     pub async fn wait(&self, what: &str, script: &str) -> Result<Value> {
         self.wait_with(what, script, Vec::new()).await
     }
@@ -165,19 +191,21 @@ impl Ui {
         self.log(&format!("wait: {what}"));
         let begun = Instant::now();
         let mut last = Value::Null;
+        let mut thrown: Option<anyhow::Error> = None;
         loop {
             let left = limit.saturating_sub(begun.elapsed());
             if left.is_zero() {
-                let e = Self::timed_out(what, limit, by_budget, Some(&last));
+                let e = Self::wait_timed_out(what, limit, by_budget, &last, thrown);
                 self.log(&format!("  FAILED: {e:#}"));
                 return Err(e);
             }
             match timeout(left, self.js(script, args.clone())).await {
                 Err(_) => {
-                    let e = Self::timed_out(what, limit, by_budget, Some(&last));
+                    let e = Self::wait_timed_out(what, limit, by_budget, &last, thrown);
                     self.log(&format!("  FAILED: {e:#}"));
                     return Err(e);
                 }
+                Ok(Err(e)) if Self::script_threw(&e) => thrown = Some(e),
                 Ok(Err(e)) => {
                     let e = e.context(format!("WebDriver failed while waiting for \"{what}\""));
                     self.log(&format!("  FAILED: {e:#}"));
