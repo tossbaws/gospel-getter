@@ -518,6 +518,116 @@ pub fn highlight_controls(colors: &[Option<&str>]) -> ([bool; 4], bool) {
     (pressed, colors.iter().any(Option::is_some))
 }
 
+// ---- Shift, for the card's ghost.
+
+/// Which Shift keys are held, as the events have told it: the left and the
+/// right by their `code`, and a Shift seen only in an event's `shiftKey`
+/// (its own keydown never came, or didn't say which).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ShiftHeld {
+    left: bool,
+    right: bool,
+    unsided: bool,
+}
+
+impl ShiftHeld {
+    /// Whether any Shift is held.
+    pub fn any(self) -> bool {
+        self.left || self.right || self.unsided
+    }
+}
+
+/// Which Shift a key is, by its `key` and `code`; `None` for any other key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShiftKey {
+    Left,
+    Right,
+    /// A Shift that doesn't say which (no `code`).
+    Unsided,
+}
+
+/// Which Shift `key` and `code` are, if either.
+pub fn shift_key(key: &str, code: &str) -> Option<ShiftKey> {
+    match code {
+        "ShiftLeft" => Some(ShiftKey::Left),
+        "ShiftRight" => Some(ShiftKey::Right),
+        _ => (key == "Shift").then_some(ShiftKey::Unsided),
+    }
+}
+
+/// What happened, for the Shift rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShiftEvent {
+    /// A key went down: a Shift, or another key; `shift` is its `shiftKey`.
+    KeyDown { key: Option<ShiftKey>, shift: bool },
+    /// A key came up, as `KeyDown`.
+    KeyUp { key: Option<ShiftKey>, shift: bool },
+    /// The pointer moved, a button went down or up, or the wheel turned;
+    /// `shift` is its `shiftKey`.
+    Pointer { shift: bool },
+    /// The window lost focus, was hidden or got focus back: whatever was
+    /// held may have been let go somewhere else.
+    LetGo,
+}
+
+/// Which Shift keys are held after `event`. Every event's own modifier
+/// state is the truth: one whose `shiftKey` is false means none is held,
+/// whatever keyups did or didn't arrive (on Wayland with an input method,
+/// Shift's keyup may never reach the page). A Shift's keyup lets go of that
+/// one only, so the other Shift still holds it (WebKitGTK's keyup of a
+/// Shift still says `shiftKey`, so that can't tell).
+pub fn shift_after(held: ShiftHeld, event: ShiftEvent) -> ShiftHeld {
+    let none = ShiftHeld::default();
+    // A `shiftKey` with no Shift known to be down: one is, unsaid which.
+    let seen = |held: ShiftHeld| {
+        if held.any() {
+            held
+        } else {
+            ShiftHeld {
+                unsided: true,
+                ..held
+            }
+        }
+    };
+    match event {
+        ShiftEvent::LetGo
+        | ShiftEvent::Pointer { shift: false }
+        | ShiftEvent::KeyDown {
+            key: None,
+            shift: false,
+        } => none,
+        ShiftEvent::Pointer { shift: true } | ShiftEvent::KeyDown { key: None, .. } => seen(held),
+        ShiftEvent::KeyDown { key: Some(key), .. } => match key {
+            ShiftKey::Left => ShiftHeld { left: true, ..held },
+            ShiftKey::Right => ShiftHeld {
+                right: true,
+                ..held
+            },
+            ShiftKey::Unsided => ShiftHeld {
+                unsided: true,
+                ..held
+            },
+        },
+        ShiftEvent::KeyUp { shift: false, .. } => none,
+        ShiftEvent::KeyUp { key: None, .. } => seen(held),
+        ShiftEvent::KeyUp { key: Some(key), .. } => match key {
+            // Let go of one: the other may still be down. A Shift held
+            // unsaid could have been this one.
+            ShiftKey::Left => ShiftHeld {
+                left: false,
+                unsided: false,
+                ..held
+            },
+            ShiftKey::Right => ShiftHeld {
+                right: false,
+                unsided: false,
+                ..held
+            },
+            ShiftKey::Unsided => none,
+        },
+    }
+}
+
 // ---- Where the card goes.
 //
 // Measured each time it opens or its contents change (not on scroll: it's
@@ -1062,6 +1172,93 @@ mod tests {
         let column = rect(0.0, 40.0, 0.0, 0.0);
         assert_eq!(card_top(Side::Below, column, &r, 200.0), 668.0);
         assert_eq!(card_top(Side::Above, column, &r, 200.0), 252.0);
+    }
+
+    fn after(events: &[ShiftEvent]) -> ShiftHeld {
+        events
+            .iter()
+            .fold(ShiftHeld::default(), |held, &e| shift_after(held, e))
+    }
+
+    fn down(key: Option<ShiftKey>, shift: bool) -> ShiftEvent {
+        ShiftEvent::KeyDown { key, shift }
+    }
+
+    fn up(key: Option<ShiftKey>, shift: bool) -> ShiftEvent {
+        ShiftEvent::KeyUp { key, shift }
+    }
+
+    const LEFT: Option<ShiftKey> = Some(ShiftKey::Left);
+    const RIGHT: Option<ShiftKey> = Some(ShiftKey::Right);
+
+    #[test]
+    fn shift_keys_are_told_by_code_then_key() {
+        assert_eq!(shift_key("Shift", "ShiftLeft"), LEFT);
+        assert_eq!(shift_key("Shift", "ShiftRight"), RIGHT);
+        assert_eq!(shift_key("Shift", ""), Some(ShiftKey::Unsided));
+        assert_eq!(shift_key("J", "KeyJ"), None);
+        assert_eq!(shift_key("Control", "ControlLeft"), None);
+    }
+
+    #[test]
+    fn shift_is_held_from_its_keydown_to_its_keyup() {
+        let pointer = |shift| ShiftEvent::Pointer { shift };
+        assert!(!after(&[]).any());
+        assert!(after(&[down(LEFT, true)]).any());
+        assert!(after(&[down(LEFT, true), pointer(true), pointer(true)]).any());
+        // Chrome's and WebView2's keyup of Shift says shiftKey false;
+        // WebKitGTK's says true. Either lets go.
+        assert!(!after(&[down(LEFT, true), up(LEFT, false)]).any());
+        assert!(!after(&[down(LEFT, true), up(LEFT, true)]).any());
+        assert!(!after(&[down(RIGHT, true), up(RIGHT, true)]).any());
+        let unsided = Some(ShiftKey::Unsided);
+        assert!(after(&[down(unsided, true)]).any());
+        assert!(!after(&[down(unsided, true), up(unsided, true)]).any());
+    }
+
+    #[test]
+    fn any_event_without_shift_lets_go_with_no_keyup() {
+        let pointer = |shift| ShiftEvent::Pointer { shift };
+        // The Captain's Wayland: Shift down, two Shift-clicks, no keyup;
+        // the pointer moves without Shift.
+        let clicks = [down(LEFT, true), pointer(true), pointer(true)];
+        assert!(!after(&[&clicks[..], &[pointer(false)]].concat()).any());
+        assert!(!after(&[&clicks[..], &[down(None, false)]].concat()).any());
+        assert!(!after(&[&clicks[..], &[up(None, false)]].concat()).any());
+        // Even with both held: shiftKey false means neither is.
+        assert!(!after(&[down(LEFT, true), down(RIGHT, true), pointer(false)]).any());
+        // Focus moving away, a hidden window, focus coming back.
+        assert!(!after(&[down(LEFT, true), ShiftEvent::LetGo]).any());
+    }
+
+    #[test]
+    fn letting_go_of_one_shift_keeps_the_other() {
+        let both = [down(LEFT, true), down(RIGHT, true)];
+        assert!(after(&[&both[..], &[up(LEFT, true)]].concat()).any());
+        assert!(after(&[&both[..], &[up(RIGHT, true)]].concat()).any());
+        assert!(!after(&[&both[..], &[up(LEFT, true), up(RIGHT, true)]].concat()).any());
+        assert!(!after(&[&both[..], &[up(RIGHT, true), up(LEFT, false)]].concat()).any());
+        // Autorepeat of the one still down changes nothing.
+        assert!(after(&[&both[..], &[up(LEFT, true), down(RIGHT, true)]].concat()).any());
+    }
+
+    #[test]
+    fn shift_seen_only_in_shift_key_is_held() {
+        let pointer = |shift| ShiftEvent::Pointer { shift };
+        // Shift went down in another window: the first event that says so
+        // holds it, and the pointer without it lets go.
+        assert!(after(&[pointer(true)]).any());
+        assert!(after(&[down(None, true)]).any());
+        assert!(after(&[up(None, true)]).any());
+        assert!(!after(&[pointer(true), pointer(false)]).any());
+        // Its keyup, either side, lets go of it.
+        assert!(!after(&[pointer(true), up(LEFT, true)]).any());
+        assert!(!after(&[pointer(true), up(RIGHT, true)]).any());
+        // Another key with Shift changes nothing already known.
+        assert_eq!(
+            after(&[down(RIGHT, true), down(None, true)]),
+            after(&[down(RIGHT, true)])
+        );
     }
 
     #[test]

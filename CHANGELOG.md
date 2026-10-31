@@ -4,6 +4,25 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- On Linux, after you held Shift to Shift-click more verses, the selection
+  card could stay faint and unclickable once you let go of Shift. On
+  Wayland with an input method such as fcitx5, the app may never hear
+  Shift come up; it now also goes by the mouse and keyboard themselves,
+  so the card comes back at the latest when the mouse moves.
+- With both Shift keys held, letting go of one brought the card back while
+  the other was still down, so the next Shift-click landed on the card.
+  It stays faint until you let go of both.
+- A Shift-click with nothing selected opened the card at full strength
+  while Shift was still held, so the next Shift-click landed on it. A card
+  opened that way is faint at once.
+- Letting go of Shift a moment before the mouse button cleared the
+  selection instead of extending it: the button came up on the card that
+  had just come back. It now counts as the Shift-click you meant, and the
+  selection stays.
+
 ## [2.22.0] - 2026-10-30
 
 Back, Forward and Recent places in the bar, chapter arrows, exact-phrase
