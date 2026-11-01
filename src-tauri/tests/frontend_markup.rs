@@ -295,6 +295,118 @@ fn margin_notes_sit_beside_the_text_on_screen_only() {
     assert!(!margin_rs.contains("scroll_by") && !margin_rs.contains("scroll_to"));
 }
 
+/// Compare with Notes (ui-leptos/src/margin.rs): the reader's notes in a
+/// "My notes" column beside the text, placed as margin notes are and drawn
+/// in the margin's look (the UI sans, smaller than the verses, the label in
+/// the quiet accent, a thin rule beside a range), absolutely in the column
+/// so they can't move the text; folded past 10 lines. Under the pointer or
+/// holding focus, a note is lifted onto the card's surface (--option-bg,
+/// ringed in --accent-dim), where its words, its label, its "where" and its
+/// focus ring are legible in every theme, and which stands apart from the
+/// page in every theme. The column goes where Compare
+/// stacks, the notes then under their verses; printing leaves both out and
+/// sets the text alone. The choice is this computer's, never in a backup.
+#[test]
+fn notes_beside_the_text_in_compare_on_screen_only() {
+    let rules = rules();
+    let screen = |selector: &str| {
+        rules
+            .iter()
+            .find(|r| r.at_rule.as_deref() == Some("@media screen") && r.selector == selector)
+            .unwrap_or_else(|| panic!("expected an `@media screen` rule for `{selector}`"))
+            .body
+            .clone()
+    };
+    let column = screen(".notes-column");
+    for declaration in [
+        "position: relative;",
+        "font-family: var(--font-ui);",
+        "font-size: max(11px, calc(0.8rem * var(--ui-scale)));",
+        "line-height: 1.45;",
+        "color: var(--text);",
+    ] {
+        assert!(column.contains(declaration), ".notes-column: {declaration}");
+    }
+    let under = screen(".note-under");
+    assert!(under.contains("border-left: 1px solid var(--accent-dim);"));
+    assert!(under.contains("font-family: var(--font-ui);"));
+    // The empty column's one line: quiet by its italic, in --text, which
+    // is never less legible on the page than the notes themselves.
+    let empty = screen(".notes-column-empty");
+    assert!(empty.contains("color: var(--text);") && empty.contains("font-style: italic;"));
+    let wash = screen(
+        ".notes-column .margin-note:hover, .notes-column .margin-note:focus-within, .note-under .margin-note:hover, .note-under .margin-note:focus-within",
+    );
+    assert!(wash.contains("background: var(--option-bg);"));
+    assert!(wash.contains("box-shadow: 0 0 0 1px var(--accent-dim);"));
+    // The margin's notes, ring and rule, unchanged, in the column too.
+    assert!(screen(".margin-note").contains("position: absolute;"));
+    assert!(
+        screen(".margin-note-ref:focus-visible, .margin-marker:focus-visible")
+            .contains("outline: 2px solid var(--accent);")
+    );
+    assert!(
+        piece("margin.rs").contains(
+            r#"set_property("--margin-fold-lines", &text::COLUMN_FOLD_LINES.to_string())"#
+        )
+    );
+    assert!(piece("margin_text.rs").contains("pub const COLUMN_FOLD_LINES: u32 = 10;"));
+
+    // Where Compare stacks, the same query as the page's Rust pieces ask.
+    assert!(
+        piece("margin_text.rs")
+            .contains(r#"pub const STACKED_QUERY: &str = "(max-width: 640px)";"#)
+    );
+    let stacked = |selector: &str| {
+        rules
+            .iter()
+            .find(|r| {
+                r.at_rule.as_deref() == Some("@media (max-width: 640px)") && r.selector == selector
+            })
+            .unwrap_or_else(|| panic!("expected a stacked rule for `{selector}`"))
+            .body
+            .clone()
+    };
+    assert!(stacked(".compare-grid").contains("grid-template-columns: minmax(0, 1fr);"));
+    assert!(stacked(".notes-column").contains("display: none;"));
+
+    let print = block_after(HTML, "@media print");
+    assert!(print.contains(
+        ".notes-grid > .compare-head, .notes-column, .note-under, .margin-notes, .margin-marker { display: none !important; }"
+    ));
+    assert!(print.contains(".notes-grid { display: block !important; }"));
+
+    for (theme, props) in theme_palettes(&rules) {
+        let lifted = property(&props, "--option-bg");
+        for (what, fg, floor) in [
+            ("a note's words", "--text", 4.5),
+            ("a note's label", "--accent-2", 4.5),
+            ("a note's \"not numbered\"", "--text-dim", 4.5),
+            ("a note's focus ring", "--accent", 3.0),
+        ] {
+            let ratio = contrast_ratio(property(&props, fg), lifted);
+            assert!(
+                ratio >= floor,
+                "theme `{theme}`: {what} on --option-bg is {ratio:.2}:1"
+            );
+        }
+        for bg in backgrounds(&props) {
+            assert_ne!(
+                bg.to_lowercase(),
+                lifted.to_lowercase(),
+                "theme `{theme}`: a lifted note stands apart from the page"
+            );
+        }
+    }
+
+    assert_eq!(preferences::COMPARE_NOTES.fallback, "off");
+    assert_eq!(
+        preferences::COMPARE_NOTES.file_name,
+        None,
+        "never in a backup"
+    );
+}
+
 /// Regression guard for GH-5: the "Random chapter" feature picks a chapter
 /// entirely client-side, so every rendered `.book-item` button must carry
 /// its `chapter_count` as a data attribute, or the client has no valid
@@ -1056,6 +1168,9 @@ const UI_SCALED_AT_MEDIUM: &[(&str, &str, &str)] = &[
     (".margin-notes", "font-size", "0.8rem"),
     (".margin-note-ref", "font-size", "0.72rem"),
     (".margin-note-more", "font-size", "0.75rem"),
+    (".notes-column", "font-size", "0.8rem"),
+    (".notes-column-empty", "font-size", "0.85rem"),
+    (".note-under", "font-size", "0.8rem"),
     // What the shared button rule gave them (0.85rem), now their own.
     (".search-more", "font-size", "0.85rem"),
     // Recent places, the menu from the bar's ▾.
@@ -4339,10 +4454,18 @@ fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
         }
     }
     // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
+    // Compare's translations are its grid; with the notes, the text is the
+    // reading pane's own, so it flows.
     let reader = piece("reader_text.rs");
     let pane = block_after(reader, "pub fn reading_pane(");
-    assert!(pane.contains("Some(compare) => compare_grid(dto, compare),"));
-    assert!(pane.contains(r##"r#"<div class="chapter-text">{}</div>"#,"##));
+    assert!(pane.contains("Beside::Translations(compare) => compare_grid(dto, compare),"));
+    assert!(pane.contains("Beside::Notes { name } => notes_grid(dto, code, name),"));
+    assert!(pane.contains("Beside::Nothing => chapter_text(dto, code),"));
+    assert!(
+        block_after(reader, "fn chapter_text(")
+            .contains(r##"r#"<div class="chapter-text">{}</div>"#,"##)
+    );
+    assert!(block_after(reader, "fn notes_grid(").contains("chapter_text(dto, code),"));
     assert!(!block_after(reader, "fn compare_grid(").contains("chapter-text"));
     assert!(
         block_after(reader, "fn side_chapter(")

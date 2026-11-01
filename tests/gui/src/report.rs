@@ -78,11 +78,12 @@ pub enum Check {
     NoteMarkdown = 66,
     BarHistory = 67,
     BarChapters = 68,
+    NotesBeside = 69,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 58] = [
+    pub const SHIPPED: [Check; 59] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -138,6 +139,7 @@ impl Check {
         Check::MarginSwitch,
         Check::MarginNarrow,
         Check::MarginPsalm119,
+        Check::NotesBeside,
         Check::NotesSearch,
         Check::NoteMarkdown,
         Check::PlainText,
@@ -234,6 +236,7 @@ impl Check {
             Check::NoteMarkdown => "note-markdown",
             Check::BarHistory => "bar-back-forward-recent",
             Check::BarChapters => "bar-chapter-arrows",
+            Check::NotesBeside => "notes-beside",
         }
     }
 

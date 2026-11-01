@@ -14,6 +14,7 @@
 //! italics or raised where the backend's parts say, never changed.
 
 use crate::dto::{ChapterSide, Compare, Edge, Reading, Translation, Verse, Xref};
+use crate::margin_text;
 use crate::passage_reference::verse_range;
 use crate::verse_parts::{Footnote, PartKind, SegmentKind};
 
@@ -482,12 +483,60 @@ fn xrefs_of(dto: &Reading, number: i64) -> &[Xref] {
         .map_or(&[], |v| v.xrefs.as_slice())
 }
 
+/// What Compare shows beside the text being read.
+#[derive(Debug, Clone, Copy)]
+pub enum Beside<'a> {
+    /// Nothing: Compare is off (or reading mode shows the text alone).
+    Nothing,
+    /// The translations, side by side.
+    Translations(&'a Compare),
+    /// The reader's notes on the chapter, beside the text as normal reading
+    /// sets it; the text's column is headed with its translation's name.
+    Notes { name: &'a str },
+}
+
+/// Compare with Notes: the chapter's text exactly as normal reading sets
+/// it (a verse to a line, or Flowing), headed like a translation's column,
+/// and beside it, where Compare's second translation would be, the empty
+/// "My notes" column (`margin_text::column_html`), which the margin
+/// (`margin`) draws again with the notes and places them in.
+/// The notes never sit in the text's flow, so they can't move it.
+fn notes_grid(dto: &Reading, code: &str, name: &str) -> String {
+    format!(
+        r#"<div class="compare-grid notes-grid" data-columns="2"><div class="compare-head">{} <span class="compare-head-code">({})</span></div><div class="compare-head" aria-hidden="true">{}</div>{}{}</div>"#,
+        escape_html(name),
+        escape_html(&code.to_uppercase()),
+        margin_text::COLUMN_NAME,
+        chapter_text(dto, code),
+        margin_text::column_html(&[], false),
+    )
+}
+
+/// The chapter's verses, in the translation `code`, as normal reading sets
+/// them.
+fn chapter_text(dto: &Reading, code: &str) -> String {
+    format!(
+        r#"<div class="chapter-text">{}</div>"#,
+        dto.current_verses
+            .iter()
+            .map(|v| verse_row(v, dto.current_book_id, dto.current_chapter, code, &v.xrefs))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
+}
+
 /// The whole reading pane: `#reading-pane-inner` with the chapter on
 /// screen and its neighbors (`data-current-*`, `data-prev-*`,
 /// `data-next-*`), the verses (in the translation `code`) or Compare's
 /// grid, the chapter's end and its two lists. While comparing, the columns
-/// take the neighbors' place.
-pub fn reading_pane(dto: &Reading, compare: Option<&Compare>, code: &str, open: Opened) -> String {
+/// (the translations', or the text's and the notes') take the neighbors'
+/// place.
+pub fn reading_pane(dto: &Reading, beside: Beside<'_>, code: &str, open: Opened) -> String {
+    let compare = match beside {
+        Beside::Translations(compare) => Some(compare),
+        Beside::Nothing | Beside::Notes { .. } => None,
+    };
+    let comparing = !matches!(beside, Beside::Nothing);
     let attrs = |side: Option<&ChapterSide>, which: &str| {
         side.map(|s| {
             format!(
@@ -497,19 +546,13 @@ pub fn reading_pane(dto: &Reading, compare: Option<&Compare>, code: &str, open: 
         })
         .unwrap_or_default()
     };
-    let body = match compare {
-        Some(compare) => compare_grid(dto, compare),
-        None => format!(
-            r#"<div class="chapter-text">{}</div>"#,
-            dto.current_verses
-                .iter()
-                .map(|v| verse_row(v, dto.current_book_id, dto.current_chapter, code, &v.xrefs))
-                .collect::<Vec<_>>()
-                .join("\n")
-        ),
+    let body = match beside {
+        Beside::Translations(compare) => compare_grid(dto, compare),
+        Beside::Notes { name } => notes_grid(dto, code, name),
+        Beside::Nothing => chapter_text(dto, code),
     };
     let side = |s: Option<&ChapterSide>, edge: Option<&Edge>, which: Which| {
-        if compare.is_some() {
+        if comparing {
             return String::new();
         }
         let inner = match s {
@@ -541,10 +584,10 @@ pub fn reading_pane(dto: &Reading, compare: Option<&Compare>, code: &str, open: 
         chapter = dto.current_chapter,
         prev = attrs(dto.prev.as_ref(), "prev"),
         next = attrs(dto.next.as_ref(), "next"),
-        comparing = if compare.is_some() {
-            " is-comparing"
-        } else {
-            ""
+        comparing = match beside {
+            Beside::Nothing => "",
+            Beside::Translations(_) => " is-comparing",
+            Beside::Notes { .. } => " is-comparing with-notes",
         },
         before = side(dto.prev.as_ref(), dto.prev_edge.as_ref(), Which::Prev),
         name = escape_html(&dto.current_book_name),
@@ -670,13 +713,14 @@ pub fn compare_codes(current: &str, partner: Option<&str>) -> Vec<String> {
     }
 }
 
-/// What a chapter is fetched for: Compare off (`""`), or on with these
-/// translations ("kjv web").
-pub fn compare_layout(comparing: bool, codes: &[String]) -> String {
-    if comparing {
-        codes.join(" ")
-    } else {
-        String::new()
+/// What a chapter is fetched for: the text alone (`""`), Compare with
+/// these translations ("kjv web"), or with the notes ("+notes", which no
+/// translation's code can be: a code is letters and digits).
+pub fn compare_layout(beside: crate::aa_text::Beside, codes: &[String]) -> String {
+    match beside {
+        crate::aa_text::Beside::Nothing => String::new(),
+        crate::aa_text::Beside::Translations => codes.join(" "),
+        crate::aa_text::Beside::Notes => "+notes".to_string(),
     }
 }
 
@@ -1141,9 +1185,40 @@ mod tests {
     #[test]
     fn the_pane_is_the_page_s_markup_byte_for_byte() {
         assert_eq!(
-            reading_pane(&reading(), None, "kjv", Opened::default()),
+            reading_pane(&reading(), Beside::Nothing, "kjv", Opened::default()),
             GENESIS_1
         );
+    }
+
+    /// Compare with Notes: the text exactly as normal reading has it (the
+    /// same verses, byte for byte, in a `.chapter-text`, so Flowing sets it
+    /// too), headed with its translation's name, beside an empty "My notes"
+    /// region for the margin to fill; no neighbors, one Footnotes list.
+    #[test]
+    fn notes_sit_beside_the_text_as_normal_reading_sets_it() {
+        let normal = reading_pane(&reading(), Beside::Nothing, "kjv", Opened::default());
+        let pane = reading_pane(
+            &reading(),
+            Beside::Notes {
+                name: "King James Version",
+            },
+            "kjv",
+            Opened::default(),
+        );
+        let text = chapter_text(&reading(), "kjv");
+        assert!(text.starts_with(r#"<div class="chapter-text"><p class="verse"#));
+        assert_eq!(normal.matches(&text).count(), 1);
+        assert_eq!(pane.matches(&text).count(), 1);
+        assert!(pane.contains(r#"<div class="reading-row is-comparing with-notes">"#));
+        assert!(!pane.contains("chapter-side"));
+        assert!(pane.contains(
+            r#"<div class="compare-grid notes-grid" data-columns="2"><div class="compare-head">King James Version <span class="compare-head-code">(KJV)</span></div><div class="compare-head" aria-hidden="true">My notes</div><div class="chapter-text">"#
+        ));
+        assert!(pane.contains(
+            r#"</div><section class="notes-column" aria-label="My notes"></section></div>"#
+        ));
+        assert!(pane.contains("Footnotes (1)"));
+        assert!(!pane.contains("compare-gap"));
     }
 
     #[test]
@@ -1152,7 +1227,7 @@ mod tests {
             footnotes: true,
             xrefs: true,
         };
-        let pane = reading_pane(&reading(), None, "kjv", open);
+        let pane = reading_pane(&reading(), Beside::Nothing, "kjv", open);
         assert!(pane.contains(r#"id="footnote-list-kjv"><div class="footnote-row">"#));
         assert!(pane.contains(r#"id="xref-summary-list"><div class="xref-summary-row">"#));
         assert_eq!(pane.matches(r#"aria-expanded="true""#).count(), 2);
@@ -1177,7 +1252,12 @@ mod tests {
                 },
             ],
         };
-        let pane = reading_pane(&dto, Some(&compare), "kjv", Opened::default());
+        let pane = reading_pane(
+            &dto,
+            Beside::Translations(&compare),
+            "kjv",
+            Opened::default(),
+        );
         assert!(pane.contains(r#"<div class="reading-row is-comparing">"#));
         assert!(!pane.contains("chapter-side"));
         assert!(pane.contains(r#"<div class="compare-grid" data-columns="2"><div class="compare-head" role="columnheader">King James Version <span class="compare-head-code">(KJV)</span></div>"#));
@@ -1263,9 +1343,15 @@ mod tests {
 
     #[test]
     fn compare_fetches_for_its_layout() {
+        use crate::aa_text::Beside as Shown;
         let codes = compare_codes("kjv", Some("web"));
-        assert_eq!(compare_layout(true, &codes), "kjv web");
-        assert_eq!(compare_layout(false, &codes), "");
+        assert_eq!(compare_layout(Shown::Translations, &codes), "kjv web");
+        assert_eq!(compare_layout(Shown::Nothing, &codes), "");
+        assert_eq!(compare_layout(Shown::Notes, &codes), "+notes");
+        assert_eq!(
+            compare_layout(Shown::Notes, &compare_codes("kjv", None)),
+            "+notes"
+        );
         assert_eq!(compare_codes("kjv", None), vec!["kjv".to_string()]);
         let compare = Compare {
             book_id: 43,

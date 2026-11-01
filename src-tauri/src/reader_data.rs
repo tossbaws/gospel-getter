@@ -1232,6 +1232,36 @@ mod tests {
         }
     }
 
+    /// Compare's Notes is a setting of the computer's that no backup
+    /// carries, so an export's `compare_with` is still only ever a
+    /// translation's code, and the format is unchanged. Even a file that
+    /// named the notes there (written by hand) imports, as one naming a
+    /// translation this version lacks does: that one setting skipped and
+    /// named, everything else applied.
+    #[test]
+    fn a_file_naming_the_notes_as_compares_partner_still_imports() {
+        let file = r#"{"format": "gospel-getter-reader-data", "format_version": 3,
+                     "exported_at": "x", "app_version": "2.23.0", "reading_position": null,
+                     "bookmarks": [],
+                     "notes": [{"book": 43, "chapter": 3, "verse_start": 3, "verse_end": 5, "body": "Born again."}],
+                     "preferences": {"compare": true, "compare_with": "notes", "layout": "flowing"}}"#;
+        let data = parse(file.as_bytes()).unwrap();
+        assert_eq!(data.preferences.compare_with, None);
+        assert_eq!(data.preferences.compare, Some(true));
+        assert_eq!(data.preferences.layout, Some(Layout::Flowing));
+        assert_eq!(data.skipped_preferences, ["compare with “notes”"]);
+        assert_eq!(data.notes.len(), 1);
+        assert!(TranslationCode::new("notes").is_none());
+        // What this version writes: no new setting, by the table's names.
+        assert!(
+            crate::preferences::PREFERENCES
+                .iter()
+                .filter_map(|p| p.file_name)
+                .all(|name| Preferences::NAMES.contains(&name))
+        );
+        assert_eq!(crate::preferences::COMPARE_NOTES.file_name, None);
+    }
+
     /// A file from a later version, with display settings this one doesn't
     /// know, imports everything else: each unknown or invalid preference is
     /// skipped and named, and the valid ones still apply. Bookmarks,

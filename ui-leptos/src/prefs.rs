@@ -271,6 +271,12 @@ mod tests {
                     "on",
                     vec!["on", "off"]
                 ),
+                (
+                    "compareNotes",
+                    "gospel-getter-compare-notes",
+                    "off",
+                    vec!["off", "on"]
+                ),
             ]
         );
         assert_eq!(

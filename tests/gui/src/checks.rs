@@ -21,7 +21,9 @@
 //! note from the card, a cross-reference read in it, and the Shift ghost
 //! (46 to 52, `card`); margin notes in reading mode: beside their verses,
 //! the switch leaving the text where it was, the markers in a narrow
-//! window, Psalm 119 with a note on every verse (60 to 63, `margin`); the
+//! window, Psalm 119 with a note on every verse (60 to 63, `margin`);
+//! Compare with Notes, the notes beside a text that never moves (69,
+//! `beside`); the
 //! Library's Notes tab searched (64, `notes`) and a note's Markdown and
 //! references in the card, the Library and the margin, and Copy as
 //! Markdown (66, `notes`); and, last, the plain-text fallback (44,
@@ -34,6 +36,7 @@
 //! more (65, `notes`); and, in a last session on the GUI checks' test
 //! build, the updater (9 to 13, `updates`).
 
+mod beside;
 mod card;
 mod dialogs;
 mod display;
@@ -412,6 +415,12 @@ async fn shipped(
                 &format!("putting things back after the margin checks failed: {e:#}"),
             );
         }
+        // Compare with Notes (69), on notes of its own, deleted after.
+        let beside = run.notes_beside().await;
+        if beside.is_err() {
+            run.failure_screenshot(Check::NotesBeside).await;
+        }
+        report.record(Check::NotesBeside, beside).await;
         // The Notes tab's search (64), on notes of its own, deleted after.
         let search = run.notes_search().await;
         if search.is_err() {
@@ -490,6 +499,7 @@ async fn shipped(
                     .into_iter()
                     .filter(|name| config.xvfb.is_some() || !name.starts_with("60-")),
             )
+            .chain(beside::BESIDE_SHOTS)
             .chain(notes::NOTES_SHOTS)
             // The margin's, only where there's room for it, as check 60's.
             .chain(

@@ -1,7 +1,31 @@
 //! Aa's rules, free of the DOM so they are tested natively (`cargo test`):
-//! which keys change the text size, and stepping through the sizes. They
-//! are the page's (`ui/index.html` at 4b2d15e: `sizeKey` and
-//! `stepTextSize`), rule for rule.
+//! which keys change the text size, and stepping through the sizes (the
+//! page's, `ui/index.html` at 4b2d15e: `sizeKey` and `stepTextSize`, rule
+//! for rule), and what Compare shows beside the text.
+
+/// What Compare shows beside the text being read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Beside {
+    /// Nothing: the text alone.
+    Nothing,
+    /// The translations, side by side.
+    Translations,
+    /// The reader's notes on the chapter (Compare's "with" Notes).
+    Notes,
+}
+
+/// What Compare shows, with Compare on or off (`compare`), Notes chosen as
+/// what it compares with or not (`notes`), in reading mode or not.
+/// Reading mode shows the text with its margin notes, never the notes
+/// column; it compares translations as it always has.
+pub fn beside(compare: bool, notes: bool, reading_mode: bool) -> Beside {
+    match (compare, notes) {
+        (false, _) => Beside::Nothing,
+        (true, false) => Beside::Translations,
+        (true, true) if reading_mode => Beside::Nothing,
+        (true, true) => Beside::Notes,
+    }
+}
 
 /// A key press, as far as the text size keys care.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -137,5 +161,17 @@ mod tests {
         // Nothing chosen (`selectedIndex` -1): a step up is the first.
         assert_eq!(stepped(-1, 4, 1), Some(0));
         assert_eq!(stepped(-1, 0, 1), None);
+    }
+
+    #[test]
+    fn compare_shows_the_notes_only_out_of_reading_mode() {
+        for reading_mode in [false, true] {
+            assert_eq!(beside(false, false, reading_mode), Beside::Nothing);
+            assert_eq!(beside(false, true, reading_mode), Beside::Nothing);
+            assert_eq!(beside(true, false, reading_mode), Beside::Translations);
+        }
+        assert_eq!(beside(true, true, false), Beside::Notes);
+        // Reading mode: the text, with the margin's notes.
+        assert_eq!(beside(true, true, true), Beside::Nothing);
     }
 }

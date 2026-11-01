@@ -123,7 +123,7 @@ test('groups come in order: Go to, Commands, Verses; ↓ and ↑ move through al
         // Words some commands and some verses have.
         await type(app, 'compare');
         assert.deepEqual(groupLabels(app), ['Commands', 'Verses']);
-        assert.deepEqual(commandLabels(app), ['Compare on', 'Compare with: BSB', 'Compare with: WEB']);
+        assert.deepEqual(commandLabels(app), ['Compare on', 'Compare with: BSB', 'Compare with: WEB', 'Compare with: Notes']);
         const all = groups(app).flatMap((g) => g.options);
         assert.ok(all.length > 3);
         assert.equal(active(app), all[0], 'the first command is active');
@@ -156,7 +156,7 @@ test('">" lists commands only, without searching', () =>
         await type(app, '> theme ma');
         assert.deepEqual(commandLabels(app), ['Theme: Matrix']);
         await type(app, '>');
-        assert.equal(commandLabels(app).length, 44);
+        assert.equal(commandLabels(app).length, 45);
         assert.equal(commandLabels(app)[0], 'Compare on');
         assert.equal(commandLabels(app).at(-1), 'Keyboard shortcuts');
         await type(app, '>nothing like this');

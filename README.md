@@ -107,6 +107,15 @@ needed.
   button, chooses the other one, and it's remembered; until you choose,
   it's the KJV (or, beside the KJV, the WEB). Where only one translation
   numbers a verse, the other column says so instead of shifting anything.
+
+  **Notes**, the last of the **with** choices, shows your own notes on the
+  chapter instead, in a **My notes** column beside the text. The text
+  stays exactly as you read it (Verses or Flowing), and each note sits
+  beside its first verse, labelled with its verses; a long one folds
+  after about ten lines. Click a note to select its verses and edit it in
+  the card. In a narrow window each note sits under its first verse. Reading
+  mode keeps its margin notes, and the choice stays on this computer, out
+  of backups.
 - **Cross-references.** Select a verse to see related passages in its
   card. Click one to read it right there in the card, a whole range at
   once, in the translation you're reading; click it again to close it, and
@@ -143,8 +152,8 @@ needed.
   line (**Verses**, the default) or runs each chapter on as prose with
   small raised verse numbers (**Flowing**), in the chapter you're reading,
   the faded chapters beside it, reading mode and print. Selecting, notes,
-  highlights, bookmarks and footnotes work the same in both. Compare always
-  shows a verse to a row.
+  highlights, bookmarks and footnotes work the same in both. Compare's
+  translations always show a verse to a row.
 
   ![John 3 in the KJV in the Flowing layout, in the Chi Rho theme: the verses run on as paragraphs, each starting after a small raised number, with John 2 and John 4 faded on either side, also flowing. Supplied words such as "of" are in italics, and small letters after verses 3 and 7 mark their footnotes. The sidebar on the left lists the books, with John's chapters open and 3 marked](screenshots/flowing.png)
 - **Everything in reach, out of the way.** A slim bar at the top holds

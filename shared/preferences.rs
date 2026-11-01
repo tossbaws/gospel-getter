@@ -232,8 +232,9 @@ pub const WIDTH: Preference = Preference {
     file_name: Some("width"),
 };
 
-/// A verse to a line, as it always was, or flowing on as prose. Compare
-/// keeps a verse to a row whichever is chosen.
+/// A verse to a line, as it always was, or flowing on as prose. Compare's
+/// translations keep a verse to a row whichever is chosen (its notes leave
+/// the text as chosen).
 pub const LAYOUT: Preference = Preference {
     name: "layout",
     key: "gospel-getter-layout",
@@ -313,8 +314,23 @@ pub const MARGIN_NOTES: Preference = Preference {
     file_name: None,
 };
 
+/// Compare shows the reader's notes on the chapter beside the text, in
+/// place of a second translation (the "with" choices' Notes). A display
+/// setting of this computer's, like the margin's: no backup carries it, so
+/// an export's `compare_with` stays a translation's code, and the
+/// translation chosen before stays chosen for when Notes isn't.
+pub const COMPARE_NOTES: Preference = Preference {
+    name: "compareNotes",
+    key: "gospel-getter-compare-notes",
+    fallback: "off",
+    values: ON_OFF,
+    renamed: &[],
+    select: None,
+    file_name: None,
+};
+
 /// Every saved setting, in the order they're applied (and exported).
-pub const PREFERENCES: [Preference; 11] = [
+pub const PREFERENCES: [Preference; 12] = [
     THEME,
     TEXT_SIZE,
     LINE_SPACING,
@@ -326,6 +342,7 @@ pub const PREFERENCES: [Preference; 11] = [
     SIDEBAR,
     UPDATE_CHECK,
     MARGIN_NOTES,
+    COMPARE_NOTES,
 ];
 
 /// The setting the page calls `name`.
