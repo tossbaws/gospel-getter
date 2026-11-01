@@ -33,10 +33,13 @@ pub struct Choice {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PaletteState {
-    /// Comparing two translations.
+    /// Compare is on.
     pub comparing: bool,
     /// The translation compared with (or that would be), if there's one.
     pub partner: Option<String>,
+    /// Compare compares with the reader's notes (its "with" Notes), not
+    /// the partner.
+    pub compare_notes: bool,
     /// Reading mode is on.
     pub reader_mode: bool,
     /// The book and chapter picker is the sidebar.
@@ -96,6 +99,8 @@ pub enum Run {
     Translation(String),
     /// Compares with this translation, as Compare's "with" does.
     CompareWith(String),
+    /// Compares with the reader's notes, as Compare's "with" Notes does.
+    CompareNotes,
     /// The code that was the page's (`page::run_command`): the command's
     /// name there.
     Page(&'static str),
@@ -174,6 +179,9 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         });
     };
     let comparing = state.comparing;
+    // Compare's translations keep a verse to a row; its notes leave the
+    // text as the reader set it.
+    let rows = comparing && !state.compare_notes;
     let reader_mode = state.reader_mode;
 
     add(
@@ -186,7 +194,8 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         .into(),
         "compare",
         "translations side by side",
-        (!comparing && state.partner.is_none()).then_some("There’s only one translation"),
+        (!comparing && state.partner.is_none() && !state.compare_notes)
+            .then_some("There’s only one translation"),
         click("compare-btn"),
     );
     add(
@@ -212,7 +221,7 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
             format!("Layout: {}", o.label),
             "",
             "",
-            if comparing {
+            if rows {
                 Some("Compare always shows a verse to a row")
             } else {
                 in_use(o.value == state.layout)
@@ -298,13 +307,25 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
             "",
             &o.label,
             if comparing {
-                in_use(state.partner.as_ref() == Some(&o.value))
+                in_use(!state.compare_notes && state.partner.as_ref() == Some(&o.value))
             } else {
                 Some("Only while comparing")
             },
             Run::CompareWith(o.value.clone()),
         );
     }
+    add(
+        "compare-notes".into(),
+        "Compare with: Notes".into(),
+        "",
+        "my notes beside the text",
+        if comparing {
+            in_use(state.compare_notes)
+        } else {
+            Some("Only while comparing")
+        },
+        Run::CompareNotes,
+    );
     add(
         "random-chapter".into(),
         "Random chapter".into(),
@@ -647,8 +668,8 @@ mod tests {
             assert!(list[..i].iter().all(|o| o.id != c.id), "{} twice", c.id);
         }
         // 2 + 2 layouts + 2 widths + 3 sizes + 2 themes + 3 translations
-        // + 2 to compare with + 20 more.
-        assert_eq!(list.len(), 36);
+        // + 2 to compare with + Notes + 20 more.
+        assert_eq!(list.len(), 37);
         let ids: Vec<&str> = list.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(
             &ids[..9],
@@ -665,13 +686,14 @@ mod tests {
             ]
         );
         assert_eq!(
-            labels(&list[11..16]),
+            labels(&list[11..17]),
             [
                 "Translation: KJV",
                 "Translation: WEB",
                 "Translation: BSB",
                 "Compare with: WEB",
-                "Compare with: BSB"
+                "Compare with: BSB",
+                "Compare with: Notes"
             ]
         );
     }
@@ -745,6 +767,29 @@ mod tests {
             reason(&comparing, "layout-flowing"),
             Some("Compare always shows a verse to a row")
         );
+        assert_eq!(reason(&comparing, "compare-notes"), None);
+        assert_eq!(find(&comparing, "compare-notes").run, Run::CompareNotes);
+        assert_eq!(reason(&list, "compare-notes"), Some("Only while comparing"));
+
+        // Comparing with the notes: Notes in use, any translation can be
+        // chosen instead, and the text keeps its layout.
+        let notes = commands(&PaletteState {
+            comparing: true,
+            compare_notes: true,
+            ..john_3()
+        });
+        assert_eq!(reason(&notes, "compare-notes"), Some(IN_USE));
+        assert_eq!(reason(&notes, "compare-with-web"), None);
+        assert_eq!(reason(&notes, "compare-with-bsb"), None);
+        assert_eq!(reason(&notes, "layout-flowing"), None);
+        assert_eq!(reason(&notes, "layout-verse"), Some(IN_USE));
+        // With one translation, the notes can still be compared with.
+        let alone_with_notes = commands(&PaletteState {
+            partner: None,
+            compare_notes: true,
+            ..john_3()
+        });
+        assert_eq!(reason(&alone_with_notes, "compare"), None);
 
         let alone = commands(&PaletteState {
             partner: None,

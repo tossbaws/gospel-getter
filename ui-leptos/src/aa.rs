@@ -1,5 +1,6 @@
 //! Aa (text and display) and the translation button's popover: the
-//! translations, Compare and what it compares with; text size (its stepper,
+//! translations, Compare and what it compares with (another translation,
+//! or the reader's notes); text size (its stepper,
 //! Ctrl+=, Ctrl+- and Ctrl+0, and the size shown for a moment), line
 //! spacing, width, layout (kept but disabled while comparing) and theme;
 //! reading mode; and the launch check's setting in About. Every choice
@@ -38,16 +39,16 @@ use web_sys::{
     KeyboardEvent,
 };
 
-use crate::aa_text::{self as text, Press};
+use crate::aa_text::{self as text, Beside, Press};
 use crate::bridge;
 use crate::dom;
 use crate::preferences::{self, Preference, Values};
 use crate::prefs::{self, Raw};
 use crate::surfaces::{self, Surface};
 
-/// Compare was switched on or off, or what it compares with changed: a
-/// `CustomEvent` on `document`, no `detail`. The page shows the chapter in
-/// the new layout.
+/// Compare was switched on or off, or what it compares with changed (or
+/// reading mode, with Compare's Notes chosen): a `CustomEvent` on
+/// `document`, no `detail`. The page shows the chapter in the new layout.
 pub const COMPARE_CHANGE_EVENT: &str = "gospel-getter:compare-change";
 
 /// The layout changed: a `CustomEvent` on `document`, no `detail`. The
@@ -187,13 +188,39 @@ pub fn partner() -> Option<String> {
     crate::page_text::partner(chosen.as_deref(), &bridge::translation_code(), &codes)
 }
 
-/// Compare's "with": chooses `code`, unless it's already the one.
+/// What Compare shows beside the text now (`aa_text::beside`).
+pub fn beside() -> Beside {
+    text::beside(
+        prefs::on(&preferences::COMPARE),
+        prefs::on(&preferences::COMPARE_NOTES),
+        prefs::on(&preferences::READER_MODE),
+    )
+}
+
+/// Compare's "with": chooses `code`, unless it's already the one (and
+/// Notes isn't chosen instead).
 pub fn compare_with(code: &str) {
     let chosen = prefs::shown(&preferences::COMPARE_WITH);
-    if partner().as_deref() == Some(code) && chosen.as_deref() == Some(code) {
+    let notes = prefs::on(&preferences::COMPARE_NOTES);
+    if !notes && partner().as_deref() == Some(code) && chosen.as_deref() == Some(code) {
         return;
     }
+    if notes {
+        prefs::set(&preferences::COMPARE_NOTES, "off");
+    }
     prefs::set(&preferences::COMPARE_WITH, code);
+    sync_aa();
+    announce(COMPARE_CHANGE_EVENT);
+}
+
+/// Compare's "with" Notes: the reader's notes on the chapter beside the
+/// text, unless they're already chosen. The translation chosen before stays
+/// chosen, for when a translation is chosen again.
+pub fn compare_with_notes() {
+    if prefs::on(&preferences::COMPARE_NOTES) {
+        return;
+    }
+    prefs::set(&preferences::COMPARE_NOTES, "on");
     sync_aa();
     announce(COMPARE_CHANGE_EVENT);
 }
@@ -271,7 +298,14 @@ pub fn text_size_shortcut(step: i8) {
 /// somewhere sensible: the exit button, or Aa, which holds its toggle. It
 /// hides the sidebar, and leaving it brings the sidebar back.
 pub fn set_reader_mode(on: bool) {
+    let was = beside();
     prefs::set(&preferences::READER_MODE, if on { "on" } else { "off" });
+    // Compare with Notes shows the text alone in reading mode, where the
+    // margin has the notes: the chapter is drawn again for it.
+    if beside() != was {
+        sync_aa();
+        announce(COMPARE_CHANGE_EVENT);
+    }
     if let Some(toggle) = by_id("reader-mode-btn") {
         let _ = toggle.set_attribute("aria-pressed", &on.to_string());
     }
@@ -393,7 +427,17 @@ fn render_compare_with() {
             ),
         );
     }
+    append(&choices, notes_segment_view());
     sync_aa();
+}
+
+/// Compare's "with" Notes, after the translations: not a translation, so
+/// it has no `data-value`.
+fn notes_segment_view() -> AnyView {
+    view! {
+        <button type="button" class="segment" data-beside="notes" title="Your notes on the chapter, beside the text">"Notes"</button>
+    }
+    .into_any()
 }
 
 fn set_pressed(group: &str, value: Option<&str>) {
@@ -423,7 +467,19 @@ fn sync_aa() {
             radio.set_tab_index(if checked { 0 } else { -1 });
         }
     }
-    set_pressed("compare-with-choices", partner().as_deref());
+    let notes = prefs::on(&preferences::COMPARE_NOTES);
+    set_pressed(
+        "compare-with-choices",
+        partner().as_deref().filter(|_| !notes),
+    );
+    if let Some(choice) = by_id("compare-with-choices").and_then(|group| {
+        group
+            .query_selector(r#"[data-beside="notes"]"#)
+            .ok()
+            .flatten()
+    }) {
+        let _ = choice.set_attribute("aria-pressed", &notes.to_string());
+    }
     for (group, pref) in GROUPS
         .iter()
         .chain(&[("theme-choices", preferences::THEME)])
@@ -431,7 +487,9 @@ fn sync_aa() {
         let value = pref.select.and_then(select).map(|s| s.value());
         set_pressed(group, value.as_deref());
     }
-    let comparing = prefs::on(&preferences::COMPARE);
+    // Compare's translations keep a verse to a row; its notes leave the
+    // text as the reader set it.
+    let comparing = beside() == Beside::Translations;
     if let Some(layout) = by_id("layout-choices") {
         for btn in buttons(&layout, "button") {
             btn.set_disabled(comparing);
@@ -579,6 +637,7 @@ pub fn apply_preferences(values: &JsValue) -> Result<bool, JsValue> {
         })
         .collect::<Result<Vec<_>, JsValue>>()?;
     let mut persisted = true;
+    let was = beside();
     let mut compare_changed = false;
     for (pref, value) in changes {
         if *pref == preferences::COMPARE && prefs::on(pref) != (value == "on") {
@@ -598,7 +657,7 @@ pub fn apply_preferences(values: &JsValue) -> Result<bool, JsValue> {
     show_toggles();
     sync_aa();
     surfaces::sync_picker();
-    if compare_changed {
+    if compare_changed || beside() != was {
         announce(COMPARE_CHANGE_EVENT);
     }
     Ok(persisted)
@@ -786,7 +845,12 @@ pub fn mount() {
     }
     if let Some(el) = by_id("compare-with-choices") {
         dom::on_click(&el, |event| {
-            if let Some(code) = button_hit(&event).and_then(|btn| data_value(&btn)) {
+            let Some(btn) = button_hit(&event) else {
+                return;
+            };
+            if btn.get_attribute("data-beside").as_deref() == Some("notes") {
+                compare_with_notes();
+            } else if let Some(code) = data_value(&btn) {
                 compare_with(&code);
             }
         });

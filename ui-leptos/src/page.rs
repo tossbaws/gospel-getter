@@ -128,7 +128,7 @@ pub fn search_shown() -> bool {
     by_id("search-panel").is_some_and(|panel| !panel.hidden())
 }
 
-/// Comparing two translations (`html[data-compare]`).
+/// Compare is on (`html[data-compare]`), with a translation or the notes.
 fn is_comparing() -> bool {
     html_data("data-compare").as_deref() == Some("on")
 }
@@ -625,6 +625,7 @@ pub fn palette_state() -> PaletteState {
     PaletteState {
         comparing: is_comparing(),
         partner: crate::aa::partner(),
+        compare_notes: crate::prefs::on(&crate::preferences::COMPARE_NOTES),
         reader_mode: html_data("data-reader-mode").as_deref() == Some("on"),
         sidebar: html_data("data-picker").as_deref() == Some("sidebar"),
         wide: html_data("data-wide").is_some(),

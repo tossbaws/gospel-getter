@@ -189,7 +189,7 @@ impl Run<'_> {
     }
 
     /// Opens the translation button's popover.
-    async fn open_translations(&self) -> Result<()> {
+    pub(super) async fn open_translations(&self) -> Result<()> {
         let ui = &self.ui;
         ui.click("open the translations", "#translation-toggle")
             .await?;
@@ -203,7 +203,7 @@ impl Run<'_> {
         Ok(())
     }
 
-    async fn close_translations(&self) -> Result<()> {
+    pub(super) async fn close_translations(&self) -> Result<()> {
         let ui = &self.ui;
         ui.press("press Escape (close the translations)", Key::Escape)
             .await?;

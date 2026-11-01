@@ -38,7 +38,9 @@ async function clickAndWait(app, target, cmd) {
 
 const el = (app, id) => app.document.getElementById(id);
 const radios = (app) => [...el(app, 'translation-choices').querySelectorAll('[role="radio"]')];
-const withButtons = (app) => [...el(app, 'compare-with-choices').querySelectorAll('button')];
+// The translations among Compare's "with" choices (Notes, after them, is
+// not one: notes-beside.test.mjs).
+const withButtons = (app) => [...el(app, 'compare-with-choices').querySelectorAll('button[data-value]')];
 const markers = (verse) => [...verse.querySelectorAll('.fn-marker')].map((m) => m.textContent);
 const verseText = (verse) => [...verse.querySelector('.verse-text').childNodes]
     .filter((n) => !(n.classList && n.classList.contains('fn-marker')))

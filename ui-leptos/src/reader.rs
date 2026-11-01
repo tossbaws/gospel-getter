@@ -43,6 +43,7 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::{Element, HtmlElement, HtmlOptionElement, HtmlSelectElement, MouseEvent};
 
 use crate::aa;
+use crate::aa_text::Beside;
 use crate::bridge;
 use crate::card;
 use crate::dom;
@@ -153,10 +154,10 @@ pub fn translation_name(code: &str) -> String {
         .unwrap_or_else(|| code.to_uppercase())
 }
 
+/// Comparing translations (Compare on, with a translation rather than the
+/// notes): the comparison is fetched.
 fn is_comparing() -> bool {
-    bridge::document()
-        .and_then(|d| d.document_element())
-        .is_some_and(|html| html.get_attribute("data-compare").as_deref() == Some("on"))
+    aa::beside() == Beside::Translations
 }
 
 fn compare_codes() -> Vec<String> {
@@ -164,7 +165,7 @@ fn compare_codes() -> Vec<String> {
 }
 
 fn compare_layout() -> String {
-    text::compare_layout(is_comparing(), &compare_codes())
+    text::compare_layout(aa::beside(), &compare_codes())
 }
 
 fn scroll_y() -> f64 {
@@ -336,9 +337,15 @@ fn render_current() {
         }
     }
 
+    let name = translation_name(&here.translation_code);
+    let beside = match (&compare, aa::beside()) {
+        (Some(compare), _) => text::Beside::Translations(compare),
+        (None, Beside::Notes) => text::Beside::Notes { name: &name },
+        (None, _) => text::Beside::Nothing,
+    };
     pane.set_inner_html(&text::reading_pane(
         &dto,
-        compare.as_deref(),
+        beside,
         &here.translation_code,
         opened(),
     ));

@@ -4,6 +4,22 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Your notes beside the text: Compare's **with** choices end in
+  **Notes**, which shows your notes on the chapter in a **My notes**
+  column where the second translation would be. The text stays as you
+  read it, in Verses or Flowing, and never moves as notes come and go.
+  Each note sits beside its first verse, labelled with its verses (a thin
+  line beside a range), below the one above where they'd overlap, and
+  folds after about ten lines with **more**. Clicking a note selects its
+  verses and opens it in the card, where you edit it, and the column
+  follows every change. In a narrow window each note sits under its first
+  verse. Reading mode still shows the margin notes, printing leaves the
+  column out, and the choice is remembered on this computer but not put
+  in backups, so backups are unchanged and still import into 2.22.
+
 ## [2.22.1] - 2026-10-31
 
 Fixes for holding Shift to select verses, and nothing else changes:

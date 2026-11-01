@@ -216,6 +216,10 @@ struct State {
     /// the margin, which may open one in the note editor).
     chapter_notes: Vec<(SelectionNote, JsValue)>,
     chapter_notes_token: u64,
+    /// The chapter (book, chapter) `chapter_notes` were last asked for,
+    /// and whether they could be read (if not, there are none).
+    chapter_notes_of: Option<(i64, i64)>,
+    chapter_notes_read: bool,
     selection_notes: Vec<NoteRow>,
     selection_notes_error: String,
     selection_notes_token: u64,
@@ -679,11 +683,9 @@ fn apply(change: Change) {
 // ---- A cross-reference read in place.
 
 /// The passage's text comes from the translation being read; while
-/// comparing, from the first (left) column's.
+/// comparing translations, from the first (left) column's.
 fn preview_translation() -> String {
-    let comparing = bridge::document()
-        .and_then(|d| d.document_element())
-        .is_some_and(|html| html.get_attribute("data-compare").as_deref() == Some("on"));
+    let comparing = crate::aa::beside() == crate::aa_text::Beside::Translations;
     with(|s| {
         let chapter = s.chapter.as_ref();
         chapter
@@ -1489,6 +1491,7 @@ fn refresh_chapter_notes() -> Task {
         return Box::pin(async {});
     };
     let sent = send("list_notes", &args);
+    let of = (args.book_id, args.chapter);
     Box::pin(async move {
         let got = answer(sent).await.and_then(|raw| {
             let notes: Vec<SelectionNote> = read(raw.clone())?;
@@ -1498,11 +1501,18 @@ fn refresh_chapter_notes() -> Task {
         if with(|s| s.chapter_notes_token) != token {
             return;
         }
-        let notes = got.unwrap_or_else(|e| {
-            ipc::log_error("Failed to load the chapter’s notes", &e);
-            Vec::new()
+        let (notes, read) = match got {
+            Ok(notes) => (notes, true),
+            Err(e) => {
+                ipc::log_error("Failed to load the chapter’s notes", &e);
+                (Vec::new(), false)
+            }
+        };
+        with(|s| {
+            s.chapter_notes = notes;
+            s.chapter_notes_of = Some(of);
+            s.chapter_notes_read = read;
         });
-        with(|s| s.chapter_notes = notes);
         apply_note_markers();
         show_margin();
     })
@@ -1513,20 +1523,29 @@ fn refresh_chapter_notes() -> Task {
 const PAST_EVERY_LAST_VERSE: i64 = 999;
 
 /// The chapter's notes, to the margin (`margin`), which shows them in
-/// reading mode.
+/// reading mode and in Compare's notes column, and whether they're known:
+/// read for this chapter (not still on their way, or unreadable), so the
+/// column only says a chapter has none when it hasn't.
 fn show_margin() {
     let found = with(|s| {
         let c = s.chapter.as_ref()?;
+        let known = s.chapter_notes_read && s.chapter_notes_of == Some((c.book_id, c.chapter));
         let notes = s
             .chapter_notes
             .iter()
             .filter(|(n, _)| n.book_id == c.book_id && n.chapter == c.chapter)
             .cloned()
             .collect::<Vec<_>>();
-        Some((c.book_id, c.chapter, c.translation_code.clone(), notes))
+        Some((
+            c.book_id,
+            c.chapter,
+            c.translation_code.clone(),
+            notes,
+            known,
+        ))
     });
-    if let Some((book_id, chapter, code, notes)) = found {
-        margin::notes(book_id, chapter, &code, notes);
+    if let Some((book_id, chapter, code, notes, known)) = found {
+        margin::notes(book_id, chapter, &code, notes, known);
     }
 }
 
