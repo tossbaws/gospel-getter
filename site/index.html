@@ -84,7 +84,7 @@
             <div class="pane pane-black features-head">
                 <h2 id="features-title">A quiet place to read</h2>
                 <p>Gospel Getter does a few things and stays out of the way. Every screenshot on this page is the real app.</p>
-                <p><a class="link" href="guide.html">Every feature, in full</a></p>
+                <p><a class="link" href="guide.html">The main features, in more detail</a></p>
             </div>
             <div class="pane pane-emerald-deep feature" id="context">
                 <h3>Read in context</h3>
@@ -108,7 +108,7 @@
                          srcset="assets/search-720.webp 720w, assets/search-1440.webp 1440w"
                          sizes="(max-width: 46rem) 100vw, 58vw"
                          width="1440" height="1300" loading="lazy" decoding="async"
-                         alt="The search panel in the Chi Rho theme. The search “love one another” found 20 verses in the WEB, starting with John 13:34, John 13:35 and John 15:12, each with the matching words highlighted.">
+                         alt="The search panel in the Chi Rho theme. The words love one another, searched without quotes, found 20 verses in the WEB, starting with John 13:34, John 13:35 and John 15:12, each with the matching words highlighted.">
                 </div>
             </figure>
         </section>
@@ -121,7 +121,7 @@
                 <div class="keep-stage">
                     <ul class="keep-notes keep-notes-left">
                         <li class="note-select"><strong>Select a passage</strong> Click a verse, then Shift-click another. The range stays marked while you work with it.</li>
-                        <li class="note-copy"><strong>Copy with the reference</strong> The text comes with “1 Corinthians 13:4–7 (WEB)” after it. Copy as… adds verse numbers or makes a Markdown quote.</li>
+                        <li class="note-copy"><strong>Copy with the reference</strong> The text comes with “— 1 Corinthians 13:4–7 (WEB)” after it. Copy as… adds verse numbers or makes a Markdown quote.</li>
                         <li class="note-refs"><strong>Follow the cross-references</strong> Related passages for every verse, from OpenBible.info. Click one to read it right there.</li>
                     </ul>
                     <figure class="feature keep-card">
@@ -209,7 +209,7 @@
                     <fieldset class="control-layout">
                         <legend>Layout</legend>
                         <div class="choices">
-                            <input type="radio" name="layout" id="layout-verse" checked><label for="layout-verse">Verse by verse</label>
+                            <input type="radio" name="layout" id="layout-verse" checked><label for="layout-verse">Verses</label>
                             <input type="radio" name="layout" id="layout-flowing"><label for="layout-flowing">Flowing</label>
                         </div>
                     </fieldset>
@@ -236,7 +236,7 @@
                 <ul class="computer-list">
                     <li><strong>Windows and Linux.</strong> Installers for 64-bit Windows, and an AppImage or <code>.deb</code> for Linux.</li>
                     <li><strong>Works offline.</strong> The King James Version, the Berean Standard Bible and the World English Bible are built in, along with the cross-references and search.</li>
-                    <li><strong>Your reading stays on your computer.</strong> Bookmarks, highlights, notes and settings live in the app’s own data folder. The app only goes online to check for a new version, which you can turn off.</li>
+                    <li><strong>Your reading stays on your computer.</strong> Bookmarks, highlights, notes and settings live in the app’s own data folder. The app only goes online to check for a new version, which you can turn off, and to download one you’ve chosen to install.</li>
                     <li><strong>Updates ask first.</strong> Nothing is downloaded or installed until you choose <strong>Update and restart</strong>.</li>
                     <li><strong>Move to a new computer.</strong> Export your bookmarks, highlights, notes and settings to a file, and see what it contains before you import it.</li>
                     <li><strong>Free and open source.</strong> <a href="https://github.com/tossbaws/gospel-getter">The code is on GitHub</a> under the MIT license.</li>
@@ -249,6 +249,7 @@
             <div class="pane pane-black download-head">
                 <h2 id="download-title">Download Gospel Getter</h2>
                 <p class="release-line"><strong>Version 2.23.0.</strong> Free, for 64-bit Windows and Linux. <a href="https://github.com/tossbaws/gospel-getter/releases/latest">What’s new</a></p>
+                <p class="small">Windows 10 or 11, 64-bit. Linux: 64-bit, Ubuntu 22.04 / Debian 12 or newer (or similar).</p>
                 <p class="touch-only touch-note">You seem to be on a phone or tablet. Gospel Getter runs on <strong>Windows and Linux computers</strong> only, so open this page on your computer to install it.</p>
             </div>
 
@@ -289,7 +290,6 @@
                     <li><a href="https://github.com/tossbaws/gospel-getter/blob/main/CHANGELOG.md">Changelog</a></li>
                     <li><a href="https://github.com/tossbaws/gospel-getter">Source code</a></li>
                 </ul>
-                <p class="small">There’s no Mac, phone or tablet version, and no web version to read in a browser.</p>
             </div>
         </section>
 
@@ -336,7 +336,7 @@
                 <details id="faq-checksums" name="faq">
                     <summary>How do I check my download?</summary>
                     <div>
-                        <p>Each release lists the SHA-256 checksum of every file in <a href="https://github.com/tossbaws/gospel-getter/releases/latest/download/SHA256SUMS">SHA256SUMS</a>. The installers are built by GitHub Actions from the tagged source, as the <a href="https://github.com/tossbaws/gospel-getter/releases/latest">release notes</a> explain.</p>
+                        <p><a href="https://github.com/tossbaws/gospel-getter/releases/latest/download/SHA256SUMS">SHA256SUMS</a> lists the SHA-256 checksum of each download. The installers are built by GitHub Actions from the tagged source, as the <a href="https://github.com/tossbaws/gospel-getter/releases/latest">release notes</a> explain.</p>
                         <p>On Linux, put SHA256SUMS in the same folder as your download and run:</p>
                         <pre><code>sha256sum -c --ignore-missing SHA256SUMS</code></pre>
                         <p>On Windows, in PowerShell, run this and compare the result with the matching line in SHA256SUMS:</p>
@@ -355,11 +355,13 @@
                 <details id="faq-update" name="faq">
                     <summary>Does it update itself? Will I lose my bookmarks?</summary>
                     <div>
-                        <p>It can, and it always asks first. When Gospel Getter starts, it checks whether there’s a new version. If there is, it tells you, and nothing is downloaded or installed until you choose <strong>Update and restart</strong>. You can choose <strong>Later</strong> instead, or turn the check off in <strong>About Gospel Getter</strong>, from the menu at the top right of the app. <strong>Check now</strong> there checks whenever you like, and shows a new version right there, with its release notes and <strong>Update now</strong>. If GitHub doesn’t answer within 20 seconds, it says so.</p>
+                        <p>It can, and it always asks first. When Gospel Getter starts, it checks whether there’s a new version.</p>
+                        <p>If there is, it tells you, and nothing is downloaded or installed until you choose <strong>Update and restart</strong>. You can choose <strong>Later</strong> instead, or turn the check off in <strong>About Gospel Getter</strong>, from the menu at the top right of the app.</p>
+                        <p><strong>Check now</strong>, in the same place, checks straight away, and shows a new version right there, with its release notes and <strong>Update now</strong>.</p>
                         <p>The Windows installers (setup.exe or MSI), the AppImage and the .deb from this page update themselves. If you built Gospel Getter yourself or installed it another way, the app offers a link to the download page instead.</p>
-                        <p>Versions 2.6 through 2.22 update themselves to this one. Versions 2.5 and older can’t update themselves. If you have one of those, download the new version from this page and install it over the old one, just this once.</p>
+                        <p>Versions 2.6 and newer update themselves. Versions 2.5 and older can’t update themselves. If you have one of those, download the new version from this page and install it over the old one, just this once.</p>
                         <p>Checking downloads a small file from GitHub that names the latest version, so GitHub sees your IP address, as with any download. Nothing about your reading or your data is sent.</p>
-                        <p>Updating keeps your bookmarks, highlights, notes, reading position and settings. To be safe, or to move to another computer, use <strong>Export data…</strong> in the same menu first. A file exported by version 2.8 or newer needs 2.8 or newer to import, and one exported by 2.12 needs 2.12 or newer: 2.11 and older refuse a file whose theme they don’t know. From 2.12 on, a display setting the app doesn’t know is skipped with a notice, and the rest imports, as 2.12 does with a 2.13 file’s Width, 2.12 and 2.13 do with a 2.14 file’s Layout, and 2.12 to 2.14 do with a 2.15 file’s compare translation.</p>
+                        <p>Updating keeps your bookmarks, highlights, notes, reading position and settings. To be safe, or to move to another computer, use <strong>Export data…</strong> in the same menu first. A file always imports into the same version or newer. An older version may skip a setting it doesn’t know, or refuse a file from a much newer version, and it tells you which.</p>
                     </div>
                 </details>
 
@@ -382,6 +384,7 @@
                     <summary>Is there a Mac, phone or web version?</summary>
                     <div>
                         <p>No. Gospel Getter is available for Windows and Linux computers only.</p>
+                        <p>On Windows, the app uses Microsoft’s WebView2, and if your computer doesn’t have it yet, the installer downloads it, so it needs the internet that once.</p>
                     </div>
                 </details>
             </div>
@@ -397,7 +400,7 @@
             </figure>
             <div class="pane pane-night about-text">
                 <h2 id="about-title"><span class="ornament" aria-hidden="true">Α</span>About the maker<span class="ornament" aria-hidden="true">Ω</span></h2>
-                <p class="statement">Gospel Getter is made by Chi Rho Code LLC, a small Christian software company. We build software made well, for the glory of God.</p>
+                <p class="statement">Gospel Getter is made by Chi Rho Code LLC, a small Christian software company. Software made well, for the glory of God.</p>
                 <p>The app is free, and its source code is open on GitHub under the MIT license. It keeps every translation exactly as its public-domain source provides it: we never edit the text.</p>
                 <p>Found a problem, or have a question or an idea? <a href="https://github.com/tossbaws/gospel-getter/issues/new/choose">Open an issue on GitHub</a> (you’ll need a free GitHub account), or write to <a href="mailto:help@chirhocode.com">help@chirhocode.com</a>.</p>
                 <p><a class="link" href="https://chirhocode.com/">More from Chi Rho Code</a></p>
@@ -410,7 +413,7 @@
             <p class="foot-name">Gospel Getter</p>
             <ul class="footer-links">
                 <li><a href="#download">Download</a></li>
-                <li><a href="guide.html">Every feature</a></li>
+                <li><a href="guide.html">Feature guide</a></li>
                 <li><a href="https://github.com/tossbaws/gospel-getter">Source code</a></li>
                 <li><a href="https://github.com/tossbaws/gospel-getter/releases">Releases</a></li>
                 <li><a href="https://github.com/tossbaws/gospel-getter/blob/main/CHANGELOG.md">Changelog</a></li>
