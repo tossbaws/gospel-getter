@@ -7,9 +7,10 @@ analytics or cookies. The fonts are self-hosted in `assets/fonts/`.
 only once the version it shows is a published release (see "Downloads and
 releases").
 
-The page is served first at `https://tossbaws.github.io/gospel-getter/` and
-later at the root of a domain, so **every internal URL is relative**
-(`brand.css`, `assets/…`, `#download`). Never start one with `/`.
+The page is served at the root of `https://gospelgetter.chirhocode.com/`, but
+**every internal URL is still relative** (`brand.css`, `assets/…`,
+`#download`) so the page also works from a folder, as in a local preview.
+Never start one with `/`.
 
 ## Preview locally
 
