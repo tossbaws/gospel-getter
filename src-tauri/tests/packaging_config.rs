@@ -64,6 +64,32 @@ fn tauri_conf_targets_all_platform_installers() {
     );
 }
 
+/// The copyright holder is Chi Rho Code LLC, but the publisher and the
+/// identifier keep the old name: each names something on users' machines.
+#[test]
+fn tauri_conf_publisher_and_identifier_stay_put_under_the_new_copyright() {
+    let conf: Value = serde_json::from_str(TAURI_CONF).unwrap();
+    assert_eq!(
+        conf["bundle"]["publisher"], "tossbaws",
+        "the NSIS install folder lives under HKCU\\Software\\<publisher>; \
+         changing it orphans existing installs, so it needs a migration \
+         (see 2026-11-01 decision)"
+    );
+    assert_eq!(
+        conf["identifier"], "com.tossbaws.gospel-getter",
+        "the identifier names the data folder; changing it loses every \
+         user's data"
+    );
+    let copyright = conf["bundle"]["copyright"]
+        .as_str()
+        .expect("bundle.copyright should be a string");
+    assert!(
+        copyright.contains("Chi Rho Code LLC"),
+        "bundle.copyright ({copyright:?}) should name Chi Rho Code LLC, \
+         the copyright holder in LICENSE"
+    );
+}
+
 #[test]
 fn tauri_conf_icon_paths_all_exist_on_disk() {
     let conf: Value = serde_json::from_str(TAURI_CONF).unwrap();
