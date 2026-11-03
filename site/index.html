@@ -61,8 +61,8 @@
                     <a class="button" href="#download-windows">Download for Windows</a>
                     <a class="link" href="#download-linux">Download for Linux</a>
                 </div>
-                <p class="small hero-note">Version 2.23.0, for 64-bit computers. The Windows installer isn’t code-signed yet, so Windows will probably warn you before it runs. <a href="#faq-smartscreen">What to expect</a>.</p>
-                <p class="touch-only touch-note">Gospel Getter is a desktop app for <strong>Windows and Linux computers</strong>. There’s no phone, tablet or Mac version. To install it, open this page on your computer.</p>
+                <p class="small hero-note">Version 2.23.0, for 64-bit computers.</p>
+                <p class="touch-only touch-note">Gospel Getter is a desktop app for <strong>Windows and Linux computers</strong>. To install it, open this page on your computer.</p>
             </div>
             <figure class="pane hero-shot">
                 <img src="assets/hero-1400.webp"
@@ -72,7 +72,7 @@
                      alt="Gospel Getter in the Chi Rho theme (parchment text on near-black, with gold headings), showing John 3 in the World English Bible, from “Now there was a man of the Pharisees named Nicodemus” onwards. The chapter is in the centre, with the edges of John 2 and John 4 faded on either side.">
             </figure>
             <ul class="facts" aria-label="At a glance">
-                <li class="pane pane-emerald-deep"><strong>Free</strong> No price, no ads, no subscription.</li>
+                <li class="pane pane-emerald-deep"><strong>Free</strong> with no ads.</li>
                 <li class="pane pane-emerald"><strong>Reads offline</strong> All three translations are built in.</li>
                 <li class="pane pane-teal-deep"><strong>No account</strong> Nothing to sign up for or log in to.</li>
                 <li class="pane pane-night"><strong>Open source</strong> <a href="https://github.com/tossbaws/gospel-getter">MIT-licensed code on GitHub</a>.</li>
@@ -83,7 +83,7 @@
         <section class="board features" id="features" aria-labelledby="features-title">
             <div class="pane pane-black features-head">
                 <h2 id="features-title">A quiet place to read</h2>
-                <p>Gospel Getter does a few things and stays out of the way. Every screenshot on this page is the real app.</p>
+                <p>Gospel Getter does a few things and stays out of the way.</p>
                 <p><a class="link" href="guide.html">The main features, in more detail</a></p>
             </div>
             <div class="pane pane-emerald-deep feature" id="context">
@@ -117,7 +117,7 @@
         <section class="board keep" id="keep" aria-labelledby="keep-title">
             <div class="pane pane-black keep-plate">
                 <h2 id="keep-title">Keep what matters</h2>
-                <p class="keep-intro">Select verses and a card opens under them. Point at a note to see its part of the card.</p>
+                <p class="keep-intro">Select verses and a card opens under them.</p>
                 <div class="keep-stage">
                     <ul class="keep-notes keep-notes-left">
                         <li class="note-select"><strong>Select a passage</strong> Click a verse, then Shift-click another. The range stays marked while you work with it.</li>
@@ -163,7 +163,7 @@
         <section class="board themes" id="themes" aria-labelledby="themes-title">
             <div class="pane pane-black themes-head">
                 <h2 id="themes-title">Make it yours</h2>
-                <p>Try the app’s themes, text sizes and layouts on Psalm 23. The colours and the typeface, Literata, are the app’s own.</p>
+                <p>Try the app’s themes, text sizes and layouts on Psalm 23.</p>
             </div>
             <div class="pane pane-night demo">
                 <div class="reader" data-ui>
@@ -215,15 +215,6 @@
                     </fieldset>
                 </div>
             </div>
-            <div class="pane pane-emerald-deep themes-more">
-                <h3>And under Aa in the app</h3>
-                <ul>
-                    <li>Three line spacings and three widths.</li>
-                    <li>Reading mode, which hides everything but the text.</li>
-                    <li>A ninth theme, System, which follows your computer: Vellum when it’s light, Chi Rho when it’s dark.</li>
-                    <li>Printing is always black on white.</li>
-                </ul>
-            </div>
         </section>
 
         <!-- Made for your computer. -->
@@ -265,7 +256,7 @@
                         <p class="file-note">For people who prefer or manage MSI installs.</p>
                     </li>
                 </ul>
-                <p class="caution">The installers aren’t code-signed yet, so Windows SmartScreen will probably say it “protected your PC” from an “unknown publisher”. If you trust this download, choose <strong>More info</strong>, then <strong>Run anyway</strong>. <a href="#faq-smartscreen">More about this</a>.</p>
+                <p class="caution">Windows may warn about an unknown publisher. <a href="#faq-smartscreen">What to do</a>. If your computer doesn’t have Microsoft’s WebView2 yet, the installer downloads it, so it needs the internet that once.</p>
             </section>
 
             <section class="pane pane-teal-deep platform" id="download-linux" aria-labelledby="linux-title">
@@ -336,7 +327,7 @@
                 <details id="faq-checksums" name="faq">
                     <summary>How do I check my download?</summary>
                     <div>
-                        <p><a href="https://github.com/tossbaws/gospel-getter/releases/latest/download/SHA256SUMS">SHA256SUMS</a> lists the SHA-256 checksum of each download. The installers are built by GitHub Actions from the tagged source, as the <a href="https://github.com/tossbaws/gospel-getter/releases/latest">release notes</a> explain.</p>
+                        <p><a href="https://github.com/tossbaws/gospel-getter/releases/latest/download/SHA256SUMS">SHA256SUMS</a> lists the SHA-256 checksum of each download.</p>
                         <p>On Linux, put SHA256SUMS in the same folder as your download and run:</p>
                         <pre><code>sha256sum -c --ignore-missing SHA256SUMS</code></pre>
                         <p>On Windows, in PowerShell, run this and compare the result with the matching line in SHA256SUMS:</p>
@@ -358,33 +349,16 @@
                         <p>It can, and it always asks first. When Gospel Getter starts, it checks whether there’s a new version.</p>
                         <p>If there is, it tells you, and nothing is downloaded or installed until you choose <strong>Update and restart</strong>. You can choose <strong>Later</strong> instead, or turn the check off in <strong>About Gospel Getter</strong>, from the menu at the top right of the app.</p>
                         <p><strong>Check now</strong>, in the same place, checks straight away, and shows a new version right there, with its release notes and <strong>Update now</strong>.</p>
-                        <p>The Windows installers (setup.exe or MSI), the AppImage and the .deb from this page update themselves. If you built Gospel Getter yourself or installed it another way, the app offers a link to the download page instead.</p>
-                        <p>Versions 2.6 and newer update themselves. Versions 2.5 and older can’t update themselves. If you have one of those, download the new version from this page and install it over the old one, just this once.</p>
                         <p>Checking downloads a small file from GitHub that names the latest version, so GitHub sees your IP address, as with any download. Nothing about your reading or your data is sent.</p>
-                        <p>Updating keeps your bookmarks, highlights, notes, reading position and settings. To be safe, or to move to another computer, use <strong>Export data…</strong> in the same menu first. A file always imports into the same version or newer. An older version may skip a setting it doesn’t know, or refuse a file from a much newer version, and it tells you which.</p>
-                    </div>
-                </details>
-
-                <details id="faq-version" name="faq">
-                    <summary>Which version is this?</summary>
-                    <div>
-                        <p>The download buttons on this page always get the newest release. To see which version you have installed, open the menu at the top right of the app and choose <strong>About Gospel Getter</strong>: the version is shown under the name. Older versions are on the <a href="https://github.com/tossbaws/gospel-getter/releases">releases page</a>.</p>
+                        <p>Updating keeps your bookmarks, highlights, notes, reading position and settings.</p>
                     </div>
                 </details>
 
                 <details id="faq-translations" name="faq">
                     <summary>Which translations are included?</summary>
                     <div>
-                        <p>Three: the King James Version (KJV), the Berean Standard Bible (BSB) and the World English Bible (WEB). All three are public domain, which is what lets them ship offline inside the app; the KJV is the default, and the translation button at the top of the app switches between them. <strong>About Gospel Getter</strong>, in the menu at the top right, credits each one’s source. Copyrighted translations such as the NIV and ESV aren’t included.</p>
+                        <p>Three: the King James Version (KJV), the Berean Standard Bible (BSB) and the World English Bible (WEB). All three are public domain; the KJV is the default, and the translation button at the top of the app switches between them. <strong>About Gospel Getter</strong>, in the menu at the top right, credits each one’s source. Copyrighted translations such as the NIV and ESV aren’t included.</p>
                         <p>Cross-references are from <a href="https://www.openbible.info/labs/cross-references/">OpenBible.info</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
-                    </div>
-                </details>
-
-                <details id="faq-platforms" name="faq">
-                    <summary>Is there a Mac, phone or web version?</summary>
-                    <div>
-                        <p>No. Gospel Getter is available for Windows and Linux computers only.</p>
-                        <p>On Windows, the app uses Microsoft’s WebView2, and if your computer doesn’t have it yet, the installer downloads it, so it needs the internet that once.</p>
                     </div>
                 </details>
             </div>
@@ -402,7 +376,7 @@
                 <h2 id="about-title"><span class="ornament" aria-hidden="true">Α</span>About the maker<span class="ornament" aria-hidden="true">Ω</span></h2>
                 <p class="statement">Gospel Getter is made by Chi Rho Code LLC, a small Christian software company. Software made well, for the glory of God.</p>
                 <p>The app is free, and its source code is open on GitHub under the MIT license. It keeps every translation exactly as its public-domain source provides it: we never edit the text.</p>
-                <p>Found a problem, or have a question or an idea? <a href="https://github.com/tossbaws/gospel-getter/issues/new/choose">Open an issue on GitHub</a> (you’ll need a free GitHub account), or write to <a href="mailto:help@chirhocode.com">help@chirhocode.com</a>.</p>
+                <p>Found a problem, or have a question or an idea? <a href="https://github.com/tossbaws/gospel-getter/issues/new/choose">Open an issue on GitHub</a>, or write to <a href="mailto:help@chirhocode.com">help@chirhocode.com</a>.</p>
                 <p><a class="link" href="https://chirhocode.com/">More from Chi Rho Code</a></p>
             </div>
         </section>

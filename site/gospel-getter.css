@@ -426,22 +426,6 @@
     margin-top: 0;
 }
 
-.themes-more {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 1rem var(--gap);
-}
-
-.themes-more h3 {
-    grid-column: 1 / 6;
-}
-
-.themes-more h3 + ul {
-    grid-column: 6 / 13;
-    margin-top: 0;
-}
-
 /* The reader: the app's own reading view, in its own colours. Chi Rho first. It takes the
    height of the controls beside it and scrolls, as the app's page does, so no choice in the
    demo changes the height of the panes. */
@@ -1368,9 +1352,7 @@
     }
 
     .themes-head h2,
-    .themes-head p,
-    .themes-more h3,
-    .themes-more h3 + ul {
+    .themes-head p {
         grid-column: 1 / -1;
     }
 
