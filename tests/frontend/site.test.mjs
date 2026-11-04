@@ -233,7 +233,7 @@ test('site/brand.css is still the copy of chirhocode-site\'s brand.css that its 
     );
 });
 
-test('the Support section links to four Payment Links, the customer portal, Ko-fi and the refund email', () => {
+test('the Support section links to four Payment Links, the customer portal and Ko-fi, and says tips are final', () => {
     const { document } = pages.find((p) => p.name === 'index.html');
     const support = document.getElementById('support');
     assert.ok(support, 'site/index.html has no #support section');
@@ -249,8 +249,23 @@ test('the Support section links to four Payment Links, the customer portal, Ko-f
         '#support has no link to the Stripe customer portal',
     );
     assert.ok(hrefs.includes('https://ko-fi.com/crcllc'), '#support has no link to https://ko-fi.com/crcllc');
-    // A tip is refunded on request.
-    assert.ok(hrefs.includes('mailto:help@chirhocode.com'), '#support has no link to mailto:help@chirhocode.com');
+    // Tips are final: the note says so, for Ko-fi too, and promises no refund.
+    const note = support.querySelector('.support-head p.small');
+    assert.ok(note, '#support has no note under its intro');
+    assert.match(note.textContent, /\bare final\b/, '#support\'s note doesn\'t say tips are final');
+    assert.match(note.textContent, /\bKo-fi\b/, '#support\'s note doesn\'t name Ko-fi');
+    assert.doesNotMatch(note.textContent, /refund/i, '#support\'s note still promises a refund');
+    assert.equal(note.querySelector('a[href^="mailto:"]'), null, '#support\'s note still has a mailto link');
+    assert.ok(
+        [...support.querySelectorAll('a[href^="https://billing.stripe.com/p/login/"]')]
+            .some((a) => a.textContent.trim() === 'Manage or cancel a monthly tip'),
+        '#support has no "Manage or cancel a monthly tip" link',
+    );
+    // The address for questions is still on the page, in the feedback section.
+    assert.ok(
+        document.querySelector('a[href="mailto:help@chirhocode.com"]'),
+        'site/index.html has no link to mailto:help@chirhocode.com',
+    );
 });
 
 test('no site page links to a Stripe sandbox (test-mode) link', () => {
