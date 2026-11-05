@@ -352,11 +352,23 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
 
+      # Static, so it starts on a Windows without the Visual C++ runtime, as the
+      # app does: tauri-build links the app's statically, and this program has
+      # no tauri-build. This runner has that runtime, so running the program
+      # can't show it's needed. What the program imports can.
       - name: Build the CLI sidecar
         shell: pwsh
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
         run: |
           cargo build --release --locked -p gospel-getter-cli
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dumpbin = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -find 'VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          if (-not $dumpbin) { Write-Error "dumpbin wasn't found, so the CLI's imports can't be checked"; exit 1 }
+          $imports = & $dumpbin /nologo /dependents target\release\gospel-getter-cli.exe
+          if ($LASTEXITCODE -ne 0 -or -not ($imports -match 'KERNEL32')) { Write-Error "Couldn't read the CLI's imports: $imports"; exit 1 }
+          if ($imports -match 'VCRUNTIME|MSVCP') { Write-Error "The CLI needs the Visual C++ runtime: $imports"; exit 1 }
+          Write-Host "The CLI's imports: $($imports -match '\.dll' | ForEach-Object { $_.Trim() })"
           $triple = (rustc -vV | Select-String '^host: ').Line.Substring(6).Trim()
           New-Item -ItemType Directory -Force binaries | Out-Null
           Copy-Item target/release/gospel-getter-cli.exe "binaries/gospel-getter-cli-$triple.exe"
