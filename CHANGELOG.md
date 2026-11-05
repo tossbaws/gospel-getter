@@ -4,7 +4,24 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.24.0] - 2026-11-05
+
+An AI agent on your computer can now read your install. Updating keeps your
+bookmarks, highlights, notes, reading position and settings.
+
+### Added
+- `gospel-getter-cli`, a small separate program that lets an AI agent on
+  your computer (Claude Code, Claude Desktop or any MCP client), or you in
+  a terminal, read your own install. It only reads: it opens the database
+  with a read-only connection, so it can't change anything, and it has no
+  network port. Its nine tools list the translations, get a passage's text,
+  search a translation, compare a passage across translations, get
+  cross-references, tell where you last were reading, and list your
+  bookmarks, your highlights and your notes. The `.deb` puts it on your
+  `PATH`, the Windows installers put it beside the app, and AppImage users
+  download it on its own from the release. Setup is in the README, under
+  [Use with AI agents](README.md#use-with-ai-agents). The app's window
+  doesn't change.
 
 ### Changed
 - The copyright holder is now Chi Rho Code LLC.
