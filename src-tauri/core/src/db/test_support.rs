@@ -314,8 +314,8 @@ pub struct RawBook {
 /// stores.
 pub fn bundled(code: &str) -> Vec<RawBook> {
     let json = match code {
-        "kjv" => include_str!("../../data/kjv.json"),
-        "web" => include_str!("../../data/web.json"),
+        "kjv" => include_str!("../../../data/kjv.json"),
+        "web" => include_str!("../../../data/web.json"),
         _ => panic!("no bundled translation {code}"),
     };
     serde_json::from_str(json).expect("bundled translation JSON")
@@ -342,7 +342,7 @@ pub struct RawBsbFootnote {
 
 /// The bundled BSB, parsed: the exact strings the seed step stores.
 pub fn bundled_bsb() -> Vec<RawBsbBook> {
-    serde_json::from_str(include_str!("../../data/bsb.json")).expect("bundled BSB JSON")
+    serde_json::from_str(include_str!("../../../data/bsb.json")).expect("bundled BSB JSON")
 }
 
 /// Write a database as v2.1.0 left it after some reading: v2.1.0's schema,

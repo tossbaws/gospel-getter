@@ -2,21 +2,11 @@
 //! `run`; the modules are public so the frontend test bridge
 //! (`examples/frontend_bridge.rs`) can drive the same command logic.
 
-// The books' abbreviations, shared with the page's Rust pieces (ui-leptos),
-// which compile the same file.
-#[path = "../../shared/book_aliases.rs"]
-pub mod book_aliases;
 pub mod commands;
 pub mod credit_links;
-pub mod db;
-pub mod domain;
 pub mod markdown;
 pub mod notes_export;
 pub mod passage_copy;
-// How a passage is named ("John 3:16–18"), shared with the page's Rust
-// pieces (ui-leptos), which compile the same file.
-#[path = "../../shared/passage_reference.rs"]
-pub mod passage_reference;
 // The saved settings' one table, shared with the page's Rust pieces
 // (ui-leptos), which compile the same file.
 #[path = "../../shared/preferences.rs"]
@@ -30,11 +20,11 @@ pub mod start_here;
 pub mod support_link;
 pub mod updater;
 pub mod web_link;
-// A verse's parts and footnotes as shown, shared with the page's Rust
-// pieces (ui-leptos), which compile the same file.
-#[path = "../../shared/verse_parts.rs"]
-pub mod verse_parts;
 pub mod window;
+
+// The database and the domain logic, in a crate of their own, free of Tauri,
+// so that `gospel-getter-cli` can use them without linking the webview.
+pub use gospel_getter_core::{book_aliases, db, domain, passage_reference, verse_parts};
 
 use anyhow::Context;
 use tauri::Manager;
@@ -139,7 +129,7 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
         .app_data_dir()
         .context("Failed to resolve the app data directory")?;
     std::fs::create_dir_all(&app_data_dir).context("Failed to create the app data directory")?;
-    let db_path = app_data_dir.join("gospel_getter.db");
+    let db_path = app_data_dir.join(db::DATABASE_FILE);
     info!("Using database at {}", db_path.display());
 
     // Best-effort: if we can't resolve the home directory, or the legacy

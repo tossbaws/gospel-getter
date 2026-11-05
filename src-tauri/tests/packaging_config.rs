@@ -15,6 +15,14 @@ const CAPABILITY: &str = include_str!("../capabilities/default.json");
 const DIST_YML: &str = include_str!("../../.github/workflows/dist.yml");
 const INSTALL_SH: &str = include_str!("../../packaging/install.sh");
 const WINDOWS_PACKAGING: &str = include_str!("../../packaging/windows/README.md");
+const SIDECAR_CONF: &str = include_str!("../tauri.sidecar.conf.json");
+const GITIGNORE: &str = include_str!("../.gitignore");
+const CARGO_LOCK: &str = include_str!("../Cargo.lock");
+const CLI_CARGO_TOML: &str = include_str!("../cli/Cargo.toml");
+const CLI_MAIN_RS: &str = include_str!("../cli/src/main.rs");
+const CORE_CARGO_TOML: &str = include_str!("../core/Cargo.toml");
+const CORE_CONNECT_RS: &str = include_str!("../core/src/db/connect.rs");
+const APP_MAIN_RS: &str = include_str!("../src/main.rs");
 
 /// Crude but sufficient: pull `version = "X.Y.Z"` out of Cargo.toml's
 /// `[package]` table without pulling in a TOML parser as a dev-only dep.
@@ -552,4 +560,248 @@ fn no_release_or_packaging_build_enables_the_gui_test_updater() {
             }
         }
     }
+}
+
+/// The program every installer carries beside the app (`gospel-getter-cli`,
+/// A3), as a sidecar named in an overlay. `tauri.conf.json` names none:
+/// tauri-build wants a sidecar's file there on every build it's named for, and
+/// `cargo build` and `cargo test` come before the file does.
+const SIDECAR: &str = "binaries/gospel-getter-cli";
+const SIDECAR_STEP: &str = "Build the CLI sidecar";
+
+#[test]
+fn the_sidecar_is_named_in_its_overlay_alone() {
+    let overlay: Value = serde_json::from_str(SIDECAR_CONF).unwrap();
+    assert_eq!(
+        overlay["bundle"]["externalBin"],
+        serde_json::json!([SIDECAR])
+    );
+    assert_eq!(
+        overlay["bundle"].as_object().map(|b| b.len()),
+        Some(1),
+        "it changes nothing else: {overlay}"
+    );
+    let conf: Value = serde_json::from_str(TAURI_CONF).unwrap();
+    assert!(conf["bundle"].get("externalBin").is_none());
+    let updater: Value = serde_json::from_str(include_str!("../tauri.updater.conf.json")).unwrap();
+    assert!(updater["bundle"].get("externalBin").is_none());
+    assert!(
+        GITIGNORE.lines().any(|l| l == "/binaries/"),
+        "the built sidecar stays out of the repository"
+    );
+}
+
+/// Every installer build takes the overlay, after its job has built the
+/// sidecar: on its own, without features, from the lock file.
+#[test]
+fn every_installer_build_carries_the_sidecar() {
+    let steps = dist_steps();
+    for job in ["linux", "windows"] {
+        let job_steps: Vec<&Step> = steps.iter().filter(|s| s.job == job).collect();
+        let built_at = job_steps
+            .iter()
+            .position(|s| s.name == SIDECAR_STEP)
+            .unwrap_or_else(|| panic!("job {job} has no \"{SIDECAR_STEP}\" step"));
+        let build = &job_steps[built_at].text;
+        assert!(
+            build.contains("cargo build --release --locked -p gospel-getter-cli"),
+            "{build}"
+        );
+        assert!(!build.contains("--features"), "{build}");
+        assert!(build.contains("binaries/gospel-getter-cli-"), "{build}");
+        let mut installer_builds = 0;
+        for (at, step) in job_steps.iter().enumerate() {
+            for line in step
+                .text
+                .lines()
+                .filter(|l| l.trim_start().starts_with("cargo tauri build"))
+            {
+                installer_builds += 1;
+                assert!(
+                    line.contains("--config tauri.sidecar.conf.json"),
+                    "an installer without the sidecar: {line}"
+                );
+                assert!(at > built_at, "built before the sidecar: {line}");
+            }
+        }
+        assert!(installer_builds > 0, "job {job} builds no installers");
+    }
+}
+
+/// AppImage users can't reach a sidecar (F8), so the program goes up on its
+/// own too, from the job that built it, before the job's test app is built.
+#[test]
+fn the_cli_is_also_uploaded_on_its_own() {
+    let steps = dist_steps();
+    for (job, artifact, file) in [
+        (
+            "linux",
+            "gospel-getter-cli-linux-x86_64",
+            "src-tauri/binaries/gospel-getter-cli-x86_64-unknown-linux-gnu",
+        ),
+        (
+            "windows",
+            "gospel-getter-cli-windows-x86_64",
+            "src-tauri/binaries/gospel-getter-cli-x86_64-pc-windows-msvc.exe",
+        ),
+    ] {
+        let uploads: Vec<&Step> = steps
+            .iter()
+            .filter(|s| s.job == job && s.text.contains(&format!("name: {artifact}\n")))
+            .collect();
+        assert_eq!(uploads.len(), 1, "job {job} uploads {artifact} once");
+        let upload = &uploads[0].text;
+        assert!(upload.contains("actions/upload-artifact"), "{upload}");
+        assert!(upload.contains(&format!("path: {file}\n")), "{upload}");
+        assert!(upload.contains("if-no-files-found: error"), "{upload}");
+    }
+}
+
+/// Each kind of installer is checked for it, once installed.
+#[test]
+fn the_smoke_tests_check_the_sidecar_is_there() {
+    let steps = dist_steps();
+    let smoke = |job: &str, name: &str| -> String {
+        steps
+            .iter()
+            .find(|s| s.job == job && s.name.contains(name))
+            .unwrap_or_else(|| panic!("no {name} step in {job}"))
+            .text
+            .clone()
+    };
+    assert!(smoke("linux", "AppImage extracts").contains("usr/bin/gospel-getter-cli --version"));
+    let deb = smoke("linux", ".deb installs");
+    assert!(deb.contains("'/usr/bin/gospel-getter-cli'"), "{deb}");
+    assert!(deb.contains("gospel-getter-cli --version"), "{deb}");
+    let nsis = smoke("windows", "silent install");
+    assert!(nsis.contains("gospel-getter-cli.exe"), "{nsis}");
+    assert!(nsis.contains("--version"), "{nsis}");
+}
+
+/// The app never runs its sidecar, so it gains no plugin or permission to, and
+/// the page none at all.
+#[test]
+fn the_app_gets_no_way_to_run_the_sidecar() {
+    assert!(!CARGO_TOML.contains("tauri-plugin-shell"));
+    assert!(!LIB_RS.contains("tauri_plugin_shell"));
+    let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
+    assert_eq!(
+        capability["permissions"],
+        serde_json::json!(["core:default"])
+    );
+}
+
+#[test]
+fn the_cli_is_the_apps_version_and_finds_the_apps_data() {
+    let version = cargo_package_version();
+    assert!(
+        CLI_CARGO_TOML
+            .lines()
+            .any(|l| l == format!("version = \"{version}\"")),
+        "cli/Cargo.toml's version should track Cargo.toml's ({version})"
+    );
+    let conf: Value = serde_json::from_str(TAURI_CONF).unwrap();
+    let identifier = conf["identifier"].as_str().unwrap();
+    assert!(
+        CORE_CONNECT_RS.contains(&format!(
+            "pub const APP_IDENTIFIER: &str = \"{identifier}\";"
+        )),
+        "the CLI reads the app's data folder by its identifier, {identifier}"
+    );
+}
+
+/// On Windows the app is a GUI program and the CLI a console one, so it prints
+/// in a terminal; the app stays as it was.
+#[test]
+fn only_the_app_is_a_windows_gui_program() {
+    assert!(APP_MAIN_RS.contains("windows_subsystem = \"windows\""));
+    assert!(!CLI_MAIN_RS.contains("#![cfg_attr(") && !CLI_MAIN_RS.contains("#![windows_subsystem"));
+}
+
+/// Packages named in Cargo.lock, with what each depends on.
+fn lock_packages() -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut packages: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    let mut name = String::new();
+    let mut in_dependencies = false;
+    for line in CARGO_LOCK.lines() {
+        if let Some(found) = line
+            .strip_prefix("name = \"")
+            .and_then(|r| r.strip_suffix('"'))
+        {
+            name = found.to_string();
+            packages.entry(name.clone()).or_default();
+        } else if line == "dependencies = [" {
+            in_dependencies = true;
+        } else if line == "]" {
+            in_dependencies = false;
+        } else if in_dependencies {
+            // `"name",` or `"name version",` where two versions are in the lock.
+            let dependency = line.trim().trim_matches([',', '"']);
+            let dependency = dependency.split(' ').next().unwrap_or(dependency);
+            packages
+                .entry(name.clone())
+                .or_default()
+                .push(dependency.to_string());
+        }
+    }
+    packages
+}
+
+/// `gospel-getter-cli` links neither GTK nor WebKit (A3), and no HTTP or other
+/// network code (F4): nothing in its dependency tree, dev and build
+/// dependencies included, can bring one in.
+#[test]
+fn the_cli_depends_on_no_webview_and_no_network() {
+    let packages = lock_packages();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut waiting = vec!["gospel-getter-cli".to_string()];
+    while let Some(name) = waiting.pop() {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        let dependencies = packages
+            .get(&name)
+            .unwrap_or_else(|| panic!("{name} isn't in Cargo.lock"));
+        waiting.extend(dependencies.iter().cloned());
+    }
+    assert!(seen.contains("rmcp") && seen.contains("gospel_getter_core"));
+    for package in &seen {
+        let banned = package.starts_with("tauri")
+            || package.starts_with("webkit2gtk")
+            || package.starts_with("gtk")
+            || package.starts_with("gdk")
+            || [
+                "wry", "tao", "glib", "hyper", "reqwest", "axum", "tower", "rustls",
+            ]
+            .contains(&package.as_str());
+        assert!(!banned, "gospel-getter-cli depends on {package}");
+    }
+    for manifest in [CLI_CARGO_TOML, CORE_CARGO_TOML] {
+        assert!(!manifest.contains("tauri"), "{manifest}");
+    }
+    let rmcp = CLI_CARGO_TOML
+        .lines()
+        .find(|l| l.starts_with("rmcp = "))
+        .expect("rmcp is a dependency");
+    assert!(
+        rmcp.contains("default-features = false")
+            && rmcp.contains("\"server\"")
+            && rmcp.contains("\"transport-io\"")
+            && !rmcp.contains("http"),
+        "{rmcp}"
+    );
+}
+
+/// The translations' text is embedded once. As a `const` it's copied into each
+/// crate instantiating what uses it, and the app's binary grows by all of it.
+#[test]
+fn the_translations_text_is_a_static() {
+    let seed = include_str!("../core/src/db/seed.rs");
+    assert!(seed.contains("\nstatic TEXTS: "), "see `seed::TEXTS`");
+}
+
+/// The AUR recipe's own build makes the CLI too; it should install it.
+#[test]
+fn pkgbuild_installs_the_cli() {
+    assert!(PKGBUILD.contains("usr/bin/gospel-getter-cli"));
 }

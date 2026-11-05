@@ -8,6 +8,8 @@ edition = "2024"
 # The oldest Rust that builds it: sqlx 0.9 needs 1.94 (and Tauri 2.12
 # 1.90), more than the code's own let chains (1.88).
 rust-version = "1.94"
+# `cargo tauri dev` is `cargo run`, and the workspace has a second program.
+default-run = "gospel_getter"
 
 # The app's code lives in the library, so the frontend test bridge
 # (`examples/frontend_bridge.rs`) can drive the real commands; `main.rs`
@@ -15,6 +17,13 @@ rust-version = "1.94"
 [lib]
 name = "gospel_getter_lib"
 path = "src/lib.rs"
+
+# The database and domain logic (`core`) are a crate of their own, free of
+# Tauri, and so is the program built on them (`cli`), which links neither GTK
+# nor WebKit. `cargo build`, `test`, `clippy` and `doc` here cover every member.
+[workspace]
+members = ["core", "cli"]
+default-members = [".", "core", "cli"]
 
 # Off in every build but one. `gui-test-updater` is the GUI checks' test
 # build (scripts/gui-check.sh, tests/gui): its updater reads where to check,
@@ -29,6 +38,7 @@ gui-test-updater = []
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+gospel_getter_core = { path = "core" }
 tauri = { version = "2", features = [] }
 # `time`: the search index build's pauses between tries (`retry.rs`).
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
@@ -48,11 +58,6 @@ semver = "1"
 # from, and its date presets go to, the frontend as "YYYY-MM-DD"); the rest
 # of chrono's defaults aren't needed.
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
-# The words a search matched, marked in its results (`query::term_marks`):
-# letters, digits and private-use characters (general categories), compared
-# decomposed (NFD) without their marks. Both were already in the tree.
-unicode-normalization = "0.1.25"
-unicode-properties = { version = "0.1.4", default-features = false, features = ["general-category"] }
 
 # Desktop only: the in-app updater, and opening the releases page in the
 # system browser for builds that can't update themselves. See `updater.rs`.
@@ -71,6 +76,8 @@ tauri-plugin-window-state = "~2.5"
 # Only for `examples/frontend_bridge.rs` (the frontend tests' stdio bridge);
 # the app itself doesn't read stdin.
 [dev-dependencies]
+# Disposable prepared databases (`db::test_support`).
+gospel_getter_core = { path = "core", features = ["test-support"] }
 tokio = { version = "1", features = ["io-std", "io-util"] }
 # Tauri's mock runtime, for driving the commands through real IPC in tests.
 tauri = { version = "2", features = ["test"] }

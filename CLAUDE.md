@@ -1,6 +1,6 @@
 # Gospel Getter: instructions for Claude Code
 
-Gospel Getter is a Tauri 2 Bible reader. The Rust backend lives in `src-tauri/`. The UI is the `ui-leptos/` crate (Rust, Leptos), which Trunk (`Trunk.toml`) compiles to WebAssembly and builds with `ui/index.html` into `dist/`, the folder Tauri embeds. `ui/index.html` still holds the page's markup, its stylesheet and three small inline scripts (the pre-paint script, boot's prefetch and the plain-text fallback), with `ui/leptos-loader.js`, the fonts and the favicons beside it. `tests/gui/` drives the real app through tauri-driver (`scripts/gui-check.sh`), and `tests/frontend/` loads the built page into jsdom against the backend's real commands.
+Gospel Getter is a Tauri 2 Bible reader. The Rust backend lives in `src-tauri/`, a workspace: the app, `core/` (the database and domain logic, free of Tauri) and `cli/` (`gospel-getter-cli`, a read-only CLI and MCP server built on `core/`). The UI is the `ui-leptos/` crate (Rust, Leptos), which Trunk (`Trunk.toml`) compiles to WebAssembly and builds with `ui/index.html` into `dist/`, the folder Tauri embeds. `ui/index.html` still holds the page's markup, its stylesheet and three small inline scripts (the pre-paint script, boot's prefetch and the plain-text fallback), with `ui/leptos-loader.js`, the fonts and the favicons beside it. `tests/gui/` drives the real app through tauri-driver (`scripts/gui-check.sh`), and `tests/frontend/` loads the built page into jsdom against the backend's real commands.
 
 ## Rust
 

@@ -6,8 +6,7 @@ use serde::Deserialize;
 
 use crate::db::WritePool;
 
-/// One bundled translation's raw text, embedded into the binary so the app
-/// is fully self-contained and works offline, and how the app lists it.
+/// How the app lists one bundled translation (its text is in `TEXTS`).
 pub struct TranslationSource {
     pub code: &'static str,
     pub name: &'static str,
@@ -18,7 +17,6 @@ pub struct TranslationSource {
     pub licence: &'static str,
     /// Where it comes from, as About credits it.
     pub credit: &'static str,
-    json: &'static str,
 }
 
 /// The list of bundled translations, in the order Aa lists them. **To add
@@ -27,7 +25,7 @@ pub struct TranslationSource {
 /// in canonical Genesis-to-Revelation order — see `data/kjv.json`; a verse
 /// the translation doesn't number is `null`, and footnotes kept apart from
 /// the text go in each book's `footnotes`, as in `data/bsb.json`), then add
-/// one entry here. Only include translations you have the right to
+/// one entry here and one in `TEXTS`. Only include translations you have the right to
 /// redistribute (public domain, or under a license that permits
 /// bulk/offline copies) — see the README for why NIV and ESV aren't bundled
 /// this way.
@@ -41,7 +39,6 @@ pub const TRANSLATIONS: &[TranslationSource] = &[
         date: Some("1611/1769"),
         licence: "public domain",
         credit: "King James Version (KJV), public domain, from the thiagobodruk/bible dataset",
-        json: include_str!("../../data/kjv.json"),
     },
     TranslationSource {
         code: "bsb",
@@ -49,7 +46,6 @@ pub const TRANSLATIONS: &[TranslationSource] = &[
         date: Some("2023"),
         licence: "public domain",
         credit: "Berean Standard Bible (BSB), public domain, berean.bible",
-        json: include_str!("../../data/bsb.json"),
     },
     TranslationSource {
         code: "web",
@@ -57,8 +53,19 @@ pub const TRANSLATIONS: &[TranslationSource] = &[
         date: None,
         licence: "public domain",
         credit: "World English Bible (WEB), public domain, from TehShrike/world-english-bible (via ebible.org)",
-        json: include_str!("../../data/web.json"),
     },
+];
+
+/// Each bundled translation's raw text, embedded into the binary so the app
+/// is fully self-contained and works offline. Apart from [`TRANSLATIONS`], so
+/// that a program that only lists them (`gospel-getter-cli`) doesn't carry
+/// their text: the linker keeps only what's used. A `static`, not a `const`: a
+/// const's data is copied into every crate that instantiates what uses it, and
+/// `seed_missing` is instantiated in the app too, which doubled its size.
+static TEXTS: [(&str, &str); 3] = [
+    ("kjv", include_str!("../../../data/kjv.json")),
+    ("bsb", include_str!("../../../data/bsb.json")),
+    ("web", include_str!("../../../data/web.json")),
 ];
 
 /// The order translations are seeded in: each new one at the end.
@@ -161,7 +168,11 @@ pub async fn seed_missing(writer: &WritePool) -> anyhow::Result<()> {
                 source.code
             ))?;
 
-        let books: Vec<RawBook> = serde_json::from_str(source.json)
+        let (_, text) = TEXTS
+            .iter()
+            .find(|(code, _)| *code == source.code)
+            .expect("every seeded translation has its text");
+        let books: Vec<RawBook> = serde_json::from_str(text)
             .context(format!("Failed to parse bundled {} data", source.code))?;
 
         for (book_index, book) in books.iter().enumerate() {
@@ -253,7 +264,7 @@ pub async fn seed_missing(writer: &WritePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-const CROSS_REFERENCES_JSON: &str = include_str!("../../data/cross_references.json");
+const CROSS_REFERENCES_JSON: &str = include_str!("../../../data/cross_references.json");
 
 #[derive(Deserialize)]
 struct RawCrossRefBook {
