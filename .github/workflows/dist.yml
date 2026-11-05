@@ -32,6 +32,13 @@ name: Distribution Artifacts
 # .sig beside it, for tools/release/make_latest_json.py. Pushes to main must
 # be signed; a pull request without access to the secret (from a fork)
 # builds unsigned installers, with a warning, which can't be released.
+#
+# Every installer carries gospel-getter-cli beside the app, as a Tauri sidecar
+# (bundle.externalBin, in the tauri.sidecar.conf.json overlay, since tauri-build
+# wants the file there on every build it's named for): built first, and named
+# for its target as Tauri asks. The app never runs it. An AppImage's sidecar
+# can't be reached from a shell, so it's also uploaded on its own, as an
+# artifact (gospel-getter-cli-*) that a release attaches.
 
 on:
   push:
@@ -116,6 +123,15 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
 
+      # Stripped: nothing else strips it, and a backtrace on it has no use.
+      - name: Build the CLI sidecar
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p gospel-getter-cli
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          mkdir -p binaries
+          strip -o "binaries/gospel-getter-cli-$triple" target/release/gospel-getter-cli
+
       - name: Build AppImage and deb bundles
         env:
           GOSPEL_GETTER_SELF_UPDATE: "1"
@@ -123,9 +139,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
-            cargo tauri build --bundles appimage,deb --config tauri.updater.conf.json
+            cargo tauri build --bundles appimage,deb --config tauri.sidecar.conf.json --config tauri.updater.conf.json
           else
-            cargo tauri build --bundles appimage,deb
+            cargo tauri build --bundles appimage,deb --config tauri.sidecar.conf.json
           fi
 
       - name: Locate built artifacts
@@ -170,6 +186,7 @@ jobs:
           chmod +x "$appimage"
           "$appimage" --appimage-extract >/dev/null
           test -x squashfs-root/AppRun
+          squashfs-root/usr/bin/gospel-getter-cli --version
 
           xvfb-run --auto-servernum ./squashfs-root/AppRun &
           app_pid=$!
@@ -233,6 +250,9 @@ jobs:
             || { echo "::error::package installs no file under /usr/bin"; exit 1; }
           echo "$owned_files" | grep -q '\.desktop$' \
             || { echo "::error::package installs no .desktop launcher"; exit 1; }
+          echo "$owned_files" | grep -qx '/usr/bin/gospel-getter-cli' \
+            || { echo "::error::package installs no gospel-getter-cli on PATH"; exit 1; }
+          gospel-getter-cli --version
 
           sudo apt-get remove -y "$pkg_name"
           if dpkg -s "$pkg_name" 2>/dev/null | grep -q '^Status: install ok installed'; then
@@ -257,6 +277,13 @@ jobs:
           path: |
             ${{ steps.artifacts.outputs.deb }}
             ${{ steps.artifacts.outputs.deb_sig }}
+          if-no-files-found: error
+
+      - name: Upload the CLI on its own
+        uses: actions/upload-artifact@v4
+        with:
+          name: gospel-getter-cli-linux-x86_64
+          path: src-tauri/binaries/gospel-getter-cli-x86_64-unknown-linux-gnu
           if-no-files-found: error
 
       # Last, after the installers above are uploaded: the GUI checks' test
@@ -325,6 +352,15 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
 
+      - name: Build the CLI sidecar
+        shell: pwsh
+        run: |
+          cargo build --release --locked -p gospel-getter-cli
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $triple = (rustc -vV | Select-String '^host: ').Line.Substring(6).Trim()
+          New-Item -ItemType Directory -Force binaries | Out-Null
+          Copy-Item target/release/gospel-getter-cli.exe "binaries/gospel-getter-cli-$triple.exe"
+
       # bundle.targets is "all" in tauri.conf.json, so this produces both
       # an NSIS setup.exe and an MSI on Windows.
       - name: Build Windows installers
@@ -335,9 +371,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if ("${{ steps.signing.outputs.signed }}" -eq "true") {
-            cargo tauri build --config tauri.updater.conf.json
+            cargo tauri build --config tauri.sidecar.conf.json --config tauri.updater.conf.json
           } else {
-            cargo tauri build
+            cargo tauri build --config tauri.sidecar.conf.json
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -408,6 +444,15 @@ jobs:
             Write-Host "Install directory contents:"
             Get-ChildItem $entry.InstallLocation | Format-Table Name, Length
           }
+          # NSIS writes InstallLocation in quotes. The sidecar is beside the
+          # app and prints in a terminal: a console program, unlike the app.
+          $location = "$($entry.InstallLocation)".Trim('"')
+          $printed = & (Join-Path $location "gospel-getter-cli.exe") --version
+          if ($LASTEXITCODE -ne 0 -or -not ($printed -match '^gospel-getter-cli ')) {
+            Write-Error "gospel-getter-cli.exe isn't beside the app, or printed nothing: '$printed'"
+            exit 1
+          }
+          Write-Host "Sidecar: $printed"
 
           $uninstallExe = $entry.UninstallString.Trim('"')
           Write-Host "Running silent uninstall: $uninstallExe /S"
@@ -440,6 +485,13 @@ jobs:
           path: |
             ${{ steps.artifacts.outputs.msi }}
             ${{ steps.artifacts.outputs.msi_sig }}
+          if-no-files-found: error
+
+      - name: Upload the CLI on its own
+        uses: actions/upload-artifact@v4
+        with:
+          name: gospel-getter-cli-windows-x86_64
+          path: src-tauri/binaries/gospel-getter-cli-x86_64-pc-windows-msvc.exe
           if-no-files-found: error
 
       # Last, after the installers above are uploaded, and only when

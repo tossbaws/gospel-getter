@@ -23,6 +23,11 @@ which yields both an NSIS `.exe` and an MSI under
 `packaging/generate-icons.sh`) is used automatically; there's nothing
 Windows-specific left to hand-maintain here.
 
+The released installers also carry `gospel-getter-cli.exe` beside the app. To
+build that too, build it first and name it for its target, as the `windows` job
+in `.github/workflows/dist.yml` does, and add
+`--config tauri.sidecar.conf.json`.
+
 **Not verified as part of the Tauri migration** — that work happened on
 Linux, and Linux artifact verification (the AppImage) was the hard
 requirement. A Windows build should be tried on an actual Windows machine

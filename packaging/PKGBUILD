@@ -28,8 +28,8 @@
 # Builds the Tauri desktop binary directly from source (not through the
 # AppImage bundler — makepkg already gives us a proper native package, so
 # there's no need for AppImage's self-contained-runtime wrapping) and
-# installs it plus its desktop launcher, icon, and license to their
-# standard system-wide locations. There's no service to enable: it's a
+# installs it plus gospel-getter-cli (built with it), its desktop launcher,
+# icon, and license to their standard system-wide locations. There's no service to enable: it's a
 # normal windowed app that only runs while it's open.
 
 pkgname=gospel-getter
@@ -60,6 +60,7 @@ package() {
   cd "$pkgname-$_pkgver/src-tauri"
 
   install -Dm755 target/release/gospel_getter "$pkgdir/usr/bin/gospel_getter"
+  install -Dm755 target/release/gospel-getter-cli "$pkgdir/usr/bin/gospel-getter-cli"
 
   install -Dm644 icons/128x128.png \
     "$pkgdir/usr/share/icons/hicolor/128x128/apps/gospel-getter.png"
