@@ -20,8 +20,9 @@ bookmarks, highlights, notes, reading position and settings.
   bookmarks, your highlights and your notes. The `.deb` puts it on your
   `PATH`, the Windows installers put it beside the app, and AppImage users
   download it on its own from the release. Setup is in the README, under
-  [Use with AI agents](README.md#use-with-ai-agents). The app's window
-  doesn't change.
+  [Use with AI agents](README.md#use-with-ai-agents). What it reads goes
+  to the agent's AI service, so connect only agents you trust. The app's
+  window doesn't change.
 
 ### Changed
 - The copyright holder is now Chi Rho Code LLC.

@@ -400,6 +400,10 @@ up passages, search, compare translations, follow cross-references, and read
 your bookmarks, highlights and notes. Scripture comes back as the app's Copy
 gives it, with footnotes kept apart.
 
+**Privacy.** Gospel Getter itself sends nothing anywhere. But what an agent
+reads through it, your notes included, goes to that agent and its AI service,
+like anything else you share with it. Connect only agents you trust.
+
 It only reads. It opens the database with a read-only connection, so it can't
 change anything, and it works while the app is open. It has no network port;
 an agent talks to it over stdio. Open the app once first, so the database

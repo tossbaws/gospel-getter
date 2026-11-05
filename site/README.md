@@ -35,11 +35,14 @@ because, from v2.4.0 on, every release's assets have the same names:
 | `Gospel-Getter_x64_en-US.msi` | Windows MSI package |
 | `Gospel-Getter_amd64.AppImage` | Linux AppImage |
 | `Gospel-Getter_amd64.deb` | Debian/Ubuntu package |
-| `SHA256SUMS` | Checksums of the four files above, by these names |
+| `gospel-getter-cli-x86_64-unknown-linux-gnu` | The CLI on its own, for Linux, from v2.24.0 (the site doesn't link it) |
+| `gospel-getter-cli-x86_64-pc-windows-msvc.exe` | The CLI on its own, for Windows, from v2.24.0 (the site doesn't link it) |
+| `SHA256SUMS` | Checksums of the four installers and the two CLI binaries above, by these names |
 
 The Distribution Artifacts workflow builds versioned file names; they're
 renamed to these when the release is published, without changing the
-bytes. Releases before v2.4.0 keep their versioned names.
+bytes. Releases before v2.4.0 keep their versioned names. The two CLI
+binaries are published under the names they're built with.
 
 **On each release, only the displayed version changes:** replace
 `Version X.Y.Z` in `index.html` with the new version, and run `npm test` in
