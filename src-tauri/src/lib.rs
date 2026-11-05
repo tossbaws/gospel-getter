@@ -129,7 +129,7 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
         .app_data_dir()
         .context("Failed to resolve the app data directory")?;
     std::fs::create_dir_all(&app_data_dir).context("Failed to create the app data directory")?;
-    let db_path = app_data_dir.join("gospel_getter.db");
+    let db_path = app_data_dir.join(db::DATABASE_FILE);
     info!("Using database at {}", db_path.display());
 
     // Best-effort: if we can't resolve the home directory, or the legacy

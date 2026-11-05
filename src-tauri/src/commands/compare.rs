@@ -5,7 +5,7 @@ use anyhow::Context;
 use serde::Serialize;
 
 use super::{AppState, SimpleVerseDto, failed};
-use crate::db::Translation;
+use crate::domain::passage::translations_named;
 
 // ---- Compare translations (GH-13)
 
@@ -38,24 +38,7 @@ pub async fn compare_chapter(
     chapter: i64,
     codes: &[String],
 ) -> anyhow::Result<Option<CompareDto>> {
-    let mut translations = Vec::with_capacity(codes.len());
-    for code in codes {
-        let t = state
-            .translations
-            .iter()
-            .find(|t| &t.code == code)
-            .ok_or_else(|| anyhow::anyhow!("There's no translation \"{code}\"."))?;
-        if translations
-            .iter()
-            .any(|seen: &&Translation| seen.id == t.id)
-        {
-            anyhow::bail!("{} is named twice.", t.name);
-        }
-        translations.push(t);
-    }
-    if translations.is_empty() {
-        anyhow::bail!("No translations to compare.");
-    }
+    let translations = translations_named(&state.translations, codes)?;
     let Some(book) = state.books.iter().find(|b| b.id == book_id) else {
         return Ok(None);
     };

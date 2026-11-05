@@ -310,7 +310,8 @@ fn book_key(name: &str) -> String {
     words.concat()
 }
 
-fn find_book<'a>(name: &str, books: &'a [Book]) -> Option<&'a Book> {
+/// The book `name` names: its name or an abbreviation, as Go to reads one.
+pub fn find_book<'a>(name: &str, books: &'a [Book]) -> Option<&'a Book> {
     let key = book_key(name);
     if key.is_empty() {
         return None;

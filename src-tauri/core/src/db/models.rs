@@ -3,6 +3,8 @@
 
 use sqlx::FromRow;
 
+use crate::domain::kjv_markup::VerseText;
+
 /// A book of the Bible, in canonical order (Genesis = 1 ... Revelation = 66).
 #[derive(Debug, Clone, FromRow)]
 pub struct Book {
@@ -24,6 +26,19 @@ pub struct Verse {
     /// verses (`get_chapter_verses`) carry them; empty otherwise.
     #[sqlx(skip)]
     pub footnotes: Vec<crate::domain::usfm_note::StoredFootnote>,
+}
+
+impl Verse {
+    /// The verse as shown: with its footnotes, where its translation keeps
+    /// them apart from the text (the BSB's), or else from its stored text
+    /// (the KJV's markup is read there; see `VerseText`).
+    pub fn shown(&self, translation_code: &str) -> VerseText {
+        if self.footnotes.is_empty() {
+            VerseText::new(translation_code, &self.text)
+        } else {
+            VerseText::with_footnotes(&self.text, &self.footnotes)
+        }
+    }
 }
 
 /// A Bible translation (e.g. King James Version, World English Bible).

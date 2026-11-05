@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use super::{AppState, SimpleVerseDto};
 use crate::db;
+use crate::domain::passage::numbering_notice;
 use crate::passage_copy::{self, CopyFormat};
 use crate::passage_reference::passage_reference;
 
@@ -95,31 +96,15 @@ pub async fn passage_text(
         .map(|v| SimpleVerseDto::without_notes(&translation.code, v))
         .collect();
     let numbered: Vec<i64> = verses.iter().map(|v| v.number).collect();
-    let missing = missing_runs(&numbered, start, end, last_anywhere);
-    let notice = (!missing.is_empty()).then(|| {
-        let what = passage_reference(&book.name, chapter, Some((start, end)));
-        let (first_missing, _) = missing[0];
-        let (_, last_missing) = missing[missing.len() - 1];
-        if first_missing > last {
-            let missing =
-                passage_reference(&book.name, chapter, Some((first_missing, last_missing)));
-            format!(
-                "{missing} isn't numbered in the {} — {} {chapter} ends at verse {last} there.",
-                translation.name, book.name
-            )
-        } else {
-            let (noun, verb) = if first_missing == last_missing {
-                ("verse", "isn't")
-            } else {
-                ("verses", "aren't")
-            };
-            format!(
-                "In {what}, {noun} {} {verb} numbered in the {}.",
-                verse_list(&missing),
-                translation.name
-            )
-        }
-    });
+    let notice = numbering_notice(
+        &book.name,
+        &translation.name,
+        chapter,
+        (start, end),
+        &numbered,
+        last,
+        last_anywhere,
+    );
     Ok(PassageDto {
         book_id,
         chapter,
@@ -235,42 +220,6 @@ pub async fn copy_text(
     })
 }
 
-/// The verses from `start` to `end` that aren't in `numbered`, in order, as
-/// runs `(first, last)`. Only verses up to `last_anywhere` (the chapter's
-/// last verse in any translation) are looked at one by one; those past it,
-/// however far `end` goes, are one run.
-fn missing_runs(numbered: &[i64], start: i64, end: i64, last_anywhere: i64) -> Vec<(i64, i64)> {
-    let mut runs: Vec<(i64, i64)> = Vec::new();
-    let mut add = |first: i64, last: i64| match runs.last_mut() {
-        Some((_, run_end)) if *run_end + 1 == first => *run_end = last,
-        _ => runs.push((first, last)),
-    };
-    for n in start..=end.min(last_anywhere) {
-        if !numbered.contains(&n) {
-            add(n, n);
-        }
-    }
-    if end > last_anywhere {
-        add(start.max(last_anywhere + 1), end);
-    }
-    runs
-}
-
-/// "4", "4, 6" or "4–6, 9": runs of verse numbers, a run of more than one
-/// as a range.
-fn verse_list(runs: &[(i64, i64)]) -> String {
-    runs.iter()
-        .map(|&(a, b)| {
-            if a == b {
-                a.to_string()
-            } else {
-                format!("{a}\u{2013}{b}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +227,7 @@ mod tests {
     use crate::commands::*;
     use crate::db::test_support::{bundled, bundled_bsb};
     use crate::domain::kjv_markup::{PartKind, VerseText};
+    use crate::domain::passage::{missing_runs, verse_list};
 
     /// A previewed range is every verse in it, in order, with its
     /// reference and translation, and nothing missing.

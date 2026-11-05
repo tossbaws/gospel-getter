@@ -26,6 +26,14 @@ pub async fn get_all_translations(pool: &SqlitePool) -> anyhow::Result<Vec<Trans
         .context("Failed to fetch translations")
 }
 
+/// Get every bundled translation, in the order Aa lists them
+/// (`seed::TRANSLATIONS`).
+pub async fn get_listed_translations(pool: &SqlitePool) -> anyhow::Result<Vec<Translation>> {
+    let mut translations = get_all_translations(pool).await?;
+    translations.sort_by_key(|t| crate::db::seed::rank(&t.code));
+    Ok(translations)
+}
+
 /// The highest verse number any translation has in one chapter (0 if none
 /// has the chapter).
 pub async fn get_chapter_last_verse(

@@ -38,6 +38,12 @@ fn translation_rowids(translation_id: i64) -> (i64, i64) {
     )
 }
 
+/// The rowids of one book of a translation, in the same form.
+fn book_rowids(translation_id: i64, book_id: i64) -> (i64, i64) {
+    let first = translation_id * TRANSLATION_STRIDE + book_id * BOOK_STRIDE;
+    (first, first + BOOK_STRIDE)
+}
+
 /// A matching verse, with its text as stored in `verses`.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct SearchHit {
@@ -64,19 +70,8 @@ pub async fn ensure_search_index(db: &Db) -> anyhow::Result<Vec<i64>> {
 
     let mut indexed = Vec::new();
     for translation_id in translations {
-        let verse_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM verses WHERE translation_id = $1")
-                .bind(translation_id)
-                .fetch_one(db.read())
-                .await
-                .context("Failed to count verses to index")?;
-        let indexed_count: Option<i64> = sqlx::query_scalar(
-            "SELECT verse_count FROM search_index_state WHERE translation_id = $1",
-        )
-        .bind(translation_id)
-        .fetch_optional(db.read())
-        .await
-        .context("Failed to read search index state")?;
+        let (verse_count, indexed_count) =
+            verse_and_indexed_counts(db.read(), translation_id).await?;
         if indexed_count == Some(verse_count) {
             continue;
         }
@@ -84,6 +79,46 @@ pub async fn ensure_search_index(db: &Db) -> anyhow::Result<Vec<i64>> {
         indexed.push(translation_id);
     }
     Ok(indexed)
+}
+
+/// How many verses a translation has, and how many the index recorded for it
+/// (`None`: it isn't indexed).
+async fn verse_and_indexed_counts(
+    pool: &SqlitePool,
+    translation_id: i64,
+) -> anyhow::Result<(i64, Option<i64>)> {
+    let verse_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM verses WHERE translation_id = $1")
+            .bind(translation_id)
+            .fetch_one(pool)
+            .await
+            .context("Failed to count verses to index")?;
+    let indexed_count: Option<i64> =
+        sqlx::query_scalar("SELECT verse_count FROM search_index_state WHERE translation_id = $1")
+            .bind(translation_id)
+            .fetch_optional(pool)
+            .await
+            .context("Failed to read search index state")?;
+    Ok((verse_count, indexed_count))
+}
+
+/// Whether a translation's index is as `ensure_search_index` leaves it: of the
+/// current kind of content, and covering every verse. Only reads, for a program
+/// that can't build the index itself.
+pub async fn search_index_is_current(
+    pool: &SqlitePool,
+    translation_id: i64,
+) -> anyhow::Result<bool> {
+    let version: Option<i64> =
+        sqlx::query_scalar("SELECT version FROM search_index_version WHERE id = 1")
+            .fetch_optional(pool)
+            .await
+            .context("Failed to read search index version")?;
+    if version != Some(SEARCH_CONTENT_VERSION) {
+        return Ok(false);
+    }
+    let (verse_count, indexed_count) = verse_and_indexed_counts(pool, translation_id).await?;
+    Ok(indexed_count == Some(verse_count))
 }
 
 /// If the index holds an older kind of content, forget what it covers, so
@@ -283,11 +318,37 @@ pub async fn search_verses(
     limit: i64,
     offset: i64,
 ) -> anyhow::Result<(i64, Vec<SearchHit>)> {
+    let rowids = translation_rowids(translation_id);
+    search_rowids(pool, translation_id, rowids, query, limit, offset).await
+}
+
+/// As [`search_verses`], in one book of the translation.
+pub async fn search_verses_in_book(
+    pool: &SqlitePool,
+    translation_id: i64,
+    book_id: i64,
+    query: &SearchQuery,
+    limit: i64,
+    offset: i64,
+) -> anyhow::Result<(i64, Vec<SearchHit>)> {
+    let rowids = book_rowids(translation_id, book_id);
+    search_rowids(pool, translation_id, rowids, query, limit, offset).await
+}
+
+/// A page of the verses with every word and phrase of `query`, among the
+/// rowids from `lo` up to `hi`, all of one translation, and how many match.
+async fn search_rowids(
+    pool: &SqlitePool,
+    translation_id: i64,
+    (lo, hi): (i64, i64),
+    query: &SearchQuery,
+    limit: i64,
+    offset: i64,
+) -> anyhow::Result<(i64, Vec<SearchHit>)> {
     if query.is_empty() {
         return Ok((0, Vec::new()));
     }
     let expression = match_expression(query);
-    let (lo, hi) = translation_rowids(translation_id);
 
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM verse_search \

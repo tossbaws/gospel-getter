@@ -43,10 +43,9 @@ impl AppState {
         let books = db::get_all_books(database.read())
             .await
             .context("Failed to load books")?;
-        let mut translations = db::get_all_translations(database.read())
+        let translations = db::get_listed_translations(database.read())
             .await
             .context("Failed to load translations")?;
-        translations.sort_by_key(|t| db::seed::rank(&t.code));
         Ok(Self {
             store: Store::new(database),
             books,

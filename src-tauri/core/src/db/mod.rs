@@ -16,7 +16,10 @@ pub mod search;
 pub mod seed;
 
 pub use bookmarks::{Bookmark, BookmarkError, BookmarkInTranslation};
-pub use connect::{BUSY_TIMEOUT, Db, WRITE_QUEUE_TIMEOUT, WritePool, begin_write, create_pool};
+pub use connect::{
+    APP_IDENTIFIER, BUSY_TIMEOUT, DATABASE_FILE, Db, WRITE_QUEUE_TIMEOUT, WritePool, begin_write,
+    create_pool, open_read_only,
+};
 pub use highlights::{Highlight, HighlightColor, HighlightPassage, HighlightPassageInTranslation};
 pub use legacy::migrate_legacy_db_if_needed;
 pub use migrate::migrate;
@@ -28,6 +31,8 @@ pub use seed::{seed_cross_references_if_empty, seed_missing};
 
 #[cfg(test)]
 mod contention_tests;
+#[cfg(test)]
+mod read_only_tests;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 #[cfg(test)]

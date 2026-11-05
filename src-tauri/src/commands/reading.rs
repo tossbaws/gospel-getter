@@ -128,22 +128,11 @@ pub struct SimpleVerseDto {
     pub shown: VerseText,
 }
 
-/// A verse as shown: with its footnotes, where its translation keeps them
-/// apart from the text (the BSB's), or else from its stored text (the
-/// KJV's markup is read there; see `VerseText`).
-fn shown(translation_code: &str, verse: &db::Verse) -> VerseText {
-    if verse.footnotes.is_empty() {
-        VerseText::new(translation_code, &verse.text)
-    } else {
-        VerseText::with_footnotes(&verse.text, &verse.footnotes)
-    }
-}
-
 impl SimpleVerseDto {
     pub(super) fn new(translation_code: &str, verse: db::Verse) -> Self {
         Self {
             number: verse.verse,
-            shown: shown(translation_code, &verse),
+            shown: verse.shown(translation_code),
         }
     }
 
@@ -376,7 +365,7 @@ async fn build_reading_pane_dto(
         .into_iter()
         .map(|v| VerseDto {
             number: v.verse,
-            shown: shown(code, &v),
+            shown: v.shown(code),
             xrefs: xrefs_by_verse.remove(&v.verse).unwrap_or_default(),
         })
         .collect();

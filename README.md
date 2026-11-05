@@ -416,7 +416,8 @@ one would need a licence that permits an offline copy.
    canonical order, each `{"name", "testament", "chapters": [[verse, ...], ...]}`.
    A verse the translation doesn't number is `null`. Footnotes kept apart
    from the text go in each book's `footnotes`, as in `bsb.json`.
-2. Add an entry to `TRANSLATIONS` in `src-tauri/core/src/db/seed.rs`.
+2. Add an entry to `TRANSLATIONS` and to `TEXTS` in
+   `src-tauri/core/src/db/seed.rs`.
 
 Existing installs seed only translations they don't already have. To
 correct the text of one that's already seeded, clear its rows (its
