@@ -408,7 +408,7 @@ mod tests {
             "the highlights table's CHECK should list exactly these colors"
         );
         // The swatches are the selection card's (ui-leptos/src/card_text.rs).
-        let card = include_str!("../../../ui-leptos/src/card_text.rs");
+        let card = include_str!("../../../../ui-leptos/src/card_text.rs");
         let double_quoted: Vec<String> = names.iter().map(|n| format!("\"{n}\"")).collect();
         assert!(
             card.contains(&format!(

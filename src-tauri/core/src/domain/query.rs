@@ -612,7 +612,7 @@ mod tests {
             chapters: Vec<serde::de::IgnoredAny>,
         }
         let raw: Vec<RawBook> =
-            serde_json::from_str(include_str!("../../data/kjv.json")).expect("bundled kjv.json");
+            serde_json::from_str(include_str!("../../../data/kjv.json")).expect("bundled kjv.json");
         raw.into_iter()
             .enumerate()
             .map(|(i, b)| Book {

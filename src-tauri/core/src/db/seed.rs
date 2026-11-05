@@ -41,7 +41,7 @@ pub const TRANSLATIONS: &[TranslationSource] = &[
         date: Some("1611/1769"),
         licence: "public domain",
         credit: "King James Version (KJV), public domain, from the thiagobodruk/bible dataset",
-        json: include_str!("../../data/kjv.json"),
+        json: include_str!("../../../data/kjv.json"),
     },
     TranslationSource {
         code: "bsb",
@@ -49,7 +49,7 @@ pub const TRANSLATIONS: &[TranslationSource] = &[
         date: Some("2023"),
         licence: "public domain",
         credit: "Berean Standard Bible (BSB), public domain, berean.bible",
-        json: include_str!("../../data/bsb.json"),
+        json: include_str!("../../../data/bsb.json"),
     },
     TranslationSource {
         code: "web",
@@ -57,7 +57,7 @@ pub const TRANSLATIONS: &[TranslationSource] = &[
         date: None,
         licence: "public domain",
         credit: "World English Bible (WEB), public domain, from TehShrike/world-english-bible (via ebible.org)",
-        json: include_str!("../../data/web.json"),
+        json: include_str!("../../../data/web.json"),
     },
 ];
 
@@ -253,7 +253,7 @@ pub async fn seed_missing(writer: &WritePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-const CROSS_REFERENCES_JSON: &str = include_str!("../../data/cross_references.json");
+const CROSS_REFERENCES_JSON: &str = include_str!("../../../data/cross_references.json");
 
 #[derive(Deserialize)]
 struct RawCrossRefBook {

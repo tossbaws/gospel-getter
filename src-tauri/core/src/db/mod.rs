@@ -28,7 +28,7 @@ pub use seed::{seed_cross_references_if_empty, seed_missing};
 
 #[cfg(test)]
 mod contention_tests;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 #[cfg(test)]
 mod tests;

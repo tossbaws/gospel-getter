@@ -1,0 +1,33 @@
+[package]
+name = "gospel_getter_core"
+# Never published on its own: the app's version is the one that counts.
+version = "0.0.0"
+description = "Gospel Getter's database and domain logic, free of Tauri"
+license = "MIT"
+edition = "2024"
+rust-version = "1.94"
+publish = false
+
+# `test-support`: disposable prepared databases (`db::test_support`), for the
+# tests of the crates built on this one. Never on in a shipped build.
+[features]
+test-support = ["dep:tokio"]
+
+[dependencies]
+# Without sqlx's defaults: the queries are plain strings (no `query!`, so
+# no `macros`), there are no sqlx migrations, `Any` pools or JSON columns.
+# `derive` is for `FromRow`.
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+# The words a search matched, marked in its results (`query::term_marks`):
+# letters, digits and private-use characters (general categories), compared
+# decomposed (NFD) without their marks. Both were already in the tree.
+unicode-normalization = "0.1.25"
+unicode-properties = { version = "0.1.4", default-features = false, features = ["general-category"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

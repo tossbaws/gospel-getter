@@ -1261,6 +1261,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "flate2",
+ "gospel_getter_core",
  "open",
  "reqwest",
  "rustls",
@@ -1277,9 +1278,21 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "zip",
+]
+
+[[package]]
+name = "gospel_getter_core"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
  "unicode-normalization",
  "unicode-properties",
- "zip",
 ]
 
 [[package]]
