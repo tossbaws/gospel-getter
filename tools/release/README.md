@@ -27,9 +27,21 @@ can't see the release as an update.
        --notes-file NOTES.md --assets DIR
    ```
 
-3. Upload the installers, their `.sig` files, `latest.json` and
-   `SHA256SUMS` to the `vX.Y.Z` release. The manifest's URLs point at that
-   tag (`releases/download/vX.Y.Z/...`), so it names exactly these files.
+3. Take the two standalone CLI binaries from the same run, from its
+   `gospel-getter-cli-linux-x86_64` and `gospel-getter-cli-windows-x86_64`
+   artifacts, and keep their names:
+   `gospel-getter-cli-x86_64-unknown-linux-gnu` and
+   `gospel-getter-cli-x86_64-pc-windows-msvc.exe`. They have no `.sig` and
+   aren't in `latest.json`: the updater never fetches them, since each
+   installer carries its own copy.
+
+4. Write `SHA256SUMS`, covering the four installers and the two CLI
+   binaries, by these names.
+
+5. Upload the installers, their `.sig` files, the two CLI binaries,
+   `latest.json` and `SHA256SUMS` to the `vX.Y.Z` release. The manifest's
+   URLs point at that tag (`releases/download/vX.Y.Z/...`), so it names
+   exactly the four installers it was made for.
 
 Each installer has its own platform key, which the updater plugin looks up
 for the bundle the running copy was installed from. A `.deb` install is only

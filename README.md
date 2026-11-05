@@ -342,15 +342,15 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.22.1?** Each updates itself to 2.23.0: it
+**Coming from 2.6.0 through 2.23.0?** Each updates itself to 2.24.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
-update themselves. The 2.19.0 pre-release updates itself to 2.23.0 the
+update themselves. The 2.19.0 pre-release updates itself to 2.24.0 the
 same way.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.23.0 by hand once, from the
+Install 2.24.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -399,6 +399,10 @@ Desktop, any MCP client), or you in a terminal, read your own install: look
 up passages, search, compare translations, follow cross-references, and read
 your bookmarks, highlights and notes. Scripture comes back as the app's Copy
 gives it, with footnotes kept apart.
+
+**Privacy.** Gospel Getter itself sends none of it anywhere. But what an agent
+reads through it, your notes included, goes to that agent and its AI service,
+like anything else you share with it. Connect only agents you trust.
 
 It only reads. It opens the database with a read-only connection, so it can't
 change anything, and it works while the app is open. It has no network port;
