@@ -182,6 +182,42 @@ jobs:
           kill "$app_pid"
           wait "$app_pid" 2>/dev/null || true
 
+      # The AppImage bundles this host's WebKitGTK, and the WebKit crash on
+      # exit (#162, fixed in 2.54.1) is waiting on Ubuntu to ship the fix.
+      # Every build reports its version so we notice when that arrives. For
+      # information only: the default shell runs with -e, hence `set +e`.
+      - name: Report bundled WebKitGTK version
+        continue-on-error: true
+        run: |
+          set +e
+          package_version="$(dpkg-query -W -f='${Version}' libwebkit2gtk-4.1-0 2>/dev/null || echo "unknown")"
+          package_version="${package_version:-unknown}"
+          pkgconfig_version="$(pkg-config --modversion webkit2gtk-4.1 2>/dev/null || echo "unknown")"
+          pkgconfig_version="${pkgconfig_version:-unknown}"
+          echo "Build host package libwebkit2gtk-4.1-0: $package_version"
+          echo "Build host pkg-config webkit2gtk-4.1: $pkgconfig_version"
+
+          if [ -d squashfs-root ]; then
+            find squashfs-root -name 'libwebkit2gtk-4.1.so*' -ls 2>/dev/null
+            # Resolving the .so symlinks leaves the name with the soname version.
+            bundled_files="$(find squashfs-root -name 'libwebkit2gtk-4.1.so*' -exec readlink -f {} + 2>/dev/null \
+              | sed 's|.*/||' | sort -u | paste -sd ' ' - || echo "unknown")"
+            bundled_files="${bundled_files:-none (the AppImage may rely on the system WebKit)}"
+          else
+            bundled_files="unknown (no squashfs-root)"
+          fi
+          echo "WebKit libraries in the AppImage: $bundled_files"
+
+          echo "::notice title=Bundled WebKitGTK::libwebkit2gtk-4.1-0 $package_version (pkg-config $pkgconfig_version), AppImage files: $bundled_files"
+          {
+            echo "### Bundled WebKitGTK"
+            echo
+            echo "- Package version (libwebkit2gtk-4.1-0): $package_version"
+            echo "- pkg-config version (webkit2gtk-4.1): $pkgconfig_version"
+            echo "- Library files in the AppImage: $bundled_files"
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          exit 0
+
       - name: "Smoke test: .deb installs and uninstalls cleanly"
         run: |
           set -euo pipefail
