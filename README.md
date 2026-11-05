@@ -392,6 +392,66 @@ Upgrading keeps your data.
   `~/.local/share/gospel-getter/data/gospel_getter.db` and leaves the
   original untouched.
 
+## Use with AI agents
+
+`gospel-getter-cli` lets an AI agent on your computer (Claude Code, Claude
+Desktop, any MCP client), or you in a terminal, read your own install: look
+up passages, search, compare translations, follow cross-references, and read
+your bookmarks, highlights and notes. Scripture comes back as the app's Copy
+gives it, with footnotes kept apart.
+
+It only reads. It opens the database with a read-only connection, so it can't
+change anything, and it works while the app is open. It has no network port;
+an agent talks to it over stdio. Open the app once first, so the database
+exists.
+
+**Where it is.** The `.deb` puts `gospel-getter-cli` on your `PATH`. The Windows
+installers put it beside the app, in `%LOCALAPPDATA%\Gospel Getter\` (the
+`setup.exe`) or `C:\Program Files\Gospel Getter\` (the MSI). An AppImage can't
+share it with your shell, so AppImage users download
+`gospel-getter-cli-x86_64-unknown-linux-gnu` from the release and `chmod +x` it.
+
+**Claude Code.** On Windows, or for the AppImage's download, use the file's full
+path:
+
+```bash
+claude mcp add gospel-getter -- gospel-getter-cli mcp
+```
+
+**Claude Desktop.** In `claude_desktop_config.json`, on Linux:
+
+```json
+{
+  "mcpServers": {
+    "gospel-getter": {
+      "command": "/usr/bin/gospel-getter-cli",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+On Windows, with your own user name:
+
+```json
+{
+  "mcpServers": {
+    "gospel-getter": {
+      "command": "C:\\Users\\YOU\\AppData\\Local\\Gospel Getter\\gospel-getter-cli.exe",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+**In a terminal.** Each tool is a subcommand that prints JSON;
+`gospel-getter-cli --help` lists them.
+
+```bash
+gospel-getter-cli passage "John 3:16-18" --translation bsb
+gospel-getter-cli search "grace" --book Romans --limit 20
+```
+
 ## Translations
 
 Three translations are bundled, all public domain, which is what allows
@@ -430,7 +490,9 @@ so it seeds again.
   and the frontend is built in Rust too: `ui-leptos/` (Leptos, compiled to
   WebAssembly), which [Trunk](https://trunkrs.dev) builds with
   `ui/index.html`, the page's markup and styles, into `dist/`. The
-  frontend calls typed Tauri commands, not HTTP.
+  frontend calls typed Tauri commands, not HTTP. The database and domain logic
+  are a crate of their own, free of Tauri (`src-tauri/core/`), which the app
+  and `gospel-getter-cli` (`src-tauri/cli/`) share.
 - **Data model:** book structure is shared between translations, but each
   translation keeps its own verse text and numbering. They number a few
   verses differently, which is expected; the BSB leaves 16 verses
