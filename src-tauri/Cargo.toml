@@ -17,10 +17,11 @@ name = "gospel_getter_lib"
 path = "src/lib.rs"
 
 # The database and domain logic (`core`) are a crate of their own, free of
-# Tauri, and `cargo build`, `test`, `clippy` and `doc` here cover every member.
+# Tauri, and so is the program built on them (`cli`), which links neither GTK
+# nor WebKit. `cargo build`, `test`, `clippy` and `doc` here cover every member.
 [workspace]
-members = ["core"]
-default-members = [".", "core"]
+members = ["core", "cli"]
+default-members = [".", "core", "cli"]
 
 # Off in every build but one. `gui-test-updater` is the GUI checks' test
 # build (scripts/gui-check.sh, tests/gui): its updater reads where to check,
