@@ -4,6 +4,16 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.24.2] - 2026-11-05
+
+The app is unchanged from 2.24.1. This release makes one frontend test
+reliable, and you won't see a difference: updating keeps your bookmarks,
+highlights, notes, reading position and settings.
+
+The welcome's history test no longer picks a random chapter that can match
+the one already open. Picking the open chapter records no history, so the
+test would fail: a flake seen in CI about once in 1,200 runs.
+
 ## [2.24.1] - 2026-11-05
 
 A fix for `gospel-getter-cli` on Windows, and nothing else changes: updating
