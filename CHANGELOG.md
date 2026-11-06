@@ -4,6 +4,17 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.24.1] - 2026-11-05
+
+A fix for `gospel-getter-cli` on Windows, and nothing else changes: updating
+keeps your bookmarks, highlights, notes, reading position and settings.
+
+### Fixed
+- On Windows, `gospel-getter-cli` needed `VCRUNTIME140.dll`, part of
+  Microsoft's Visual C++ runtime, which not every PC has. Without it, the
+  CLI and its connection to an AI agent wouldn't start. The CLI now has the
+  runtime built in. The app itself never needed that file.
+
 ## [2.24.0] - 2026-11-05
 
 An AI agent on your computer can now read your install. Updating keeps your
