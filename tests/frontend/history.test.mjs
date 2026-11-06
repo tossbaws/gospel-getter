@@ -196,8 +196,12 @@ test('the welcome’s places to start, Random chapter and the palette’s Go to 
         assert.equal(app.heading(), first);
 
         // Random chapter, from the picker or the palette.
+        // Pinned (the last book's last chapter): a pick of the chapter already open records nothing.
+        app.window.Math.random = () => 0.999999;
         await waitFor(app, () => app.click(app.document.getElementById('random-chapter-btn')));
         const random = app.heading();
+        assert.equal(random, 'Revelation 22');
+        assert.notEqual(random, first, 'Random chapter must land away from the open chapter, or nothing is recorded');
         await back(app);
         assert.equal(app.heading(), first);
         await forward(app);
