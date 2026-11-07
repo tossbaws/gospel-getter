@@ -4,6 +4,16 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.25.1] - 2026-11-07
+
+The app and `gospel-getter-cli` are unchanged from 2.25.0: updating keeps
+your bookmarks, highlights, notes, reading position and settings.
+
+### Fixed
+- On release day, the automatic build no longer cancels the release's own
+  build, so a release commit's checks on GitHub show green instead of a red
+  X. (#191)
+
 ## [2.25.0] - 2026-11-07
 
 An AI agent can now check its own quotations and read many passages at
