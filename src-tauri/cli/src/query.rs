@@ -1,9 +1,12 @@
 //! The one query layer behind both front ends: what each tool takes, what it
 //! answers, and how, all through the app's own code (`gospel_getter_core`).
 //!
-//! It can't write. The only connection it has is `db::open_read_only`'s, and
-//! every function in `db` that writes takes a `WritePool`, which only the app's
-//! `create_pool` makes and nothing here has.
+//! It can't write, but for one thing. The only connection it reads with is
+//! `db::open_read_only`'s, and every function in `db` that writes takes a
+//! `WritePool`, which only the app's `create_pool` makes and nothing here has.
+//! The one thing it writes is an AI-flagged finding (`save_findings`, in
+//! `findings`), through `db::FindingsWriter`, which can only add findings, and
+//! only once the reader has turned that on in the app.
 //!
 //! Verse text is what the app's Copy gives: `VerseText::text`, the stored text
 //! with the KJV's supplied words as plain words and its margin notes left out,
@@ -23,8 +26,14 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::path::Path;
 
+mod findings;
+mod resources;
 mod verify;
 
+pub use findings::{
+    FindingsOut, ListFindingsArgs, SaveFindingsArgs, SaveFindingsOut, save_findings,
+};
+pub use resources::{RESOURCE_TEMPLATE, book_name, chapter_resources, read_resource};
 pub use verify::{VerifyQuoteArgs, VerifyQuoteOut};
 
 /// What every refusal to read an install that isn't ready ends with.
@@ -175,6 +184,13 @@ pub enum Request {
     ListHighlights(ListHighlightsArgs),
     ListNotes(ListNotesArgs),
     VerifyQuote(VerifyQuoteArgs),
+    ListFindings(ListFindingsArgs),
+    /// The one that writes: `client` is the MCP client's name, the agent's
+    /// when it gives none.
+    SaveFindings {
+        args: SaveFindingsArgs,
+        client: Option<String>,
+    },
 }
 
 // ---- What each tool answers.
@@ -194,6 +210,8 @@ pub enum Answer {
     Highlights(HighlightsOut),
     Notes(NotesOut),
     VerifyQuote(VerifyQuoteOut),
+    Findings(FindingsOut),
+    SavedFindings(SaveFindingsOut),
 }
 
 /// The answer of `list_translations`.
@@ -235,6 +253,9 @@ pub struct FootnoteOut {
 pub struct PassageOut {
     /// "John 3:16–18".
     pub reference: String,
+    /// The book's number (Genesis is 1), for the tools that save a passage.
+    #[serde(skip)]
+    pub book_id: i64,
     pub translation: String,
     pub translation_name: String,
     pub book: String,
@@ -437,8 +458,14 @@ pub struct NoteOut {
 
 // ---- Answering.
 
-/// Answer one question: open the database, read, and close it again.
+/// Answer one question: open the database, read, and close it again. Saving
+/// findings opens it twice: to read and check everything, then to save.
 pub async fn run(database: &Path, request: Request) -> anyhow::Result<Answer> {
+    if let Request::SaveFindings { args, client } = request {
+        return Ok(Answer::SavedFindings(
+            save_findings(database, args, client).await?,
+        ));
+    }
     let library = Library::open(database).await?;
     let answer = library.answer(request).await;
     library.close().await;
@@ -518,6 +545,9 @@ impl Library {
             Request::ListHighlights(args) => Answer::Highlights(self.list_highlights(args).await?),
             Request::ListNotes(args) => Answer::Notes(self.list_notes(args).await?),
             Request::VerifyQuote(args) => Answer::VerifyQuote(self.verify_quote(args).await?),
+            Request::ListFindings(args) => Answer::Findings(self.list_findings(args).await?),
+            // `run` saves findings itself, with the writer; this only reads.
+            Request::SaveFindings { .. } => bail!("Saving findings needs the database's path."),
         })
     }
 
@@ -689,6 +719,7 @@ impl Library {
         }
         Ok(Ok(PassageOut {
             reference,
+            book_id: book.id,
             translation: translation.code.clone(),
             translation_name: translation.name.clone(),
             book: book.name.clone(),
@@ -1063,6 +1094,11 @@ impl Library {
             notes,
         })
     }
+}
+
+/// An answer as a tool gives it: compact JSON.
+pub fn to_json(answer: &Answer) -> anyhow::Result<String> {
+    serde_json::to_string(answer).context("Couldn't write the JSON")
 }
 
 /// The references in `input`, which are separated by commas or semicolons. A part

@@ -1,7 +1,10 @@
 //! `gospel-getter-cli`: lets a local AI agent, or a person in a terminal, read
 //! the reader's own Gospel Getter install. Subcommands print JSON on stdout;
 //! `mcp` serves the same tools over stdio. Both are thin layers over `query`,
-//! which only ever holds a read-only connection to the database.
+//! which reads through a read-only connection to the database. The one thing
+//! either writes is an AI-flagged finding (`save_findings`), once the reader
+//! has turned that on in the app, and through a writer that can do nothing
+//! else.
 //!
 //! A normal console program on every platform (no `windows_subsystem`, unlike
 //! the app), so it prints in a Windows terminal.
@@ -18,11 +21,13 @@ use std::process::ExitCode;
 
 use query::{
     CompareArgs, GetCrossReferencesArgs, GetPassageArgs, GetPassagesArgs, ListBookmarksArgs,
-    ListHighlightsArgs, ListNotesArgs, Request, SearchArgs, VerifyQuoteArgs,
+    ListFindingsArgs, ListHighlightsArgs, ListNotesArgs, Request, SaveFindingsArgs, SearchArgs,
+    VerifyQuoteArgs,
 };
 
-/// Read your Gospel Getter install, read-only. Prints JSON on stdout; errors
-/// are plain text on stderr, with a non-zero exit.
+/// Read your Gospel Getter install, read-only but for saving AI findings
+/// when you've turned that on. Prints JSON on stdout; errors are plain text
+/// on stderr, with a non-zero exit.
 #[derive(Debug, Parser)]
 #[command(name = "gospel-getter-cli", version)]
 struct Cli {
@@ -75,6 +80,14 @@ enum Command {
     /// Check a quotation against the real text, character for character.
     #[command(name = "verify_quote", visible_alias = "verify-quote")]
     VerifyQuote(VerifyQuoteArgs),
+    /// The AI-flagged findings saved, in Bible order: where, by whom, for what.
+    #[command(name = "list_findings", visible_aliases = ["findings", "list-findings"])]
+    ListFindings(ListFindingsArgs),
+    /// Mark verses as AI-flagged findings for one of the reader's requests,
+    /// once they've turned that on in the app (Aa, then AI agents). Only the
+    /// places: nothing about what the verses say.
+    #[command(name = "save_findings", visible_alias = "save-findings")]
+    SaveFindings(SaveFindingsArgs),
     /// Serve these tools to an MCP client over stdio.
     #[command(name = "mcp")]
     Mcp,
@@ -95,6 +108,10 @@ impl Command {
             Self::ListHighlights(args) => Request::ListHighlights(args),
             Self::ListNotes(args) => Request::ListNotes(args),
             Self::VerifyQuote(args) => Request::VerifyQuote(args),
+            Self::ListFindings(args) => Request::ListFindings(args),
+            // On the command line there's no client to name: the agent is
+            // `--agent`, else "AI agent".
+            Self::SaveFindings(args) => Request::SaveFindings { args, client: None },
             Self::Mcp => return None,
         })
     }
@@ -184,7 +201,7 @@ mod tests {
     #[test]
     fn every_name_of_a_subcommand_is_that_subcommand() {
         type Is = fn(&Command) -> bool;
-        let table: [(&[&str], &[&str], Is); 11] = [
+        let table: [(&[&str], &[&str], Is); 13] = [
             (
                 &["list_translations", "translations", "list-translations"],
                 &[],
@@ -248,6 +265,14 @@ mod tests {
                 ],
                 |c| matches!(c, Command::VerifyQuote(_)),
             ),
+            (&["list_findings", "findings", "list-findings"], &[], |c| {
+                matches!(c, Command::ListFindings(_))
+            }),
+            (
+                &["save_findings", "save-findings"],
+                &["--request", "grief", "John 11:35"],
+                |c| matches!(c, Command::SaveFindings(_)),
+            ),
         ];
         for (names, rest, is) in table {
             for name in names {
@@ -259,5 +284,10 @@ mod tests {
         // A subcommand that needs its arguments doesn't run without them.
         assert!(Cli::try_parse_from(["gospel-getter-cli", "get_passages"]).is_err());
         assert!(Cli::try_parse_from(["gospel-getter-cli", "verify-quote"]).is_err());
+        assert!(Cli::try_parse_from(["gospel-getter-cli", "save-findings", "John 11:35"]).is_err());
+        assert!(
+            Cli::try_parse_from(["gospel-getter-cli", "save-findings", "--request", "grief"])
+                .is_err()
+        );
     }
 }
