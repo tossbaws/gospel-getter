@@ -18,7 +18,7 @@ use std::process::ExitCode;
 
 use query::{
     CompareArgs, GetCrossReferencesArgs, GetPassageArgs, ListBookmarksArgs, ListHighlightsArgs,
-    ListNotesArgs, Request, SearchArgs,
+    ListNotesArgs, Request, SearchArgs, VerifyQuoteArgs,
 };
 
 /// Read your Gospel Getter install, read-only. Prints JSON on stdout; errors
@@ -63,6 +63,9 @@ enum Command {
     /// The reader's notes, in Bible order, with their verses.
     #[command(name = "list_notes", visible_alias = "notes")]
     ListNotes(ListNotesArgs),
+    /// Check a quotation against the real text, character for character.
+    #[command(name = "verify_quote", visible_alias = "verify-quote")]
+    VerifyQuote(VerifyQuoteArgs),
     /// Serve these tools to an MCP client over stdio.
     #[command(name = "mcp")]
     Mcp,
@@ -81,6 +84,7 @@ impl Command {
             Self::ListBookmarks(args) => Request::ListBookmarks(args),
             Self::ListHighlights(args) => Request::ListHighlights(args),
             Self::ListNotes(args) => Request::ListNotes(args),
+            Self::VerifyQuote(args) => Request::VerifyQuote(args),
             Self::Mcp => return None,
         })
     }
@@ -174,6 +178,19 @@ mod tests {
             for word in [name, short] {
                 assert!(Cli::try_parse_from(["gospel-getter-cli", word, "John 3:16"]).is_ok());
             }
+        }
+        for word in ["verify_quote", "verify-quote"] {
+            let cli = Cli::try_parse_from([
+                "gospel-getter-cli",
+                word,
+                "Jesus wept.",
+                "--reference",
+                "John 11:35",
+                "--translation",
+                "kjv",
+            ])
+            .expect("it parses");
+            assert!(matches!(cli.command, Command::VerifyQuote(_)));
         }
     }
 }

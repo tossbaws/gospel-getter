@@ -253,6 +253,84 @@ async fn every_subcommand_answers_in_json() {
     });
 }
 
+/// `verify_quote` under both its names: exact, a difference, and what's nowhere.
+#[tokio::test]
+async fn verify_quote_checks_a_quotation_character_for_character() {
+    let db = closed_install("e2e_verify").await;
+    let path = db.path();
+    unchanged(&db, || {
+        let exact = &[
+            "verify_quote",
+            JOHN_3_16_KJV,
+            "--reference",
+            "John 3:16",
+            "--translation",
+            "kjv",
+        ];
+        assert_eq!(
+            answer(&path, exact),
+            json!({
+                "status": "exact",
+                "translation": "kjv",
+                "reference": "John 3:16",
+                "text": JOHN_3_16_KJV,
+                "message": "This is exactly John 3:16 in the KJV.",
+            })
+        );
+        let mut kebab = exact.to_vec();
+        kebab[0] = "verify-quote";
+        assert_eq!(answer(&path, &kebab), answer(&path, exact));
+
+        let found = answer(
+            &path,
+            &[
+                "verify_quote",
+                "For God so loved the world",
+                "--translation",
+                "web",
+            ],
+        );
+        assert_eq!(found["status"], "exact_part");
+        assert_eq!(found["reference"], "John 3:16");
+        assert_eq!(found["text"], JOHN_3_16_WEB);
+
+        let misquoted = JOHN_3_16_KJV.replacen("loved", "lovad", 1);
+        let differs = answer(
+            &path,
+            &[
+                "verify_quote",
+                &misquoted,
+                "--reference",
+                "John 3:16",
+                "--translation",
+                "kjv",
+            ],
+        );
+        assert_eq!(differs["status"], "differs");
+        assert_eq!(differs["text"], JOHN_3_16_KJV);
+        assert_eq!(differs["difference"]["position"], 15);
+        assert_eq!(differs["difference"]["word"], 4);
+
+        let elsewhere = answer(
+            &path,
+            &["verify_quote", JOHN_3_5_KJV, "--reference", "John 3:16"],
+        );
+        assert_eq!(elsewhere["status"], "elsewhere");
+        assert_eq!(elsewhere["reference"], "John 3:16");
+        assert_eq!(elsewhere["found_at"][0]["reference"], "John 3:5");
+        assert_eq!(elsewhere["found_at"][0]["text"], JOHN_3_5_KJV);
+
+        assert_eq!(
+            answer(&path, &["verify_quote", "Blessed are the pickle makers"]),
+            json!({
+                "status": "not_found",
+                "translation": "kjv",
+                "message": "This text isn't in the KJV as quoted.",
+            })
+        );
+    });
+}
+
 /// A failure is a sentence on stderr and a non-zero exit, with no JSON.
 #[tokio::test]
 async fn failures_are_plain_text_and_a_non_zero_exit() {
@@ -263,6 +341,19 @@ async fn failures_are_plain_text_and_a_non_zero_exit() {
         assert!(refusal(&path, &["passage", "John 3:16", "--translation", "niv"]).contains("niv"));
         assert!(refusal(&path, &["search", "grace", "--book", "Hezekiah"]).contains("no book"));
         assert!(refusal(&path, &["list_highlights", "--color", "mauve"]).contains("mauve"));
+        assert!(
+            refusal(
+                &path,
+                &[
+                    "verify_quote",
+                    "Jesus wept.",
+                    "--reference",
+                    "Hezekiah 3:16"
+                ]
+            )
+            .contains("no book called")
+        );
+        assert!(refusal(&path, &["verify_quote", "  "]).contains("empty"));
     });
 }
 
@@ -411,6 +502,7 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
                 "list_notes",
                 "list_translations",
                 "search",
+                "verify_quote",
             ]
             .into_iter()
             .collect()
@@ -426,6 +518,37 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
             get_passage["inputSchema"]["properties"]["reference"]["type"],
             "string"
         );
+
+        // The arguments are the subcommand's, and its description says what each
+        // status means and the limit.
+        let verify_quote = tools.iter().find(|t| t["name"] == "verify_quote").unwrap();
+        let arguments = |tool: &Value| -> Vec<String> {
+            let properties = tool["inputSchema"]["properties"].as_object().unwrap();
+            properties.keys().cloned().collect()
+        };
+        assert_eq!(
+            arguments(verify_quote),
+            ["reference", "text", "translation"]
+        );
+        assert_eq!(verify_quote["inputSchema"]["required"], json!(["text"]));
+        let help = run(&path, &["verify_quote", "--help"]);
+        let help = String::from_utf8_lossy(&help.stdout);
+        for flag in ["<TEXT>", "--reference", "--translation"] {
+            assert!(help.contains(flag), "{flag}: {help}");
+        }
+        let description = verify_quote["description"].as_str().unwrap();
+        for words in [
+            "\"exact\"",
+            "\"exact_part\"",
+            "\"differs\"",
+            "\"elsewhere\"",
+            "\"not_found\"",
+            "character for character",
+            "whitespace around the whole quote is trimmed",
+            "10,000",
+        ] {
+            assert!(description.contains(words), "{words}: {description}");
+        }
 
         let passage = mcp.call_for_json(
             3,
@@ -447,7 +570,7 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
         assert_eq!(notes["notes"][0]["body"], "Rejoice, always.");
 
         // The same arguments, the same JSON, whichever way it's asked.
-        let same: [(&str, Value, &[&str]); 7] = [
+        let same: [(&str, Value, &[&str]); 10] = [
             (
                 "get_passage",
                 json!({"reference": "Psalm 119:105", "translation": "kjv"}),
@@ -483,6 +606,33 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
                     "5",
                 ],
             ),
+            (
+                "verify_quote",
+                json!({"text": JOHN_3_16_BSB, "reference": "John 3:16", "translation": "bsb"}),
+                &[
+                    "verify_quote",
+                    JOHN_3_16_BSB,
+                    "--reference",
+                    "John 3:16",
+                    "--translation",
+                    "bsb",
+                ],
+            ),
+            (
+                "verify_quote",
+                json!({"text": "for god so loved", "reference": "John 3:16"}),
+                &[
+                    "verify_quote",
+                    "for god so loved",
+                    "--reference",
+                    "John 3:16",
+                ],
+            ),
+            (
+                "verify_quote",
+                json!({"text": "Blessed are the pickle makers"}),
+                &["verify_quote", "Blessed are the pickle makers"],
+            ),
         ];
         for (i, (tool, arguments, args)) in same.into_iter().enumerate() {
             assert_eq!(
@@ -493,17 +643,20 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
         }
 
         // A failure is the tool's error, in the subcommand's words.
-        let (is_error, text) = mcp.call(20, "get_passage", json!({"reference": "Hezekiah 3:16"}));
+        let (is_error, text) = mcp.call(40, "get_passage", json!({"reference": "Hezekiah 3:16"}));
         assert!(is_error);
         assert_eq!(
             format!("{text}\n"),
             refusal(&path, &["get_passage", "Hezekiah 3:16"])
         );
+        let (is_error, text) = mcp.call(41, "verify_quote", json!({"text": ""}));
+        assert!(is_error);
+        assert_eq!(format!("{text}\n"), refusal(&path, &["verify_quote", ""]));
 
         // No such argument: the server refuses, typed as it is.
         mcp.send(&json!({
             "jsonrpc": "2.0",
-            "id": 21,
+            "id": 42,
             "method": "tools/call",
             "params": {"name": "get_passage", "arguments": {"reference": "John 3:16", "body": "x"}},
         }));
@@ -656,6 +809,33 @@ async fn a_missing_index_stops_only_search() {
         let passage = answer(&path, &["passage", "John 3:16", "--translation", "web"]);
         assert_eq!(passage["verses"][0]["text"], JOHN_3_16_WEB);
         assert_eq!(answer(&path, &["list_notes"])["total"], 0);
+    });
+}
+
+/// No search index: a passage that has the quote is still checked, and what
+/// has to search for it refuses, without building the index.
+#[tokio::test]
+async fn a_missing_index_stops_a_quote_only_where_it_must_search() {
+    let (db, pool) = prepared_database("e2e_verify_no_index").await;
+    pool.close().await;
+    let path = db.path();
+    unchanged(&db, || {
+        let held = answer(
+            &path,
+            &["verify_quote", JOHN_3_5_KJV, "--reference", "John 3:5"],
+        );
+        assert_eq!(held["status"], "exact");
+        for args in [
+            &["verify_quote", JOHN_3_5_KJV][..],
+            &["verify_quote", JOHN_3_5_KJV, "--reference", "John 3:16"][..],
+        ] {
+            let message = refusal(&path, args);
+            assert!(message.contains("search index"), "{message}");
+            assert!(
+                message.contains("Open Gospel Getter once first"),
+                "{message}"
+            );
+        }
     });
 }
 

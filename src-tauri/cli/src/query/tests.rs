@@ -460,7 +460,7 @@ async fn search_answers_a_reference_as_the_box_does() {
     pool.close().await;
 }
 
-/// Without the search index only `search` refuses (F3).
+/// Without the search index only what searches refuses (F3): here, `search`.
 #[tokio::test]
 async fn only_search_needs_the_index() {
     let (db, pool) = prepared_database("cli_no_index").await;

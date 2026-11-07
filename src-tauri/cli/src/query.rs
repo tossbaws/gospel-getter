@@ -23,6 +23,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::path::Path;
 
+mod verify;
+
+pub use verify::{VerifyQuoteArgs, VerifyQuoteOut};
+
 /// What every refusal to read an install that isn't ready ends with.
 const OPEN_THE_APP: &str = "Open Gospel Getter once first, then try again.";
 
@@ -154,6 +158,7 @@ pub enum Request {
     ListBookmarks(ListBookmarksArgs),
     ListHighlights(ListHighlightsArgs),
     ListNotes(ListNotesArgs),
+    VerifyQuote(VerifyQuoteArgs),
 }
 
 // ---- What each tool answers.
@@ -171,6 +176,7 @@ pub enum Answer {
     Bookmarks(BookmarksOut),
     Highlights(HighlightsOut),
     Notes(NotesOut),
+    VerifyQuote(VerifyQuoteOut),
 }
 
 /// The answer of `list_translations`.
@@ -472,6 +478,7 @@ impl Library {
             Request::ListBookmarks(args) => Answer::Bookmarks(self.list_bookmarks(args).await?),
             Request::ListHighlights(args) => Answer::Highlights(self.list_highlights(args).await?),
             Request::ListNotes(args) => Answer::Notes(self.list_notes(args).await?),
+            Request::VerifyQuote(args) => Answer::VerifyQuote(self.verify_quote(args).await?),
         })
     }
 
@@ -597,7 +604,16 @@ impl Library {
 
     async fn get_passage(&self, args: GetPassageArgs) -> anyhow::Result<PassageOut> {
         let translation = self.translation(args.translation.as_deref()).await?;
-        let passage = self.passage_named(&args.reference)?;
+        self.passage_in(translation, &args.reference).await
+    }
+
+    /// What `reference` names in `translation`, or why there's nothing to give.
+    async fn passage_in(
+        &self,
+        translation: &Translation,
+        reference: &str,
+    ) -> anyhow::Result<PassageOut> {
+        let passage = self.passage_named(reference)?;
         let book = self.book(passage.book_id)?;
         let reference = passage_reference(&book.name, passage.chapter, passage.verses);
         let (verses, notice) = self.read(translation, passage).await?;

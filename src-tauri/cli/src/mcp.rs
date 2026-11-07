@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use crate::query::{
     self, CompareArgs, GetCrossReferencesArgs, GetPassageArgs, Library, ListBookmarksArgs,
-    ListHighlightsArgs, ListNotesArgs, Request, SearchArgs,
+    ListHighlightsArgs, ListNotesArgs, Request, SearchArgs, VerifyQuoteArgs,
 };
 
 /// What the client's model is told about this server.
@@ -150,6 +150,18 @@ impl Server {
         Parameters(args): Parameters<ListNotesArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         self.answer(Request::ListNotes(args)).await
+    }
+
+    #[tool(
+        name = "verify_quote",
+        description = "Check a quotation against the real text of one translation, the one named or else the reader's default, never any other. The comparison is character for character with the clean text get_passage gives, a passage's verses joined by one space: case, punctuation, apostrophe and quote style and inner whitespace all count, and only whitespace around the whole quote is trimmed. Without a reference, or when the reference doesn't hold it, phrase search looks for it. status is \"exact\" (the whole passage), \"exact_part\" (a contiguous part of the passage), \"differs\" (not in the passage: difference gives the first differing position and word, text the real text; with no reference given, the passage is only the closest verse, not a match), \"elsewhere\" (not in the reference given, but found_at lists where it is, and difference is against the reference) or \"not_found\" (not in this translation as quoted: no reference, no guess). At most 10,000 characters.",
+        annotations(read_only_hint = true)
+    )]
+    async fn verify_quote(
+        &self,
+        Parameters(args): Parameters<VerifyQuoteArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.answer(Request::VerifyQuote(args)).await
     }
 }
 
