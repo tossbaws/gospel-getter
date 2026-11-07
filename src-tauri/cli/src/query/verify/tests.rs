@@ -622,6 +622,17 @@ fn a_quote_is_aligned_where_the_text_shares_the_most_with_it() {
     let difference = first_difference("abX", "abC abD");
     assert_eq!(difference.actual, "C abD");
 
+    // Unless a later one differs only by a look-alike: that one, with its
+    // note. The earliest of those, and the earliest when the first has one.
+    let difference = first_difference("the LORD\u{2019}S", "unto the LORD; and the LORD'S.");
+    assert_eq!(difference.actual, "'S.");
+    assert!(difference.note.is_some(), "{difference:?}");
+    assert_eq!(difference.position, 9);
+    let difference = first_difference("a b\u{2019}x", "a b' a b\u{2018} a b'");
+    assert_eq!(difference.actual, "' a b\u{2018} a b'");
+    let difference = first_difference("a b\u{2019}x", "a bC a b' a b\u{2018}");
+    assert_eq!(difference.actual, "' a b\u{2018}");
+
     // Sharing nothing, the start of each.
     assert_eq!(
         first_difference("xyz", "abc"),
@@ -767,6 +778,32 @@ async fn a_curly_apostrophe_differs_and_a_note_says_so() {
     let message = answer["message"].as_str().expect("a message");
     assert!(message.contains("not all were checked."), "{message}");
     assert!(message.ends_with(note), "{message}");
+    install.close().await;
+}
+
+/// Exodus 9:29 has "the LORD" twice ("unto the LORD;" and "the LORD'S."): a
+/// quote with a curly apostrophe is aligned at the one where only the
+/// apostrophe differs, and the note says so. The verdict is as strict as
+/// ever: it differs.
+#[tokio::test]
+async fn a_tie_is_aligned_where_the_note_applies() {
+    let install = Install::indexed("verify_tie_note").await;
+    let verse = install.real_text("Exodus 9:29", "kjv").await;
+    assert_eq!(verse.matches("the LORD").count(), 2, "{verse}");
+    let answer = install
+        .check("the LORD\u{2019}S.", Some("Exodus 9:29"), "kjv")
+        .await;
+    assert_eq!(answer["status"], "differs");
+    let note = "The text has an apostrophe (U+0027) where the quote has a right single \
+                quotation mark (U+2019).";
+    assert_eq!(answer["difference"]["note"], note);
+    assert_eq!(answer["difference"]["position"], 9);
+    assert_eq!(answer["difference"]["actual"], "'S.");
+    let message = answer["message"].as_str().expect("a message");
+    assert!(message.ends_with(note), "{message}");
+    install
+        .assert_it_keeps_its_promise("the LORD\u{2019}S.", &answer)
+        .await;
     install.close().await;
 }
 

@@ -1132,16 +1132,23 @@ fn is_only_numbers(part: &str) -> bool {
 
 /// The reference that the numbers `part` make, going on from `previous`, which
 /// has a book's name to go on from, or `None`. It's in the same book. It's in the
-/// same chapter too if it names no chapter, and `previous` named verses: "John
-/// 3:16, 18" is John 3:18, but "John 3:16, 4:2" is John 4:2 and "Psalm 23, 24" is
-/// Psalm 24.
+/// chapter `previous` ends in too if it names no chapter, and `previous` named
+/// verses: "John 3:16, 18" is John 3:18, and after a range across chapters,
+/// "John 3:16-4:2, 5" is John 4:5; but "John 3:16, 4:2" is John 4:2 and "Psalm
+/// 23, 24" is Psalm 24.
 fn continued(previous: &str, part: &str) -> Option<String> {
     let (at, last_letter) = previous.char_indices().rfind(|(_, c)| c.is_alphabetic())?;
     let (book, numbers) = previous.split_at(at + last_letter.len_utf8());
+    // The chapter of its last verse: the number before its last ':' or '.'.
     let chapter = numbers
-        .trim_start_matches(|c: char| !c.is_ascii_digit())
-        .split_once([':', '.'])
-        .map(|(chapter, _)| chapter);
+        .rsplit_once([':', '.'])
+        .and_then(|(before, _)| {
+            before
+                .trim_end()
+                .rsplit(|c: char| !c.is_ascii_digit())
+                .next()
+        })
+        .filter(|chapter| !chapter.is_empty());
     Some(match chapter {
         Some(chapter) if !part.contains([':', '.']) => format!("{book} {chapter}:{part}"),
         _ => format!("{book} {part}"),

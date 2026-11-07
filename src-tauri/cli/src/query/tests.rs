@@ -455,6 +455,11 @@ fn a_list_of_references_is_split_at_commas_and_semicolons() {
         ("John 3:16, 4:2", &["John 3:16", "John 4:2"]),
         ("John 3:16, 18-20", &["John 3:16", "John 3:18-20"]),
         ("John 3:16-18, 20", &["John 3:16-18", "John 3:20"]),
+        // After a range across chapters, the chapter it ends in.
+        ("John 3:16-4:2, 5", &["John 3:16-4:2", "John 4:5"]),
+        ("John 3:16 - 4:2, 5-7", &["John 3:16 - 4:2", "John 4:5-7"]),
+        ("John 3.16-4.2, 5", &["John 3.16-4.2", "John 4:5"]),
+        ("John 3:16-4:2, 5:1", &["John 3:16-4:2", "John 5:1"]),
         (
             "John 3:16\u{2013}18, 20\u{2013}22",
             &["John 3:16\u{2013}18", "John 3:20\u{2013}22"],
