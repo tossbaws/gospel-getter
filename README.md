@@ -385,6 +385,12 @@ Upgrading keeps your data.
   Backups and **Export notes…** don't include them.
 - **Recent places** (the bar's ▾ list, the last 10) are kept in the app's
   web storage, on this computer only. Backups don't include them.
+- AI findings (see **Mark findings** under **Use with AI agents**) and the
+  **Let AI agents save findings** switch are kept in the database. A backup
+  includes them: one with findings, or with the switch on, is data format 4,
+  which 2.26.0 and newer restore, and which 2.25.x and older refuse with
+  their "made by a newer version" message; a backup with neither is format 3,
+  as before, and any version since 2.8.0 restores it in full.
 - The window's size and place are kept in `window-state.json`, beside the
   database, and aren't exported either.
 - Coming from the old browser-based Gospel Getter (the local server on
@@ -400,14 +406,21 @@ up passages, search, compare translations, follow cross-references, and read
 your bookmarks, highlights and notes. Scripture comes back as the app's Copy
 gives it, with footnotes kept apart.
 
+It's there to help you find and read the words of God for yourself, never to
+have an AI summarise, paraphrase or interpret them for you. Its tools return
+the exact text and say where it is; its instructions tell an agent to quote
+scripture exactly and point you to it.
+
 **Privacy.** Gospel Getter itself sends none of it anywhere. But what an agent
 reads through it, your notes included, goes to that agent and its AI service,
 like anything else you share with it. Connect only agents you trust.
 
-It only reads. It opens the database with a read-only connection, so it can't
-change anything, and it works while the app is open. It has no network port;
-an agent talks to it over stdio. Open the app once first, so the database
-exists.
+It reads, with one exception you control. It opens the database with a
+read-only connection, and it works while the app is open. The one thing it
+can write is an AI finding (see **Mark findings**), and only once you've
+turned that on in the app; it can never change your notes, bookmarks or
+highlights. It has no network port; an agent talks to it over stdio. Open the
+app once first, so the database exists.
 
 **Where it is.** The `.deb` puts `gospel-getter-cli` on your `PATH`. The Windows
 installers put it beside the app, in `%LOCALAPPDATA%\Gospel Getter\` (the
@@ -460,8 +473,8 @@ gospel-getter-cli get-passages "John 3:16" "Rom 5:8" --translation bsb
 gospel-getter-cli verify-quote "For God so loved the world" --translation kjv
 ```
 
-**Quoting and study.** Two tools, and one form of `get_passage`, are made for
-an agent quoting scripture or working through a topic:
+**Finding and quoting.** Two tools, and one form of `get_passage`, are made
+for an agent quoting scripture or finding every place on a topic:
 
 - `verify_quote` checks a quotation against the real text of one translation,
   character for character (quotes up to 10,000 characters): `exact`,
@@ -471,7 +484,54 @@ an agent quoting scripture or working through a topic:
 - `get_passages` gives many passages in one call: at most 50 references and 500
   verses, and a reference that fails doesn't stop the rest.
 - `get_passage` takes several references separated by commas or semicolons
-  (`"John 3:16, 18; Rom 5:8"`), and answers as `get_passages` does.
+  (`"John 3:16, 18; Rom 5:8"`), and answers as `get_passages` does. A part of
+  only numbers goes on from the reference before it: `"John 3:16, 18"` is John
+  3:18, and after a range across chapters, `"John 3:16-4:2, 5"` is John 4:5.
+
+**Mark findings.** Ask your agent something like *"note every verse that
+deals with grief so I can read them"*, and it can mark each verse it finds in
+Gospel Getter with `save_findings`, so you can go through them and read each
+one for yourself, and judge whether it got them right.
+
+- **Off until you turn it on.** In the app, choose **Aa**, then under **AI
+  agents** turn on **Let AI agents save findings**. Until you do, the tool
+  answers with how to turn it on, and saves nothing.
+- **Markers, not commentary.** A finding says only who found the verse and
+  for which of your requests: "Found by Claude for your request “grief”." It
+  never says what the verse means, and there's nowhere to store anything
+  that would; the verse beside it is left as it is, for you to read.
+- **Add-only.** An agent can add findings, never edit or remove them, and
+  never touch your notes, bookmarks or highlights. Saving the same verse for
+  the same request again changes nothing.
+- **In the app.** In reading mode each finding sits in the margin beside its
+  verse, after your own notes there, as a violet **AI** badge and the verse
+  (**AI ×2** when there are two); click it to see who found it and for what,
+  with **Keep as mine** and **Remove**. A flagged verse has a dotted violet
+  underline. **Keep as mine** opens the note editor with the finding's words
+  in it, all selected, so typing anything replaces them; saving makes it your
+  own note and removes the finding. The Library's Notes tab lists findings by
+  request, apart from your notes, with **Remove all** (and Undo). Findings an
+  agent saves while the app is open show the next time a chapter is shown or
+  the Library is opened. Export notes leaves them out; Export data keeps them.
+- `list_findings` lists what's saved (where, by whom, for which request, with
+  no text), so an agent can avoid saving a verse twice.
+
+```bash
+gospel-getter-cli save-findings --request "grief" --agent "Claude" "John 11:35" "Job 2:11-13"
+gospel-getter-cli list-findings --request "grief"
+```
+
+**The notes prompt.** One MCP prompt, `summarise-my-notes` (argument: `book`),
+asks an agent to summarise and organise *your own notes* on a book: it reads
+them with `list_notes`, works only with your words, quotes any verse they
+point to exactly with `get_passage`, and never summarises the verses. There
+are no prompts that ask an agent to study or explain a passage.
+
+**Passages as resources.** Each chapter of each translation is an MCP
+resource, `gg://<translation>/<book>/<chapter>` (`gg://kjv/john/3`,
+`gg://web/1-john/4`: the book in lowercase, its spaces as hyphens), so a
+client can attach a chapter as context. Its text is exactly what
+`get_passage` gives for that chapter; an unknown address is a plain error.
 
 ## Translations
 
