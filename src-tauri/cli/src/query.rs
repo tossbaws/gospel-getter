@@ -52,7 +52,7 @@ const MAX_BATCH_VERSES: usize = 500;
 #[derive(Debug, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GetPassageArgs {
-    /// A reference, as the app's Go to reads it: "John 3:16", "John 3:16-18" or "Psalm 23".
+    /// A reference, as the app's Go to reads it: "John 3:16", "John 3:16-18" or "Psalm 23". Or several, separated by commas or semicolons: "John 3:16, 18; Rom 5:8".
     pub reference: String,
     /// A translation's code, such as kjv, bsb or web. Default: the one the reader last read.
     #[arg(long)]
@@ -506,7 +506,7 @@ impl Library {
     async fn answer(&self, request: Request) -> anyhow::Result<Answer> {
         Ok(match request {
             Request::ListTranslations => Answer::Translations(self.list_translations().await?),
-            Request::GetPassage(args) => Answer::Passage(self.get_passage(args).await?),
+            Request::GetPassage(args) => self.get_passage(args).await?,
             Request::GetPassages(args) => Answer::Passages(self.get_passages(args).await?),
             Request::Search(args) => Answer::Search(self.search(args).await?),
             Request::Compare(args) => Answer::Compare(self.compare(args).await?),
@@ -641,9 +641,20 @@ impl Library {
         })
     }
 
-    async fn get_passage(&self, args: GetPassageArgs) -> anyhow::Result<PassageOut> {
+    /// One passage, as ever; several references are answered as `get_passages`
+    /// answers them.
+    async fn get_passage(&self, args: GetPassageArgs) -> anyhow::Result<Answer> {
         let translation = self.translation(args.translation.as_deref()).await?;
-        self.passage_in(translation, &args.reference).await
+        let references = split_references(&args.reference);
+        let one = match references.as_slice() {
+            [] => &args.reference,
+            [one] => one,
+            _ => {
+                let passages = self.passages_in(translation, &references).await?;
+                return Ok(Answer::Passages(passages));
+            }
+        };
+        Ok(Answer::Passage(self.passage_in(translation, one).await?))
     }
 
     /// What `reference` names in `translation`, or why there's nothing to give.
@@ -1052,6 +1063,53 @@ impl Library {
             notes,
         })
     }
+}
+
+/// The references in `input`, which are separated by commas or semicolons. A part
+/// of only numbers goes on from the reference before it (see [`continued`]); a
+/// part with a letter in it, "1 John" as much as "Rom", is a reference of its own.
+/// Empty parts are dropped. What each part means, `query::interpret` decides.
+fn split_references(input: &str) -> Vec<String> {
+    let mut references: Vec<String> = Vec::new();
+    for part in input
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        let reference = match references.last() {
+            Some(previous) if is_only_numbers(part) => continued(previous, part),
+            _ => None,
+        };
+        references.push(reference.unwrap_or_else(|| part.to_string()));
+    }
+    references
+}
+
+/// Whether a part of a list of references has only what comes after a book's
+/// name, as Go to reads it: "18", "4:2" or "18-20".
+fn is_only_numbers(part: &str) -> bool {
+    part.starts_with(|c: char| c.is_ascii_digit())
+        && part
+            .chars()
+            .all(|c| c.is_ascii_digit() || " \t:.-\u{2013}\u{2014}".contains(c))
+}
+
+/// The reference that the numbers `part` make, going on from `previous`, which
+/// has a book's name to go on from, or `None`. It's in the same book. It's in the
+/// same chapter too if it names no chapter, and `previous` named verses: "John
+/// 3:16, 18" is John 3:18, but "John 3:16, 4:2" is John 4:2 and "Psalm 23, 24" is
+/// Psalm 24.
+fn continued(previous: &str, part: &str) -> Option<String> {
+    let (at, last_letter) = previous.char_indices().rfind(|(_, c)| c.is_alphabetic())?;
+    let (book, numbers) = previous.split_at(at + last_letter.len_utf8());
+    let chapter = numbers
+        .trim_start_matches(|c: char| !c.is_ascii_digit())
+        .split_once([':', '.'])
+        .map(|(chapter, _)| chapter);
+    Some(match chapter {
+        Some(chapter) if !part.contains([':', '.']) => format!("{book} {chapter}:{part}"),
+        _ => format!("{book} {part}"),
+    })
 }
 
 /// A verse as shown, as a tool answers with it: its text and its footnotes'

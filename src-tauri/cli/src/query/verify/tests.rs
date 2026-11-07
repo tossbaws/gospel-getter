@@ -59,11 +59,10 @@ impl Install {
 
     /// What `get_passage` gives for a reference, its verses joined by one space.
     async fn real_text(&self, reference: &str, translation: &str) -> String {
-        let args = crate::query::GetPassageArgs {
-            reference: reference.to_string(),
-            translation: Some(translation.to_string()),
-        };
-        let passage = self.library.get_passage(args).await.expect("a passage");
+        let translation = self.library.translation(Some(translation)).await;
+        let translation = translation.expect("a translation");
+        let passage = self.library.passage_in(translation, reference).await;
+        let passage = passage.expect("a passage");
         let verses: Vec<&str> = passage.verses.iter().map(|v| v.text.as_str()).collect();
         verses.join(" ")
     }
@@ -809,11 +808,9 @@ async fn a_reference_that_cannot_be_read_is_refused_as_get_passage_does() {
         ("for God so loved", "kjv"),
         ("Matthew 17:21", "bsb"),
     ] {
-        let args = crate::query::GetPassageArgs {
-            reference: reference.to_string(),
-            translation: Some(code.to_string()),
-        };
-        let message = format!("{:#}", install.library.get_passage(args).await.unwrap_err());
+        let translation = install.library.translation(Some(code)).await.unwrap();
+        let refusal = install.library.passage_in(translation, reference).await;
+        let message = format!("{:#}", refusal.unwrap_err());
         assert_eq!(
             install.refused("Jesus wept.", Some(reference), code).await,
             message

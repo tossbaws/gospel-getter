@@ -61,7 +61,7 @@ impl Server {
 
     #[tool(
         name = "get_passage",
-        description = "A passage's exact text: one verse, a range or a whole chapter, at most 200 verses. Footnotes come apart from the text.",
+        description = "A passage's exact text: one verse, a range or a whole chapter, at most 200 verses. Footnotes come apart from the text. Several references in the one argument, separated by commas or semicolons (\"John 3:16, 18; Rom 5:8\"), answer exactly as get_passages does, with its caps: a part of only numbers goes on from the reference before it.",
         annotations(read_only_hint = true)
     )]
     async fn get_passage(

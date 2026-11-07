@@ -331,6 +331,92 @@ async fn verify_quote_checks_a_quotation_character_for_character() {
     });
 }
 
+/// Every subcommand under its kebab-case names, the same as under its own.
+#[tokio::test]
+async fn kebab_case_names_are_the_same_subcommands() {
+    let db = closed_install("e2e_kebab").await;
+    let path = db.path();
+    unchanged(&db, || {
+        for (name, kebabs, rest) in [
+            ("list_translations", &["list-translations"][..], &[][..]),
+            ("get_passage", &["get-passage"], &["John 3:16"]),
+            ("get_passages", &["get-passages"], &["John 3:16", "Rom 5:8"]),
+            (
+                "get_cross_references",
+                &["get-cross-references", "cross-references"],
+                &["John 3:16"],
+            ),
+            (
+                "get_reading_place",
+                &["get-reading-place", "reading-place"],
+                &[],
+            ),
+            ("list_bookmarks", &["list-bookmarks"], &[]),
+            ("list_highlights", &["list-highlights"], &[]),
+            ("list_notes", &["list-notes"], &[]),
+            ("verify_quote", &["verify-quote"], &["Jesus wept."]),
+        ] {
+            let mut args = vec![name];
+            args.extend_from_slice(rest);
+            let own = answer(&path, &args);
+            for kebab in kebabs {
+                args[0] = kebab;
+                assert_eq!(answer(&path, &args), own, "{kebab}");
+            }
+        }
+    });
+}
+
+/// Several references in one, in either front end, are `get_passages`'s answer;
+/// one is `get_passage`'s, however it's written.
+#[tokio::test]
+async fn get_passage_takes_several_references_in_both_front_ends() {
+    let db = closed_install("e2e_passage_list").await;
+    let path = db.path();
+    unchanged(&db, || {
+        let many = answer(
+            &path,
+            &[
+                "get_passages",
+                "John 3:16",
+                "Rom 5:8",
+                "--translation",
+                "kjv",
+            ],
+        );
+        assert_eq!(many["passages"][0]["verses"][0]["text"], JOHN_3_16_KJV);
+        assert_eq!(many["verse_count"], 2);
+        for list in [
+            "John 3:16, Rom 5:8",
+            "John 3:16; Rom 5:8",
+            "John 3:16,Rom 5:8",
+        ] {
+            let args = ["passage", list, "--translation", "kjv"];
+            assert_eq!(answer(&path, &args), many, "{list}");
+        }
+        assert_eq!(
+            answer(&path, &["passage", "John 3:16,", "--translation", "kjv"]),
+            answer(&path, &["passage", "John 3:16", "--translation", "kjv"]),
+        );
+        let refused = refusal(&path, &["passage", "Psalm 119; Psalm 119; Psalm 119"]);
+        assert_eq!(
+            refused,
+            "That's 528 verses; at most 500 per call. Split it.\n"
+        );
+
+        let mut mcp = Mcp::start(&path);
+        mcp.initialize();
+        let arguments = json!({"reference": "John 3:16, Rom 5:8", "translation": "kjv"});
+        assert_eq!(mcp.call_for_json(2, "get_passage", arguments), many);
+        let arguments = json!({"reference": "John 3:16, 18", "translation": "kjv"});
+        assert_eq!(
+            mcp.call_for_json(3, "get_passage", arguments),
+            answer(&path, &["passage", "John 3:16, 18", "--translation", "kjv"]),
+        );
+        mcp.finish();
+    });
+}
+
 /// `get_passages` under all its names: the passages in the order asked, as
 /// `get_passage` gives each, one that fails in its place.
 #[tokio::test]

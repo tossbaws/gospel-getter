@@ -433,6 +433,131 @@ async fn get_passages_reads_one_translation() {
     pool.close().await;
 }
 
+/// One function reads a list of references: the separators, what goes on from
+/// what, the spaces around it all.
+#[test]
+fn a_list_of_references_is_split_at_commas_and_semicolons() {
+    for (input, references) in [
+        ("John 3:16", &["John 3:16"][..]),
+        ("  John 3:16\t", &["John 3:16"]),
+        ("John 3:16, Rom 5:8", &["John 3:16", "Rom 5:8"]),
+        ("John 3:16; 1 John 4:8", &["John 3:16", "1 John 4:8"]),
+        (
+            "John 3:16 ;Rom 5:8 ,Jude 5",
+            &["John 3:16", "Rom 5:8", "Jude 5"],
+        ),
+        // "1 John" is a new book, not chapter 1 of this one.
+        ("John 3:16, 1 John 4:8", &["John 3:16", "1 John 4:8"]),
+        // Only numbers: the next verse, a new chapter, a range.
+        ("John 3:16, 18", &["John 3:16", "John 3:18"]),
+        ("John 3:16,18", &["John 3:16", "John 3:18"]),
+        ("John 3:16; 18", &["John 3:16", "John 3:18"]),
+        ("John 3:16, 4:2", &["John 3:16", "John 4:2"]),
+        ("John 3:16, 18-20", &["John 3:16", "John 3:18-20"]),
+        ("John 3:16-18, 20", &["John 3:16-18", "John 3:20"]),
+        (
+            "John 3:16\u{2013}18, 20\u{2013}22",
+            &["John 3:16\u{2013}18", "John 3:20\u{2013}22"],
+        ),
+        ("John 3:16, 18 - 20", &["John 3:16", "John 3:18 - 20"]),
+        // Each goes on from the one before, whichever way that was reached.
+        (
+            "John 3:16, 18, 4:2, 7; Rom 5:8, 9",
+            &[
+                "John 3:16",
+                "John 3:18",
+                "John 4:2",
+                "John 4:7",
+                "Rom 5:8",
+                "Rom 5:9",
+            ],
+        ),
+        ("1 John 4:8, 9", &["1 John 4:8", "1 John 4:9"]),
+        // No verses to go on from: another chapter.
+        ("Psalm 23, 24", &["Psalm 23", "Psalm 24"]),
+        ("Romans, 5", &["Romans", "Romans 5"]),
+        // An abbreviation's period, and "." for ":".
+        ("Gen. 3:16, 18", &["Gen. 3:16", "Gen 3:18"]),
+        ("John 3.16, 18", &["John 3.16", "John 3:18"]),
+        ("John 3:16, 4.2", &["John 3:16", "John 4.2"]),
+        // Empty parts are nothing.
+        ("John 3:16,", &["John 3:16"]),
+        (",, John 3:16;; ", &["John 3:16"]),
+        (" , ; ", &[]),
+        ("", &[]),
+        // Nothing to go on from: as given, for get_passage's own refusal.
+        ("16, John 3:16", &["16", "John 3:16"]),
+        ("16, 18", &["16", "18"]),
+        ("for God, so loved", &["for God", "so loved"]),
+        // Not numbers alone.
+        ("John 3:16, -", &["John 3:16", "-"]),
+        ("John 3:16, v18", &["John 3:16", "v18"]),
+    ] {
+        assert_eq!(split_references(input), references, "{input:?}");
+    }
+}
+
+/// One reference is `get_passage`'s own answer, whatever is around it; two or
+/// more are exactly what `get_passages` gives for them, with its caps.
+#[tokio::test]
+async fn get_passage_takes_several_references() {
+    let (db, pool) = fresh_database("cli_passage_list").await;
+    let one = ask(&db, passage_of("John 3:16", Some("kjv"))).await;
+    assert_eq!(one["reference"], "John 3:16");
+    for same in ["  John 3:16 ", "John 3:16,", ";John 3:16"] {
+        assert_eq!(ask(&db, passage_of(same, Some("kjv"))).await, one, "{same}");
+    }
+
+    for (list, references) in [
+        ("John 3:16, Rom 5:8", &["John 3:16", "Rom 5:8"][..]),
+        ("John 3:16; 1 John 4:8", &["John 3:16", "1 John 4:8"]),
+        ("John 3:16, 18", &["John 3:16", "John 3:18"]),
+        ("John 3:16, 4:2", &["John 3:16", "John 4:2"]),
+        ("Psalm 23, 24", &["Psalm 23", "Psalm 24"]),
+    ] {
+        assert_eq!(
+            ask(&db, passage_of(list, Some("kjv"))).await,
+            ask(&db, passages_of(references, Some("kjv"))).await,
+            "{list}"
+        );
+    }
+    let answer = ask(&db, passage_of("John 3:16, 18; Rom 5:8", Some("bsb"))).await;
+    assert_eq!(answer["translation"], "bsb");
+    assert_eq!(answer["verse_count"], 3);
+    let names: Vec<&str> = answer["passages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["reference"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["John 3:16", "John 3:18", "Romans 5:8"]);
+
+    // A part that fails is that entry's answer, named by what it went on to be.
+    let answer = ask(&db, passage_of("John 3:16, 99; Hezekiah 1", Some("kjv"))).await;
+    assert_eq!(answer["verse_count"], 1);
+    assert_eq!(answer["passages"][1]["reference"], "John 3:99");
+    let error = answer["passages"][1]["error"].as_str().unwrap();
+    assert!(error.contains("John 3 ends at verse 36"), "{error}");
+    assert_eq!(answer["passages"][2]["reference"], "Hezekiah 1");
+
+    // The caps, and a list of nothing is what it always was.
+    assert_eq!(
+        refused(&db, passage_of("Psalm 119; Psalm 119; Psalm 119", None)).await,
+        "That's 528 verses; at most 500 per call. Split it."
+    );
+    let many = vec!["John 3:16"; MAX_BATCH_REFERENCES + 1].join(", ");
+    assert_eq!(
+        refused(&db, passage_of(&many, None)).await,
+        "That's 51 references; at most 50 per call. Split it."
+    );
+    assert!(
+        refused(&db, passage_of(" , ", None))
+            .await
+            .contains("isn't a Bible reference")
+    );
+    pool.close().await;
+}
+
 /// The same hits, in the same order, as the search behind the app's own box,
 /// each verse's text clean; a limit takes the first of them.
 #[tokio::test]

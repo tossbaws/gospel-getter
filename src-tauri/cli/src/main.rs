@@ -37,10 +37,10 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// The translations in this install, and which one is the default.
-    #[command(name = "list_translations", visible_alias = "translations")]
+    #[command(name = "list_translations", visible_aliases = ["translations", "list-translations"])]
     ListTranslations,
-    /// A passage's exact text.
-    #[command(name = "get_passage", visible_alias = "passage")]
+    /// A passage's exact text, or several: "John 3:16, 18; Rom 5:8".
+    #[command(name = "get_passage", visible_aliases = ["passage", "get-passage"])]
     GetPassage(GetPassageArgs),
     /// Many passages in one call, all in one translation.
     #[command(name = "get_passages", visible_aliases = ["passages", "get-passages"])]
@@ -52,19 +52,25 @@ enum Command {
     #[command(name = "compare")]
     Compare(CompareArgs),
     /// The cross-references of a verse, a range or a chapter.
-    #[command(name = "get_cross_references", visible_alias = "cross_references")]
+    #[command(
+        name = "get_cross_references",
+        visible_aliases = ["cross_references", "get-cross-references", "cross-references"]
+    )]
     GetCrossReferences(GetCrossReferencesArgs),
     /// Where the reader last was.
-    #[command(name = "get_reading_place", visible_alias = "reading_place")]
+    #[command(
+        name = "get_reading_place",
+        visible_aliases = ["reading_place", "get-reading-place", "reading-place"]
+    )]
     GetReadingPlace,
     /// The reader's bookmarks, newest first, with their verses.
-    #[command(name = "list_bookmarks", visible_alias = "bookmarks")]
+    #[command(name = "list_bookmarks", visible_aliases = ["bookmarks", "list-bookmarks"])]
     ListBookmarks(ListBookmarksArgs),
     /// The reader's highlights, in Bible order, with their verses.
-    #[command(name = "list_highlights", visible_alias = "highlights")]
+    #[command(name = "list_highlights", visible_aliases = ["highlights", "list-highlights"])]
     ListHighlights(ListHighlightsArgs),
     /// The reader's notes, in Bible order, with their verses.
-    #[command(name = "list_notes", visible_alias = "notes")]
+    #[command(name = "list_notes", visible_aliases = ["notes", "list-notes"])]
     ListNotes(ListNotesArgs),
     /// Check a quotation against the real text, character for character.
     #[command(name = "verify_quote", visible_alias = "verify-quote")]
@@ -164,43 +170,94 @@ mod tests {
         );
     }
 
-    /// The names of the tools work as subcommands, and so do the short forms.
+    /// What the program parses these words as.
+    fn command_of(words: &[&str]) -> Command {
+        let line = std::iter::once("gospel-getter-cli").chain(words.iter().copied());
+        Cli::try_parse_from(line)
+            .unwrap_or_else(|e| panic!("{words:?}: {e}"))
+            .command
+    }
+
+    /// Every name of every subcommand: the tool's own, its short form, each in
+    /// snake and kebab case, all of it the same command. Scripts use the old
+    /// names, so these only ever grow.
     #[test]
-    fn subcommands_answer_to_tool_names_and_short_forms() {
-        for (name, short) in [
-            ("list_translations", "translations"),
-            ("get_reading_place", "reading_place"),
-        ] {
-            for word in [name, short] {
-                assert!(Cli::try_parse_from(["gospel-getter-cli", word]).is_ok());
+    fn every_name_of_a_subcommand_is_that_subcommand() {
+        type Is = fn(&Command) -> bool;
+        let table: [(&[&str], &[&str], Is); 11] = [
+            (
+                &["list_translations", "translations", "list-translations"],
+                &[],
+                |c| matches!(c, Command::ListTranslations),
+            ),
+            (
+                &["get_passage", "passage", "get-passage"],
+                &["John 3:16"],
+                |c| matches!(c, Command::GetPassage(_)),
+            ),
+            (
+                &["get_passages", "passages", "get-passages"],
+                &["John 3:16", "Rom 5:8"],
+                |c| matches!(c, Command::GetPassages(_)),
+            ),
+            (&["search"], &["grace"], |c| matches!(c, Command::Search(_))),
+            (&["compare"], &["John 3:16"], |c| {
+                matches!(c, Command::Compare(_))
+            }),
+            (
+                &[
+                    "get_cross_references",
+                    "cross_references",
+                    "get-cross-references",
+                    "cross-references",
+                ],
+                &["John 3:16"],
+                |c| matches!(c, Command::GetCrossReferences(_)),
+            ),
+            (
+                &[
+                    "get_reading_place",
+                    "reading_place",
+                    "get-reading-place",
+                    "reading-place",
+                ],
+                &[],
+                |c| matches!(c, Command::GetReadingPlace),
+            ),
+            (
+                &["list_bookmarks", "bookmarks", "list-bookmarks"],
+                &[],
+                |c| matches!(c, Command::ListBookmarks(_)),
+            ),
+            (
+                &["list_highlights", "highlights", "list-highlights"],
+                &[],
+                |c| matches!(c, Command::ListHighlights(_)),
+            ),
+            (&["list_notes", "notes", "list-notes"], &[], |c| {
+                matches!(c, Command::ListNotes(_))
+            }),
+            (
+                &["verify_quote", "verify-quote"],
+                &[
+                    "Jesus wept.",
+                    "--reference",
+                    "John 11:35",
+                    "--translation",
+                    "kjv",
+                ],
+                |c| matches!(c, Command::VerifyQuote(_)),
+            ),
+        ];
+        for (names, rest, is) in table {
+            for name in names {
+                let words: Vec<&str> = std::iter::once(*name).chain(rest.iter().copied()).collect();
+                assert!(is(&command_of(&words)), "{words:?}");
             }
         }
-        for (name, short) in [
-            ("get_passage", "passage"),
-            ("get_cross_references", "cross_references"),
-        ] {
-            for word in [name, short] {
-                assert!(Cli::try_parse_from(["gospel-getter-cli", word, "John 3:16"]).is_ok());
-            }
-        }
-        for word in ["get_passages", "passages", "get-passages"] {
-            let cli = Cli::try_parse_from(["gospel-getter-cli", word, "John 3:16", "Rom 5:8"])
-                .expect("it parses");
-            assert!(matches!(cli.command, Command::GetPassages(_)));
-            assert!(Cli::try_parse_from(["gospel-getter-cli", word]).is_err());
-        }
-        for word in ["verify_quote", "verify-quote"] {
-            let cli = Cli::try_parse_from([
-                "gospel-getter-cli",
-                word,
-                "Jesus wept.",
-                "--reference",
-                "John 11:35",
-                "--translation",
-                "kjv",
-            ])
-            .expect("it parses");
-            assert!(matches!(cli.command, Command::VerifyQuote(_)));
-        }
+        assert!(matches!(command_of(&["mcp"]), Command::Mcp));
+        // A subcommand that needs its arguments doesn't run without them.
+        assert!(Cli::try_parse_from(["gospel-getter-cli", "get_passages"]).is_err());
+        assert!(Cli::try_parse_from(["gospel-getter-cli", "verify-quote"]).is_err());
     }
 }
