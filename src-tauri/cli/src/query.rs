@@ -23,6 +23,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::path::Path;
 
+mod verify;
+
+pub use verify::{VerifyQuoteArgs, VerifyQuoteOut};
+
 /// What every refusal to read an install that isn't ready ends with.
 const OPEN_THE_APP: &str = "Open Gospel Getter once first, then try again.";
 
@@ -36,6 +40,9 @@ const DEFAULT_LIST_LIMIT: u32 = 100;
 const MAX_LIST_LIMIT: u32 = 500;
 /// The most cross-references returned at once.
 const MAX_CROSS_REFERENCES: usize = 500;
+/// The most references, and verses in all, one call for many passages returns.
+const MAX_BATCH_REFERENCES: usize = 50;
+const MAX_BATCH_VERSES: usize = 500;
 
 // ---- What each tool takes. The subcommands and the MCP tools share these
 // structs, so they can't differ: their docs are both the `--help` text and
@@ -45,9 +52,21 @@ const MAX_CROSS_REFERENCES: usize = 500;
 #[derive(Debug, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GetPassageArgs {
-    /// A reference, as the app's Go to reads it: "John 3:16", "John 3:16-18" or "Psalm 23".
+    /// A reference, as the app's Go to reads it: "John 3:16", "John 3:16-18" or "Psalm 23". Or several, separated by commas or semicolons: "John 3:16, 18; Rom 5:8".
     pub reference: String,
     /// A translation's code, such as kjv, bsb or web. Default: the one the reader last read.
+    #[arg(long)]
+    pub translation: Option<String>,
+}
+
+/// Arguments of `get_passages`.
+#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GetPassagesArgs {
+    /// References, each as the app's Go to reads it: at most 50, and at most 500 verses in all.
+    #[arg(required = true, value_name = "REF")]
+    pub references: Vec<String>,
+    /// A translation's code, such as kjv, bsb or web, for all of them. Default: the one the reader last read.
     #[arg(long)]
     pub translation: Option<String>,
 }
@@ -147,6 +166,7 @@ pub struct ListNotesArgs {
 pub enum Request {
     ListTranslations,
     GetPassage(GetPassageArgs),
+    GetPassages(GetPassagesArgs),
     Search(SearchArgs),
     Compare(CompareArgs),
     GetCrossReferences(GetCrossReferencesArgs),
@@ -154,6 +174,7 @@ pub enum Request {
     ListBookmarks(ListBookmarksArgs),
     ListHighlights(ListHighlightsArgs),
     ListNotes(ListNotesArgs),
+    VerifyQuote(VerifyQuoteArgs),
 }
 
 // ---- What each tool answers.
@@ -164,6 +185,7 @@ pub enum Request {
 pub enum Answer {
     Translations(TranslationsOut),
     Passage(PassageOut),
+    Passages(PassagesOut),
     Search(SearchOut),
     Compare(CompareOut),
     CrossReferences(CrossReferencesOut),
@@ -171,6 +193,7 @@ pub enum Answer {
     Bookmarks(BookmarksOut),
     Highlights(HighlightsOut),
     Notes(NotesOut),
+    VerifyQuote(VerifyQuoteOut),
 }
 
 /// The answer of `list_translations`.
@@ -220,6 +243,27 @@ pub struct PassageOut {
     /// Which of the verses asked for this translation doesn't number.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<String>,
+}
+
+/// The answer of `get_passages`.
+#[derive(Debug, Serialize)]
+pub struct PassagesOut {
+    pub translation: String,
+    pub translation_name: String,
+    /// How many verses there are in all the passages.
+    pub verse_count: usize,
+    /// One for each reference, in the order asked.
+    pub passages: Vec<PassageEntry>,
+}
+
+/// One reference's part of an answer for many.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum PassageEntry {
+    /// What `get_passage` gives for it.
+    Passage(PassageOut),
+    /// The reference as given, and the sentence `get_passage` refuses it with.
+    Failed { reference: String, error: String },
 }
 
 /// The answer of `search`.
@@ -462,7 +506,8 @@ impl Library {
     async fn answer(&self, request: Request) -> anyhow::Result<Answer> {
         Ok(match request {
             Request::ListTranslations => Answer::Translations(self.list_translations().await?),
-            Request::GetPassage(args) => Answer::Passage(self.get_passage(args).await?),
+            Request::GetPassage(args) => self.get_passage(args).await?,
+            Request::GetPassages(args) => Answer::Passages(self.get_passages(args).await?),
             Request::Search(args) => Answer::Search(self.search(args).await?),
             Request::Compare(args) => Answer::Compare(self.compare(args).await?),
             Request::GetCrossReferences(args) => {
@@ -472,6 +517,7 @@ impl Library {
             Request::ListBookmarks(args) => Answer::Bookmarks(self.list_bookmarks(args).await?),
             Request::ListHighlights(args) => Answer::Highlights(self.list_highlights(args).await?),
             Request::ListNotes(args) => Answer::Notes(self.list_notes(args).await?),
+            Request::VerifyQuote(args) => Answer::VerifyQuote(self.verify_quote(args).await?),
         })
     }
 
@@ -595,19 +641,53 @@ impl Library {
         })
     }
 
-    async fn get_passage(&self, args: GetPassageArgs) -> anyhow::Result<PassageOut> {
+    /// One passage, as ever; several references are answered as `get_passages`
+    /// answers them.
+    async fn get_passage(&self, args: GetPassageArgs) -> anyhow::Result<Answer> {
         let translation = self.translation(args.translation.as_deref()).await?;
-        let passage = self.passage_named(&args.reference)?;
+        let references = split_references(&args.reference);
+        let one = match references.as_slice() {
+            [] => &args.reference,
+            [one] => one,
+            _ => {
+                let passages = self.passages_in(translation, &references).await?;
+                return Ok(Answer::Passages(passages));
+            }
+        };
+        Ok(Answer::Passage(self.passage_in(translation, one).await?))
+    }
+
+    /// What `reference` names in `translation`, or why there's nothing to give.
+    async fn passage_in(
+        &self,
+        translation: &Translation,
+        reference: &str,
+    ) -> anyhow::Result<PassageOut> {
+        self.passage_or_why(translation, reference)
+            .await?
+            .map_err(|why| anyhow!(why))
+    }
+
+    /// As [`Self::passage_in`], but a reference that names nothing there is only
+    /// the sentence saying so: an error here is a failure to read the database.
+    async fn passage_or_why(
+        &self,
+        translation: &Translation,
+        reference: &str,
+    ) -> anyhow::Result<Result<PassageOut, String>> {
+        let passage = match self.passage_named(reference) {
+            Ok(passage) => passage,
+            Err(why) => return Ok(Err(format!("{why:#}"))),
+        };
         let book = self.book(passage.book_id)?;
         let reference = passage_reference(&book.name, passage.chapter, passage.verses);
         let (verses, notice) = self.read(translation, passage).await?;
         if verses.is_empty() {
-            bail!(notice.unwrap_or_else(|| format!(
-                "{reference} isn't numbered in the {}.",
-                translation.name
-            )));
+            return Ok(Err(notice.unwrap_or_else(|| {
+                format!("{reference} isn't numbered in the {}.", translation.name)
+            })));
         }
-        Ok(PassageOut {
+        Ok(Ok(PassageOut {
             reference,
             translation: translation.code.clone(),
             translation_name: translation.name.clone(),
@@ -615,6 +695,50 @@ impl Library {
             chapter: passage.chapter,
             verses,
             notice,
+        }))
+    }
+
+    async fn get_passages(&self, args: GetPassagesArgs) -> anyhow::Result<PassagesOut> {
+        let translation = self.translation(args.translation.as_deref()).await?;
+        self.passages_in(translation, &args.references).await
+    }
+
+    /// What each reference names in `translation`, in the order given. Over
+    /// either cap, none of it: a reference that fails is only that one's answer.
+    async fn passages_in(
+        &self,
+        translation: &Translation,
+        references: &[String],
+    ) -> anyhow::Result<PassagesOut> {
+        if references.is_empty() {
+            bail!("There are no references to read. Try something like John 3:16.");
+        }
+        let count = references.len();
+        if count > MAX_BATCH_REFERENCES {
+            bail!("That's {count} references; at most {MAX_BATCH_REFERENCES} per call. Split it.");
+        }
+        let mut passages = Vec::with_capacity(count);
+        let mut verse_count = 0;
+        for reference in references {
+            passages.push(match self.passage_or_why(translation, reference).await? {
+                Ok(passage) => {
+                    verse_count += passage.verses.len();
+                    PassageEntry::Passage(passage)
+                }
+                Err(error) => PassageEntry::Failed {
+                    reference: reference.clone(),
+                    error,
+                },
+            });
+        }
+        if verse_count > MAX_BATCH_VERSES {
+            bail!("That's {verse_count} verses; at most {MAX_BATCH_VERSES} per call. Split it.");
+        }
+        Ok(PassagesOut {
+            translation: translation.code.clone(),
+            translation_name: translation.name.clone(),
+            verse_count,
+            passages,
         })
     }
 
@@ -939,6 +1063,53 @@ impl Library {
             notes,
         })
     }
+}
+
+/// The references in `input`, which are separated by commas or semicolons. A part
+/// of only numbers goes on from the reference before it (see [`continued`]); a
+/// part with a letter in it, "1 John" as much as "Rom", is a reference of its own.
+/// Empty parts are dropped. What each part means, `query::interpret` decides.
+fn split_references(input: &str) -> Vec<String> {
+    let mut references: Vec<String> = Vec::new();
+    for part in input
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        let reference = match references.last() {
+            Some(previous) if is_only_numbers(part) => continued(previous, part),
+            _ => None,
+        };
+        references.push(reference.unwrap_or_else(|| part.to_string()));
+    }
+    references
+}
+
+/// Whether a part of a list of references has only what comes after a book's
+/// name, as Go to reads it: "18", "4:2" or "18-20".
+fn is_only_numbers(part: &str) -> bool {
+    part.starts_with(|c: char| c.is_ascii_digit())
+        && part
+            .chars()
+            .all(|c| c.is_ascii_digit() || " \t:.-\u{2013}\u{2014}".contains(c))
+}
+
+/// The reference that the numbers `part` make, going on from `previous`, which
+/// has a book's name to go on from, or `None`. It's in the same book. It's in the
+/// same chapter too if it names no chapter, and `previous` named verses: "John
+/// 3:16, 18" is John 3:18, but "John 3:16, 4:2" is John 4:2 and "Psalm 23, 24" is
+/// Psalm 24.
+fn continued(previous: &str, part: &str) -> Option<String> {
+    let (at, last_letter) = previous.char_indices().rfind(|(_, c)| c.is_alphabetic())?;
+    let (book, numbers) = previous.split_at(at + last_letter.len_utf8());
+    let chapter = numbers
+        .trim_start_matches(|c: char| !c.is_ascii_digit())
+        .split_once([':', '.'])
+        .map(|(chapter, _)| chapter);
+    Some(match chapter {
+        Some(chapter) if !part.contains([':', '.']) => format!("{book} {chapter}:{part}"),
+        _ => format!("{book} {part}"),
+    })
 }
 
 /// A verse as shown, as a tool answers with it: its text and its footnotes'

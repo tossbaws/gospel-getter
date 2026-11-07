@@ -12,8 +12,8 @@ use rmcp::{ErrorData, ServerHandler, ServiceExt, tool, tool_handler, tool_router
 use std::path::PathBuf;
 
 use crate::query::{
-    self, CompareArgs, GetCrossReferencesArgs, GetPassageArgs, Library, ListBookmarksArgs,
-    ListHighlightsArgs, ListNotesArgs, Request, SearchArgs,
+    self, CompareArgs, GetCrossReferencesArgs, GetPassageArgs, GetPassagesArgs, Library,
+    ListBookmarksArgs, ListHighlightsArgs, ListNotesArgs, Request, SearchArgs, VerifyQuoteArgs,
 };
 
 /// What the client's model is told about this server.
@@ -61,7 +61,7 @@ impl Server {
 
     #[tool(
         name = "get_passage",
-        description = "A passage's exact text: one verse, a range or a whole chapter, at most 200 verses. Footnotes come apart from the text.",
+        description = "A passage's exact text: one verse, a range or a whole chapter, at most 200 verses. Footnotes come apart from the text. Several references in the one argument, separated by commas or semicolons (\"John 3:16, 18; Rom 5:8\"), answer exactly as get_passages does, with its caps: a part of only numbers goes on from the reference before it.",
         annotations(read_only_hint = true)
     )]
     async fn get_passage(
@@ -69,6 +69,18 @@ impl Server {
         Parameters(args): Parameters<GetPassageArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         self.answer(Request::GetPassage(args)).await
+    }
+
+    #[tool(
+        name = "get_passages",
+        description = "Many passages in one call, all in one translation: at most 50 references and at most 500 verses in all, 200 of them from any one reference. Over either cap the whole call is refused, with no text. Each entry of passages is what get_passage gives, in the order asked; a reference that fails is {reference, error} in its place, and the rest still come back.",
+        annotations(read_only_hint = true)
+    )]
+    async fn get_passages(
+        &self,
+        Parameters(args): Parameters<GetPassagesArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.answer(Request::GetPassages(args)).await
     }
 
     #[tool(
@@ -150,6 +162,18 @@ impl Server {
         Parameters(args): Parameters<ListNotesArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         self.answer(Request::ListNotes(args)).await
+    }
+
+    #[tool(
+        name = "verify_quote",
+        description = "Check a quotation against the real text of one translation, the one named or else the reader's default, never any other. The comparison is character for character with the clean text get_passage gives, a passage's verses joined by one space: case, punctuation, apostrophe and quote style and inner whitespace all count, and only whitespace around the whole quote is trimmed. Without a reference, or when the reference doesn't hold it, phrase search looks for it. status is \"exact\" (the whole passage), \"exact_part\" (a contiguous part of the passage), \"differs\" (not in the passage: difference gives the first differing position and word, text the real text; where the two characters there only look alike, such as a no-break space or a curly apostrophe, difference.note and the message say so; with no reference given, the passage is only the closest verse, not a match), \"elsewhere\" (not in the reference given, but found_at lists where it is, and difference is against the reference) or \"not_found\" (not in this translation as quoted: no reference, no guess). At most 10,000 characters.",
+        annotations(read_only_hint = true)
+    )]
+    async fn verify_quote(
+        &self,
+        Parameters(args): Parameters<VerifyQuoteArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.answer(Request::VerifyQuote(args)).await
     }
 }
 

@@ -449,12 +449,29 @@ On Windows, with your own user name:
 ```
 
 **In a terminal.** Each tool is a subcommand that prints JSON;
-`gospel-getter-cli --help` lists them.
+`gospel-getter-cli --help` lists them. Each also answers to a kebab-case name,
+such as `reading-place` or `verify-quote`.
 
 ```bash
 gospel-getter-cli passage "John 3:16-18" --translation bsb
 gospel-getter-cli search "grace" --book Romans --limit 20
+gospel-getter-cli passage "John 3:16, 18; Rom 5:8"
+gospel-getter-cli get-passages "John 3:16" "Rom 5:8" --translation bsb
+gospel-getter-cli verify-quote "For God so loved the world" --translation kjv
 ```
+
+**Quoting and study.** Two tools, and one form of `get_passage`, are made for
+an agent quoting scripture or working through a topic:
+
+- `verify_quote` checks a quotation against the real text of one translation,
+  character for character (quotes up to 10,000 characters): `exact`,
+  `exact_part`, `differs`, `elsewhere` or `not_found`, with the first difference
+  and the true reference if a phrase search finds it; where two characters only
+  look alike (a no-break space, a curly apostrophe), it says so.
+- `get_passages` gives many passages in one call: at most 50 references and 500
+  verses, and a reference that fails doesn't stop the rest.
+- `get_passage` takes several references separated by commas or semicolons
+  (`"John 3:16, 18; Rom 5:8"`), and answers as `get_passages` does.
 
 ## Translations
 
