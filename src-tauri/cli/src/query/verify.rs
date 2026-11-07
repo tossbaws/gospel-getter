@@ -75,6 +75,10 @@ pub struct QuoteDifference {
     /// The real text from the same point, up to 40 characters of it: empty
     /// where the quote runs on past the end of the text.
     pub actual: String,
+    /// When the two characters there only look alike, what each one is. It only
+    /// explains the difference: they are still different characters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// A passage that has a quote, character for character.
@@ -161,18 +165,20 @@ impl Library {
             Some(first) => (
                 QuoteStatus::Elsewhere,
                 format!(
-                    "This isn't in {reference} in the {label} as quoted, but it is in {}.{}",
+                    "This isn't in {reference} in the {label} as quoted, but it is in {}.{}{}",
                     first.reference,
                     more_places(&search.places, search.cut_short),
+                    look_alike_sentence(&difference),
                 ),
             ),
             None => (
                 QuoteStatus::Differs,
                 format!(
-                    "This differs from {reference} in the {label} at word {}, character {}.{}",
+                    "This differs from {reference} in the {label} at word {}, character {}.{}{}",
                     difference.word,
                     difference.position,
                     not_all_checked(search.cut_short),
+                    look_alike_sentence(&difference),
                 ),
             ),
         };
@@ -233,10 +239,11 @@ impl Library {
                     translation: translation.code.clone(),
                     message: format!(
                         "This isn't in the {label} as quoted. {closest}, not a match: it differs \
-                         at word {}, character {}.{}",
+                         at word {}, character {}.{}{}",
                         difference.word,
                         difference.position,
                         not_all_checked(search.cut_short),
+                        look_alike_sentence(&difference),
                     ),
                     reference: Some(reference),
                     text: Some(text.to_string()),
@@ -470,6 +477,14 @@ fn not_all_checked(cut_short: bool) -> String {
     }
 }
 
+/// What a message ends with when the characters at a difference only look alike.
+fn look_alike_sentence(difference: &QuoteDifference) -> String {
+    difference
+        .note
+        .as_ref()
+        .map_or_else(String::new, |note| format!(" {note}"))
+}
+
 /// Refuse what can't be checked.
 fn check_length(quote: &str) -> anyhow::Result<()> {
     if quote.is_empty() {
@@ -542,9 +557,75 @@ fn word_at(quote: &[char], position: usize) -> usize {
     words
 }
 
+/// The apostrophes and single quotes that can pass for one another.
+const APOSTROPHES: [char; 4] = ['\'', '\u{2018}', '\u{2019}', '\u{2bc}'];
+/// The double quotes that can pass for one another.
+const DOUBLE_QUOTES: [char; 3] = ['"', '\u{201c}', '\u{201d}'];
+/// The hyphens and dashes that can pass for one another.
+const DASHES: [char; 6] = [
+    '-', '\u{2010}', '\u{2011}', '\u{2013}', '\u{2014}', '\u{2212}',
+];
+
+/// Whether two different characters can pass for one another on a page.
+fn look_alike(a: char, b: char) -> bool {
+    let of_a_kind = |kind: &[char]| kind.contains(&a) && kind.contains(&b);
+    a != b
+        && ((a.is_whitespace() && b.is_whitespace())
+            || of_a_kind(&APOSTROPHES)
+            || of_a_kind(&DOUBLE_QUOTES)
+            || of_a_kind(&DASHES))
+}
+
+/// What to call one of the characters [`look_alike`] takes in, in a sentence.
+fn name_of(c: char) -> &'static str {
+    match c {
+        ' ' => "a space",
+        '\u{a0}' => "a no-break space",
+        '\t' => "a tab",
+        '\n' => "a newline",
+        '\r' => "a carriage return",
+        '\u{2002}' => "an en space",
+        '\u{2003}' => "an em space",
+        '\u{2009}' => "a thin space",
+        '\u{200a}' => "a hair space",
+        '\u{202f}' => "a narrow no-break space",
+        '\u{3000}' => "an ideographic space",
+        '\'' => "an apostrophe",
+        '\u{2018}' => "a left single quotation mark",
+        '\u{2019}' => "a right single quotation mark",
+        '\u{2bc}' => "a modifier letter apostrophe",
+        '"' => "a straight double quotation mark",
+        '\u{201c}' => "a left double quotation mark",
+        '\u{201d}' => "a right double quotation mark",
+        '-' => "a hyphen",
+        '\u{2010}' => "a Unicode hyphen",
+        '\u{2011}' => "a non-breaking hyphen",
+        '\u{2013}' => "an en dash",
+        '\u{2014}' => "an em dash",
+        '\u{2212}' => "a minus sign",
+        _ => "a whitespace character",
+    }
+}
+
+/// The sentence for a quote's character and the text's at a difference, when
+/// they only look alike.
+fn look_alike_note(quoted: char, actual: char) -> Option<String> {
+    look_alike(quoted, actual).then(|| {
+        format!(
+            "The text has {} (U+{:04X}) where the quote has {} (U+{:04X}).",
+            name_of(actual),
+            u32::from(actual),
+            name_of(quoted),
+            u32::from(quoted),
+        )
+    })
+}
+
 /// Where `quote`, which isn't in `text`, first departs from it. It's aligned at
 /// the place in `text` that shares the most with its start, the earliest of
-/// any equal. In characters throughout, so nothing is cut inside one.
+/// any equal; but a place that doesn't get through the quote's first word has
+/// only a few letters in common with it, so then it's the start of the text. In
+/// characters throughout, so nothing is cut inside one.
 fn first_difference(quote: &str, text: &str) -> QuoteDifference {
     let quote: Vec<char> = quote.chars().collect();
     let text: Vec<char> = text.chars().collect();
@@ -555,12 +636,20 @@ fn first_difference(quote: &str, text: &str) -> QuoteDifference {
             (start, common) = (at, shared);
         }
     }
+    let first_word = quote.iter().take_while(|c| !c.is_whitespace()).count();
+    if common < first_word {
+        (start, common) = (0, common_prefix(&quote, &text));
+    }
     let position = common + 1;
     QuoteDifference {
         position,
         word: word_at(&quote, position),
         quoted: quote[common..].iter().take(SHOWN_CHARS).collect(),
         actual: text[start + common..].iter().take(SHOWN_CHARS).collect(),
+        note: quote
+            .get(common)
+            .zip(text.get(start + common))
+            .and_then(|(&quoted, &actual)| look_alike_note(quoted, actual)),
     }
 }
 

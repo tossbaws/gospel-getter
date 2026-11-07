@@ -466,7 +466,8 @@ an agent quoting scripture or working through a topic:
 - `verify_quote` checks a quotation against the real text of one translation,
   character for character (quotes up to 10,000 characters): `exact`,
   `exact_part`, `differs`, `elsewhere` or `not_found`, with the first difference
-  and the true reference if a phrase search finds it.
+  and the true reference if a phrase search finds it; where two characters only
+  look alike (a no-break space, a curly apostrophe), it says so.
 - `get_passages` gives many passages in one call: at most 50 references and 500
   verses, and a reference that fails doesn't stop the rest.
 - `get_passage` takes several references separated by commas or semicolons

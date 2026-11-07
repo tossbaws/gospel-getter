@@ -211,13 +211,6 @@ async fn every_kind_of_small_change_differs() {
         assert_eq!(answer["difference"]["word"], word, "{quote}");
         install.assert_it_keeps_its_promise(quote, &answer).await;
     }
-    // The first letter wrong: no alignment starts at it, so the first difference
-    // is against the best the rule finds. Still only ever a difference.
-    let answer = install
-        .check("for God so loved the world", Some("John 3:16"), "kjv")
-        .await;
-    assert_eq!(answer["status"], "differs", "{answer}");
-
     // The BSB's apostrophes are curly: a straight one isn't the same character.
     let verse = install.real_text("Luke 2:49", "bsb").await;
     let straight = verse.replace('\u{2019}', "'");
@@ -637,12 +630,284 @@ fn a_quote_is_aligned_where_the_text_shares_the_most_with_it() {
             word: 1,
             quoted: "xyz".to_string(),
             actual: "abc".to_string(),
+            note: None,
         }
     );
 
     // A space counts to the word before it.
     let difference = first_difference("one two three", "one two, three");
     assert_eq!((difference.position, difference.word), (8, 2));
+}
+
+/// The first word wrong: no place in the text gets through it, so the comparison
+/// is from the start of the text.
+#[tokio::test]
+async fn a_wrong_first_word_is_compared_from_the_start_of_the_text() {
+    let install = Install::indexed("verify_first_word").await;
+    let quote = "for God so loved the world";
+    let difference = json!({
+        "position": 1,
+        "word": 1,
+        "quoted": "for God so loved the world",
+        "actual": "For God so loved the world, that he gave",
+    });
+    let answer = install.check(quote, Some("John 3:16"), "kjv").await;
+    assert_eq!(answer["status"], "differs");
+    assert_eq!(answer["difference"], difference);
+    assert_eq!(
+        answer["message"],
+        "This differs from John 3:16 in the KJV at word 1, character 1."
+    );
+
+    let answer = install.check(quote, None, "kjv").await;
+    assert_eq!(answer["status"], "differs");
+    assert_eq!(answer["difference"], difference);
+    assert_eq!(
+        answer["message"],
+        "This isn't in the KJV as quoted. The closest verse is John 3:16, not a match: it \
+         differs at word 1, character 1."
+    );
+    install.close().await;
+}
+
+#[test]
+fn a_best_alignment_counts_only_past_the_first_word() {
+    // Inside the first word: the start of the text, whatever shares more.
+    let difference = first_difference("forest", "Forget the fore");
+    assert_eq!((difference.position, difference.word), (1, 1));
+    assert_eq!(difference.quoted, "forest");
+    assert_eq!(difference.actual, "Forget the fore");
+
+    // And what the start itself shares still counts.
+    let difference = first_difference("Frog God", "Far and Fro");
+    assert_eq!((difference.position, difference.word), (2, 1));
+    assert_eq!(difference.quoted, "rog God");
+    assert_eq!(difference.actual, "ar and Fro");
+
+    // Mid-text, past the first word: that alignment stands.
+    let difference = first_difference("so loved the wrld", "For God so loved the world");
+    assert_eq!((difference.position, difference.word), (15, 4));
+    assert_eq!(difference.quoted, "rld");
+    assert_eq!(difference.actual, "orld");
+
+    // All of the first word, and the difference right after it: it stands too.
+    let difference = first_difference("one two", "x one, two");
+    assert_eq!((difference.position, difference.word), (4, 1));
+    assert_eq!(difference.quoted, " two");
+    assert_eq!(difference.actual, ", two");
+}
+
+/// A no-break space typed as a space: still a difference, and it says what each
+/// one is. Typed as it is, it's no difference at all.
+#[tokio::test]
+async fn a_no_break_space_differs_and_a_note_says_so() {
+    let install = Install::indexed("verify_note_space").await;
+    let verse = install.real_text("Genesis 22:16", "web").await;
+    let plain = verse.replace('\u{a0}', " ");
+    let note = "The text has a no-break space (U+00A0) where the quote has a space (U+0020).";
+
+    let answer = install.check(&plain, Some("Genesis 22:16"), "web").await;
+    assert_eq!(answer["status"], "differs");
+    assert_eq!(answer["text"], verse.as_str());
+    assert_eq!(answer["difference"]["note"], note);
+    assert_eq!(
+        answer["message"],
+        format!("This differs from Genesis 22:16 in the WEB at word 3, character 12. {note}")
+    );
+    install.assert_it_keeps_its_promise(&plain, &answer).await;
+
+    let answer = install.check(&plain, None, "web").await;
+    assert_eq!(answer["status"], "differs");
+    assert_eq!(answer["difference"]["note"], note);
+    assert_eq!(
+        answer["message"],
+        format!(
+            "This isn't in the WEB as quoted. The closest verse is Genesis 22:16, not a match: \
+             it differs at word 3, character 12. {note}"
+        )
+    );
+
+    let answer = install.check(&verse, Some("Genesis 22:16"), "web").await;
+    assert_eq!(answer["status"], "exact");
+    assert!(answer.get("difference").is_none());
+    assert!(
+        !answer["message"]
+            .as_str()
+            .expect("a message")
+            .contains("U+")
+    );
+    install.close().await;
+}
+
+/// A straight apostrophe for a curly one, and the other way about. The message
+/// ends with the note, after anything else it has to say.
+#[tokio::test]
+async fn a_curly_apostrophe_differs_and_a_note_says_so() {
+    let install = Install::indexed("verify_note_apostrophe").await;
+    let verse = install.real_text("Luke 17:32", "web").await;
+    let straight = verse.replace('\u{2019}', "'");
+    let answer = install.check(&straight, Some("Luke 17:32"), "web").await;
+    assert_eq!(answer["status"], "differs");
+    let note = "The text has a right single quotation mark (U+2019) where the quote has an \
+                apostrophe (U+0027).";
+    assert_eq!(answer["difference"]["note"], note);
+    assert_eq!(answer["difference"]["position"], 13);
+    assert_eq!(
+        answer["message"],
+        format!("This differs from Luke 17:32 in the WEB at word 2, character 13. {note}")
+    );
+
+    let answer = install
+        .check("the LORD\u{2019}S", Some("Psalm 24:1"), "kjv")
+        .await;
+    assert_eq!(answer["status"], "differs");
+    let note = "The text has an apostrophe (U+0027) where the quote has a right single \
+                quotation mark (U+2019).";
+    assert_eq!(answer["difference"]["note"], note);
+    let message = answer["message"].as_str().expect("a message");
+    assert!(message.contains("not all were checked."), "{message}");
+    assert!(message.ends_with(note), "{message}");
+    install.close().await;
+}
+
+/// A real wrong letter has no note, and neither has a message.
+#[tokio::test]
+async fn a_wrong_letter_has_no_note() {
+    let install = Install::indexed("verify_no_note").await;
+    let verse = install.real_text("Luke 17:32", "web").await;
+    let wrong = verse.replacen("wife", "wifa", 1);
+    let answer = install.check(&wrong, Some("Luke 17:32"), "web").await;
+    assert_eq!(answer["status"], "differs");
+    assert!(answer["difference"].get("note").is_none(), "{answer}");
+    assert_eq!(
+        answer["message"],
+        "This differs from Luke 17:32 in the WEB at word 3, character 19."
+    );
+    install.close().await;
+}
+
+/// `elsewhere` has its difference against the reference given, so its note is too.
+/// No two verses of the bundled text differ only so, so this disposable copy gets
+/// one: nothing here goes near a real install.
+#[tokio::test]
+async fn a_quote_found_elsewhere_has_the_note_on_the_reference_given() {
+    let install = Install::indexed("verify_note_elsewhere").await;
+    sqlx::query(
+        "UPDATE verses SET text = 'Jesus\u{a0}wept.' WHERE book_id = 43 AND chapter = 11 \
+         AND verse = 36 AND translation_id = (SELECT id FROM translations WHERE code = 'kjv')",
+    )
+    .execute(install.pool.write().pool())
+    .await
+    .expect("change the disposable copy");
+
+    let answer = install
+        .check("Jesus wept.", Some("John 11:36"), "kjv")
+        .await;
+    assert_eq!(answer["status"], "elsewhere");
+    assert_eq!(answer["found_at"][0]["reference"], "John 11:35");
+    let note = "The text has a no-break space (U+00A0) where the quote has a space (U+0020).";
+    assert_eq!(answer["difference"]["note"], note);
+    assert_eq!(
+        answer["message"],
+        format!("This isn't in John 11:36 in the KJV as quoted, but it is in John 11:35. {note}")
+    );
+    install.close().await;
+}
+
+#[test]
+fn a_note_names_both_characters_and_gives_their_codes() {
+    for (quoted, actual, note) in [
+        (
+            ' ',
+            '\u{a0}',
+            "The text has a no-break space (U+00A0) where the quote has a space (U+0020).",
+        ),
+        (
+            '\n',
+            ' ',
+            "The text has a space (U+0020) where the quote has a newline (U+000A).",
+        ),
+        (
+            '\u{2005}',
+            '\t',
+            "The text has a tab (U+0009) where the quote has a whitespace character (U+2005).",
+        ),
+        (
+            '\'',
+            '\u{2019}',
+            "The text has a right single quotation mark (U+2019) where the quote has an \
+             apostrophe (U+0027).",
+        ),
+        (
+            '\u{2018}',
+            '\u{2bc}',
+            "The text has a modifier letter apostrophe (U+02BC) where the quote has a left \
+             single quotation mark (U+2018).",
+        ),
+        (
+            '"',
+            '\u{201c}',
+            "The text has a left double quotation mark (U+201C) where the quote has a straight \
+             double quotation mark (U+0022).",
+        ),
+        (
+            '\u{201d}',
+            '"',
+            "The text has a straight double quotation mark (U+0022) where the quote has a right \
+             double quotation mark (U+201D).",
+        ),
+        (
+            '-',
+            '\u{2014}',
+            "The text has an em dash (U+2014) where the quote has a hyphen (U+002D).",
+        ),
+        (
+            '\u{2013}',
+            '\u{2212}',
+            "The text has a minus sign (U+2212) where the quote has an en dash (U+2013).",
+        ),
+        (
+            '\u{2010}',
+            '\u{2011}',
+            "The text has a non-breaking hyphen (U+2011) where the quote has a Unicode hyphen \
+             (U+2010).",
+        ),
+    ] {
+        let difference = first_difference(&format!("one{quoted}two"), &format!("one{actual}two"));
+        assert_eq!(difference.position, 4, "{note}");
+        assert_eq!(difference.note.as_deref(), Some(note));
+    }
+
+    // Every pair of a kind, each way, and a character is no look-alike of itself.
+    let spaces = [' ', '\u{a0}', '\t', '\n', '\r', '\u{2003}', '\u{3000}'];
+    for kind in [&spaces[..], &APOSTROPHES, &DOUBLE_QUOTES, &DASHES] {
+        for &a in kind {
+            for &b in kind {
+                let note = first_difference(&format!("x{a}y"), &format!("x{b}y")).note;
+                assert_eq!(note.is_some(), a != b, "{a:?} and {b:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn only_look_alikes_have_a_note() {
+    for (quote, text) in [
+        ("one two", "one tao"),
+        ("one two", "one Two"),
+        ("one  two", "one two"),
+        // Of different kinds.
+        ("a'b", "a\"b"),
+        ("a-b", "a'b"),
+        ("a b", "a-b"),
+        ("a b", "a,b"),
+        // No character in the text to compare it with.
+        ("a'", "a"),
+        ("a b", "a"),
+    ] {
+        let difference = first_difference(quote, text);
+        assert_eq!(difference.note, None, "{quote:?} and {text:?}");
+    }
 }
 
 #[test]

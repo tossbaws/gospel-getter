@@ -310,6 +310,31 @@ async fn verify_quote_checks_a_quotation_character_for_character() {
         assert_eq!(differs["text"], JOHN_3_16_KJV);
         assert_eq!(differs["difference"]["position"], 15);
         assert_eq!(differs["difference"]["word"], 4);
+        assert!(differs["difference"].get("note").is_none(), "{differs}");
+
+        // A no-break space typed as a space: still a difference, explained.
+        let passage = answer(&path, &["passage", "Genesis 22:16", "--translation", "web"]);
+        let verse = passage["verses"][0]["text"].as_str().unwrap();
+        let plain = verse.replace('\u{a0}', " ");
+        let noted = answer(
+            &path,
+            &[
+                "verify_quote",
+                &plain,
+                "--reference",
+                "Genesis 22:16",
+                "--translation",
+                "web",
+            ],
+        );
+        assert_eq!(noted["status"], "differs");
+        assert_eq!(noted["text"], verse);
+        let note = "The text has a no-break space (U+00A0) where the quote has a space (U+0020).";
+        assert_eq!(noted["difference"]["note"], note);
+        assert!(
+            noted["message"].as_str().unwrap().ends_with(note),
+            "{noted}"
+        );
 
         let elsewhere = answer(
             &path,
@@ -681,6 +706,7 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
             "\"not_found\"",
             "character for character",
             "whitespace around the whole quote is trimmed",
+            "only look alike",
             "10,000",
         ] {
             assert!(description.contains(words), "{words}: {description}");
@@ -722,7 +748,7 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
         assert_eq!(notes["notes"][0]["body"], "Rejoice, always.");
 
         // The same arguments, the same JSON, whichever way it's asked.
-        let same: [(&str, Value, &[&str]); 11] = [
+        let same: [(&str, Value, &[&str]); 12] = [
             (
                 "get_passage",
                 json!({"reference": "Psalm 119:105", "translation": "kjv"}),
@@ -789,6 +815,18 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
                     "for god so loved",
                     "--reference",
                     "John 3:16",
+                ],
+            ),
+            (
+                "verify_quote",
+                json!({"text": "Remember Lot's wife!", "reference": "Luke 17:32", "translation": "web"}),
+                &[
+                    "verify_quote",
+                    "Remember Lot's wife!",
+                    "--reference",
+                    "Luke 17:32",
+                    "--translation",
+                    "web",
                 ],
             ),
             (
