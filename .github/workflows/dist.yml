@@ -5,8 +5,11 @@ name: Distribution Artifacts
 # each one before uploading it as a workflow artifact. This is separate
 # from ci.yml (which only runs cargo fmt/clippy/test/build) because
 # bundling is slow and installs system packages. It runs on every push to
-# main (a release's installers come from the run on its release commit),
-# on every pull request, and by hand (workflow_dispatch).
+# main, on every pull request, and by hand (workflow_dispatch). A release's
+# installers come from the run dispatched on its release commit, so the push
+# of a release-prep merge (a "chore(release):" commit) builds nothing. A push
+# or pull request run cancels the one in progress on its ref; a dispatched
+# run waits for it instead.
 #
 # Then the GUI checks (scripts/gui-check.sh, tests/gui) drive the built
 # app through its own webview with tauri-driver: gui-linux on the AppImage
@@ -51,7 +54,7 @@ permissions:
 
 concurrency:
   group: dist-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -60,6 +63,9 @@ env:
 jobs:
   linux:
     name: Linux (AppImage + deb)
+    # Not on the push of a release-prep merge: the release's installers come
+    # from the run dispatched on the same commit (see the top of this file).
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')
     # Tauri's own Linux packaging guidance is to build on the oldest
     # supported Ubuntu LTS, not `ubuntu-latest`: the AppImage/deb bundler
     # links against the build host's glibc/webkit2gtk, and a binary built
@@ -305,6 +311,8 @@ jobs:
 
   windows:
     name: Windows (NSIS installer)
+    # Not on the push of a release-prep merge, as for the linux job.
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')
     runs-on: windows-latest
     defaults:
       run:
