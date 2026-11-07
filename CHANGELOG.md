@@ -4,6 +4,41 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.25.0] - 2026-11-07
+
+An AI agent can now check its own quotations and read many passages at
+once. The app's window doesn't change, and updating keeps your bookmarks,
+highlights, notes, reading position and settings.
+
+### Added
+- `verify_quote`, a new tool in `gospel-getter-cli`, checks a quotation
+  against the real text of one translation, and no other, character for
+  character. Only whitespace at either end of the quote is trimmed; case,
+  punctuation, the kind of apostrophe and every space inside it count. It
+  answers `exact` (the whole passage), `exact_part` (an unbroken part of
+  it), `differs`, `elsewhere` (not in the passage given, but in another)
+  or `not_found`. Where the quote differs, it says at which character and
+  which word it first does, and gives the real text from there. When the
+  two characters there only look alike, such as a straight and a curly
+  apostrophe or a space and a no-break space, a note names both. Without
+  a reference, or when the quote isn't in the one given, a phrase search
+  in the same translation looks for the real reference. The search only
+  suggests where to look: each passage it leads to is then compared
+  character for character, so the tool never reports a match that isn't
+  one. A quotation can be up to 10,000 characters.
+- `get_passages`, another new tool, reads many passages in one call, all
+  in one translation: at most 50 references and 500 verses, or the call
+  is refused. Each passage comes back as `get_passage` gives it, in the
+  order asked, and a reference that fails gets its error in its place
+  without stopping the rest.
+- `get_passage` takes several references separated by commas or
+  semicolons: "John 3:16, 18; Rom 5:8" is John 3:16, John 3:18 and
+  Romans 5:8. Several come back as `get_passages` gives them, with the
+  same limits.
+- In a terminal, every subcommand also answers to a kebab-case name, such
+  as `get-passage`, `reading-place` or `verify-quote`. The old names still
+  work.
+
 ## [2.24.2] - 2026-11-05
 
 The app is unchanged from 2.24.1. This release makes one frontend test
