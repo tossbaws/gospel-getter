@@ -112,6 +112,8 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
         "bookmarks",
         "highlights",
         "notes",
+        "ai_findings",
+        "app_settings",
         "verse_search",
         "search_index_state",
         "search_index_version",

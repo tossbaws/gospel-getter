@@ -327,15 +327,32 @@ pub async fn add_note(
     let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start note transaction")?;
+    let note = insert_note(&mut tx, passage, &body, dates).await?;
+    tx.commit()
+        .await
+        .context("Failed to commit note transaction")?;
+    Ok(note)
+}
+
+/// [`add_note`]'s checks and insert, on a connection that's already in a
+/// transaction that writes, with `body` already normalized: for a change
+/// that adds a note and does something else in the same transaction
+/// (`findings::keep_as_mine`).
+pub(crate) async fn insert_note(
+    tx: &mut sqlx::SqliteConnection,
+    passage: &Passage,
+    body: &str,
+    dates: Option<(&str, &str)>,
+) -> Result<Note, NoteError> {
     check_passage(
-        &mut tx,
+        &mut *tx,
         passage.book_id,
         passage.chapter,
         passage.verse_start,
         passage.verse_end,
     )
     .await?;
-    let totals = note_totals(&mut tx, None).await?;
+    let totals = note_totals(&mut *tx, None).await?;
     let after = NoteTotals {
         count: totals.count + 1,
         chars: totals.chars + body.chars().count(),
@@ -356,15 +373,12 @@ pub async fn add_note(
     .bind(passage.chapter)
     .bind(passage.verse_start)
     .bind(passage.verse_end)
-    .bind(&body)
+    .bind(body)
     .bind(created_at)
     .bind(updated_at)
     .fetch_one(&mut *tx)
     .await
     .context("Failed to insert note")?;
-    tx.commit()
-        .await
-        .context("Failed to commit note transaction")?;
     Ok(note)
 }
 

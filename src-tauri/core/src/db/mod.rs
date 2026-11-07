@@ -1,10 +1,12 @@
 //! The SQLite database: its schema (`migrate`), the bundled Bible data it's
-//! seeded with (`seed`), and the reader's bookmarks, highlights and notes.
+//! seeded with (`seed`), the reader's bookmarks, highlights and notes, and
+//! the findings AI agents saved at the reader's request (`findings`).
 //! `prepare` brings any database, new or from any earlier version, up to
 //! date at startup.
 
 pub mod bookmarks;
 pub mod connect;
+pub mod findings;
 pub mod highlights;
 pub mod legacy;
 pub mod migrate;
@@ -20,6 +22,9 @@ pub use connect::{
     APP_IDENTIFIER, BUSY_TIMEOUT, DATABASE_FILE, Db, WRITE_QUEUE_TIMEOUT, WritePool, begin_write,
     create_pool, open_read_only,
 };
+pub use findings::{
+    Finding, FindingRequest, FindingsError, FindingsWriter, KeepError, NewFinding, SavedFindings,
+};
 pub use highlights::{Highlight, HighlightColor, HighlightPassage, HighlightPassageInTranslation};
 pub use legacy::migrate_legacy_db_if_needed;
 pub use migrate::migrate;
@@ -31,6 +36,8 @@ pub use seed::{seed_cross_references_if_empty, seed_missing};
 
 #[cfg(test)]
 mod contention_tests;
+#[cfg(test)]
+mod findings_tests;
 #[cfg(test)]
 mod read_only_tests;
 #[cfg(any(test, feature = "test-support"))]

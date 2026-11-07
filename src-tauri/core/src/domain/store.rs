@@ -6,9 +6,10 @@ use std::collections::{HashMap, HashSet};
 use crate::db::reader_data::{ApplyImportError, ImportCounts};
 use crate::db::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
 use crate::db::{
-    self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Db, Highlight,
-    HighlightColor, HighlightPassageInTranslation, Note, NoteError, Passage, ReadingPlace,
-    SearchHit, TopVerse, Verse,
+    self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Db, Finding,
+    FindingRequest, FindingsError, Highlight, HighlightColor, HighlightPassageInTranslation,
+    KeepError, NewFinding, Note, NoteError, Passage, ReadingPlace, SavedFindings, SearchHit,
+    TopVerse, Verse,
 };
 use crate::domain::query::SearchQuery;
 
@@ -214,6 +215,59 @@ impl Store {
     /// Every note, in Bible order.
     pub async fn notes(&self) -> anyhow::Result<Vec<Note>> {
         db::notes::list_notes(self.db.read()).await
+    }
+
+    /// The AI findings on one chapter, in the order they're shown.
+    pub async fn chapter_findings(
+        &self,
+        book_id: i64,
+        chapter: i64,
+    ) -> anyhow::Result<Vec<Finding>> {
+        db::findings::list_findings(self.db.read(), book_id, chapter).await
+    }
+
+    /// Every AI finding, in Bible order.
+    pub async fn findings(&self) -> anyhow::Result<Vec<Finding>> {
+        db::findings::all_findings(self.db.read()).await
+    }
+
+    /// Every request's findings, the latest request first.
+    pub async fn finding_requests(&self) -> anyhow::Result<Vec<FindingRequest>> {
+        db::findings::list_requests(self.db.read()).await
+    }
+
+    /// Save findings (bringing back removed ones), all or none.
+    pub async fn add_findings(
+        &self,
+        findings: &[NewFinding],
+    ) -> Result<SavedFindings, FindingsError> {
+        db::findings::add_findings(self.db.write(), findings).await
+    }
+
+    /// Remove one finding, returning it as it was, if it existed.
+    pub async fn remove_finding(&self, id: i64) -> anyhow::Result<Option<Finding>> {
+        db::findings::remove_finding(self.db.write(), id).await
+    }
+
+    /// Remove every finding of one request, returning them as they were.
+    pub async fn remove_finding_request(&self, request: &str) -> anyhow::Result<Vec<Finding>> {
+        db::findings::remove_request(self.db.write(), request).await
+    }
+
+    /// "Keep as mine": the reader's note on a finding's verses, and the
+    /// finding gone, in one transaction (`db::findings::keep_as_mine`).
+    pub async fn keep_finding_as_note(&self, id: i64, body: &str) -> Result<Note, KeepError> {
+        db::findings::keep_as_mine(self.db.write(), id, body).await
+    }
+
+    /// Whether "Let AI agents save findings" is on.
+    pub async fn findings_enabled(&self) -> anyhow::Result<bool> {
+        db::findings::findings_enabled(self.db.read()).await
+    }
+
+    /// Turn "Let AI agents save findings" on or off.
+    pub async fn set_findings_enabled(&self, on: bool) -> anyhow::Result<()> {
+        db::findings::set_findings_enabled(self.db.write(), on).await
     }
 
     /// Build whatever part of the search index is missing or stale.
