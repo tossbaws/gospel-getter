@@ -232,7 +232,7 @@ pub async fn migrate(writer: &WritePool) -> anyhow::Result<()> {
             verse_start INTEGER NOT NULL CHECK (verse_start >= 1),
             verse_end INTEGER NOT NULL CHECK (verse_end >= verse_start),
             agent TEXT NOT NULL CHECK (length(agent) BETWEEN 1 AND 60),
-            request TEXT NOT NULL CHECK (length(request) BETWEEN 1 AND 200),
+            request TEXT NOT NULL CHECK (length(request) BETWEEN 1 AND 60),
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         )
         "#,

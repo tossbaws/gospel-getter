@@ -2509,7 +2509,12 @@ async fn invalid_findings_reject_the_whole_file_and_change_nothing() {
         (
             "empty request",
             finding(r#""agent": "Claude", "request": "  ""#),
-            "AI finding 1 (John 11:35): The request can't be empty",
+            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}; this one is empty.",
+        ),
+        (
+            "a request with commentary",
+            finding(r#""agent": "Claude", "request": "grief: here Jesus shows his sorrow""#),
+            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon",
         ),
         (
             "a body",

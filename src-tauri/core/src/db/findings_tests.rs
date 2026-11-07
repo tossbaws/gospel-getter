@@ -168,14 +168,14 @@ async fn the_table_holds_only_a_marker_and_checks_it() {
         (
             "a long request",
             (11, 1, 1),
-            ("Claude".to_string(), "r".repeat(201)),
+            ("Claude".to_string(), "r".repeat(61)),
         ),
     ] {
         let result = insert(chapter, start, end, agent, request).await;
         let message = format!("{:?}", result.expect_err(what));
         assert!(message.contains("CHECK"), "{what}: {message}");
     }
-    insert(11, 1, 1, "a".repeat(60), "r".repeat(200))
+    insert(11, 1, 1, "a".repeat(60), "r".repeat(60))
         .await
         .expect("the longest of each is allowed");
 }

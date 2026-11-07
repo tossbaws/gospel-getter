@@ -1151,6 +1151,45 @@ async fn saving_findings_says_what_was_saved_already_there_or_not_read() {
     );
 }
 
+/// A request is a short topic label, never room for words about a verse
+/// (C3): one with commentary in it, or too long, is refused whole in both
+/// front ends, with what a request is, and nothing is saved.
+#[tokio::test]
+async fn a_request_that_is_more_than_a_topic_label_is_refused() {
+    let db = closed_install("e2e_findings_label").await;
+    turn_findings_on(&db).await;
+    let path = db.path();
+    let too_long = "r".repeat(61);
+    let label = "The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}";
+    unchanged(&db, || {
+        for request in [
+            "grief: here Jesus shows that he shares our sorrow",
+            "grief; and what it means",
+            "grief \u{2014} his tears for Lazarus",
+            "grief \u{2013} loss",
+            too_long.as_str(),
+        ] {
+            let message = refusal(
+                &path,
+                &["save-findings", "--request", request, "John 11:35"],
+            );
+            assert!(message.starts_with(label), "{request}: {message}");
+        }
+        let mut mcp = Mcp::start(&path);
+        mcp.initialize();
+        let (is_error, text) = mcp.call(
+            2,
+            "save_findings",
+            json!({"request": "grief\nJesus wept because…", "references": ["John 11:35"]}),
+        );
+        assert!(is_error);
+        assert!(text.starts_with(label), "{text}");
+        let listed = mcp.call_for_json(3, "list_findings", json!({}));
+        assert_eq!(listed["total"], 0, "nothing saved");
+        mcp.finish();
+    });
+}
+
 /// An install the app hasn't opened since 2.25.x has no findings' tables:
 /// both tools say to open the new app once, and nothing is made.
 #[tokio::test]

@@ -8,9 +8,10 @@
 //!
 //! Everything is read, checked and refused through the read-only
 //! [`Library`] first: whether the install has the findings' tables, whether
-//! the reader has turned saving on (C6), each reference, the cap. Only then
-//! is [`db::FindingsWriter`] opened, for the one insert, and closed again; it
-//! checks the tables and the switch once more in its own transaction.
+//! the reader has turned saving on (C6), the request, each reference, the
+//! cap. Only then is [`FindingsWriter`] opened, for the one insert, and closed
+//! again; it checks the tables and the switch once more in its own
+//! transaction.
 
 use anyhow::{Context, bail};
 use clap::Args;
@@ -37,7 +38,7 @@ pub const AI_FINDING: &str = "ai_finding";
 #[derive(Debug, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SaveFindingsArgs {
-    /// The reader's request, in a few words, as they asked it: "grief" or "the sun". At most 200 characters, one line. The app shows it with each finding.
+    /// The reader's topic in a few words, as they asked it: "grief" or "the sun". A short label: at most 60 characters, with no colon, semicolon, dash (— or –) or line break. The app shows it with each finding.
     #[arg(long)]
     pub request: String,
     /// The verses found, as references the app's Go to reads: "John 11:35", "Job 2:11-13" or "Psalm 6". Each verse is one finding. At most 500 verses in all.

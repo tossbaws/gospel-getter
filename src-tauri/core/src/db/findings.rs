@@ -29,9 +29,19 @@ use super::{BUSY_TIMEOUT, BookmarkError, WRITE_QUEUE_TIMEOUT, WritePool};
 /// there. The `ai_findings` table's CHECK says the same.
 pub const MAX_AGENT_CHARS: usize = 60;
 
-/// The most characters a request may have. The `ai_findings` table's CHECK
-/// says the same.
-pub const MAX_REQUEST_CHARS: usize = 200;
+/// The most characters a request may have: a short topic label ("grief", "the
+/// sun"), never room for words about a verse (C3). The `ai_findings` table's
+/// CHECK says the same.
+pub const MAX_REQUEST_CHARS: usize = 60;
+
+/// What a request can't hold, besides line breaks and other control
+/// characters: the punctuation that would start a sentence about the verse
+/// ("grief: here Jesus shows…"), not a label.
+pub const NOT_IN_A_REQUEST: [char; 4] = [':', ';', '\u{2014}', '\u{2013}'];
+
+/// How every refusal of a request starts: what a request is.
+const A_REQUEST_IS: &str =
+    "The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}";
 
 /// Who a finding is said to be by when its agent gives no name.
 pub const DEFAULT_AGENT: &str = "AI agent";
@@ -97,40 +107,44 @@ pub enum RequestError {
     Empty,
     /// More than [`MAX_REQUEST_CHARS`] characters, after trimming.
     TooLong { chars: usize },
-    /// A line break, a tab or another control character.
-    ControlCharacter,
+    /// One of [`NOT_IN_A_REQUEST`], a line break, a tab or another control
+    /// character: more than a label.
+    NotALabel,
 }
 
 impl fmt::Display for RequestError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Empty => f.write_str(
-                "The request can't be empty: give the reader's request in a few words, such as \
-                 \u{201c}grief\u{201d}.",
-            ),
+            Self::Empty => write!(f, "{A_REQUEST_IS}; this one is empty."),
             Self::TooLong { chars } => write!(
                 f,
-                "The request can have up to {MAX_REQUEST_CHARS} characters; this one has \
-                 {chars}. Shorten it."
+                "{A_REQUEST_IS}: at most {MAX_REQUEST_CHARS} characters, and this one has \
+                 {chars}."
             ),
-            Self::ControlCharacter => {
-                f.write_str("The request can only be plain text on one line.")
-            }
+            Self::NotALabel => write!(
+                f,
+                "{A_REQUEST_IS}, so it can't have a colon, a semicolon, a dash (\u{2014} or \
+                 \u{2013}) or a line break."
+            ),
         }
     }
 }
 
 impl std::error::Error for RequestError {}
 
-/// A request as it's stored: trimmed, then 1 to [`MAX_REQUEST_CHARS`]
-/// characters of plain text on one line.
+/// A request as it's stored: trimmed, then a short topic label (C3): 1 to
+/// [`MAX_REQUEST_CHARS`] characters on one line, none of them one of
+/// [`NOT_IN_A_REQUEST`].
 pub fn normalize_request(raw: &str) -> Result<String, RequestError> {
     let request = raw.trim();
     if request.is_empty() {
         return Err(RequestError::Empty);
     }
-    if request.chars().any(char::is_control) {
-        return Err(RequestError::ControlCharacter);
+    if request
+        .chars()
+        .any(|c| c.is_control() || NOT_IN_A_REQUEST.contains(&c))
+    {
+        return Err(RequestError::NotALabel);
     }
     let chars = request.chars().count();
     if chars > MAX_REQUEST_CHARS {
@@ -753,10 +767,32 @@ mod tests {
     fn a_request_is_trimmed_and_checked() {
         assert_eq!(normalize_request("  grief \n"), Ok("grief".to_string()));
         assert_eq!(normalize_request(" \t "), Err(RequestError::Empty));
-        assert_eq!(
-            normalize_request("grief\nand loss"),
-            Err(RequestError::ControlCharacter)
-        );
+        // A label, in a few words: these are all one.
+        for label in [
+            "the sun",
+            "every reference to the sun",
+            "born-again",
+            "Lazarus's tomb",
+            "grief (and loss)",
+        ] {
+            assert_eq!(normalize_request(label), Ok(label.to_string()), "{label}");
+        }
+        // More than a label: refused, whatever comes after.
+        for not_one in [
+            "grief: here Jesus shows that he shares our sorrow",
+            "grief; and loss",
+            "grief \u{2014} his tears",
+            "grief \u{2013} loss",
+            "grief\nand loss",
+            "grief\r\nand loss",
+            "grief\tloss",
+        ] {
+            assert_eq!(
+                normalize_request(not_one),
+                Err(RequestError::NotALabel),
+                "{not_one:?}"
+            );
+        }
         let longest = "\u{1d11e}".repeat(MAX_REQUEST_CHARS);
         assert_eq!(normalize_request(&longest), Ok(longest.clone()));
         assert_eq!(
@@ -777,6 +813,28 @@ mod tests {
         // Cut short at a space, it doesn't end in one.
         let spaced = format!("{} b", "a".repeat(MAX_AGENT_CHARS - 1));
         assert_eq!(normalize_agent(&spaced), "a".repeat(MAX_AGENT_CHARS - 1));
+    }
+
+    /// Each refusal says plainly what a request is.
+    #[test]
+    fn a_refused_request_is_told_it_is_a_short_topic_label() {
+        assert_eq!(MAX_REQUEST_CHARS, 60);
+        let a_label = "The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}";
+        assert_eq!(
+            RequestError::Empty.to_string(),
+            format!("{a_label}; this one is empty.")
+        );
+        assert_eq!(
+            RequestError::TooLong { chars: 75 }.to_string(),
+            format!("{a_label}: at most 60 characters, and this one has 75.")
+        );
+        assert_eq!(
+            RequestError::NotALabel.to_string(),
+            format!(
+                "{a_label}, so it can't have a colon, a semicolon, a dash (\u{2014} or \u{2013}) \
+                 or a line break."
+            )
+        );
     }
 
     /// The limits here are the ones the table's CHECKs enforce.
