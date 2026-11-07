@@ -18,6 +18,9 @@ pub struct Config {
     pub out_dir: PathBuf,
     /// A folder of the run's own for the exported file.
     pub export_dir: PathBuf,
+    /// gospel-getter-cli, which check 70 saves an AI finding with while
+    /// the app runs (beside the app, or the AppImage's own), if there is one.
+    pub cli: Option<PathBuf>,
     /// What is left of the run's time budget.
     pub budget: Duration,
     /// The longest any one step may take.
@@ -66,6 +69,10 @@ impl Config {
             app: var("GUI_APP")?,
             out_dir: PathBuf::from(var("GUI_OUT_DIR")?),
             export_dir: PathBuf::from(var("GUI_EXPORT_DIR")?),
+            cli: std::env::var("GUI_CLI")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from),
             budget: seconds("GUI_BUDGET_SECS")?,
             step_timeout: seconds("GUI_STEP_TIMEOUT_SECS")?,
             session_timeout: if std::env::var_os("GUI_SESSION_TIMEOUT_SECS").is_some() {

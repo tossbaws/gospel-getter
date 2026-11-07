@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::db::reader_data::{ApplyImportError, ImportCounts};
+use crate::db::reader_data::{ApplyImportError, FindingsImport, ImportCounts};
 use crate::db::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
 use crate::db::{
     self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Db, Finding,
@@ -318,6 +318,7 @@ impl Store {
         bookmarks: &[NewBookmark],
         highlights: Option<&[NewHighlight]>,
         notes: Option<&[NewNote]>,
+        findings: Option<FindingsImport<'_>>,
         replace: bool,
         position: Option<&NewPosition>,
     ) -> Result<ImportCounts, ApplyImportError> {
@@ -326,6 +327,7 @@ impl Store {
             bookmarks,
             highlights,
             notes,
+            findings,
             replace,
             position,
         )

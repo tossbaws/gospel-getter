@@ -26,6 +26,14 @@
 //! Restore and Discard; it never puts the draft in the text box by itself,
 //! and never saves it without Save.
 //!
+//! "Keep as mine" on an AI finding (C10) opens this as + Add note on the
+//! finding's verses, its text the finding's words, all of them selected as
+//! after Ctrl+A, so typing anything replaces them. Saving a note that isn't
+//! empty saves it as the reader's own and removes the finding, in one
+//! transaction (`keep_finding_as_note`); cancelling, or closing it empty,
+//! changes nothing. The reader's notes already on the verse are listed, and
+//! never changed.
+//!
 //! This is the page's note panel script (`ui/index.html` at fa5969d,
 //! `charCount` to its keydown trap) as a Leptos component: the same ids,
 //! classes, ARIA, `hidden` and `disabled`, text and focus order. The panel
@@ -45,7 +53,7 @@ use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
 use crate::bridge::{self, NoteRequest, OtherNote};
 use crate::card;
 use crate::dom::{self, focus};
-use crate::dto::{AddNoteArgs, DeleteNoteArgs, UpdateNoteArgs};
+use crate::dto::{AddNoteArgs, DeleteNoteArgs, KeepFindingArgs, UpdateNoteArgs};
 use crate::ipc;
 use crate::note_text::{self, DRAFTS_KEY, Draft, DraftPassage, Drafts};
 
@@ -205,9 +213,10 @@ impl Editor {
 
     /// When adding, the other notes on the passage, read-only.
     fn set_others(self, others: Vec<OtherNote>) {
-        let adding = self
-            .session
-            .with_value(|s| s.as_ref().is_some_and(|s| s.request.mode == "add"));
+        let adding = self.session.with_value(|s| {
+            s.as_ref()
+                .is_some_and(|s| matches!(s.request.mode.as_str(), "add" | "keep"))
+        });
         let others = if adding { others } else { Vec::new() };
         if let Some(others_box) = self.others_box.get() {
             others_box.set_hidden(others.is_empty());
@@ -377,11 +386,12 @@ impl Editor {
     fn open(self, request: NoteRequest, note: JsValue, return_to: Option<HtmlElement>) {
         let id = self.next_id.get_value() + 1;
         self.next_id.set_value(id);
-        let initial = request
-            .note
-            .as_ref()
-            .map(|n| n.body.clone())
-            .unwrap_or_default();
+        let initial = match (&request.keep, &request.note) {
+            (Some(keep), _) => keep.text.clone(),
+            (None, Some(note)) => note.body.clone(),
+            (None, None) => String::new(),
+        };
+        let keeping = request.keep.is_some();
         let editing = request.mode == "edit";
         let draft_passage = DraftPassage {
             book: request.passage.book_id,
@@ -447,7 +457,10 @@ impl Editor {
         if let Some(input) = self.input.get() {
             focus(&input);
             let end = input.value().encode_utf16().count() as u32;
-            let _ = input.set_selection_range(end, end);
+            // Kept from a finding, all of it is selected, as after Ctrl+A;
+            // otherwise the caret is at the end.
+            let start = if keeping { 0 } else { end };
+            let _ = input.set_selection_range(start, end);
             if let Some(body) = &body {
                 let below = input.get_bounding_client_rect().bottom()
                     - body.get_bounding_client_rect().bottom();
@@ -550,6 +563,17 @@ impl Editor {
         self.set_busy(true);
         spawn_local(async move {
             let result = match (&session.request.note, session.request.mode.as_str()) {
+                _ if session.request.keep.is_some() => {
+                    let id = session.request.keep.as_ref().map_or(0, |k| k.id);
+                    match ipc::args(&KeepFindingArgs { id, body: &body }) {
+                        Ok(args) => {
+                            ipc::invoke::<serde::de::IgnoredAny>("keep_finding_as_note", args)
+                                .await
+                                .map(drop)
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
                 (Some(note), "edit") => match ipc::args(&UpdateNoteArgs {
                     id: note.id,
                     body: &body,
@@ -718,7 +742,11 @@ impl Editor {
             }
         });
         dom::on_document_event(bridge::NOTE_OTHERS_EVENT, move |event: CustomEvent| {
-            if !self.is_open() {
+            // The selection's notes; a kept finding's verse has its own.
+            let keeping = self
+                .session
+                .with_value(|s| s.as_ref().is_some_and(|s| s.request.keep.is_some()));
+            if !self.is_open() || keeping {
                 return;
             }
             match bridge::note_others(&event) {

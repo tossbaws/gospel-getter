@@ -154,10 +154,14 @@ test('Aa changes the real preferences live, and they persist across a restart', 
         const dialog = app.surface('aa');
         assert.equal(dialog.getAttribute('role'), 'dialog');
         assert.equal(dialog.getAttribute('aria-label'), 'Display');
-        // In this order: text size, line spacing, width, layout, theme, reading mode.
+        // In this order: text size, line spacing, width, layout, theme,
+        // reading mode, then the AI agents' switch, the one setting that
+        // isn't about the page's look.
         const order = [...dialog.querySelectorAll('.section-label')].map((l) => l.textContent);
-        assert.deepEqual(order, ['Text size', 'Line spacing', 'Width', 'Layout', 'Theme']);
-        assert.equal(dialog.querySelector('.popover-body').lastElementChild.querySelector('button').id, 'reader-mode-btn');
+        assert.deepEqual(order, ['Text size', 'Line spacing', 'Width', 'Layout', 'Theme', 'AI agents']);
+        const last = dialog.querySelector('.popover-body').lastElementChild;
+        assert.equal(last.previousElementSibling.querySelector('button').id, 'reader-mode-btn');
+        assert.equal(last.querySelector('input').id, 'ai-findings-toggle');
         // Compare, with the translation to compare with, under the translations.
         const compareRow = $(app, 'compare-btn').closest('.aa-row');
         assert.ok(compareRow.contains($(app, 'compare-with-choices')), 'Compare beside its "with" choices');

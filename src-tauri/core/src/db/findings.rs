@@ -282,13 +282,23 @@ pub async fn findings_enabled(pool: &SqlitePool) -> anyhow::Result<bool> {
 
 /// Turn "Let AI agents save findings" on or off.
 pub async fn set_findings_enabled(writer: &WritePool, on: bool) -> anyhow::Result<()> {
+    let mut conn = writer
+        .pool()
+        .acquire()
+        .await
+        .context("Failed to save the AI findings setting")?;
+    set_enabled_on(&mut conn, on).await
+}
+
+/// [`set_findings_enabled`] on `conn` (in an import's transaction, say).
+pub(crate) async fn set_enabled_on(conn: &mut SqliteConnection, on: bool) -> anyhow::Result<()> {
     sqlx::query(
         "INSERT INTO app_settings (key, value) VALUES ($1, $2) \
          ON CONFLICT (key) DO UPDATE SET value = excluded.value",
     )
     .bind(ENABLED_KEY)
     .bind(if on { ON } else { "off" })
-    .execute(writer.pool())
+    .execute(&mut *conn)
     .await
     .context("Failed to save the AI findings setting")?;
     Ok(())
@@ -297,7 +307,7 @@ pub async fn set_findings_enabled(writer: &WritePool, on: bool) -> anyhow::Resul
 /// Each finding's passage checked, and the finding saved unless the same
 /// verses are already saved for the same request, all on `conn`, which is in
 /// a transaction that writes. One that can't be saved stops them all.
-async fn insert_findings(
+pub(crate) async fn insert_findings(
     conn: &mut SqliteConnection,
     findings: &[NewFinding],
 ) -> Result<SavedFindings, FindingsError> {

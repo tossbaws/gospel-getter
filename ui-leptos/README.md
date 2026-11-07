@@ -41,7 +41,10 @@ card's bookmark, highlight and notes, the verses' marks and the Shift
 ghost, with its markup and rules in `src/card_text.rs`); and the notes in
 the margin in reading mode (`src/margin.rs`: placed beside their verses,
 the markers in a narrow window, with their rules and markup in
-`src/margin_text.rs`); a note's text as Markdown wherever it shows
+`src/margin_text.rs`); the AI-flagged findings an agent saved at the
+reader's request, among the notes there, in Compare's notes column and in
+the Library, with Aa's switch for them (`src/findings.rs`, their rules and
+markup in `src/findings_text.rs`); a note's text as Markdown wherever it shows
 (`src/note_markdown.rs`: the subset, everything else escaped, the
 references the backend found in it as links), the links in it
 (`src/note_links.rs`: a reference goes to its passage, a web link opens

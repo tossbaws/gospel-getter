@@ -274,6 +274,52 @@ async fn dispatch(
                     .await,
             )?
         }
+        "list_findings" => answer(
+            commands::chapter_findings(state, arg(args, "bookId")?, arg(args, "chapter")?).await,
+        )?,
+        "list_finding_requests" => answer(commands::finding_requests(state).await)?,
+        "remove_finding" => answer(commands::finding_remove(state, arg(args, "id")?).await)?,
+        "remove_finding_request" => {
+            let request: String = arg(args, "request")?;
+            answer(commands::finding_request_remove(state, &request).await)?
+        }
+        "restore_findings" => {
+            answer(commands::findings_restore(state, arg(args, "findings")?).await)?
+        }
+        "keep_finding_as_note" => {
+            let body: String = arg(args, "body")?;
+            answer(commands::finding_keep(state, arg(args, "id")?, &body).await)?
+        }
+        "get_ai_findings_enabled" => answer(commands::findings_switch(state).await)?,
+        "set_ai_findings_enabled" => {
+            answer(commands::set_findings_switch(state, arg(args, "enabled")?).await)?
+        }
+        // An agent saving findings, as `gospel-getter-cli`'s save_findings
+        // does (the app itself never adds one): `{ request, agent,
+        // references: [{ bookId, chapter, verse }] }`, the reader's switch
+        // aside.
+        "__save_findings" => {
+            let request: String = arg(args, "request")?;
+            let agent: String = arg(args, "agent")?;
+            let verses: Vec<Value> = arg(args, "references")?;
+            let mut findings = Vec::with_capacity(verses.len());
+            for v in &verses {
+                let verse: i64 = arg(v, "verse")?;
+                findings.push(db::NewFinding {
+                    passage: Passage {
+                        book_id: arg(v, "bookId")?,
+                        chapter: arg(v, "chapter")?,
+                        verse_start: verse,
+                        verse_end: verse,
+                    },
+                    agent: agent.clone(),
+                    request: request.clone(),
+                    created_at: arg(v, "createdAt")?,
+                });
+            }
+            let saved = state.store.add_findings(&findings).await?;
+            Ok(Value::from(saved.saved.len()))
+        }
         "search" => {
             let query: String = arg(args, "query")?;
             let offset: Option<i64> = arg(args, "offset")?;
@@ -521,6 +567,12 @@ async fn dispatch(
                     .execute(writer.pool())
                     .await?;
                 sqlx::query("DELETE FROM notes")
+                    .execute(writer.pool())
+                    .await?;
+                sqlx::query("DELETE FROM ai_findings")
+                    .execute(writer.pool())
+                    .await?;
+                sqlx::query("DELETE FROM app_settings")
                     .execute(writer.pool())
                     .await?;
             }

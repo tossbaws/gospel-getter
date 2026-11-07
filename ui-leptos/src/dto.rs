@@ -736,6 +736,52 @@ pub struct SelectionNote {
     pub links: Vec<NoteLink>,
 }
 
+/// `keep_finding_as_note`'s arguments: the finding, and the note's text.
+#[derive(Debug, Serialize)]
+pub struct KeepFindingArgs<'a> {
+    pub id: i64,
+    pub body: &'a str,
+}
+
+/// An AI-flagged finding, as `list_findings` answers: where an AI agent, at
+/// the reader's request, marked a verse. A marker only: who found it, for
+/// which request, and nothing about the verse (C3).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Finding {
+    pub id: i64,
+    pub book_id: i64,
+    pub book_name: String,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    /// "John 11:35".
+    pub reference: String,
+    /// "Claude".
+    pub agent: String,
+    /// "grief".
+    pub request: String,
+    /// "Found by Claude for your request “grief”.", the backend's.
+    pub text: String,
+    pub created_at: String,
+    /// "Nov 7, 2026".
+    pub created_at_display: String,
+}
+
+/// One request's findings, as `list_finding_requests` answers.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindingRequest {
+    pub request: String,
+    /// "Claude", or "Claude and Codex".
+    pub agents: String,
+    pub verse_count: i64,
+    /// "Nov 7, 2026": when the latest was found.
+    pub latest_display: String,
+    /// In Bible order.
+    pub findings: Vec<Finding>,
+}
+
 /// A cross-reference's passage, as `get_passage` answers
 /// (`commands::PassageDto`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

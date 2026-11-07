@@ -7,8 +7,9 @@ use anyhow::Context;
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 
+use crate::db::findings::{insert_findings, set_enabled_on};
 use crate::db::notes::{NoteLimit, NoteTotals, note_totals};
-use crate::db::{Bookmark, HighlightColor, WritePool};
+use crate::db::{Bookmark, HighlightColor, NewFinding, WritePool};
 
 /// A bookmark ready to insert, after validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +194,14 @@ pub async fn now(pool: &SqlitePool) -> anyhow::Result<String> {
         .context("Failed to read the time")
 }
 
+/// A format 4 file's AI findings and switch, to import.
+#[derive(Debug, Clone, Copy)]
+pub struct FindingsImport<'a> {
+    pub findings: &'a [NewFinding],
+    /// The switch, when the file has it.
+    pub enabled: Option<bool>,
+}
+
 /// Why an import couldn't be applied. Either way, nothing was changed.
 #[derive(Debug)]
 pub enum ApplyImportError {
@@ -252,6 +261,9 @@ pub struct ImportCounts {
     pub notes_added: usize,
     pub notes_already_present: usize,
     pub notes_removed: usize,
+    pub findings_added: usize,
+    pub findings_already_present: usize,
+    pub findings_removed: usize,
 }
 
 /// Apply a validated import in one transaction: either every change
@@ -275,6 +287,11 @@ pub struct ImportCounts {
 /// nothing; `replace` deletes every note first and restores every one in
 /// the file. `None` (a format 1 or 2 file, which can't hold notes) leaves
 /// them untouched.
+///
+/// `findings` likewise (a format 4 file's AI findings): merging adds each
+/// one not already saved for its request; `replace` removes every finding
+/// first. Its switch, if the file has it, is set. `None` (a format 1 to 3
+/// file) leaves both untouched.
 /// Before anything is written, the notes there would be afterwards are
 /// checked against `MAX_NOTES` and `MAX_TOTAL_NOTE_CHARS`; an import that
 /// would go past either changes nothing.
@@ -283,6 +300,7 @@ pub async fn apply_import(
     bookmarks: &[NewBookmark],
     highlights: Option<&[NewHighlight]>,
     notes: Option<&[NewNote]>,
+    findings: Option<FindingsImport<'_>>,
     replace: bool,
     position: Option<&NewPosition>,
 ) -> Result<ImportCounts, ApplyImportError> {
@@ -395,6 +413,27 @@ pub async fn apply_import(
         }
     }
 
+    let mut findings_added = 0;
+    let mut findings_already_present = 0;
+    let mut findings_removed = 0;
+    if let Some(import) = findings {
+        if replace {
+            findings_removed = sqlx::query("DELETE FROM ai_findings")
+                .execute(&mut *tx)
+                .await
+                .context("Failed to clear the AI findings")?
+                .rows_affected() as usize;
+        }
+        let saved = insert_findings(&mut tx, import.findings)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to add the AI findings: {e}"))?;
+        findings_added = saved.saved.len();
+        findings_already_present = saved.already.len();
+        if let Some(on) = import.enabled {
+            set_enabled_on(&mut tx, on).await?;
+        }
+    }
+
     if let Some(p) = position {
         sqlx::query(
             "INSERT INTO reading_position (id, translation_id, book_id, chapter) \
@@ -429,5 +468,8 @@ pub async fn apply_import(
         notes_added,
         notes_already_present: notes.map_or(0, <[_]>::len) - notes_added,
         notes_removed,
+        findings_added,
+        findings_already_present,
+        findings_removed,
     })
 }

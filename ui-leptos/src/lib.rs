@@ -17,7 +17,9 @@
 //! card (`card`, with its markup and rules in `card_text`): the verse
 //! selection, copying, and the card's bookmark, highlight and notes; and
 //! the notes in the margin in reading mode (`margin`, with its rules and
-//! markup in `margin_text`); the top bar's Back, Forward and Recent places
+//! markup in `margin_text`), and the AI-flagged findings among them and
+//! Aa's switch for them (`findings`, with their rules and markup in
+//! `findings_text`); the top bar's Back, Forward and Recent places
 //! (`nav`, with its rules and markup in `nav_text`); a note's text as Markdown wherever it shows
 //! (`note_markdown`), its links (`note_links`) and Copy as Markdown
 //! (`note_copy`); and
@@ -51,6 +53,8 @@ mod clicks;
 mod dom;
 mod dto;
 mod export_notes;
+mod findings;
+mod findings_text;
 mod import_preview;
 mod import_text;
 mod install;
@@ -119,6 +123,8 @@ pub fn start() {
     // Aa and the saved settings next: their records (the `<select>`s) are
     // filled before any piece reads them.
     aa::mount();
+    // Aa's "Let AI agents save findings".
+    findings::mount();
     // The selection card, which the reader tells about each chapter, and
     // the reader, before the rest; then boot: its chapter is on its way (or
     // in, and drawn now, within this call).

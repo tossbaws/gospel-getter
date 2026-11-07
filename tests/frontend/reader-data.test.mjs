@@ -186,10 +186,10 @@ test('an invalid file is explained and changes nothing', () =>
 
 test('a file from a newer version is refused clearly', () =>
     withApp({}, async (app) => {
-        const path = writeFile({ format: 'gospel-getter-reader-data', format_version: 4, exported_at: 'x', app_version: '9.0.0' });
+        const path = writeFile({ format: 'gospel-getter-reader-data', format_version: 5, exported_at: 'x', app_version: '9.0.0' });
         await clickData(app, 'import-data-btn', path);
         const invalid = () => el(app, 'import-invalid').textContent;
-        assert.match(invalid(), /made by a newer version of Gospel Getter \(data format 4\)\. This version reads format 3; update Gospel Getter to import it\. Nothing was changed\.$/);
+        assert.match(invalid(), /made by a newer version of Gospel Getter \(data format 5\)\. This version reads format 4; update Gospel Getter to import it\. Nothing was changed\.$/);
         await app.key('Escape', {}, el(app, 'import-cancel'));
         assert.ok(!overlayOpen(app), 'Escape closes it');
         const garbage = writeFile('this is not json');
