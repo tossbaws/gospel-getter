@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use query::{
-    CompareArgs, GetCrossReferencesArgs, GetPassageArgs, ListBookmarksArgs, ListHighlightsArgs,
-    ListNotesArgs, Request, SearchArgs, VerifyQuoteArgs,
+    CompareArgs, GetCrossReferencesArgs, GetPassageArgs, GetPassagesArgs, ListBookmarksArgs,
+    ListHighlightsArgs, ListNotesArgs, Request, SearchArgs, VerifyQuoteArgs,
 };
 
 /// Read your Gospel Getter install, read-only. Prints JSON on stdout; errors
@@ -42,6 +42,9 @@ enum Command {
     /// A passage's exact text.
     #[command(name = "get_passage", visible_alias = "passage")]
     GetPassage(GetPassageArgs),
+    /// Many passages in one call, all in one translation.
+    #[command(name = "get_passages", visible_aliases = ["passages", "get-passages"])]
+    GetPassages(GetPassagesArgs),
     /// Search the text of one translation, in Bible order.
     #[command(name = "search")]
     Search(SearchArgs),
@@ -77,6 +80,7 @@ impl Command {
         Some(match self {
             Self::ListTranslations => Request::ListTranslations,
             Self::GetPassage(args) => Request::GetPassage(args),
+            Self::GetPassages(args) => Request::GetPassages(args),
             Self::Search(args) => Request::Search(args),
             Self::Compare(args) => Request::Compare(args),
             Self::GetCrossReferences(args) => Request::GetCrossReferences(args),
@@ -178,6 +182,12 @@ mod tests {
             for word in [name, short] {
                 assert!(Cli::try_parse_from(["gospel-getter-cli", word, "John 3:16"]).is_ok());
             }
+        }
+        for word in ["get_passages", "passages", "get-passages"] {
+            let cli = Cli::try_parse_from(["gospel-getter-cli", word, "John 3:16", "Rom 5:8"])
+                .expect("it parses");
+            assert!(matches!(cli.command, Command::GetPassages(_)));
+            assert!(Cli::try_parse_from(["gospel-getter-cli", word]).is_err());
         }
         for word in ["verify_quote", "verify-quote"] {
             let cli = Cli::try_parse_from([

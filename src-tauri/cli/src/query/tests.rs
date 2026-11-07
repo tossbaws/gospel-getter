@@ -294,6 +294,145 @@ fn a_passage_is_capped_and_says_so() {
     );
 }
 
+fn passages_of(references: &[&str], translation: Option<&str>) -> Request {
+    Request::GetPassages(GetPassagesArgs {
+        references: references.iter().map(|r| (*r).to_string()).collect(),
+        translation: translation.map(str::to_string),
+    })
+}
+
+/// Each entry is what `get_passage` gives, in the order asked, repeats kept.
+#[tokio::test]
+async fn get_passages_answers_in_the_order_asked() {
+    let (db, pool) = fresh_database("cli_passages").await;
+    let references = ["Rom 5:8", "John 3:16-17", "Psalm 117", "Rom 5:8"];
+    let answer = ask(&db, passages_of(&references, Some("bsb"))).await;
+    assert_eq!(answer["translation"], "bsb");
+    assert_eq!(answer["translation_name"], "Berean Standard Bible");
+    assert_eq!(answer["verse_count"], 1 + 2 + 2 + 1);
+    let passages = answer["passages"].as_array().unwrap();
+    assert_eq!(passages.len(), references.len());
+    for (entry, reference) in passages.iter().zip(references) {
+        assert_eq!(entry, &ask(&db, passage_of(reference, Some("bsb"))).await);
+    }
+    assert_eq!(passages[1]["reference"], "John 3:16\u{2013}17");
+    pool.close().await;
+}
+
+/// A reference that fails is that entry's answer, in `get_passage`'s words; the
+/// rest still come back, and don't count it.
+#[tokio::test]
+async fn get_passages_says_which_reference_failed() {
+    let (db, pool) = fresh_database("cli_passages_failed").await;
+    let answer = ask(
+        &db,
+        passages_of(
+            &[
+                "John 3:16",
+                "Hezekiah 3:16",
+                "  for God so loved  ",
+                "Matthew 17:21",
+                "John 3:17",
+            ],
+            Some("bsb"),
+        ),
+    )
+    .await;
+    assert_eq!(answer["verse_count"], 2);
+    let passages = answer["passages"].as_array().unwrap();
+    assert_eq!(passages[0]["reference"], "John 3:16");
+    assert_eq!(passages[4]["reference"], "John 3:17");
+    assert_eq!(
+        passages[1],
+        json!({
+            "reference": "Hezekiah 3:16",
+            "error": refused(&db, passage_of("Hezekiah 3:16", Some("bsb"))).await,
+        })
+    );
+    assert_eq!(passages[2]["reference"], "  for God so loved  ");
+    assert_eq!(
+        passages[2]["error"],
+        "\u{201c}for God so loved\u{201d} isn't a Bible reference. Try something like John 3:16."
+    );
+    assert_eq!(
+        passages[3],
+        json!({
+            "reference": "Matthew 17:21",
+            "error": "In Matthew 17:21, verse 21 isn't numbered in the Berean Standard Bible.",
+        })
+    );
+
+    let answer = ask(&db, passages_of(&["Hezekiah 3:16"], Some("kjv"))).await;
+    assert_eq!(answer["verse_count"], 0);
+    assert_eq!(answer["passages"][0]["reference"], "Hezekiah 3:16");
+    pool.close().await;
+}
+
+/// Over either cap, the whole call is refused, saying how many and the limit.
+/// At the cap, it's all there.
+#[tokio::test]
+async fn get_passages_caps_a_call_and_refuses_the_whole_of_it() {
+    let (db, pool) = fresh_database("cli_passages_caps").await;
+    let fifty = ["John 3:16"; MAX_BATCH_REFERENCES];
+    let answer = ask(&db, passages_of(&fifty, Some("kjv"))).await;
+    assert_eq!(answer["verse_count"], 50);
+    assert_eq!(answer["passages"].as_array().unwrap().len(), 50);
+    let fifty_one = ["John 3:16"; MAX_BATCH_REFERENCES + 1];
+    assert_eq!(
+        refused(&db, passages_of(&fifty_one, Some("kjv"))).await,
+        "That's 51 references; at most 50 per call. Split it."
+    );
+
+    // Psalm 119 has 176 verses.
+    let five_hundred = ["Psalm 119", "Psalm 119", "Psalm 119:1-148"];
+    let answer = ask(&db, passages_of(&five_hundred, Some("kjv"))).await;
+    assert_eq!(answer["verse_count"], 500);
+    let over = ["Psalm 119", "Psalm 119", "Psalm 119:1-149"];
+    assert_eq!(
+        refused(&db, passages_of(&over, Some("kjv"))).await,
+        "That's 501 verses; at most 500 per call. Split it."
+    );
+    let far_over = ["Psalm 119", "Psalm 119", "Psalm 119", "Psalm 119"];
+    assert_eq!(
+        refused(&db, passages_of(&far_over, Some("kjv"))).await,
+        "That's 704 verses; at most 500 per call. Split it."
+    );
+
+    assert!(
+        refused(&db, passages_of(&[], Some("kjv")))
+            .await
+            .contains("no references")
+    );
+    pool.close().await;
+}
+
+/// One translation for all of them: the one named, else the reader's, else the
+/// KJV. One that isn't there refuses the whole call.
+#[tokio::test]
+async fn get_passages_reads_one_translation() {
+    let (db, pool) = fresh_database("cli_passages_translation").await;
+    let references = ["John 3:16", "Rom 5:8"];
+    let answer = ask(&db, passages_of(&references, None)).await;
+    assert_eq!(answer["translation"], "kjv");
+    assert_eq!(answer["passages"][1]["translation"], "kjv");
+
+    save_position(&pool, translation_id(&pool, "web").await, None).await;
+    let answer = ask(&db, passages_of(&references, None)).await;
+    assert_eq!(answer["translation"], "web");
+    assert_eq!(answer["passages"][0]["translation"], "web");
+    assert_eq!(
+        answer["passages"][0]["verses"][0]["text"],
+        bundled("web")[42].chapters[2][15].as_str()
+    );
+
+    let answer = ask(&db, passages_of(&references, Some("BSB"))).await;
+    assert_eq!(answer["translation"], "bsb");
+
+    let message = refused(&db, passages_of(&references, Some("niv"))).await;
+    assert!(message.contains("niv") && message.contains("kjv, bsb, web"));
+    pool.close().await;
+}
+
 /// The same hits, in the same order, as the search behind the app's own box,
 /// each verse's text clean; a limit takes the first of them.
 #[tokio::test]

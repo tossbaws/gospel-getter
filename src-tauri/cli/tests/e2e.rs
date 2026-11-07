@@ -331,6 +331,55 @@ async fn verify_quote_checks_a_quotation_character_for_character() {
     });
 }
 
+/// `get_passages` under all its names: the passages in the order asked, as
+/// `get_passage` gives each, one that fails in its place.
+#[tokio::test]
+async fn get_passages_gives_many_in_one_call() {
+    let db = closed_install("e2e_passages").await;
+    let path = db.path();
+    unchanged(&db, || {
+        let asked = [
+            "get_passages",
+            "John 3:16",
+            "Hezekiah 3:16",
+            "Psalm 119:105",
+            "--translation",
+            "kjv",
+        ];
+        let many = answer(&path, &asked);
+        assert_eq!(many["translation"], "kjv");
+        assert_eq!(many["translation_name"], "King James Version");
+        assert_eq!(many["verse_count"], 2);
+        assert_eq!(
+            many["passages"][0],
+            answer(&path, &["get_passage", "John 3:16", "--translation", "kjv"])
+        );
+        assert_eq!(many["passages"][0]["verses"][0]["text"], JOHN_3_16_KJV);
+        assert_eq!(
+            many["passages"][1],
+            json!({
+                "reference": "Hezekiah 3:16",
+                "error": "There's no book called \u{201c}Hezekiah\u{201d}.",
+            })
+        );
+        assert_eq!(many["passages"][2]["verses"][0]["text"], PSALM_119_105_KJV);
+        for name in ["passages", "get-passages"] {
+            let mut args = asked.to_vec();
+            args[0] = name;
+            assert_eq!(answer(&path, &args), many, "{name}");
+        }
+
+        let message = refusal(
+            &path,
+            &["get_passages", "Psalm 119", "Psalm 119", "Psalm 119"],
+        );
+        assert_eq!(
+            message,
+            "That's 528 verses; at most 500 per call. Split it.\n"
+        );
+    });
+}
+
 /// A failure is a sentence on stderr and a non-zero exit, with no JSON.
 #[tokio::test]
 async fn failures_are_plain_text_and_a_non_zero_exit() {
@@ -496,6 +545,7 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
                 "compare",
                 "get_cross_references",
                 "get_passage",
+                "get_passages",
                 "get_reading_place",
                 "list_bookmarks",
                 "list_highlights",
@@ -550,6 +600,22 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
             assert!(description.contains(words), "{words}: {description}");
         }
 
+        let get_passages = tools.iter().find(|t| t["name"] == "get_passages").unwrap();
+        assert_eq!(arguments(get_passages), ["references", "translation"]);
+        assert_eq!(
+            get_passages["inputSchema"]["required"],
+            json!(["references"])
+        );
+        let help = run(&path, &["get_passages", "--help"]);
+        let help = String::from_utf8_lossy(&help.stdout);
+        for flag in ["<REF>...", "--translation"] {
+            assert!(help.contains(flag), "{flag}: {help}");
+        }
+        let description = get_passages["description"].as_str().unwrap();
+        for words in ["50 references", "500 verses", "{reference, error}"] {
+            assert!(description.contains(words), "{words}: {description}");
+        }
+
         let passage = mcp.call_for_json(
             3,
             "get_passage",
@@ -570,7 +636,7 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
         assert_eq!(notes["notes"][0]["body"], "Rejoice, always.");
 
         // The same arguments, the same JSON, whichever way it's asked.
-        let same: [(&str, Value, &[&str]); 10] = [
+        let same: [(&str, Value, &[&str]); 11] = [
             (
                 "get_passage",
                 json!({"reference": "Psalm 119:105", "translation": "kjv"}),
@@ -604,6 +670,17 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
                     "0",
                     "--limit",
                     "5",
+                ],
+            ),
+            (
+                "get_passages",
+                json!({"references": ["John 3:16", "Hezekiah 3:16"], "translation": "web"}),
+                &[
+                    "get_passages",
+                    "John 3:16",
+                    "Hezekiah 3:16",
+                    "--translation",
+                    "web",
                 ],
             ),
             (
@@ -652,11 +729,21 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
         let (is_error, text) = mcp.call(41, "verify_quote", json!({"text": ""}));
         assert!(is_error);
         assert_eq!(format!("{text}\n"), refusal(&path, &["verify_quote", ""]));
+        let refs = json!({"references": ["Psalm 119", "Psalm 119", "Psalm 119"]});
+        let (is_error, text) = mcp.call(43, "get_passages", refs);
+        assert!(is_error);
+        assert_eq!(
+            format!("{text}\n"),
+            refusal(
+                &path,
+                &["get_passages", "Psalm 119", "Psalm 119", "Psalm 119"]
+            )
+        );
 
         // No such argument: the server refuses, typed as it is.
         mcp.send(&json!({
             "jsonrpc": "2.0",
-            "id": 42,
+            "id": 44,
             "method": "tools/call",
             "params": {"name": "get_passage", "arguments": {"reference": "John 3:16", "body": "x"}},
         }));

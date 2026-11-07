@@ -40,6 +40,9 @@ const DEFAULT_LIST_LIMIT: u32 = 100;
 const MAX_LIST_LIMIT: u32 = 500;
 /// The most cross-references returned at once.
 const MAX_CROSS_REFERENCES: usize = 500;
+/// The most references, and verses in all, one call for many passages returns.
+const MAX_BATCH_REFERENCES: usize = 50;
+const MAX_BATCH_VERSES: usize = 500;
 
 // ---- What each tool takes. The subcommands and the MCP tools share these
 // structs, so they can't differ: their docs are both the `--help` text and
@@ -52,6 +55,18 @@ pub struct GetPassageArgs {
     /// A reference, as the app's Go to reads it: "John 3:16", "John 3:16-18" or "Psalm 23".
     pub reference: String,
     /// A translation's code, such as kjv, bsb or web. Default: the one the reader last read.
+    #[arg(long)]
+    pub translation: Option<String>,
+}
+
+/// Arguments of `get_passages`.
+#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GetPassagesArgs {
+    /// References, each as the app's Go to reads it: at most 50, and at most 500 verses in all.
+    #[arg(required = true, value_name = "REF")]
+    pub references: Vec<String>,
+    /// A translation's code, such as kjv, bsb or web, for all of them. Default: the one the reader last read.
     #[arg(long)]
     pub translation: Option<String>,
 }
@@ -151,6 +166,7 @@ pub struct ListNotesArgs {
 pub enum Request {
     ListTranslations,
     GetPassage(GetPassageArgs),
+    GetPassages(GetPassagesArgs),
     Search(SearchArgs),
     Compare(CompareArgs),
     GetCrossReferences(GetCrossReferencesArgs),
@@ -169,6 +185,7 @@ pub enum Request {
 pub enum Answer {
     Translations(TranslationsOut),
     Passage(PassageOut),
+    Passages(PassagesOut),
     Search(SearchOut),
     Compare(CompareOut),
     CrossReferences(CrossReferencesOut),
@@ -226,6 +243,27 @@ pub struct PassageOut {
     /// Which of the verses asked for this translation doesn't number.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<String>,
+}
+
+/// The answer of `get_passages`.
+#[derive(Debug, Serialize)]
+pub struct PassagesOut {
+    pub translation: String,
+    pub translation_name: String,
+    /// How many verses there are in all the passages.
+    pub verse_count: usize,
+    /// One for each reference, in the order asked.
+    pub passages: Vec<PassageEntry>,
+}
+
+/// One reference's part of an answer for many.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum PassageEntry {
+    /// What `get_passage` gives for it.
+    Passage(PassageOut),
+    /// The reference as given, and the sentence `get_passage` refuses it with.
+    Failed { reference: String, error: String },
 }
 
 /// The answer of `search`.
@@ -469,6 +507,7 @@ impl Library {
         Ok(match request {
             Request::ListTranslations => Answer::Translations(self.list_translations().await?),
             Request::GetPassage(args) => Answer::Passage(self.get_passage(args).await?),
+            Request::GetPassages(args) => Answer::Passages(self.get_passages(args).await?),
             Request::Search(args) => Answer::Search(self.search(args).await?),
             Request::Compare(args) => Answer::Compare(self.compare(args).await?),
             Request::GetCrossReferences(args) => {
@@ -613,17 +652,31 @@ impl Library {
         translation: &Translation,
         reference: &str,
     ) -> anyhow::Result<PassageOut> {
-        let passage = self.passage_named(reference)?;
+        self.passage_or_why(translation, reference)
+            .await?
+            .map_err(|why| anyhow!(why))
+    }
+
+    /// As [`Self::passage_in`], but a reference that names nothing there is only
+    /// the sentence saying so: an error here is a failure to read the database.
+    async fn passage_or_why(
+        &self,
+        translation: &Translation,
+        reference: &str,
+    ) -> anyhow::Result<Result<PassageOut, String>> {
+        let passage = match self.passage_named(reference) {
+            Ok(passage) => passage,
+            Err(why) => return Ok(Err(format!("{why:#}"))),
+        };
         let book = self.book(passage.book_id)?;
         let reference = passage_reference(&book.name, passage.chapter, passage.verses);
         let (verses, notice) = self.read(translation, passage).await?;
         if verses.is_empty() {
-            bail!(notice.unwrap_or_else(|| format!(
-                "{reference} isn't numbered in the {}.",
-                translation.name
-            )));
+            return Ok(Err(notice.unwrap_or_else(|| {
+                format!("{reference} isn't numbered in the {}.", translation.name)
+            })));
         }
-        Ok(PassageOut {
+        Ok(Ok(PassageOut {
             reference,
             translation: translation.code.clone(),
             translation_name: translation.name.clone(),
@@ -631,6 +684,50 @@ impl Library {
             chapter: passage.chapter,
             verses,
             notice,
+        }))
+    }
+
+    async fn get_passages(&self, args: GetPassagesArgs) -> anyhow::Result<PassagesOut> {
+        let translation = self.translation(args.translation.as_deref()).await?;
+        self.passages_in(translation, &args.references).await
+    }
+
+    /// What each reference names in `translation`, in the order given. Over
+    /// either cap, none of it: a reference that fails is only that one's answer.
+    async fn passages_in(
+        &self,
+        translation: &Translation,
+        references: &[String],
+    ) -> anyhow::Result<PassagesOut> {
+        if references.is_empty() {
+            bail!("There are no references to read. Try something like John 3:16.");
+        }
+        let count = references.len();
+        if count > MAX_BATCH_REFERENCES {
+            bail!("That's {count} references; at most {MAX_BATCH_REFERENCES} per call. Split it.");
+        }
+        let mut passages = Vec::with_capacity(count);
+        let mut verse_count = 0;
+        for reference in references {
+            passages.push(match self.passage_or_why(translation, reference).await? {
+                Ok(passage) => {
+                    verse_count += passage.verses.len();
+                    PassageEntry::Passage(passage)
+                }
+                Err(error) => PassageEntry::Failed {
+                    reference: reference.clone(),
+                    error,
+                },
+            });
+        }
+        if verse_count > MAX_BATCH_VERSES {
+            bail!("That's {verse_count} verses; at most {MAX_BATCH_VERSES} per call. Split it.");
+        }
+        Ok(PassagesOut {
+            translation: translation.code.clone(),
+            translation_name: translation.name.clone(),
+            verse_count,
+            passages,
         })
     }
 

@@ -12,8 +12,8 @@ use rmcp::{ErrorData, ServerHandler, ServiceExt, tool, tool_handler, tool_router
 use std::path::PathBuf;
 
 use crate::query::{
-    self, CompareArgs, GetCrossReferencesArgs, GetPassageArgs, Library, ListBookmarksArgs,
-    ListHighlightsArgs, ListNotesArgs, Request, SearchArgs, VerifyQuoteArgs,
+    self, CompareArgs, GetCrossReferencesArgs, GetPassageArgs, GetPassagesArgs, Library,
+    ListBookmarksArgs, ListHighlightsArgs, ListNotesArgs, Request, SearchArgs, VerifyQuoteArgs,
 };
 
 /// What the client's model is told about this server.
@@ -69,6 +69,18 @@ impl Server {
         Parameters(args): Parameters<GetPassageArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         self.answer(Request::GetPassage(args)).await
+    }
+
+    #[tool(
+        name = "get_passages",
+        description = "Many passages in one call, all in one translation: at most 50 references and at most 500 verses in all, 200 of them from any one reference. Over either cap the whole call is refused, with no text. Each entry of passages is what get_passage gives, in the order asked; a reference that fails is {reference, error} in its place, and the rest still come back.",
+        annotations(read_only_hint = true)
+    )]
+    async fn get_passages(
+        &self,
+        Parameters(args): Parameters<GetPassagesArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.answer(Request::GetPassages(args)).await
     }
 
     #[tool(
