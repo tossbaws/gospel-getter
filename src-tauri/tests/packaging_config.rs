@@ -562,6 +562,72 @@ fn no_release_or_packaging_build_enables_the_gui_test_updater() {
     }
 }
 
+/// A dist.yml job's own keys (`name:`, `if:`, `needs:` and so on), up to its
+/// `steps:`, trimmed, without comments or what's nested under them.
+fn dist_job_keys(job: &str) -> Vec<&'static str> {
+    let header = format!("  {job}:");
+    DIST_YML
+        .lines()
+        .skip_while(|l| *l != header)
+        .skip(1)
+        .take_while(|l| *l != "    steps:")
+        .filter(|l| l.starts_with("    ") && !l.starts_with("     "))
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#'))
+        .collect()
+}
+
+/// A release's installers come from the run dispatched on its release commit
+/// after the merge (`gh workflow run dist.yml`), which joined the same
+/// concurrency group as the merge's push run and cancelled it: a red X on
+/// every release commit. So the push of a release-prep merge builds nothing,
+/// and a dispatched run waits for the run in progress instead of cancelling
+/// it. Pull requests (a release/ branch's too) and other pushes build as
+/// before.
+#[test]
+fn a_release_merge_never_cancels_its_own_build() {
+    for job in ["linux", "windows"] {
+        let keys = dist_job_keys(job);
+        let condition = keys
+            .iter()
+            .find_map(|k| k.strip_prefix("if: "))
+            .unwrap_or_else(|| panic!("job {job} has no `if:`: {keys:#?}"));
+        assert!(
+            condition.contains("startsWith(github.event.head_commit.message, 'chore(release):')"),
+            "job {job} builds on a release-prep merge's push: {condition}"
+        );
+        // Only a push skips: a pull request and a dispatched run always build.
+        assert!(
+            condition.starts_with("github.event_name != 'push' || "),
+            "job {job} can skip more than a push: {condition}"
+        );
+        assert!(
+            !condition.contains("pull_request") && !condition.contains("workflow_dispatch"),
+            "job {job}: {condition}"
+        );
+    }
+
+    let concurrency: Vec<&str> = DIST_YML
+        .lines()
+        .skip_while(|l| *l != "concurrency:")
+        .skip(1)
+        .take_while(|l| l.starts_with("  "))
+        .map(str::trim)
+        .collect();
+    let cancel = concurrency
+        .iter()
+        .find_map(|l| l.strip_prefix("cancel-in-progress: "))
+        .unwrap_or_else(|| panic!("no cancel-in-progress: {concurrency:#?}"));
+    assert_ne!(
+        cancel, "true",
+        "a dispatched run would cancel the run in progress on its commit"
+    );
+    assert!(
+        cancel.contains("github.event_name != 'workflow_dispatch'"),
+        "a dispatched run should wait, and only it: {cancel}"
+    );
+}
+
 /// The program every installer carries beside the app (`gospel-getter-cli`,
 /// A3), as a sidecar named in an overlay. `tauri.conf.json` names none:
 /// tauri-build wants a sidecar's file there on every build it's named for, and

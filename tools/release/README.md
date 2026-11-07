@@ -9,7 +9,9 @@ release must have a `latest.json` asset. Without one, release installers
 can't see the release as an update.
 
 1. Take the four installers from the verified Distribution Artifacts run on
-   the release commit. Each artifact also holds the installer's `.sig`
+   the release commit. That's the run dispatched after the merge
+   (`gh workflow run dist.yml --ref main`): the merge's own push run builds
+   nothing. Each artifact also holds the installer's `.sig`
    updater signature. Rename both files of each pair to the stable names:
 
    | Platform key | Asset | Signature |
