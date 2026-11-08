@@ -4,6 +4,29 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.27.0] - 2026-11-08
+
+One place to export, in the ☰ menu, and a limit on AI findings. Updating
+keeps your bookmarks, highlights, notes, findings, reading position and
+settings.
+
+### Changed
+- One place to export: **☰ → Export data…** now opens a small chooser.
+  **Everything (backup)** saves the same backup as before, and **My
+  notes** opens the same Export notes window as before. My notes is
+  greyed out while there are no notes, and Everything while an export or
+  import runs. The Library's Notes tab no longer has an **Export notes…**
+  button, so its search box runs the full width of the tab. The command
+  palette (/ or Ctrl+K) is unchanged: its **Export notes…** and **Export
+  data…** still go straight to each, with no chooser in between.
+- Gospel Getter keeps at most 10,000 AI findings, as it does notes. A
+  save or import that would go past that changes nothing and says so. A
+  verse already saved for the same request doesn't count again.
+- `gospel-getter-cli`'s package description no longer says read-only: it
+  reads your install, and its one write is saving findings.
+- Backups are unchanged: Everything (backup) saves the same file, in the
+  same data formats, as 2.26.0's Export data.
+
 ## [2.26.0] - 2026-11-07
 
 An AI agent can now mark every verse on a topic for you to read yourself.
