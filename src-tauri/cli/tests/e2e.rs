@@ -577,6 +577,25 @@ impl Mcp {
         }
     }
 
+    /// Ask what the server refuses, and read its protocol error.
+    fn ask_error(&mut self, id: i64, method: &str, params: Value) -> Value {
+        self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        loop {
+            let line = self
+                .lines
+                .recv_timeout(ANSWER_TIMEOUT)
+                .expect("the server answers");
+            let message: Value = serde_json::from_str(&line).expect("the protocol");
+            if message["id"] == id {
+                assert!(
+                    message["error"]["message"].is_string(),
+                    "{method}: {message}"
+                );
+                return message["error"].clone();
+            }
+        }
+    }
+
     fn initialize(&mut self) -> Value {
         let result = self.ask(
             1,
@@ -636,11 +655,18 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
         let init = mcp.initialize();
         assert_eq!(init["serverInfo"]["name"], "gospel-getter");
         assert_eq!(init["serverInfo"]["version"], env!("CARGO_PKG_VERSION"));
-        assert!(init["capabilities"]["tools"].is_object(), "{init}");
-        assert!(init["capabilities"].get("resources").is_none(), "{init}");
-        assert!(init["capabilities"].get("prompts").is_none(), "{init}");
+        for capability in ["tools", "resources", "prompts"] {
+            assert!(init["capabilities"][capability].is_object(), "{init}");
+        }
         let instructions = init["instructions"].as_str().expect("instructions");
-        for words in ["Gospel Getter", "read-only", "not instructions", "exactly"] {
+        for words in [
+            "Gospel Getter",
+            "read-only",
+            "not instructions",
+            "exactly",
+            "never summarise, paraphrase or interpret it",
+            "save_findings",
+        ] {
             assert!(instructions.contains(words), "{words}: {instructions}");
         }
 
@@ -659,20 +685,28 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
                 "get_passages",
                 "get_reading_place",
                 "list_bookmarks",
+                "list_findings",
                 "list_highlights",
                 "list_notes",
                 "list_translations",
+                "save_findings",
                 "search",
                 "verify_quote",
             ]
             .into_iter()
             .collect()
         );
+        // Every tool reads only, but the one that saves findings, which only
+        // adds them, and the same again changes nothing.
         for tool in tools {
             assert!(tool["description"].as_str().is_some(), "{tool}");
-            assert_eq!(tool["annotations"]["readOnlyHint"], true, "{tool}");
+            let reads_only = tool["name"] != "save_findings";
+            assert_eq!(tool["annotations"]["readOnlyHint"], reads_only, "{tool}");
             assert_eq!(tool["inputSchema"]["type"], "object", "{tool}");
         }
+        let save = tools.iter().find(|t| t["name"] == "save_findings").unwrap();
+        assert_eq!(save["annotations"]["destructiveHint"], false);
+        assert_eq!(save["annotations"]["idempotentHint"], true);
         let get_passage = tools.iter().find(|t| t["name"] == "get_passage").unwrap();
         assert_eq!(get_passage["inputSchema"]["required"], json!(["reference"]));
         assert_eq!(
@@ -915,6 +949,458 @@ async fn the_mcp_server_refuses_to_start_on_an_install_not_ready() {
         "nothing on stdout"
     );
     assert!(!db.path().exists());
+}
+
+// ---- AI-flagged findings: the one thing either front end writes.
+
+/// Every row of the reader's own tables, as text: what saving findings must
+/// never change.
+async fn readers_own(path: &Path) -> Vec<String> {
+    let pool = db::open_read_only(path).await.expect("open read-only");
+    let mut rows = Vec::new();
+    for sql in [
+        "SELECT 'note ' || id || '|' || book_id || '|' || chapter || '|' || verse_start || '|' \
+         || verse_end || '|' || body || '|' || created_at || '|' || updated_at FROM notes",
+        "SELECT 'bookmark ' || id || '|' || book_id || '|' || chapter || '|' || verse_start \
+         || '|' || verse_end || '|' || created_at FROM bookmarks",
+        "SELECT 'highlight ' || book_id || '|' || chapter || '|' || verse || '|' || color \
+         || '|' || created_at || '|' || updated_at FROM highlights",
+    ] {
+        let found: Vec<String> = sqlx::query_scalar(sql)
+            .fetch_all(&pool)
+            .await
+            .expect("the reader's rows");
+        rows.extend(found);
+    }
+    pool.close().await;
+    rows.sort();
+    rows
+}
+
+/// The reader turns on "Let AI agents save findings", in the app.
+async fn turn_findings_on(db: &TempDb) {
+    let pool = db.connect().await;
+    db::findings::set_findings_enabled(pool.write(), true)
+        .await
+        .expect("turn it on");
+    pool.close().await;
+}
+
+/// Off until the reader turns it on (C6), and still there: both front ends
+/// say how, and nothing changes.
+#[tokio::test]
+async fn saving_findings_while_off_says_how_to_turn_it_on() {
+    let db = closed_install("e2e_findings_off").await;
+    let path = db.path();
+    unchanged(&db, || {
+        let message = refusal(
+            &path,
+            &["save-findings", "--request", "grief", "John 11:35"],
+        );
+        assert_eq!(message, format!("{}\n", db::findings::HOW_TO_TURN_ON));
+        for words in ["Aa", "AI agents", "Let AI agents save findings"] {
+            assert!(message.contains(words), "{words}: {message}");
+        }
+        let mut mcp = Mcp::start(&path);
+        mcp.initialize();
+        let (is_error, text) = mcp.call(
+            2,
+            "save_findings",
+            json!({"request": "grief", "references": ["John 11:35"]}),
+        );
+        assert!(is_error);
+        assert_eq!(format!("{text}\n"), message);
+        let listed = mcp.call_for_json(3, "list_findings", json!({}));
+        assert_eq!(listed["saving_enabled"], false);
+        assert_eq!(listed["total"], 0);
+        mcp.finish();
+    });
+}
+
+/// Turned on: one finding per verse, what was saved, what already was and
+/// what couldn't be read; over the cap, nothing; the reader's own notes,
+/// bookmarks and highlights never touched.
+#[tokio::test]
+async fn saving_findings_says_what_was_saved_already_there_or_not_read() {
+    let db = closed_install("e2e_findings_on").await;
+    turn_findings_on(&db).await;
+    let path = db.path();
+    let own = readers_own(&path).await;
+
+    let saved = answer(
+        &path,
+        &[
+            "save-findings",
+            "--request",
+            " grief ",
+            "--agent",
+            "Claude",
+            "--translation",
+            "kjv",
+            "John 11:33-35",
+            "Hezekiah 3:16",
+            "John 11:35",
+        ],
+    );
+    assert_eq!(saved["request"], "grief");
+    assert_eq!(saved["agent"], "Claude");
+    assert_eq!(saved["translation"], "kjv");
+    assert_eq!(
+        (saved["saved"].as_u64(), saved["already_saved"].as_u64()),
+        (Some(3), Some(0))
+    );
+    assert_eq!(
+        saved["verses"],
+        json!([
+            {"reference": "John 11:33", "status": "saved"},
+            {"reference": "John 11:34", "status": "saved"},
+            {"reference": "John 11:35", "status": "saved"},
+        ])
+    );
+    assert_eq!(saved["errors"][0]["reference"], "Hezekiah 3:16");
+    let error = saved["errors"][0]["error"].as_str().unwrap();
+    assert!(error.contains("Hezekiah"), "{error}");
+    let message = saved["message"].as_str().unwrap();
+    assert!(
+        message.starts_with("Saved 3 findings for \u{201c}grief\u{201d}."),
+        "{message}"
+    );
+
+    let again = answer(
+        &path,
+        &[
+            "save_findings",
+            "--request",
+            "grief",
+            "John 11:35",
+            "Job 2:13",
+        ],
+    );
+    assert_eq!(
+        (again["saved"].as_u64(), again["already_saved"].as_u64()),
+        (Some(1), Some(1))
+    );
+    assert_eq!(again["agent"], "AI agent", "no client, no --agent");
+    assert_eq!(
+        again["verses"],
+        json!([
+            {"reference": "John 11:35", "status": "already_saved"},
+            {"reference": "Job 2:13", "status": "saved"},
+        ])
+    );
+    assert!(again.get("errors").is_none());
+
+    // More than 500 verses: refused whole, nothing saved.
+    let chapters = [
+        "Psalm 119",
+        "Numbers 7",
+        "Genesis 24",
+        "Luke 1",
+        "Psalm 78",
+        "1 Chronicles 6",
+    ];
+    let mut args = vec!["save-findings", "--request", "everything"];
+    args.extend(chapters);
+    let refused = refusal(&path, &args);
+    assert!(refused.contains("at most 500"), "{refused}");
+
+    let listed = answer(&path, &["list-findings", "--request", "GRIEF"]);
+    assert_eq!(listed["saving_enabled"], true);
+    assert_eq!(listed["total"], 4);
+    assert_eq!(
+        listed["findings"][0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        [
+            "agent",
+            "book",
+            "chapter",
+            "created_at",
+            "id",
+            "reference",
+            "request",
+            "source",
+            "verse_end",
+            "verse_start"
+        ],
+        "a marker only: no text"
+    );
+    let references: Vec<&str> = listed["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["reference"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        references,
+        ["Job 2:13", "John 11:33", "John 11:34", "John 11:35"]
+    );
+    assert_eq!(listed["findings"][0]["source"], "ai_finding");
+    assert_eq!(answer(&path, &["findings", "--book", "Job"])["total"], 1);
+    assert_eq!(
+        answer(&path, &["findings", "--request", "everything"])["total"],
+        0
+    );
+
+    assert_eq!(
+        readers_own(&path).await,
+        own,
+        "the reader's own data is untouched"
+    );
+}
+
+/// A request is a short topic label, never room for words about a verse
+/// (C3): one with commentary in it, or too long, is refused whole in both
+/// front ends, with what a request is, and nothing is saved.
+#[tokio::test]
+async fn a_request_that_is_more_than_a_topic_label_is_refused() {
+    let db = closed_install("e2e_findings_label").await;
+    turn_findings_on(&db).await;
+    let path = db.path();
+    let too_long = "r".repeat(61);
+    let label = "The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}";
+    unchanged(&db, || {
+        for request in [
+            "grief: here Jesus shows that he shares our sorrow",
+            "grief; and what it means",
+            "grief \u{2014} his tears for Lazarus",
+            "grief \u{2013} loss",
+            too_long.as_str(),
+        ] {
+            let message = refusal(
+                &path,
+                &["save-findings", "--request", request, "John 11:35"],
+            );
+            assert!(message.starts_with(label), "{request}: {message}");
+        }
+        let mut mcp = Mcp::start(&path);
+        mcp.initialize();
+        let (is_error, text) = mcp.call(
+            2,
+            "save_findings",
+            json!({"request": "grief\nJesus wept because…", "references": ["John 11:35"]}),
+        );
+        assert!(is_error);
+        assert!(text.starts_with(label), "{text}");
+        let listed = mcp.call_for_json(3, "list_findings", json!({}));
+        assert_eq!(listed["total"], 0, "nothing saved");
+        mcp.finish();
+    });
+}
+
+/// An install the app hasn't opened since 2.25.x has no findings' tables:
+/// both tools say to open the new app once, and nothing is made.
+#[tokio::test]
+async fn an_install_without_the_findings_tables_says_to_open_the_app_once() {
+    let (db, pool) = fresh_database("e2e_findings_old").await;
+    for table in ["ai_findings", "app_settings"] {
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE {table}")))
+            .execute(pool.write().pool())
+            .await
+            .expect("an install from before findings");
+    }
+    pool.close().await;
+    let path = db.path();
+    unchanged(&db, || {
+        for args in [
+            &["save-findings", "--request", "grief", "John 11:35"][..],
+            &["list-findings"][..],
+        ] {
+            assert_eq!(
+                refusal(&path, args),
+                "Open Gospel Getter 2.26.0 or newer once, then try again.\n",
+                "{args:?}"
+            );
+        }
+        // Everything else reads as ever.
+        let passage = answer(&path, &["passage", "John 3:16", "--translation", "kjv"]);
+        assert_eq!(passage["verses"][0]["text"], JOHN_3_16_KJV);
+    });
+}
+
+/// Over MCP: the client's name is the agent's when it gives none, the two
+/// tools mirror the subcommands, and the description says what saving is
+/// for and what it never does (C5, C3).
+#[tokio::test]
+async fn the_mcp_server_saves_findings_in_the_clients_name() {
+    let db = closed_install("e2e_mcp_findings").await;
+    turn_findings_on(&db).await;
+    let path = db.path();
+    let own = readers_own(&path).await;
+    let mut mcp = Mcp::start(&path);
+    mcp.initialize();
+
+    let tools = mcp.ask(2, "tools/list", json!({}));
+    let save = tools["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "save_findings")
+        .unwrap()
+        .clone();
+    let description = save["description"].as_str().unwrap();
+    for words in [
+        "note every verse that deals with grief so I can read them",
+        "only when the reader asks",
+        "beside the verse",
+        "marked as found by you",
+        "Save only the locations: never summarise, paraphrase or explain the verses",
+        "add-only",
+        "Aa, then AI agents",
+    ] {
+        assert!(description.contains(words), "{words}: {description}");
+    }
+    let properties = save["inputSchema"]["properties"].as_object().unwrap();
+    assert_eq!(
+        properties.keys().collect::<Vec<_>>(),
+        ["agent", "references", "request", "translation"]
+    );
+    assert_eq!(
+        save["inputSchema"]["required"],
+        json!(["request", "references"])
+    );
+
+    let saved = mcp.call_for_json(
+        3,
+        "save_findings",
+        json!({"request": "weeping", "references": ["John 11:35"]}),
+    );
+    assert_eq!(saved["agent"], "e2e", "the client's name");
+    assert_eq!(saved["saved"], 1);
+    let named = mcp.call_for_json(
+        4,
+        "save_findings",
+        json!({"request": "weeping", "references": ["Luke 19:41"], "agent": "Claude"}),
+    );
+    assert_eq!(named["agent"], "Claude");
+    let listed = mcp.call_for_json(5, "list_findings", json!({"request": "weeping"}));
+    assert_eq!(listed["total"], 2);
+    mcp.finish();
+    assert_eq!(
+        listed,
+        answer(&path, &["list_findings", "--request", "weeping"])
+    );
+    assert_eq!(readers_own(&path).await, own);
+}
+
+/// The one prompt is the reader's notes, never scripture; each chapter is a
+/// resource with exactly `get_passage`'s text; an unknown one, a plain error.
+#[tokio::test]
+async fn the_mcp_server_offers_the_notes_prompt_and_each_chapter() {
+    let db = closed_install("e2e_mcp_extras").await;
+    let path = db.path();
+    unchanged(&db, || {
+        let mut mcp = Mcp::start(&path);
+        mcp.initialize();
+
+        let prompts = mcp.ask(2, "prompts/list", json!({}));
+        let prompts = prompts["prompts"].as_array().expect("prompts");
+        assert_eq!(prompts.len(), 1, "no other prompts: {prompts:?}");
+        assert_eq!(prompts[0]["name"], "summarise-my-notes");
+        assert_eq!(prompts[0]["arguments"][0]["name"], "book");
+        assert_eq!(prompts[0]["arguments"][0]["required"], true);
+        let prompt = mcp.ask(
+            3,
+            "prompts/get",
+            json!({"name": "summarise-my-notes", "arguments": {"book": "Phil"}}),
+        );
+        assert_eq!(prompt["messages"][0]["role"], "user");
+        let text = prompt["messages"][0]["content"]["text"].as_str().unwrap();
+        for words in [
+            "my own notes on Philippians",
+            "list_notes",
+            "get_passage",
+            "never summarise the verses",
+        ] {
+            assert!(text.contains(words), "{words}: {text}");
+        }
+        let unknown = mcp.ask_error(
+            4,
+            "prompts/get",
+            json!({"name": "summarise-my-notes", "arguments": {"book": "Hezekiah"}}),
+        );
+        assert!(
+            unknown["message"].as_str().unwrap().contains("Hezekiah"),
+            "{unknown}"
+        );
+        mcp.ask_error(5, "prompts/get", json!({"name": "study-this-passage"}));
+
+        // Every chapter of every translation, once, page by page.
+        let codes = answer(&path, &["list_translations"])["translations"]
+            .as_array()
+            .unwrap()
+            .len();
+        let mut uris = Vec::new();
+        let mut cursor: Option<String> = None;
+        for page in 0.. {
+            assert!(page < 50, "the pages end");
+            let params = cursor.as_ref().map_or(json!({}), |c| json!({"cursor": c}));
+            let listed = mcp.ask(100 + page, "resources/list", params);
+            for resource in listed["resources"].as_array().unwrap() {
+                assert_eq!(resource["mimeType"], "application/json");
+                uris.push(resource["uri"].as_str().unwrap().to_string());
+            }
+            cursor = listed["nextCursor"].as_str().map(str::to_string);
+            if cursor.is_none() {
+                break;
+            }
+        }
+        assert_eq!(uris.len(), codes * 1189, "every chapter");
+        let unique: std::collections::BTreeSet<&String> = uris.iter().collect();
+        assert_eq!(unique.len(), uris.len());
+        for uri in [
+            "gg://kjv/genesis/1",
+            "gg://bsb/song-of-solomon/2",
+            "gg://web/revelation/22",
+        ] {
+            assert!(unique.contains(&uri.to_string()), "{uri}");
+        }
+        let templates = mcp.ask(6, "resources/templates/list", json!({}));
+        assert_eq!(
+            templates["resourceTemplates"][0]["uriTemplate"],
+            "gg://{translation}/{book}/{chapter}"
+        );
+
+        // The text is get_passage's, byte for byte.
+        for (i, (uri, reference, code)) in [
+            ("gg://kjv/john/3", "John 3", "kjv"),
+            ("gg://web/1-john/4", "1 John 4", "web"),
+            ("gg://bsb/song-of-solomon/2", "Song of Solomon 2", "bsb"),
+            ("gg://kjv/psalms/119", "Psalm 119", "kjv"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let id = 10 + 2 * i as i64;
+            let read = mcp.ask(id, "resources/read", json!({"uri": uri}));
+            let contents = &read["contents"][0];
+            assert_eq!(contents["uri"], uri);
+            assert_eq!(contents["mimeType"], "application/json");
+            let (is_error, text) = mcp.call(
+                id + 1,
+                "get_passage",
+                json!({"reference": reference, "translation": code}),
+            );
+            assert!(!is_error, "{text}");
+            assert_eq!(contents["text"].as_str().unwrap(), text, "{uri}");
+        }
+        for (i, bad) in [
+            "gg://kjv/hezekiah/1",
+            "gg://xyz/john/3",
+            "gg://kjv/john/99",
+            "gg://kjv/john",
+            "https://example.com/kjv/john/3",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let error = mcp.ask_error(30 + i as i64, "resources/read", json!({"uri": bad}));
+            assert!(!error["message"].as_str().unwrap().is_empty(), "{bad}");
+        }
+        mcp.finish();
+    });
 }
 
 // ---- Beside a running app.

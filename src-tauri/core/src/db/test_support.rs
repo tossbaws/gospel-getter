@@ -5,7 +5,7 @@
 //!
 //! Preparing a database (seeding three translations and the
 //! cross-references, then building the search index) takes seconds, so it's
-//! done once per test binary, into template files (see [`Templates`]), and
+//! done once per test binary, into template files (see `Templates`), and
 //! each test that wants a prepared database gets its own copy of one.
 
 use serde::Deserialize;
@@ -55,13 +55,13 @@ impl Drop for TempDb {
 }
 
 /// A database prepared exactly as the app prepares one at startup, with
-/// the search index built: a copy of the [`Template::Indexed`] template.
+/// the search index built: a copy of the `Template::Indexed` template.
 pub async fn fresh_database(label: &str) -> (TempDb, Db) {
     copy_of(Template::Indexed, label).await
 }
 
 /// A database prepared exactly as the app prepares one at startup, before
-/// the search index is built: a copy of the [`Template::Prepared`]
+/// the search index is built: a copy of the `Template::Prepared`
 /// template.
 pub async fn prepared_database(label: &str) -> (TempDb, Db) {
     copy_of(Template::Prepared, label).await

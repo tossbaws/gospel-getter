@@ -13,6 +13,8 @@
 //! - `reading`: the home screen, the chapter being read and the saved position.
 //! - `passages`: a passage read in place (a cross-reference) or copied.
 //! - `bookmarks`, `highlights`, `notes`: the reader's own marks on verses.
+//! - `findings`: the AI-flagged findings an agent saved at the reader's
+//!   request, and the reader's switch for them.
 //! - `search`: search, and going to a reference.
 //! - `compare`: a chapter in several translations side by side.
 //! - `backup`: exporting and importing the reader's data.
@@ -24,6 +26,7 @@ mod bookmarks;
 mod compare;
 mod export_notes;
 mod files;
+mod findings;
 mod highlights;
 mod lookup;
 mod notes;
@@ -37,6 +40,7 @@ pub use bookmarks::*;
 pub use compare::*;
 pub use export_notes::*;
 pub(crate) use files::*;
+pub use findings::*;
 pub use highlights::*;
 use lookup::*;
 pub use notes::*;

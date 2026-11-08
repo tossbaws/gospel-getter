@@ -13,7 +13,9 @@ use crate::db::WritePool;
 /// EXISTS` adds to any database, and which an older app opening the same
 /// database never reads (2.20.0's `reading_place`, say: 2.19.1 keeps
 /// saving `reading_position` without it, and the place is used only while
-/// it's for the chapter saved there). The first change it can't make (a
+/// it's for the chapter saved there; 2.26.0's `ai_findings` and
+/// `app_settings`, which 2.25.x and older never open). The first change it
+/// can't make (a
 /// new column, a changed constraint) bumps this to 2, adds a step after the
 /// `CREATE`s that runs only when the stored version is below 2 (an
 /// `ALTER TABLE`, say), and writes 2 in place of 1 below.
@@ -210,6 +212,72 @@ pub async fn migrate(writer: &WritePool) -> anyhow::Result<()> {
         .execute(writer.pool())
         .await
         .context("Failed to create notes index")?;
+
+    // AI-flagged findings (2.26.0, `db::findings`): where an AI agent, at the
+    // reader's request, marked a verse ("every verse that deals with
+    // grief"), so the reader can read each one themselves. A marker, never
+    // commentary (C3): there's no column for free text. What the app shows
+    // is built from `agent` and `request` alone ("Found by Claude for your
+    // request “grief”."). The passage's CHECKs are the notes'; the lengths
+    // back up `db::findings::{MAX_AGENT_CHARS, MAX_REQUEST_CHARS}`. Saving
+    // the same verse for the same request again is a no-op (the UNIQUE
+    // index); they're looked up a chapter at a time and a request at a
+    // time, hence the other two.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS ai_findings (
+            id INTEGER PRIMARY KEY,
+            book_id INTEGER NOT NULL REFERENCES books(id),
+            chapter INTEGER NOT NULL CHECK (chapter >= 1),
+            verse_start INTEGER NOT NULL CHECK (verse_start >= 1),
+            verse_end INTEGER NOT NULL CHECK (verse_end >= verse_start),
+            agent TEXT NOT NULL CHECK (length(agent) BETWEEN 1 AND 60),
+            request TEXT NOT NULL CHECK (length(request) BETWEEN 1 AND 60),
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        )
+        "#,
+    )
+    .execute(writer.pool())
+    .await
+    .context("Failed to create ai_findings table")?;
+
+    for (index, sql) in [
+        (
+            "ai_findings unique",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_findings_unique \
+             ON ai_findings (book_id, chapter, verse_start, verse_end, request)",
+        ),
+        (
+            "ai_findings chapter",
+            "CREATE INDEX IF NOT EXISTS idx_ai_findings_chapter ON ai_findings (book_id, chapter)",
+        ),
+        (
+            "ai_findings request",
+            "CREATE INDEX IF NOT EXISTS idx_ai_findings_request ON ai_findings (request)",
+        ),
+    ] {
+        sqlx::query(sql)
+            .execute(writer.pool())
+            .await
+            .with_context(|| format!("Failed to create the {index} index"))?;
+    }
+
+    // The app's own settings that something outside the page must read, a
+    // key and its value each: `ai_findings_enabled` (`db::findings`), which
+    // `gospel-getter-cli` checks before it saves a finding. A key that's
+    // absent has its default (for that one, off: C6). The page's display
+    // settings stay in the page's own storage (`shared/preferences.rs`).
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(writer.pool())
+    .await
+    .context("Failed to create app_settings table")?;
 
     // A translation's footnotes, where it keeps them apart from its verse
     // text (the BSB's): each exactly as its source has it (`usfm`), and

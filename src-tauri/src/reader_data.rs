@@ -17,6 +17,16 @@
 //! them, still import exactly as before and leave the reader's notes
 //! alone.
 //!
+//! Format 4 (from v2.26.0) adds AI-flagged findings: `findings`, each a
+//! passage, the agent that found it and the reader's request (never any
+//! text about the verse), and `ai_findings_enabled`, the reader's switch,
+//! there only when it's on. An export is written as format 4 only when it
+//! has either, and as format 3 otherwise, so a backup without findings
+//! still restores in full in 2.8.0 to 2.25.x; one with findings is refused
+//! there with their plain "made by a newer version" message. Format 1 to 3
+//! files still import exactly as before and leave the findings and the
+//! switch alone.
+//!
 //! Display preferences are read leniently: one this version
 //! doesn't know, or with a value it doesn't offer (a theme added later,
 //! say), is skipped and named in `ReaderData::skipped_preferences`, and the
@@ -31,20 +41,24 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
+use crate::db::findings::{normalize_agent, normalize_request};
 use crate::db::notes::normalize_body;
 // The rows an import writes are the database's (`db::reader_data`); named
 // here too, as validating a file makes them.
 pub use crate::db::reader_data::{
     NewBookmark, NewHighlight, NewNote, NewPosition, NoteKey, StoredNote, notes_to_add,
 };
-use crate::db::{Book, HighlightColor, Translation};
+use crate::db::{Book, HighlightColor, NewFinding, Passage, Translation};
 
 /// The `format` every reader-data file declares.
 pub const FORMAT: &str = "gospel-getter-reader-data";
-/// The `format_version` this version writes. It reads this,
-/// `FORMAT_VERSION_2` and `FORMAT_VERSION_1`; anything newer is refused,
-/// since it may mean things this version would misread.
-pub const FORMAT_VERSION: u64 = 3;
+/// The newest `format_version` this version writes (when there are AI
+/// findings to write, or the switch is on; otherwise `FORMAT_VERSION_3`). It
+/// reads this and every older one; anything newer is refused, since it may
+/// mean things this version would misread.
+pub const FORMAT_VERSION: u64 = 4;
+/// The third format: format 2 and notes, but no AI findings.
+pub const FORMAT_VERSION_3: u64 = 3;
 /// The second format: format 1 and highlights, but no notes.
 pub const FORMAT_VERSION_2: u64 = 2;
 /// The first format: bookmarks, reading position and preferences, but no
@@ -114,9 +128,17 @@ pub struct ReaderData {
     /// written back out stays a valid format 1 file.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub highlights: Vec<HighlightRecord>,
-    /// Format 3 only, and likewise left out when there are none.
+    /// Format 3 and newer, and likewise left out when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<NoteRecord>,
+    /// Format 4 only, and likewise left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<FindingRecord>,
+    /// Format 4 only: "Let AI agents save findings", written only when it's
+    /// on. Imported, it turns the switch on (or, `false`, off); absent, the
+    /// switch is left as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_findings_enabled: Option<bool>,
     #[serde(default)]
     pub preferences: Preferences,
     /// The display preferences in the file that `parse` skipped, each as
@@ -201,6 +223,31 @@ pub struct NoteRecord {
     pub created_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+}
+
+/// One AI-flagged finding: a passage, who found it and for which of the
+/// reader's requests (see `db::findings`). No text: a finding never says
+/// anything about the verse.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FindingRecord {
+    /// Canonical book number, Genesis = 1 … Revelation = 66.
+    pub book: i64,
+    /// The book's name, for people reading the file. If present on import,
+    /// it must match `book`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub book_name: Option<String>,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    /// Who found it: "Claude".
+    pub agent: String,
+    /// What the reader asked for: "grief".
+    pub request: String,
+    /// When it was found (UTC, ISO 8601). Kept on import; a missing one is
+    /// "now".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
 }
 
 /// Display preferences. Each is optional: a file only changes the ones it
@@ -369,11 +416,16 @@ pub fn parse(bytes: &[u8]) -> Result<ReaderData, ImportError> {
     }
     match value.get("format_version").and_then(Value::as_u64) {
         Some(FORMAT_VERSION) => {}
-        // A format 1 or 2 file is read exactly as it always was: one that
-        // names highlights (format 1) or notes has a field its format
-        // doesn't define.
-        Some(old @ (FORMAT_VERSION_1 | FORMAT_VERSION_2)) => {
-            for (field, since) in [("highlights", FORMAT_VERSION_2), ("notes", FORMAT_VERSION)] {
+        // A format 1 to 3 file is read exactly as it always was: one that
+        // names highlights (format 1), notes (formats 1 and 2) or findings
+        // has a field its format doesn't define.
+        Some(old @ (FORMAT_VERSION_1 | FORMAT_VERSION_2 | FORMAT_VERSION_3)) => {
+            for (field, since) in [
+                ("highlights", FORMAT_VERSION_2),
+                ("notes", FORMAT_VERSION_3),
+                ("findings", FORMAT_VERSION),
+                ("ai_findings_enabled", FORMAT_VERSION),
+            ] {
                 if old < since && value.get(field).is_some() {
                     return Err(ImportError::Malformed(format!(
                         "The file doesn't have the expected layout: unknown field `{field}` \
@@ -565,6 +617,11 @@ pub struct ValidatedImport {
     /// How many notes in the file had no date and repeated another one in
     /// it (the same passage and text).
     pub note_duplicates_in_file: usize,
+    /// In the file's order. `None` for a format 1 to 3 file, which can't
+    /// hold findings, so importing it leaves them alone.
+    pub findings: Option<Vec<NewFinding>>,
+    /// The file's "Let AI agents save findings", if it has one.
+    pub ai_findings_enabled: Option<bool>,
     pub position: Option<NewPosition>,
     pub preferences: Preferences,
     /// The file's display preferences that were skipped (see
@@ -837,6 +894,52 @@ pub fn validate(
         ));
     }
 
+    let mut findings: Vec<NewFinding> = Vec::new();
+    for (i, f) in data.findings.into_iter().enumerate() {
+        let label = format!("AI finding {}", i + 1);
+        let (found, reference) = match check_passage_record(
+            &label,
+            (f.book, &f.book_name, f.chapter, f.verse_start, f.verse_end),
+            books,
+            last_verses,
+        ) {
+            Ok(checked) => checked,
+            Err(problem) => {
+                problems.push(problem);
+                continue;
+            }
+        };
+        let request = match normalize_request(&f.request) {
+            Ok(request) => request,
+            Err(e) => {
+                problems.push(format!("{label} ({reference}): {e}"));
+                continue;
+            }
+        };
+        let created_at = match f.created_at.as_deref().map(normalize_timestamp) {
+            None => None,
+            Some(Some(t)) => Some(t),
+            Some(None) => {
+                problems.push(format!(
+                    "{label} ({reference}): its date isn't a valid UTC time like \
+                     2026-10-04T12:30:00Z."
+                ));
+                continue;
+            }
+        };
+        findings.push(NewFinding {
+            passage: Passage {
+                book_id: found.id,
+                chapter: f.chapter,
+                verse_start: f.verse_start,
+                verse_end: f.verse_end,
+            },
+            agent: normalize_agent(&f.agent),
+            request,
+            created_at,
+        });
+    }
+
     let position = match data.reading_position {
         None => None,
         Some(p) => {
@@ -907,8 +1010,10 @@ pub fn validate(
         duplicates_in_file,
         highlights: (data.format_version != FORMAT_VERSION_1).then_some(highlights),
         highlight_duplicates_in_file,
-        notes: (data.format_version >= FORMAT_VERSION).then_some(notes),
+        notes: (data.format_version >= FORMAT_VERSION_3).then_some(notes),
         note_duplicates_in_file,
+        findings: (data.format_version >= FORMAT_VERSION).then_some(findings),
+        ai_findings_enabled: data.ai_findings_enabled,
         position,
         preferences: data.preferences,
         skipped_preferences: data.skipped_preferences,
@@ -1101,14 +1206,14 @@ mod tests {
             Err(ImportError::NotReaderData)
         );
         let newer = parse(
-            br#"{"format": "gospel-getter-reader-data", "format_version": 4, "brand_new": true}"#,
+            br#"{"format": "gospel-getter-reader-data", "format_version": 5, "brand_new": true}"#,
         )
         .unwrap_err();
         assert_eq!(
             newer,
             ImportError::UnsupportedVersion(
-                "This file was made by a newer version of Gospel Getter (data format 4). This \
-                 version reads format 3; update Gospel Getter to import it."
+                "This file was made by a newer version of Gospel Getter (data format 5). This \
+                 version reads format 4; update Gospel Getter to import it."
                     .to_string()
             )
         );
@@ -1498,6 +1603,8 @@ mod tests {
                 };
                 notes
             ],
+            findings: Vec::new(),
+            ai_findings_enabled: None,
             preferences: Preferences {
                 theme: Some(Theme::ClassicLight),
                 text_size: Some(TextSize::Medium),
@@ -1602,6 +1709,8 @@ mod tests {
             bookmarks: Vec::new(),
             highlights: Vec::new(),
             notes: Vec::new(),
+            findings: Vec::new(),
+            ai_findings_enabled: None,
             preferences: Preferences::default(),
             skipped_preferences: Vec::new(),
         };

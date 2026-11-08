@@ -80,6 +80,13 @@
 # DevToolsActivePort file is, and Edge WebDriver's user-data folders) and
 # screenshots/desktop.png.
 #
+# Check 70 (an AI-flagged finding saved by gospel-getter-cli while the app
+# runs, then shown, opened and kept as the reader's note) runs the CLI
+# GUI_CHECK_CLI names, else the one beside the app (a release build's, or an
+# installed app's on Windows), else the one an AppImage carries; without
+# one it fails as not run. The CLI runs in the checks' own environment, so
+# it finds the database the app uses.
+#
 # Settings, for CI or a slow machine: GUI_CHECK_BUDGET (seconds for the whole
 # run, default 180), GUI_CHECK_STEP_TIMEOUT (seconds per step, default 10),
 # GUI_CHECK_SESSION_TIMEOUT (seconds to start the app, default 30),
@@ -281,6 +288,21 @@ free_port() {
     return 1
 }
 
+# The CLI check 70 runs: GUI_CHECK_CLI, else the one beside the app.
+cli="${GUI_CHECK_CLI:-}"
+if [[ -z $cli ]]; then
+    for name in gospel-getter-cli gospel-getter-cli.exe; do
+        if [[ -f "$(dirname "$app")/$name" ]]; then
+            cli="$(dirname "$app")/$name"
+            break
+        fi
+    done
+fi
+if [[ -n $cli ]]; then
+    [[ -f $cli ]] || setup_failed "no such file (GUI_CHECK_CLI): $cli"
+    cli="$(realpath "$cli")"
+fi
+
 driver_args=()
 run_env=()
 launch="$app"
@@ -400,6 +422,10 @@ EOF
             || setup_failed "the AppImage did not extract"
         launch="$work/squashfs-root/AppRun"
         [[ -x $launch ]] || setup_failed "the AppImage has no AppRun"
+        # The CLI it carries, for check 70, unless one was named.
+        if [[ -z $cli && -x "$work/squashfs-root/usr/bin/gospel-getter-cli" ]]; then
+            cli="$work/squashfs-root/usr/bin/gospel-getter-cli"
+        fi
     fi
 
     # tauri-driver passes its environment to WebKitWebDriver, which starts
@@ -450,6 +476,7 @@ else
             GUI_LAUNCH_UPDATER_LOG="$(cygpath -w "$out/app-updater.log")")
     fi
     checks_settings="$(cygpath -w "$updater_settings")"
+    [[ -z $cli ]] || cli="$(cygpath -w "$cli")"
 fi
 
 port="$(free_port)" || setup_failed "no free port for tauri-driver"
@@ -602,6 +629,7 @@ fi
     GUI_TEST_UPDATER_FILE="$checks_settings" \
     GUI_OUT_DIR="$out" \
     GUI_EXPORT_DIR="$export_dir" \
+    GUI_CLI="$cli" \
     GUI_BUDGET_SECS="$remaining" \
     GUI_STEP_TIMEOUT_SECS="$step_timeout" \
     GUI_SESSION_TIMEOUT_SECS="${GUI_CHECK_SESSION_TIMEOUT:-30}" \

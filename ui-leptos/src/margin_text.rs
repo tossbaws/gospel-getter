@@ -16,6 +16,7 @@
 //! verse.
 
 use crate::dto::SelectionNote;
+use crate::findings_text::{self, FindingGroup};
 use crate::note_markdown::{self, Layout};
 use crate::reader_text::escape_html;
 
@@ -232,14 +233,66 @@ fn rules_html(notes: &[(&SelectionNote, Anchor)]) -> String {
         .collect()
 }
 
+/// What goes down the margin beside a verse: one of the reader's notes, or
+/// the verse's AI findings, one entry for them all (`findings_text`).
+#[derive(Debug, Clone, Copy)]
+pub enum Entry<'a> {
+    Note(&'a SelectionNote),
+    Findings(&'a FindingGroup),
+}
+
+/// The reader's notes and the verses' findings, each where it sits, in the
+/// order they go down the page: by the verse each sits beside, the reader's
+/// own notes there first, then its findings (C9), each kind in the order
+/// given.
+pub fn entries<'a>(
+    notes: &[(&'a SelectionNote, Anchor)],
+    findings: &[(&'a FindingGroup, Anchor)],
+) -> Vec<(Entry<'a>, Anchor)> {
+    let mut all: Vec<(Entry<'a>, Anchor, u8)> = notes
+        .iter()
+        .map(|&(note, anchor)| (Entry::Note(note), anchor, 0))
+        .chain(
+            findings
+                .iter()
+                .map(|&(group, anchor)| (Entry::Findings(group), anchor, 1)),
+        )
+        .collect();
+    all.sort_by_key(|(_, anchor, kind)| (anchor.verse, *kind));
+    all.into_iter()
+        .map(|(entry, anchor, _)| (entry, anchor))
+        .collect()
+}
+
+/// The reader's notes among `entries`.
+fn notes_of<'a>(entries: &[(Entry<'a>, Anchor)]) -> Vec<(&'a SelectionNote, Anchor)> {
+    entries
+        .iter()
+        .filter_map(|&(entry, anchor)| match entry {
+            Entry::Note(note) => Some((note, anchor)),
+            Entry::Findings(_) => None,
+        })
+        .collect()
+}
+
 /// The margin: a complementary landmark, "Your notes", after the chapter in
 /// reading order, its notes in verse order, and a thin rule beside each
 /// range's verses (decoration, hidden from screen readers).
+#[cfg(test)]
 pub fn margin_html(notes: &[(&SelectionNote, Anchor)]) -> String {
-    let rules = rules_html(notes);
-    let items: String = notes
+    margin_entries_html(&entries(notes, &[]))
+}
+
+/// The margin, the verses' AI findings among the reader's notes, each
+/// after the notes beside its verse.
+pub fn margin_entries_html(entries: &[(Entry, Anchor)]) -> String {
+    let rules = rules_html(&notes_of(entries));
+    let items: String = entries
         .iter()
-        .map(|(note, anchor)| note_html(note, *anchor))
+        .map(|(entry, anchor)| match entry {
+            Entry::Note(note) => note_html(note, *anchor),
+            Entry::Findings(group) => findings_text::margin_html(group),
+        })
         .collect();
     format!(
         r#"<aside class="margin-notes" role="complementary" aria-label="Your notes">{rules}{items}</aside>"#
@@ -262,32 +315,53 @@ pub fn column_note_html(note: &SelectionNote, anchor: Anchor) -> String {
 /// way or couldn't be read), one quiet line saying how to add one. Empty,
 /// it's what the reader draws before the notes come.
 pub fn column_html(notes: &[(&SelectionNote, Anchor)], known: bool) -> String {
-    let inner = if notes.is_empty() {
+    column_entries_html(&entries(notes, &[]), known)
+}
+
+/// Compare's notes column, the verses' AI findings among the reader's
+/// notes as in the margin; the line for a chapter with none only when it has
+/// neither.
+pub fn column_entries_html(entries: &[(Entry, Anchor)], known: bool) -> String {
+    let inner = if entries.is_empty() {
         if known {
             format!(r#"<p class="notes-column-empty">{NO_NOTES}</p>"#)
         } else {
             String::new()
         }
     } else {
-        let rules = rules_html(notes);
-        let items: String = notes
+        let rules = rules_html(&notes_of(entries));
+        let items: String = entries
             .iter()
-            .map(|(note, anchor)| column_note_html(note, *anchor))
+            .map(|e| column_entry_html(e, "column"))
             .collect();
         format!("{rules}{items}")
     };
     format!(r#"<section class="notes-column" aria-label="{COLUMN_NAME}">{inner}</section>"#)
 }
 
+/// One entry of the notes column, or under its verse (`where_`).
+fn column_entry_html((entry, anchor): &(Entry, Anchor), where_: &str) -> String {
+    match entry {
+        Entry::Note(note) => column_note_html(note, *anchor),
+        Entry::Findings(group) => findings_text::column_html(group, where_),
+    }
+}
+
 /// The notes that sit under one verse, in a window too narrow for the
 /// column: each as in the column, after the verse in the text.
+#[cfg(test)]
 pub fn under_html(notes: &[(&SelectionNote, Anchor)]) -> String {
-    notes
+    under_entries_html(&entries(notes, &[]))
+}
+
+/// The entries that sit under one verse, the reader's notes first.
+pub fn under_entries_html(entries: &[(Entry, Anchor)]) -> String {
+    entries
         .iter()
-        .map(|(note, anchor)| {
+        .map(|entry| {
             format!(
                 r#"<div class="note-under">{}</div>"#,
-                column_note_html(note, *anchor)
+                column_entry_html(entry, "under")
             )
         })
         .collect()

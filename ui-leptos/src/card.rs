@@ -59,7 +59,7 @@ use crate::bridge;
 use crate::card_text::{self as text, Change, Room, Selection, Side, Slot};
 use crate::dom;
 use crate::dto::{
-    Bookmark, Compare, CopyText, CopyTextArgs, Highlight, PassageArgs, PassageText,
+    Bookmark, Compare, CopyText, CopyTextArgs, Finding, Highlight, PassageArgs, PassageText,
     PassageTextArgs, Reading, RemoveBookmarkArgs, SelectionNote, SetHighlightArgs, Verse,
 };
 use crate::ipc;
@@ -69,7 +69,7 @@ use crate::palette::PaletteState;
 /// Every verse the reader can select: the chapter being read, in each
 /// translation column it's shown in. Neither the faded neighbors nor
 /// cross-reference text carry `data-translation`.
-const SELECTABLE: &str = ".chapter-main .verse[data-translation]";
+pub(crate) const SELECTABLE: &str = ".chapter-main .verse[data-translation]";
 
 /// A future this runs to its end, its commands already sent.
 type Task = Pin<Box<dyn Future<Output = ()>>>;
@@ -1693,14 +1693,17 @@ fn render_notes_section() {
 }
 
 /// Reloads the chapter's notes (the markers), the selection's and the
-/// Library's, after any change to notes, wherever it came from; the
-/// commands are sent now, in that order, and this settles once all three
-/// have.
+/// Library's, and the chapter's AI findings (a note kept from one removes
+/// it), after any change to notes, wherever it came from; the commands are
+/// sent now, in that order, and this settles once all four have.
 pub fn refresh_notes() -> impl Future<Output = ()> + 'static {
     let chapter = to_promise(refresh_chapter_notes());
     let selection = to_promise(refresh_selection_notes());
     let library = to_promise(refresh_library(&["notes"]));
-    let all = js_sys::Promise::all(&js_sys::Array::of3(&chapter, &selection, &library));
+    let findings = to_promise(Box::pin(crate::findings::refresh()));
+    let all = js_sys::Promise::all(&js_sys::Array::of4(
+        &chapter, &selection, &library, &findings,
+    ));
     async move {
         let _ = JsFuture::from(all).await;
     }
@@ -1736,6 +1739,17 @@ struct NoteOpen<'a> {
     code: &'a str,
     passage_html: &'a str,
     others: Vec<Other>,
+    /// "Keep as mine": the AI finding the note is made from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    keep: Option<KeepOut<'a>>,
+}
+
+/// The finding "Keep as mine" makes a note of: its id, and its words, which
+/// the editor opens with, all selected (C10).
+#[derive(Serialize)]
+struct KeepOut<'a> {
+    id: i64,
+    text: &'a str,
 }
 
 #[derive(Serialize)]
@@ -1757,6 +1771,19 @@ fn open_note_panel(
     reference: String,
     code: &str,
     opener: Option<HtmlElement>,
+) {
+    open_note_editor(mode, note, passage, reference, code, opener, None);
+}
+
+/// [`open_note_panel`], or, with `keep`, "Keep as mine" on that finding.
+fn open_note_editor(
+    mode: &str,
+    note: Option<JsValue>,
+    passage: (i64, i64, i64, i64),
+    reference: String,
+    code: &str,
+    opener: Option<HtmlElement>,
+    keep: Option<&Finding>,
 ) {
     let (book_id, chapter, start, end) = passage;
     let Some(verses) = with(|s| {
@@ -1793,7 +1820,15 @@ fn open_note_panel(
         reference: &reference,
         code,
         passage_html: &passage_html,
-        others: if mode == "add" { others() } else { Vec::new() },
+        others: match keep {
+            Some(finding) => chapter_others(finding),
+            None if mode == "add" => others(),
+            None => Vec::new(),
+        },
+        keep: keep.map(|f| KeepOut {
+            id: f.id,
+            text: &f.text,
+        }),
     };
     let Ok(detail) = ipc::args(&open) else {
         return;
@@ -1862,6 +1897,57 @@ fn open_add_note(opener: Option<HtmlElement>) {
     if let Some((passage, reference, code)) = found {
         open_note_panel("add", None, passage, reference, &code, opener);
     }
+}
+
+/// "Keep as mine" on an AI finding of the chapter on screen (C10): the same
+/// editor as + Add note, on the finding's verses, in the translation being
+/// read, opened with the finding's words, all of them selected. Saving a
+/// note there makes it the reader's own note and removes the finding; the
+/// reader's notes already on the verse are listed, and never changed.
+pub fn keep_finding(finding: &Finding, opener: Option<HtmlElement>) {
+    let Some(code) = with(|s| {
+        let chapter = s.chapter.as_ref()?;
+        (chapter.book_id == finding.book_id && chapter.chapter == finding.chapter)
+            .then(|| chapter.translation_code.clone())
+    }) else {
+        return;
+    };
+    open_note_editor(
+        "keep",
+        None,
+        (
+            finding.book_id,
+            finding.chapter,
+            finding.verse_start,
+            finding.verse_end,
+        ),
+        finding.reference.clone(),
+        &code,
+        opener,
+        Some(finding),
+    );
+}
+
+/// The reader's own notes on a finding's verses, from the chapter's, as the
+/// editor lists the others.
+fn chapter_others(finding: &Finding) -> Vec<Other> {
+    with(|s| {
+        s.chapter_notes
+            .iter()
+            .map(|(n, _)| n)
+            .filter(|n| {
+                n.book_id == finding.book_id
+                    && n.chapter == finding.chapter
+                    && n.verse_start <= finding.verse_end
+                    && n.verse_end >= finding.verse_start
+            })
+            .map(|n| Other {
+                reference: n.reference.clone(),
+                date: n.created_at_display.clone(),
+                body: n.body.clone(),
+            })
+            .collect()
+    })
 }
 
 /// A Library note's Edit has opened its passage (the reader jumped there,
@@ -2198,6 +2284,9 @@ pub fn shown(
     apply_highlight_markers();
     apply_note_markers();
     show_margin();
+    if let Some((book_id, chapter)) = with(|s| s.chapter.as_ref().map(|c| (c.book_id, c.chapter))) {
+        crate::findings::chapter_shown(book_id, chapter);
+    }
     spawn_local(refresh_chapter_notes());
 }
 

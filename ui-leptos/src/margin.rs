@@ -35,6 +35,12 @@
 //! first verse instead, in the text, through the reading place logic.
 //! Read-only too: a note opens the card as a margin note does.
 //!
+//! The chapter's AI-flagged findings (`findings`, handed over with
+//! [`findings`]) go everywhere the notes do, by the same rules: one entry
+//! per verse, after the reader's own notes beside it (C9), collapsed as the
+//! violet badge and the verse until clicked (C7, `findings_text`); a marker
+//! after the pencil in a narrow window. They're drawn collapsed every time.
+//!
 //! `window.gospelGetterMargin` says what's shown and how long the last
 //! placing took, for the tests ([`export_margin`]).
 
@@ -51,7 +57,8 @@ use crate::bridge;
 use crate::card;
 use crate::dom;
 use crate::dto::SelectionNote;
-use crate::margin_text::{self as text, Anchor};
+use crate::findings_text::{self, FindingGroup};
+use crate::margin_text::{self as text, Anchor, Entry};
 use crate::preferences;
 use crate::prefs;
 use crate::surfaces;
@@ -98,12 +105,17 @@ struct State {
     notes: Vec<(SelectionNote, JsValue)>,
     /// They're the chapter's (read for it), so none means it has none.
     known: bool,
+    /// The chapter's AI findings, a group per verse, and the chapter (book,
+    /// chapter) they were read for.
+    findings: Vec<FindingGroup>,
+    findings_of: Option<(i64, i64)>,
     /// Bumped by each new set of notes: they're drawn again.
     generation: u64,
     /// What's on the page: drawn for which generation, how, and the notes
     /// in the order drawn.
     drawn: Option<(u64, Shown)>,
     placed: Vec<Placed>,
+    placed_findings: Vec<(FindingGroup, Anchor)>,
     /// A frame is asked for, to place the notes.
     frame_pending: bool,
     /// How long the last placing took, in milliseconds.
@@ -136,6 +148,31 @@ pub fn notes(
         s.known = known;
         s.generation += 1;
     });
+    schedule();
+}
+
+/// The chapter's AI findings (`book_id` `chapter`), a group per verse, from
+/// `findings`: drawn in the next frame.
+pub fn findings(book_id: i64, chapter: i64, groups: Vec<FindingGroup>) {
+    with(|s| {
+        s.findings = groups;
+        s.findings_of = Some((book_id, chapter));
+        s.generation += 1;
+    });
+    schedule();
+}
+
+/// The chapter's findings, if they're for the chapter the notes are.
+fn findings_here(s: &State) -> Vec<FindingGroup> {
+    match (&s.chapter, s.findings_of) {
+        (Some((book_id, chapter, _)), Some(of)) if of == (*book_id, *chapter) => s.findings.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// Places the notes again in the next frame: an entry grew or shrank (a
+/// verse's findings opened or closed).
+pub fn relayout() {
     schedule();
 }
 
@@ -217,6 +254,16 @@ fn by_note_id(root: &Element, selector: &str) -> HashMap<i64, HtmlElement> {
         .collect()
 }
 
+/// The elements `selector` finds in `root`, by their `data-finding-key`.
+fn by_finding_key(root: &Element, selector: &str) -> HashMap<String, HtmlElement> {
+    root.query_selector_all(selector)
+        .map(|found| dom::elements(&found))
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|el| Some((el.get_attribute("data-finding-key")?, el)))
+        .collect()
+}
+
 /// The page's rem, in px.
 fn rem() -> f64 {
     root()
@@ -259,7 +306,7 @@ fn wanted(column: &HtmlElement) -> Shown {
     let attr = |name: &str| root().and_then(|html| html.get_attribute(name));
     let shown = attr("data-reader-mode").as_deref() == Some("on")
         && prefs::on(&preferences::MARGIN_NOTES)
-        && !with(|s| s.notes.is_empty());
+        && !with(|s| s.notes.is_empty() && findings_here(s).is_empty());
     if !shown {
         Shown::Nothing
     } else if text::width(room(column), rem()).is_some() {
@@ -332,7 +379,7 @@ fn clear() {
         let _ = column.remove_attribute("data-drawn");
         let _ = column.style().remove_property("min-height");
     }
-    let markers = found(".margin-marker, .note-under");
+    let markers = found(".margin-marker, .note-under, .finding-inline");
     if !markers.is_empty() {
         surfaces::keep_reading_place(
             || {
@@ -343,7 +390,10 @@ fn clear() {
             None,
         );
     }
-    with(|s| s.placed.clear());
+    with(|s| {
+        s.placed.clear();
+        s.placed_findings.clear();
+    });
 }
 
 /// The chapter's notes in the order they go down the margin (by the verse
@@ -363,6 +413,29 @@ fn anchored(numbered: &[i64]) -> Vec<Placed> {
     .collect()
 }
 
+/// The chapter's findings in the order they go down the page, each with
+/// where it sits among `numbered`, as a note on its verses would.
+fn anchored_findings(numbered: &[i64]) -> Vec<(FindingGroup, Anchor)> {
+    let groups = with(|s| findings_here(s));
+    text::in_order(
+        groups.into_iter().map(|g| {
+            let (start, end) = (g.verse_start, g.verse_end);
+            (g, start, end)
+        }),
+        numbered,
+    )
+}
+
+/// The notes and findings placed, in the order they go down the page.
+fn all_entries<'a>(
+    placed: &'a [Placed],
+    findings: &'a [(FindingGroup, Anchor)],
+) -> Vec<(Entry<'a>, Anchor)> {
+    let notes: Vec<(&SelectionNote, Anchor)> = placed.iter().map(|p| (&p.note, p.anchor)).collect();
+    let findings: Vec<(&FindingGroup, Anchor)> = findings.iter().map(|(g, a)| (g, *a)).collect();
+    text::entries(&notes, &findings)
+}
+
 fn draw(column: &HtmlElement, shown: Shown) {
     let Some(code) = with(|s| s.chapter.as_ref().map(|c| c.2.clone())) else {
         return;
@@ -371,30 +444,29 @@ fn draw(column: &HtmlElement, shown: Shown) {
     let numbered: Vec<i64> = verses.iter().filter_map(|v| number(v)).collect();
     let verses = by_number(verses);
     let placed = anchored(&numbered);
+    let placed_findings = anchored_findings(&numbered);
+    let entries = all_entries(&placed, &placed_findings);
     let known = with(|s| s.known);
     match shown {
         Shown::Nothing => {}
         Shown::Column => {
-            let pairs: Vec<(&SelectionNote, Anchor)> =
-                placed.iter().map(|p| (&p.note, p.anchor)).collect();
             if let Some(empty) = column.query_selector(".notes-column").ok().flatten() {
-                empty.set_outer_html(&text::column_html(&pairs, known));
+                empty.set_outer_html(&text::column_entries_html(&entries, known));
             }
             if let Some(drawn) = column.query_selector(".notes-column").ok().flatten() {
                 let _ = drawn.set_attribute("data-drawn", shown.name());
                 listen(&drawn);
             }
         }
-        Shown::Under => draw_under(column, &verses, &placed, known),
+        Shown::Under => draw_under(column, &verses, &entries, known),
         Shown::Margin => {
-            let pairs: Vec<(&SelectionNote, Anchor)> =
-                placed.iter().map(|p| (&p.note, p.anchor)).collect();
-            let _ = column.insert_adjacent_html("beforeend", &text::margin_html(&pairs));
+            let _ = column.insert_adjacent_html("beforeend", &text::margin_entries_html(&entries));
             if let Some(aside) = column.query_selector(".margin-notes").ok().flatten() {
                 listen(&aside);
             }
         }
         Shown::Markers => {
+            // The reader's pencil first, then the violet AI marker (C9).
             surfaces::keep_reading_place(
                 || {
                     for p in &placed {
@@ -403,11 +475,19 @@ fn draw(column: &HtmlElement, shown: Shown) {
                                 .insert_adjacent_html("beforeend", &text::marker_html(&p.note));
                         }
                     }
+                    for (group, anchor) in &placed_findings {
+                        if let Some(verse) = verses.get(&anchor.verse) {
+                            let _ = verse.insert_adjacent_html(
+                                "beforeend",
+                                &findings_text::marker_html(group),
+                            );
+                        }
+                    }
                 },
                 None,
             );
             for marker in column
-                .query_selector_all(".margin-marker")
+                .query_selector_all(".margin-marker, .finding-inline")
                 .map(|found| dom::elements(&found))
                 .unwrap_or_default()
             {
@@ -415,7 +495,10 @@ fn draw(column: &HtmlElement, shown: Shown) {
             }
         }
     }
-    with(|s| s.placed = placed);
+    with(|s| {
+        s.placed = placed;
+        s.placed_findings = placed_findings;
+    });
 }
 
 /// Each note under the verse it sits beside, in the text (the reading
@@ -425,14 +508,14 @@ fn draw(column: &HtmlElement, shown: Shown) {
 fn draw_under(
     column: &HtmlElement,
     verses: &HashMap<i64, HtmlElement>,
-    placed: &[Placed],
+    placed: &[(Entry, Anchor)],
     known: bool,
 ) {
-    let mut under: Vec<(i64, Vec<(&SelectionNote, Anchor)>)> = Vec::new();
-    for p in placed {
+    let mut under: Vec<(i64, Vec<(Entry, Anchor)>)> = Vec::new();
+    for &(entry, anchor) in placed {
         match under.last_mut() {
-            Some((verse, notes)) if *verse == p.anchor.verse => notes.push((&p.note, p.anchor)),
-            _ => under.push((p.anchor.verse, vec![(&p.note, p.anchor)])),
+            Some((verse, entries)) if *verse == anchor.verse => entries.push((entry, anchor)),
+            _ => under.push((anchor.verse, vec![(entry, anchor)])),
         }
     }
     let text_column = column.query_selector(".chapter-text").ok().flatten();
@@ -445,9 +528,10 @@ fn draw_under(
                 }
                 return;
             }
-            for (verse, notes) in &under {
+            for (verse, entries) in &under {
                 if let Some(verse) = verses.get(verse) {
-                    let _ = verse.insert_adjacent_html("afterend", &text::under_html(notes));
+                    let _ =
+                        verse.insert_adjacent_html("afterend", &text::under_entries_html(entries));
                 }
             }
         },
@@ -467,9 +551,18 @@ fn draw_under(
 
 /// A click on a note, its reference or "more" (or a marker; Enter and
 /// Space click them) opens it; the click goes no further, so it neither
-/// selects the verse a marker is in nor clears the selection.
+/// selects the verse a marker is in nor clears the selection. A verse's
+/// findings, their toggle and their actions are `findings`'.
 fn listen(target: &Element) {
+    dom::on(target, "keydown", |event| {
+        if let Some(event) = event.dyn_ref::<web_sys::KeyboardEvent>() {
+            crate::findings::on_key(event);
+        }
+    });
     dom::on(target, "click", |event| {
+        if crate::findings::on_click(&event) {
+            return;
+        }
         let note_id = event
             .target()
             .and_then(|t| t.dyn_into::<Element>().ok())
@@ -620,11 +713,27 @@ fn place_notes(column: &HtmlElement, aside: &HtmlElement, top_of: f64) -> f64 {
         return 0.0;
     };
     let verses = by_number(verses(column, &code));
-    let ids: Vec<(i64, Anchor)> =
-        with(|s| s.placed.iter().map(|p| (p.note.id, p.anchor)).collect());
+    // Each entry down the page: a note by its id, a verse's findings by
+    // their key, in the order they go (`margin_text::entries`).
+    let ids: Vec<(Option<i64>, String, Anchor)> = with(|s| {
+        all_entries(&s.placed, &s.placed_findings)
+            .into_iter()
+            .map(|(entry, anchor)| match entry {
+                Entry::Note(note) => (Some(note.id), String::new(), anchor),
+                Entry::Findings(group) => (None, group.key(), anchor),
+            })
+            .collect()
+    });
     let mut found = by_note_id(aside, ".margin-note");
+    let mut found_findings = by_finding_key(aside, ".margin-finding");
     let rules = by_note_id(aside, ".margin-rule");
-    let notes: Vec<Option<HtmlElement>> = ids.iter().map(|(id, _)| found.remove(id)).collect();
+    let notes: Vec<Option<HtmlElement>> = ids
+        .iter()
+        .map(|(id, key, _)| match id {
+            Some(id) => found.remove(id),
+            None => found_findings.remove(key),
+        })
+        .collect();
 
     // Every box read in one pass (the page laid out once): which notes are
     // cut short (their words past the fold; "more" overlays the faded foot,
@@ -644,14 +753,14 @@ fn place_notes(column: &HtmlElement, aside: &HtmlElement, top_of: f64) -> f64 {
     };
     let wanted: Vec<f64> = ids
         .iter()
-        .map(|&(_, anchor)| {
+        .map(|&(_, _, anchor)| {
             mark(anchor.verse).map_or(0.0, |el| el.get_bounding_client_rect().top() - top_of)
         })
         .collect();
     let spans: Vec<Option<(f64, f64)>> = ids
         .iter()
-        .map(|&(_, anchor)| {
-            anchor.is_range().then(|| {
+        .map(|&(id, _, anchor)| {
+            (id.is_some() && anchor.is_range()).then(|| {
                 let top = verses
                     .get(&anchor.verse)
                     .map_or(0.0, |v| v.get_bounding_client_rect().top());
@@ -668,14 +777,16 @@ fn place_notes(column: &HtmlElement, aside: &HtmlElement, top_of: f64) -> f64 {
         .collect();
     let tops = text::stack(&wanted, &heights, text::STACK_GAP_PX);
 
-    for ((((note, top), (id, _)), span), folded) in
+    for ((((note, top), (id, _, _)), span), folded) in
         notes.iter().zip(&tops).zip(&ids).zip(&spans).zip(&folded)
     {
         if let Some(note) = note {
             let _ = note.style().set_property("top", &format!("{top}px"));
             fold(note, *folded);
         }
-        if let (Some((span_top, span_height)), Some(rule)) = (span, rules.get(id)) {
+        if let (Some((span_top, span_height)), Some(rule)) =
+            (span, id.and_then(|id| rules.get(&id)))
+        {
             let _ = rule.style().set_property("top", &format!("{span_top}px"));
             let _ = rule
                 .style()

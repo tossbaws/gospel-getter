@@ -134,6 +134,13 @@
             --hl-green: #2c5a46;
             --hl-blue: #22415f;
             --hl-pink: #682a47;
+            /* AI-flagged findings (ui-leptos/src/findings.rs): an agent's
+               markers, never the reader's own, in a violet of their own:
+               the badge's fill and its text (--on-ai), the dotted underline
+               of a flagged verse and the findings' verses. AA in every theme
+               and apart from its accents (see the palette tests). */
+            --ai: #b9a6ff;
+            --on-ai: #15121f;
         }
 
         /* Vellum: Chi Rho's light twin, ink on warm paper, with emerald
@@ -162,6 +169,8 @@
             --hl-green: #c6ecbd;
             --hl-blue: #c9defc;
             --hl-pink: #f8cfe2;
+            --ai: #6d3fc4;
+            --on-ai: #ffffff;
         }
 
         @media (prefers-color-scheme: light) {
@@ -187,6 +196,8 @@
                 --hl-green: #c6ecbd;
                 --hl-blue: #c9defc;
                 --hl-pink: #f8cfe2;
+                --ai: #6d3fc4;
+                --on-ai: #ffffff;
             }
         }
 
@@ -236,6 +247,8 @@
             --hl-green: #1e5541;
             --hl-blue: #23437a;
             --hl-pink: #74245c;
+            --ai: #d4a8ff;
+            --on-ai: #14082c;
         }
 
         :root[data-theme="classic-dark"],
@@ -260,6 +273,8 @@
             --hl-green: #224f2f;
             --hl-blue: #1f3f6b;
             --hl-pink: #5c2747;
+            --ai: #c0a3ff;
+            --on-ai: #15121f;
         }
 
         :root[data-theme="classic-light"],
@@ -284,6 +299,8 @@
             --hl-green: #c6ecbd;
             --hl-blue: #c9defc;
             --hl-pink: #f8cfe2;
+            --ai: #7b35c9;
+            --on-ai: #ffffff;
         }
 
         :root[data-theme="matrix"],
@@ -308,6 +325,8 @@
             --hl-green: #11521f;
             --hl-blue: #0f3a5c;
             --hl-pink: #57173e;
+            --ai: #c4b0ff;
+            --on-ai: #100c1f;
         }
 
         :root[data-theme="beast-slayer"],
@@ -338,6 +357,8 @@
             --hl-green: #31512a;
             --hl-blue: #22415f;
             --hl-pink: #682a47;
+            --ai: #c6b2ff;
+            --on-ai: #15121f;
         }
 
         /* Hot pink as the accent on a near-black plum ground, rather than
@@ -371,6 +392,8 @@
             --hl-green: #1f5038;
             --hl-blue: #263d6b;
             --hl-pink: #84205a;
+            --ai: #b9a6ff;
+            --on-ai: #15121f;
         }
 
         :root[data-text-size="small"] { --reading-scale: 0.9; }
@@ -1093,6 +1116,76 @@
         .library-panel .bookmark-list {
             max-height: none;
             overflow: visible;
+        }
+
+        /* The Notes tab's two parts, when there are AI findings: "My
+           notes", then "Found by AI agents", grouped by request. */
+        .library-section-title {
+            font-size: max(11px, calc(0.78rem * var(--ui-scale)));
+            font-weight: 600;
+            color: var(--text);
+            margin: 0.9rem 0 0.35rem;
+        }
+
+        .my-notes-title {
+            margin-top: 0.4rem;
+        }
+
+        .finding-group-list,
+        .finding-group-verses {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .finding-group {
+            padding: 0.5rem 0;
+            border-top: 1px solid var(--accent-dim);
+        }
+
+        .finding-group-head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 0.2rem 0.6rem;
+        }
+
+        .finding-group-name {
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .finding-group-meta {
+            font-size: max(11px, calc(0.78rem * var(--ui-scale)));
+            color: var(--text-dim);
+        }
+
+        .finding-group-verses {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.2rem 0.75rem;
+            margin-top: 0.35rem;
+        }
+
+        .finding-open {
+            font-family: inherit;
+            font-size: max(11px, calc(0.8rem * var(--ui-scale)));
+            color: var(--ai);
+            background: none;
+            border: none;
+            padding: 0;
+            text-decoration: underline dotted;
+            text-underline-offset: 2px;
+            cursor: pointer;
+        }
+
+        .finding-open:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .finding-groups-error {
+            color: var(--text);
         }
 
         .library-hint {
@@ -3073,6 +3166,127 @@
                 border-left: none;
                 padding-left: 0;
             }
+
+            /* AI-flagged findings (ui-leptos/src/findings.rs): markers an
+               AI agent saved at the reader's request, in their own violet
+               (--ai), so they're never taken for the reader's notes or for
+               scripture (C2). A flagged verse gets a dotted underline (C8),
+               which sits with the reader's highlight band and pencil. */
+            .chapter-main .verse.has-finding .verse-text {
+                text-decoration: underline dotted var(--ai);
+                text-decoration-thickness: 1.5px;
+                text-underline-offset: 0.3em;
+                text-decoration-skip-ink: none;
+            }
+
+            /* The badge: "AI", or "AI ×2". */
+            .ai-badge {
+                display: inline-block;
+                font-family: var(--font-ui);
+                font-size: max(11px, calc(0.7rem * var(--ui-scale)));
+                font-weight: 600;
+                letter-spacing: 0.04em;
+                line-height: 1.35;
+                color: var(--on-ai);
+                background: var(--ai);
+                border-radius: var(--radius-s);
+                padding: 0 0.3em;
+                white-space: nowrap;
+            }
+
+            /* A verse's findings in the margin (C7): collapsed, the badge
+               and the verse; open, a dashed violet rule down their side,
+               each finding's words and its actions. Placed as a note is,
+               after the reader's notes beside the same verse (C9). */
+            .margin-finding {
+                position: absolute;
+                left: 0;
+                right: 0;
+                padding-left: 0.55rem;
+                border-left: 2px dashed transparent;
+            }
+
+            .margin-finding.is-open {
+                border-left-color: var(--ai);
+            }
+
+            .margin-finding-head {
+                display: block;
+                font-family: inherit;
+                font-size: max(11px, calc(0.72rem * var(--ui-scale)));
+                line-height: 1.3;
+                color: var(--ai);
+                background: none;
+                border: none;
+                padding: 0;
+                text-align: left;
+                cursor: pointer;
+            }
+
+            .margin-finding-head::after {
+                content: ' \25B8';
+            }
+
+            .margin-finding-head[aria-expanded="true"]::after {
+                content: ' \25BE';
+            }
+
+            .finding-list {
+                list-style: none;
+                margin: 0.15rem 0 0;
+                padding: 0;
+                color: var(--text);
+            }
+
+            .finding-item {
+                display: block;
+                margin: 0 0 0.35rem;
+            }
+
+            .finding-actions {
+                display: block;
+            }
+
+            .finding-actions .note-link {
+                margin-right: 0.7rem;
+            }
+
+            .margin-finding-head:focus-visible {
+                outline: 2px solid var(--accent);
+                outline-offset: 2px;
+            }
+
+            /* Too narrow for the margin: a violet marker after the verse,
+               after the reader's pencil (C9), that opens the verse's
+               findings in the text, after it. */
+            .finding-marker {
+                color: var(--ai);
+            }
+
+            .finding-inline {
+                display: block;
+                margin: 0.25rem 0 0.4rem;
+                padding-left: 0.6rem;
+                border-left: 2px dashed var(--ai);
+                font-family: var(--font-ui);
+                font-size: max(11px, calc(0.8rem * var(--ui-scale)));
+                line-height: 1.45;
+                color: var(--text);
+            }
+
+            .finding-inline[hidden] {
+                display: none;
+            }
+
+            /* In Compare's notes column, and under a verse there. */
+            .notes-column .margin-finding {
+                padding: 0.2rem 0.45rem 0.25rem 0.55rem;
+            }
+
+            .note-under .margin-finding {
+                position: relative;
+                padding: 0.2rem 0.45rem 0.25rem 0.6rem;
+            }
         }
 
         /* The reference button, at the left of the bar: the chapter being
@@ -4590,6 +4804,11 @@
                 display: none !important;
             }
 
+            /* A marker's opened AI findings, in the text: left out too. */
+            .finding-inline {
+                display: none !important;
+            }
+
             /* Compare with Notes prints as the text alone, as normal
                reading does. */
             .notes-grid {
@@ -4865,6 +5084,11 @@
                     <div class="aa-section">
                         <button type="button" id="reader-mode-btn" class="reader-mode-btn" aria-pressed="false">Reading mode</button>
                         <button type="button" id="margin-notes-btn" class="reader-mode-btn margin-notes-btn" aria-pressed="true" title="Your notes beside the text, in reading mode">Notes in the margin</button>
+                    </div>
+                    <div class="aa-section ai-agents-section">
+                        <span class="section-label" id="ai-agents-label">AI agents</span>
+                        <label class="update-check-option ai-findings-option"><input type="checkbox" id="ai-findings-toggle" role="switch" aria-describedby="ai-findings-note"> Let AI agents save findings</label>
+                        <p id="ai-findings-note" class="section-note">An AI agent you ask, such as Claude, can then mark each verse it finds for you here, with your request, for you to read for yourself; it can&rsquo;t change your notes, bookmarks or highlights.</p>
                     </div>
                 </div>
             </div>

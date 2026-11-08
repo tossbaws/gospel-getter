@@ -26,7 +26,9 @@
 //! `beside`); the
 //! Library's Notes tab searched (64, `notes`) and a note's Markdown and
 //! references in the card, the Library and the margin, and Copy as
-//! Markdown (66, `notes`); and, last, the plain-text fallback (44,
+//! Markdown (66, `notes`); an AI-flagged finding saved by gospel-getter-cli
+//! while the app runs, shown in the margin, opened and kept as the
+//! reader's note (70, `findings`); and, last, the plain-text fallback (44,
 //! `reader`);
 //! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
 //! Then the app started again on the same data, keeping Aa's settings (26)
@@ -40,6 +42,7 @@ mod beside;
 mod card;
 mod dialogs;
 mod display;
+mod findings;
 mod keys;
 mod library;
 mod margin;
@@ -433,6 +436,18 @@ async fn shipped(
             run.failure_screenshot(Check::NoteMarkdown).await;
         }
         report.record(Check::NoteMarkdown, markdown).await;
+        // An AI finding (70), saved by the CLI, removed after.
+        let findings = run.ai_findings().await;
+        if findings.is_err() {
+            run.failure_screenshot(Check::AiFindings).await;
+        }
+        if let Err(e) = run.ai_findings_clean_up().await {
+            log_line(
+                started,
+                &format!("putting things back after the AI findings check failed: {e:#}"),
+            );
+        }
+        report.record(Check::AiFindings, findings).await;
 
         if let Err(e) = run.vellum_screenshots().await {
             run.failure_screenshot(Check::Screenshots).await;

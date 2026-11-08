@@ -10,12 +10,12 @@ use std::sync::atomic::Ordering;
 
 use super::{AppState, app_version, book_name, failed, run_dialog, write_atomically};
 use crate::db::notes::grouped;
-use crate::db::reader_data::ApplyImportError;
+use crate::db::reader_data::{ApplyImportError, FindingsImport};
 use crate::db::{self, NoteLimit};
 use crate::passage_reference::passage_reference;
 use crate::reader_data::{
-    self, BookmarkRecord, HighlightRecord, NewBookmark, NewPosition, NoteRecord, PositionRecord,
-    Preferences, ReaderData, ValidatedImport,
+    self, BookmarkRecord, FindingRecord, HighlightRecord, NewBookmark, NewPosition, NoteRecord,
+    PositionRecord, Preferences, ReaderData, ValidatedImport,
 };
 
 // ---- Export and import the reader's own data
@@ -129,6 +129,15 @@ pub struct ImportPreviewDto {
     pub notes_already_present: usize,
     /// How many notes there are here now (what replacing removes).
     pub current_notes: usize,
+    /// Whether the file's format can hold AI findings (format 4 on). An
+    /// older file never touches them, even when replacing.
+    pub has_findings: bool,
+    /// The AI findings in the file.
+    pub findings_in_file: usize,
+    /// How many AI findings there are here now (what replacing removes).
+    pub current_findings: usize,
+    /// The file's "Let AI agents save findings", if it has one.
+    pub ai_findings_enabled: Option<bool>,
     pub position: Option<PositionPreviewDto>,
     pub preferences: Preferences,
     /// The display preferences in the file this version can't apply (a
@@ -172,6 +181,9 @@ pub struct ImportResultDto {
     pub notes_added: usize,
     pub notes_already_present: usize,
     pub notes_removed: usize,
+    pub findings_added: usize,
+    pub findings_already_present: usize,
+    pub findings_removed: usize,
     /// The reading position saved, if the reader chose to restore it.
     pub position: Option<PositionPreviewDto>,
 }
@@ -185,8 +197,10 @@ fn passage_reference_for(state: &AppState, b: &NewBookmark) -> String {
 }
 
 /// The reader's data as an export file: bookmarks (oldest first),
-/// highlights and notes (in Bible order), the saved reading position, and
-/// the display `preferences` the frontend passed in.
+/// highlights, notes and AI findings (in Bible order), the saved reading
+/// position, "Let AI agents save findings" when it's on, and the display
+/// `preferences` the frontend passed in. Format 4 only when it has findings
+/// or the switch on: otherwise format 3, which 2.8.0 to 2.25.x restore.
 pub async fn build_reader_data(
     state: &AppState,
     preferences: Preferences,
@@ -194,6 +208,8 @@ pub async fn build_reader_data(
     let bookmarks = state.store.all_bookmarks().await?;
     let highlights = state.store.highlights().await?;
     let notes = state.store.notes().await?;
+    let findings = state.store.findings().await?;
+    let findings_enabled = state.store.findings_enabled().await?;
     let position = state.store.reading_position().await?;
     let reading_position = position.and_then(|(translation_id, book_id, chapter)| {
         let translation = state.translations.iter().find(|t| t.id == translation_id)?;
@@ -206,7 +222,11 @@ pub async fn build_reader_data(
     });
     Ok(ReaderData {
         format: reader_data::FORMAT.to_string(),
-        format_version: reader_data::FORMAT_VERSION,
+        format_version: if findings.is_empty() && !findings_enabled {
+            reader_data::FORMAT_VERSION_3
+        } else {
+            reader_data::FORMAT_VERSION
+        },
         exported_at: state.store.now().await?,
         app_version: app_version().to_string(),
         reading_position,
@@ -246,6 +266,20 @@ pub async fn build_reader_data(
                 updated_at: Some(n.updated_at),
             })
             .collect(),
+        findings: findings
+            .into_iter()
+            .map(|f| FindingRecord {
+                book_name: book_name(state, f.book_id).map(str::to_string),
+                book: f.book_id,
+                chapter: f.chapter,
+                verse_start: f.verse_start,
+                verse_end: f.verse_end,
+                agent: f.agent,
+                request: f.request,
+                created_at: Some(f.created_at),
+            })
+            .collect(),
+        ai_findings_enabled: findings_enabled.then_some(true),
         preferences,
         skipped_preferences: Vec::new(),
     })
@@ -336,6 +370,7 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
     let stored_notes = state.store.stored_notes().await?;
     let file_notes = import.notes.as_deref().unwrap_or_default();
     let new_notes = reader_data::notes_to_add(file_notes, &stored_notes).len();
+    let current_findings = state.store.findings().await?.len();
     let preview = ImportPreviewDto {
         token: state.next_import_token.fetch_add(1, Ordering::Relaxed),
         file_name,
@@ -364,6 +399,10 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
         new_notes,
         notes_already_present: file_notes.len() - new_notes,
         current_notes: stored_notes.len(),
+        has_findings: import.findings.is_some(),
+        findings_in_file: import.findings.as_ref().map_or(0, Vec::len),
+        current_findings,
+        ai_findings_enabled: import.ai_findings_enabled,
         position: import.position.as_ref().map(PositionPreviewDto::from),
         preferences: import.preferences.clone(),
         skipped_preferences_notice: reader_data::skipped_preferences_notice(
@@ -415,6 +454,10 @@ pub async fn apply_pending_import(
             &import.bookmarks,
             import.highlights.as_deref(),
             import.notes.as_deref(),
+            import.findings.as_deref().map(|findings| FindingsImport {
+                findings,
+                enabled: import.ai_findings_enabled,
+            }),
             replace,
             position,
         )
@@ -437,6 +480,9 @@ pub async fn apply_pending_import(
         notes_added: counts.notes_added,
         notes_already_present: counts.notes_already_present,
         notes_removed: counts.notes_removed,
+        findings_added: counts.findings_added,
+        findings_already_present: counts.findings_already_present,
+        findings_removed: counts.findings_removed,
         position: position.map(PositionPreviewDto::from),
     })
 }

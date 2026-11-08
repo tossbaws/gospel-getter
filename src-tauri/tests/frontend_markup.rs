@@ -17,7 +17,15 @@ use gospel_getter_lib::preferences::{self, Preference, Values};
 /// highlight and notes), and what was the page's main script (the keyboard
 /// and click dispatchers, boot, and the page's glue): checks of those read
 /// them where they now live.
-const PIECES: [(&str, &str); 33] = [
+const PIECES: [(&str, &str); 35] = [
+    (
+        "findings.rs",
+        include_str!("../../ui-leptos/src/findings.rs"),
+    ),
+    (
+        "findings_text.rs",
+        include_str!("../../ui-leptos/src/findings_text.rs"),
+    ),
     (
         "export_notes.rs",
         include_str!("../../ui-leptos/src/export_notes.rs"),
@@ -1167,6 +1175,12 @@ const UI_SCALED_AT_MEDIUM: &[(&str, &str, &str)] = &[
     (".xref-citation", "font-size", "0.85rem"),
     (".margin-notes", "font-size", "0.8rem"),
     (".margin-note-ref", "font-size", "0.72rem"),
+    (".ai-badge", "font-size", "0.7rem"),
+    (".margin-finding-head", "font-size", "0.72rem"),
+    (".finding-inline", "font-size", "0.8rem"),
+    (".library-section-title", "font-size", "0.78rem"),
+    (".finding-group-meta", "font-size", "0.78rem"),
+    (".finding-open", "font-size", "0.8rem"),
     (".margin-note-more", "font-size", "0.75rem"),
     (".notes-column", "font-size", "0.8rem"),
     (".notes-column-empty", "font-size", "0.85rem"),
@@ -5457,4 +5471,97 @@ fn nothing_inline_that_the_content_security_policy_would_block() {
         piece("reader.rs").contains(r#"grid.style().set_property("--compare-columns", &count)"#)
     );
     assert!(!reader.contains(" style="));
+}
+
+/// How far apart two hues are, around the wheel, in degrees.
+fn hue_distance(a: &str, b: &str) -> f64 {
+    let d = (hue(a) - hue(b)).abs();
+    d.min(360.0 - d)
+}
+
+/// AI-flagged findings (ui-leptos/src/findings.rs) have a violet of their
+/// own, `--ai`, in every theme: legible at AA where the margin, the
+/// Library and the card's surface put it, its badge's text (`--on-ai`) AA
+/// on it, never less legible on a gradient's colors than the theme's own
+/// quiet accent, its dotted underline at least 3:1 on every highlighter
+/// color, and well apart from the theme's accents in hue, so it can't be
+/// taken for the reader's own marks (C2).
+#[test]
+fn ai_findings_have_their_own_violet_in_every_theme() {
+    let rules = rules();
+    for (theme, props) in theme_palettes(&rules) {
+        let ai = property(&props, "--ai");
+        for bg in ["--option-bg", "--bar-bg"] {
+            let ratio = contrast_ratio(ai, property(&props, bg));
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: --ai on {bg} is {ratio:.2}:1"
+            );
+        }
+        let on = contrast_ratio(property(&props, "--on-ai"), ai);
+        assert!(on >= 4.5, "theme `{theme}`: --on-ai on --ai is {on:.2}:1");
+        let accent_2 = property(&props, "--accent-2");
+        for stop in backgrounds(&props) {
+            let ratio = contrast_ratio(ai, &stop);
+            let floor = contrast_ratio(accent_2, &stop).min(4.5);
+            assert!(
+                ratio >= floor,
+                "theme `{theme}`: --ai on {stop} is {ratio:.2}:1, under {floor:.2}:1"
+            );
+        }
+        for color in ["yellow", "green", "blue", "pink"] {
+            let hl = property(&props, &format!("--hl-{color}"));
+            let ratio = contrast_ratio(ai, hl);
+            assert!(
+                ratio >= 3.0,
+                "theme `{theme}`: --ai on --hl-{color} is {ratio:.2}:1"
+            );
+        }
+        for accent in ["--accent", "--accent-2"] {
+            let apart = hue_distance(ai, property(&props, accent));
+            assert!(
+                apart >= 40.0,
+                "theme `{theme}`: --ai is {apart:.0}° from {accent}"
+            );
+        }
+    }
+
+    let screen = |selector: &str| {
+        rules
+            .iter()
+            .find(|r| r.at_rule.as_deref() == Some("@media screen") && r.selector == selector)
+            .unwrap_or_else(|| panic!("expected an `@media screen` rule for `{selector}`"))
+            .body
+            .clone()
+    };
+    // C8: the dotted violet underline, on the verse's text, where the
+    // highlighter's band is too.
+    assert!(
+        screen(".chapter-main .verse.has-finding .verse-text")
+            .contains("text-decoration: underline dotted var(--ai);")
+    );
+    let badge = screen(".ai-badge");
+    assert!(badge.contains("color: var(--on-ai);") && badge.contains("background: var(--ai);"));
+    assert!(screen(".margin-finding-head").contains("color: var(--ai);"));
+    assert!(screen(".margin-finding").contains("position: absolute;"));
+    assert!(screen(".finding-inline[hidden]").contains("display: none;"));
+    assert!(
+        screen_rule(&rules, ".finding-open")
+            .body
+            .contains("color: var(--ai);")
+    );
+    let print = block_after(HTML, "@media print");
+    assert!(print.contains(".finding-inline { display: none !important; }"));
+
+    // C6: the switch, in Aa, off until the reader turns it on, with one
+    // sentence saying what it allows.
+    assert!(HTML.contains(
+        r#"<input type="checkbox" id="ai-findings-toggle" role="switch" aria-describedby="ai-findings-note"> Let AI agents save findings</label>"#
+    ));
+    assert!(HTML.contains(r#"<p id="ai-findings-note" class="section-note">An AI agent you ask"#));
+    assert!(piece("findings.rs").contains(r#"const SWITCH_ID: &str = "ai-findings-toggle";"#));
+    assert!(
+        piece("findings_text.rs").contains("Found by <span class=\\\"finding-agent\\\">"),
+        "the words shown are who found it and for what"
+    );
 }

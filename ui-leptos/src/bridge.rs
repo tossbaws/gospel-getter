@@ -389,7 +389,8 @@ pub const NOTE_EVENT: &str = "gospel-getter:note";
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteRequest {
-    /// `add` or `edit`.
+    /// `add`, `edit`, or `keep` ("Keep as mine" on an AI finding: adding a
+    /// note, from the finding's words).
     pub mode: String,
     /// The note being edited.
     pub note: Option<NoteRef>,
@@ -406,6 +407,17 @@ pub struct NoteRequest {
     pub passage_html: String,
     /// When adding, the other notes on these verses, read-only.
     pub others: Vec<OtherNote>,
+    /// "Keep as mine": the finding the note is made from.
+    #[serde(default)]
+    pub keep: Option<KeepRef>,
+}
+
+/// The AI finding "Keep as mine" makes a note of: its id, and its words,
+/// which the editor opens with, all selected.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct KeepRef {
+    pub id: i64,
+    pub text: String,
 }
 
 /// The note being edited: its id and text (the rest stays the card's).

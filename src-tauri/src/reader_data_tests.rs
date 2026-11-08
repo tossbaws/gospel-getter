@@ -338,7 +338,9 @@ async fn an_export_is_the_same_with_or_without_the_verse_read() {
     let verse = reader_data::to_file_contents(&at_the_verse).unwrap();
     assert_eq!(verse, top);
     let json: Value = serde_json::from_str(&verse).unwrap();
-    assert_eq!(json["format_version"], reader_data::FORMAT_VERSION);
+    // No AI findings and the switch off: format 3, which 2.8.0 to 2.25.x
+    // restore in full.
+    assert_eq!(json["format_version"], reader_data::FORMAT_VERSION_3);
     assert_eq!(
         json["reading_position"],
         serde_json::json!({"translation": "web", "book": 43, "book_name": "John", "chapter": 3})
@@ -1247,8 +1249,8 @@ async fn invalid_highlights_reject_the_whole_file_and_change_nothing() {
         ),
         (
             "newer format",
-            v2_file_with("", "").replace("\"format_version\": 2", "\"format_version\": 4"),
-            "newer version of Gospel Getter (data format 4). This version reads format 3;",
+            v2_file_with("", "").replace("\"format_version\": 2", "\"format_version\": 5"),
+            "newer version of Gospel Getter (data format 5). This version reads format 4;",
         ),
     ];
     for (label, contents, expected) in &cases {
@@ -1908,9 +1910,9 @@ async fn invalid_notes_reject_the_whole_file_and_change_nothing() {
         ),
         (
             "newer format",
-            v3_file_with("").replace("\"format_version\": 3", "\"format_version\": 4"),
-            "This file was made by a newer version of Gospel Getter (data format 4). This \
-             version reads format 3; update Gospel Getter to import it."
+            v3_file_with("").replace("\"format_version\": 3", "\"format_version\": 5"),
+            "This file was made by a newer version of Gospel Getter (data format 5). This \
+             version reads format 4; update Gospel Getter to import it."
                 .to_string(),
         ),
     ];
@@ -2343,4 +2345,209 @@ async fn an_export_of_more_than_10000_bookmarks_imports_again() {
             vec![]
         )
     );
+}
+
+// ---- AI-flagged findings (format 4).
+
+/// Every finding, as stored but for its id, in Bible order.
+async fn finding_rows(state: &AppState) -> Vec<(i64, i64, i64, i64, String, String, String)> {
+    state
+        .store
+        .findings()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|f| {
+            (
+                f.book_id,
+                f.chapter,
+                f.verse_start,
+                f.verse_end,
+                f.agent,
+                f.request,
+                f.created_at,
+            )
+        })
+        .collect()
+}
+
+async fn add_finding(state: &AppState, chapter: i64, verse: i64, request: &str) {
+    state
+        .store
+        .add_findings(&[crate::db::NewFinding {
+            passage: Passage {
+                book_id: 43,
+                chapter,
+                verse_start: verse,
+                verse_end: verse,
+            },
+            agent: "Claude".to_string(),
+            request: request.to_string(),
+            created_at: None,
+        }])
+        .await
+        .unwrap();
+}
+
+/// A backup is format 3, as 2.25.x writes it, until it has findings or the
+/// switch is on: only then format 4, which 2.25.x refuses with its plain
+/// "made by a newer version" message rather than misreading it.
+#[tokio::test]
+async fn a_backup_is_format_4_only_with_findings_or_the_switch_on() {
+    let (db, state) = app("rd_findings_format").await;
+    commands::note_add(&state, john_3(16, 16), "Mine.")
+        .await
+        .unwrap();
+    let json = |data: &reader_data::ReaderData| -> Value {
+        serde_json::from_str(&reader_data::to_file_contents(data).unwrap()).unwrap()
+    };
+    let plain = json(&build_reader_data(&state, matrix_prefs()).await.unwrap());
+    assert_eq!(plain["format_version"], 3);
+    assert!(plain.get("findings").is_none() && plain.get("ai_findings_enabled").is_none());
+
+    commands::set_findings_switch(&state, true).await.unwrap();
+    let switched = json(&build_reader_data(&state, matrix_prefs()).await.unwrap());
+    assert_eq!(switched["format_version"], 4);
+    assert_eq!(switched["ai_findings_enabled"], true);
+    assert!(switched.get("findings").is_none());
+
+    commands::set_findings_switch(&state, false).await.unwrap();
+    add_finding(&state, 11, 35, "grief").await;
+    let found = json(&build_reader_data(&state, matrix_prefs()).await.unwrap());
+    assert_eq!(found["format_version"], 4);
+    assert!(found.get("ai_findings_enabled").is_none(), "off: left out");
+    let record = &found["findings"][0];
+    assert_eq!(
+        record.as_object().unwrap().keys().collect::<Vec<_>>(),
+        [
+            "agent",
+            "book",
+            "book_name",
+            "chapter",
+            "created_at",
+            "request",
+            "verse_end",
+            "verse_start"
+        ],
+        "a marker: no text"
+    );
+    assert_eq!(
+        (&record["agent"], &record["request"]),
+        (&"Claude".into(), &"grief".into())
+    );
+    // The notes, bookmarks and highlights are as format 3 has them.
+    assert_eq!(found["notes"], plain["notes"]);
+    drop(db);
+}
+
+#[tokio::test]
+async fn findings_and_the_switch_round_trip_and_older_files_leave_them_alone() {
+    let (db, a) = app("rd_findings_a").await;
+    add_finding(&a, 11, 35, "grief").await;
+    add_finding(&a, 11, 33, "grief").await;
+    add_finding(&a, 11, 35, "tears").await;
+    commands::set_findings_switch(&a, true).await.unwrap();
+    let path = file(&db, "findings.gospel-getter.json");
+    export_to(&a, &path, Preferences::default()).await;
+
+    let (_db_b, b) = app("rd_findings_b").await;
+    let p = preview(&b, &path).await;
+    assert!(p.has_findings);
+    assert_eq!((p.findings_in_file, p.current_findings), (3, 0));
+    assert_eq!(p.ai_findings_enabled, Some(true));
+    let done = import(&b, &path, false).await;
+    assert_eq!((done.findings_added, done.findings_already_present), (3, 0));
+    assert_eq!(finding_rows(&b).await, finding_rows(&a).await, "dates kept");
+    assert!(commands::findings_switch(&b).await.unwrap());
+    let again = import(&b, &path, false).await;
+    assert_eq!(
+        (again.findings_added, again.findings_already_present),
+        (0, 3)
+    );
+
+    // A format 3 file, even replacing, leaves the findings and the switch.
+    let v3 = file(&db, "v3.gospel-getter.json");
+    std::fs::write(&v3, v3_file_with("")).unwrap();
+    assert!(!preview(&b, &v3).await.has_findings);
+    let replaced = import(&b, &v3, true).await;
+    assert_eq!(replaced.findings_removed, 0);
+    assert_eq!(finding_rows(&b).await.len(), 3);
+    assert!(commands::findings_switch(&b).await.unwrap());
+
+    // A format 4 file replacing: its findings only.
+    add_finding(&b, 3, 16, "love").await;
+    let replaced = import(&b, &path, true).await;
+    assert_eq!((replaced.findings_removed, replaced.findings_added), (4, 3));
+    assert_eq!(finding_rows(&b).await, finding_rows(&a).await);
+}
+
+#[tokio::test]
+async fn invalid_findings_reject_the_whole_file_and_change_nothing() {
+    let (db, state) = app("rd_findings_invalid").await;
+    add_finding(&state, 11, 35, "grief").await;
+    let before = (everything(&state).await, finding_rows(&state).await);
+    let v4 = |findings: &str| {
+        format!(
+            r#"{{"format": "gospel-getter-reader-data", "format_version": 4,
+                "exported_at": "2026-11-07T00:00:00.000Z", "app_version": "2.26.0",
+                "reading_position": null, "bookmarks": [], "findings": [{findings}]}}"#
+        )
+    };
+    let finding = |fields: &str| {
+        v4(&format!(
+            r#"{{"book": 43, "chapter": 11, "verse_start": 35, "verse_end": 35, {fields}}}"#
+        ))
+    };
+    let cases = [
+        (
+            "bad verse",
+            v4(
+                r#"{"book": 43, "chapter": 11, "verse_start": 58, "verse_end": 58, "agent": "Claude", "request": "grief"}"#,
+            ),
+            "AI finding 1: there's no John 11:58",
+        ),
+        (
+            "empty request",
+            finding(r#""agent": "Claude", "request": "  ""#),
+            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}; this one is empty.",
+        ),
+        (
+            "a request with commentary",
+            finding(r#""agent": "Claude", "request": "grief: here Jesus shows his sorrow""#),
+            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon",
+        ),
+        (
+            "a body",
+            finding(r#""agent": "Claude", "request": "grief", "body": "It means…""#),
+            "unknown field `body`",
+        ),
+        (
+            "format 3 with findings",
+            v3_file_with("").replace("\"bookmarks\"", "\"findings\": [], \"bookmarks\""),
+            "unknown field `findings` (data format 3 has no findings)",
+        ),
+        (
+            "format 3 with the switch",
+            v3_file_with("").replace(
+                "\"bookmarks\"",
+                "\"ai_findings_enabled\": true, \"bookmarks\"",
+            ),
+            "unknown field `ai_findings_enabled`",
+        ),
+    ];
+    for (label, contents, expected) in &cases {
+        let path = file(
+            &db,
+            &format!("{}.gospel-getter.json", label.replace(' ', "-")),
+        );
+        std::fs::write(&path, contents).unwrap();
+        let (message, problems) = invalid(&state, &path).await;
+        let all = format!("{message} {}", problems.join(" "));
+        assert!(all.contains(expected), "{label}: {all}");
+        assert_eq!(
+            (everything(&state).await, finding_rows(&state).await),
+            before,
+            "{label} changed something"
+        );
+    }
 }

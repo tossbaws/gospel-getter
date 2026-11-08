@@ -77,7 +77,7 @@ fn note_links(state: &AppState, body: &str) -> Vec<NoteLinkDto> {
         .collect()
 }
 
-fn note_dto(state: &AppState, note: Note) -> NoteDto {
+pub(super) fn note_dto(state: &AppState, note: Note) -> NoteDto {
     let book_name = book_name(state, note.book_id).unwrap_or("?").to_string();
     NoteDto {
         links: note_links(state, &note.body),
@@ -100,7 +100,7 @@ fn note_dto(state: &AppState, note: Note) -> NoteDto {
 }
 
 /// A note that couldn't be saved, in words for the reader.
-fn note_error_message(state: &AppState, error: NoteError) -> String {
+pub(super) fn note_error_message(state: &AppState, error: NoteError) -> String {
     const FAILED: &str = "The note couldn't be saved.";
     match error {
         NoteError::Passage(e) => passage_error_message(state, e, "noted", FAILED),

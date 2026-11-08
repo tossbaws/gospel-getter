@@ -798,7 +798,10 @@ fn on_select_change(pref: Preference) {
 pub fn draw(surface: Surface) {
     match surface {
         Surface::Translation => render_translations(),
-        Surface::Aa => sync_aa(),
+        Surface::Aa => {
+            sync_aa();
+            crate::findings::draw_switch();
+        }
         _ => {}
     }
 }

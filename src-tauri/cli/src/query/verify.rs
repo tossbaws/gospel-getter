@@ -622,17 +622,31 @@ fn look_alike_note(quoted: char, actual: char) -> Option<String> {
 }
 
 /// Where `quote`, which isn't in `text`, first departs from it. It's aligned at
-/// the place in `text` that shares the most with its start, the earliest of
-/// any equal; but a place that doesn't get through the quote's first word has
-/// only a few letters in common with it, so then it's the start of the text. In
-/// characters throughout, so nothing is cut inside one.
+/// the place in `text` that shares the most with its start; of places that
+/// share as much, the earliest where the characters at the difference only look
+/// alike, so its note is given (the quote's "the LORD’S" against "unto the
+/// LORD; … the LORD'S", Exodus 9:29), else the earliest. But a place that
+/// doesn't get through the quote's first word has only a few letters in common
+/// with it, so then it's the start of the text. In characters throughout, so
+/// nothing is cut inside one. Only what's reported depends on this: the verdict
+/// is the comparison's ([`verbatim`]).
 fn first_difference(quote: &str, text: &str) -> QuoteDifference {
     let quote: Vec<char> = quote.chars().collect();
     let text: Vec<char> = text.chars().collect();
+    let looks_alike_at = |start: usize, common: usize| {
+        quote
+            .get(common)
+            .zip(text.get(start + common))
+            .is_some_and(|(&quoted, &actual)| look_alike(quoted, actual))
+    };
     let (mut start, mut common) = (0, 0);
     for at in 0..text.len() {
         let shared = common_prefix(&quote, &text[at..]);
-        if shared > common {
+        let tie_with_a_note = shared == common
+            && shared > 0
+            && !looks_alike_at(start, common)
+            && looks_alike_at(at, shared);
+        if shared > common || tie_with_a_note {
             (start, common) = (at, shared);
         }
     }

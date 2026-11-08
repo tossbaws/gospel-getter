@@ -28,6 +28,14 @@
 //! overlapping reloads of a list is shown, as before (each list has its own
 //! token).
 //!
+//! The Notes tab also lists the AI-flagged findings an agent saved at the
+//! reader's request (C4), apart from "My notes" under their own heading,
+//! grouped by request: each with who found them, how many verses and when,
+//! its verses (each opening its passage) and "Remove all", which removes
+//! them together, with Undo in the toast (`findings`). They're read again
+//! each time the Library opens and whenever the notes are, so what an agent
+//! saved while the app was open shows then.
+//!
 //! This is the page's Library script (`ui/index.html` at 6d8d9a5: the tabs,
 //! `renderBookmarkList`, `renderHighlightList`, `renderNoteList`, their
 //! refreshes and their clicks) as a Leptos component: the same ids,
@@ -46,8 +54,10 @@ use crate::bridge;
 use crate::card;
 use crate::dom;
 use crate::dto::{
-    Bookmark, HighlightPassage, Note, PassageArgs, RemoveBookmarkArgs, TranslationArgs,
+    Bookmark, FindingRequest, HighlightPassage, Note, PassageArgs, RemoveBookmarkArgs,
+    TranslationArgs,
 };
+use crate::findings_text;
 use crate::ipc;
 use crate::library_text::{self as text, List};
 use crate::note_markdown::{self, Layout};
@@ -106,6 +116,10 @@ struct Library {
     bookmarks: RwSignal<Option<Shown<Bookmark>>>,
     highlights: RwSignal<Option<Shown<HighlightPassage>>>,
     notes: RwSignal<Option<Shown<NoteRow>>, LocalStorage>,
+    /// The AI findings, by request; and their latest reload.
+    findings: RwSignal<Option<Shown<FindingRequest>>>,
+    findings_token: StoredValue<u64>,
+    finding_box: NodeRef<html::Div>,
     /// The color filter: `all` or a color, for this session only.
     filter: RwSignal<String>,
     /// What the Notes tab's search box held when typing last paused (the
@@ -164,6 +178,9 @@ impl Library {
             bookmarks: RwSignal::new(None),
             highlights: RwSignal::new(None),
             notes: RwSignal::new_local(None),
+            findings: RwSignal::new(None),
+            findings_token: StoredValue::new(0),
+            finding_box: NodeRef::new(),
             filter: RwSignal::new(text::ALL.to_string()),
             query: RwSignal::new(String::new()),
             search_timer: StoredValue::new(None),
@@ -321,6 +338,101 @@ impl Library {
         }
     }
 
+    /// Reloads the AI findings; the future finishes once the answer is shown
+    /// (or dropped for a newer reload).
+    fn reload_findings(self) -> impl Future<Output = ()> + 'static {
+        self.findings_token.update_value(|t| *t += 1);
+        let token = self.findings_token.get_value();
+        // Asked now, within what asked for it (the Library opening, say),
+        // as the other lists are.
+        let sent = ipc::send("list_finding_requests", JsValue::UNDEFINED);
+        async move {
+            let answer = match sent {
+                Ok(sent) => wasm_bindgen_futures::JsFuture::from(sent)
+                    .await
+                    .and_then(|raw| {
+                        serde_wasm_bindgen::from_value::<Vec<FindingRequest>>(raw.clone())
+                            .map(|groups| (groups, raw))
+                            .map_err(JsValue::from)
+                    }),
+                Err(e) => Err(e),
+            };
+            if self.findings_token.get_value() != token {
+                return;
+            }
+            match answer {
+                Ok((groups, _)) => self.findings.set(Some(Shown::rows(groups))),
+                Err(e) => {
+                    ipc::log_error("Failed to load the AI findings", &e);
+                    let message = format!(
+                        "The AI findings couldn\u{2019}t be loaded: {}",
+                        ipc::error_text(&e)
+                    );
+                    self.findings.update(|s| match s {
+                        Some(shown) => shown.error = Some(message),
+                        None => {
+                            *s = Some(Shown {
+                                items: Vec::new(),
+                                error: Some(message),
+                            })
+                        }
+                    });
+                }
+            }
+            tick().await;
+        }
+    }
+
+    /// A click in the findings: a verse opens its passage; "Remove all"
+    /// removes its request's findings.
+    fn on_finding_click(self, event: &MouseEvent) {
+        let Some(target) = target_of(event) else {
+            return;
+        };
+        if let Some(remove) = closest(&target, ".finding-remove-all") {
+            let Some(request) = remove.get_attribute("data-request") else {
+                return;
+            };
+            spawn_local(async move {
+                if let Err(message) = crate::findings::remove_request(request.clone()).await {
+                    bridge::toast(
+                        &format!(
+                            "The findings for \u{201c}{request}\u{201d} weren\u{2019}t removed: \
+                             {message}"
+                        ),
+                        true,
+                    );
+                }
+            });
+            return;
+        }
+        let Some(open) = closest(&target, ".finding-open") else {
+            return;
+        };
+        let Some(id) = data_number::<i64>(&open, "data-finding-id") else {
+            return;
+        };
+        let found = self.findings.with_untracked(|s| {
+            s.as_ref()?
+                .items
+                .iter()
+                .flat_map(|g| &g.findings)
+                .find(|f| f.id == id)
+                .cloned()
+        });
+        if let Some(f) = found {
+            Self::open(
+                PassageArgs {
+                    book_id: f.book_id,
+                    chapter: f.chapter,
+                    verse_start: f.verse_start,
+                    verse_end: f.verse_end,
+                },
+                &JsValue::NULL,
+            );
+        }
+    }
+
     /// Shows `message` in place of `list`'s rows (which it keeps).
     fn show_error(self, list: List, message: String) {
         fn set<T>(shown: &mut Option<Shown<T>>, message: String) {
@@ -353,6 +465,17 @@ impl Library {
             }
         };
         let reloads = js_sys::Array::new();
+        // The findings sit with the notes, and reload with them.
+        if lists
+            .iter()
+            .any(|name| name == "findings" || name == "notes")
+        {
+            let reload = self.reload_findings();
+            reloads.push(&wasm_bindgen_futures::future_to_promise(async move {
+                reload.await;
+                Ok(JsValue::UNDEFINED)
+            }));
+        }
         for list in lists.iter().filter_map(|name| List::named(name)) {
             let reload = self.reload(list);
             reloads.push(&wasm_bindgen_futures::future_to_promise(async move {
@@ -853,6 +976,80 @@ fn note_rows(shown: Option<Shown<NoteRow>>, query: &str) -> AnyView {
         .into_any()
 }
 
+/// The AI findings, by request, apart from the reader's own notes: nothing
+/// until there are some.
+fn finding_groups(shown: Option<Shown<FindingRequest>>) -> AnyView {
+    let Some(shown) = shown else {
+        return ().into_any();
+    };
+    if let Some(error) = shown.error {
+        return view! { <p class="finding-groups-error" role="alert">{error}</p> }.into_any();
+    }
+    if shown.items.is_empty() {
+        return ().into_any();
+    }
+    let groups = shown
+        .items
+        .into_iter()
+        .map(|group| {
+            let quoted = format!("\u{201c}{}\u{201d}", group.request);
+            let meta = findings_text::request_meta(
+                &group.agents,
+                group.verse_count,
+                &group.latest_display,
+            );
+            let remove_label = format!(
+                "Remove all {} for {quoted}",
+                if group.findings.len() == 1 {
+                    "1 AI finding".to_string()
+                } else {
+                    format!("{} AI findings", group.findings.len())
+                }
+            );
+            let verses_label = format!("Verses found for {quoted}");
+            let (row_request, button_request) = (group.request.clone(), group.request.clone());
+            let verses = group
+                .findings
+                .into_iter()
+                .map(|f| {
+                    view! {
+                        <li>
+                            <button type="button" class="finding-open" data-finding-id=f.id.to_string()>
+                                {f.reference}
+                            </button>
+                        </li>
+                    }
+                })
+                .collect_view();
+            view! {
+                <li class="finding-group" data-request=row_request>
+                    <div class="finding-group-head">
+                        <span class="finding-group-name">
+                            <span class="ai-badge">{findings_text::BADGE}</span>
+                            " "
+                            {quoted}
+                        </span>
+                        <span class="finding-group-meta">{meta}</span>
+                        <button type="button" class="finding-remove-all note-link" data-request=button_request aria-label=remove_label>
+                            {findings_text::REMOVE_ALL}
+                        </button>
+                    </div>
+                    <ul class="finding-group-verses" aria-label=verses_label>{verses}</ul>
+                </li>
+            }
+        })
+        .collect_view();
+    view! {
+        <section class="finding-groups" aria-labelledby="finding-groups-title">
+            <h3 id="finding-groups-title" class="library-section-title finding-groups-title">
+                {findings_text::FOUND_BY_AI}
+            </h3>
+            <ul id="finding-group-list" class="finding-group-list">{groups}</ul>
+        </section>
+    }
+    .into_any()
+}
+
 /// What a click on one of a list's buttons does, given the element clicked.
 type RowClick = fn(Library, Element);
 
@@ -887,8 +1084,21 @@ pub fn mount() {
             dom::on(&list, name, move |event| library.on_note_near(&event));
         }
     }
+    if let Some(found) = library.finding_box.get_untracked() {
+        dom::on_click(&found, move |event| library.on_finding_click(&event));
+    }
     dom::on_document_event(bridge::LIBRARY_REFRESH_EVENT, move |event| {
         library.on_refresh(event);
+    });
+    // Opening the Library reads the findings again: an agent may have saved
+    // some while the app was open.
+    dom::on_document_event(bridge::SURFACE_OPEN_EVENT, move |event| {
+        let opened = js_sys::Reflect::get(&event.detail(), &JsValue::from_str("name"))
+            .ok()
+            .and_then(|name| name.as_string());
+        if opened.as_deref() == Some("library") {
+            spawn_local(library.reload_findings());
+        }
     });
     place(&holder);
 }
@@ -900,6 +1110,13 @@ fn lists(library: Library) -> impl IntoView {
     // the search notes to search.
     let no_notes = move || {
         library.notes.with(|s| {
+            s.as_ref()
+                .is_none_or(|s| s.error.is_some() || s.items.is_empty())
+        })
+    };
+    // "My notes" is said only when there are findings apart from them.
+    let no_findings = move || {
+        library.findings.with(|s| {
             s.as_ref()
                 .is_none_or(|s| s.error.is_some() || s.items.is_empty())
         })
@@ -1006,6 +1223,7 @@ fn lists(library: Library) -> impl IntoView {
                 </button>
             </div>
             <p id="note-search-count" class="note-search-count" aria-live="polite">{search_count}</p>
+            <h3 class="library-section-title my-notes-title" hidden=no_findings>{findings_text::MY_NOTES}</h3>
             <ul
                 node_ref=library.note_list
                 id="note-list"
@@ -1014,6 +1232,9 @@ fn lists(library: Library) -> impl IntoView {
             >
                 {move || note_rows(library.notes.get(), &library.query.get())}
             </ul>
+            <div node_ref=library.finding_box class="finding-box">
+                {move || finding_groups(library.findings.get())}
+            </div>
         </div>
     }
 }
