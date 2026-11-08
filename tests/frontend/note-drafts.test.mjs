@@ -351,15 +351,12 @@ test('drafts are in no backup and no notes export: both are as they were', async
         const exportBoth = async (name) => {
             const data = join(dir, `${name}.gospel-getter.json`);
             await app.pick(data);
-            app.open('menu');
-            let before = app.calls.length;
-            app.click(el(app, 'export-data-btn'));
-            await app.idle(before, 'export_reader_data');
+            await app.exportEverything();
             const notes = join(dir, `${name}.md`);
             await app.pick(notes);
-            app.openLibrary('notes');
-            before = app.calls.length;
-            app.click(el(app, 'export-notes-btn'));
+            await app.openExport();
+            let before = app.calls.length;
+            app.click(el(app, 'export-choice-notes'));
             await app.idle(before, 'count_notes_export');
             before = app.calls.length;
             app.click(el(app, 'export-notes-confirm'));

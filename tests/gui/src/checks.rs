@@ -1,7 +1,9 @@
 //! The checks, in the order a person would meet them: the app starts and
 //! its page boots (1), and on a fresh install the welcome greets them (5);
 //! the Leptos pieces mounted and the Content Security Policy blocked
-//! nothing (2, judged at the end of the run); Export notes end to end (3);
+//! nothing (2, judged at the end of the run); Export notes end to end,
+//! from ☰ → Export data… → My notes (3), and that chooser itself, with the
+//! Library's Notes tab left without a button (71);
 //! the note editor editing and asking before discarding (6); the keyboard
 //! shortcuts sheet (7); Export data… then Import data… to the preview (8);
 //! the Library's Bookmarks, Highlights and Notes, each filled from the
@@ -138,6 +140,13 @@ const SHOTS: [&str; 9] = [
     "7-shortcuts-chi-rho.png",
     "8-import-preview-chi-rho.png",
     "9-translation-chi-rho.png",
+];
+
+/// ☰ → Export data…'s chooser (check 71), in Chi Rho (dark) and Vellum
+/// (light).
+const EXPORT_CHOICE_SHOTS: [&str; 2] = [
+    "71-export-choice-chi-rho.png",
+    "71-export-choice-vellum.png",
 ];
 
 /// The import preview's screenshot: on Windows the native open dialog is
@@ -323,6 +332,12 @@ async fn shipped(
         }
         report.record(Check::ExportNotes, export).await;
 
+        let choice = run.export_choice().await;
+        if choice.is_err() {
+            run.failure_screenshot(Check::ExportChoice).await;
+        }
+        report.record(Check::ExportChoice, choice).await;
+
         let editor = run.note_editor().await;
         if editor.is_err() {
             run.failure_screenshot(Check::NoteEditor).await;
@@ -451,7 +466,7 @@ async fn shipped(
 
         if let Err(e) = run.vellum_screenshots().await {
             run.failure_screenshot(Check::Screenshots).await;
-            for name in &SHOTS[2..4] {
+            for name in SHOTS[2..4].iter().chain(&EXPORT_CHOICE_SHOTS[1..]) {
                 if !run.shots.taken.iter().any(|(n, _)| n == name) {
                     run.shots.note(name, Err(anyhow::anyhow!("{e:#}")));
                 }
@@ -494,6 +509,7 @@ async fn shipped(
         let expected: Vec<&'static str> = SHOTS
             .into_iter()
             .filter(|name| config.xvfb.is_some() || *name != IMPORT_SHOT)
+            .chain(EXPORT_CHOICE_SHOTS)
             .chain(library::LIBRARY_SHOTS)
             .chain(search::SEARCH_SHOTS)
             // The sidebar's, only where the window can be wide enough for
@@ -676,8 +692,8 @@ impl Run<'_> {
     async fn leptos_mounted(&self) -> Result<String> {
         self.ui
             .wait(
-                "the Leptos pieces to mount their five dialogs",
-                "const ids = ['export-notes-overlay', 'shortcuts-overlay', 'welcome-overlay', 'import-overlay', 'note-overlay'];
+                "the Leptos pieces to mount their six dialogs",
+                "const ids = ['export-choice-overlay', 'export-notes-overlay', 'shortcuts-overlay', 'welcome-overlay', 'import-overlay', 'note-overlay'];
                  const state = Object.fromEntries(ids.map((id) => {
                      const el = document.getElementById(id);
                      return [id, el ? (el.hidden ? 'closed' : 'open') : 'missing'];
@@ -685,8 +701,8 @@ impl Run<'_> {
                  return [Object.values(state).every((s) => s === 'closed'), state];",
             )
             .await?;
-        Ok("the Leptos pieces mounted their five dialogs (#export-notes-overlay, #shortcuts-overlay, \
-            #welcome-overlay, #import-overlay, #note-overlay; all closed)"
+        Ok("the Leptos pieces mounted their six dialogs (#export-choice-overlay, #export-notes-overlay, \
+            #shortcuts-overlay, #welcome-overlay, #import-overlay, #note-overlay; all closed)"
             .to_owned())
     }
 
@@ -771,25 +787,57 @@ impl Run<'_> {
                 ),
             )
             .await?;
+            // Opened, it moves focus to its tab once it has slid in, as
+            // `library_tab` waits for: not later, onto a dialog opened
+            // from it meanwhile.
+            ui.settled("the Library to finish sliding in").await?;
         }
         ui.click("the Library's Notes tab", "#library-tab-notes")
             .await?;
         ui.wait(
-            "Export notes… to be shown and enabled",
+            "the Notes tab to show, its search on (there are notes)",
             &format!(
-                "{VISIBLE_JS} const button = document.getElementById('export-notes-btn');
-                 return [visible(button) && !button.disabled,
-                     {{ shown: visible(button), disabled: button.disabled }}];"
+                "{VISIBLE_JS} const search = document.getElementById('note-search');
+                 return [visible(search) && !search.disabled,
+                     {{ shown: visible(search), disabled: search && search.disabled }}];"
             ),
         )
         .await?;
         Ok(())
     }
 
-    /// Clicks Export notes… and waits for the dialog, with focus in it.
-    async fn open_export_dialog(&self) -> Result<Value> {
+    /// ☰ → Export data…, and waits for its chooser: Export, Everything
+    /// (backup) and My notes, both enabled (there are notes by now), focus
+    /// on Everything. What it shows.
+    async fn open_export_chooser(&self) -> Result<Value> {
+        self.open_menu().await?;
         let ui = &self.ui;
-        ui.click("click Export notes…", "#export-notes-btn").await?;
+        ui.click("click Export data…", "#export-data-btn").await?;
+        ui.wait(
+            "the export chooser to show, focus on Everything, both choices enabled",
+            &format!(
+                "{VISIBLE_JS} {DESCRIBE_JS}
+                 const panel = document.getElementById('export-choice-panel');
+                 const all = document.getElementById('export-choice-everything');
+                 const notes = document.getElementById('export-choice-notes');
+                 const said = (el) => ['name', 'line'].map((part) =>
+                     (document.getElementById(el.id + '-' + part) || {{}}).textContent);
+                 return [visible(panel) && visible(all) && visible(notes) && !all.disabled && !notes.disabled
+                         && document.activeElement === all,
+                     {{ title: (document.getElementById('export-choice-title') || {{}}).textContent,
+                        everything: said(all), notes: said(notes),
+                        menu: visible(document.getElementById('app-menu')),
+                        focus: describe(document.activeElement) }}];"
+            ),
+        )
+        .await
+    }
+
+    /// The chooser's My notes, and waits for the Export notes dialog, with
+    /// focus in it.
+    async fn choose_my_notes(&self) -> Result<Value> {
+        let ui = &self.ui;
+        ui.click("click My notes", "#export-choice-notes").await?;
         ui.wait(
             "the Export notes dialog to show, with focus inside it",
             &format!(
@@ -805,16 +853,23 @@ impl Run<'_> {
         .await
     }
 
-    /// Escape closes the dialog and focus goes back to Export notes….
+    /// ☰ → Export data… → My notes: the Export notes dialog, focus in it.
+    async fn open_export_dialog(&self) -> Result<Value> {
+        self.open_export_chooser().await?;
+        self.choose_my_notes().await
+    }
+
+    /// Escape closes the dialog and focus goes back to ☰, where it was
+    /// asked for from.
     async fn escape_export_dialog(&self) -> Result<()> {
         let ui = &self.ui;
         ui.press("press Escape in the dialog", Key::Escape).await?;
         ui.wait(
-            "the dialog to close, focus back on #export-notes-btn",
+            "the dialog to close, focus back on ☰ (#menu-toggle)",
             &format!(
                 "{DESCRIBE_JS}
                  const overlay = document.getElementById('export-notes-overlay');
-                 return [overlay.hidden && document.activeElement && document.activeElement.id === 'export-notes-btn',
+                 return [overlay.hidden && document.activeElement && document.activeElement.id === 'menu-toggle',
                      {{ hidden: overlay.hidden, focus: describe(document.activeElement) }}];"
             ),
         )
@@ -884,10 +939,9 @@ impl Run<'_> {
             _ => "note added (verse 1, N, Save, after the first-run search index build)".to_owned(),
         });
 
-        self.open_library_notes().await?;
         let shown = self.open_export_dialog().await?;
         said.push(format!(
-            "dialog opened from Library → Notes (\"{}\", \"{}\")",
+            "dialog opened from ☰ → Export data… → My notes (\"{}\", \"{}\")",
             shown["title"].as_str().unwrap_or_default(),
             shown["count"].as_str().unwrap_or_default().trim()
         ));
@@ -906,7 +960,7 @@ impl Run<'_> {
         self.shots.note(SHOTS[1], shot);
 
         self.escape_export_dialog().await?;
-        said.push("Escape closed it, focus back on #export-notes-btn".to_owned());
+        said.push("Escape closed it, focus back on ☰ (#menu-toggle)".to_owned());
 
         self.open_export_dialog().await?;
         said.push(self.tab_cycle().await?);
@@ -1001,6 +1055,98 @@ impl Run<'_> {
             }
         }
         Ok(said.join("; "))
+    }
+
+    /// Check 71: ☰ → Export data… is the one place to export (D20). Its
+    /// chooser says Export, with Everything (backup) and My notes, each
+    /// with its line, both enabled once there's a note (check 3's); ↓ moves
+    /// between them and Escape closes it, focus back on ☰. The Library's
+    /// Notes tab has no Export notes… button any more: its search box is
+    /// alone, across the tab. The Library is left open there, as check 3
+    /// left it before, for check 6.
+    async fn export_choice(&mut self) -> Result<String> {
+        let shown = self.open_export_chooser().await?;
+        let expected = json!({
+            "title": "Export",
+            "everything": [
+                "Everything (backup)",
+                "Bookmarks, highlights, notes, findings and settings, to restore later"
+            ],
+            "notes": ["My notes", "Choose notes and a layout, then save or print"],
+        });
+        for key in ["title", "everything", "notes"] {
+            if shown[key] != expected[key] {
+                bail!(
+                    "the chooser's {key} is {}, not {}",
+                    shown[key],
+                    expected[key]
+                );
+            }
+        }
+        if shown["menu"] != Value::Bool(false) {
+            bail!("the ☰ menu stayed open behind the chooser: {shown}");
+        }
+        let theme = self.expect_theme("chi-rho").await;
+        let shot = match theme {
+            Ok(()) => {
+                self.ui
+                    .screenshot(
+                        "screenshot: the export chooser, Chi Rho",
+                        &self.shot_path(EXPORT_CHOICE_SHOTS[0]),
+                    )
+                    .await
+            }
+            Err(e) => Err(e),
+        };
+        self.shots.note(EXPORT_CHOICE_SHOTS[0], shot);
+
+        let ui = &self.ui;
+        ui.press("press ↓ (to My notes)", Key::Down).await?;
+        ui.wait(
+            "focus on My notes",
+            &format!(
+                "{DESCRIBE_JS} const active = document.activeElement;
+                 return [!!active && active.id === 'export-choice-notes', describe(active)];"
+            ),
+        )
+        .await?;
+        ui.press("press Escape in the chooser", Key::Escape).await?;
+        ui.wait(
+            "the chooser to close, focus back on ☰ (#menu-toggle)",
+            &format!(
+                "{DESCRIBE_JS}
+                 const overlay = document.getElementById('export-choice-overlay');
+                 return [overlay.hidden && !!document.activeElement && document.activeElement.id === 'menu-toggle',
+                     {{ hidden: overlay.hidden, focus: describe(document.activeElement) }}];"
+            ),
+        )
+        .await?;
+
+        self.open_library_notes().await?;
+        let ui = &self.ui;
+        let tab = ui
+            .wait(
+                "the Notes tab without Export notes…, its search box across it",
+                &format!(
+                    "{VISIBLE_JS}
+                     const tools = document.querySelector('#library-notes .note-tools');
+                     const search = document.getElementById('note-search');
+                     const button = document.getElementById('export-notes-btn');
+                     const width = (el) => el ? Math.round(el.getBoundingClientRect().width) : null;
+                     return [!button && !!tools && tools.children.length === 1 && visible(search)
+                             && Math.abs(width(search) - width(tools)) <= 1,
+                         {{ button: !!button, children: tools ? tools.children.length : null,
+                            search: width(search), tools: width(tools) }}];"
+                ),
+            )
+            .await?;
+        Ok(format!(
+            "☰ → Export data… opened the chooser (\"Export\": Everything (backup) and My notes, each with \
+             its line, both enabled), the menu closed behind it, focus on Everything; ↓ went to My notes; \
+             Escape closed it, focus back on ☰; the Library's Notes tab has no Export notes… button, its \
+             search box alone and {}px across",
+            tab["search"]
+        ))
     }
 
     /// Tab, pressed once more than the dialog has controls, keeps focus
@@ -1160,8 +1306,16 @@ impl Run<'_> {
             .await;
         self.shots.note(SHOTS[2], shot);
 
-        self.open_library_notes().await?;
-        self.open_export_dialog().await?;
+        self.open_export_chooser().await?;
+        let shot = self
+            .ui
+            .screenshot(
+                "screenshot: the export chooser, Vellum",
+                &self.shot_path(EXPORT_CHOICE_SHOTS[1]),
+            )
+            .await;
+        self.shots.note(EXPORT_CHOICE_SHOTS[1], shot);
+        self.choose_my_notes().await?;
         let shot = self
             .ui
             .screenshot(

@@ -264,10 +264,7 @@ test('recent places last across a restart, on this computer only: not a display 
         assert.ok(!(KEY.replace('gospel-getter-', '').replace('-', '_') in app.window.gospelGetterPreferences.current()));
         const path = join(dir, 'backup.gospel-getter.json');
         await app.pick(path);
-        app.open('menu');
-        const before = app.calls.length;
-        app.click(el(app, 'export-data-btn'));
-        await app.idle(before);
+        await app.exportEverything();
         const text = readFileSync(path, 'utf8');
         assert.ok(!/recent/i.test(text), 'Recent places aren’t in the backup');
         assert.ok(!text.includes('"start":28') && !text.includes('Romans'), 'nor any of its places');

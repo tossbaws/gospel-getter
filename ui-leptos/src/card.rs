@@ -2089,6 +2089,7 @@ fn ghost_allowed(els: &Elements) -> bool {
         "import-overlay",
         "about-overlay",
         "note-overlay",
+        "export-choice-overlay",
         "export-notes-overlay",
         "shortcuts-overlay",
         "welcome-overlay",

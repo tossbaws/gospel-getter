@@ -34,7 +34,7 @@ use crate::reader::{self, Request};
 /// a verse selection: the top bar (the translation, Aa, the ☰ menu, the
 /// reading-mode exit), the picker, the Library, About, the search panel,
 /// the dialogs and the toast, which answer their own.
-const NOT_THE_READERS: &str = "#top-bar, #picker, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-notes-overlay, #shortcuts-overlay, #data-status";
+const NOT_THE_READERS: &str = "#top-bar, #picker, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-choice-overlay, #export-notes-overlay, #shortcuts-overlay, #data-status";
 
 /// The reader's own controls in the pane (the chapter's Cross references,
 /// its steps, a neighbor's heading, the lists' disclosures), which it

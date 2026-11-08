@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use super::notes::{NoteDto, note_dto, note_error_message};
 use super::{AppState, book_name, failed};
-use crate::db::{Finding, FindingRequest, KeepError, NewFinding, Passage};
+use crate::db::{Finding, FindingRequest, FindingsError, KeepError, NewFinding, Passage};
 use crate::passage_reference::passage_reference;
 use crate::reader_data;
 
@@ -196,6 +196,8 @@ pub async fn findings_restore(
     }
     match state.store.add_findings(&back).await {
         Ok(saved) => Ok(saved.saved.len()),
+        // An agent saved more meanwhile, up to the limit: said plainly.
+        Err(e @ FindingsError::Limit) => Err(e.to_string()),
         Err(e) => {
             tracing::error!("Failed to restore findings: {e}");
             Err("The findings couldn't be restored.".to_string())

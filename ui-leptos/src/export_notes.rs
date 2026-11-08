@@ -13,10 +13,14 @@
 //! the folder chosen are replaced only once the reader says so: the dialog
 //! stays open for a folder, and asks (Replace or Cancel).
 //!
+//! It's opened from ☰ → Export data… → My notes (`export_choice`), or the
+//! command palette's Export notes…, while there are notes.
+//!
 //! A small modal, as the page's note panel: it has the keyboard while open
 //! (a capturing `keydown` on `window`, stopping every other handler), Escape
-//! closes it, Tab stays inside, and closing gives focus back to the button.
-//! It opens fresh every time: nothing is kept.
+//! closes it, Tab stays inside, and closing gives focus back to where it was
+//! asked for from (☰, or where the palette left it). It opens fresh every
+//! time: nothing is kept.
 //!
 //! This is the page's export-notes script (`ui/index.html` at v2.16.1,
 //! 6960–7217) as a Leptos component: the same ids, classes, ARIA, `hidden`
@@ -33,7 +37,7 @@ use wasm_bindgen::JsValue;
 use web_sys::{CustomEvent, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent, NodeList};
 
 use crate::bridge::{self, OpenRequest};
-use crate::dom::{self, focus, inside_hidden};
+use crate::dom::{self, focus, usable};
 use crate::dto::{
     Commentary, CommentaryArgs, ConfirmFolderArgs, CountArgs, ExportArgs, ExportOptions,
     ExportOutcome, Filter, FolderOutcome, NotedBook,
@@ -84,6 +88,8 @@ struct Dialog {
     open: RwSignal<bool>,
     /// What the page said when it asked the dialog to open.
     request: RwSignal<Option<OpenRequest>>,
+    /// Where focus goes back to on closing (`detail.returnFocus`).
+    return_to: StoredValue<Option<HtmlElement>, LocalStorage>,
     /// What the backend offered when the dialog opened.
     options: RwSignal<Option<ExportOptions>>,
     /// The ids of the ticked books.
@@ -141,6 +147,7 @@ impl Dialog {
         Self {
             open: RwSignal::new(false),
             request: RwSignal::new(None),
+            return_to: StoredValue::new_local(None),
             options,
             ticked,
             ticked_books,
@@ -275,11 +282,12 @@ impl Dialog {
 
     /// Opens the dialog on the book being read if it has notes, otherwise
     /// on every book, and on All time.
-    fn open(self, request: OpenRequest) {
+    fn open(self, request: OpenRequest, return_to: Option<HtmlElement>) {
         let busy = self.busy.get_value();
         if busy.exporting || busy.opening || request.note_count == 0 {
             return;
         }
+        self.return_to.set_value(return_to);
         self.busy.update_value(|b| b.opening = true);
         spawn_local(async move {
             let result =
@@ -348,20 +356,14 @@ impl Dialog {
         focus(first);
     }
 
-    /// Closes the dialog. Focus goes back to the button that opened it, or
-    /// to the page's focus home if the button is gone, hidden or disabled.
+    /// Closes the dialog. Focus goes back to where it was asked for from,
+    /// or to the page's focus home if that's gone, hidden or disabled.
     fn close(self) {
         self.open.set(false);
         done_printing();
         self.busy.update_value(|b| b.count_token += 1);
-        match bridge::export_button() {
-            Some(button)
-                if button.is_connected()
-                    && !inside_hidden(&button)
-                    && !button.has_attribute("disabled") =>
-            {
-                focus(&button);
-            }
+        match self.return_to.get_value() {
+            Some(back) if usable(&back) && !back.has_attribute("disabled") => focus(&back),
             _ => bridge::focus_home(),
         }
     }
@@ -585,7 +587,7 @@ impl Dialog {
             // Handled, whatever happens next: the dialog is here.
             event.prevent_default();
             match bridge::open_request(&event) {
-                Ok(request) => self.open(request),
+                Ok(request) => self.open(request, bridge::return_focus(&event)),
                 Err(e) => ipc::log_error("The export-notes request couldn't be read", &e),
             }
         });

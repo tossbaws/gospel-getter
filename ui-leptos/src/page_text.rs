@@ -3,6 +3,8 @@
 //! yet, what Export data… says it saved, and which translation Compare
 //! shows beside the one being read.
 
+/// Said when ☰ → Export data…'s chooser isn't there to open.
+pub const EXPORT_UNAVAILABLE: &str = "Export isn’t available.";
 /// Said when Export notes' dialog isn't there to open.
 pub const EXPORT_NOTES_UNAVAILABLE: &str = "Export notes isn’t available.";
 /// Said when the import isn't there to begin.

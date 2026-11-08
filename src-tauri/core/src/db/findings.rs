@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
-use super::notes::{Note, NoteBodyError, NoteError, Passage, insert_note, normalize_body};
+use super::notes::{Note, NoteBodyError, NoteError, Passage, grouped, insert_note, normalize_body};
 use super::{BUSY_TIMEOUT, BookmarkError, WRITE_QUEUE_TIMEOUT, WritePool};
 
 /// The most characters an agent's name keeps; a longer one is cut short
@@ -42,6 +42,14 @@ pub const NOT_IN_A_REQUEST: [char; 4] = [':', ';', '\u{2014}', '\u{2013}'];
 /// How every refusal of a request starts: what a request is.
 const A_REQUEST_IS: &str =
     "The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}";
+
+/// The most AI findings Gospel Getter keeps, every request's together, as
+/// [`MAX_NOTES`](super::notes::MAX_NOTES) is for notes: a backup holds them
+/// all and an import accepts no more, so every backup imports again, and it
+/// bounds a backup's size (`reader_data::MAX_FILE_BYTES` in the app).
+/// Enforced where every finding is saved (`insert_findings`): an agent's
+/// save, the app's Undo and an import.
+pub const MAX_FINDINGS: usize = 10_000;
 
 /// Who a finding is said to be by when its agent gives no name.
 pub const DEFAULT_AGENT: &str = "AI agent";
@@ -203,6 +211,8 @@ pub enum FindingsError {
     Request(RequestError),
     /// A passage that doesn't exist (the same checks as bookmarks).
     Passage(BookmarkError),
+    /// Saving them would take the reader past [`MAX_FINDINGS`] findings.
+    Limit,
     Database(anyhow::Error),
 }
 
@@ -213,6 +223,11 @@ impl fmt::Display for FindingsError {
             Self::Off => f.write_str(HOW_TO_TURN_ON),
             Self::Request(e) => write!(f, "{e}"),
             Self::Passage(e) => write!(f, "{e}"),
+            Self::Limit => write!(
+                f,
+                "Gospel Getter holds at most {} AI findings; remove some in the Library first.",
+                grouped(MAX_FINDINGS)
+            ),
             Self::Database(e) => write!(f, "{e:#}"),
         }
     }
@@ -318,15 +333,31 @@ pub(crate) async fn set_enabled_on(conn: &mut SqliteConnection, on: bool) -> any
     Ok(())
 }
 
+/// How many findings there are, every request's.
+async fn finding_count(conn: &mut SqliteConnection) -> anyhow::Result<usize> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ai_findings")
+        .fetch_one(&mut *conn)
+        .await
+        .context("Failed to count the findings")?;
+    usize::try_from(count).context("negative finding count")
+}
+
 /// Each finding's passage checked, and the finding saved unless the same
 /// verses are already saved for the same request, all on `conn`, which is in
-/// a transaction that writes. One that can't be saved stops them all.
+/// a transaction that writes. One that can't be saved stops them all, and so
+/// does one that would make more than [`MAX_FINDINGS`] in all
+/// ([`FindingsError::Limit`]): all or none, as every caller rolls its
+/// transaction back on an error, so a save that would pass the limit saves
+/// nothing. One already saved for its request adds nothing, so it never
+/// counts against the limit: at the limit, saving the same verses again
+/// still answers that they're already saved.
 pub(crate) async fn insert_findings(
     conn: &mut SqliteConnection,
     findings: &[NewFinding],
 ) -> Result<SavedFindings, FindingsError> {
     let mut checked: HashMap<(i64, i64), (i64, i64)> = HashMap::new();
     let mut saved = SavedFindings::default();
+    let mut count = finding_count(&mut *conn).await?;
     for finding in findings {
         let request = normalize_request(&finding.request)?;
         let agent = normalize_agent(&finding.agent);
@@ -351,6 +382,10 @@ pub(crate) async fn insert_findings(
         .context("Failed to save a finding")?
         .rows_affected();
         if inserted > 0 {
+            count += 1;
+            if count > MAX_FINDINGS {
+                return Err(FindingsError::Limit);
+            }
             saved.saved.push(p);
         } else {
             saved.already.push(p);
@@ -697,7 +732,8 @@ impl FindingsWriter {
     /// Save one finding by `agent` for `request` on each of `passages`, all
     /// or none, once the database has the tables and the reader has turned
     /// it on, both checked in the same transaction. The same verses already
-    /// saved for the same request are left as they were.
+    /// saved for the same request are left as they were. Nothing is saved if
+    /// it would make more than [`MAX_FINDINGS`] ([`FindingsError::Limit`]).
     pub async fn add(
         &self,
         agent: &str,

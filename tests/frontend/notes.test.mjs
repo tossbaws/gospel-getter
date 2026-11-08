@@ -699,10 +699,7 @@ test('export counts notes in its toast, and the file holds them', () =>
     withNotes([[16, 16, 'Exported.']], {}, async (app) => {
         const path = join(dir, 'export.gospel-getter.json');
         await app.pick(path);
-        app.open('menu');
-        const before = app.calls.length;
-        app.click(el(app, 'export-data-btn'));
-        await app.idle(before, 'export_reader_data');
+        await app.exportEverything();
         assert.match(el(app, 'data-status').textContent, /^Saved 0 bookmarks, 1 note, your reading position, your display settings to .*\. Bible text isn’t included\.$/);
         const json = JSON.parse((await import('node:fs')).readFileSync(path, 'utf8'));
         assert.equal(json.format_version, 3);

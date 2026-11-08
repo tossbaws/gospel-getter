@@ -138,7 +138,7 @@ test('Escape in the box clears it; the next Escape closes the Library, as before
         assert.ok(app.surface('library').hidden, 'then Escape is the page’s again');
     }));
 
-test('the box is labelled, keyboard reachable before Export notes…, and off without notes', () =>
+test('the box is labelled, the tab’s first stop, and off without notes', () =>
     withNotes(async (app) => {
         const input = box(app);
         assert.equal(input.type, 'search');
@@ -147,10 +147,13 @@ test('the box is labelled, keyboard reachable before Export notes…, and off wi
         assert.equal(input.getAttribute('aria-describedby'), 'note-search-count');
         assert.ok(!input.disabled);
         assert.ok(input.tabIndex === 0);
-        // At the top of the tab, then Export notes…, then the rows.
+        // At the top of the tab, alone (Export notes… is ☰ → Export data… →
+        // My notes), then the rows.
         const stops = [...el(app, 'library-notes').querySelectorAll('input, button')];
         assert.equal(stops[0], input);
-        assert.equal(stops[1], el(app, 'export-notes-btn'));
+        assert.deepEqual([...input.parentElement.children], [input]);
+        assert.equal(el(app, 'export-notes-btn'), null);
+        assert.ok(stops[1].closest('#note-list'), 'then the first row');
         // A letter typed in it is a letter, not a shortcut.
         app.key('n', {}, input);
         await settle();
@@ -183,8 +186,9 @@ test('Export notes… keeps its own filters, whatever the search shows', () =>
     withNotes(async (app) => {
         await search(app, 'charity');
         assert.deepEqual(references(app), ['1 Corinthians 13:4']);
+        await app.openExport();
         const before = app.calls.length;
-        app.click(el(app, 'export-notes-btn'));
+        app.click(el(app, 'export-choice-notes'));
         await app.idle(before, 'count_notes_export');
         // Reading Psalms, which has no notes: every book, every note.
         assert.equal(el(app, 'export-notes-count').textContent, '6 notes match');

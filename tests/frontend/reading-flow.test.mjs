@@ -349,10 +349,7 @@ test('Width survives a backup: exported, then imported into a fresh window', asy
     const path = join(dir, 'width.gospel-getter.json');
     await withApp({ storage: { 'gospel-getter-width': 'narrow' } }, async (app) => {
         await app.pick(path);
-        app.open('menu');
-        const before = app.calls.length;
-        app.click($(app, 'export-data-btn'));
-        await app.idle(before);
+        await app.exportEverything();
     });
     assert.equal(JSON.parse(readFileSync(path, 'utf8')).preferences.width, 'narrow');
     await withApp({}, async (app) => {

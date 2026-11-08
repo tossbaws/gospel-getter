@@ -1,9 +1,10 @@
 // Export notes…: the notes chosen by book, chapters and when they were
 // written, as a readable Markdown file with each note's verses quoted in
-// the translation being read. A button at the top of the Library's Notes
-// tab opens a small modal; the real backend offers the choices, counts
-// what they match, and builds and writes the file (the save dialog is
-// scripted, and the export's clock can be fixed).
+// the translation being read. ☰ → Export data… → My notes opens a small
+// modal (the command palette's Export notes… too, straight to it); the
+// real backend offers the choices, counts what they match, and builds and
+// writes the file (the save dialog is scripted, and the export's clock can
+// be fixed).
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -45,7 +46,9 @@ const SAMPLE = [
 ];
 
 const el = (app, id) => app.document.getElementById(id);
-const button = (app) => el(app, 'export-notes-btn');
+/** ☰ → Export data…'s My notes. */
+const myNotes = (app) => el(app, 'export-choice-notes');
+const chooserOpen = (app) => !el(app, 'export-choice-overlay').hidden;
 const dialogOpen = (app) => !el(app, 'export-notes-overlay').hidden;
 const boxes = (app) => [...el(app, 'export-notes-books').querySelectorAll('input[type="checkbox"]')];
 const box = (app, id) => boxes(app).find((b) => Number(b.value) === id);
@@ -69,11 +72,25 @@ async function clickAndWait(app, target, cmd) {
     await app.idle(before, cmd);
 }
 
+/** ☰ → Export data… → My notes, and waits for `cmd` (the dialog's first count). */
+async function openNotes(app, cmd = 'count_notes_export') {
+    await app.openExport();
+    await clickAndWait(app, myNotes(app), cmd);
+}
+
 /** Opens the dialog, and waits for its first count. */
 async function openDialog(app) {
-    app.openLibrary('notes');
-    await clickAndWait(app, button(app), 'count_notes_export');
+    await openNotes(app);
     assert.ok(dialogOpen(app));
+}
+
+/** Whether ☰ → Export data… → My notes can be chosen now: the chooser opened, and closed again. */
+async function notesChoosable(app) {
+    await app.openExport();
+    const choosable = !myNotes(app).disabled;
+    await app.key('Escape', {}, app.document.activeElement);
+    assert.ok(!chooserOpen(app));
+    return choosable;
 }
 
 /** Sets a field (or the Written list) as the reader would, and waits for the count. */
@@ -97,21 +114,26 @@ async function toggle(app, id) {
 const OCT_12 = () => backend('__set_clock', { now: '2026-10-12T18:00:00Z', offsetMinutes: -360 });
 const written = (body, createdAt) => backend('__note_written', { body, createdAt });
 
-test('the button is at the top of the Notes tab, after its search box, and disabled without notes', () =>
+test('it’s ☰ → Export data… → My notes, greyed out saying why without notes; the Notes tab has no button', () =>
     withNotes([], {}, async (app) => {
         app.openLibrary('notes');
-        const notes = el(app, 'library-notes');
-        const tools = notes.firstElementChild;
-        assert.deepEqual([...tools.children], [el(app, 'note-search'), button(app)]);
-        assert.equal(button(app).textContent, 'Export notes…');
-        assert.ok(button(app).disabled);
-        app.click(button(app));
+        const tools = el(app, 'library-notes').firstElementChild;
+        assert.deepEqual([...tools.children], [el(app, 'note-search')]);
+        assert.equal(el(app, 'export-notes-btn'), null);
+        await app.openExport();
+        assert.equal(el(app, 'export-choice-notes-name').textContent, 'My notes');
+        assert.ok(myNotes(app).disabled);
+        assert.equal(el(app, 'export-choice-notes-line').textContent, 'There are no notes yet');
+        assert.equal(myNotes(app).getAttribute('aria-describedby'), 'export-choice-notes-line');
+        app.click(myNotes(app));
+        await settle();
         assert.ok(!dialogOpen(app));
+        assert.ok(chooserOpen(app), 'nothing happened');
     }));
 
-test('the button follows the notes live: add, delete, undo and import', () =>
+test('My notes follows the notes live: add, delete, undo and import', () =>
     withNotes([], {}, async (app) => {
-        assert.ok(button(app).disabled);
+        assert.ok(!(await notesChoosable(app)));
 
         // Add one through the note panel.
         const before = app.calls.length;
@@ -121,19 +143,20 @@ test('the button follows the notes live: add, delete, undo and import', () =>
         app.type(el(app, 'note-input'), 'Added.');
         await settle();
         await clickAndWait(app, el(app, 'note-save'), 'list_all_notes');
-        assert.ok(!button(app).disabled, 'enabled once there is a note');
+        assert.ok(await notesChoosable(app), 'enabled once there is a note');
 
         // Delete it, then undo.
         app.click(app.document.querySelector('.verse-notes .note-edit'));
         await clickAndWait(app, el(app, 'note-delete'), 'list_all_notes');
-        assert.ok(button(app).disabled, 'disabled once it is deleted');
-        await clickAndWait(app, app.status().querySelector('.status-undo'), 'list_all_notes');
-        assert.ok(!button(app).disabled, 'enabled again on undo');
+        const undo = app.status().querySelector('.status-undo');
+        assert.ok(!(await notesChoosable(app)), 'disabled once it is deleted');
+        await clickAndWait(app, undo, 'list_all_notes');
+        assert.ok(await notesChoosable(app), 'enabled again on undo');
 
         // Delete again, and import one back.
         app.click(app.document.querySelector('.verse-notes .note-edit'));
         await clickAndWait(app, el(app, 'note-delete'), 'list_all_notes');
-        assert.ok(button(app).disabled);
+        assert.ok(!(await notesChoosable(app)));
         const path = join(dir, 'import.gospel-getter.json');
         writeFileSync(path, JSON.stringify({
             format: 'gospel-getter-reader-data',
@@ -148,7 +171,7 @@ test('the button follows the notes live: add, delete, undo and import', () =>
         app.open('menu');
         await clickAndWait(app, el(app, 'import-data-btn'), 'choose_import_file');
         await clickAndWait(app, el(app, 'import-confirm'), 'list_all_notes');
-        assert.ok(!button(app).disabled, 'enabled after the import');
+        assert.ok(await notesChoosable(app), 'enabled after the import');
     }));
 
 test('the checklist lists only books with notes, in Bible order with counts, and ticks just the book being read', () =>
@@ -361,7 +384,7 @@ test('it opens fresh every time: just the book being read, All time, nothing kep
         await app.click(el(app, 'export-notes-cancel'));
         assert.ok(!dialogOpen(app));
 
-        await clickAndWait(app, button(app), 'count_notes_export');
+        await openNotes(app);
         assert.deepEqual(ticked(app), [JOHN]);
         assert.ok(chaptersShown(app));
         assert.deepEqual(chapterFields(app), ['1', '3']);
@@ -412,7 +435,7 @@ test('Export sends the translation and the filter, and reports the file', () =>
         // One book's chapters, and dates.
         const range = join(dir, 'john-3.md');
         await app.pick(range);
-        await clickAndWait(app, button(app), 'count_notes_export');
+        await openNotes(app);
         await setField(app, 'export-notes-chapter-from', '3');
         await setField(app, 'export-notes-when', 'custom');
         await setField(app, 'export-notes-from', '2026-10-01');
@@ -425,7 +448,7 @@ test('Export sends the translation and the filter, and reports the file', () =>
         // Several books, each under its heading.
         const two = join(dir, 'two.md');
         await app.pick(two);
-        await clickAndWait(app, button(app), 'count_notes_export');
+        await openNotes(app);
         await toggle(app, FIRST_JOHN);
         await clickAndWait(app, confirm(app), 'export_notes');
         assert.deepEqual(exportCalls(app)[2].filter, { ...EVERY, books: [JOHN, FIRST_JOHN] });
@@ -437,7 +460,7 @@ test('Export sends the translation and the filter, and reports the file', () =>
         // Every book: the file as before.
         const all = join(dir, 'all.md');
         await app.pick(all);
-        await clickAndWait(app, button(app), 'count_notes_export');
+        await openNotes(app);
         await clickAndWait(app, el(app, 'export-notes-all'), 'count_notes_export');
         await clickAndWait(app, confirm(app), 'export_notes');
         assert.deepEqual(exportCalls(app)[3], { translationCode: 'kjv', filter: EVERY, layout: 'quoted' });
@@ -472,26 +495,27 @@ test('cancelling the save dialog says nothing; a failure says why', () =>
         assert.ok(app.toast().classList.contains('is-hidden'));
 
         app.failCommand('export_notes', 'No notes match these filters.');
-        await clickAndWait(app, button(app), 'count_notes_export');
+        await openNotes(app);
         await clickAndWait(app, confirm(app), 'export_notes');
         assert.equal(app.toast().textContent, 'Export failed: No notes match these filters.');
         assert.ok(app.toast().classList.contains('is-error'));
 
         // If the choices can't be worked out, it says so, and doesn't open.
         app.failCommand('get_notes_export_options', 'Your notes couldn’t be read for export.');
-        await clickAndWait(app, button(app), 'get_notes_export_options');
+        await openNotes(app, 'get_notes_export_options');
         assert.ok(!dialogOpen(app));
         assert.equal(app.toast().textContent, 'Export failed: Your notes couldn’t be read for export.');
     }));
 
-test('Escape and Cancel close it and give focus back; it keeps the keyboard while open', () =>
+test('Escape and Cancel close it and give focus back to ☰; it keeps the keyboard while open', () =>
     withNotes(SAMPLE, {}, async (app) => {
+        const menu = el(app, 'menu-toggle');
         await openDialog(app);
         await app.click(el(app, 'export-notes-cancel'));
         assert.ok(!dialogOpen(app));
-        assert.equal(app.document.activeElement, button(app));
+        assert.equal(app.document.activeElement, menu);
 
-        await clickAndWait(app, button(app), 'count_notes_export');
+        await openNotes(app);
         // Tab and Shift+Tab wrap: All, None, each book, the chapters, Written, Export, Cancel.
         const tab = (shiftKey) => app.key('Tab', { shiftKey }, app.document.activeElement).defaultPrevented;
         assert.equal(app.document.activeElement, box(app, JOHN));
@@ -519,17 +543,18 @@ test('Escape and Cancel close it and give focus back; it keeps the keyboard whil
         assert.equal(app.heading(), 'John 3');
         assert.ok(!app.isComparing());
         assert.ok(app.searchPanel().hidden);
-        assert.ok(!app.surface('library').hidden);
+        assert.ok(app.surface('library').hidden);
         assert.ok(dialogOpen(app));
         // Clicking the dimmed page does nothing.
         assert.ok(app.click(el(app, 'export-notes-overlay')).defaultPrevented);
         assert.ok(dialogOpen(app));
 
-        // Escape closes it, and only it: the Library stays open.
+        // Escape closes it, and only it: nothing else opens.
         await app.key('Escape', {}, target);
         assert.ok(!dialogOpen(app));
-        assert.ok(!app.surface('library').hidden);
-        assert.equal(app.document.activeElement, button(app));
+        assert.ok(!chooserOpen(app));
+        assert.equal(app.window.gospelGetterSurfaces.current(), null);
+        assert.equal(app.document.activeElement, menu);
         assert.equal(exportCalls(app).length, 0);
     }));
 
@@ -541,16 +566,15 @@ test('every focus it moves is preventScroll', () =>
             calls.push({ el: this, options });
             return focus.call(this, options);
         };
-        app.openLibrary('notes');
         calls.length = 0;
-        await clickAndWait(app, button(app), 'count_notes_export');
+        await openNotes(app);
         app.key('Tab', { shiftKey: true }, app.document.activeElement);
         app.key('Tab', {}, app.document.activeElement);
         app.key('Escape', {}, app.document.activeElement);
-        await clickAndWait(app, button(app), 'count_notes_export');
+        await openNotes(app);
         app.click(el(app, 'export-notes-cancel'));
         await app.pick(null);
-        await clickAndWait(app, button(app), 'count_notes_export');
+        await openNotes(app);
         await clickAndWait(app, confirm(app), 'export_notes');
         assert.ok(calls.length >= 6, `${calls.length} focus calls`);
         const scrolling = calls.filter((c) => !(c.options && c.options.preventScroll));
@@ -616,7 +640,7 @@ test('the Commentary layout writes the notes by verse number, with no Bible text
         assert.ok(!file.includes(storedVerse('kjv', 'John', 3, 16).slice(0, 30)), 'no Bible text');
 
         // It opens fresh: the quoted layout again.
-        await clickAndWait(app, button(app), 'count_notes_export');
+        await openNotes(app);
         assert.ok(el(app, 'export-notes-quoted').checked);
         assert.ok(el(app, 'export-notes-print').hidden);
         app.click(el(app, 'export-notes-cancel'));
@@ -721,7 +745,7 @@ test('Print… prints the same commentary: only a print-only container, through 
             assert.ok(rest.length > 0);
         }
         // Closing the dialog also puts it back, should the print dialog not say it's done.
-        await clickAndWait(app, button(app), 'count_notes_export');
+        await openNotes(app);
         chooseCommentary(app);
         await settle();
         await clickAndWait(app, el(app, 'export-notes-print'), 'get_notes_commentary');

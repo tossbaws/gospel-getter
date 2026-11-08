@@ -58,9 +58,10 @@ pub struct PaletteState {
     /// The translations (code and name) and the one being read.
     pub translations: Vec<Choice>,
     pub translation: String,
-    /// Export notes… is on the page and enabled (there are notes).
+    /// There are notes to export.
     pub notes: bool,
-    /// ☰'s Export data… and Import data… are disabled (one is running).
+    /// An export or import is running (the backup waits for it, and ☰'s
+    /// Import data… is disabled).
     pub export_busy: bool,
     pub import_busy: bool,
     /// About's Check now is checking.
@@ -367,7 +368,7 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         "",
         "markdown file",
         (!state.notes).then_some("There are no notes yet"),
-        click("export-notes-btn"),
+        page("export-notes"),
     );
     add(
         "export-data".into(),
@@ -375,7 +376,7 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         "",
         "backup save file",
         state.export_busy.then_some("Busy with an export or import"),
-        click("export-data-btn"),
+        page("export-data"),
     );
     add(
         "import-data".into(),
@@ -904,6 +905,69 @@ mod tests {
         assert_eq!(find(&list, "library-notes").run, Run::Library("notes"));
         assert_eq!(find(&list, "check-updates").run, Run::CheckUpdates);
         assert_eq!(find(&list, "back").run, page("back"));
+    }
+
+    /// Export notes… and Export data… are as they were before ☰'s Export
+    /// data… became a chooser: the same labels, words, reasons and place,
+    /// between Open Library: Notes and Import data…; and each runs its own
+    /// action directly (the page's code), not ☰'s chooser.
+    #[test]
+    fn the_exports_are_unchanged_and_skip_the_chooser() {
+        let shown = |state: &PaletteState| -> Vec<(String, String, String, Option<&str>)> {
+            let list = commands(state);
+            let at = list
+                .iter()
+                .position(|c| c.id == "library-notes")
+                .expect("Open Library: Notes");
+            list[at..at + 4]
+                .iter()
+                .map(|c| (c.id.clone(), c.label.clone(), c.words.clone(), c.reason))
+                .collect()
+        };
+        let row = |id: &str, label: &str, words: &str, reason: Option<&'static str>| {
+            (id.to_string(), label.to_string(), words.to_string(), reason)
+        };
+        assert_eq!(
+            shown(&john_3()),
+            [
+                row("library-notes", "Open Library: Notes", "", None),
+                row(
+                    "export-notes",
+                    "Export notes…",
+                    "markdown file",
+                    Some("There are no notes yet")
+                ),
+                row("export-data", "Export data…", "backup save file", None),
+                row("import-data", "Import data…", "restore backup file", None),
+            ]
+        );
+        let busy = PaletteState {
+            notes: true,
+            export_busy: true,
+            import_busy: true,
+            ..john_3()
+        };
+        let busy_now = Some("Busy with an export or import");
+        assert_eq!(
+            shown(&busy)[1..],
+            [
+                row("export-notes", "Export notes…", "markdown file", None),
+                row("export-data", "Export data…", "backup save file", busy_now),
+                row(
+                    "import-data",
+                    "Import data…",
+                    "restore backup file",
+                    busy_now
+                ),
+            ]
+        );
+        let list = commands(&john_3());
+        assert_eq!(find(&list, "export-notes").run, page("export-notes"));
+        assert_eq!(find(&list, "export-data").run, page("export-data"));
+        for id in ["export-notes", "export-data"] {
+            let c = find(&list, id);
+            assert_eq!((c.key.as_str(), c.keys), ("", ""), "{id}");
+        }
     }
 
     #[test]

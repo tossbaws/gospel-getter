@@ -1,7 +1,8 @@
 //! Gospel Getter's Leptos pieces: Rust compiled to WebAssembly, loaded by
 //! `ui/index.html` beside its JavaScript (Trunk builds the page; see
 //! `Trunk.toml` and `README.md`). The pieces so far are the page's modal
-//! dialogs: Export notes (`export_notes`), the keyboard shortcuts sheet
+//! dialogs: ☰ → Export data…'s chooser (`export_choice`), Export notes
+//! (`export_notes`), the keyboard shortcuts sheet
 //! (`shortcuts`), the welcome (`welcome`), the import preview
 //! (`import_preview`) and the note editor (`note_editor`); About
 //! (`about`) with the updater (`updates`); the Library's tabs and lists
@@ -52,6 +53,7 @@ mod card_text;
 mod clicks;
 mod dom;
 mod dto;
+mod export_choice;
 mod export_notes;
 mod findings;
 mod findings_text;
@@ -160,6 +162,7 @@ fn mount_the_rest() {
     // toast and banner by z-index), so where it sits in the body does not
     // matter; they go at the end. The handles are forgotten on purpose:
     // the dialogs live as long as the page.
+    leptos::mount::mount_to(body.clone(), export_choice::ExportChoice).forget();
     leptos::mount::mount_to(body.clone(), export_notes::ExportNotes).forget();
     leptos::mount::mount_to(body.clone(), shortcuts::Shortcuts).forget();
     leptos::mount::mount_to(body.clone(), welcome::WelcomeCard).forget();

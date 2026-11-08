@@ -111,8 +111,8 @@ impl NoteRow {
 
 #[derive(Clone, Copy)]
 struct Library {
-    /// `None` until the list's first answer: the list is empty, its count
-    /// blank (and Export notes disabled).
+    /// `None` until the list's first answer: the list is empty, and its
+    /// count blank.
     bookmarks: RwSignal<Option<Shown<Bookmark>>>,
     highlights: RwSignal<Option<Shown<HighlightPassage>>>,
     notes: RwSignal<Option<Shown<NoteRow>>, LocalStorage>,
@@ -1106,8 +1106,7 @@ pub fn mount() {
 fn lists(library: Library) -> impl IntoView {
     let [tab_bookmarks, tab_highlights, tab_notes] = library.tabs;
     let [panel_bookmarks, panel_highlights, panel_notes] = library.panels;
-    // Export notes… needs notes to export (its click is the page's), and
-    // the search notes to search.
+    // The search needs notes to search.
     let no_notes = move || {
         library.notes.with(|s| {
             s.as_ref()
@@ -1218,9 +1217,6 @@ fn lists(library: Library) -> impl IntoView {
                     on:input=move |_| library.on_search_input()
                     on:keydown=move |event: KeyboardEvent| library.on_search_key(&event)
                 />
-                <button type="button" id="export-notes-btn" class="reader-mode-btn export-notes-btn" aria-haspopup="dialog" disabled=no_notes>
-                    "Export notes\u{2026}"
-                </button>
             </div>
             <p id="note-search-count" class="note-search-count" aria-live="polite">{search_count}</p>
             <h3 class="library-section-title my-notes-title" hidden=no_findings>{findings_text::MY_NOTES}</h3>

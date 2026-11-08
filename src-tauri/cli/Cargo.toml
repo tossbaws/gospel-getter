@@ -2,7 +2,7 @@
 name = "gospel-getter-cli"
 # The app's version: tests/packaging_config.rs fails if they differ.
 version = "2.26.0"
-description = "Read a Gospel Getter install from the command line or an MCP client, read-only"
+description = "Read a Gospel Getter install from the command line or an MCP client; the only write is saving AI-flagged findings"
 license = "MIT"
 repository = "https://github.com/tossbaws/gospel-getter"
 edition = "2024"

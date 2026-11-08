@@ -448,6 +448,20 @@ export async function openApp({
             app.open('library');
             app.click(document.getElementById(`library-tab-${tab}`));
         },
+        /** ☰ → Export data…: its chooser, open and drawn (Everything, the backup, or My notes). */
+        async openExport() {
+            app.open('menu');
+            app.click(document.getElementById('export-data-btn'));
+            await until(() => !document.getElementById('export-choice-overlay').hidden, 'the export chooser');
+            await settle();
+        },
+        /** ☰ → Export data… → Everything (backup): the backup, saved (or not) as the next file dialog answers. */
+        async exportEverything() {
+            await app.openExport();
+            const before = calls.length;
+            app.click(document.getElementById('export-choice-everything'));
+            await app.idle(before, 'export_reader_data');
+        },
         /** The toast export and import report in (its text stays after it fades). */
         toast() {
             return document.getElementById('data-status');

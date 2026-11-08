@@ -464,6 +464,11 @@ pub async fn apply_pending_import(
         .await
         .map_err(|e| match e {
             ApplyImportError::NoteLimit(limit) => import_limit_message(limit),
+            ApplyImportError::FindingLimit => format!(
+                "Importing this file would give you more than {} AI findings, the most Gospel \
+                 Getter keeps, so nothing was changed.",
+                grouped(db::findings::MAX_FINDINGS)
+            ),
             ApplyImportError::Database(e) => {
                 tracing::error!("Import failed: {e:#}");
                 "The import failed, so nothing was changed.".to_string()

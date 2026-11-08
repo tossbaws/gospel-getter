@@ -85,18 +85,23 @@ pub const FILE_SUFFIX: &str = ".gospel-getter.json";
 ///   UTF-8 unescaped, or 2 for `\n`, `\t`, `\"` and `\\`; the control
 ///   characters JSON would escape in 6, like `\u0001`, are refused — so
 ///   100,000,000 bytes;
-/// - the rest of the file (its header, reading position and every
-///   preference) takes 562 bytes.
+/// - an AI finding takes 708 bytes, its agent's name and its request at
+///   their longest (60 characters each, `MAX_AGENT_CHARS` and
+///   `MAX_REQUEST_CHARS`, of 4 bytes apiece: neither keeps a control
+///   character): 10,000 of them (`MAX_FINDINGS`), 7,080,000 bytes;
+/// - the rest of the file (its header, reading position, every preference
+///   and the AI findings switch) takes 613 bytes.
 ///
 /// A highlight is one verse, and the bundled translations number 31,109
 /// verses between them, so at most 7,186,179 bytes of highlights. With
-/// every verse highlighted and the notes at both their limits, a file of
-/// 50,000 bookmarks is 119,126,741 bytes (113.6 MiB), and one of 130,271
-/// fits. Without notes, every bookmark there can be — each of the 530,288
-/// verse ranges within a chapter — and every highlight fit, in
-/// 106,880,885 bytes (101.9 MiB). Only a reader with notes near both
-/// their limits (25 million characters, every one 4 bytes long) and more
-/// than 130,271 bookmarks could export a file too large to import.
+/// every verse highlighted, the notes at both their limits and the AI
+/// findings at theirs, a file of 50,000 bookmarks is 126,206,792 bytes
+/// (120.4 MiB), and one of 92,611 fits. Without notes, every bookmark there
+/// can be — each of the 530,288 verse ranges within a chapter — every
+/// highlight and every finding fit, in 113,960,936 bytes (108.7 MiB). Only
+/// a reader with notes near both their limits (25 million characters, every
+/// one 4 bytes long) and more than 92,611 bookmarks could export a file too
+/// large to import.
 ///
 /// Format 2's limit was 16 MiB; it rose because the reader's notes can
 /// hold far more text than every other record together, and a backup of
@@ -105,6 +110,8 @@ pub const FILE_SUFFIX: &str = ".gospel-getter.json";
 pub const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
 /// The most notes one file may hold: as many as the reader can keep.
 pub const MAX_NOTES: usize = crate::db::notes::MAX_NOTES;
+/// The most AI findings one file may hold: as many as the reader can keep.
+pub const MAX_FINDINGS: usize = crate::db::findings::MAX_FINDINGS;
 /// The most characters the notes in one file may hold together: as many
 /// as the reader's notes can.
 pub const MAX_TOTAL_NOTE_CHARS: usize = crate::db::notes::MAX_TOTAL_NOTE_CHARS;
@@ -707,6 +714,12 @@ pub fn validate(
         return Err(ImportError::Invalid(vec![format!(
             "It has {} notes; the most one file can hold is {MAX_NOTES}.",
             data.notes.len()
+        )]));
+    }
+    if data.findings.len() > MAX_FINDINGS {
+        return Err(ImportError::Invalid(vec![format!(
+            "It has {} AI findings; the most one file can hold is {MAX_FINDINGS}.",
+            data.findings.len()
         )]));
     }
 
@@ -1537,10 +1550,16 @@ mod tests {
         assert_eq!(parse(contents.as_bytes()).unwrap(), data);
     }
 
-    /// A file with `bookmarks`, `highlights` and `notes` copies of the
-    /// largest record of each kind, and every other field at its largest,
-    /// as `to_file_contents` writes it: its size in bytes.
-    fn maximal_file_size(bookmarks: usize, highlights: usize, notes: usize) -> usize {
+    /// A file with `bookmarks`, `highlights`, `notes` and `findings` copies
+    /// of the largest record of each kind, and every other field at its
+    /// largest, as `to_file_contents` writes it: its size in bytes.
+    fn maximal_file_size(
+        bookmarks: usize,
+        highlights: usize,
+        notes: usize,
+        findings: usize,
+    ) -> usize {
+        use crate::db::findings::{MAX_AGENT_CHARS, MAX_REQUEST_CHARS};
         let kjv = crate::db::test_support::bundled("kjv");
         let longest_name = kjv.iter().map(|b| b.name.as_str()).max_by_key(|n| n.len());
         let book_name = longest_name.map(str::to_string);
@@ -1556,6 +1575,22 @@ mod tests {
         // note may hold (see `worst_case_note_characters_take_4_bytes`).
         let body = "\u{10ffff}".repeat(crate::db::notes::MAX_NOTE_CHARS);
         assert_eq!(normalize_body(&body).as_deref(), Ok(body.as_str()));
+        // A finding's agent and request at their longest, of the same
+        // character (see `worst_case_finding_characters_take_4_bytes`).
+        let agent = "\u{10ffff}".repeat(MAX_AGENT_CHARS);
+        assert_eq!(normalize_agent(&agent), agent);
+        let request = "\u{10ffff}".repeat(MAX_REQUEST_CHARS);
+        assert_eq!(normalize_request(&request).as_deref(), Ok(request.as_str()));
+        let finding = FindingRecord {
+            book,
+            book_name: book_name.clone(),
+            chapter,
+            verse_start: verse,
+            verse_end: verse,
+            agent,
+            request,
+            created_at: at.clone(),
+        };
         let data = ReaderData {
             format: FORMAT.to_string(),
             format_version: FORMAT_VERSION,
@@ -1603,8 +1638,8 @@ mod tests {
                 };
                 notes
             ],
-            findings: Vec::new(),
-            ai_findings_enabled: None,
+            findings: vec![finding; findings],
+            ai_findings_enabled: Some(true),
             preferences: Preferences {
                 theme: Some(Theme::ClassicLight),
                 text_size: Some(TextSize::Medium),
@@ -1637,30 +1672,53 @@ mod tests {
         assert_eq!(widest, 4);
     }
 
+    /// Of every character a finding's agent or request may hold, none takes
+    /// more than 4 bytes in a file: an agent's control characters become
+    /// spaces, and a request can't have one.
+    #[test]
+    fn worst_case_finding_characters_take_4_bytes() {
+        let mut widest = (0, 0);
+        for c in (0..=0x10_ffff).filter_map(char::from_u32) {
+            let encoded = |text: &str| serde_json::to_string(text).unwrap().len() - 4;
+            // Inside the text, so trimming can't drop it.
+            let agent = normalize_agent(&format!("a{c}b"));
+            widest.0 = usize::max(widest.0, encoded(&agent));
+            if let Ok(request) = normalize_request(&format!("a{c}b")) {
+                widest.1 = usize::max(widest.1, encoded(&request));
+            }
+        }
+        assert_eq!(widest, (4, 4));
+    }
+
     /// The arithmetic in `MAX_FILE_BYTES`'s documentation, with every
-    /// record as large as it can be and the notes at both their limits.
+    /// record as large as it can be, the notes at both their limits and the
+    /// AI findings at theirs.
     #[test]
     fn a_maximal_file_fits_the_size_limit() {
         use crate::db::notes::MAX_NOTE_CHARS;
         use crate::db::test_support::bundled_bsb;
-        let base = maximal_file_size(1, 1, 1);
-        let bookmark = maximal_file_size(2, 1, 1) - base;
-        let highlight = maximal_file_size(1, 2, 1) - base;
-        let note = maximal_file_size(1, 1, 2) - base;
+        let base = maximal_file_size(1, 1, 1, 1);
+        let bookmark = maximal_file_size(2, 1, 1, 1) - base;
+        let highlight = maximal_file_size(1, 2, 1, 1) - base;
+        let note = maximal_file_size(1, 1, 2, 1) - base;
+        let finding = maximal_file_size(1, 1, 1, 2) - base;
         // Each record adds the same bytes, so the size is linear in each count.
-        assert_eq!(maximal_file_size(3, 1, 1) - base, 2 * bookmark);
-        assert_eq!(maximal_file_size(1, 3, 1) - base, 2 * highlight);
-        assert_eq!(maximal_file_size(1, 1, 3) - base, 2 * note);
-        let rest = base - bookmark - highlight - note;
+        assert_eq!(maximal_file_size(3, 1, 1, 1) - base, 2 * bookmark);
+        assert_eq!(maximal_file_size(1, 3, 1, 1) - base, 2 * highlight);
+        assert_eq!(maximal_file_size(1, 1, 3, 1) - base, 2 * note);
+        assert_eq!(maximal_file_size(1, 1, 1, 3) - base, 2 * finding);
+        let rest = base - bookmark - highlight - note - finding;
         // A maximal note's text is 4 bytes a character; the rest is the record.
         let note_record = note - 4 * MAX_NOTE_CHARS;
         // As documented on `MAX_FILE_BYTES`.
         assert_eq!(
-            (bookmark, highlight, note_record, rest),
-            (188, 231, 254, 562)
+            (bookmark, highlight, note_record, finding, rest),
+            (188, 231, 254, 708, 613)
         );
         let notes = MAX_NOTES * note_record + 4 * MAX_TOTAL_NOTE_CHARS;
         assert_eq!(notes, 102_540_000);
+        let findings = MAX_FINDINGS * finding;
+        assert_eq!(findings, 7_080_000);
 
         // The verses a highlight or bookmark can be on: in each chapter,
         // up to the last any bundled translation numbers.
@@ -1686,20 +1744,21 @@ mod tests {
         assert_eq!((verses, ranges), (31_109, 530_288));
 
         let size = |bookmarks: usize, notes: usize| {
-            (rest + bookmarks * bookmark + verses * highlight + notes) as u64
+            (rest + bookmarks * bookmark + verses * highlight + notes + findings) as u64
         };
-        assert_eq!(size(50_000, notes), 119_126_741);
-        assert!(size(130_271, notes) <= MAX_FILE_BYTES);
-        assert!(size(130_272, notes) > MAX_FILE_BYTES);
-        assert_eq!(size(ranges, 0), 106_880_885);
+        assert_eq!(size(50_000, notes), 126_206_792);
+        assert!(size(50_000, notes) <= MAX_FILE_BYTES);
+        assert!(size(92_611, notes) <= MAX_FILE_BYTES);
+        assert!(size(92_612, notes) > MAX_FILE_BYTES);
+        assert_eq!(size(ranges, 0), 113_960_936);
         assert!(size(ranges, 0) <= MAX_FILE_BYTES);
     }
 
-    /// More notes than the reader can keep are refused, before anything
-    /// else is checked. Bookmarks and highlights have no such limit: any
-    /// number the file holds is checked as usual.
+    /// More notes, or AI findings, than the reader can keep are refused,
+    /// before anything else is checked. Bookmarks and highlights have no
+    /// such limit: any number the file holds is checked as usual.
     #[test]
-    fn only_notes_have_a_count_limit() {
+    fn only_notes_and_findings_have_a_count_limit() {
         let empty = || ReaderData {
             format: FORMAT.to_string(),
             format_version: FORMAT_VERSION,
@@ -1764,6 +1823,33 @@ mod tests {
             ..empty()
         });
         assert_eq!(at_limit.problems()[0], "Note 1: there's no book number 43.");
+
+        let finding = FindingRecord {
+            book: 43,
+            book_name: None,
+            chapter: 3,
+            verse_start: 16,
+            verse_end: 16,
+            agent: "Claude".to_string(),
+            request: "love".to_string(),
+            created_at: None,
+        };
+        assert_eq!(
+            refused(ReaderData {
+                findings: vec![finding.clone(); MAX_FINDINGS + 1],
+                ..empty()
+            })
+            .problems(),
+            ["It has 10001 AI findings; the most one file can hold is 10000."]
+        );
+        let at_limit = refused(ReaderData {
+            findings: vec![finding; MAX_FINDINGS],
+            ..empty()
+        });
+        assert_eq!(
+            at_limit.problems()[0],
+            "AI finding 1: there's no book number 43."
+        );
     }
 
     #[test]

@@ -414,8 +414,8 @@ test('Export notes leaves the findings out', () =>
     }, async (app) => {
         const path = join(dir, 'notes.md');
         await app.pick(path);
-        app.openLibrary('notes');
-        await clickAndWait(app, app.document.getElementById('export-notes-btn'), 'count_notes_export');
+        await app.openExport();
+        await clickAndWait(app, app.document.getElementById('export-choice-notes'), 'count_notes_export');
         await clickAndWait(app, app.document.getElementById('export-notes-confirm'), 'export_notes');
         const file = readFileSync(path, 'utf8');
         assert.ok(file.includes('Mine.'), file);

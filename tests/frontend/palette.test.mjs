@@ -299,9 +299,10 @@ test('Enter runs a command through its own control, and the box closes', () =>
         assert.equal(app.document.activeElement, byId('library-tab-notes'));
         app.key('Escape', {}, app.document.activeElement);
 
-        // The ☰ menu's items.
+        // The ☰ menu's items. (Export data… and Export notes… run the
+        // backup and the dialog themselves, not ☰'s chooser: see
+        // export-choice.test.mjs.)
         for (const [query, id] of [
-            ['export data', 'export-data-btn'],
             ['import data', 'import-data-btn'],
             ['show welcome', 'welcome-btn'],
             ['about gospel', 'about-btn'],

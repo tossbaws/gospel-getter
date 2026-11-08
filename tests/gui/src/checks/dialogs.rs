@@ -112,7 +112,7 @@ impl Run<'_> {
     }
 
     /// Opens ☰ and waits for it.
-    async fn open_menu(&self) -> Result<()> {
+    pub(super) async fn open_menu(&self) -> Result<()> {
         self.ui.click("open ☰", "#menu-toggle").await?;
         self.ui
             .wait(
@@ -364,7 +364,8 @@ impl Run<'_> {
         ))
     }
 
-    /// Check 8: Export data… writes a file through the native save dialog,
+    /// Check 8: Export data… (its chooser's Everything) writes a file
+    /// through the native save dialog,
     /// Import data… opens it through the native open dialog, the preview
     /// shows what it holds, and Cancel closes it with nothing changed. On
     /// Windows each native dialog is only seen to appear (and is closed).
@@ -374,9 +375,10 @@ impl Run<'_> {
             noteText: (document.querySelector('#note-list .note-preview') || {}).textContent || null }];";
         let before = self.ui.wait("what the reader has now", counts).await?;
 
-        self.open_menu().await?;
+        // ☰ → Export data… → Everything (backup).
+        self.open_export_chooser().await?;
         self.ui
-            .click("click Export data…", "#export-data-btn")
+            .click("click Everything (backup)", "#export-choice-everything")
             .await?;
         let mut said = Vec::new();
         let path = self.config.export_dir.join(DATA_FILE);

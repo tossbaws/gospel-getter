@@ -5,7 +5,9 @@ time. This crate holds the pieces, written with [Leptos] and compiled to
 WebAssembly; they run inside the same Tauri app. The page keeps only three
 small inline scripts of its own (the pre-paint script, boot's prefetch and
 the plain-text fallback) and the loader. The pieces are the page's
-modal dialogs: Export notes (`src/export_notes.rs`, the first), the
+modal dialogs: Export notes (`src/export_notes.rs`, the first), ☰ →
+Export data…'s chooser (`src/export_choice.rs`: Everything, the backup,
+or My notes, which opens Export notes), the
 keyboard shortcuts sheet (`src/shortcuts.rs`), the welcome
 (`src/welcome.rs`), the import preview (`src/import_preview.rs`) and the
 note editor (`src/note_editor.rs`); and About (`src/about.rs`) with the
@@ -100,8 +102,10 @@ keeps the two the same.
   `src/picker_text.rs`, `src/aa_text.rs`, `src/surfaces_text.rs`,
   `src/reader_text.rs`, `src/card_text.rs`, `src/margin_text.rs`,
   `src/note_markdown.rs`,
-  `src/keyboard_text.rs`, `src/page_text.rs`: the
-  pieces' words, numbers and rules (Export notes' filter, the import's
+  `src/keyboard_text.rs`, `src/page_text.rs`, and those at the top of
+  `src/export_choice.rs`: the
+  pieces' words, numbers and rules (Export notes' filter, the export
+  chooser's words, reasons and arrow keys, the import's
   sentences, the note's length rule and its drafts, the welcome's
   fresh-install rule, the updater's sentences, `megabytes` and download
   progress, the Library's rows, color names, filter, notes search and
