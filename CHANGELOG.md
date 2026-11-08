@@ -4,6 +4,80 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.26.0] - 2026-11-07
+
+An AI agent can now mark every verse on a topic for you to read yourself.
+It's off until you turn it on, and updating keeps your bookmarks,
+highlights, notes, reading position and settings.
+
+### Added
+- AI-flagged findings. Ask your agent something like "note every verse
+  that deals with grief so I can read them", and it can mark each verse
+  it finds, so you can read each one for yourself and judge whether it
+  got them right. It's off until you turn it on: choose **Aa**, then under
+  **AI agents** turn on **Let AI agents save findings**. Until you do,
+  the agent's tool answers with how to turn it on, and saves nothing.
+- A finding says only who found the verse and for which of your
+  requests, "Found by Claude for your request “grief”.", and never what
+  the verse means: there's nowhere to store anything that would. The
+  request is a short topic label, at most 60 characters, with no colon,
+  semicolon, dash or line break, so it can't carry commentary either.
+- In reading mode, a finding sits in the margin beside its verse, after
+  your own notes there, collapsed as a violet **AI** badge and the verse
+  (**AI ×2** when there are two). Click it, or press Enter or Space, to
+  open it, with **Keep as mine** and **Remove** (with Undo); click again
+  to fold it. It opens collapsed every time. A flagged verse has a dotted
+  violet underline. Compare's My notes column shows findings the same
+  way. In a narrow window, a violet AI marker follows the verse (after
+  your own note's pencil, if it has one) and opens them in the text.
+- **Keep as mine** opens your note editor with the finding's words in
+  it, all selected, so typing anything replaces them. Saving makes it
+  your own note and removes the finding; cancelling changes nothing.
+- The Library's Notes tab lists findings under **Found by AI agents**,
+  apart from your notes and grouped by request. Each group says who found
+  it, how many verses and when, links each verse to its passage, and has
+  **Remove all** (with Undo).
+- An agent can add findings, never edit or remove them, and never touch
+  your notes, bookmarks or highlights. Saving the same verse for the same
+  request again changes nothing. Findings an agent saves while the app is
+  open show the next time a chapter is shown or the Library is opened.
+  Export notes leaves them out.
+- In `gospel-getter-cli`, `save_findings` saves findings, up to 500 verses
+  a call (a reference that fails gets its own error, and the rest still
+  save), and `list_findings` lists what's saved, with no text. In a
+  terminal they're `save-findings` and `list-findings`. A finding names
+  the agent it's given, or else the MCP client's name, or "AI agent" in a
+  terminal. Saving a finding is the CLI's one write: everything else it
+  still reads through a read-only connection. Open 2.26.0 once before the
+  first save.
+- One MCP prompt, `summarise-my-notes`, asks an agent to summarise and
+  organise your own notes on a book. It works only with your words,
+  quotes any verse they point to exactly, and never summarises the
+  verses.
+- Every chapter of every translation is an MCP resource,
+  `gg://<translation>/<book>/<chapter>` (such as `gg://kjv/john/3`), so an
+  agent can attach a chapter as context. Its text is exactly what
+  `get_passage` gives.
+
+### Changed
+- The MCP server's instructions now tell an agent to quote scripture
+  exactly, and never to summarise, paraphrase or interpret it.
+- Export data keeps your findings and the switch. A backup with findings,
+  or made with the switch on, is data format 4: 2.26.0 and newer restore
+  it, and 2.25.x and older refuse it with their "made by a newer version"
+  message. A backup with neither stays format 3, exactly as 2.25.x writes
+  it, so 2.8.0 through 2.25.x still restore it in full.
+
+### Fixed
+- In a list of references, a part of only numbers after a range across
+  chapters now goes on from the chapter the range ends in: "John
+  3:16-4:2, 5" is John 4:5, not John 3:5.
+- `verify_quote` gives its look-alike note in one more case. Where the
+  closest match ties between two places (Exodus 9:29 has "the LORD"
+  twice), it now reports the difference at the place where the
+  characters only look alike: a quote with a curly apostrophe in "the
+  LORD'S" gets the note about it. The verdict doesn't change.
+
 ## [2.25.1] - 2026-11-07
 
 The app and `gospel-getter-cli` are unchanged from 2.25.0: updating keeps
