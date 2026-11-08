@@ -88,8 +88,9 @@ needed.
   goes there. If the app quits, or you close a note with **Keep for
   later**, what you typed is kept as a draft to restore, on this computer
   only: backups don't include drafts. Deleting a note offers **Undo**, and
-  **Copy as Markdown** copies one with its verses quoted. **Export
-  notes…** (in the Library's Notes tab) saves them as a Markdown file, or
+  **Copy as Markdown** copies one with its verses quoted. **My notes**,
+  under **Export data…** in the ☰ menu (or **Export notes…** in the
+  command palette), saves them as a Markdown file, or
   with **One file per book (a folder)** a file for each book, as notes
   apps such as Obsidian keep them, with each note's verses quoted in the
   translation you're reading, or as a **Commentary** (your notes by verse
@@ -177,10 +178,12 @@ needed.
 - **Picks up where you left off.** Gospel Getter reopens at the verse you
   were reading. Your chapter, translation, bookmarks, highlights, notes
   and display settings are remembered between sessions.
-- **Back up or move your data.** In the ☰ menu, **Export data…** saves your
-  bookmarks, highlights, notes, reading position and display settings
-  (Width, Layout and compare's translation included) to a
-  JSON file, and **Import data…** shows what a file contains before adding
+- **Back up or move your data.** In the ☰ menu, **Export data…** asks
+  what to export: **Everything (backup)** saves your bookmarks,
+  highlights, notes, AI findings, reading position and display settings
+  (Width, Layout and compare's translation included) to a JSON file, and
+  **My notes** opens the notes export (see **Notes**). **Import data…**
+  shows what a file contains before adding
   it (or, if you choose, replacing your bookmarks, highlights and notes).
   Only that personal data is exported, not Bible text or the app's
   database. Files exported by 2.8.0 or newer (data format 3, which adds
@@ -192,8 +195,10 @@ needed.
   the rest of the file imports: 2.12 skips a 2.13 backup's Width that way,
   2.12 and 2.13 skip a 2.14 backup's Layout, and 2.12 to 2.14 skip a 2.15
   backup's compare translation.
-  **Export data…** is the backup, and its file imports again; **Export
-  notes…** makes a readable copy of your notes, which isn't imported.
+  **Everything (backup)** is the backup, and its file imports again; **My
+  notes** makes a readable copy of your notes, which isn't imported. In
+  the command palette, **Export data…** and **Export notes…** go straight
+  to each.
 - **A short welcome.** On a new install, one card opens over the
   chapter. **Pick a look** tries Chi Rho or Vellum on the spot (the other
   themes are under **Aa**), and **Where to start** suggests Mark, John,
@@ -382,7 +387,7 @@ Upgrading keeps your data.
   include it, and restoring one opens its chapter at the top.
 - Note drafts (what you typed in a note and haven't saved) are kept in the
   app's web storage, on this computer only, for 30 days (the 20 newest).
-  Backups and **Export notes…** don't include them.
+  Backups and the notes export don't include them.
 - **Recent places** (the bar's ▾ list, the last 10) are kept in the app's
   web storage, on this computer only. Backups don't include them.
 - AI findings (see **Mark findings** under **Use with AI agents**) and the
@@ -515,7 +520,8 @@ one for yourself, and judge whether it got them right.
   own note and removes the finding. The Library's Notes tab lists findings by
   request, apart from your notes, with **Remove all** (and Undo). Findings an
   agent saves while the app is open show the next time a chapter is shown or
-  the Library is opened. Export notes leaves them out; Export data keeps them.
+  the Library is opened. The notes export (☰ → **Export data…** → **My
+  notes**) leaves them out; the backup (**Everything**) keeps them.
 - `list_findings` lists what's saved (where, by whom, for which request, with
   no text), so an agent can avoid saving a verse twice.
 
@@ -637,7 +643,7 @@ stored exactly as its source provides it.
   unmatched `}`). The only changes are structural: removing the file's
   byte-order mark and reshaping the JSON. The stored text keeps the
   markup; the app only changes how it's shown. The reader, Copy, search
-  and **Export notes…** present it as print does: supplied words in
+  and the notes export present it as print does: supplied words in
   italics (plain in Copy and search, italic in Copy as…'s Markdown quote),
   and margin notes as lettered footnotes in the reader, left out of Copy,
   search and the export. The four verses with broken markup are shown as
