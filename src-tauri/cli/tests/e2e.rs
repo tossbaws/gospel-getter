@@ -1151,6 +1151,72 @@ async fn saving_findings_says_what_was_saved_already_there_or_not_read() {
     );
 }
 
+/// There are at most 10,000 findings in all (`MAX_FINDINGS`). A save that
+/// would pass the limit saves none of its verses, and both front ends say
+/// so plainly; verses already saved for the request add nothing, so they're
+/// answered as before even at the limit.
+#[tokio::test]
+async fn saving_past_the_findings_limit_says_so_and_saves_nothing() {
+    let (db, pool) = fresh_database("e2e_findings_limit").await;
+    // On John 11:35, each for a request of its own.
+    gospel_getter_core::db::test_support::fill_findings(
+        pool.write(),
+        db::findings::MAX_FINDINGS - 1,
+    )
+    .await;
+    db::findings::set_findings_enabled(pool.write(), true)
+        .await
+        .expect("turn it on");
+    pool.close().await;
+    let path = db.path();
+    let own = readers_own(&path).await;
+    let limit = "Gospel Getter holds at most 10,000 AI findings; remove some in the Library first.";
+
+    // Two new verses would be one over: neither is saved.
+    let message = refusal(
+        &path,
+        &["save-findings", "--request", "grief", "John 11:33-34"],
+    );
+    assert_eq!(message, format!("{limit}\n"));
+    assert_eq!(
+        answer(&path, &["list-findings", "--request", "grief"])["total"],
+        0
+    );
+    // One reaches it; the same again is already saved.
+    let saved = answer(
+        &path,
+        &["save-findings", "--request", "grief", "John 11:33"],
+    );
+    assert_eq!(saved["saved"], 1);
+    let again = answer(
+        &path,
+        &["save-findings", "--request", "grief", "John 11:33"],
+    );
+    assert_eq!(
+        (again["saved"].as_u64(), again["already_saved"].as_u64()),
+        (Some(0), Some(1))
+    );
+
+    // At the limit, a new one is refused through MCP too.
+    let mut mcp = Mcp::start(&path);
+    mcp.initialize();
+    let (is_error, text) = mcp.call(
+        2,
+        "save_findings",
+        json!({"request": "tears", "references": ["John 11:35"]}),
+    );
+    assert!(is_error);
+    assert_eq!(text, limit);
+    let listed = mcp.call_for_json(3, "list_findings", json!({"request": "tears"}));
+    assert_eq!(listed["total"], 0, "nothing saved");
+    mcp.finish();
+    assert_eq!(
+        readers_own(&path).await,
+        own,
+        "the reader's own data is untouched"
+    );
+}
+
 /// A request is a short topic label, never room for words about a verse
 /// (C3): one with commentary in it, or too long, is refused whole in both
 /// front ends, with what a request is, and nothing is saved.

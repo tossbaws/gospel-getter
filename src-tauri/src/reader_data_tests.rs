@@ -11,7 +11,8 @@ use crate::commands::{
 };
 use crate::db::Passage;
 use crate::db::test_support::{
-    TempDb, bundled, fill_notes, fresh_database, other_tables_snapshot, verses_snapshot,
+    TempDb, bundled, fill_findings, fill_notes, fresh_database, other_tables_snapshot,
+    verses_snapshot,
 };
 use crate::reader_data::{
     self, Layout, LineSpacing, MAX_SHOWN_FILE_CHARS, Preferences, TextSize, Theme, TranslationCode,
@@ -2550,4 +2551,101 @@ async fn invalid_findings_reject_the_whole_file_and_change_nothing() {
             "{label} changed something"
         );
     }
+}
+
+// ---- The limit on AI findings
+
+use crate::reader_data::MAX_FINDINGS;
+
+/// A database (and app) with `count` AI findings (`fill_findings`).
+async fn app_with_findings(label: &str, count: usize) -> (TempDb, AppState) {
+    let (db, pool) = fresh_database(label).await;
+    fill_findings(pool.write(), count).await;
+    let state = AppState::load(pool).await.expect("load state");
+    (db, state)
+}
+
+/// A format 4 file with a bookmark and `count` findings on John 11:35, each
+/// for a request of its own (`f000001`, `f000002`…).
+fn v4_file_with_findings(count: usize) -> String {
+    let findings: Vec<String> = (1..=count)
+        .map(|i| {
+            format!(
+                r#"{{"book": 43, "chapter": 11, "verse_start": 35, "verse_end": 35, "agent": "Claude", "request": "f{i:06}"}}"#
+            )
+        })
+        .collect();
+    format!(
+        r#"{{"format": "gospel-getter-reader-data", "format_version": 4,
+            "exported_at": "2026-11-07T00:00:00.000Z", "app_version": "2.26.0",
+            "reading_position": null,
+            "bookmarks": [{{"book": 1, "chapter": 1, "verse_start": 1, "verse_end": 1}}],
+            "findings": [{}]}}"#,
+        findings.join(", ")
+    )
+}
+
+/// An import that would leave more than `MAX_FINDINGS` findings (merged
+/// with the reader's) changes nothing and says why, as one past the notes'
+/// limit does; one that fits merges as usual, and replacing is fine. A file
+/// with more findings than anyone can keep is refused before anything else.
+#[tokio::test]
+async fn an_import_past_the_findings_limit_changes_nothing() {
+    assert_eq!(MAX_FINDINGS, crate::db::findings::MAX_FINDINGS);
+    // Two short of the limit; the file has three new ones.
+    let (db, state) = app_with_findings("rd_findings_limit", MAX_FINDINGS - 2).await;
+    let before = (everything(&state).await, finding_rows(&state).await);
+    let three = file(&db, "three-more.gospel-getter.json");
+    std::fs::write(&three, v4_file_with_findings(3)).unwrap();
+    let p = preview(&state, &three).await;
+    assert_eq!(p.findings_in_file, 3);
+    let error = commands::apply_pending_import(&state, p.token, false, true)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        "Importing this file would give you more than 10,000 AI findings, the most Gospel \
+         Getter keeps, so nothing was changed."
+    );
+    assert_eq!(
+        (everything(&state).await, finding_rows(&state).await),
+        before,
+        "not even the bookmark"
+    );
+
+    // Two fit, merged: the limit exactly. The same file again adds nothing.
+    let two = file(&db, "two-more.gospel-getter.json");
+    std::fs::write(&two, v4_file_with_findings(2)).unwrap();
+    let merged = import(&state, &two, false).await;
+    assert_eq!(merged.findings_added, 2);
+    assert_eq!(finding_rows(&state).await.len(), MAX_FINDINGS);
+    let again = import(&state, &two, false).await;
+    assert_eq!(
+        (again.findings_added, again.findings_already_present),
+        (0, 2)
+    );
+
+    // Replacing leaves just the file's three.
+    let replaced = import(&state, &three, true).await;
+    assert_eq!(
+        (replaced.findings_added, replaced.findings_removed),
+        (3, MAX_FINDINGS)
+    );
+
+    // One more than the limit in a file: refused outright, nothing read
+    // further; at the limit, a file imports.
+    let before = finding_rows(&state).await;
+    let over = file(&db, "too-many.gospel-getter.json");
+    std::fs::write(&over, v4_file_with_findings(MAX_FINDINGS + 1)).unwrap();
+    let (_, problems) = invalid(&state, &over).await;
+    assert_eq!(
+        problems,
+        ["It has 10001 AI findings; the most one file can hold is 10000."]
+    );
+    assert_eq!(finding_rows(&state).await, before);
+    let at = file(&db, "at-the-limit.gospel-getter.json");
+    std::fs::write(&at, v4_file_with_findings(MAX_FINDINGS)).unwrap();
+    let full = import(&state, &at, true).await;
+    assert_eq!(full.findings_added, MAX_FINDINGS);
+    assert_eq!(finding_rows(&state).await.len(), MAX_FINDINGS);
 }

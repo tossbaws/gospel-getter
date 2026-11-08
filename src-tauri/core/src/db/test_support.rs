@@ -503,3 +503,18 @@ pub async fn fill_notes(writer: &WritePool, count: usize, chars: usize) {
     .await
     .expect("fill notes");
 }
+
+/// Add `count` distinct AI findings on John 11:35 by "Claude", each for a
+/// request of its own (`r000001`, `r000002`…), in one statement — for
+/// filling a database up to the findings' limit quickly.
+pub async fn fill_findings(writer: &WritePool, count: usize) {
+    sqlx::query(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < $1) \
+         INSERT INTO ai_findings (book_id, chapter, verse_start, verse_end, agent, request) \
+         SELECT 43, 11, 35, 35, 'Claude', printf('r%06d', i) FROM n",
+    )
+    .bind(count as i64)
+    .execute(writer.pool())
+    .await
+    .expect("fill findings");
+}

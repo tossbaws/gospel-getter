@@ -5,12 +5,12 @@
 use std::time::Duration;
 
 use super::findings::{
-    DEFAULT_AGENT, FindingsWriter, KeepError, NewFinding, add_findings, findings_enabled,
-    keep_as_mine, list_findings, list_requests, remove_finding, remove_request,
+    DEFAULT_AGENT, FindingsWriter, KeepError, MAX_FINDINGS, NewFinding, add_findings, all_findings,
+    findings_enabled, keep_as_mine, list_findings, list_requests, remove_finding, remove_request,
     set_findings_enabled,
 };
 use super::notes::{MAX_NOTES, NoteLimit, Passage, add_note, list_notes};
-use super::test_support::{TempDb, fill_notes, fresh_database};
+use super::test_support::{TempDb, fill_findings, fill_notes, fresh_database};
 use super::{
     Db, FindingsError, HighlightColor, NoteBodyError, NoteError, begin_write, bookmarks, highlights,
 };
@@ -389,6 +389,93 @@ async fn the_writer_saves_only_while_the_switch_is_on() {
     );
     writer.close().await;
     assert_eq!(readers_own(&pool).await, own, "no other table changed");
+}
+
+/// How many findings there are.
+async fn finding_count(pool: &Db) -> usize {
+    all_findings(pool.read()).await.expect("findings").len()
+}
+
+/// There are at most `MAX_FINDINGS` findings, every request's together.
+/// A save that would make more saves none of its findings (all or none,
+/// as a passage that isn't there stops them all), and says so plainly;
+/// one that only finds its verses already saved adds nothing, so it's
+/// answered as before even at the limit. Undo's re-add (`add_findings`)
+/// and an agent's save (the writer) obey it alike.
+#[tokio::test]
+async fn findings_stop_at_the_limit_all_or_none() {
+    assert_eq!(MAX_FINDINGS, 10_000);
+    let (db, pool) = fresh_database("findings_limit").await;
+    fill_findings(pool.write(), MAX_FINDINGS - 2).await;
+    assert_eq!(finding_count(&pool).await, MAX_FINDINGS - 2);
+
+    // Three new ones would be one over: none is saved.
+    let over = add_findings(
+        pool.write(),
+        &[
+            new(verse(11, 33), "grief"),
+            new(verse(11, 34), "grief"),
+            new(verse(11, 36), "grief"),
+        ],
+    )
+    .await;
+    assert!(matches!(over, Err(FindingsError::Limit)), "{over:?}");
+    assert_eq!(
+        over.unwrap_err().to_string(),
+        "Gospel Getter holds at most 10,000 AI findings; remove some in the Library first."
+    );
+    assert_eq!(finding_count(&pool).await, MAX_FINDINGS - 2);
+    assert!(
+        list_requests(pool.read())
+            .await
+            .unwrap()
+            .iter()
+            .all(|r| r.request != "grief")
+    );
+
+    // Two reach it exactly.
+    let at = add_findings(
+        pool.write(),
+        &[new(verse(11, 33), "grief"), new(verse(11, 34), "grief")],
+    )
+    .await
+    .expect("up to the limit");
+    assert_eq!(at.saved.len(), 2);
+    assert_eq!(finding_count(&pool).await, MAX_FINDINGS);
+
+    // At the limit, the same verses again add nothing, and are answered
+    // as already saved; a new one is refused.
+    let again = add_findings(pool.write(), &[new(verse(11, 33), "grief")])
+        .await
+        .expect("already saved");
+    assert_eq!((again.saved, again.already), (vec![], vec![verse(11, 33)]));
+    let one_more = add_findings(pool.write(), &[new(verse(11, 36), "grief")]).await;
+    assert!(
+        matches!(one_more, Err(FindingsError::Limit)),
+        "{one_more:?}"
+    );
+
+    // An agent's save, through the writer, likewise.
+    set_findings_enabled(pool.write(), true).await.expect("on");
+    let writer = FindingsWriter::open(&db.path()).await.expect("open");
+    let agent = writer.add("Claude", "tears", &[verse(11, 35)]).await;
+    assert!(matches!(agent, Err(FindingsError::Limit)), "{agent:?}");
+    let same = writer
+        .add("Claude", "grief", &[verse(11, 34)])
+        .await
+        .expect("already saved");
+    assert_eq!(same.already, [verse(11, 34)]);
+
+    // Room again once some are removed.
+    let gone = remove_request(pool.write(), "grief").await.expect("remove");
+    assert_eq!(gone.len(), 2);
+    let saved = writer
+        .add("Claude", "tears", &[verse(11, 35), verse(11, 36)])
+        .await
+        .expect("room for two");
+    writer.close().await;
+    assert_eq!(saved.saved.len(), 2);
+    assert_eq!(finding_count(&pool).await, MAX_FINDINGS);
 }
 
 /// A database the app hasn't opened since 2.25.x has no tables for

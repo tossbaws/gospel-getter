@@ -7,7 +7,7 @@ use anyhow::Context;
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 
-use crate::db::findings::{insert_findings, set_enabled_on};
+use crate::db::findings::{FindingsError, insert_findings, set_enabled_on};
 use crate::db::notes::{NoteLimit, NoteTotals, note_totals};
 use crate::db::{Bookmark, HighlightColor, NewFinding, WritePool};
 
@@ -207,6 +207,9 @@ pub struct FindingsImport<'a> {
 pub enum ApplyImportError {
     /// The notes it would leave would go past a limit.
     NoteLimit(NoteLimit),
+    /// The AI findings it would leave would be more than
+    /// [`MAX_FINDINGS`](crate::db::findings::MAX_FINDINGS).
+    FindingLimit,
     Database(anyhow::Error),
 }
 
@@ -214,6 +217,11 @@ impl std::fmt::Display for ApplyImportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoteLimit(limit) => write!(f, "the import would go past a limit: {limit}"),
+            Self::FindingLimit => write!(
+                f,
+                "the import would go past a limit: {}",
+                FindingsError::Limit
+            ),
             Self::Database(e) => write!(f, "{e:#}"),
         }
     }
@@ -294,7 +302,9 @@ pub struct ImportCounts {
 /// file) leaves both untouched.
 /// Before anything is written, the notes there would be afterwards are
 /// checked against `MAX_NOTES` and `MAX_TOTAL_NOTE_CHARS`; an import that
-/// would go past either changes nothing.
+/// would go past either changes nothing. So does one that would leave more
+/// than `MAX_FINDINGS` findings (merging the file's into the reader's): the
+/// findings are counted as they're added, and the transaction is dropped.
 pub async fn apply_import(
     writer: &WritePool,
     bookmarks: &[NewBookmark],
@@ -426,7 +436,10 @@ pub async fn apply_import(
         }
         let saved = insert_findings(&mut tx, import.findings)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to add the AI findings: {e}"))?;
+            .map_err(|e| match e {
+                FindingsError::Limit => ApplyImportError::FindingLimit,
+                e => anyhow::anyhow!("Failed to add the AI findings: {e}").into(),
+            })?;
         findings_added = saved.saved.len();
         findings_already_present = saved.already.len();
         if let Some(on) = import.enabled {
