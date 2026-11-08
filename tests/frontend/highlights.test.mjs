@@ -207,6 +207,12 @@ async function clickData(app, id, path) {
     await app.idle(before);
 }
 
+/** ☰ → Export data… → Everything (backup), with the save dialog answering `path`. */
+async function exportData(app, path) {
+    await app.pick(path);
+    await app.exportEverything();
+}
+
 const dataStatus = (app) => app.document.getElementById('data-status').textContent;
 
 test('export saves highlights, and says so', () =>
@@ -215,7 +221,7 @@ test('export saves highlights, and says so', () =>
         await choose(app, swatch(app, 'yellow'));
         app.key('Escape');
         const path = newPath('export');
-        await clickData(app, 'export-data-btn', path);
+        await exportData(app, path);
         assert.equal(dataStatus(app), `Saved 0 bookmarks, 2 highlighted verses, your reading position, your display settings to ${path}. Bible text isn’t included.`);
         const json = JSON.parse(readFileSync(path, 'utf8'));
         assert.equal(json.format_version, 3);

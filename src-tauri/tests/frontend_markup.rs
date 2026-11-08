@@ -17,7 +17,7 @@ use gospel_getter_lib::preferences::{self, Preference, Values};
 /// highlight and notes), and what was the page's main script (the keyboard
 /// and click dispatchers, boot, and the page's glue): checks of those read
 /// them where they now live.
-const PIECES: [(&str, &str); 35] = [
+const PIECES: [(&str, &str); 36] = [
     (
         "findings.rs",
         include_str!("../../ui-leptos/src/findings.rs"),
@@ -25,6 +25,10 @@ const PIECES: [(&str, &str); 35] = [
     (
         "findings_text.rs",
         include_str!("../../ui-leptos/src/findings_text.rs"),
+    ),
+    (
+        "export_choice.rs",
+        include_str!("../../ui-leptos/src/export_choice.rs"),
     ),
     (
         "export_notes.rs",
@@ -4836,6 +4840,100 @@ fn the_welcome_uses_tested_theme_colors() {
             .1;
         let ratio = contrast_ratio(property(&props, "--accent"), property(&props, "--bg"));
         assert!(ratio >= 3.0, "{theme}'s preview is {ratio:.2}:1");
+    }
+}
+
+/// ☰ → Export data… is the one place to export (D20): a modal chooser like
+/// the page's others (the overlay's and panel's classes, a dialog named by
+/// its title), whose two choices are buttons named by their names and
+/// described by their lines, and Cancel; the Library's Notes tab has no
+/// Export notes… button any more. Its colors add nothing of its own:
+/// --text, --text-dim and --accent on the modal's opaque --option-bg, a
+/// choice under the pointer the welcome's 0.06 --accent wash, a greyed-out
+/// choice's name --text-dim, all AA in every theme.
+#[test]
+fn the_export_chooser_is_a_modal_in_tested_theme_colors() {
+    assert!(tag_of("export-choice-overlay").contains(r#"class="modal-overlay""#));
+    let panel = tag_of("export-choice-panel");
+    for attribute in [
+        r#"class="modal-panel export-choice-panel""#,
+        r#"role="dialog""#,
+        r#"aria-modal="true""#,
+        r#"aria-labelledby="export-choice-title""#,
+    ] {
+        assert!(panel.contains(attribute), "{attribute}");
+    }
+    assert!(tag_of("export-choice-title").contains(r#"class="note-title""#));
+    assert!(tag_of("export-choice-cancel").contains(r#"class="reader-mode-btn""#));
+    let chooser = piece("export_choice.rs");
+    for needle in [
+        r#"class="export-choice""#,
+        "aria-labelledby=labelled_by",
+        "aria-describedby=described_by",
+        r#"class="export-choice-name""#,
+        r#"class="export-choice-line""#,
+        r#""export-choice-everything","#,
+        r#""export-choice-notes","#,
+    ] {
+        assert!(chooser.contains(needle), "{needle}");
+    }
+    assert!(tag_of("export-data-btn").contains(r#"title="Save a backup, or export your notes""#));
+    for (file, source) in std::iter::once(("index.html", HTML)).chain(PIECES) {
+        assert!(
+            !source.contains("export-notes-btn") && !source.contains("export_button"),
+            "{file} still has the Library's Export notes… button"
+        );
+    }
+
+    let rules = rules();
+    for (selector, color) in [
+        (".export-choice", "--text"),
+        (".export-choice-name", "--accent"),
+        (".export-choice-line", "--text-dim"),
+        (".export-choice:disabled .export-choice-name", "--text-dim"),
+    ] {
+        assert!(
+            screen_rule(&rules, selector)
+                .body
+                .contains(&format!("color: var({color})")),
+            "{selector} should be {color}"
+        );
+    }
+    let hover = screen_rule(&rules, ".export-choice:hover:not(:disabled)");
+    assert!(
+        hover
+            .body
+            .contains("background: rgba(var(--accent-rgb), 0.06)")
+    );
+    assert!(
+        screen_rule(&rules, ".export-choice")
+            .body
+            .contains("background: none")
+    );
+    for (theme, props) in theme_palettes(&rules) {
+        let bg = property(&props, "--option-bg");
+        let wash = composite(
+            &format!("rgba({}, 0.06)", property(&props, "--accent-rgb")),
+            bg,
+        );
+        for (what, fg, under) in [
+            ("a choice's name", "--accent", bg),
+            ("a choice's line", "--text-dim", bg),
+            ("a greyed-out choice's name and line", "--text-dim", bg),
+            (
+                "a choice's name under the pointer",
+                "--accent",
+                wash.as_str(),
+            ),
+            (
+                "a choice's line under the pointer",
+                "--text-dim",
+                wash.as_str(),
+            ),
+        ] {
+            let ratio = contrast_ratio(property(&props, fg), under);
+            assert!(ratio >= 4.5, "theme `{theme}`: {what} is {ratio:.2}:1");
+        }
     }
 }
 

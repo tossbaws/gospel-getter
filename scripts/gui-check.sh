@@ -32,8 +32,9 @@
 # markers in a narrow window, Psalm 119 with a note on every verse), 64
 # (the Library's Notes tab searched), 66 (a note's Markdown and
 # references, Copy as Markdown), 67 (the bar's Back, Forward and Recent
-# places), 68 (the bar's chapter arrows) and 69 (Compare with Notes: the
-# notes beside a text that never moves) run on the app given; for 58 (a cold start to
+# places), 68 (the bar's chapter arrows), 69 (Compare with Notes: the
+# notes beside a text that never moves) and 71 (☰ → Export data…'s chooser,
+# and the Library's Notes tab without a button) run on the app given; for 58 (a cold start to
 # the saved chapter), 59 (at the verse the reader was at), 26 and 45 it is
 # closed and started again on the same data, and for 65 (a note being typed
 # as the app quits, offered back as a draft) once more. The updater's checks (9 to 13) run on

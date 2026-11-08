@@ -1,12 +1,14 @@
 //! The page's glue, which its main script was: the toast at the foot of
-//! the window; ☰'s Export data… (its own command) and Import data…, and an
-//! import's reloads; Export notes…'s button; the welcome (from ☰, and the
-//! startup question boot asks); the keyboard shortcuts sheet; opening and
-//! closing the search box; what the palette's commands need, and the
-//! commands whose code was the page's; the translation changing; the
-//! Library's lists reloaded, and its notes kept for the welcome and Export
-//! notes; Compare's partner; and the launch check for updates. Boot is
-//! `boot`, the keys `keyboard` and the clicks `clicks`.
+//! the window; ☰'s Export data… (its chooser, `export_choice`, and the
+//! backup, its own command) and Import data…, and an import's reloads;
+//! the Export notes dialog asked for (the chooser's My notes, the
+//! palette's Export notes…); the welcome (from ☰, and the startup question
+//! boot asks); the keyboard shortcuts sheet; opening and closing the search
+//! box; what the palette's commands need, and the commands whose code was
+//! the page's; the translation changing; the Library's lists reloaded, and
+//! its notes kept for the welcome, the chooser and Export notes; Compare's
+//! partner; and the launch check for updates. Boot is `boot`, the keys
+//! `keyboard` and the clicks `clicks`.
 //!
 //! This is the main script of `ui/index.html` at 2a9d85c (`errorText` to
 //! `aboutOpen`, less what `boot`, `keyboard` and `clicks` took) in Rust: the
@@ -20,7 +22,7 @@
 //! surfaces (`surfaces`) mount in the same call as this, before any click or
 //! key can come. What can come before the rest of the pieces have mounted
 //! (`lib::mount_the_rest`) still says so: the sheet, the welcome, the
-//! import, Export notes, search and About.
+//! import, the export chooser, Export notes, search and About.
 
 use std::cell::RefCell;
 
@@ -28,9 +30,10 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
-use web_sys::{Element, HtmlButtonElement, HtmlElement, HtmlOptionElement, HtmlSelectElement};
+use web_sys::{HtmlButtonElement, HtmlElement, HtmlOptionElement, HtmlSelectElement};
 
 use crate::bridge;
+use crate::bridge::ExportFacts;
 use crate::card::{self, Ask};
 use crate::card_text::Slot;
 use crate::dom;
@@ -49,6 +52,9 @@ struct State {
     toast_timer: Option<i32>,
     /// How many notes the Library loaded (`list_all_notes`), once it has.
     notes: Option<u32>,
+    /// An export or import is running (Export data…'s backup, Import
+    /// data…): neither starts again until it's done.
+    data_busy: bool,
     /// The backend's places to start, from boot, for the welcome.
     start_here: Option<JsValue>,
     /// Boot's books for the picker, sent again once every piece is there.
@@ -111,6 +117,11 @@ pub fn about_open() -> bool {
 /// The note editor is open.
 pub fn note_open() -> bool {
     overlay_open("note-overlay")
+}
+
+/// ☰ → Export data…'s chooser is open.
+pub fn export_choice_open() -> bool {
+    overlay_open("export-choice-overlay")
 }
 
 /// Export notes' dialog is open.
@@ -242,13 +253,28 @@ fn show_data_status(message: &str, is_error: bool, duration: i32) -> Option<Html
     Some(status)
 }
 
-/// ☰'s Export data… and Import data…, disabled while either runs.
+/// An export or import is running, or done: ☰'s Import data… is disabled
+/// meanwhile, and so is the chooser's Everything (☰'s Export data… still
+/// opens the chooser, for My notes).
 pub fn set_data_busy(busy: bool) {
-    for id in ["export-data-btn", "import-data-btn"] {
-        if let Some(item) = button(id) {
-            item.set_disabled(busy);
-        }
+    with(|s| s.data_busy = busy);
+    if let Some(item) = button("import-data-btn") {
+        item.set_disabled(busy);
     }
+    send_export_facts();
+}
+
+/// What the export chooser needs now.
+fn export_facts() -> ExportFacts {
+    with(|s| ExportFacts {
+        notes: s.notes.unwrap_or(0) > 0,
+        busy: s.data_busy,
+    })
+}
+
+/// Tells the chooser what changed ([`bridge::EXPORT_FACTS_EVENT`]).
+fn send_export_facts() {
+    bridge::dispatch(bridge::EXPORT_FACTS_EVENT, &export_facts());
 }
 
 // ---- Back up or move your data. The native file dialogs, file access and
@@ -273,9 +299,13 @@ struct Exported {
     preferences: u64,
 }
 
-/// ☰ → Export data…: bookmarks, highlights, notes, the reading position and
-/// the display settings, to a file the reader chooses.
-fn export_data() {
+/// The backup (the chooser's Everything, the palette's Export data…):
+/// bookmarks, highlights, notes, the reading position and the display
+/// settings, to a file the reader chooses. Not while one is running.
+pub fn export_data() {
+    if with(|s| s.data_busy) {
+        return;
+    }
     let args = js_sys::Object::new();
     let _ = js_sys::Reflect::set(
         &args,
@@ -318,23 +348,28 @@ fn export_data() {
     });
 }
 
-/// Export notes…, at the top of the Library's Notes tab (the Library's
-/// button, enabled while there are notes; the palette clicks it too): asks
-/// the dialog to open with what it needs.
-fn on_library_click(event: &web_sys::Event) {
-    let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else {
+/// ☰ → Export data…: the chooser, Everything (the backup) or My notes (the
+/// Export notes dialog); focus goes back to `return_focus`.
+fn open_export_choice(return_focus: Option<HtmlElement>) {
+    let Ok(facts) = ipc::args(&export_facts()) else {
         return;
     };
-    let Some(export) = target
-        .closest("#export-notes-btn")
-        .ok()
-        .flatten()
-        .and_then(|el| el.dyn_into::<HtmlButtonElement>().ok())
-    else {
-        return;
-    };
+    let _ = js_sys::Reflect::set(
+        &facts,
+        &JsValue::from_str("returnFocus"),
+        &element_or_null(return_focus),
+    );
+    if !bridge::request(bridge::EXPORT_CHOICE_EVENT, &facts) {
+        set_data_status(text::EXPORT_UNAVAILABLE, true);
+    }
+}
+
+/// The chooser's My notes and the palette's Export notes… (while there are
+/// notes): asks the Export notes dialog to open with what it needs; closing
+/// it gives focus back to `return_focus`.
+pub fn open_export_notes(return_focus: Option<HtmlElement>) {
     let notes = with(|s| s.notes).unwrap_or(0);
-    if export.disabled() || notes == 0 {
+    if notes == 0 {
         return;
     }
     let code = bridge::translation_code();
@@ -355,6 +390,11 @@ fn on_library_click(event: &web_sys::Event) {
     }) else {
         return;
     };
+    let _ = js_sys::Reflect::set(
+        &detail,
+        &JsValue::from_str("returnFocus"),
+        &element_or_null(return_focus),
+    );
     if !bridge::request(bridge::OPEN_EVENT, &detail) {
         set_data_status(text::EXPORT_NOTES_UNAVAILABLE, true);
     }
@@ -449,7 +489,7 @@ pub fn library_resent() -> js_sys::Promise {
 }
 
 /// Every note, as the Library loaded them: kept as their count, for the
-/// welcome and Export notes.
+/// welcome, the chooser and Export notes.
 fn on_library_loaded(event: &web_sys::CustomEvent) {
     let detail = event.detail();
     let get = |key: &str| js_sys::Reflect::get(&detail, &JsValue::from_str(key)).ok();
@@ -461,6 +501,7 @@ fn on_library_loaded(event: &web_sys::CustomEvent) {
             .and_then(|n| n.as_f64())
             .map_or(0, |n| n as u32);
         with(|s| s.notes = Some(count));
+        send_export_facts();
     }
 }
 
@@ -639,8 +680,8 @@ pub fn palette_state() -> PaletteState {
         theme: value_of("theme-select"),
         translations: choices("translation-select"),
         translation: bridge::translation_code(),
-        notes: button("export-notes-btn").is_some_and(|b| !b.disabled()),
-        export_busy: disabled("export-data-btn"),
+        notes: export_facts().notes,
+        export_busy: export_facts().busy,
         import_busy: disabled("import-data-btn"),
         checking: disabled("update-check-btn"),
         chapter_shown: dom::query(".chapter-copy-btn").is_some(),
@@ -665,6 +706,11 @@ pub fn run_command(command: &str) {
         "back" => keyboard::go_history(-1),
         "forward" => keyboard::go_history(1),
         "shortcuts" => open_shortcuts(None),
+        // Straight to the dialog and the backup, not by way of ☰'s
+        // chooser. The dialog gives focus to the page's focus home when it
+        // closes, as it did when this clicked the Library's button.
+        "export-notes" => open_export_notes(None),
+        "export-data" => export_data(),
         _ => {}
     }
 }
@@ -702,8 +748,8 @@ fn on_ready() {
     }
 }
 
-/// Listens where the main script listened: the ☰ items, the Library's
-/// Export notes…, the search and About buttons, the translation changing,
+/// Listens where the main script listened: the ☰ items, the search and
+/// About buttons, the translation changing,
 /// the Library's notes and every piece being there; then the click
 /// dispatcher (`clicks`) and the keyboard dispatcher (`keyboard`). Called
 /// first of all, before any piece mounts, so these run first, as the main
@@ -714,10 +760,9 @@ pub fn mount() {
             dom::on_click(&el, move |_| handler());
         }
     };
-    on_click("export-data-btn", export_data);
-    if let Some(panel) = by_id("library-panel") {
-        dom::on(&panel, "click", |event| on_library_click(&event));
-    }
+    on_click("export-data-btn", || {
+        open_export_choice(by_id("menu-toggle"))
+    });
     on_click("import-data-btn", import_data);
     dom::on_document_event(bridge::LIBRARY_LOADED_EVENT, |event| {
         on_library_loaded(&event);

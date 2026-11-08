@@ -239,10 +239,10 @@ test('a copy that fails says so', async () => {
     });
 });
 
-/** Opens Export notes and waits for its count. */
+/** Opens Export notes (☰ → Export data… → My notes) and waits for its count. */
 async function openExport(app) {
-    app.openLibrary('notes');
-    await clickAndWait(app, el(app, 'export-notes-btn'), 'count_notes_export');
+    await app.openExport();
+    await clickAndWait(app, el(app, 'export-choice-notes'), 'count_notes_export');
 }
 
 test('Export notes as one file per book: a folder of books in Bible order, each its own export', async () => {

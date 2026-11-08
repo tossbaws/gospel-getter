@@ -204,7 +204,7 @@ test('Export data… and Import data… say what they do on hover, and nothing m
     withApp({}, async (app) => {
         const exportBtn = $(app, 'export-data-btn');
         const importBtn = $(app, 'import-data-btn');
-        assert.equal(exportBtn.title, 'Save a backup of your bookmarks, highlights, notes and settings');
+        assert.equal(exportBtn.title, 'Save a backup, or export your notes');
         assert.equal(importBtn.title, 'Load a Gospel Getter backup from this or another computer');
         assert.equal(exportBtn.textContent, 'Export data…');
         assert.equal(importBtn.textContent, 'Import data…');

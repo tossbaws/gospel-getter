@@ -37,15 +37,21 @@
 //! later hears what it missed when [`READY_EVENT`] comes:
 //! - Requests to open, each cancelable; the piece cancels it to say it has
 //!   it, and if nothing does (it hasn't mounted yet), the asker says it
-//!   isn't available (`page`): [`OPEN_EVENT`] (`gospel-getter:export-notes`,
-//!   Export notes…, an [`OpenRequest`]); [`SHORTCUTS_EVENT`]
+//!   isn't available (`page`): [`EXPORT_CHOICE_EVENT`]
+//!   (`gospel-getter:export-choice`, ☰ → Export data…'s chooser, its
+//!   [`ExportFacts`]); [`OPEN_EVENT`] (`gospel-getter:export-notes`, the
+//!   Export notes dialog, an [`OpenRequest`]); [`SHORTCUTS_EVENT`]
 //!   (`gospel-getter:shortcuts`, the sheet); [`WELCOME_EVENT`]
 //!   (`gospel-getter:welcome`, at the end of boot with what the
 //!   fresh-install rule needs, or from ☰, with the places to start, a
 //!   [`WelcomeRequest`]; boot's is asked again on [`READY_EVENT`] if nobody
 //!   answered); [`IMPORT_EVENT`] (`gospel-getter:import`, no detail);
 //!   [`SEARCH_EVENT`] (`gospel-getter:search`, `{ open }`); and
-//!   `detail.returnFocus` on the sheet's and welcome's ([`return_focus`]).
+//!   `detail.returnFocus` on the chooser's, Export notes', the sheet's and
+//!   welcome's ([`return_focus`]).
+//! - [`EXPORT_FACTS_EVENT`] (`gospel-getter:export-facts`, its
+//!   [`ExportFacts`]): whether there are notes, or an export or import is
+//!   running, changed (`page`); the chooser follows it.
 //! - [`LAUNCH_CHECK_EVENT`] (`gospel-getter:update-check`): boot is done,
 //!   so the updater runs its quiet launch check, unless
 //!   `html[data-update-check]` is `off` ([`launch_check_on`]); asked again
@@ -58,7 +64,7 @@
 //!   has mounted, it's asked again on [`READY_EVENT`] ([`refresh_library`]).
 //!   [`LIBRARY_LOADED_EVENT`] (`gospel-getter:library-loaded`, `{ list,
 //!   items }`) answers with the bookmarks (the card's markers) and the notes
-//!   (`page`'s copy, for the welcome and Export notes).
+//!   (`page`'s copy, for the welcome, the chooser and Export notes).
 //! - [`PICKER_BOOKS_EVENT`] (`gospel-getter:picker-books`, `{ otBooks,
 //!   ntBooks }`, boot's, sent again on [`READY_EVENT`]),
 //!   [`PICKER_CURRENT_EVENT`] (`gospel-getter:picker-current`, the
@@ -83,8 +89,9 @@
 //!   mounted.
 //!
 //! Direct calls, where the page's script used to be in between: the toast
-//! ([`toast`], `page`), a modal opening ([`modal_opening`]), the ☰ items
-//! kept disabled ([`data_busy`]), an import's reloads ([`imported`]), what
+//! ([`toast`], `page`), a modal opening ([`modal_opening`]), an export or
+//! import running ([`data_busy`]), an import's reloads ([`imported`]), the
+//! chooser's two choices ([`export_everything`], [`export_notes`]), what
 //! the palette's commands need ([`palette_state`]) and the commands whose
 //! code was the page's ([`page_command`]); and the reader's and the card's
 //! own `reader::ask` and `card::ask`.
@@ -97,13 +104,14 @@
 //! the reader and the Library hear first (`page`), then the search box; the
 //! controls the palette's commands click as a reader would, by id
 //! (`#compare-btn`, `#reader-mode-btn`, `#reader-exit`,
-//! `#random-chapter-btn`, `#sidebar-toggle`, `#export-notes-btn`,
-//! `#export-data-btn`, `#import-data-btn`, `#welcome-btn`, `#about-btn`
-//! then `#update-check-btn`, `#library-toggle` then a `#library-tab-*`),
+//! `#random-chapter-btn`, `#sidebar-toggle`, `#import-data-btn`,
+//! `#welcome-btn`, `#about-btn` then `#update-check-btn`, `#library-toggle`
+//! then a `#library-tab-*`),
 //! or a `[data-value]` choice in `#layout-choices`, `#width-choices` or
 //! `#theme-choices`.
 //!
-//! The pieces' overlays (`#export-notes-overlay`, `#shortcuts-overlay`,
+//! The pieces' overlays (`#export-choice-overlay`, `#export-notes-overlay`,
+//! `#shortcuts-overlay`,
 //! `#welcome-overlay`, `#import-overlay`, `#note-overlay`, `#about-overlay`)
 //! keep their `hidden` truthful: the keyboard dispatcher (`keyboard`) and
 //! the card's Shift ghost read them, looked up by id when asked, to know a
@@ -128,13 +136,45 @@ use web_sys::{CustomEvent, CustomEventInit, Document, HtmlElement};
 
 use crate::palette::PaletteState;
 
-/// Export notes… asks its dialog to open (`page`): a cancelable
-/// `CustomEvent` whose `detail` is an [`OpenRequest`].
+/// ☰ → Export data… asks its chooser to open (`page`): a cancelable
+/// `CustomEvent` whose `detail` is the page's [`ExportFacts`] now, plus
+/// `returnFocus` (☰).
+pub const EXPORT_CHOICE_EVENT: &str = "gospel-getter:export-choice";
+
+/// Whether there are notes, or an export or import is running, changed: a
+/// `CustomEvent` whose `detail` is the page's [`ExportFacts`] now (`page`).
+pub const EXPORT_FACTS_EVENT: &str = "gospel-getter:export-facts";
+
+/// What the export chooser needs of the page: whether there are notes to
+/// export (My notes), and whether an export or import is running
+/// (Everything waits for it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ExportFacts {
+    pub notes: bool,
+    pub busy: bool,
+}
+
+/// The chooser's Everything (backup): ☰ → Export data…'s backup, as it has
+/// always run (`page`).
+pub fn export_everything() {
+    crate::page::export_data();
+}
+
+/// The chooser's My notes: the Export notes dialog, asked to open with what
+/// it needs (`page`); closing it gives focus back to `return_focus`.
+pub fn export_notes(return_focus: Option<HtmlElement>) {
+    crate::page::open_export_notes(return_focus);
+}
+
+/// The Export notes dialog is asked to open (the chooser's My notes, the
+/// palette's Export notes…; `page`): a cancelable `CustomEvent` whose
+/// `detail` is an [`OpenRequest`] plus `returnFocus`.
 pub const OPEN_EVENT: &str = "gospel-getter:export-notes";
 
-/// What the dialog needs, taken when the button is clicked: how many notes there are (none: nothing to export), the book
-/// being read (ticked first, if it has notes), and the translation whose
-/// text the file quotes (the one chosen with the translation button).
+/// What the dialog needs, taken when it's asked for: how many notes there
+/// are (none: nothing to export), the book being read (ticked first, if it
+/// has notes), and the translation whose text the file quotes (the one
+/// chosen with the translation button).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenRequest {
@@ -161,14 +201,6 @@ pub fn toast(message: &str, is_error: bool) {
 /// answer.
 pub fn toast_with_action(message: &str, label: &str, duration: i32) -> Option<HtmlElement> {
     crate::page::set_data_status_with_action(message, label, duration)
-}
-
-/// The Library's Export notes… button, if the page has it.
-pub fn export_button() -> Option<HtmlElement> {
-    document()?
-        .get_element_by_id("export-notes-btn")?
-        .dyn_into::<HtmlElement>()
-        .ok()
 }
 
 /// Where focus goes when what had it is gone, as the page's `focusHome`:
@@ -363,8 +395,8 @@ pub fn welcome_seen() {
 /// `CustomEvent`, no `detail`. The import cancels it to say it has it.
 pub const IMPORT_EVENT: &str = "gospel-getter:import";
 
-/// Import is under way, or done: ☰'s Export data… and Import data… are
-/// disabled (or enabled) for it, as for an export (`page`).
+/// Import is under way, or done: ☰'s Import data… and the chooser's
+/// Everything are disabled (or enabled) for it, as for an export (`page`).
 pub fn data_busy(busy: bool) {
     crate::page::set_data_busy(busy);
 }
@@ -662,7 +694,9 @@ pub fn palette_state() -> PaletteState {
 
 /// Runs a palette command whose code was the page's (`palette::Run::Page`):
 /// `copy-chapter`, `copy-chapter-as`, `next-chapter`, `previous-chapter`,
-/// `next-book`, `previous-book`, `back`, `forward` and `shortcuts`, within
+/// `next-book`, `previous-book`, `back`, `forward`, `shortcuts`,
+/// `export-notes` (the Export notes dialog) and `export-data` (the backup;
+/// neither by way of ☰'s chooser), within
 /// the click or key that chose it (the clipboard needs that), after the box
 /// has closed and focus has gone back (`page`).
 pub fn page_command(command: &str) {

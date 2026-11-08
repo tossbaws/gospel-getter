@@ -541,10 +541,12 @@ test('the menu items export, import, show the welcome and open About', () =>
         const item = (id) => $(app, id);
 
         await app.pick(null);
-        app.open('menu');
-        await clickAndWait(app, item('export-data-btn'), 'export_reader_data');
+        await app.openExport();
+        assert.ok(!isOpen(app, 'menu'), 'its chooser closed the menu');
+        await clickAndWait(app, $(app, 'export-choice-everything'), 'export_reader_data');
         assert.ok(!isOpen(app, 'menu'));
         assert.equal(toastText(), 'Export cancelled. No file was saved.');
+        assert.equal(app.document.activeElement, toggle(app, 'menu'));
 
         await app.pick(null);
         app.open('menu');
@@ -581,8 +583,7 @@ test('export and import report in a toast that fades, polite to screen readers',
         assert.ok(!app.surface('library').contains(toast) && !app.surface('menu').contains(toast));
 
         await app.pick(null);
-        app.open('menu');
-        await clickAndWait(app, $(app, 'export-data-btn'), 'export_reader_data');
+        await app.exportEverything();
         assert.ok(!toast.classList.contains('is-hidden'));
         assert.equal(toast.textContent, 'Export cancelled. No file was saved.');
         // The update banner is showing: the toast sits above it, not over it.
@@ -594,8 +595,7 @@ test('export and import report in a toast that fades, polite to screen readers',
         assert.equal(toast.textContent, 'Export cancelled. No file was saved.', 'the words stay for the record');
 
         app.failCommand('export_reader_data', 'The disk is full.');
-        app.open('menu');
-        await clickAndWait(app, $(app, 'export-data-btn'), 'export_reader_data');
+        await app.exportEverything();
         assert.equal(toast.textContent, 'Export failed: The disk is full.');
         assert.ok(toast.classList.contains('is-error'));
         assert.ok(!toast.classList.contains('is-hidden'));

@@ -201,6 +201,7 @@ fn not_ours(event: &KeyboardEvent) -> bool {
     page::import_open()
         || page::about_open()
         || page::note_open()
+        || page::export_choice_open()
         || page::export_notes_open()
         || page::shortcuts_open()
 }

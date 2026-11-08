@@ -2225,25 +2225,13 @@
             }
         }
 
-        /* Export notes: a button at the top of the Library's Notes tab,
-           and a small modal (the note panel's look) to choose which notes:
-           some books (a checklist that scrolls inside the dialog), one
-           book's chapters, and when they were written. Like the other
-           dialogs it doesn't grow with Text size; its button, in the
-           Library, does (see --ui-scale). */
-        .export-notes-btn {
-            flex: 0 0 auto;
-        }
-
-        /* The Notes tab's search box, beside Export notes…: it filters the
-           list as it's typed (ui-leptos/src/library.rs), says how many of
-           how many it shows under it, and marks what it found in each row
-           in the search results' own mark. */
+        /* The Notes tab's search box, the tab's whole width: it filters
+           the list as it's typed (ui-leptos/src/library.rs), says how many
+           of how many it shows under it, and marks what it found in each
+           row in the search results' own mark. */
         .note-tools {
             display: flex;
-            flex-wrap: wrap;
             align-items: center;
-            gap: 0.5rem;
             margin-bottom: 0.6rem;
         }
 
@@ -2284,11 +2272,73 @@
             border-radius: var(--radius-s);
         }
 
-        .export-notes-btn:disabled {
-            opacity: 0.6;
+        /* ☰ → Export data…: a small modal (the note panel's look) of two
+           choices, Everything (the backup) and My notes (Export notes,
+           below), each a name over a line saying what it is or, greyed out,
+           why it can't be chosen now; Cancel at the end. Like the other
+           dialogs it doesn't grow with Text size. Its text is --text,
+           --text-dim and --accent on the opaque --option-bg (AA in every
+           theme); a choice under the pointer gets the welcome's faint 0.06
+           --accent wash, which keeps its --accent name at AA, and one that
+           can't be chosen has its name in --text-dim, as the palette's do. */
+        .export-choice-panel {
+            width: min(24rem, 100%);
+        }
+
+        .export-choices {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-bottom: 0.9rem;
+        }
+
+        .export-choice {
+            display: block;
+            width: 100%;
+            padding: 0.55rem 0.8rem;
+            font-family: inherit;
+            text-align: left;
+            color: var(--text);
+            background: none;
+            border: 1px solid var(--accent-dim);
+            border-radius: var(--radius-m);
+            cursor: pointer;
+        }
+
+        .export-choice:hover:not(:disabled) {
+            border-color: var(--accent);
+            background: rgba(var(--accent-rgb), 0.06);
+        }
+
+        .export-choice:disabled {
             cursor: not-allowed;
         }
 
+        .export-choice-name {
+            display: block;
+            font-size: 0.95rem;
+            color: var(--accent);
+        }
+
+        .export-choice:disabled .export-choice-name {
+            color: var(--text-dim);
+        }
+
+        .export-choice-line {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+        }
+
+        .export-choice-buttons {
+            justify-content: flex-end;
+        }
+
+        /* Export notes: a small modal (the note panel's look), opened from
+           the chooser's My notes or the palette, to choose which notes:
+           some books (a checklist that scrolls inside the dialog), one
+           book's chapters, and when they were written. Like the other
+           dialogs it doesn't grow with Text size. */
         .export-notes-panel {
             width: min(26rem, 100%);
         }
@@ -5098,7 +5148,7 @@
         <div class="bar-item">
             <button type="button" id="menu-toggle" class="bar-btn" aria-label="Menu" title="Menu" aria-haspopup="menu" aria-controls="app-menu" aria-expanded="false">&#9776;</button>
             <div id="app-menu" class="popover app-menu" role="menu" aria-label="Menu" hidden>
-                <button type="button" id="export-data-btn" class="menu-item" role="menuitem" tabindex="-1" title="Save a backup of your bookmarks, highlights, notes and settings">Export data…</button>
+                <button type="button" id="export-data-btn" class="menu-item" role="menuitem" tabindex="-1" title="Save a backup, or export your notes">Export data…</button>
                 <button type="button" id="import-data-btn" class="menu-item" role="menuitem" tabindex="-1" title="Load a Gospel Getter backup from this or another computer">Import data…</button>
                 <div class="menu-separator" role="separator"></div>
                 <button type="button" id="welcome-btn" class="menu-item" role="menuitem" tabindex="-1">Show welcome</button>

@@ -299,10 +299,7 @@ test('compare’s partner goes into a backup, and comes back from one', async ()
     const path = join(dir, 'compare-with.gospel-getter.json');
     await withApp({ book: 'John', chapter: 3, translation: 'web', storage: { 'gospel-getter-compare-with': 'bsb' } }, async (app) => {
         await app.pick(path);
-        app.open('menu');
-        const before = app.calls.length;
-        app.click(el(app, 'export-data-btn'));
-        await app.idle(before);
+        await app.exportEverything();
         const json = JSON.parse(readFileSync(path, 'utf8'));
         assert.equal(json.preferences.compare_with, 'bsb');
     });

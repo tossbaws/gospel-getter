@@ -57,6 +57,12 @@ async function clickData(app, id, path) {
     await app.idle(before);
 }
 
+/** ☰ → Export data… → Everything (backup), with the save dialog answering `path` (null: cancelled). */
+async function exportData(app, path) {
+    await app.pick(path);
+    await app.exportEverything();
+}
+
 async function bookmarksIn(code = 'kjv') {
     return (await backend('list_bookmarks', { translationCode: code })).map((b) => b.reference).sort();
 }
@@ -86,7 +92,7 @@ test('Export saves bookmarks, reading position and display settings to the chose
         await bookmarkVerse(app, 16);
         await setTheme(app, 'matrix');
         const path = newPath('export');
-        await clickData(app, 'export-data-btn', path);
+        await exportData(app, path);
 
         assert.equal(dataStatus(app), `Saved 1 bookmark, your reading position, your display settings to ${path}. Bible text isn’t included.`);
         assert.ok(toastShown(app));
@@ -124,10 +130,11 @@ test('the ☰ menu items read exactly "Export data…" and "Import data…"', ()
 test('cancelling the save dialog writes nothing', () =>
     withApp({}, async (app) => {
         const before = readdirSync(dir).length;
-        await clickData(app, 'export-data-btn', null);
+        await exportData(app, null);
         assert.equal(dataStatus(app), 'Export cancelled. No file was saved.');
         assert.equal(readdirSync(dir).length, before);
-        assert.equal(el(app, 'export-data-btn').disabled, false, 'the buttons are usable again');
+        assert.equal(el(app, 'export-choice-everything').disabled, false, 'the backup can be chosen again');
+        assert.equal(el(app, 'import-data-btn').disabled, false, 'and Import data… too');
     }));
 
 test('cancelling the open dialog changes nothing', () =>
@@ -452,7 +459,7 @@ test('data moves to a fresh install through a real file', async () => {
         app.key('Escape');
         await bookmarkVerse(app, 6);
         await setTheme(app, 'hot-pink');
-        await clickData(app, 'export-data-btn', path);
+        await exportData(app, path);
         assert.match(dataStatus(app), /^Saved 2 bookmarks, your reading position, your display settings to .+\. Bible text isn’t included\.$/);
     });
 
