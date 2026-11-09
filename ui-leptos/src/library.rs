@@ -9,7 +9,13 @@
 //! and acts on their rows: opening a row closes the Library and has the
 //! reader jump to the passage (a note's Edit then has the page open the
 //! note editor);
-//! removing a bookmark or a highlight keeps focus in the list.
+//! removing a bookmark or a highlight keeps focus in the list, on the next
+//! row, once the list is reloaded, but only while the Library still owns
+//! focus (GG-11): nothing newer since (another tab, the color filter, any
+//! header surface opened or closed, the Library's own among them), the
+//! Library still open on that list, focus still in it or nowhere (the row
+//! it was on gone), and the row there to take it. Otherwise focus stays
+//! where the reader has put it since: a note editor, the search box.
 //!
 //! The Notes tab has a search box at its top: typing in it filters the
 //! list (on the notes already loaded, once typing pauses for
@@ -58,10 +64,11 @@ use crate::dto::{
     TranslationArgs,
 };
 use crate::findings_text;
+use crate::intent::{Claim, Generation};
 use crate::ipc;
 use crate::library_text::{self as text, List};
 use crate::note_markdown::{self, Layout};
-use crate::surfaces;
+use crate::surfaces::{self, Surface};
 
 /// A list as last shown: its rows, or why it couldn't be loaded (or a row
 /// removed) in place of them. The rows stay meanwhile, as the page kept
@@ -130,6 +137,10 @@ struct Library {
     note_search: NodeRef<html::Input>,
     /// Each list's latest reload, by `List::index`.
     tokens: StoredValue<[u64; 3]>,
+    /// A removal waiting to move focus to the next row: claimed by each
+    /// removal, cancelled by a tab switched, the color filter changed, and
+    /// any header surface opening or closing ([`Library::refocus`]).
+    focus: StoredValue<Generation>,
     tabs: [NodeRef<html::Button>; 3],
     panels: [NodeRef<html::Div>; 3],
     bookmark_list: NodeRef<html::Ul>,
@@ -186,6 +197,7 @@ impl Library {
             search_timer: StoredValue::new(None),
             note_search: NodeRef::new(),
             tokens: StoredValue::new([0; 3]),
+            focus: StoredValue::new(Generation::default()),
             tabs: [NodeRef::new(), NodeRef::new(), NodeRef::new()],
             panels: [NodeRef::new(), NodeRef::new(), NodeRef::new()],
             bookmark_list: NodeRef::new(),
@@ -198,6 +210,8 @@ impl Library {
     // ---- The tabs: the one chosen is kept for this session only.
 
     fn select_tab(self, index: usize, focus: bool) {
+        // Another list (or this one again): a removal's focus is let go.
+        self.focus.update_value(Generation::cancel);
         for (i, (tab, panel)) in self.tabs.iter().zip(&self.panels).enumerate() {
             let selected = i == index;
             if let Some(tab) = tab.get_untracked() {
@@ -507,6 +521,35 @@ impl Library {
         on_button(target);
     }
 
+    /// Moves focus to `target` after a removal from `list` (which claimed
+    /// [`Library::focus`] as `claim`) has been reloaded, only if the Library
+    /// still owns focus: nothing newer since (another tab, the filter, a
+    /// surface opened or closed), the Library still the surface shown with
+    /// `list`'s tab chosen, focus still in the Library or nowhere (the row
+    /// it was on removed), and `target` there and shown. Otherwise focus is
+    /// left where it is.
+    fn refocus(self, claim: Option<Claim>, list: List, target: Option<HtmlElement>) {
+        let chosen = self.tabs[list.index()]
+            .get_untracked()
+            .is_some_and(|tab| tab.get_attribute("aria-selected").as_deref() == Some("true"));
+        let panel = bridge::document().and_then(|d| d.get_element_by_id("library-panel"));
+        let body = bridge::document().and_then(|d| d.body());
+        let focus_free = dom::active_element().is_none_or(|active| {
+            body.as_ref()
+                .is_some_and(|body| dom::same(Some(&active), body))
+                || panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.contains(Some(&active)))
+        });
+        let owns = claim.is_some_and(|claim| self.focus.with_value(|g| g.holds(claim)))
+            && surfaces::current() == Some(Surface::Library)
+            && chosen
+            && focus_free;
+        if let Some(target) = target.filter(|t| owns && dom::usable(t)) {
+            focus_plain(&target);
+        }
+    }
+
     /// Opens a passage: the Library closes (focus back to its button, or
     /// left for the editor), and the reader jumps there.
     fn open(passage: PassageArgs, note: &JsValue) {
@@ -551,6 +594,7 @@ impl Library {
             );
             return;
         }
+        let claim = self.focus.try_update_value(Generation::claim);
         spawn_local(async move {
             let removed = match ipc::args(&RemoveBookmarkArgs { id }) {
                 Ok(args) => ipc::invoke_value("remove_bookmark", args).await,
@@ -575,9 +619,7 @@ impl Library {
                     text::next_after_removing(index, buttons.len()).map(|i| buttons[i].clone())
                 })
                 .or_else(|| self.tabs[0].get_untracked().map(Into::into));
-            if let Some(next) = next {
-                focus_plain(&next);
-            }
+            self.refocus(claim, List::Bookmarks, next);
         });
     }
 
@@ -616,6 +658,7 @@ impl Library {
         let position = buttons()
             .iter()
             .position(|b| dom::same(Some(&remove), b.as_ref()));
+        let claim = self.focus.try_update_value(Generation::claim);
         spawn_local(async move {
             let removed = match ipc::args(&args) {
                 Ok(args) => ipc::invoke_value("remove_highlight", args).await,
@@ -645,9 +688,7 @@ impl Library {
                         .and_then(|f| f.query_selector("[aria-pressed=\"true\"]").ok().flatten())
                         .and_then(|b| b.dyn_into::<HtmlElement>().ok())
                 });
-            if let Some(next) = next {
-                focus_plain(&next);
-            }
+            self.refocus(claim, List::Highlights, next);
         });
     }
 
@@ -782,6 +823,8 @@ impl Library {
         let Some(filter) = button.get_attribute("data-filter") else {
             return;
         };
+        // Another filter: a removal's focus is let go.
+        self.focus.update_value(Generation::cancel);
         self.filter.set(filter);
         // Shown again as a list, as the page re-rendered it.
         self.highlights.update(|s| match s {
@@ -1092,7 +1135,14 @@ pub fn mount() {
     });
     // Opening the Library reads the findings again: an agent may have saved
     // some while the app was open.
+    // Any header surface opening or closing (the Library's own among them,
+    // and a modal's, which closes them) is newer than a removal waiting to
+    // move focus.
+    dom::on_document_event(bridge::SURFACE_CLOSE_EVENT, move |_| {
+        library.focus.update_value(Generation::cancel);
+    });
     dom::on_document_event(bridge::SURFACE_OPEN_EVENT, move |event| {
+        library.focus.update_value(Generation::cancel);
         let opened = js_sys::Reflect::get(&event.detail(), &JsValue::from_str("name"))
             .ok()
             .and_then(|name| name.as_string());

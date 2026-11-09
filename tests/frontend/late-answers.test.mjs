@@ -18,13 +18,17 @@ const GENESIS = bookId('Genesis');
 
 const el = (app, id) => app.document.getElementById(id);
 
-/** Resets the reader's data, adds `notes` ([book, chapter, verse, body]), then opens John 3. */
-async function withNotes(notes, body, options = {}) {
+/**
+ * Resets the reader's data, adds `notes` ([book, chapter, verse, body]) and
+ * whatever `seed` adds, then opens John 3.
+ */
+async function withNotes(notes, body, { seed = async () => {}, ...options } = {}) {
     await backend('__reset', { bookId: JOHN, chapter: 3, translationCode: 'kjv' });
     const added = [];
     for (const [book, chapter, verse, text] of notes) {
         added.push(await backend('add_note', { bookId: book, chapter, verseStart: verse, verseEnd: verse, body: text }));
     }
+    await seed();
     const app = await openApp({ book: 'John', chapter: 3, keepBookmarks: true, ...options });
     try {
         await body(app, added);
@@ -448,3 +452,90 @@ test('GG-10: Compare turned off while its comparison is on its way: its failure 
         assert.ok(!app.isComparing());
         assert.equal(app.notice(), '', 'nothing said about a comparison the reader turned off');
     }));
+
+// ---- GG-11: focus after a Library removal, once it's done.
+
+const bookmarked = (verses) => async () => {
+    for (const verse of verses) {
+        await backend('add_bookmark', { bookId: JOHN, chapter: 3, verseStart: verse, verseEnd: verse });
+    }
+};
+const highlighted = (passages) => async () => {
+    for (const [verse, color] of passages) {
+        await backend('set_highlight', { bookId: JOHN, chapter: 3, verseStart: verse, verseEnd: verse, color });
+    }
+};
+const removes = (app, list) => [...app.document.querySelectorAll(`#${list} .bookmark-remove`)];
+const focused = (app) => app.document.activeElement;
+
+/** × on row `i` of `list` (the Library open on `tab`), its removal held: the release, and the removal's call. */
+async function removeHeld(app, tab, list, cmd, i) {
+    app.openLibrary(tab);
+    await app.until(() => removes(app, list).length > i, `the ${tab}`);
+    const release = app.holdCommand(cmd);
+    app.click(removes(app, list)[i]);
+    await app.until(() => app.calls.some((c) => c.cmd === cmd && !c.done), `the ${cmd} call`);
+    return release;
+}
+
+/** Lets the held removal go, and waits for its reloads. */
+async function removed(app, release, reload) {
+    const since = app.calls.length;
+    release();
+    await app.idle(since, reload);
+}
+
+test('GG-11: a bookmark removed late leaves focus in a note editor opened since', () =>
+    withNotes([], async (app) => {
+        const release = await removeHeld(app, 'bookmarks', 'bookmark-list', 'remove_bookmark', 1);
+        // Newer: the Library closed, and a note begun on John 3:16.
+        app.click(el(app, 'library-close'));
+        assert.ok(app.surface('library').hidden);
+        await addNoteOn(app, 16);
+        assert.equal(focused(app).id, 'note-input');
+
+        await removed(app, release, 'list_bookmarks');
+        assert.equal(removes(app, 'bookmark-list').length, 2, 'the bookmark was removed');
+        assert.equal(focused(app).id, 'note-input', 'focus stays in the editor');
+    }, { seed: bookmarked([1, 2, 3]) }));
+
+test('GG-11: a highlight removed late leaves focus in the search box opened since', () =>
+    withNotes([], async (app) => {
+        const release = await removeHeld(app, 'highlights', 'highlight-list', 'remove_highlight', 0);
+        app.click(el(app, 'library-close'));
+        await app.key('/');
+        assert.equal(focused(app), app.searchInput());
+
+        await removed(app, release, 'list_highlight_passages');
+        assert.equal(removes(app, 'highlight-list').length, 1, 'the highlight was removed');
+        assert.equal(focused(app), app.searchInput(), 'focus stays in the search box');
+    }, { seed: highlighted([[15, 'green'], [17, 'pink']]) }));
+
+test('GG-11: a removal finished after another tab was chosen leaves focus alone', () =>
+    withNotes([], async (app) => {
+        const release = await removeHeld(app, 'bookmarks', 'bookmark-list', 'remove_bookmark', 1);
+        app.click(el(app, 'library-tab-highlights'));
+        const before = focused(app);
+
+        await removed(app, release, 'list_bookmarks');
+        assert.equal(removes(app, 'bookmark-list').length, 2);
+        assert.equal(focused(app), before, 'never into the hidden Bookmarks list');
+    }, { seed: bookmarked([1, 2, 3]) }));
+
+test('GG-11: a removal finished after the color filter changed leaves focus alone', () =>
+    withNotes([], async (app) => {
+        const release = await removeHeld(app, 'highlights', 'highlight-list', 'remove_highlight', 0);
+        app.click(app.document.querySelector('.highlight-filter-btn[data-filter="green"]'));
+        const before = focused(app);
+
+        await removed(app, release, 'list_highlight_passages');
+        assert.equal(focused(app), before, 'the reader’s filter, not a row');
+    }, { seed: highlighted([[15, 'green'], [16, 'green'], [17, 'pink']]) }));
+
+test('GG-11: with nothing newer, a late removal still moves focus to the next row', () =>
+    withNotes([], async (app) => {
+        const release = await removeHeld(app, 'bookmarks', 'bookmark-list', 'remove_bookmark', 1);
+        await removed(app, release, 'list_bookmarks');
+        assert.equal(removes(app, 'bookmark-list').length, 2);
+        assert.equal(focused(app), removes(app, 'bookmark-list')[1], 'the next bookmark’s ×');
+    }, { seed: bookmarked([1, 2, 3]) }));
