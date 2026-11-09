@@ -118,10 +118,14 @@ test('☰ → Keyboard shortcuts opens it, and closing returns to ☰; so does t
         await app.click(item);
         assert.ok(isOpen(app));
         assert.ok(app.surface('menu').hidden, 'the menu closes');
-        app.key('Escape', {}, app.document.activeElement);
+        // Awaited: until the sheet is drawn closed, it still has the keys,
+        // and / would go nowhere (and Enter in a box that never opened
+        // runs nothing).
+        await app.key('Escape', {}, app.document.activeElement);
         assert.equal(app.document.activeElement, app.document.getElementById('menu-toggle'));
 
         app.key('/');
+        assert.equal(app.searchPanel().hidden, false, 'the palette opens');
         app.type(app.searchInput(), 'keyboard');
         await app.idle(0);
         app.key('Enter', {}, app.searchInput());

@@ -250,3 +250,110 @@ test('GG-07: a save that fails with nothing newer is put back, and said', () =>
         assert.equal(await savingOn(), false);
         assert.equal(toastText(app), SWITCH_FAILED);
     }));
+
+// ---- GG-09: Enter in the search box, waiting for its search.
+
+const searches = (app) => app.calls.filter((c) => c.cmd === 'search');
+
+/**
+ * The search box open, `query` typed and Enter pressed straight after, so
+ * Enter waits for its search, whose answer is held: the release, and that
+ * search's call.
+ */
+async function enterBeforeTheAnswer(app, query) {
+    if (app.searchPanel().hidden) await app.key('/');
+    assert.ok(!app.searchPanel().hidden);
+    const release = app.holdAnswer('search');
+    const before = searches(app).length;
+    app.type(app.searchInput(), query);
+    app.key('Enter', {}, app.searchInput());
+    assert.equal(searches(app).length, before + 1, 'Enter searches at once');
+    const search = searches(app).at(-1);
+    assert.equal(search.args.query, query);
+    assert.ok(!search.done);
+    return { release, search };
+}
+
+/** Lets the held search answer, and waits for the page to be quiet again. */
+async function answer(app, { release, search }) {
+    const since = app.calls.length;
+    release();
+    await app.until(() => search.done, 'the held search');
+    await app.idle(since);
+}
+
+const wentTo = (app, book) => readings(app, book).length > 0;
+
+test('GG-09: Enter, then Escape: the late answer runs nothing', () =>
+    withNotes([], async (app) => {
+        const held = await enterBeforeTheAnswer(app, 'Romans 8:28');
+        app.key('Escape', {}, app.searchInput());
+        assert.ok(app.searchPanel().hidden);
+        await answer(app, held);
+        assert.equal(app.heading(), 'John 3');
+        assert.ok(!wentTo(app, ROMANS), 'nothing navigated');
+    }));
+
+test('GG-09: Enter, then a new query: the old search’s late answer runs neither option', () =>
+    withNotes([], async (app) => {
+        const held = await enterBeforeTheAnswer(app, 'Romans 8:28');
+        const before = searches(app).length;
+        app.type(app.searchInput(), 'Genesis 1');
+        // Its own search, once typing pauses (not held), answered first.
+        await app.until(() => searches(app).length > before && searches(app).at(-1).done, 'the newer search');
+        await settle();
+        assert.ok(app.document.querySelector('#search-results .search-go'), 'Genesis 1 offered');
+        await answer(app, held);
+        assert.equal(app.heading(), 'John 3');
+        assert.ok(!wentTo(app, ROMANS) && !wentTo(app, GENESIS), 'Enter wasn’t pressed on either');
+        assert.ok(!app.searchPanel().hidden, 'the box stays, with the newer words');
+        assert.equal(app.searchInput().value, 'Genesis 1');
+    }));
+
+test('GG-09: Enter, then a translation switch: the late answer runs nothing', () =>
+    withNotes([], async (app) => {
+        const held = await enterBeforeTheAnswer(app, 'Romans 8:28');
+        const since = app.calls.length;
+        const select = el(app, 'translation-select');
+        select.value = 'web';
+        select.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+        // The chapter again in the WEB, and the words searched again in it.
+        await app.until(() => searches(app).length > 1 && searches(app).at(-1).args.translationCode === 'web'
+            && searches(app).at(-1).done, 'the WEB search');
+        await app.idle(since);
+        await answer(app, held);
+        assert.equal(app.heading(), 'John 3');
+        assert.ok(!wentTo(app, ROMANS), 'nothing navigated');
+    }));
+
+test('GG-09: Enter, then the box closed and opened again: the late answer runs nothing', () =>
+    withNotes([], async (app) => {
+        const held = await enterBeforeTheAnswer(app, 'Romans 8:28');
+        app.key('Escape', {}, app.searchInput());
+        await app.key('/');
+        assert.ok(!app.searchPanel().hidden, 'open again, the same words in it');
+        assert.equal(app.searchInput().value, 'Romans 8:28');
+        await answer(app, held);
+        assert.equal(app.heading(), 'John 3');
+        assert.ok(!wentTo(app, ROMANS), 'Enter was pressed in the box as it was before');
+        assert.ok(!app.searchPanel().hidden);
+    }));
+
+test('GG-09: Enter, then a navigation: the late answer runs nothing', () =>
+    withNotes([], async (app) => {
+        // Somewhere to go back from: Genesis 1, by the box.
+        await app.key('/');
+        await app.search('Genesis 1');
+        app.key('Enter', {}, app.searchInput());
+        await app.waitForHeading('Genesis 1');
+        await app.idle();
+
+        const held = await enterBeforeTheAnswer(app, 'Romans 8:28');
+        // Newer: the mouse's back button, back to John 3, the box still open.
+        app.window.dispatchEvent(new app.window.MouseEvent('mouseup', { button: 3, bubbles: true, cancelable: true }));
+        await app.waitForHeading('John 3');
+        assert.ok(!app.searchPanel().hidden);
+        await answer(app, held);
+        assert.equal(app.heading(), 'John 3');
+        assert.ok(!wentTo(app, ROMANS), 'nothing navigated');
+    }));

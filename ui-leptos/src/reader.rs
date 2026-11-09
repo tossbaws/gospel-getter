@@ -1048,6 +1048,14 @@ pub fn open(passage: &bridge::OpenPassage, note: JsValue) {
     });
 }
 
+/// How many chapter loads have begun: a number that moves on with every
+/// navigation, so a late answer can tell whether the reader has gone
+/// anywhere since it was asked for (search's Enter, waiting for its
+/// search). Read only.
+pub fn loads() -> u64 {
+    with(|s| s.load_token)
+}
+
 /// What the palette's commands need of the reader: the chapters (as the
 /// pane says, which ← and → go by) and books around the one on screen, and
 /// the history either way.
