@@ -96,6 +96,20 @@ pub fn summary(preview: &ImportPreview, has_preferences: bool) -> Vec<String> {
             lines.push("No notes.".to_string());
         }
     }
+    // Format 4 files can carry AI findings; older ones can't, and leave the
+    // reader's findings alone.
+    if preview.has_findings {
+        if preview.findings_in_file > 0 {
+            lines.push(format!(
+                "{}: {} new, {} you already have.",
+                plural(preview.findings_in_file, "AI finding"),
+                preview.new_findings,
+                preview.findings_already_present
+            ));
+        } else {
+            lines.push("No AI findings.".to_string());
+        }
+    }
     if preview.position.is_none() {
         lines.push("No reading position.".to_string());
     }
@@ -111,6 +125,66 @@ pub fn summary(preview: &ImportPreview, has_preferences: bool) -> Vec<String> {
     lines
 }
 
+/// Whether the add-or-replace choice is offered: the file holds something
+/// to add, or to replace the reader's with (bookmarks, highlights, notes
+/// or AI findings).
+pub fn offers_choice(preview: &ImportPreview) -> bool {
+    preview.bookmarks_in_file > 0
+        || preview.highlights_in_file > 0
+        || preview.notes_in_file > 0
+        || preview.findings_in_file > 0
+}
+
+/// "a", "a and b", "a, b and c".
+fn and_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// What replacing removes, a collection each: its name, and how many of the
+/// reader's it removes ("bookmarks", "3 current bookmarks"). A file's
+/// format says which collections it replaces; AI findings are named only
+/// when there are some here to remove.
+fn replaced(preview: &ImportPreview) -> Vec<(String, String)> {
+    let mut replaced = vec![(
+        "bookmarks".to_string(),
+        plural(preview.current_bookmarks, "current bookmark"),
+    )];
+    if preview.has_highlights {
+        replaced.push((
+            "highlights".to_string(),
+            plural(preview.current_highlights, "highlighted verse"),
+        ));
+    }
+    if preview.has_notes {
+        replaced.push(("notes".to_string(), plural(preview.current_notes, "note")));
+    }
+    if preview.has_findings && preview.current_findings > 0 {
+        replaced.push((
+            "AI findings".to_string(),
+            plural(preview.current_findings, "AI finding"),
+        ));
+    }
+    replaced
+}
+
+/// The collections replacing removes, by name: "bookmarks, highlights and
+/// notes".
+fn replaced_names(preview: &ImportPreview) -> String {
+    let names: Vec<String> = replaced(preview).into_iter().map(|(n, _)| n).collect();
+    and_list(&names)
+}
+
+/// How many of each replacing removes: "3 current bookmarks and 5
+/// highlighted verses".
+fn replaced_counts(preview: &ImportPreview) -> String {
+    let counts: Vec<String> = replaced(preview).into_iter().map(|(_, c)| c).collect();
+    and_list(&counts)
+}
+
 /// The add-or-replace choice's words: its legend, and its two options.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Choice {
@@ -120,92 +194,83 @@ pub struct Choice {
 }
 
 pub fn choice(preview: &ImportPreview) -> Choice {
-    if preview.has_notes {
-        Choice {
-            legend: "Bookmarks, highlights and notes".to_string(),
-            merge: format!(
-                "Add them to mine ({}, {}, {}; anything I already have stays as it is)",
-                plural(preview.new_bookmarks, "new bookmark"),
-                plural(preview.new_highlights, "new highlighted verse"),
-                plural(preview.new_notes, "new note")
-            ),
-            replace: format!(
-                "Replace all my bookmarks, highlights and notes with the file’s (removes my {}, {} and {})",
-                plural(preview.current_bookmarks, "current bookmark"),
-                plural(preview.current_highlights, "highlighted verse"),
-                plural(preview.current_notes, "note")
-            ),
-        }
-    } else if preview.has_highlights {
-        Choice {
-            legend: "Bookmarks and highlights".to_string(),
-            merge: format!(
-                "Add them to mine ({}, {}; anything I already have stays as it is)",
-                plural(preview.new_bookmarks, "new bookmark"),
-                plural(preview.new_highlights, "new highlighted verse")
-            ),
-            replace: format!(
-                "Replace all my bookmarks and highlights with the file’s (removes my {} and {})",
-                plural(preview.current_bookmarks, "current bookmark"),
-                plural(preview.current_highlights, "highlighted verse")
-            ),
-        }
-    } else {
-        Choice {
+    let replace = format!(
+        "Replace all my {} with the file’s (removes my {})",
+        replaced_names(preview),
+        replaced_counts(preview)
+    );
+    if !preview.has_highlights {
+        return Choice {
             legend: "Bookmarks".to_string(),
             merge: format!(
                 "Add them to my bookmarks ({} new; any I already have stay as they are)",
                 preview.new_bookmarks
             ),
-            replace: format!(
-                "Replace all my bookmarks with the file’s (removes my {})",
-                plural(preview.current_bookmarks, "current bookmark")
-            ),
-        }
+            replace,
+        };
+    }
+    let mut names = vec!["bookmarks".to_string(), "highlights".to_string()];
+    let mut added = vec![
+        plural(preview.new_bookmarks, "new bookmark"),
+        plural(preview.new_highlights, "new highlighted verse"),
+    ];
+    if preview.has_notes {
+        names.push("notes".to_string());
+        added.push(plural(preview.new_notes, "new note"));
+    }
+    if preview.has_findings && (preview.findings_in_file > 0 || preview.current_findings > 0) {
+        names.push("AI findings".to_string());
+    }
+    if preview.has_findings && preview.findings_in_file > 0 {
+        added.push(plural(preview.new_findings, "new AI finding"));
+    }
+    let legend = and_list(&names);
+    let mut legend_chars = legend.chars();
+    Choice {
+        legend: legend_chars
+            .next()
+            .map(|first| first.to_uppercase().collect::<String>() + legend_chars.as_str())
+            .unwrap_or_default(),
+        merge: format!(
+            "Add them to mine ({}; anything I already have stays as it is)",
+            added.join(", ")
+        ),
+        replace,
     }
 }
 
 /// The warning shown while Replace is chosen, and the confirm button's
-/// label for the choice.
-pub fn mode(preview: &ImportPreview, replace: bool) -> (String, &'static str) {
-    let current = plural(preview.current_bookmarks, "current bookmark");
-    let tail =
-        "and keeps only the file’s. If you might want yours back, cancel and export them first.";
-    if preview.has_notes {
-        (
-            format!(
-                "This deletes your {current}, {} and {} {tail}",
-                plural(preview.current_highlights, "highlighted verse"),
-                plural(preview.current_notes, "note")
-            ),
-            if replace {
-                "Replace bookmarks, highlights and notes and import"
-            } else {
-                "Import"
-            },
-        )
-    } else if preview.has_highlights {
-        (
-            format!(
-                "This deletes your {current} and {} {tail}",
-                plural(preview.current_highlights, "highlighted verse")
-            ),
-            if replace {
-                "Replace bookmarks and highlights and import"
-            } else {
-                "Import"
-            },
-        )
-    } else {
-        (
-            format!("This deletes your {current} {tail}"),
-            if replace {
-                "Replace bookmarks and import"
-            } else {
-                "Import"
-            },
-        )
-    }
+/// label for the choice. Both name everything replacing removes.
+pub fn mode(preview: &ImportPreview, replace: bool) -> (String, String) {
+    (
+        format!(
+            "This deletes your {} and keeps only the file’s. If you might want yours back, cancel and export them first.",
+            replaced_counts(preview)
+        ),
+        if replace {
+            format!("Replace {} and import", replaced_names(preview))
+        } else {
+            "Import".to_string()
+        },
+    )
+}
+
+/// The option to also set "Let AI agents save findings" as the file has it:
+/// its label, and whether it starts ticked. Offered only when the file has
+/// the switch and it differs from the reader's. It starts unticked when it
+/// would turn saving on, so that's only ever the reader's choice, and
+/// ticked when it would turn it off.
+pub fn permission(preview: &ImportPreview) -> Option<(String, bool)> {
+    let on = preview
+        .ai_findings_enabled
+        .filter(|&on| preview.has_findings && on != preview.current_ai_findings_enabled)?;
+    Some((
+        format!(
+            "Also turn {} “Let AI agents save findings”, as in the file",
+            if on { "on" } else { "off" }
+        ),
+        !on,
+    ))
 }
 
 /// The file's display settings, named as Aa names them: `label(select,
@@ -254,7 +319,7 @@ pub fn describe_preferences(
 /// settings it skipped.
 pub fn result_parts(preview: &ImportPreview, replace: bool, result: &ImportResult) -> Vec<String> {
     let mut parts = Vec::new();
-    if preview.bookmarks_in_file > 0 {
+    if preview.bookmarks_in_file > 0 || (replace && result.removed > 0) {
         parts.push(if replace {
             format!(
                 "Replaced {} with the file’s {}.",
@@ -309,6 +374,33 @@ pub fn result_parts(preview: &ImportPreview, replace: bool, result: &ImportResul
             };
             format!("Added {}{had}.", plural(result.notes_added, "note"))
         });
+    }
+    if preview.has_findings
+        && (preview.findings_in_file > 0 || (replace && result.findings_removed > 0))
+    {
+        parts.push(if replace {
+            format!(
+                "Replaced {} with the file’s {}.",
+                plural(result.findings_removed, "AI finding"),
+                plural(result.findings_added, "AI finding")
+            )
+        } else {
+            let had = if result.findings_already_present > 0 {
+                format!(" ({} you already had)", result.findings_already_present)
+            } else {
+                String::new()
+            };
+            format!(
+                "Added {}{had}.",
+                plural(result.findings_added, "AI finding")
+            )
+        });
+    }
+    if let Some(on) = result.findings_permission {
+        parts.push(format!(
+            "Turned {} “Let AI agents save findings”.",
+            if on { "on" } else { "off" }
+        ));
     }
     if let Some(position) = &result.position {
         parts.push(format!("Went to {}.", position.reference));
@@ -477,6 +569,157 @@ mod tests {
             mode(&with_everything(), true).1,
             "Replace bookmarks, highlights and notes and import"
         );
+    }
+
+    /// A format 4 file with three AI findings, where the reader has four.
+    fn with_findings() -> ImportPreview {
+        ImportPreview {
+            has_findings: true,
+            findings_in_file: 3,
+            new_findings: 2,
+            findings_already_present: 1,
+            current_findings: 4,
+            ..with_everything()
+        }
+    }
+
+    #[test]
+    fn ai_findings_are_named_wherever_the_import_touches_them() {
+        assert_eq!(
+            summary(&with_findings(), true)[4],
+            "3 AI findings: 2 new, 1 you already have."
+        );
+        let c = choice(&with_findings());
+        assert_eq!(c.legend, "Bookmarks, highlights, notes and AI findings");
+        assert_eq!(
+            c.merge,
+            "Add them to mine (1 new bookmark, 1,200 new highlighted verses, 1 new note, 2 new AI findings; anything I already have stays as it is)"
+        );
+        assert_eq!(
+            c.replace,
+            "Replace all my bookmarks, highlights, notes and AI findings with the file’s (removes my 3 current bookmarks, 5 highlighted verses, 1 note and 4 AI findings)"
+        );
+        let (warning, button) = mode(&with_findings(), true);
+        assert_eq!(
+            warning,
+            "This deletes your 3 current bookmarks, 5 highlighted verses, 1 note and 4 AI findings and keeps only the file’s. If you might want yours back, cancel and export them first."
+        );
+        assert_eq!(
+            button,
+            "Replace bookmarks, highlights, notes and AI findings and import"
+        );
+
+        // A file with none, replacing the reader's: they're named as removed.
+        let empty = ImportPreview {
+            findings_in_file: 0,
+            new_findings: 0,
+            findings_already_present: 0,
+            ..with_findings()
+        };
+        assert_eq!(summary(&empty, true)[4], "No AI findings.");
+        assert!(
+            mode(&empty, true)
+                .0
+                .contains(", 1 note and 4 AI findings and keeps")
+        );
+        assert!(!choice(&empty).merge.contains("AI finding"), "none to add");
+
+        // None here to remove: replacing names the rest, as before.
+        let none_here = ImportPreview {
+            current_findings: 0,
+            ..with_findings()
+        };
+        assert_eq!(
+            mode(&none_here, true).1,
+            "Replace bookmarks, highlights and notes and import"
+        );
+        assert!(!choice(&none_here).replace.contains("AI finding"));
+        assert!(choice(&none_here).merge.contains("2 new AI findings"));
+    }
+
+    #[test]
+    fn a_file_with_only_findings_offers_the_choice() {
+        let only = ImportPreview {
+            has_highlights: true,
+            has_notes: true,
+            has_findings: true,
+            findings_in_file: 1,
+            new_findings: 1,
+            ..ImportPreview::default()
+        };
+        assert!(offers_choice(&only));
+        assert!(!offers_choice(&ImportPreview {
+            findings_in_file: 0,
+            ..only
+        }));
+        assert!(offers_choice(&bookmarks_only()));
+    }
+
+    #[test]
+    fn the_permission_is_offered_only_when_the_file_would_change_it() {
+        let file = |file: Option<bool>, here: bool| ImportPreview {
+            ai_findings_enabled: file,
+            current_ai_findings_enabled: here,
+            ..with_findings()
+        };
+        assert_eq!(
+            permission(&file(Some(true), false)),
+            Some((
+                "Also turn on “Let AI agents save findings”, as in the file".to_string(),
+                false
+            )),
+            "turning saving on starts unticked"
+        );
+        assert_eq!(
+            permission(&file(Some(false), true)),
+            Some((
+                "Also turn off “Let AI agents save findings”, as in the file".to_string(),
+                true
+            )),
+            "turning it off starts ticked"
+        );
+        assert_eq!(permission(&file(Some(true), true)), None);
+        assert_eq!(permission(&file(Some(false), false)), None);
+        assert_eq!(permission(&file(None, true)), None);
+        assert_eq!(permission(&file(None, false)), None);
+    }
+
+    #[test]
+    fn how_it_went_with_findings_and_the_permission() {
+        let merged = ImportResult {
+            findings_added: 2,
+            findings_already_present: 1,
+            findings_permission: Some(true),
+            ..ImportResult::default()
+        };
+        let parts = result_parts(&with_findings(), false, &merged);
+        assert!(parts.contains(&"Added 2 AI findings (1 you already had).".to_string()));
+        assert!(parts.contains(&"Turned on “Let AI agents save findings”.".to_string()));
+
+        // Replacing with a file without findings reports the removal; so does
+        // replacing with one without bookmarks.
+        let only_findings = ImportPreview {
+            bookmarks_in_file: 0,
+            sample: Vec::new(),
+            findings_in_file: 0,
+            ..with_findings()
+        };
+        let replaced = ImportResult {
+            removed: 3,
+            findings_removed: 4,
+            findings_permission: Some(false),
+            ..ImportResult::default()
+        };
+        let parts = result_parts(&only_findings, true, &replaced);
+        assert!(parts.contains(&"Replaced 3 bookmarks with the file’s 0 bookmarks.".to_string()));
+        assert!(
+            parts.contains(&"Replaced 4 AI findings with the file’s 0 AI findings.".to_string())
+        );
+        assert!(parts.contains(&"Turned off “Let AI agents save findings”.".to_string()));
+
+        // Left alone: nothing said about the switch.
+        let untouched = result_parts(&with_findings(), false, &ImportResult::default());
+        assert!(!untouched.iter().any(|p| p.contains("Let AI agents")));
     }
 
     #[test]

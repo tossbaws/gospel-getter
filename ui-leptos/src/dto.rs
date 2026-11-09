@@ -248,6 +248,18 @@ pub struct ImportPreview {
     pub new_notes: u64,
     pub notes_already_present: u64,
     pub current_notes: u64,
+    /// Whether the file's format can hold AI findings (format 4 on); an
+    /// older file never touches them, even when replacing.
+    pub has_findings: bool,
+    pub findings_in_file: u64,
+    pub new_findings: u64,
+    pub findings_already_present: u64,
+    /// How many AI findings there are here now (what replacing removes).
+    pub current_findings: u64,
+    /// The file's "Let AI agents save findings", if it has one.
+    pub ai_findings_enabled: Option<bool>,
+    /// "Let AI agents save findings" here now.
+    pub current_ai_findings_enabled: bool,
     pub position: Option<PositionPreview>,
     pub preferences: Preferences,
     pub skipped_preferences_notice: Option<String>,
@@ -286,6 +298,9 @@ pub struct ApplyImportArgs {
     pub token: u64,
     pub replace: bool,
     pub restore_position: bool,
+    /// Also set "Let AI agents save findings" as the file has it; without
+    /// it the switch is left as it is.
+    pub restore_findings_permission: bool,
 }
 
 /// `cancel_import`'s arguments.
@@ -307,6 +322,11 @@ pub struct ImportResult {
     pub notes_added: u64,
     pub notes_already_present: u64,
     pub notes_removed: u64,
+    pub findings_added: u64,
+    pub findings_already_present: u64,
+    pub findings_removed: u64,
+    /// "Let AI agents save findings" as the import set it, if it did.
+    pub findings_permission: Option<bool>,
     pub position: Option<PositionPreview>,
 }
 

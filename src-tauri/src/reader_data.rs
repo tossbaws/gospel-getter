@@ -19,13 +19,15 @@
 //!
 //! Format 4 (from v2.26.0) adds AI-flagged findings: `findings`, each a
 //! passage, the agent that found it and the reader's request (never any
-//! text about the verse), and `ai_findings_enabled`, the reader's switch,
-//! there only when it's on. An export is written as format 4 only when it
-//! has either, and as format 3 otherwise, so a backup without findings
-//! still restores in full in 2.8.0 to 2.25.x; one with findings is refused
-//! there with their plain "made by a newer version" message. Format 1 to 3
-//! files still import exactly as before and leave the findings and the
-//! switch alone.
+//! text about the verse), and `ai_findings_enabled`, the reader's switch.
+//! An export is written as format 4 only when it has findings or the switch
+//! is on, and as format 3 otherwise, so a backup without findings still
+//! restores in full in 2.8.0 to 2.25.x; one with findings is refused there
+//! with their plain "made by a newer version" message. A format 4 export
+//! always says whether the switch is on or off (2.26.0 and 2.27.0 wrote it
+//! only when it was on); a format 4 file without it leaves the switch as it
+//! is. Format 1 to 3 files still import exactly as before and leave the
+//! findings and the switch alone.
 //!
 //! Display preferences are read leniently: one this version
 //! doesn't know, or with a value it doesn't offer (a theme added later,
@@ -48,7 +50,7 @@ use crate::db::notes::normalize_body;
 pub use crate::db::reader_data::{
     NewBookmark, NewHighlight, NewNote, NewPosition, NoteKey, StoredNote, notes_to_add,
 };
-use crate::db::{Book, HighlightColor, NewFinding, Passage, Translation};
+use crate::db::{Book, Finding, HighlightColor, NewFinding, Passage, Translation};
 
 /// The `format` every reader-data file declares.
 pub const FORMAT: &str = "gospel-getter-reader-data";
@@ -90,15 +92,16 @@ pub const FILE_SUFFIX: &str = ".gospel-getter.json";
 ///   `MAX_REQUEST_CHARS`, of 4 bytes apiece: neither keeps a control
 ///   character): 10,000 of them (`MAX_FINDINGS`), 7,080,000 bytes;
 /// - the rest of the file (its header, reading position, every preference
-///   and the AI findings switch) takes 613 bytes.
+///   and the AI findings switch, `false` being longer than `true`) takes
+///   614 bytes.
 ///
 /// A highlight is one verse, and the bundled translations number 31,109
 /// verses between them, so at most 7,186,179 bytes of highlights. With
 /// every verse highlighted, the notes at both their limits and the AI
-/// findings at theirs, a file of 50,000 bookmarks is 126,206,792 bytes
+/// findings at theirs, a file of 50,000 bookmarks is 126,206,793 bytes
 /// (120.4 MiB), and one of 92,611 fits. Without notes, every bookmark there
 /// can be — each of the 530,288 verse ranges within a chapter — every
-/// highlight and every finding fit, in 113,960,936 bytes (108.7 MiB). Only
+/// highlight and every finding fit, in 113,960,937 bytes (108.7 MiB). Only
 /// a reader with notes near both their limits (25 million characters, every
 /// one 4 bytes long) and more than 92,611 bookmarks could export a file too
 /// large to import.
@@ -141,8 +144,9 @@ pub struct ReaderData {
     /// Format 4 only, and likewise left out when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<FindingRecord>,
-    /// Format 4 only: "Let AI agents save findings", written only when it's
-    /// on. Imported, it turns the switch on (or, `false`, off); absent, the
+    /// Format 4 only: "Let AI agents save findings", on or off. Every
+    /// format 4 export writes it (2.26.0 and 2.27.0 wrote it only when it
+    /// was on). Imported, it can turn the switch on or off; absent, the
     /// switch is left as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_findings_enabled: Option<bool>,
@@ -634,6 +638,21 @@ pub struct ValidatedImport {
     /// The file's display preferences that were skipped (see
     /// `ReaderData::skipped_preferences`).
     pub skipped_preferences: Vec<String>,
+}
+
+/// How many of a file's `findings` merging would add to the `stored`
+/// ones: each passage and request not saved yet, once. The database keeps
+/// one finding per passage and request (`db::findings`), so the rest are
+/// left as they are.
+pub fn new_findings(findings: &[NewFinding], stored: &[Finding]) -> usize {
+    let mut saved: HashSet<(Passage, &str)> = stored
+        .iter()
+        .map(|f| (f.passage(), f.request.as_str()))
+        .collect();
+    findings
+        .iter()
+        .filter(|f| saved.insert((f.passage, f.request.as_str())))
+        .count()
 }
 
 /// Check one passage in a file (a bookmark's or a note's, labelled
@@ -1639,7 +1658,8 @@ mod tests {
                 notes
             ],
             findings: vec![finding; findings],
-            ai_findings_enabled: Some(true),
+            // Off is the longer of the two values a format 4 export writes.
+            ai_findings_enabled: Some(false),
             preferences: Preferences {
                 theme: Some(Theme::ClassicLight),
                 text_size: Some(TextSize::Medium),
@@ -1713,7 +1733,7 @@ mod tests {
         // As documented on `MAX_FILE_BYTES`.
         assert_eq!(
             (bookmark, highlight, note_record, finding, rest),
-            (188, 231, 254, 708, 613)
+            (188, 231, 254, 708, 614)
         );
         let notes = MAX_NOTES * note_record + 4 * MAX_TOTAL_NOTE_CHARS;
         assert_eq!(notes, 102_540_000);
@@ -1746,11 +1766,11 @@ mod tests {
         let size = |bookmarks: usize, notes: usize| {
             (rest + bookmarks * bookmark + verses * highlight + notes + findings) as u64
         };
-        assert_eq!(size(50_000, notes), 126_206_792);
+        assert_eq!(size(50_000, notes), 126_206_793);
         assert!(size(50_000, notes) <= MAX_FILE_BYTES);
         assert!(size(92_611, notes) <= MAX_FILE_BYTES);
         assert!(size(92_612, notes) > MAX_FILE_BYTES);
-        assert_eq!(size(ranges, 0), 113_960_936);
+        assert_eq!(size(ranges, 0), 113_960_937);
         assert!(size(ranges, 0) <= MAX_FILE_BYTES);
     }
 

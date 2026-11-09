@@ -10,6 +10,14 @@
 //! home (☰, where Import data… was chosen). After an import what's shown of
 //! the reader's data is reloaded (`bridge::imported`, `page`).
 //!
+//! Once Import is pressed the import can't be cancelled: the backend may
+//! already have committed it, so "Nothing was changed" could be untrue.
+//! Until its answer comes, Cancel, Escape and every choice do nothing (they
+//! are disabled, and the dialog itself keeps focus); then it closes and
+//! says what was done, or, if it failed, gives them back to try again or
+//! cancel. An answer for a preview no longer shown changes nothing on
+//! screen.
+//!
 //! This is the page's import script (`ui/index.html` at fa5969d,
 //! `describePreferences` to its keydown handler) as a Leptos component:
 //! the same ids, classes, ARIA, `hidden` and `disabled`, text and focus
@@ -50,7 +58,11 @@ struct Import {
     choice: RwSignal<import_text::Choice>,
     position_label: RwSignal<String>,
     prefs_label: RwSignal<String>,
+    /// The option to set "Let AI agents save findings" as the file has it
+    /// (`import_text::permission`), if it's offered.
+    permission_label: RwSignal<String>,
     error: RwSignal<String>,
+    /// Import is under way, and can't be cancelled.
     confirming: RwSignal<bool>,
     /// The preview being shown, for the view.
     shown_preview: RwSignal<Option<ImportPreview>>,
@@ -64,6 +76,7 @@ struct Import {
     replace: NodeRef<html::Input>,
     position: NodeRef<html::Input>,
     prefs: NodeRef<html::Input>,
+    permission: NodeRef<html::Input>,
     warning: NodeRef<html::P>,
     confirm: NodeRef<html::Button>,
     cancel: NodeRef<html::Button>,
@@ -170,6 +183,13 @@ impl Import {
         } else {
             format!("Use the file’s display settings: {}", prefs.join(", "))
         });
+        let permission = import_text::permission(&preview);
+        self.permission_label.set(
+            permission
+                .as_ref()
+                .map(|(label, _)| label.clone())
+                .unwrap_or_default(),
+        );
         self.error.set(String::new());
         self.confirming.set(false);
         if let Some(merge) = self.merge.get() {
@@ -180,6 +200,9 @@ impl Import {
         }
         if let Some(box_) = self.prefs.get() {
             box_.set_checked(!prefs.is_empty());
+        }
+        if let Some(box_) = self.permission.get() {
+            box_.set_checked(permission.is_some_and(|(_, ticked)| ticked));
         }
         self.shown_preview.set(Some(preview.clone()));
         self.preview.set_value(Some((preview, raw_prefs)));
@@ -215,7 +238,7 @@ impl Import {
         let (warning, label) = import_text::mode(&preview, replace);
         self.set_warning(replace.then_some(warning));
         if let Some(confirm) = self.confirm.get() {
-            confirm.set_text_content(Some(label));
+            confirm.set_text_content(Some(&label));
         }
     }
 
@@ -233,10 +256,20 @@ impl Import {
         self.preview.set_value(None);
     }
 
+    /// Whether the preview `token` is still the one shown: an answer for
+    /// any other changes nothing on screen.
+    fn owns(self, token: u64) -> bool {
+        self.open.get_untracked()
+            && self
+                .preview
+                .with_value(|p| p.as_ref().is_some_and(|(p, _)| p.token == token))
+    }
+
     /// Cancel (or Close, for a file that can't be imported). Focus goes
-    /// back to ☰, where Import data… was chosen.
+    /// back to ☰, where Import data… was chosen. Not once Import has
+    /// started: it runs to the end (see the module's notes).
     fn cancel(self) {
-        if !self.open.get_untracked() {
+        if !self.open.get_untracked() || self.confirming.get_untracked() {
             return;
         }
         if let Some((preview, _)) = self.preview.get_value() {
@@ -265,42 +298,63 @@ impl Import {
         if self.confirming.get_untracked() {
             return;
         }
-        let choosing_shown = preview.bookmarks_in_file > 0
-            || preview.highlights_in_file > 0
-            || preview.notes_in_file > 0;
-        let replace = choosing_shown && self.replace.get().is_some_and(|r| r.checked());
+        let replace =
+            import_text::offers_choice(&preview) && self.replace.get().is_some_and(|r| r.checked());
         let restore_position =
             preview.position.is_some() && self.position.get().is_some_and(|p| p.checked());
         let has_prefs = !Self::preferences_described(&preview).is_empty();
         let use_prefs = has_prefs && self.prefs.get().is_some_and(|p| p.checked());
+        // Only ever as the reader ticks it: never because the file says so.
+        let restore_findings_permission = import_text::permission(&preview).is_some()
+            && self.permission.get().is_some_and(|p| p.checked());
+        let token = preview.token;
         self.confirming.set(true);
         self.error.set(String::new());
+        // Its controls are disabled meanwhile; the dialog keeps focus.
+        if let Some(panel) = self.panel.get() {
+            let _ = panel.focus();
+        }
         spawn_local(async move {
             let args = ApplyImportArgs {
-                token: preview.token,
+                token,
                 replace,
                 restore_position,
+                restore_findings_permission,
             };
             let result = match ipc::args(&args) {
                 Ok(args) => ipc::invoke::<ImportResult>("apply_import", args).await,
                 Err(e) => Err(e),
             };
+            if !self.owns(token) {
+                return;
+            }
             let result = match result {
                 Ok(result) => result,
                 Err(e) => {
                     // All or nothing: nothing changed; the preview stays
-                    // open to try again or cancel.
+                    // open to try again or cancel, focus on Import.
                     ipc::log_error("Import failed", &e);
                     self.error.set(format!(
                         "{} You can try again, or cancel.",
                         ipc::error_text(&e)
                     ));
                     self.confirming.set(false);
+                    tick().await;
+                    if self.owns(token)
+                        && let Some(confirm) = self.confirm.get()
+                    {
+                        let _ = confirm.focus();
+                    }
                     return;
                 }
             };
             self.close();
             bridge::focus_home();
+            // Aa's switch, shown as it is now the import has set it (the
+            // findings and the Library reload with the notes, `page`).
+            if result.findings_permission.is_some() {
+                crate::findings::draw_switch();
+            }
             let mut parts = import_text::result_parts(&preview, replace, &result);
             // Display settings live in the webview's own storage, not the
             // database, so they're applied after the database part has
@@ -326,6 +380,9 @@ impl Import {
                 event.prevent_default();
                 self.cancel();
             }
+            // While Import runs everything in the dialog is disabled:
+            // focus stays on it.
+            "Tab" if self.confirming.get_untracked() => event.prevent_default(),
             "Tab" => {
                 if let Some(panel) = self.panel.get() {
                     let stops = dom::focusable(&panel, "input, button");
@@ -360,6 +417,7 @@ pub fn ImportDialog() -> impl IntoView {
         }),
         position_label: RwSignal::new(String::new()),
         prefs_label: RwSignal::new(String::new()),
+        permission_label: RwSignal::new(String::new()),
         error: RwSignal::new(String::new()),
         confirming: RwSignal::new(false),
         shown_preview: RwSignal::new(None),
@@ -370,6 +428,7 @@ pub fn ImportDialog() -> impl IntoView {
         replace: NodeRef::new(),
         position: NodeRef::new(),
         prefs: NodeRef::new(),
+        permission: NodeRef::new(),
         warning: NodeRef::new(),
         confirm: NodeRef::new(),
         cancel: NodeRef::new(),
@@ -380,11 +439,10 @@ pub fn ImportDialog() -> impl IntoView {
     let preview_flag = move |f: fn(&ImportPreview) -> bool| {
         move || !invalid() && import.shown_preview.with(|p| p.as_ref().is_some_and(f))
     };
-    let choice_shown = preview_flag(|p| {
-        p.bookmarks_in_file > 0 || p.highlights_in_file > 0 || p.notes_in_file > 0
-    });
+    let choice_shown = preview_flag(import_text::offers_choice);
     let position_shown = preview_flag(|p| p.position.is_some());
     let prefs_shown = move || !invalid() && !import.prefs_label.get().is_empty();
+    let permission_shown = move || !invalid() && !import.permission_label.get().is_empty();
     let problems = move || match import.shown.get() {
         Shown::Invalid { problems, .. } => problems
             .into_iter()
@@ -393,6 +451,8 @@ pub fn ImportDialog() -> impl IntoView {
             .into_any(),
         Shown::Preview => ().into_any(),
     };
+    // Import is under way: every control waits for it.
+    let busy = move || import.confirming.get();
     let invalid_text = move || match import.shown.get() {
         Shown::Invalid { message, .. } => message,
         Shown::Preview => String::new(),
@@ -406,6 +466,8 @@ pub fn ImportDialog() -> impl IntoView {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="import-title"
+                aria-busy=move || import.confirming.get().then_some("true")
+                tabindex="-1"
                 aria-describedby=move || {
                     if invalid() { "import-invalid data-problems" } else { "import-summary" }
                 }
@@ -445,12 +507,25 @@ pub fn ImportDialog() -> impl IntoView {
                 >
                     <legend id="import-choice-legend">{move || import.choice.get().legend}</legend>
                     <label>
-                        <input type="radio" name="import-mode" value="merge" checked node_ref=import.merge />
+                        <input
+                            type="radio"
+                            name="import-mode"
+                            value="merge"
+                            checked
+                            disabled=busy
+                            node_ref=import.merge
+                        />
                         " "
                         <span id="import-merge-label">{move || import.choice.get().merge}</span>
                     </label>
                     <label>
-                        <input type="radio" name="import-mode" value="replace" node_ref=import.replace />
+                        <input
+                            type="radio"
+                            name="import-mode"
+                            value="replace"
+                            disabled=busy
+                            node_ref=import.replace
+                        />
                         " "
                         <span id="import-replace-label">{move || import.choice.get().replace}</span>
                     </label>
@@ -461,14 +536,40 @@ pub fn ImportDialog() -> impl IntoView {
                     class="import-option"
                     hidden=move || !position_shown()
                 >
-                    <input type="checkbox" id="import-position" checked node_ref=import.position />
+                    <input
+                        type="checkbox"
+                        id="import-position"
+                        checked
+                        disabled=busy
+                        node_ref=import.position
+                    />
                     " "
                     <span id="import-position-label">{move || import.position_label.get()}</span>
                 </label>
                 <label id="import-prefs-option" class="import-option" hidden=move || !prefs_shown()>
-                    <input type="checkbox" id="import-prefs" checked node_ref=import.prefs />
+                    <input
+                        type="checkbox"
+                        id="import-prefs"
+                        checked
+                        disabled=busy
+                        node_ref=import.prefs
+                    />
                     " "
                     <span id="import-prefs-label">{move || import.prefs_label.get()}</span>
+                </label>
+                <label
+                    id="import-permission-option"
+                    class="import-option"
+                    hidden=move || !permission_shown()
+                >
+                    <input
+                        type="checkbox"
+                        id="import-permission"
+                        disabled=busy
+                        node_ref=import.permission
+                    />
+                    " "
+                    <span id="import-permission-label">{move || import.permission_label.get()}</span>
                 </label>
                 <p id="import-error" class="import-error" role="alert">{move || import.error.get()}</p>
                 <div class="import-buttons">
@@ -477,7 +578,7 @@ pub fn ImportDialog() -> impl IntoView {
                         id="import-confirm"
                         class="import-confirm"
                         hidden=invalid
-                        disabled=move || import.confirming.get()
+                        disabled=busy
                         node_ref=import.confirm
                         on:click=move |_: MouseEvent| import.confirm()
                     >
@@ -487,6 +588,7 @@ pub fn ImportDialog() -> impl IntoView {
                         type="button"
                         id="import-cancel"
                         class="reader-mode-btn"
+                        disabled=busy
                         node_ref=import.cancel
                         on:click=move |_: MouseEvent| import.cancel()
                     >
