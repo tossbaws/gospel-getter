@@ -184,3 +184,69 @@ test('GG-01: an open editor’s unsaved text survives another note being asked t
         assert.equal(el(app, 'note-input').value, typed);
         assert.equal(toastText(app), STILL_WRITING, 'and the toast says why nothing else opened');
     }));
+
+// ---- GG-07: Aa's "Let AI agents save findings".
+
+const SWITCH_FAILED = 'The AI agents setting couldn’t be saved.';
+const aiSwitch = (app) => el(app, 'ai-findings-toggle');
+const switchCalls = (app, cmd) => app.calls.filter((c) => c.cmd === cmd);
+const savingOn = () => backend('get_ai_findings_enabled');
+
+test('GG-07: a read of the switch that began before a change never overwrites it', () =>
+    withNotes([], async (app) => {
+        assert.equal(await savingOn(), false);
+        const release = app.holdAnswer('get_ai_findings_enabled');
+        const reads = switchCalls(app, 'get_ai_findings_enabled').length;
+        app.open('aa');
+        await app.until(() => switchCalls(app, 'get_ai_findings_enabled').length > reads, 'Aa’s read');
+        const read = switchCalls(app, 'get_ai_findings_enabled').at(-1);
+        assert.ok(!read.done, 'Aa’s read of the switch is on its way');
+
+        // Newer: the reader turns it on, and that's saved.
+        aiSwitch(app).click();
+        await app.until(() => switchCalls(app, 'set_ai_findings_enabled').every((c) => c.done)
+            && switchCalls(app, 'set_ai_findings_enabled').length === 1, 'the save');
+        assert.equal(await savingOn(), true);
+
+        release();
+        await app.until(() => read.done, 'the older read');
+        await app.idle();
+        assert.equal(aiSwitch(app).checked, true, 'the switch shows what was saved last');
+        assert.equal(await savingOn(), true);
+    }));
+
+test('GG-07: an older save’s failure, after newer changes, doesn’t undo them', () =>
+    withNotes([], async (app) => {
+        app.open('aa');
+        await app.idle();
+        assert.equal(aiSwitch(app).checked, false);
+
+        const fail = app.holdFailure('set_ai_findings_enabled', 'The database is busy.');
+        aiSwitch(app).click(); // On: its save fails, late.
+        aiSwitch(app).click(); // Off.
+        aiSwitch(app).click(); // On again: the newest.
+        assert.equal(aiSwitch(app).checked, true);
+
+        fail();
+        await app.until(() => switchCalls(app, 'set_ai_findings_enabled').length >= 2
+            && switchCalls(app, 'set_ai_findings_enabled').every((c) => c.done), 'every save');
+        await app.idle();
+        assert.equal(await savingOn(), true, 'the newest change is saved');
+        assert.equal(aiSwitch(app).checked, true, 'and shown: the older failure didn’t put it back');
+        assert.notEqual(toastText(app), SWITCH_FAILED, 'nothing the reader still wants failed');
+    }));
+
+test('GG-07: a save that fails with nothing newer is put back, and said', () =>
+    withNotes([], async (app) => {
+        app.open('aa');
+        await app.idle();
+        const fail = app.holdFailure('set_ai_findings_enabled', 'The database is busy.');
+        aiSwitch(app).click();
+        assert.equal(aiSwitch(app).checked, true);
+        fail();
+        await app.until(() => switchCalls(app, 'set_ai_findings_enabled').every((c) => c.done), 'the save');
+        await app.idle();
+        assert.equal(aiSwitch(app).checked, false, 'put back as it was');
+        assert.equal(await savingOn(), false);
+        assert.equal(toastText(app), SWITCH_FAILED);
+    }));

@@ -17,7 +17,15 @@
 //! - "Remove" removes that one finding, with Undo in the toast.
 //!
 //! And the reader's switch in Aa, "Let AI agents save findings" (C6), read
-//! as Aa opens and saved as it changes.
+//! as Aa opens and saved as it changes. It shows only the newest confirmed
+//! state (GG-07): every read and every change claims the switch's
+//! generation (`intent`), and an answer shows only while its claim holds.
+//! Changes are saved one at a time, in order: a change made while a save
+//! is on its way waits for it (the newest waiting replaces any before it),
+//! so the backend sees them in the reader's order and the switch stays
+//! focusable throughout. A save that fails is undone, and said, only if
+//! nothing newer has happened since; a read asked for while a save is on
+//! its way (Aa opened again, an import) is made once the saves are done.
 
 use std::cell::RefCell;
 
@@ -31,6 +39,7 @@ use crate::card;
 use crate::dom;
 use crate::dto::Finding;
 use crate::findings_text as text;
+use crate::intent::{Claim, Generation};
 use crate::ipc;
 use crate::margin;
 use crate::surfaces;
@@ -50,6 +59,14 @@ struct State {
     of: Option<(i64, i64)>,
     /// Bumped by each read: only the latest is shown.
     token: u64,
+    /// The switch's reads and changes: only the newest shows.
+    switch: Generation,
+    /// What the backend last said the switch is (read or saved).
+    switch_stored: Option<bool>,
+    /// A change of the switch is being saved; the newest change made
+    /// meanwhile waits, with its claim.
+    switch_saving: bool,
+    switch_waiting: Option<(bool, Claim)>,
 }
 
 thread_local! {
@@ -362,12 +379,23 @@ fn switch() -> Option<HtmlInputElement> {
         .ok()
 }
 
-/// Aa is opening: the switch shows what's saved.
+/// Aa is opening (or an import changed it): the switch shows what's saved,
+/// unless the reader changes it before the answer is in. While a change is
+/// being saved, the read is made once the saves are done.
 pub fn draw_switch() {
-    spawn_local(async {
-        match ipc::invoke::<bool>("get_ai_findings_enabled", wasm_bindgen::JsValue::UNDEFINED).await
-        {
+    let (claim, saving) = with(|s| (s.switch.claim(), s.switch_saving));
+    if saving {
+        return;
+    }
+    spawn_local(async move {
+        let read =
+            ipc::invoke::<bool>("get_ai_findings_enabled", wasm_bindgen::JsValue::UNDEFINED).await;
+        if !with(|s| s.switch.holds(claim)) {
+            return;
+        }
+        match read {
             Ok(on) => {
+                with(|s| s.switch_stored = Some(on));
                 if let Some(switch) = switch() {
                     switch.set_checked(on);
                 }
@@ -377,25 +405,69 @@ pub fn draw_switch() {
     });
 }
 
-/// The switch changed: saved, or put back as it was with why.
+/// The switch changed: saved, after any save already on its way.
 fn on_switch() {
     let Some(input) = switch() else {
         return;
     };
     let on = input.checked();
-    spawn_local(async move {
+    let first = with(|s| {
+        let claim = s.switch.claim();
+        s.switch_waiting = Some((on, claim));
+        if s.switch_saving {
+            None
+        } else {
+            s.switch_saving = true;
+            s.switch_waiting.take()
+        }
+    });
+    if let Some(first) = first {
+        spawn_local(save_switch(first));
+    }
+}
+
+/// Saves `first` (a change of the switch, with its claim), then each change
+/// that waited meanwhile, the newest only, one at a time. A save that fails
+/// is put back to what the backend last said only while its claim holds
+/// (nothing newer since), and is said unless a newer change is on its way
+/// to replace it. Once none waits, a read asked for meanwhile is made.
+async fn save_switch(first: (bool, Claim)) {
+    let mut next = Some(first);
+    let mut last = first.1;
+    while let Some((on, claim)) = next {
+        last = claim;
         let saved = match ipc::args(&SwitchArgs { enabled: on }) {
             Ok(args) => ipc::invoke::<bool>("set_ai_findings_enabled", args).await,
             Err(e) => Err(e),
         };
-        if let Err(e) = saved {
-            ipc::log_error("Failed to save the AI agents setting", &e);
-            if let Some(switch) = switch() {
-                switch.set_checked(!on);
+        match saved {
+            Ok(_) => with(|s| s.switch_stored = Some(on)),
+            Err(e) => {
+                ipc::log_error("Failed to save the AI agents setting", &e);
+                let (current, stored, newer) = with(|s| {
+                    (
+                        s.switch.holds(claim),
+                        s.switch_stored,
+                        s.switch_waiting.is_some(),
+                    )
+                });
+                if current && let Some(switch) = switch() {
+                    switch.set_checked(stored.unwrap_or(!on));
+                }
+                if !newer {
+                    bridge::toast(text::SWITCH_FAILED, true);
+                }
             }
-            bridge::toast(text::SWITCH_FAILED, true);
         }
+        next = with(|s| s.switch_waiting.take());
+    }
+    let reread = with(|s| {
+        s.switch_saving = false;
+        !s.switch.holds(last)
     });
+    if reread {
+        draw_switch();
+    }
 }
 
 /// Listens to the switch, and reads it once.
