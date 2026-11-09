@@ -2,7 +2,9 @@
 // agents save findings" (format 4 files): the preview names the findings
 // in the file and the ones replacing would remove, a file of findings alone
 // can replace, and the file's switch is set only when the reader ticks the
-// option to. Against the real backend and real files, as
+// option to. And once Import is pressed it can't be cancelled: Cancel,
+// Escape and the choices wait for its answer (held here), which is then
+// reported. Against the real backend and real files, as
 // reader-data.test.mjs; the reader's findings are saved as an agent would
 // (the bridge's `__save_findings`).
 
@@ -11,7 +13,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp } from './harness.mjs';
+import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-import-truth-'));
 after(async () => {
@@ -266,4 +268,107 @@ test('nothing is asked about AI saving when the file agrees with the install or 
             assert.equal(await savingOn(), here, 'left as it was');
             assert.doesNotMatch(app.notice(), /Let AI agents/);
         }
+    }));
+
+// ---- GG-03: once Import starts, it runs to the end.
+
+const panelHasFocus = (app) => el(app, 'import-panel').contains(app.document.activeElement);
+const controls = (app) => [
+    ...app.document.querySelectorAll('#import-panel input[name="import-mode"]'),
+    el(app, 'import-position'),
+    el(app, 'import-prefs'),
+    el(app, 'import-permission'),
+    el(app, 'import-cancel'),
+    el(app, 'import-confirm'),
+];
+const applyCalls = (app) => app.calls.filter((c) => c.cmd === 'apply_import');
+
+/** Everything a reader could do to cancel, while Import runs: none of it does anything. */
+async function tryToCancel(app) {
+    assert.ok(controls(app).every((c) => c.disabled), 'every choice waits');
+    assert.equal(el(app, 'import-panel').getAttribute('aria-busy'), 'true');
+    assert.ok(panelHasFocus(app), 'the dialog keeps focus');
+    app.click(el(app, 'import-cancel'));
+    const escape = app.key('Escape', {}, app.document.activeElement);
+    assert.ok(escape.defaultPrevented);
+    const tab = app.key('Tab', {}, app.document.activeElement);
+    assert.ok(tab.defaultPrevented);
+    app.click(el(app, 'import-overlay'));
+    await settle();
+    assert.ok(overlayOpen(app), 'still open');
+    assert.ok(panelHasFocus(app), 'focus stayed in the dialog');
+    assert.ok(!app.calls.some((c) => c.cmd === 'cancel_import'), 'not discarded');
+    assert.doesNotMatch(app.toast().textContent, /Nothing was changed/);
+    assert.equal(applyCalls(app).length, 1);
+}
+
+test('once Import starts, Cancel, Escape and the backdrop wait for it, and then it says what it did', () =>
+    withApp({}, async (app) => {
+        await backend('add_bookmark', { bookId: JOHN, chapter: 3, verseStart: 5, verseEnd: 5 });
+        await preview(app, v4({ findings: [] }));
+        choose(app, 'replace');
+        // The backend commits at once; its answer is held back, as a slow
+        // one would be.
+        const answer = app.holdAnswer('apply_import');
+        app.click(el(app, 'import-confirm'));
+        await app.until(() => applyCalls(app).length === 1, 'the import');
+        for (let i = 0; (await bookmarksHere()).includes('John 3:5'); i++) {
+            assert.ok(i < 200, 'the import never committed');
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        await tryToCancel(app);
+
+        answer();
+        await app.until(() => !overlayOpen(app), 'the import to finish');
+        await app.idle();
+        assert.equal(app.notice(), 'Import complete. Replaced 1 bookmark with the file’s 2 bookmarks.');
+        assert.equal(app.toast().textContent, 'Import complete. Replaced 1 bookmark with the file’s 2 bookmarks.');
+        assert.deepEqual(await bookmarksHere(), ['John 3:16', 'Psalms 23:1–4']);
+        assert.equal(app.document.activeElement, el(app, 'menu-toggle'), 'focus goes back to ☰');
+    }));
+
+test('an import that fails while it can’t be cancelled gives the choices back, to try again or cancel', () =>
+    withApp({}, async (app) => {
+        await backend('add_bookmark', { bookId: JOHN, chapter: 3, verseStart: 5, verseEnd: 5 });
+        await preview(app, v4({ findings: [] }));
+        choose(app, 'replace');
+        const fail = app.holdFailure('apply_import', 'The import failed, so nothing was changed.');
+        app.click(el(app, 'import-confirm'));
+        await app.until(() => applyCalls(app).length === 1, 'the import');
+        await tryToCancel(app);
+
+        fail();
+        await app.until(() => el(app, 'import-error').textContent !== '', 'the failure');
+        await app.idle();
+        assert.ok(overlayOpen(app));
+        assert.equal(el(app, 'import-error').textContent, 'The import failed, so nothing was changed. You can try again, or cancel.');
+        assert.ok(controls(app).every((c) => !c.disabled), 'the choices are back');
+        assert.equal(el(app, 'import-panel').getAttribute('aria-busy'), null);
+        assert.equal(app.document.activeElement, el(app, 'import-confirm'), 'focus on Import, to try again');
+        assert.ok(app.document.querySelector('input[name="import-mode"][value="replace"]').checked, 'still Replace');
+        assert.deepEqual(await bookmarksHere(), ['John 3:5']);
+
+        // Tried again, it imports.
+        const args = await confirm(app);
+        assert.equal(args.replace, true);
+        assert.equal(applyCalls(app).length, 2);
+        assert.match(app.notice(), /^Import complete\. Replaced 1 bookmark with the file’s 2 bookmarks\./);
+        assert.deepEqual(await bookmarksHere(), ['John 3:16', 'Psalms 23:1–4']);
+    }));
+
+test('after a failure, Cancel cancels again and says nothing was changed', () =>
+    withApp({}, async (app) => {
+        await preview(app, v4());
+        app.failCommand('apply_import', 'The import failed, so nothing was changed.');
+        const before = app.calls.length;
+        app.click(el(app, 'import-confirm'));
+        await app.idle(before, 'apply_import');
+        assert.ok(overlayOpen(app));
+        app.failCommand('apply_import', null);
+        const cancelled = app.calls.length;
+        app.click(el(app, 'import-cancel'));
+        await app.idle(cancelled, 'cancel_import');
+        assert.ok(!overlayOpen(app));
+        assert.equal(app.toast().textContent, 'Import cancelled. Nothing was changed.');
+        assert.deepEqual(await findingsHere(), []);
     }));

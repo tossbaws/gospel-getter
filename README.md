@@ -187,7 +187,8 @@ needed.
   it (or, if you choose, replacing your bookmarks, highlights, notes and
   AI findings: the warning names each one it removes). A backup turns
   **Let AI agents save findings** on or off only if you tick the import's
-  option to, offered when its setting differs from yours.
+  option to, offered when its setting differs from yours. Once you press
+  **Import** it runs to the end, and then says what it did.
   Only that personal data is exported, not Bible text or the app's
   database. Files exported by 2.8.0 or newer (data format 3, which adds
   notes) can't be imported by 2.7.0 or older, which say the file is from a
