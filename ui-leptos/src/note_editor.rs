@@ -26,6 +26,13 @@
 //! Restore and Discard; it never puts the draft in the text box by itself,
 //! and never saves it without Save.
 //!
+//! An open editor is never replaced while it holds something the reader
+//! would lose: text changed from what it opened with (typed since the last
+//! draft was kept, or not), or a save or delete still on its way. A request
+//! to open another note then is turned down, with a toast saying why, and
+//! the open note stays exactly as it was. With nothing changed, a request
+//! opens over it as before.
+//!
 //! "Keep as mine" on an AI finding (C10) opens this as + Add note on the
 //! finding's verses, its text the finding's words, all of them selected as
 //! after Ctrl+A, so typing anything replaces them. Saving a note that isn't
@@ -383,7 +390,27 @@ impl Editor {
         }
     }
 
+    /// Whether the editor is open holding something replacing it would
+    /// lose: text changed from what it opened with, or a save or delete on
+    /// its way.
+    fn holds_unsaved(self) -> bool {
+        if !self.is_open() {
+            return false;
+        }
+        let text = self.text();
+        self.busy.get_value()
+            || self.session.with_value(|s| {
+                s.as_ref()
+                    .is_some_and(|s| note_text::changed(&text, &s.initial))
+            })
+    }
+
     fn open(self, request: NoteRequest, note: JsValue, return_to: Option<HtmlElement>) {
+        // Never over unsaved text, whatever asked: the open note stays.
+        if self.holds_unsaved() {
+            bridge::toast(note_text::STILL_WRITING, true);
+            return;
+        }
         let id = self.next_id.get_value() + 1;
         self.next_id.set_value(id);
         let initial = match (&request.keep, &request.note) {

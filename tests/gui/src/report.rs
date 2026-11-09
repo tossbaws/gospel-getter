@@ -81,11 +81,12 @@ pub enum Check {
     NotesBeside = 69,
     AiFindings = 70,
     ExportChoice = 71,
+    SingleKeys = 72,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 61] = [
+    pub const SHIPPED: [Check; 62] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -138,6 +139,7 @@ impl Check {
         Check::KeyCopy,
         Check::KeyHistoryNote,
         Check::PalettePageCommands,
+        Check::SingleKeys,
         Check::MarginNotes,
         Check::MarginSwitch,
         Check::MarginNarrow,
@@ -243,6 +245,7 @@ impl Check {
             Check::NotesBeside => "notes-beside",
             Check::AiFindings => "ai-findings",
             Check::ExportChoice => "export-choice",
+            Check::SingleKeys => "single-key-switch",
         }
     }
 

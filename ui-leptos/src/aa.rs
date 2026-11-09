@@ -3,8 +3,9 @@
 //! or the reader's notes); text size (its stepper,
 //! Ctrl+=, Ctrl+- and Ctrl+0, and the size shown for a moment), line
 //! spacing, width, layout (kept but disabled while comparing) and theme;
-//! reading mode; and the launch check's setting in About. Every choice
-//! goes through the saved settings' store (`prefs`).
+//! reading mode; the Single-key shortcuts switch (the keyboard dispatcher,
+//! `keyboard`, reads it); and the launch check's setting in About. Every
+//! choice goes through the saved settings' store (`prefs`).
 //!
 //! The two popovers themselves (`#aa-popover`, `#translation-popover`, with
 //! their headings, the stepper, Compare and Reading mode) are the page's;
@@ -57,6 +58,9 @@ pub const LAYOUT_CHANGE_EVENT: &str = "gospel-getter:layout-change";
 
 /// How long the text size shows after a size key, in milliseconds.
 const SIZE_SHOWN_MS: i32 = 1500;
+
+/// Aa's "Single-key shortcuts" switch.
+const SINGLE_KEYS_ID: &str = "single-keys-toggle";
 
 /// The settings with a choice group in Aa, and the group.
 const GROUPS: [(&str, Preference); 3] = [
@@ -663,7 +667,16 @@ pub fn apply_preferences(values: &JsValue) -> Result<bool, JsValue> {
     Ok(persisted)
 }
 
-/// Reading mode's and Compare's buttons say whether they're on.
+/// The "Single-key shortcuts" switch.
+fn single_keys_switch() -> Option<web_sys::HtmlInputElement> {
+    bridge::document()?
+        .get_element_by_id(SINGLE_KEYS_ID)?
+        .dyn_into::<web_sys::HtmlInputElement>()
+        .ok()
+}
+
+/// Reading mode's and Compare's buttons say whether they're on, and the
+/// Single-key shortcuts switch shows its setting.
 fn show_toggles() {
     for (id, pref) in [
         ("reader-mode-btn", preferences::READER_MODE),
@@ -673,6 +686,9 @@ fn show_toggles() {
         if let Some(toggle) = by_id(id) {
             let _ = toggle.set_attribute("aria-pressed", &prefs::on(&pref).to_string());
         }
+    }
+    if let Some(switch) = single_keys_switch() {
+        switch.set_checked(prefs::on(&preferences::SINGLE_KEY_SHORTCUTS));
     }
 }
 
@@ -889,6 +905,17 @@ pub fn mount() {
     }
     if let Some(compare) = by_id("compare-btn") {
         dom::on_click(&compare, |_| toggle_compare());
+    }
+    // Single-key shortcuts, on or off: the keyboard dispatcher reads the
+    // setting as each key comes.
+    if let Some(switch) = single_keys_switch() {
+        dom::on(&switch, "change", |_| {
+            let on = single_keys_switch().is_some_and(|s| s.checked());
+            prefs::set(
+                &preferences::SINGLE_KEY_SHORTCUTS,
+                if on { "on" } else { "off" },
+            );
+        });
     }
     // Notes in the margin, on or off: the margin (`margin`) follows the
     // setting on `<html>`.

@@ -29,7 +29,9 @@
 //! page's glue (`page`, with its words and rules in `page_text`): the
 //! toast, Export and Import data…, the welcome, the shortcuts sheet and
 //! search opened, the palette's page commands, the launch check. What the
-//! page's few remaining scripts share with this is in `bridge`.
+//! page's few remaining scripts share with this is in `bridge`, and the
+//! rule for whose an answer is once it's back, after the reader has done
+//! something newer, is `intent`'s.
 //!
 //! If this module fails to load, the chapter still shows, as plain text, in
 //! the saved look (the page's small fallback reads it, and its pre-paint
@@ -60,6 +62,7 @@ mod findings_text;
 mod import_preview;
 mod import_text;
 mod install;
+mod intent;
 mod ipc;
 mod keyboard;
 mod keyboard_text;

@@ -329,8 +329,25 @@ pub const COMPARE_NOTES: Preference = Preference {
     file_name: None,
 };
 
+/// The keyboard shortcuts that are a character key pressed on its own (G,
+/// T, C, N, j and k, `[` and `]`, `/` and `?`: Aa's "Single-key
+/// shortcuts"), on unless the reader turns them off, as WCAG 2.1.4 asks,
+/// for speech input or a screen reader. The shortcuts with Ctrl, Cmd or
+/// Alt, and the keys that aren't characters (the arrows, Escape), work
+/// either way. A setting of this computer's, like the margin's: no backup
+/// carries it.
+pub const SINGLE_KEY_SHORTCUTS: Preference = Preference {
+    name: "singleKeyShortcuts",
+    key: "gospel-getter-single-key-shortcuts",
+    fallback: "on",
+    values: Values::Words(&["on", "off"]),
+    renamed: &[],
+    select: None,
+    file_name: None,
+};
+
 /// Every saved setting, in the order they're applied (and exported).
-pub const PREFERENCES: [Preference; 12] = [
+pub const PREFERENCES: [Preference; 13] = [
     THEME,
     TEXT_SIZE,
     LINE_SPACING,
@@ -343,6 +360,7 @@ pub const PREFERENCES: [Preference; 12] = [
     UPDATE_CHECK,
     MARGIN_NOTES,
     COMPARE_NOTES,
+    SINGLE_KEY_SHORTCUTS,
 ];
 
 /// The setting the page calls `name`.

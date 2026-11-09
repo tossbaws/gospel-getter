@@ -19,7 +19,12 @@
 //! (`page`) ask it for chapters ([`start`], [`ask`]). A stale answer
 //! never overwrites a newer one: each load has its token, as the page's
 //! `loadToken`, each step back or forward its own, and a position is saved
-//! only for a chapter put on screen, in the order they were shown.
+//! only for a chapter put on screen, in the order they were shown. What
+//! outlives a load has its own generation (`intent`): a note's Edit waiting
+//! for its jump opens the note only if nothing newer has happened (another
+//! navigation, or any note editor opening), and Compare's own fetch, when
+//! it's switched on or its translations change, shows (or says it failed)
+//! only while it's still the comparison of the chapter on screen asked for.
 //!
 //! This is the page's reader (`ui/index.html` at 4a7f6f5: `updateReference`
 //! to the `compare-change` listener, `openPassage`, `savePosition` and the
@@ -48,6 +53,7 @@ use crate::bridge;
 use crate::card;
 use crate::dom;
 use crate::dto::{Compare, CompareArgs, Home, Position, Reading, ReadingArgs, Verse};
+use crate::intent::Generation;
 use crate::ipc;
 use crate::nav::{self, Facts};
 use crate::nav_text::RecentPlace;
@@ -82,6 +88,15 @@ struct State {
     columns: Vec<(String, Vec<i64>)>,
     /// Bumped by each load: an answer to an older one is dropped.
     load_token: u64,
+    /// A note's Edit waiting for its jump ([`open`]): claimed by the Edit,
+    /// cancelled by any newer navigation ([`load_sent`]) and by any note
+    /// editor opening (`bridge::NOTE_EVENT`), so a late jump never opens a
+    /// note over something newer.
+    edit: Generation,
+    /// Compare's own fetch ([`on_compare_change`]), apart from a load's:
+    /// claimed by each change of Compare (on, off, another translation),
+    /// so only the newest one's answer, or failure, shows.
+    compare: Generation,
     /// A position is being saved; the newest one waiting goes next.
     saving: bool,
     waiting: Option<Position>,
@@ -467,6 +482,16 @@ enum Outcome {
 /// asks for its chapter before this module has loaded). An answer already
 /// in is put on screen now, within the request.
 fn load_sent(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
+    // A navigation: a note's Edit still waiting for its own jump is let go
+    // ([`open`]).
+    with(|s| s.edit.cancel());
+    send_load(book_id, chapter, sent)
+}
+
+/// [`load_sent`]'s work: the commands sent, and the answers put on screen.
+/// Compare changing on the way asks again through here, as the same load
+/// (a note's Edit waiting for it still opens after).
+fn send_load(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
     // The reader has asked for something else: a verse put back where they
     // were at launch stays put no longer.
     surfaces::let_go_of_place();
@@ -503,7 +528,7 @@ fn load_sent(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
         );
         return match answer {
             Outcome::Done(loaded) => Box::pin(async move { loaded }),
-            Outcome::Again => load_reading(book_id, chapter),
+            Outcome::Again => send_load(book_id, chapter, None),
         };
     }
     Box::pin(async move {
@@ -534,7 +559,7 @@ fn load_sent(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
         );
         match answer {
             Outcome::Done(loaded) => loaded,
-            Outcome::Again => load_reading(book_id, chapter).await,
+            Outcome::Again => send_load(book_id, chapter, None).await,
         }
     })
 }
@@ -805,8 +830,12 @@ fn export_place() {
 
 /// Compare went on or off, or what it compares with changed: the chapter on
 /// screen in the new layout, fetching the comparison only if it isn't the
-/// one there already (and dropping it if a load has begun meanwhile).
+/// one there already. Its answer (or its failure's notice) shows only while
+/// it's still the comparison asked for: no newer change of Compare, no load
+/// begun since, and the same chapter, translations and layout on screen.
 fn on_compare_change() {
+    // Whatever Compare is now, a fetch for what it was is no longer wanted.
+    let claim = with(|s| s.compare.claim());
     let Some(dto) = with(|s| s.last_dto.clone()) else {
         return;
     };
@@ -826,10 +855,19 @@ fn on_compare_change() {
         return;
     }
     let token = with(|s| s.load_token);
-    let compare = load_compare(dto.current_book_id, dto.current_chapter);
+    let layout = compare_layout();
+    let (book_id, chapter) = (dto.current_book_id, dto.current_chapter);
+    let compare = load_compare(book_id, chapter);
     spawn_local(async move {
         let compare_raw = JsFuture::from(compare).await.unwrap_or(JsValue::NULL);
-        if with(|s| s.load_token) != token {
+        let asked = with(|s| {
+            s.compare.holds(claim)
+                && s.load_token == token
+                && s.last_dto
+                    .as_ref()
+                    .is_some_and(|d| d.current_book_id == book_id && d.current_chapter == chapter)
+        });
+        if !asked || compare_codes() != codes || compare_layout() != layout {
             return;
         }
         let compare = (!compare_raw.is_null())
@@ -1001,7 +1039,11 @@ pub fn jump(book_id: i64, chapter: i64, top: bool) {
 /// A Library row or a search result opens its passage (the Library or the
 /// search box already closed), as a jump, its verses selected; with a
 /// `note` (a note's Edit, as `list_all_notes` gave it), the selection card
-/// then opens the note editor on it (`card::edit_note`).
+/// then opens the note editor on it (`card::edit_note`), once the jump has
+/// put the passage on screen, and only if nothing newer has happened on
+/// the way: a jump that failed or was overtaken, another navigation, or
+/// any note editor opening meanwhile (even one closed again) lets the Edit
+/// go, so it never opens over what the reader is doing now.
 pub fn open(passage: &bridge::OpenPassage, note: JsValue) {
     let load = jump_to(
         passage.book_id,
@@ -1010,12 +1052,27 @@ pub fn open(passage: &bridge::OpenPassage, note: JsValue) {
         passage.verse_end,
         false,
     );
+    if note.is_null() || note.is_undefined() {
+        spawn(load);
+        return;
+    }
+    // After the jump's own load has begun (which cancels any Edit before
+    // this one).
+    let edit = with(|s| s.edit.claim());
     spawn_local(async move {
-        let _ = load.await;
-        if !note.is_null() && !note.is_undefined() && with(|s| s.reading.is_some()) {
+        let loaded = load.await;
+        if loaded && with(|s| s.edit.holds(edit) && s.reading.is_some()) {
             card::edit_note(&note);
         }
     });
+}
+
+/// How many chapter loads have begun: a number that moves on with every
+/// navigation, so a late answer can tell whether the reader has gone
+/// anywhere since it was asked for (search's Enter, waiting for its
+/// search). Read only.
+pub fn loads() -> u64 {
+    with(|s| s.load_token)
 }
 
 /// What the palette's commands need of the reader: the chapters (as the
@@ -1285,6 +1342,9 @@ pub fn mount() {
         }
     });
     dom::on_document_event(aa::COMPARE_CHANGE_EVENT, |_| on_compare_change());
+    // Any note editor opening is newer than a note's Edit still waiting for
+    // its jump ([`open`]).
+    dom::on_document_event(bridge::NOTE_EVENT, |_| with(|s| s.edit.cancel()));
     // After the click dispatcher on the body (`clicks`), which ignores
     // these.
     if let Some(body) = document.body() {

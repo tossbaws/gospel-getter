@@ -80,6 +80,14 @@ pub const SHORTCUTS: &[Shortcut] = &[
     Shortcut { id: "forward", group: "History", keys: &[&["Alt", "→"]], aria: "Alt+ArrowRight", does: "Forward again", handles: &["ArrowRight"] },
 ];
 
+/// What the sheet says above its groups while Aa's "Single-key shortcuts"
+/// is off: that the keys pressed on their own do nothing, which still
+/// work, and how to turn them back on.
+pub const SINGLE_KEYS_OFF: &str = "Single-key shortcuts are off, so the keys here that are \
+    pressed on their own, such as G, J, / and ?, do nothing. The ones with Ctrl or Alt, the \
+    arrow keys and Esc still work. To turn them back on, open Aa and switch on Single-key \
+    shortcuts.";
+
 /// The row `id`, if there is one.
 pub fn shortcut(id: &str) -> Option<&'static Shortcut> {
     SHORTCUTS.iter().find(|s| s.id == id)

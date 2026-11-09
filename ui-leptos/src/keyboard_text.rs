@@ -4,6 +4,11 @@
 //! page scrolls to show a verse. Every key compared here is in some row's
 //! `handles` of the table of shortcuts (`shortcut_table`), which a test of
 //! the backend's checks (`every_handled_key_is_in_the_shortcuts_table`).
+//!
+//! With Aa's "Single-key shortcuts" off ([`route_for`]), a character key
+//! pressed on its own ([`character_only`]) is no shortcut (WCAG 2.1.4):
+//! only the keys with Ctrl, Cmd or Alt, and those that aren't characters
+//! (the arrows, Escape), are.
 
 use crate::reader_text::Which;
 
@@ -131,6 +136,24 @@ pub fn route(press: &Press) -> Option<Route> {
         return Some(Route::Turn(Which::Next));
     }
     None
+}
+
+/// Whether `press` is a character key pressed on its own: one character (a
+/// letter, a digit or a symbol, with Shift or not, as `?` and `J` are),
+/// with no Ctrl, Cmd or Alt. These are the shortcuts Aa's "Single-key
+/// shortcuts" turns off; the arrows and Escape aren't characters.
+pub fn character_only(press: &Press) -> bool {
+    !press.ctrl && !press.meta && !press.alt && press.key.chars().count() == 1
+}
+
+/// What `press` is for ([`route`]) with single-key shortcuts on
+/// (`single_keys`), or off: then a character key pressed on its own is no
+/// shortcut, and goes on as if unheard (typed, where typing is possible).
+pub fn route_for(press: &Press, single_keys: bool) -> Option<Route> {
+    if !single_keys && character_only(press) {
+        return None;
+    }
+    route(press)
 }
 
 /// The selection, as the card has it: its column, the verse it started
@@ -274,6 +297,94 @@ mod tests {
         assert_eq!(route(&press("ArrowRight")), Some(Route::Turn(Which::Next)));
         assert_eq!(route(&press("x")), None);
         assert_eq!(route(&press("Enter")), None);
+    }
+
+    /// The key values one way of pressing a shortcut (one of the table's
+    /// combinations of caps) sends, each with its modifiers (Ctrl, Alt,
+    /// Shift): a letter in either case (with Shift, its capital), an arrow
+    /// or Esc by its key's name.
+    fn presses_of(caps: &[&str]) -> Vec<(String, bool, bool, bool)> {
+        let has = |cap: &str| caps.contains(&cap);
+        let (ctrl, alt, shift) = (has("Ctrl"), has("Alt"), has("Shift"));
+        let Some(cap) = caps
+            .iter()
+            .find(|c| !matches!(**c, "Ctrl" | "Alt" | "Shift"))
+        else {
+            return Vec::new();
+        };
+        let named = match *cap {
+            "←" => Some("ArrowLeft"),
+            "→" => Some("ArrowRight"),
+            "↑" => Some("ArrowUp"),
+            "↓" => Some("ArrowDown"),
+            "Esc" => Some("Escape"),
+            _ => None,
+        };
+        let keys: Vec<String> = match named {
+            Some(name) => vec![name.to_owned()],
+            None if shift => vec![cap.to_uppercase()],
+            None => vec![cap.to_lowercase(), cap.to_uppercase()],
+        };
+        let mut keys = keys;
+        keys.dedup();
+        keys.into_iter().map(|k| (k, ctrl, alt, shift)).collect()
+    }
+
+    /// Off, Single-key shortcuts leave every character key pressed on its
+    /// own unanswered, and every other way to press a shortcut still does
+    /// what it did: each way in the table of shortcuts, so a shortcut added
+    /// to it later is covered too.
+    #[test]
+    fn single_key_shortcuts_off_answer_no_character_key_alone_and_keep_the_rest() {
+        let mut turned_off = Vec::new();
+        let mut kept = Vec::new();
+        for row in crate::shortcut_table::SHORTCUTS {
+            for caps in row.keys {
+                for (key, ctrl, alt, shift) in presses_of(caps) {
+                    for meta in [false, true].into_iter().filter(|m| !m || ctrl) {
+                        let press = Press {
+                            key: &key,
+                            ctrl: ctrl && !meta,
+                            meta,
+                            alt,
+                            shift,
+                        };
+                        let on = route_for(&press, true);
+                        assert_eq!(on, route(&press), "{}: on is as before", row.id);
+                        let off = route_for(&press, false);
+                        let alone = !ctrl && !alt && key.chars().count() == 1;
+                        assert_eq!(character_only(&press), alone, "{}: {key}", row.id);
+                        if alone {
+                            assert_eq!(off, None, "{}: {key} alone is off", row.id);
+                            if on.is_some() {
+                                turned_off.push(row.id);
+                            }
+                        } else {
+                            assert_eq!(off, on, "{}: {caps:?} works either way", row.id);
+                            if on.is_some() {
+                                kept.push(row.id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // The switch does something both ways: some keys alone are turned
+        // off, and Ctrl+K (the palette), Ctrl+B, Alt+← and the arrows stay.
+        assert!(turned_off.contains(&"picker") && turned_off.contains(&"shortcuts"));
+        for id in ["search", "library", "back", "next-chapter", "close"] {
+            assert!(kept.contains(&id), "{id} stays");
+        }
+        // A key that's no shortcut is no shortcut either way.
+        assert_eq!(route_for(&press("x"), false), None);
+        // Typed with Ctrl, a letter is never a single-key shortcut.
+        let ctrl_k = Press {
+            key: "k",
+            ctrl: true,
+            ..Press::default()
+        };
+        assert!(!character_only(&ctrl_k));
+        assert_eq!(route_for(&ctrl_k, false), Some(Route::Search));
     }
 
     #[test]

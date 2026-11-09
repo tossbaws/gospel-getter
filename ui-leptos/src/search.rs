@@ -17,6 +17,15 @@
 //! code that was the page's (`palette::Run`, `page`). Only the latest
 //! search's answer shows.
 //!
+//! Enter pressed while a search for what's typed is still on its way runs
+//! the active option once that search is answered, as it always has, but
+//! only if the search is still the current one and Enter still belongs to
+//! what it was pressed on (GG-09): the box still open, the same words in
+//! the same translation, and nothing newer since (typing, the arrows, a
+//! click in the box, closing or reopening it, a translation switch, or any
+//! navigation, `reader::loads`). Otherwise the late answer is shown and
+//! nothing runs.
+//!
 //! This is the page's search script (`ui/index.html` at 201ab8f,
 //! `setSearchOpen` to the panel's keydown) in Rust: the same ids, classes,
 //! ARIA, `hidden`, text and focus order. Everything a test or a reader sees
@@ -35,6 +44,7 @@ use crate::aa;
 use crate::bridge;
 use crate::dom;
 use crate::dto::{GoTo, SearchAnswer, SearchArgs, SearchVerse};
+use crate::intent::{Claim, Generation};
 use crate::ipc;
 use crate::palette::{self, Command, Query, Run};
 use crate::search_text::{self as text};
@@ -91,6 +101,9 @@ struct State {
     /// Where focus was when the box opened, for a command to give it back
     /// to.
     return_focus: Option<HtmlElement>,
+    /// Enter waiting for its search: claimed by Enter, cancelled by
+    /// anything newer done in the box (see [`Search::still_pressed`]).
+    enter: Generation,
 }
 
 #[derive(Clone, Copy)]
@@ -183,6 +196,9 @@ impl Search {
     /// Opens (remembering where focus was, closing the surfaces, drawing
     /// the list and putting focus in the box, its text selected) or closes.
     fn set_open(self, open: bool) {
+        // Closed, or opened again: an Enter waiting for its search is let
+        // go.
+        self.cancel_enter();
         let Some(panel) = panel() else {
             return;
         };
@@ -228,8 +244,9 @@ impl Search {
     /// Searches what the box holds in the translation being read, from
     /// `offset`. The empty box and commands alone (">") search nothing, and
     /// that's done at once (`None`); a search is a future that's done once
-    /// its answer is shown, or dropped because a newer search replaced it.
-    fn run_search(self, offset: i64) -> Option<impl Future<Output = ()> + 'static> {
+    /// its answer (or its failure) is shown, `true`, or dropped because a
+    /// newer search replaced it, `false`.
+    fn run_search(self, offset: i64) -> Option<impl Future<Output = bool> + 'static> {
         self.cancel_timer();
         let token = self.state.with_value(|s| s.token) + 1;
         self.state.update_value(|s| s.token = token);
@@ -260,7 +277,7 @@ impl Search {
                 Err(e) => Err(e),
             };
             if self.state.with_value(|s| s.token) != token {
-                return;
+                return false;
             }
             match answer {
                 Ok(answer) => {
@@ -279,13 +296,16 @@ impl Search {
                     self.render();
                 }
             }
+            true
         })
     }
 
     /// Searches now, without waiting for it.
     fn search_now(self, offset: i64) {
         if let Some(search) = self.run_search(offset) {
-            spawn_local(search);
+            spawn_local(async move {
+                search.await;
+            });
         }
     }
 
@@ -573,6 +593,8 @@ impl Search {
     /// box has closed and focus is back where it was. A command that can't
     /// run now says why, and the box stays.
     fn run_option(self, option: &Element) {
+        // An option run is newer than an Enter still waiting.
+        self.cancel_enter();
         let Some(id) = option.get_attribute("data-command") else {
             self.open_result(option);
             return;
@@ -607,6 +629,7 @@ impl Search {
     // ---- The reader's keys and clicks.
 
     fn on_input(self) {
+        self.cancel_enter();
         self.cancel_timer();
         self.state.update_value(|s| s.moved = false);
         self.render();
@@ -625,6 +648,8 @@ impl Search {
             }
             key @ ("ArrowDown" | "ArrowUp") => {
                 event.prevent_default();
+                // Another option chosen: not the one Enter was pressed on.
+                self.cancel_enter();
                 let options = self.options();
                 if options.is_empty() {
                     return;
@@ -652,16 +677,41 @@ impl Search {
                             .is_some_and(|l| l.query == value && l.translation_code == code)
                     });
                 let search = if pending { self.run_search(0) } else { None };
-                match search {
-                    Some(search) => spawn_local(async move {
-                        search.await;
+                let Some(search) = search else {
+                    self.run_active();
+                    return;
+                };
+                let Some(claim) = self.state.try_update_value(|s| s.enter.claim()) else {
+                    return;
+                };
+                let loads = crate::reader::loads();
+                spawn_local(async move {
+                    let current = search.await;
+                    if current && self.still_pressed(claim, &value, &code, loads) {
                         self.run_active();
-                    }),
-                    None => self.run_active(),
-                }
+                    }
+                });
             }
             _ => {}
         }
+    }
+
+    /// Lets go of an Enter waiting for its search: something newer was done
+    /// in the box.
+    fn cancel_enter(self) {
+        self.state.update_value(|s| s.enter.cancel());
+    }
+
+    /// Whether Enter, pressed with `claim` on `value` in the translation
+    /// `code` after `loads` loads, still owns what it was pressed on: the
+    /// box open, nothing newer done in it, the same words in the same
+    /// translation, and the reader gone nowhere since.
+    fn still_pressed(self, claim: Claim, value: &str, code: &str, loads: u64) -> bool {
+        Self::is_open()
+            && self.state.with_value(|s| s.enter.holds(claim))
+            && self.value() == value
+            && bridge::translation_code() == code
+            && crate::reader::loads() == loads
     }
 
     fn run_active(self) {
@@ -681,6 +731,7 @@ impl Search {
             return;
         }
         if closest(&target, "#search-more").is_some() {
+            self.cancel_enter();
             self.state.update_value(|s| s.moved = true);
             let offset = self
                 .more
@@ -747,9 +798,11 @@ impl Search {
                 self.set_open(false);
             }
         });
-        // A new translation: what's typed is searched again in it.
+        // A new translation: what's typed is searched again in it (and an
+        // Enter waiting for the old one's search is let go).
         if let Some(select) = by_id("translation-select") {
             dom::on(&select, "change", move |_| {
+                self.cancel_enter();
                 if !palette::js_trim(&self.value()).is_empty() {
                     self.search_now(0);
                 }

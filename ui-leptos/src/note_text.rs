@@ -54,6 +54,11 @@ pub fn changed(text: &str, initial: &str) -> bool {
     text.trim() != initial.trim()
 }
 
+/// Said when another note is asked to open while the editor holds text the
+/// reader hasn't saved (or is saving it): the open note stays as it is.
+pub const STILL_WRITING: &str =
+    "You\u{2019}re still writing a note: save it or close it before opening another.";
+
 // ---- Drafts (R16): what's being typed is kept on this computer, in local
 // storage, until it's saved or discarded, and offered back when that note,
 // or a new note on that passage, is opened again. Never in a backup (it's
