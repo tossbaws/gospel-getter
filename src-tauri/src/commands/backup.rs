@@ -198,9 +198,11 @@ fn passage_reference_for(state: &AppState, b: &NewBookmark) -> String {
 
 /// The reader's data as an export file: bookmarks (oldest first),
 /// highlights, notes and AI findings (in Bible order), the saved reading
-/// position, "Let AI agents save findings" when it's on, and the display
-/// `preferences` the frontend passed in. Format 4 only when it has findings
-/// or the switch on: otherwise format 3, which 2.8.0 to 2.25.x restore.
+/// position, "Let AI agents save findings" and the display `preferences` the
+/// frontend passed in. Format 4 only when it has findings or the switch on,
+/// and then it always says whether the switch is on or off, so restoring it
+/// puts the switch back either way. Otherwise format 3, which 2.8.0 to
+/// 2.25.x restore: it can't hold the switch, which is off.
 pub async fn build_reader_data(
     state: &AppState,
     preferences: Preferences,
@@ -220,13 +222,14 @@ pub async fn build_reader_data(
             chapter,
         })
     });
+    let format_version = if findings.is_empty() && !findings_enabled {
+        reader_data::FORMAT_VERSION_3
+    } else {
+        reader_data::FORMAT_VERSION
+    };
     Ok(ReaderData {
         format: reader_data::FORMAT.to_string(),
-        format_version: if findings.is_empty() && !findings_enabled {
-            reader_data::FORMAT_VERSION_3
-        } else {
-            reader_data::FORMAT_VERSION
-        },
+        format_version,
         exported_at: state.store.now().await?,
         app_version: app_version().to_string(),
         reading_position,
@@ -279,7 +282,8 @@ pub async fn build_reader_data(
                 created_at: Some(f.created_at),
             })
             .collect(),
-        ai_findings_enabled: findings_enabled.then_some(true),
+        ai_findings_enabled: (format_version == reader_data::FORMAT_VERSION)
+            .then_some(findings_enabled),
         preferences,
         skipped_preferences: Vec::new(),
     })

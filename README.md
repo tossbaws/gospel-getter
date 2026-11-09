@@ -395,7 +395,9 @@ Upgrading keeps your data.
   includes them: one with findings, or with the switch on, is data format 4,
   which 2.26.0 and newer restore, and which 2.25.x and older refuse with
   their "made by a newer version" message; a backup with neither is format 3,
-  as before, and any version since 2.8.0 restores it in full.
+  as before, and any version since 2.8.0 restores it in full. A format 4
+  backup says whether the switch was on or off (2.26 and 2.27 wrote it only
+  when it was on).
 - The window's size and place are kept in `window-state.json`, beside the
   database, and aren't exported either.
 - Coming from the old browser-based Gospel Getter (the local server on

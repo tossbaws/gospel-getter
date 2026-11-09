@@ -2412,11 +2412,17 @@ async fn a_backup_is_format_4_only_with_findings_or_the_switch_on() {
     assert_eq!(switched["ai_findings_enabled"], true);
     assert!(switched.get("findings").is_none());
 
+    // Turned off again, with no findings: format 3 again, which can't hold
+    // the switch, so 2.8.0 to 2.25.x still restore it.
     commands::set_findings_switch(&state, false).await.unwrap();
+    let off = json(&build_reader_data(&state, matrix_prefs()).await.unwrap());
+    assert_eq!(off["format_version"], 3);
+    assert!(off.get("findings").is_none() && off.get("ai_findings_enabled").is_none());
+
     add_finding(&state, 11, 35, "grief").await;
     let found = json(&build_reader_data(&state, matrix_prefs()).await.unwrap());
     assert_eq!(found["format_version"], 4);
-    assert!(found.get("ai_findings_enabled").is_none(), "off: left out");
+    assert_eq!(found["ai_findings_enabled"], false, "off: written too");
     let record = &found["findings"][0];
     assert_eq!(
         record.as_object().unwrap().keys().collect::<Vec<_>>(),
@@ -2480,6 +2486,74 @@ async fn findings_and_the_switch_round_trip_and_older_files_leave_them_alone() {
     let replaced = import(&b, &path, true).await;
     assert_eq!((replaced.findings_removed, replaced.findings_added), (4, 3));
     assert_eq!(finding_rows(&b).await, finding_rows(&a).await);
+}
+
+/// John 11:35, a finding's passage.
+fn john_11_35() -> Passage {
+    Passage {
+        book_id: 43,
+        chapter: 11,
+        verse_start: 35,
+        verse_end: 35,
+    }
+}
+
+/// GG-08: a backup made with "Let AI agents save findings" off says so, and
+/// restoring it where the switch is on turns it off again, so an agent's
+/// save is refused.
+#[tokio::test]
+async fn a_backup_made_with_saving_off_turns_it_off_again() {
+    let (db, state) = app("rd_findings_off").await;
+    add_finding(&state, 11, 35, "grief").await;
+    assert!(!commands::findings_switch(&state).await.unwrap());
+    let path = file(&db, "saving-off.gospel-getter.json");
+    export_to(&state, &path, Preferences::default()).await;
+    let written: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(written["format_version"], 4);
+    assert_eq!(written["ai_findings_enabled"], false);
+
+    commands::set_findings_switch(&state, true).await.unwrap();
+    let p = preview(&state, &path).await;
+    assert_eq!(p.ai_findings_enabled, Some(false));
+    commands::apply_pending_import(&state, p.token, false, true)
+        .await
+        .unwrap();
+    assert!(!commands::findings_switch(&state).await.unwrap());
+    let writer = crate::db::FindingsWriter::open(&db.path()).await.unwrap();
+    let refused = writer.add("Claude", "tears", &[john_11_35()]).await;
+    writer.close().await;
+    assert!(
+        matches!(refused, Err(crate::db::FindingsError::Off)),
+        "{refused:?}"
+    );
+    assert_eq!(finding_rows(&state).await.len(), 1, "nothing saved");
+}
+
+/// A format 4 file without the switch, as 2.26.0 and 2.27.0 wrote one with
+/// it off, still imports, merged or replacing, and leaves the switch as it
+/// is, on or off.
+#[tokio::test]
+async fn a_format_4_file_without_the_switch_leaves_it_as_it_is() {
+    let (db, state) = app("rd_findings_absent").await;
+    let path = file(&db, "no-switch.gospel-getter.json");
+    std::fs::write(&path, v4_file_with_findings(1)).unwrap();
+    for on in [true, false] {
+        commands::set_findings_switch(&state, on).await.unwrap();
+        for replace in [false, true] {
+            let p = preview(&state, &path).await;
+            assert!(p.has_findings);
+            assert_eq!(p.ai_findings_enabled, None);
+            commands::apply_pending_import(&state, p.token, replace, true)
+                .await
+                .unwrap();
+            assert_eq!(
+                commands::findings_switch(&state).await.unwrap(),
+                on,
+                "on {on}, replace {replace}"
+            );
+            assert_eq!(finding_rows(&state).await.len(), 1);
+        }
+    }
 }
 
 #[tokio::test]
