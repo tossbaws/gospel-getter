@@ -21,7 +21,9 @@
 //! card: verses selected with the mouse and the card placed by them, Copy
 //! and Copy as… read back from the clipboard, a bookmark, highlights and a
 //! note from the card, a cross-reference read in it, and the Shift ghost
-//! (46 to 52, `card`); margin notes in reading mode: beside their verses,
+//! (46 to 52, `card`); the keyboard, and Aa's Single-key shortcuts
+//! switched off and on (53 to 57 and 72, `keys`); margin notes in reading
+//! mode: beside their verses,
 //! the switch leaving the text where it was, the markers in a narrow
 //! window, Psalm 119 with a note on every verse (60 to 63, `margin`);
 //! Compare with Notes, the notes beside a text that never moves (69,
@@ -402,11 +404,20 @@ async fn shipped(
                 Check::PalettePageCommands,
                 run.palette_page_commands().await,
             ),
+            (Check::SingleKeys, run.single_key_switch().await),
         ] {
             if result.is_err() {
                 run.failure_screenshot(check).await;
             }
             report.record(check, result).await;
+        }
+        // Single-key shortcuts back on (72 turns them off), whatever
+        // happened, after its failure screenshot.
+        if let Err(e) = run.single_keys_clean_up().await {
+            log_line(
+                started,
+                &format!("putting things back after the single-key check failed: {e:#}"),
+            );
         }
         // Margin notes (60 to 63), on notes of their own, deleted after.
         let mut margin_left = margin::MarginLeft::default();
@@ -523,6 +534,7 @@ async fn shipped(
             .chain(reader::READER_SHOTS)
             .chain(card::CARD_SHOTS)
             .chain(keys::KEYS_SHOTS)
+            .chain(keys::SINGLE_KEYS_SHOTS)
             // The margin's own, only where there's room for it (not the
             // Windows runner's screen; see `margin`); its markers' anywhere.
             .chain(

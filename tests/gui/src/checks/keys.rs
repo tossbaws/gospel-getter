@@ -9,14 +9,17 @@
 //! opening Copy as… (55); Alt+← and Alt+→ through the history, and N opening
 //! the note editor on the selection (56); the palette running commands whose
 //! code was the page's: Next chapter, Back and Copy chapter, the clipboard
-//! checked (57); and, after the restart, a cold start straight to the
-//! chapter the first session left (58). Screenshots in Chi Rho and Vellum.
+//! checked (57); Aa's "Single-key shortcuts" switched off, G and / then
+//! doing nothing while Ctrl+B, Escape and Ctrl+K still work, the shortcuts
+//! sheet saying so, and on again (72, with Aa's screenshots in Chi Rho and
+//! Vellum); and, after the restart, a cold start straight to the chapter
+//! the first session left (58). Screenshots in Chi Rho and Vellum.
 
 use anyhow::{Result, ensure};
 use serde_json::{Value, json};
 use thirtyfour::prelude::*;
 
-use super::Run;
+use super::{Run, VISIBLE_JS};
 
 /// The screenshots checks 54 and 56 take (check 4 lists them).
 pub(super) const KEYS_SHOTS: [&str; 3] = [
@@ -24,6 +27,37 @@ pub(super) const KEYS_SHOTS: [&str; 3] = [
     "56-note-by-key-chi-rho.png",
     "54-keyboard-selection-vellum.png",
 ];
+
+/// The screenshots check 72 takes (check 4 lists them): Aa with
+/// Single-key shortcuts off, in Chi Rho (dark) and Vellum (light).
+pub(super) const SINGLE_KEYS_SHOTS: [&str; 2] = [
+    "72-aa-single-keys-off-chi-rho.png",
+    "72-aa-single-keys-off-vellum.png",
+];
+
+/// Starts noting what the keys do, for check 72: each header surface
+/// opened (`gospel-getter:surface-open`), focus coming into the book and
+/// chapter picker (G's, in the sidebar), and the search box opened. Read
+/// back with [`SINGLE_KEYS_SEEN_JS`].
+const SINGLE_KEYS_WATCH_JS: &str = "const seen = [];
+    window.__guiCheckSingleKeys = seen;
+    const picker = document.getElementById('picker');
+    const search = document.getElementById('search-panel');
+    if (!window.__guiCheckSingleKeysListening) {
+        window.__guiCheckSingleKeysListening = true;
+        document.addEventListener('gospel-getter:surface-open',
+            (e) => window.__guiCheckSingleKeys.push('opened ' + (e.detail && e.detail.name)));
+        document.addEventListener('focusin', (e) => {
+            if (picker && picker.contains(e.target)) window.__guiCheckSingleKeys.push('focus in the picker');
+        });
+        new MutationObserver(() => {
+            if (!search.hidden) window.__guiCheckSingleKeys.push('search opened');
+        }).observe(search, { attributes: true, attributeFilter: ['hidden'] });
+    }
+    return null;";
+
+/// What check 72's keys did since [`SINGLE_KEYS_WATCH_JS`], in order.
+const SINGLE_KEYS_SEEN_JS: &str = "return window.__guiCheckSingleKeys || null;";
 
 /// Where the reader is, and what's selected and shown of it: the heading,
 /// the title, the verses selected, whether the card is open and a
@@ -518,5 +552,217 @@ impl Run<'_> {
             seen["title"].as_str().unwrap_or("?"),
             seen["loaded"],
         ))
+    }
+
+    /// Aa's "Single-key shortcuts" switch clicked to `on`, the setting
+    /// followed on `<html>` (no attribute for its default, on).
+    async fn set_single_keys(&self, on: bool) -> Result<()> {
+        self.ui
+            .click(
+                &format!("Aa: Single-key shortcuts {}", if on { "on" } else { "off" }),
+                "#single-keys-toggle",
+            )
+            .await?;
+        self.ui
+            .wait_with(
+                "the switch and the setting to follow",
+                "const sw = document.getElementById('single-keys-toggle');
+                 const data = document.documentElement.dataset.singleKeyShortcuts || 'on';
+                 return [sw.checked === arguments[0] && data === (arguments[0] ? 'on' : 'off'),
+                     { checked: sw.checked, data }];",
+                vec![json!(on)],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Presses `keys` (each a label and what to send), then Ctrl+B, and
+    /// waits for the Library, opened by Ctrl+B after them; what the keys did
+    /// before it. Then the Library, once it has slid in, is closed again
+    /// with Escape, which works whatever the switch says. (Not with its ×
+    /// while it slides in: during the 0.15 s `library-in` animation a
+    /// WebDriver click there can miss the moving button, with the switch on
+    /// or off, as a diagnostic run showed; every other Library check waits
+    /// for it to settle too.)
+    async fn alone_then_ctrl_b(&self, keys: &[(&str, &str)]) -> Result<Vec<Value>> {
+        self.focus_page().await?;
+        self.ui.js(SINGLE_KEYS_WATCH_JS, Vec::new()).await?;
+        for (label, key) in keys {
+            self.ui.press(&format!("press {label}"), *key).await?;
+        }
+        self.chord("press Ctrl+B (the Library)", &[Key::Control], "b")
+            .await?;
+        self.ui
+            .wait(
+                "the Library to open, by Ctrl+B, after the keys before it",
+                &format!(
+                    "{VISIBLE_JS} return [visible(document.getElementById('library-panel')), null];"
+                ),
+            )
+            .await?;
+        let seen = self.ui.js(SINGLE_KEYS_SEEN_JS, Vec::new()).await?;
+        let seen: Vec<Value> = seen.as_array().cloned().unwrap_or_default();
+        // Everything up to the Library's own opening came from the keys.
+        let before: Vec<Value> = seen
+            .iter()
+            .take_while(|e| e.as_str() != Some("opened library"))
+            .cloned()
+            .collect();
+        self.ui.settled("the Library to finish sliding in").await?;
+        self.ui
+            .press("press Escape (close the Library)", Key::Escape)
+            .await?;
+        self.ui
+            .wait(
+                "the Library to close, by Escape",
+                "return [document.getElementById('library-panel').hidden, null];",
+            )
+            .await?;
+        Ok(before)
+    }
+
+    /// After check 72, whatever happened in it: Single-key shortcuts on
+    /// again, the theme Chi Rho again, and the sheet, the Library, Aa and
+    /// the search box closed (each by its own control's click, through the
+    /// page), so the checks after it, which press G and /, start as before.
+    pub(super) async fn single_keys_clean_up(&self) -> Result<()> {
+        let left = self
+            .ui
+            .js(
+                "const sw = document.getElementById('single-keys-toggle');
+                 if (sw && !sw.checked) sw.click();
+                 const theme = document.getElementById('theme-select');
+                 if (theme && theme.value !== 'chi-rho') {
+                     const chiRho = document.querySelector('#theme-choices [data-value=\"chi-rho\"]');
+                     if (chiRho) chiRho.click();
+                 }
+                 const close = [['shortcuts-overlay', 'shortcuts-close'], ['library-panel', 'library-close'],
+                     ['aa-popover', 'aa-toggle'], ['search-panel', 'search-toggle']];
+                 for (const [shown, button] of close) {
+                     const el = document.getElementById(shown);
+                     if (el && !el.hidden) document.getElementById(button).click();
+                 }
+                 return { singleKeys: document.documentElement.dataset.singleKeyShortcuts || 'on',
+                          theme: theme ? theme.value : null };",
+                Vec::new(),
+            )
+            .await?;
+        ensure!(
+            left["singleKeys"] == "on" && left["theme"] == "chi-rho",
+            "not put back: {left}"
+        );
+        Ok(())
+    }
+
+    /// Check 72: Aa's "Single-key shortcuts" off, G and / do nothing (Ctrl+B
+    /// pressed after each opens the Library, nothing came before it, and
+    /// Escape closes it), Ctrl+K still opens the palette, and the shortcuts
+    /// sheet, from ☰, says they're off; on again, ? opens the sheet. Aa's
+    /// screenshots with the switch off, in Chi Rho and Vellum (the theme
+    /// put back after). [`Run::single_keys_clean_up`] puts it all back
+    /// whatever happens.
+    pub(super) async fn single_key_switch(&mut self) -> Result<String> {
+        let mut said = Vec::new();
+        self.go_to("John 3", "John 3").await?;
+        self.plain_reading().await?;
+        self.open_aa().await?;
+        self.ui
+            .wait(
+                "Aa's Single-key shortcuts switch, on by default",
+                &format!(
+                    "{VISIBLE_JS} const sw = document.getElementById('single-keys-toggle');
+                     return [visible(sw) && sw.checked && sw.getAttribute('role') === 'switch', null];"
+                ),
+            )
+            .await?;
+        self.set_single_keys(false).await?;
+        self.shot(
+            "screenshot: Aa, Single-key shortcuts off, Chi Rho",
+            SINGLE_KEYS_SHOTS[0],
+        )
+        .await;
+        self.aa_choose("theme-choices", "theme", "vellum").await?;
+        self.shot(
+            "screenshot: Aa, Single-key shortcuts off, Vellum",
+            SINGLE_KEYS_SHOTS[1],
+        )
+        .await;
+        self.aa_choose("theme-choices", "theme", "chi-rho").await?;
+        self.close_with_escape("Aa", "aa-popover").await?;
+        said.push("off in Aa".to_owned());
+
+        for (label, key) in [("G", "g"), ("/", "/")] {
+            let before = self.alone_then_ctrl_b(&[(label, key)]).await?;
+            ensure!(
+                before.is_empty(),
+                "with single-key shortcuts off, {label} did something: {before:?}"
+            );
+            said.push(format!(
+                "{label}: nothing, Ctrl+B after it opened the Library"
+            ));
+        }
+
+        // Ctrl+K: the palette.
+        self.focus_page().await?;
+        self.chord("press Ctrl+K (the palette)", &[Key::Control], "k")
+            .await?;
+        self.ui
+            .wait(
+                "the search box and palette to open, focus in it",
+                &format!(
+                    "{VISIBLE_JS} return [visible(document.getElementById('search-panel'))
+                         && document.activeElement === document.getElementById('search-input'), null];"
+                ),
+            )
+            .await?;
+        self.close_with_escape("the search box", "search-panel")
+            .await?;
+        said.push("Ctrl+K opened the palette".to_owned());
+
+        // The sheet, from ☰: it says they're off.
+        self.ui.click("open ☰", "#menu-toggle").await?;
+        self.ui
+            .click("☰ → Keyboard shortcuts", "#shortcuts-btn")
+            .await?;
+        let notice = self
+            .ui
+            .wait(
+                "the sheet to open, saying single-key shortcuts are off",
+                &format!(
+                    "{VISIBLE_JS} const notice = document.getElementById('shortcuts-off');
+                     return [visible(document.getElementById('shortcuts-panel')) && visible(notice),
+                         notice ? notice.textContent.trim() : null];"
+                ),
+            )
+            .await?;
+        ensure!(
+            notice
+                .as_str()
+                .is_some_and(|t| t.starts_with("Single-key shortcuts are off")),
+            "the sheet said {notice}"
+        );
+        self.close_with_escape("the sheet", "shortcuts-overlay")
+            .await?;
+        said.push("☰ → Keyboard shortcuts says they're off".to_owned());
+
+        // On again: ? is the sheet's again.
+        self.open_aa().await?;
+        self.set_single_keys(true).await?;
+        self.close_with_escape("Aa", "aa-popover").await?;
+        self.focus_page().await?;
+        self.ui.press("press ?", "?").await?;
+        self.ui
+            .wait(
+                "? to open the sheet, saying nothing of single-key shortcuts",
+                &format!(
+                    "{VISIBLE_JS} return [visible(document.getElementById('shortcuts-panel'))
+                         && document.getElementById('shortcuts-off').hidden, null];"
+                ),
+            )
+            .await?;
+        self.close_with_escape("the sheet", "shortcuts-overlay")
+            .await?;
+        said.push("on again, ? opened the sheet".to_owned());
+        Ok(said.join("; "))
     }
 }
