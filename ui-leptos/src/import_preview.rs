@@ -50,6 +50,9 @@ struct Import {
     choice: RwSignal<import_text::Choice>,
     position_label: RwSignal<String>,
     prefs_label: RwSignal<String>,
+    /// The option to set "Let AI agents save findings" as the file has it
+    /// (`import_text::permission`), if it's offered.
+    permission_label: RwSignal<String>,
     error: RwSignal<String>,
     confirming: RwSignal<bool>,
     /// The preview being shown, for the view.
@@ -64,6 +67,7 @@ struct Import {
     replace: NodeRef<html::Input>,
     position: NodeRef<html::Input>,
     prefs: NodeRef<html::Input>,
+    permission: NodeRef<html::Input>,
     warning: NodeRef<html::P>,
     confirm: NodeRef<html::Button>,
     cancel: NodeRef<html::Button>,
@@ -170,6 +174,13 @@ impl Import {
         } else {
             format!("Use the file’s display settings: {}", prefs.join(", "))
         });
+        let permission = import_text::permission(&preview);
+        self.permission_label.set(
+            permission
+                .as_ref()
+                .map(|(label, _)| label.clone())
+                .unwrap_or_default(),
+        );
         self.error.set(String::new());
         self.confirming.set(false);
         if let Some(merge) = self.merge.get() {
@@ -180,6 +191,9 @@ impl Import {
         }
         if let Some(box_) = self.prefs.get() {
             box_.set_checked(!prefs.is_empty());
+        }
+        if let Some(box_) = self.permission.get() {
+            box_.set_checked(permission.is_some_and(|(_, ticked)| ticked));
         }
         self.shown_preview.set(Some(preview.clone()));
         self.preview.set_value(Some((preview, raw_prefs)));
@@ -215,7 +229,7 @@ impl Import {
         let (warning, label) = import_text::mode(&preview, replace);
         self.set_warning(replace.then_some(warning));
         if let Some(confirm) = self.confirm.get() {
-            confirm.set_text_content(Some(label));
+            confirm.set_text_content(Some(&label));
         }
     }
 
@@ -265,14 +279,15 @@ impl Import {
         if self.confirming.get_untracked() {
             return;
         }
-        let choosing_shown = preview.bookmarks_in_file > 0
-            || preview.highlights_in_file > 0
-            || preview.notes_in_file > 0;
-        let replace = choosing_shown && self.replace.get().is_some_and(|r| r.checked());
+        let replace =
+            import_text::offers_choice(&preview) && self.replace.get().is_some_and(|r| r.checked());
         let restore_position =
             preview.position.is_some() && self.position.get().is_some_and(|p| p.checked());
         let has_prefs = !Self::preferences_described(&preview).is_empty();
         let use_prefs = has_prefs && self.prefs.get().is_some_and(|p| p.checked());
+        // Only ever as the reader ticks it: never because the file says so.
+        let restore_findings_permission = import_text::permission(&preview).is_some()
+            && self.permission.get().is_some_and(|p| p.checked());
         self.confirming.set(true);
         self.error.set(String::new());
         spawn_local(async move {
@@ -280,6 +295,7 @@ impl Import {
                 token: preview.token,
                 replace,
                 restore_position,
+                restore_findings_permission,
             };
             let result = match ipc::args(&args) {
                 Ok(args) => ipc::invoke::<ImportResult>("apply_import", args).await,
@@ -301,6 +317,11 @@ impl Import {
             };
             self.close();
             bridge::focus_home();
+            // Aa's switch, shown as it is now the import has set it (the
+            // findings and the Library reload with the notes, `page`).
+            if result.findings_permission.is_some() {
+                crate::findings::draw_switch();
+            }
             let mut parts = import_text::result_parts(&preview, replace, &result);
             // Display settings live in the webview's own storage, not the
             // database, so they're applied after the database part has
@@ -360,6 +381,7 @@ pub fn ImportDialog() -> impl IntoView {
         }),
         position_label: RwSignal::new(String::new()),
         prefs_label: RwSignal::new(String::new()),
+        permission_label: RwSignal::new(String::new()),
         error: RwSignal::new(String::new()),
         confirming: RwSignal::new(false),
         shown_preview: RwSignal::new(None),
@@ -370,6 +392,7 @@ pub fn ImportDialog() -> impl IntoView {
         replace: NodeRef::new(),
         position: NodeRef::new(),
         prefs: NodeRef::new(),
+        permission: NodeRef::new(),
         warning: NodeRef::new(),
         confirm: NodeRef::new(),
         cancel: NodeRef::new(),
@@ -380,11 +403,10 @@ pub fn ImportDialog() -> impl IntoView {
     let preview_flag = move |f: fn(&ImportPreview) -> bool| {
         move || !invalid() && import.shown_preview.with(|p| p.as_ref().is_some_and(f))
     };
-    let choice_shown = preview_flag(|p| {
-        p.bookmarks_in_file > 0 || p.highlights_in_file > 0 || p.notes_in_file > 0
-    });
+    let choice_shown = preview_flag(import_text::offers_choice);
     let position_shown = preview_flag(|p| p.position.is_some());
     let prefs_shown = move || !invalid() && !import.prefs_label.get().is_empty();
+    let permission_shown = move || !invalid() && !import.permission_label.get().is_empty();
     let problems = move || match import.shown.get() {
         Shown::Invalid { problems, .. } => problems
             .into_iter()
@@ -469,6 +491,15 @@ pub fn ImportDialog() -> impl IntoView {
                     <input type="checkbox" id="import-prefs" checked node_ref=import.prefs />
                     " "
                     <span id="import-prefs-label">{move || import.prefs_label.get()}</span>
+                </label>
+                <label
+                    id="import-permission-option"
+                    class="import-option"
+                    hidden=move || !permission_shown()
+                >
+                    <input type="checkbox" id="import-permission" node_ref=import.permission />
+                    " "
+                    <span id="import-permission-label">{move || import.permission_label.get()}</span>
                 </label>
                 <p id="import-error" class="import-error" role="alert">{move || import.error.get()}</p>
                 <div class="import-buttons">

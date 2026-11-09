@@ -316,7 +316,7 @@ test('replacing bookmarks is an explicit choice with a clear warning', () =>
         assert.equal(app.notice(), 'Import complete. Replaced 3 bookmarks with the file’s 2 bookmarks.');
         assert.deepEqual(await bookmarksIn(), ['John 3:16', 'Psalms 23:1–4']);
         const call = app.calls.find((c) => c.cmd === 'apply_import');
-        assert.deepEqual(JSON.parse(JSON.stringify(call.args)), { token: call.args.token, replace: true, restorePosition: false });
+        assert.deepEqual(JSON.parse(JSON.stringify(call.args)), { token: call.args.token, replace: true, restorePosition: false, restoreFindingsPermission: false });
     }));
 
 test('unticking the position and settings imports only bookmarks', () =>

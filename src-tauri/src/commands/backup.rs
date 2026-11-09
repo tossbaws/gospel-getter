@@ -134,10 +134,21 @@ pub struct ImportPreviewDto {
     pub has_findings: bool,
     /// The AI findings in the file.
     pub findings_in_file: usize,
+    /// How many of them aren't here yet (merge adds those:
+    /// `reader_data::new_findings`).
+    pub new_findings: usize,
+    /// How many are here already, or repeat one earlier in the file (the
+    /// same passage and request; merge leaves those as they are).
+    pub findings_already_present: usize,
     /// How many AI findings there are here now (what replacing removes).
     pub current_findings: usize,
-    /// The file's "Let AI agents save findings", if it has one.
+    /// The file's "Let AI agents save findings", if it has one (format 4
+    /// only). Importing sets it only when the reader asks to
+    /// (`apply_pending_import`'s `restore_findings_permission`).
     pub ai_findings_enabled: Option<bool>,
+    /// "Let AI agents save findings" here now, for comparing with the
+    /// file's.
+    pub current_ai_findings_enabled: bool,
     pub position: Option<PositionPreviewDto>,
     pub preferences: Preferences,
     /// The display preferences in the file this version can't apply (a
@@ -184,6 +195,10 @@ pub struct ImportResultDto {
     pub findings_added: usize,
     pub findings_already_present: usize,
     pub findings_removed: usize,
+    /// "Let AI agents save findings" as the import set it, when the reader
+    /// chose to restore the file's (`restore_findings_permission`) and it
+    /// has one; `None` when the switch was left as it was.
+    pub findings_permission: Option<bool>,
     /// The reading position saved, if the reader chose to restore it.
     pub position: Option<PositionPreviewDto>,
 }
@@ -374,7 +389,9 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
     let stored_notes = state.store.stored_notes().await?;
     let file_notes = import.notes.as_deref().unwrap_or_default();
     let new_notes = reader_data::notes_to_add(file_notes, &stored_notes).len();
-    let current_findings = state.store.findings().await?.len();
+    let stored_findings = state.store.findings().await?;
+    let file_findings = import.findings.as_deref().unwrap_or_default();
+    let new_findings = reader_data::new_findings(file_findings, &stored_findings);
     let preview = ImportPreviewDto {
         token: state.next_import_token.fetch_add(1, Ordering::Relaxed),
         file_name,
@@ -404,9 +421,12 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
         notes_already_present: file_notes.len() - new_notes,
         current_notes: stored_notes.len(),
         has_findings: import.findings.is_some(),
-        findings_in_file: import.findings.as_ref().map_or(0, Vec::len),
-        current_findings,
+        findings_in_file: file_findings.len(),
+        new_findings,
+        findings_already_present: file_findings.len() - new_findings,
+        current_findings: stored_findings.len(),
         ai_findings_enabled: import.ai_findings_enabled,
+        current_ai_findings_enabled: state.store.findings_enabled().await?,
         position: import.position.as_ref().map(PositionPreviewDto::from),
         preferences: import.preferences.clone(),
         skipped_preferences_notice: reader_data::skipped_preferences_notice(
@@ -431,15 +451,19 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Apply the pending import the reader previewed (`token`), in one
 /// database transaction. `replace` swaps every current bookmark (and, for
-/// a file that can hold them, every highlight and note) for the file's; otherwise
-/// they're merged. `restore_position` also saves the
-/// file's reading position. Display preferences live in the webview and
-/// are applied there, after this succeeds.
+/// a file that can hold them, every highlight, note and AI finding) for the
+/// file's; otherwise they're merged. `restore_position` also saves the
+/// file's reading position. `restore_findings_permission` also sets "Let AI
+/// agents save findings" as the file has it; without it the switch is never
+/// touched, merging or replacing, whatever the file says. Display
+/// preferences live in the webview and are applied there, after this
+/// succeeds.
 pub async fn apply_pending_import(
     state: &AppState,
     token: u64,
     replace: bool,
     restore_position: bool,
+    restore_findings_permission: bool,
 ) -> Result<ImportResultDto, String> {
     // Cloned out so the lock isn't held across the database work.
     let import = match lock(&state.pending_import).as_ref() {
@@ -452,6 +476,11 @@ pub async fn apply_pending_import(
         }
     };
     let position = import.position.as_ref().filter(|_| restore_position);
+    let findings_permission = import
+        .findings
+        .as_ref()
+        .and(import.ai_findings_enabled)
+        .filter(|_| restore_findings_permission);
     let counts = state
         .store
         .apply_import(
@@ -460,7 +489,7 @@ pub async fn apply_pending_import(
             import.notes.as_deref(),
             import.findings.as_deref().map(|findings| FindingsImport {
                 findings,
-                enabled: import.ai_findings_enabled,
+                enabled: findings_permission,
             }),
             replace,
             position,
@@ -492,6 +521,7 @@ pub async fn apply_pending_import(
         findings_added: counts.findings_added,
         findings_already_present: counts.findings_already_present,
         findings_removed: counts.findings_removed,
+        findings_permission,
         position: position.map(PositionPreviewDto::from),
     })
 }
@@ -588,8 +618,16 @@ pub async fn apply_import(
     token: u64,
     replace: bool,
     restore_position: bool,
+    restore_findings_permission: bool,
 ) -> Result<ImportResultDto, String> {
-    apply_pending_import(&state, token, replace, restore_position).await
+    apply_pending_import(
+        &state,
+        token,
+        replace,
+        restore_position,
+        restore_findings_permission,
+    )
+    .await
 }
 
 /// Forget a previewed import the reader cancelled.

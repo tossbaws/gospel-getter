@@ -184,7 +184,10 @@ needed.
   (Width, Layout and compare's translation included) to a JSON file, and
   **My notes** opens the notes export (see **Notes**). **Import data…**
   shows what a file contains before adding
-  it (or, if you choose, replacing your bookmarks, highlights and notes).
+  it (or, if you choose, replacing your bookmarks, highlights, notes and
+  AI findings: the warning names each one it removes). A backup turns
+  **Let AI agents save findings** on or off only if you tick the import's
+  option to, offered when its setting differs from yours.
   Only that personal data is exported, not Bible text or the app's
   database. Files exported by 2.8.0 or newer (data format 3, which adds
   notes) can't be imported by 2.7.0 or older, which say the file is from a

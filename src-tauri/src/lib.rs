@@ -630,7 +630,12 @@ mod ipc_tests {
             invoke(
                 &webview,
                 "apply_import",
-                json!({ "token": cancelled, "replace": false, "restorePosition": true }),
+                json!({
+                    "token": cancelled,
+                    "replace": false,
+                    "restorePosition": true,
+                    "restoreFindingsPermission": false,
+                }),
             )
             .is_err()
         );
@@ -638,10 +643,16 @@ mod ipc_tests {
         let result = invoke(
             &webview,
             "apply_import",
-            json!({ "token": token, "replace": false, "restorePosition": true }),
+            json!({
+                "token": token,
+                "replace": false,
+                "restorePosition": true,
+                "restoreFindingsPermission": false,
+            }),
         )
         .unwrap();
         assert_eq!(result["added"], 1);
+        assert_eq!(result["findingsPermission"], Value::Null);
         assert_eq!(result["position"]["reference"], "Psalms 23 (WEB)");
     }
 }

@@ -50,7 +50,7 @@ use crate::db::notes::normalize_body;
 pub use crate::db::reader_data::{
     NewBookmark, NewHighlight, NewNote, NewPosition, NoteKey, StoredNote, notes_to_add,
 };
-use crate::db::{Book, HighlightColor, NewFinding, Passage, Translation};
+use crate::db::{Book, Finding, HighlightColor, NewFinding, Passage, Translation};
 
 /// The `format` every reader-data file declares.
 pub const FORMAT: &str = "gospel-getter-reader-data";
@@ -638,6 +638,21 @@ pub struct ValidatedImport {
     /// The file's display preferences that were skipped (see
     /// `ReaderData::skipped_preferences`).
     pub skipped_preferences: Vec<String>,
+}
+
+/// How many of a file's `findings` merging would add to the `stored`
+/// ones: each passage and request not saved yet, once. The database keeps
+/// one finding per passage and request (`db::findings`), so the rest are
+/// left as they are.
+pub fn new_findings(findings: &[NewFinding], stored: &[Finding]) -> usize {
+    let mut saved: HashSet<(Passage, &str)> = stored
+        .iter()
+        .map(|f| (f.passage(), f.request.as_str()))
+        .collect();
+    findings
+        .iter()
+        .filter(|f| saved.insert((f.passage, f.request.as_str())))
+        .count()
 }
 
 /// Check one passage in a file (a bookmark's or a note's, labelled

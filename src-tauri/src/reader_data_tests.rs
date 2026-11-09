@@ -88,7 +88,7 @@ async fn preview(state: &AppState, path: &Path) -> commands::ImportPreviewDto {
 
 async fn import(state: &AppState, path: &Path, replace: bool) -> ImportResultDto {
     let p = preview(state, path).await;
-    commands::apply_pending_import(state, p.token, replace, true)
+    commands::apply_pending_import(state, p.token, replace, true, false)
         .await
         .unwrap()
 }
@@ -182,7 +182,7 @@ async fn export_round_trips_into_a_fresh_install() {
     assert_eq!(p.preferences, matrix_prefs());
     assert_eq!(p.position.as_ref().unwrap().reference, "Romans 8 (WEB)");
     assert_eq!(p.sample[0], "John 3:16\u{2013}18");
-    let result = commands::apply_pending_import(&b, p.token, false, true)
+    let result = commands::apply_pending_import(&b, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!(
@@ -223,7 +223,7 @@ async fn merge_deduplicates_keeps_dates_and_reimporting_changes_nothing() {
         ),
         (3, 1, 2, 1)
     );
-    let first = commands::apply_pending_import(&state, p.token, false, true)
+    let first = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!(
@@ -279,7 +279,7 @@ async fn replace_swaps_bookmarks_and_an_earlier_export_undoes_it() {
         p.current_bookmarks, 3,
         "the preview says what replacing removes"
     );
-    let result = commands::apply_pending_import(&state, p.token, true, true)
+    let result = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap();
     assert_eq!((result.added, result.removed), (1, 3));
@@ -310,7 +310,7 @@ async fn restoring_the_position_is_optional() {
     )
     .unwrap();
     let p = preview(&state, &path).await;
-    let result = commands::apply_pending_import(&state, p.token, false, false)
+    let result = commands::apply_pending_import(&state, p.token, false, false, false)
         .await
         .unwrap();
     assert!(result.position.is_none());
@@ -365,7 +365,7 @@ async fn restoring_a_backups_position_forgets_the_verse() {
             .await
             .unwrap();
         let p = preview(&state, &path).await;
-        commands::apply_pending_import(&state, p.token, false, restore)
+        commands::apply_pending_import(&state, p.token, false, restore, false)
             .await
             .unwrap();
         let home = commands::home(&state).await;
@@ -418,7 +418,7 @@ async fn unknown_preferences_are_skipped_and_everything_else_imports() {
             ..Preferences::default()
         }
     );
-    let result = commands::apply_pending_import(&state, p.token, false, true)
+    let result = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!(result.added, 1);
@@ -619,7 +619,7 @@ async fn an_empty_export_imports_cleanly() {
 
     let p = preview(&state, &path).await;
     assert_eq!((p.bookmarks_in_file, p.position.is_none()), (0, true));
-    let result = commands::apply_pending_import(&state, p.token, false, true)
+    let result = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!((result.added, result.removed), (0, 0));
@@ -662,7 +662,7 @@ async fn a_failed_import_rolls_back_completely() {
     .unwrap();
 
     let p = preview(&state, &path).await;
-    let error = commands::apply_pending_import(&state, p.token, true, true)
+    let error = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap_err();
     assert_eq!(error, "The import failed, so nothing was changed.");
@@ -674,7 +674,7 @@ async fn a_failed_import_rolls_back_completely() {
         .execute(pool.write().pool())
         .await
         .unwrap();
-    let retry = commands::apply_pending_import(&state, p.token, true, true)
+    let retry = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap();
     assert_eq!((retry.added, retry.removed), (2, 2));
@@ -768,7 +768,7 @@ async fn only_the_previewed_import_can_be_applied() {
     assert_ne!(first.token, second.token);
     // Choosing another file replaced the first preview.
     assert!(
-        commands::apply_pending_import(&state, first.token, false, true)
+        commands::apply_pending_import(&state, first.token, false, true, false)
             .await
             .unwrap_err()
             .contains("no longer waiting")
@@ -779,7 +779,7 @@ async fn only_the_previewed_import_can_be_applied() {
     // Cancelling discards it.
     commands::discard_pending_import(&state, second.token);
     assert!(
-        commands::apply_pending_import(&state, second.token, false, true)
+        commands::apply_pending_import(&state, second.token, false, true, false)
             .await
             .is_err()
     );
@@ -795,13 +795,13 @@ async fn only_the_previewed_import_can_be_applied() {
     .unwrap();
     let third = preview(&state, &path).await;
     std::fs::write(&path, "garbage").unwrap();
-    let result = commands::apply_pending_import(&state, third.token, false, true)
+    let result = commands::apply_pending_import(&state, third.token, false, true, false)
         .await
         .unwrap();
     assert_eq!(result.added, 1);
     // Applied once; the same token can't be applied twice.
     assert!(
-        commands::apply_pending_import(&state, third.token, false, true)
+        commands::apply_pending_import(&state, third.token, false, true, false)
             .await
             .is_err()
     );
@@ -1030,7 +1030,7 @@ async fn highlights_round_trip_in_a_format_2_export() {
         ),
         (5, 5, 0, 0)
     );
-    let result = commands::apply_pending_import(&b, p.token, false, true)
+    let result = commands::apply_pending_import(&b, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!(
@@ -1074,7 +1074,7 @@ async fn merging_highlights_keeps_the_readers_colors_and_reimporting_changes_not
         ),
         (3, 1, 2, 1, 1)
     );
-    let first = commands::apply_pending_import(&state, p.token, false, true)
+    let first = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!(
@@ -1136,7 +1136,7 @@ async fn replace_swaps_highlights_for_format_2_but_format_1_leaves_them_alone() 
     let p = preview(&state, &v1).await;
     assert!(!p.has_highlights);
     assert_eq!((p.highlights_in_file, p.new_highlights), (0, 0));
-    let result = commands::apply_pending_import(&state, p.token, true, true)
+    let result = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap();
     assert_eq!(
@@ -1160,7 +1160,7 @@ async fn replace_swaps_highlights_for_format_2_but_format_1_leaves_them_alone() 
         p.current_highlights, 3,
         "the preview says what replacing removes"
     );
-    let result = commands::apply_pending_import(&state, p.token, true, true)
+    let result = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap();
     assert_eq!((result.highlights_added, result.highlights_removed), (1, 3));
@@ -1302,7 +1302,7 @@ async fn a_failed_highlight_import_rolls_back_bookmarks_too() {
     .unwrap();
 
     let p = preview(&state, &path).await;
-    let error = commands::apply_pending_import(&state, p.token, true, true)
+    let error = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap_err();
     assert_eq!(error, "The import failed, so nothing was changed.");
@@ -1447,7 +1447,7 @@ async fn notes_round_trip_in_a_format_3_export() {
         // the reader's.
         (4, 0, 4, 0, 0)
     );
-    let result = commands::apply_pending_import(&b, p.token, false, true)
+    let result = commands::apply_pending_import(&b, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!(
@@ -1497,7 +1497,7 @@ async fn merging_notes_skips_ones_already_here_and_reimporting_changes_nothing()
         ),
         (4, 1, 3, 1, 1)
     );
-    let first = commands::apply_pending_import(&state, p.token, false, true)
+    let first = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!(
@@ -1572,7 +1572,7 @@ async fn notes_with_the_same_text_on_one_passage_all_restore() {
         ),
         (4, 0, 4, 0, 0)
     );
-    let result = commands::apply_pending_import(&b, p.token, false, true)
+    let result = commands::apply_pending_import(&b, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!((result.notes_added, result.notes_already_present), (4, 0));
@@ -1590,7 +1590,7 @@ async fn notes_with_the_same_text_on_one_passage_all_restore() {
         ),
         (4, 0, 0, 4, 4)
     );
-    let result = commands::apply_pending_import(&a, p.token, true, true)
+    let result = commands::apply_pending_import(&a, p.token, true, true, false)
         .await
         .unwrap();
     assert_eq!((result.notes_added, result.notes_removed), (4, 4));
@@ -1642,7 +1642,7 @@ async fn merging_adds_the_copies_not_here_yet_and_merging_again_adds_nothing() {
         // October 2 and the second "Same instant." are new.
         (4, 0, 2, 2, 4)
     );
-    let first = commands::apply_pending_import(&b, p.token, false, true)
+    let first = commands::apply_pending_import(&b, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!((first.notes_added, first.notes_already_present), (2, 2));
@@ -1670,7 +1670,7 @@ async fn merging_adds_the_copies_not_here_yet_and_merging_again_adds_nothing() {
         (p.new_notes, p.notes_already_present, p.current_notes),
         (0, 4, 6)
     );
-    let again = commands::apply_pending_import(&b, p.token, false, true)
+    let again = commands::apply_pending_import(&b, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!((again.notes_added, again.notes_already_present), (0, 4));
@@ -1709,7 +1709,7 @@ async fn notes_without_dates_match_by_passage_and_text_as_before() {
         // "Undated." the dated one; "Here already." is.
         (3, 2, 2, 1, 1)
     );
-    let first = commands::apply_pending_import(&state, p.token, false, true)
+    let first = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!((first.notes_added, first.notes_already_present), (2, 1));
@@ -1768,7 +1768,7 @@ async fn replace_swaps_notes_for_format_3_but_formats_1_and_2_leave_them_alone()
         let p = preview(&state, path).await;
         assert!(!p.has_notes);
         assert_eq!((p.notes_in_file, p.new_notes, p.current_notes), (0, 0, 2));
-        let result = commands::apply_pending_import(&state, p.token, true, true)
+        let result = commands::apply_pending_import(&state, p.token, true, true, false)
             .await
             .unwrap();
         assert_eq!(
@@ -1803,7 +1803,7 @@ async fn replace_swaps_notes_for_format_3_but_formats_1_and_2_leave_them_alone()
         p.current_notes, 2,
         "the preview says what replacing removes"
     );
-    let result = commands::apply_pending_import(&state, p.token, true, true)
+    let result = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap();
     assert_eq!((result.notes_added, result.notes_removed), (1, 2));
@@ -1970,7 +1970,7 @@ async fn a_failed_note_import_rolls_back_everything() {
     .unwrap();
 
     let p = preview(&state, &path).await;
-    let error = commands::apply_pending_import(&state, p.token, true, true)
+    let error = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap_err();
     assert_eq!(error, "The import failed, so nothing was changed.");
@@ -2011,7 +2011,7 @@ async fn an_import_that_would_pass_a_note_limit_changes_nothing() {
     )
     .unwrap();
     let p = preview(&state, &path).await;
-    let error = commands::apply_pending_import(&state, p.token, false, true)
+    let error = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap_err();
     assert_eq!(
@@ -2050,7 +2050,7 @@ async fn an_import_that_would_pass_a_note_limit_changes_nothing() {
     )
     .unwrap();
     let p = preview(&state, &path).await;
-    let error = commands::apply_pending_import(&state, p.token, false, true)
+    let error = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap_err();
     assert_eq!(
@@ -2124,7 +2124,7 @@ async fn an_export_at_both_note_limits_imports_again() {
     let (_db_b, b) = app("rd_notes_limits_import").await;
     let p = preview(&b, &path).await;
     assert_eq!((p.notes_in_file, p.new_notes), (MAX_NOTES, MAX_NOTES));
-    let result = commands::apply_pending_import(&b, p.token, true, true)
+    let result = commands::apply_pending_import(&b, p.token, true, true, false)
         .await
         .unwrap();
     assert_eq!(result.notes_added, MAX_NOTES);
@@ -2277,7 +2277,7 @@ async fn an_export_of_more_than_10000_bookmarks_imports_again() {
         (p.bookmarks_in_file, p.new_bookmarks, p.duplicates_in_file),
         (10_001, 10_001, 0)
     );
-    let result = commands::apply_pending_import(&b, p.token, false, true)
+    let result = commands::apply_pending_import(&b, p.token, false, true, false)
         .await
         .unwrap();
     assert_eq!((result.added, result.already_present), (10_001, 0));
@@ -2460,17 +2460,36 @@ async fn findings_and_the_switch_round_trip_and_older_files_leave_them_alone() {
     let (_db_b, b) = app("rd_findings_b").await;
     let p = preview(&b, &path).await;
     assert!(p.has_findings);
-    assert_eq!((p.findings_in_file, p.current_findings), (3, 0));
-    assert_eq!(p.ai_findings_enabled, Some(true));
-    let done = import(&b, &path, false).await;
+    assert_eq!(
+        (
+            p.findings_in_file,
+            p.new_findings,
+            p.findings_already_present,
+            p.current_findings
+        ),
+        (3, 3, 0, 0)
+    );
+    assert_eq!(
+        (p.ai_findings_enabled, p.current_ai_findings_enabled),
+        (Some(true), false)
+    );
+    // The reader asks for the file's switch too.
+    let done = commands::apply_pending_import(&b, p.token, false, true, true)
+        .await
+        .unwrap();
     assert_eq!((done.findings_added, done.findings_already_present), (3, 0));
+    assert_eq!(done.findings_permission, Some(true));
     assert_eq!(finding_rows(&b).await, finding_rows(&a).await, "dates kept");
     assert!(commands::findings_switch(&b).await.unwrap());
+    let p = preview(&b, &path).await;
+    assert_eq!((p.new_findings, p.findings_already_present), (0, 3));
+    assert!(p.current_ai_findings_enabled);
     let again = import(&b, &path, false).await;
     assert_eq!(
         (again.findings_added, again.findings_already_present),
         (0, 3)
     );
+    assert_eq!(again.findings_permission, None, "not asked: left alone");
 
     // A format 3 file, even replacing, leaves the findings and the switch.
     let v3 = file(&db, "v3.gospel-getter.json");
@@ -2515,9 +2534,11 @@ async fn a_backup_made_with_saving_off_turns_it_off_again() {
     commands::set_findings_switch(&state, true).await.unwrap();
     let p = preview(&state, &path).await;
     assert_eq!(p.ai_findings_enabled, Some(false));
-    commands::apply_pending_import(&state, p.token, false, true)
+    // Restored with the reader's tick to set the switch as the file has it.
+    let restored = commands::apply_pending_import(&state, p.token, false, true, true)
         .await
         .unwrap();
+    assert_eq!(restored.findings_permission, Some(false));
     assert!(!commands::findings_switch(&state).await.unwrap());
     let writer = crate::db::FindingsWriter::open(&db.path()).await.unwrap();
     let refused = writer.add("Claude", "tears", &[john_11_35()]).await;
@@ -2540,20 +2561,116 @@ async fn a_format_4_file_without_the_switch_leaves_it_as_it_is() {
     for on in [true, false] {
         commands::set_findings_switch(&state, on).await.unwrap();
         for replace in [false, true] {
+            for asked in [false, true] {
+                let p = preview(&state, &path).await;
+                assert!(p.has_findings);
+                assert_eq!(p.ai_findings_enabled, None);
+                let done = commands::apply_pending_import(&state, p.token, replace, true, asked)
+                    .await
+                    .unwrap();
+                assert_eq!(done.findings_permission, None);
+                assert_eq!(
+                    commands::findings_switch(&state).await.unwrap(),
+                    on,
+                    "on {on}, replace {replace}, asked {asked}"
+                );
+                assert_eq!(finding_rows(&state).await.len(), 1);
+            }
+        }
+    }
+}
+
+/// GG-02: a file's switch is set only when the reader asks
+/// (`restore_findings_permission`), merging or replacing, either way; asked,
+/// the result says what it set.
+#[tokio::test]
+async fn the_files_switch_is_set_only_when_the_reader_asks() {
+    let (db, state) = app("rd_findings_ask").await;
+    let with_switch = |on: bool| {
+        let path = file(&db, &format!("switch-{on}.gospel-getter.json"));
+        let contents = v4_file_with_findings(1).replace(
+            "\"findings\":",
+            &format!("\"ai_findings_enabled\": {on}, \"findings\":"),
+        );
+        std::fs::write(&path, contents).unwrap();
+        path
+    };
+    for on in [true, false] {
+        let path = with_switch(on);
+        for replace in [false, true] {
+            commands::set_findings_switch(&state, !on).await.unwrap();
             let p = preview(&state, &path).await;
-            assert!(p.has_findings);
-            assert_eq!(p.ai_findings_enabled, None);
-            commands::apply_pending_import(&state, p.token, replace, true)
+            assert_eq!(
+                (p.ai_findings_enabled, p.current_ai_findings_enabled),
+                (Some(on), !on)
+            );
+            let left = commands::apply_pending_import(&state, p.token, replace, true, false)
                 .await
                 .unwrap();
+            assert_eq!(left.findings_permission, None);
+            assert_eq!(
+                commands::findings_switch(&state).await.unwrap(),
+                !on,
+                "not asked: file {on}, replace {replace}"
+            );
+            let p = preview(&state, &path).await;
+            let set = commands::apply_pending_import(&state, p.token, replace, true, true)
+                .await
+                .unwrap();
+            assert_eq!(set.findings_permission, Some(on));
             assert_eq!(
                 commands::findings_switch(&state).await.unwrap(),
                 on,
-                "on {on}, replace {replace}"
+                "asked: file {on}, replace {replace}"
             );
-            assert_eq!(finding_rows(&state).await.len(), 1);
         }
     }
+
+    // A format 3 file has no switch to set, asked or not.
+    commands::set_findings_switch(&state, true).await.unwrap();
+    let v3 = file(&db, "v3-switch.gospel-getter.json");
+    std::fs::write(&v3, v3_file_with("")).unwrap();
+    let p = preview(&state, &v3).await;
+    assert_eq!(p.ai_findings_enabled, None);
+    let done = commands::apply_pending_import(&state, p.token, true, true, true)
+        .await
+        .unwrap();
+    assert_eq!(done.findings_permission, None);
+    assert!(commands::findings_switch(&state).await.unwrap());
+}
+
+/// The preview counts the file's findings as merging would add them: one
+/// already here, or repeated in the file, is left as it is.
+#[tokio::test]
+async fn the_preview_counts_the_findings_merging_adds() {
+    let (db, state) = app("rd_findings_count").await;
+    add_finding(&state, 11, 35, "f000001").await;
+    let path = file(&db, "repeats.gospel-getter.json");
+    // f000001 (here already), f000002 twice, f000003.
+    let contents = v4_file_with_findings(3).replace(
+        "\"request\": \"f000003\"}",
+        "\"request\": \"f000003\"}, {\"book\": 43, \"chapter\": 11, \"verse_start\": 35, \
+         \"verse_end\": 35, \"agent\": \"Claude\", \"request\": \"f000002\"}",
+    );
+    std::fs::write(&path, contents).unwrap();
+    let p = preview(&state, &path).await;
+    assert_eq!(
+        (
+            p.findings_in_file,
+            p.new_findings,
+            p.findings_already_present,
+            p.current_findings
+        ),
+        (4, 2, 2, 1)
+    );
+    let done = commands::apply_pending_import(&state, p.token, false, true, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        (done.findings_added, done.findings_already_present),
+        (p.new_findings, p.findings_already_present),
+        "as previewed"
+    );
 }
 
 #[tokio::test]
@@ -2673,7 +2790,7 @@ async fn an_import_past_the_findings_limit_changes_nothing() {
     std::fs::write(&three, v4_file_with_findings(3)).unwrap();
     let p = preview(&state, &three).await;
     assert_eq!(p.findings_in_file, 3);
-    let error = commands::apply_pending_import(&state, p.token, false, true)
+    let error = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap_err();
     assert_eq!(

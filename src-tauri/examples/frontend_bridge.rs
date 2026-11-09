@@ -420,6 +420,7 @@ async fn dispatch(
             arg(args, "token")?,
             arg(args, "replace")?,
             arg(args, "restorePosition")?,
+            arg(args, "restoreFindingsPermission")?,
         )
         .await
         {
