@@ -8,7 +8,12 @@
 //! backs out a step; Ctrl+C and Ctrl+Shift+C copy; N writes a note; `/` and
 //! Ctrl+K search; `?` the shortcuts; Ctrl+B, G, T and C the Library, the
 //! picker, the translations and Compare. Which key does what, and the
-//! selection's steps, are `keyboard_text`'s, tested on the host.
+//! selection's steps, are `keyboard_text`'s, tested on the host. With Aa's
+//! "Single-key shortcuts" off (`preferences::SINGLE_KEY_SHORTCUTS`), the
+//! keys that are a character pressed on its own (G, T, C, N, j and k, `[`
+//! and `]`, `/` and `?`) are left alone, unprevented, as if unheard; those
+//! with Ctrl, Cmd or Alt, the arrows and Escape still work. The sheet (☰ →
+//! Keyboard shortcuts) and the palette (Ctrl+K) are reached either way.
 //!
 //! This is the main script's keyboard dispatcher (`ui/index.html` at
 //! 2a9d85c: its `keydown` listener, `turnChapter`, `stepBook`,
@@ -30,6 +35,8 @@ use crate::card_text::Slot;
 use crate::dom;
 use crate::keyboard_text::{self as text, Press, Rect, Route, Selected};
 use crate::page;
+use crate::preferences;
+use crate::prefs;
 use crate::reader::{self, Load, Request};
 use crate::reader_text::Which;
 use crate::surfaces::{self, Surface};
@@ -225,7 +232,8 @@ fn on_keydown(event: &KeyboardEvent) {
         alt: event.alt_key(),
         shift: event.shift_key(),
     };
-    let Some(route) = text::route(&press) else {
+    let single_keys = prefs::on(&preferences::SINGLE_KEY_SHORTCUTS);
+    let Some(route) = text::route_for(&press, single_keys) else {
         return;
     };
     if text::always_prevented(route) {

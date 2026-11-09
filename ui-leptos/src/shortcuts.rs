@@ -1,6 +1,8 @@
 //! The keyboard shortcuts sheet (`?`, ☰ → Keyboard shortcuts, or the
 //! palette's command): the one table of shortcuts (`shortcut_table`), in
-//! its groups, each row its key caps and what it does.
+//! its groups, each row its key caps and what it does. With Aa's
+//! "Single-key shortcuts" off, it says so first, and how to turn them back
+//! on (☰ and the palette, Ctrl+K, open it then).
 //!
 //! A modal, as the page's others: while open it has the keyboard (a
 //! capturing `keydown` on `window`, stopping every other handler), Escape
@@ -19,12 +21,16 @@ use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge;
 use crate::dom::{self, focus};
+use crate::preferences;
+use crate::prefs;
 use crate::shortcut_table::{self, Shortcut};
 
 /// The sheet's state and the elements it reaches for.
 #[derive(Clone, Copy)]
 struct Sheet {
     open: RwSignal<bool>,
+    /// Whether single-key shortcuts were on as it opened.
+    single_keys: RwSignal<bool>,
     /// Where focus goes back to on closing.
     return_to: StoredValue<Option<HtmlElement>, LocalStorage>,
     overlay: NodeRef<html::Div>,
@@ -38,6 +44,8 @@ impl Sheet {
             return;
         }
         self.return_to.set_value(return_to);
+        self.single_keys
+            .set(prefs::on(&preferences::SINGLE_KEY_SHORTCUTS));
         self.open.set(true);
         spawn_local(async move {
             tick().await;
@@ -177,6 +185,7 @@ fn row_view(row: &'static Shortcut) -> impl IntoView {
 pub fn Shortcuts() -> impl IntoView {
     let sheet = Sheet {
         open: RwSignal::new(false),
+        single_keys: RwSignal::new(true),
         return_to: StoredValue::new_local(None),
         overlay: NodeRef::new(),
         close_button: NodeRef::new(),
@@ -244,6 +253,9 @@ pub fn Shortcuts() -> impl IntoView {
                     aria-labelledby="shortcuts-title"
                     node_ref=sheet.body
                 >
+                    <p id="shortcuts-off" class="shortcuts-off" hidden=move || sheet.single_keys.get()>
+                        {shortcut_table::SINGLE_KEYS_OFF}
+                    </p>
                     {groups}
                 </div>
             </div>

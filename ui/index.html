@@ -1847,6 +1847,17 @@
             margin-top: 1rem;
         }
 
+        /* Single-key shortcuts off (Aa): said first, in the text's own
+           color, ruled off from the groups below. */
+        .shortcuts-off {
+            font-size: 0.85rem;
+            line-height: 1.45;
+            color: var(--text);
+            margin: 0 0 1rem;
+            padding-bottom: 0.8rem;
+            border-bottom: 1px solid var(--accent-dim);
+        }
+
         .shortcut-group-title {
             font-size: 0.75rem;
             font-weight: bold;
@@ -5006,6 +5017,7 @@
                 ['gospel-getter-update-check', 'updateCheck', 'on', ['on', 'off'], {}],
                 ['gospel-getter-margin-notes', 'marginNotes', 'on', ['on', 'off'], {}],
                 ['gospel-getter-compare-notes', 'compareNotes', 'off', ['off', 'on'], {}],
+                ['gospel-getter-single-key-shortcuts', 'singleKeyShortcuts', 'on', ['on', 'off'], {}],
             ];
             SAVED.forEach(function (pref) {
                 var value = null;
@@ -5134,6 +5146,11 @@
                     <div class="aa-section">
                         <button type="button" id="reader-mode-btn" class="reader-mode-btn" aria-pressed="false">Reading mode</button>
                         <button type="button" id="margin-notes-btn" class="reader-mode-btn margin-notes-btn" aria-pressed="true" title="Your notes beside the text, in reading mode">Notes in the margin</button>
+                    </div>
+                    <div class="aa-section keyboard-section">
+                        <span class="section-label" id="keyboard-label">Keyboard</span>
+                        <label class="update-check-option single-keys-option"><input type="checkbox" id="single-keys-toggle" role="switch" aria-describedby="single-keys-note" checked> Single-key shortcuts</label>
+                        <p id="single-keys-note" class="section-note">Keys such as G, / and ? work pressed on their own. Turn this off if they get in the way of speech input or a screen reader: shortcuts with Ctrl, such as Ctrl+K, and the arrow keys still work.</p>
                     </div>
                     <div class="aa-section ai-agents-section">
                         <span class="section-label" id="ai-agents-label">AI agents</span>

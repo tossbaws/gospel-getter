@@ -279,6 +279,15 @@ The main ones:
 | Esc | Close search or the open panel or popover, then clear the selection, then leave reading mode |
 | `?` | All the keyboard shortcuts |
 
+The keys that work pressed on their own (`G`, `T`, `C`, `N`, `j`, `k`,
+`[`, `]`, `/` and `?`) can get in the way of speech input or a screen
+reader. **Single-key shortcuts** under **Aa** turns them off: those keys
+then do nothing, and the shortcuts with Ctrl or Alt, the arrow keys and Esc
+still work. With them off, Ctrl+K opens the search box and the command
+palette, and **Keyboard shortcuts** in the ☰ menu (or in the palette) lists
+every key, saying they're off. The switch is kept on this computer, not in
+backups.
+
 ## Installing
 
 **Download** an installer from the

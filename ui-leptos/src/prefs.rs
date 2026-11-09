@@ -181,12 +181,17 @@ mod tests {
             checked("reading_mode", &Raw::Other("1".into())).unwrap_err(),
             "“1” isn’t a valid reading mode."
         );
-        // The sidebar and the launch check are this computer's, not a
-        // file's.
+        // The sidebar, the launch check and the single-key shortcuts are
+        // this computer's, not a file's.
         assert_eq!(
             checked("sidebar", &text("open")).unwrap_err(),
             "Unknown display setting “sidebar”."
         );
+        assert_eq!(
+            checked("single_key_shortcuts", &Raw::Bool(false)).unwrap_err(),
+            "Unknown display setting “single_key_shortcuts”."
+        );
+        assert_eq!(preferences::SINGLE_KEY_SHORTCUTS.file_name, None);
         assert_eq!(
             checked("font", &text("serif")).unwrap_err(),
             "Unknown display setting “font”."
@@ -194,8 +199,8 @@ mod tests {
     }
 
     /// The table as the page's script had it (ten settings), then the
-    /// margin notes' switch: their keys, defaults and values, and the
-    /// renamed theme.
+    /// margin notes' switch, Compare's notes and the single-key shortcuts:
+    /// their keys, defaults and values, and the renamed theme.
     #[test]
     fn the_table_is_the_page_s() {
         let rows: Vec<(&str, &str, &str, Vec<&str>)> = PREFERENCES
@@ -276,6 +281,12 @@ mod tests {
                     "gospel-getter-compare-notes",
                     "off",
                     vec!["off", "on"]
+                ),
+                (
+                    "singleKeyShortcuts",
+                    "gospel-getter-single-key-shortcuts",
+                    "on",
+                    vec!["on", "off"]
                 ),
             ]
         );
