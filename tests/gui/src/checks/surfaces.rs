@@ -4,8 +4,10 @@
 //! then the Library (Aa closes), then the translations (the Library
 //! closes) (30). Escape closes in order: an open popover first, focus back
 //! on its button, then reading mode (31). A click outside a popover closes
-//! it; the Library stays (32). The ☰ menu by keyboard: ↓ on ☰ opens it on
-//! its first item, the arrows, Home and End move, Enter runs Keyboard
+//! it; the Library stays (32): a pointer click on the chapter's last verse,
+//! at a point the open surface leaves uncovered (a tall popover in a short
+//! window covers the verse's middle). The ☰ menu by keyboard: ↓ on ☰
+//! opens it on its first item, the arrows, Home and End move, Enter runs Keyboard
 //! shortcuts, Tab closes it (33). About keeps Tab inside it, and Escape
 //! gives focus back to ☰ (34; Shift+Tab's wrap where the page is told it's
 //! a Tab: WebKitGTK gives it as an "Unidentified" key). G and the sidebar's button (35, on a
@@ -214,6 +216,78 @@ const SURFACES_JS: &str = "const ids = { translation: 'translation-popover', aa:
         sheet: !!document.getElementById('shortcuts-overlay') && !document.getElementById('shortcuts-overlay').hidden,
         focus: describe(document.activeElement) };";
 
+/// Brings the verse `arguments[0]` (a selector) to the middle of the
+/// window, as far as the page lets it, and watches for the next click:
+/// whether it reaches that verse, and where. [`POINT_JS`] and
+/// [`CLICKED_JS`] read what it notes. Prepended with [`DESCRIBE_JS`].
+const AIM_JS: &str = "const verse = document.querySelector(arguments[0]);
+    if (!verse) return false;
+    verse.scrollIntoView({ block: 'center' });
+    if (!window.__guiCheckAim) {
+        const aim = { want: null, point: null, clicked: null };
+        window.__guiCheckAim = aim;
+        // Capturing at the window: before the page's own listeners.
+        window.addEventListener('click', (e) => {
+            if (aim.clicked || !aim.want) return;
+            const target = e.target instanceof Element ? e.target : null;
+            aim.clicked = { onVerse: !!target && !!target.closest(aim.want), target: describe(target),
+                at: [e.clientX, e.clientY], trusted: e.isTrusted };
+        }, true);
+    }
+    Object.assign(window.__guiCheckAim, { want: arguments[0], point: null, clicked: null });
+    return true;";
+
+/// A point on the verse `arguments[0]` (a selector, aimed at by
+/// [`AIM_JS`]) that the open surface `arguments[1]` (its element's id)
+/// leaves uncovered: on the verse's visible middle line if it can be, else
+/// higher or lower, in the middle of the widest stretch of the line the
+/// surface leaves (clear of its edges by 8 px), and only where the page
+/// itself would give a click to the verse (`elementFromPoint`, as
+/// WebDriver's element click checks). Ready once the same point is found on
+/// the same boxes twice running, so the page has come to rest. Prepended
+/// with [`DESCRIBE_JS`].
+const POINT_JS: &str = "const verse = document.querySelector(arguments[0]);
+    const surface = document.getElementById(arguments[1]);
+    const aim = window.__guiCheckAim;
+    if (!verse || !surface || !aim) return [false, { verse: !!verse, surface: !!surface, aim: !!aim }];
+    const box = (r) => [r.left, r.top, r.right, r.bottom].map(Math.round);
+    const v = verse.getBoundingClientRect();
+    const s = surface.getBoundingClientRect();
+    const width = document.documentElement.clientWidth;
+    const height = document.documentElement.clientHeight;
+    const seen = { verse: box(v), surface: box(s), window: [width, height], point: null, missed: [] };
+    const gap = 8;
+    const top = Math.max(v.top, 0);
+    const bottom = Math.min(v.bottom, height);
+    const left = Math.max(v.left, 0);
+    const right = Math.min(v.right, width);
+    for (const share of bottom - top >= 1 ? [0.5, 0.3, 0.7, 0.15, 0.85] : []) {
+        const y = Math.floor(top + (bottom - top) * share);
+        const across = y > s.top - gap && y < s.bottom + gap;
+        const spans = (across ? [[left, s.left - gap], [s.right + gap, right]] : [[left, right]])
+            .filter(([a, b]) => b - a >= 1)
+            .sort((p, q) => (q[1] - q[0]) - (p[1] - p[0]));
+        for (const [a, b] of spans) {
+            const x = Math.floor((a + b) / 2);
+            const hit = document.elementFromPoint(x, y);
+            if (hit && verse.contains(hit)) {
+                seen.point = [x, y];
+                break;
+            }
+            seen.missed.push([x, y, describe(hit)]);
+        }
+        if (seen.point) break;
+    }
+    const key = JSON.stringify([seen.point, seen.verse, seen.surface]);
+    const still = !!seen.point && aim.point === key;
+    aim.point = key;
+    return [still, seen];";
+
+/// The click [`AIM_JS`] watched for, once the page has had it.
+const CLICKED_JS: &str = "const aim = window.__guiCheckAim;
+    const clicked = aim ? aim.clicked : null;
+    return [!!clicked, clicked];";
+
 impl Run<'_> {
     /// Waits until `ready` (a JavaScript expression over `seen`, as
     /// [`SURFACES_JS`] sees it) is true, and returns what it saw.
@@ -249,8 +323,7 @@ impl Run<'_> {
         Ok(())
     }
 
-    /// The selector of the chapter's last verse: far enough down the page
-    /// that no popover covers it once it's scrolled into view.
+    /// The selector of the chapter's last verse.
     async fn last_verse(&self) -> Result<String> {
         let n = self
             .ui
@@ -264,6 +337,52 @@ impl Run<'_> {
             anyhow::bail!("no verses on the page");
         };
         Ok(format!(".chapter-main .verse[data-verse=\"{n}\"]"))
+    }
+
+    /// Clicks the chapter's last verse with the pointer, at a point the
+    /// open surface `surface` (its element's id) leaves uncovered, as a
+    /// reader clicks the page beside it; then checks the click reached the
+    /// verse. WebDriver's element click aims at the verse's middle, which a
+    /// tall popover covers in a short window (Aa, once it had its Keyboard
+    /// section, in Windows' 749 px high webview: dist run 42567866573), so
+    /// the point is found first ([`POINT_JS`]). Returns it.
+    async fn click_last_verse_outside(&self, what: &str, surface: &str) -> Result<(i64, i64)> {
+        let verse = self.last_verse().await?;
+        let ui = &self.ui;
+        let aimed = ui
+            .js(&format!("{DESCRIBE_JS} {AIM_JS}"), vec![json!(verse)])
+            .await?;
+        ensure!(aimed == Value::Bool(true), "no element {verse}");
+        let seen = ui
+            .wait_with(
+                &format!("a point on the chapter's last verse that {what} leaves uncovered"),
+                &format!("{DESCRIBE_JS} {POINT_JS}"),
+                vec![json!(verse), json!(surface)],
+            )
+            .await?;
+        let (Some(x), Some(y)) = (seen["point"][0].as_i64(), seen["point"][1].as_i64()) else {
+            bail!("no point on the chapter's last verse: {seen}");
+        };
+        ui.step(
+            &format!("click the chapter's last verse at ({x}, {y}), outside {what}"),
+            async {
+                ui.driver()
+                    .action_chain()
+                    .move_to(x, y)
+                    .click()
+                    .perform()
+                    .await?;
+                Ok(())
+            },
+        )
+        .await?;
+        let clicked = ui.wait("the click to reach the page", CLICKED_JS).await?;
+        ensure!(
+            clicked["onVerse"] == Value::Bool(true),
+            "the click at ({x}, {y}) reached {} rather than the chapter's last verse: {clicked}",
+            clicked["target"]
+        );
+        Ok((x, y))
     }
 
     /// Check 30: one panel at a time.
@@ -387,10 +506,15 @@ impl Run<'_> {
     pub(super) async fn outside_click(&mut self) -> Result<String> {
         self.nothing_open().await?;
         let mut said = Vec::new();
-        for (button, name, what) in [
-            ("#translation-toggle", "translation", "the translations"),
-            ("#aa-toggle", "aa", "Aa"),
-            ("#menu-toggle", "menu", "the ☰ menu"),
+        for (button, name, what, surface) in [
+            (
+                "#translation-toggle",
+                "translation",
+                "the translations",
+                "translation-popover",
+            ),
+            ("#aa-toggle", "aa", "Aa", "aa-popover"),
+            ("#menu-toggle", "menu", "the ☰ menu", "app-menu"),
         ] {
             self.ui.click(&format!("open {what}"), button).await?;
             self.surfaces_are(
@@ -398,13 +522,10 @@ impl Run<'_> {
                 &format!("seen.current === '{name}'"),
             )
             .await?;
-            let verse = self.last_verse().await?;
             self.ui
-                .click(
-                    &format!("click the chapter's last verse (outside {what}, below it)"),
-                    &verse,
-                )
+                .settled(&format!("{what} to finish opening"))
                 .await?;
+            let (x, y) = self.click_last_verse_outside(what, surface).await?;
             let seen = self
                 .surfaces_are(
                     &format!("{what} to close"),
@@ -412,7 +533,7 @@ impl Run<'_> {
                 )
                 .await?;
             said.push(format!(
-                "{what} closed (focus {})",
+                "{what} closed (clicked at ({x}, {y}), focus {})",
                 seen["focus"].as_str().unwrap_or("?")
             ));
             // The click selected the verse too: Escape clears it.
@@ -422,12 +543,8 @@ impl Run<'_> {
         self.surfaces_are("the Library to open", "seen.current === 'library'")
             .await?;
         self.ui.settled("the Library to slide in").await?;
-        let verse = self.last_verse().await?;
-        self.ui
-            .click(
-                "click the chapter's last verse (outside the Library)",
-                &verse,
-            )
+        let (x, y) = self
+            .click_last_verse_outside("the Library", "library-panel")
             .await?;
         let stays = self
             .surfaces_are(
@@ -444,7 +561,8 @@ impl Run<'_> {
             .await?;
         self.plain_reading().await?;
         Ok(format!(
-            "a click on the chapter's last verse: {}; the Library stayed ({:?}); its ×: closed, focus on {}",
+            "a click on the chapter's last verse, outside the open surface: {}; the Library stayed ({:?}, \
+             clicked at ({x}, {y})); its ×: closed, focus on {}",
             said.join(", "),
             stays["open"],
             closed["focus"].as_str().unwrap_or("?")
