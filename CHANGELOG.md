@@ -4,6 +4,61 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.28.0] - 2026-11-09
+
+A switch for the keys that work pressed on their own, imports that name
+everything they change, and fixes for slow answers that undid what you'd
+done since. Updating keeps your bookmarks, highlights, notes, findings,
+reading position and settings.
+
+### Added
+- Single-key shortcuts can be turned off: choose **Aa**, then under
+  **Keyboard** turn off **Single-key shortcuts** (it's on by default).
+  The keys that work pressed on their own (`G`, `T`, `C`, `N`, `j`, `k`,
+  `[`, `]`, `/` and `?`) then do nothing, so they can't get in the way of
+  speech input or a screen reader. The shortcuts with Ctrl or Alt, the
+  arrow keys and Esc still work, and Ctrl+K still opens the search box and
+  the command palette. **Keyboard shortcuts**, in the ☰ menu or the
+  palette, says when they're off. The switch is kept on this computer, not
+  in backups.
+
+### Fixed
+- Import names AI findings. The preview says how many AI findings the
+  file has and how many are new. **Replace**, its warning and the Import
+  button name the AI findings replacing would delete, and afterwards the
+  message says what happened to them. A file holding only AI findings now
+  offers **Replace** too.
+- A backup no longer turns **Let AI agents save findings** on or off by
+  itself. When the file's setting differs from yours, the import offers a
+  tick to set it as in the file: unticked when it would turn saving on,
+  ticked when it would turn it off. Without the tick the switch stays as it
+  is, adding or replacing.
+- Once you press **Import** it can't be cancelled midway: Cancel, Escape
+  and the dialog's choices wait for it, and then it says what it did. It no
+  longer says "Nothing was changed" for an import that went through. If
+  the import fails, the choices come back, to try again or cancel.
+- A backup that holds AI findings now records **Let AI agents save
+  findings** whether it's on or off, so restoring one made with it off
+  turns it off again. A backup without findings, made with the setting
+  off, is still format 3, as before.
+- A note's **Edit** in the Library no longer opens the note over another
+  note you opened while it was on its way. An open note with text you
+  haven't saved is never replaced by another: the app says you're still
+  writing, and your text stays.
+- Enter in the search box runs only what you pressed it on. Pressing
+  Enter straight after typing and then Escape no longer goes to the
+  passage when the search answers, and nor does typing on, switching
+  translation or closing the box.
+- Switching Compare's translation while the first comparison is still
+  loading no longer drops the page back to one column.
+- Aa's **Let AI agents save findings** switch shows the setting as last
+  saved: a slow read from opening Aa, or an older save that failed, no
+  longer flips it back.
+- Removing a bookmark or highlight in the Library no longer pulls focus
+  away from a note or the search box you've opened since.
+- Backups keep the same data formats: 3, or 4 with AI findings or the
+  switch on, restored by the same versions as before.
+
 ## [2.27.0] - 2026-11-08
 
 One place to export, in the ☰ menu, and a limit on AI findings. Updating
