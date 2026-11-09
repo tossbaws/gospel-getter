@@ -357,3 +357,94 @@ test('GG-09: Enter, then a navigation: the late answer runs nothing', () =>
         assert.equal(app.heading(), 'John 3');
         assert.ok(!wentTo(app, ROMANS), 'nothing navigated');
     }));
+
+// ---- GG-10: Compare's own fetch, apart from a chapter's load.
+
+const KJV_WEB = ['King James Version (KJV)', 'World English Bible (WEB)'];
+const KJV_BSB = ['King James Version (KJV)', 'Berean Standard Bible (BSB)'];
+const COMPARE_FAILED = /couldn’t be compared|couldn't be compared/;
+const compares = (app) => app.calls.filter((c) => c.cmd === 'get_compare');
+
+/** Compare's "with" switched to `code`, in the translation button's popover. */
+function compareWith(app, code) {
+    if (app.surface('translation').hidden) app.open('translation');
+    const button = el(app, 'compare-with-choices').querySelector(`button[data-value="${code}"]`);
+    assert.ok(button, `Compare can be with the ${code}`);
+    app.click(button);
+}
+
+/** Waits for every comparison asked for after the first `n` to be answered. */
+async function comparedSince(app, n, what) {
+    await app.until(() => compares(app).length > n && compares(app).slice(n).every((c) => c.done), what);
+    await app.idle(app.calls.length);
+}
+
+test('GG-10: the WEB’s comparison, answered after the BSB’s, doesn’t replace it', () =>
+    withNotes([], async (app) => {
+        // Until one is chosen, the KJV is compared with the WEB.
+        const release = app.holdAnswer('get_compare');
+        await app.key('c');
+        const web = compares(app).at(-1);
+        assert.deepEqual([...web.args.translationCodes], ['kjv', 'web']);
+        assert.ok(!web.done);
+
+        // Newer: with the BSB, answered at once.
+        const n = compares(app).length;
+        compareWith(app, 'bsb');
+        await comparedSince(app, n, 'the BSB’s comparison');
+        assert.deepEqual(app.compareColumns(), KJV_BSB);
+
+        release();
+        await app.until(() => web.done, 'the WEB’s comparison');
+        await app.idle();
+        assert.deepEqual(app.compareColumns(), KJV_BSB, 'still the BSB beside the KJV, in two columns');
+        assert.equal(app.notice(), '');
+    }));
+
+test('GG-10: an obsolete comparison’s failure says nothing', () =>
+    withNotes([], async (app) => {
+        const fail = app.holdFailure('get_compare', 'The WEB couldn’t be read.');
+        await app.key('c');
+        const web = compares(app).at(-1);
+        const n = compares(app).length;
+        compareWith(app, 'bsb');
+        await comparedSince(app, n, 'the BSB’s comparison');
+
+        fail();
+        await app.until(() => web.done, 'the WEB’s failure');
+        await app.idle();
+        assert.deepEqual(app.compareColumns(), KJV_BSB);
+        assert.doesNotMatch(app.notice(), COMPARE_FAILED, 'no notice for a comparison no longer asked for');
+    }));
+
+test('GG-10: Compare off and on again: the first comparison’s late failure says nothing', () =>
+    withNotes([], async (app) => {
+        const fail = app.holdFailure('get_compare', 'The WEB couldn’t be read.');
+        await app.key('c');
+        const first = compares(app).at(-1);
+        await app.key('c');
+        assert.ok(!app.isComparing(), 'off');
+        const n = compares(app).length;
+        await app.key('c');
+        await comparedSince(app, n, 'the comparison asked for again');
+        assert.deepEqual(app.compareColumns(), KJV_WEB);
+
+        fail();
+        await app.until(() => first.done, 'the first comparison’s failure');
+        await app.idle();
+        assert.deepEqual(app.compareColumns(), KJV_WEB, 'the newer comparison stays');
+        assert.doesNotMatch(app.notice(), COMPARE_FAILED);
+    }));
+
+test('GG-10: Compare turned off while its comparison is on its way: its failure says nothing', () =>
+    withNotes([], async (app) => {
+        const fail = app.holdFailure('get_compare', 'The WEB couldn’t be read.');
+        await app.key('c');
+        const first = compares(app).at(-1);
+        await app.key('c');
+        fail();
+        await app.until(() => first.done, 'the comparison’s failure');
+        await app.idle();
+        assert.ok(!app.isComparing());
+        assert.equal(app.notice(), '', 'nothing said about a comparison the reader turned off');
+    }));

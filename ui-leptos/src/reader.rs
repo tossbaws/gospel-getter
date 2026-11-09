@@ -22,7 +22,9 @@
 //! only for a chapter put on screen, in the order they were shown. What
 //! outlives a load has its own generation (`intent`): a note's Edit waiting
 //! for its jump opens the note only if nothing newer has happened (another
-//! navigation, or any note editor opening).
+//! navigation, or any note editor opening), and Compare's own fetch, when
+//! it's switched on or its translations change, shows (or says it failed)
+//! only while it's still the comparison of the chapter on screen asked for.
 //!
 //! This is the page's reader (`ui/index.html` at 4a7f6f5: `updateReference`
 //! to the `compare-change` listener, `openPassage`, `savePosition` and the
@@ -91,6 +93,10 @@ struct State {
     /// editor opening (`bridge::NOTE_EVENT`), so a late jump never opens a
     /// note over something newer.
     edit: Generation,
+    /// Compare's own fetch ([`on_compare_change`]), apart from a load's:
+    /// claimed by each change of Compare (on, off, another translation),
+    /// so only the newest one's answer, or failure, shows.
+    compare: Generation,
     /// A position is being saved; the newest one waiting goes next.
     saving: bool,
     waiting: Option<Position>,
@@ -824,8 +830,12 @@ fn export_place() {
 
 /// Compare went on or off, or what it compares with changed: the chapter on
 /// screen in the new layout, fetching the comparison only if it isn't the
-/// one there already (and dropping it if a load has begun meanwhile).
+/// one there already. Its answer (or its failure's notice) shows only while
+/// it's still the comparison asked for: no newer change of Compare, no load
+/// begun since, and the same chapter, translations and layout on screen.
 fn on_compare_change() {
+    // Whatever Compare is now, a fetch for what it was is no longer wanted.
+    let claim = with(|s| s.compare.claim());
     let Some(dto) = with(|s| s.last_dto.clone()) else {
         return;
     };
@@ -845,10 +855,19 @@ fn on_compare_change() {
         return;
     }
     let token = with(|s| s.load_token);
-    let compare = load_compare(dto.current_book_id, dto.current_chapter);
+    let layout = compare_layout();
+    let (book_id, chapter) = (dto.current_book_id, dto.current_chapter);
+    let compare = load_compare(book_id, chapter);
     spawn_local(async move {
         let compare_raw = JsFuture::from(compare).await.unwrap_or(JsValue::NULL);
-        if with(|s| s.load_token) != token {
+        let asked = with(|s| {
+            s.compare.holds(claim)
+                && s.load_token == token
+                && s.last_dto
+                    .as_ref()
+                    .is_some_and(|d| d.current_book_id == book_id && d.current_chapter == chapter)
+        });
+        if !asked || compare_codes() != codes || compare_layout() != layout {
             return;
         }
         let compare = (!compare_raw.is_null())
