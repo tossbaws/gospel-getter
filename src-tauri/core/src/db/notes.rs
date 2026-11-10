@@ -466,6 +466,28 @@ pub async fn notes_overlapping(pool: &SqlitePool, passage: &Passage) -> anyhow::
     Ok(overlapping(in_chapter, passage))
 }
 
+/// Where a note is and when it was written, without its words: all that
+/// counting notes by book, chapter and date needs (the notes export's live
+/// count and the choices its dialog offers).
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct NotePlace {
+    pub book_id: i64,
+    pub chapter: i64,
+    /// As [`Note::created_at`].
+    pub created_at: String,
+}
+
+/// Every note's [`NotePlace`], by book and chapter, read without any
+/// note's text (which can run to millions of characters in all).
+pub async fn note_places(pool: &SqlitePool) -> anyhow::Result<Vec<NotePlace>> {
+    sqlx::query_as::<_, NotePlace>(
+        "SELECT book_id, chapter, created_at FROM notes ORDER BY book_id, chapter, id",
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to read where the notes are")
+}
+
 /// Every note, in Bible order (see `in_bible_order`).
 pub async fn list_notes(pool: &SqlitePool) -> anyhow::Result<Vec<Note>> {
     let all = sqlx::query_as::<_, Note>(concat!("SELECT ", note_columns!(), " FROM notes"))

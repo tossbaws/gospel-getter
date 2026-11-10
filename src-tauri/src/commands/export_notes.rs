@@ -63,6 +63,17 @@ pub struct NotesExportOptions {
     pub dates: crate::notes_export::DatePresets,
 }
 
+/// Where every note is and when it was written, without their text: all
+/// the export dialog's choices and live count read.
+async fn note_places(state: &AppState) -> Result<Vec<db::notes::NotePlace>, String> {
+    state
+        .store
+        .note_places()
+        .await
+        .context("Failed to read where the notes are")
+        .map_err(failed(NOTES_UNREADABLE))
+}
+
 /// The export dialog's choices: the books with notes, and date presets
 /// that end today in `tz`.
 pub async fn notes_export_options<Tz: chrono::TimeZone>(
@@ -70,7 +81,7 @@ pub async fn notes_export_options<Tz: chrono::TimeZone>(
     now: chrono::DateTime<chrono::Utc>,
     tz: &Tz,
 ) -> Result<NotesExportOptions, String> {
-    let notes = notes_to_export(state).await?;
+    let notes = note_places(state).await?;
     Ok(NotesExportOptions {
         books: crate::notes_export::noted_books(&notes, &state.books),
         dates: crate::notes_export::date_presets(crate::notes_export::local_date(now, tz)),
@@ -85,8 +96,8 @@ pub async fn count_notes_to_export<Tz: chrono::TimeZone>(
     tz: &Tz,
 ) -> Result<usize, String> {
     filter.check(&state.books)?;
-    let notes = notes_to_export(state).await?;
-    Ok(notes.iter().filter(|n| filter.matches(n, tz)).count())
+    let notes = note_places(state).await?;
+    Ok(notes.iter().filter(|n| filter.matches(*n, tz)).count())
 }
 
 /// What an export is made from, read once: the translation its verses are

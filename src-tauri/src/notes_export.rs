@@ -40,7 +40,7 @@ use std::fmt::Write as _;
 use chrono::{DateTime, Datelike, Days, NaiveDate, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::db::notes::{grouped, in_bible_order};
+use crate::db::notes::{NotePlace, grouped, in_bible_order};
 use crate::db::{Book, Note, Verse};
 use crate::passage_copy::{self, CopyFormat};
 // The escapes live in `markdown`, which Copy as… shares; named here too, as
@@ -99,19 +99,19 @@ impl NotesFilter {
 
     /// Whether `note` is one this filter asks for, its date read in `tz`.
     /// With a date limit, a note whose date can't be read isn't.
-    pub fn matches<Tz: TimeZone>(&self, note: &Note, tz: &Tz) -> bool {
-        if !self.books.is_empty() && !self.books.contains(&note.book_id) {
+    pub fn matches<Tz: TimeZone>(&self, note: &impl Placed, tz: &Tz) -> bool {
+        if !self.books.is_empty() && !self.books.contains(&note.book_id()) {
             return false;
         }
         if let Some((first, last)) = self.chapters
-            && !(i64::from(first)..=i64::from(last)).contains(&note.chapter)
+            && !(i64::from(first)..=i64::from(last)).contains(&note.chapter())
         {
             return false;
         }
         if self.written_from.is_none() && self.written_to.is_none() {
             return true;
         }
-        let Ok(written) = DateTime::parse_from_rfc3339(&note.created_at) else {
+        let Ok(written) = DateTime::parse_from_rfc3339(note.created_at()) else {
             return false;
         };
         let day = local_date(written.to_utc(), tz);
@@ -711,28 +711,78 @@ pub struct NotedBook {
     pub chapter_count: i64,
 }
 
+/// What the filter and the dialog's choices read of a note: where it is and
+/// when it was written, never its words. A whole [`Note`] has them, and so
+/// does a [`NotePlace`], read without the words.
+pub trait Placed {
+    fn book_id(&self) -> i64;
+    fn chapter(&self) -> i64;
+    /// As [`Note::created_at`].
+    fn created_at(&self) -> &str;
+}
+
+impl Placed for Note {
+    fn book_id(&self) -> i64 {
+        self.book_id
+    }
+    fn chapter(&self) -> i64 {
+        self.chapter
+    }
+    fn created_at(&self) -> &str {
+        &self.created_at
+    }
+}
+
+impl<T: Placed> Placed for &T {
+    fn book_id(&self) -> i64 {
+        (**self).book_id()
+    }
+    fn chapter(&self) -> i64 {
+        (**self).chapter()
+    }
+    fn created_at(&self) -> &str {
+        (**self).created_at()
+    }
+}
+
+impl Placed for NotePlace {
+    fn book_id(&self) -> i64 {
+        self.book_id
+    }
+    fn chapter(&self) -> i64 {
+        self.chapter
+    }
+    fn created_at(&self) -> &str {
+        &self.created_at
+    }
+}
+
 /// The books `notes` are on, in Bible order.
-pub fn noted_books(notes: &[Note], books: &[Book]) -> Vec<NotedBook> {
+pub fn noted_books<N: Placed>(notes: &[N], books: &[Book]) -> Vec<NotedBook> {
+    // Only the book and chapter count here: in their order, each book's
+    // notes and chapters are together.
+    let mut places: Vec<(i64, i64)> = notes.iter().map(|n| (n.book_id(), n.chapter())).collect();
+    places.sort_unstable();
     let mut noted: Vec<NotedBook> = Vec::new();
-    for note in in_bible_order(notes.to_vec()) {
+    for (book_id, chapter) in places {
         match noted.last_mut() {
-            Some(book) if book.id == note.book_id => {
+            Some(book) if book.id == book_id => {
                 book.notes += 1;
-                if note.chapter != book.last_chapter {
+                if chapter != book.last_chapter {
                     book.noted_chapters += 1;
                 }
-                book.last_chapter = note.chapter;
+                book.last_chapter = chapter;
             }
             _ => {
-                let Some(book) = book_named(books, note.book_id) else {
+                let Some(book) = book_named(books, book_id) else {
                     continue;
                 };
                 noted.push(NotedBook {
                     id: book.id,
                     name: book.name.clone(),
                     notes: 1,
-                    first_chapter: note.chapter,
-                    last_chapter: note.chapter,
+                    first_chapter: chapter,
+                    last_chapter: chapter,
                     noted_chapters: 1,
                     chapter_count: book.chapter_count,
                 });
@@ -1958,7 +2008,7 @@ mod tests {
                 (62, "1 John", 1, 1, 1, 1, 50),
             ]
         );
-        assert_eq!(noted_books(&[], &books), []);
+        assert_eq!(noted_books::<Note>(&[], &books), []);
     }
 
     #[test]

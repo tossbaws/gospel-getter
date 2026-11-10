@@ -1810,3 +1810,44 @@ async fn a_chapter_s_last_verse_is_one_index_seek_per_translation() {
         );
     }
 }
+
+/// Every note's place is its book, chapter and date, as the whole note
+/// has them, in book and chapter order, read without its text.
+#[tokio::test]
+async fn note_places_are_each_notes_book_chapter_and_date() {
+    use super::notes::{NotePlace, note_places};
+    let (_db, pool) = prepared_database("note_places").await;
+    assert_eq!(note_places(pool.read()).await.unwrap(), []);
+    for (book_id, chapter, verse) in [(45, 8, 28), (43, 3, 16), (1, 1, 1), (43, 1, 1), (43, 3, 5)] {
+        let passage = Passage {
+            book_id,
+            chapter,
+            verse_start: verse,
+            verse_end: verse,
+        };
+        add_note(
+            pool.write(),
+            &passage,
+            &format!("{book_id} {chapter}:{verse}"),
+            None,
+        )
+        .await
+        .unwrap();
+    }
+    let mut whole: Vec<(i64, i64, i64, String)> = list_notes(pool.read())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|n| (n.book_id, n.chapter, n.id, n.created_at))
+        .collect();
+    whole.sort();
+    let expected: Vec<NotePlace> = whole
+        .into_iter()
+        .map(|(book_id, chapter, _, created_at)| NotePlace {
+            book_id,
+            chapter,
+            created_at,
+        })
+        .collect();
+    assert_eq!(note_places(pool.read()).await.unwrap(), expected);
+}
