@@ -415,8 +415,11 @@ Upgrading keeps your data.
   database, and aren't exported either.
 - Coming from the old browser-based Gospel Getter (the local server on
   `localhost:3002`)? The first launch copies its database from
-  `~/.local/share/gospel-getter/data/gospel_getter.db` and leaves the
-  original untouched.
+  `~/.local/share/gospel-getter/data/gospel_getter.db` (everything it has
+  saved, even while it's still running) and leaves the original untouched.
+  If that copy can't be made, Gospel Getter says so and doesn't start,
+  rather than start without it; nothing is changed, and the next launch
+  tries again. To start fresh instead, move that file somewhere else.
 
 ## Use with AI agents
 

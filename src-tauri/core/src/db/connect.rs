@@ -97,7 +97,7 @@ impl WritePool {
 /// is switched on its first connection), and SQLite keeps `-wal` and `-shm`
 /// files beside it. The app never copies its database file; the one copy
 /// it makes, of an old install's database (`migrate_legacy_db_if_needed`),
-/// happens before anything opens either file.
+/// is a SQLite snapshot, made before anything opens the new one.
 /// With WAL, `synchronous = NORMAL` is safe: a power cut can lose the last
 /// transactions, never the database. And every connection waits up to
 /// [`BUSY_TIMEOUT`] for a lock rather than failing at once (see
@@ -143,7 +143,7 @@ pub async fn create_pool(database_url: &str) -> anyhow::Result<Db> {
 
 /// One of the files SQLite keeps beside a database: `path` and `suffix`
 /// ("-wal", "-shm").
-fn beside(path: &Path, suffix: &str) -> PathBuf {
+pub(crate) fn beside(path: &Path, suffix: &str) -> PathBuf {
     let mut name = OsString::from(path.as_os_str());
     name.push(suffix);
     PathBuf::from(name)
