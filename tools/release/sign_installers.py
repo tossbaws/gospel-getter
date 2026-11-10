@@ -148,7 +148,9 @@ def rehearse_manifest(installers: dict[str, Path], version: str) -> str:
         assets = Path(scratch)
         for key, installer in installers.items():
             name = make_latest_json.PLATFORMS[key]
-            (assets / name).symlink_to(installer)
+            # Absolute: a relative target (DIR given as `installers`, as
+            # dist.yml does) would be read from the scratch folder.
+            (assets / name).symlink_to(installer.resolve())
             (assets / f"{name}.sig").write_bytes(installer.with_name(installer.name + ".sig").read_bytes())
         try:
             manifest = make_latest_json.build_manifest(version, "Rehearsal.", assets, "2026-01-01T00:00:00Z")

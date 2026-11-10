@@ -127,6 +127,17 @@ class SignInstallers(unittest.TestCase):
         self.assertIn("By key 2CEED11FD5DD0F77", out)
         self.assertIn("the update manifest can be made from them", out)
 
+    def test_the_installers_folder_may_be_relative(self):
+        # As dist.yml runs it: `sign_installers.py installers`, from the
+        # folder above, so every installer's path is relative.
+        here = os.getcwd()
+        os.chdir(self.dir.parent)
+        self.addCleanup(os.chdir, here)
+        self.dir = Path("installers")
+        code, out, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        self.assertIn("the update manifest can be made from them", out)
+
     def test_a_key_file_is_passed_with_its_empty_password(self):
         key = Path(self.tmp.name) / "rehearsal.key"
         key.write_text("throwaway")
