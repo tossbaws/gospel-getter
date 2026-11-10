@@ -1,15 +1,16 @@
 name: Distribution Artifacts
 
 # Builds the actual installers — AppImage + .deb on Linux, an NSIS setup.exe
-# (and MSI, when the bundler produces one) on Windows — and smoke-tests
-# each one before uploading it as a workflow artifact. This is separate
+# and an MSI on Windows — and smoke-tests each one (installed and removed
+# again) before uploading it as a workflow artifact. This is separate
 # from ci.yml (which only runs cargo fmt/clippy/test/build) because
 # bundling is slow and installs system packages. It runs on every push to
 # main, on every pull request, and by hand (workflow_dispatch). A release's
 # installers come from the run dispatched on its release commit, so the push
 # of a release-prep merge (a "chore(release):" commit) builds nothing. A push
 # or pull request run cancels the one in progress on its ref; a dispatched
-# run waits for it instead.
+# run is a concurrency group of its own (its run id), so a later push never
+# cancels a release build, and the dispatch cancels nothing.
 #
 # Then the GUI checks (scripts/gui-check.sh, tests/gui) drive the built
 # app through its own webview with tauri-driver: gui-linux on the AppImage
@@ -29,12 +30,29 @@ name: Distribution Artifacts
 #
 # These are the installers that update themselves: they're built with
 # GOSPEL_GETTER_SELF_UPDATE=1 (read at compile time, see src-tauri/src/
-# updater.rs), which no other build of the app has, and signed for the
-# updater with the TAURI_SIGNING_PRIVATE_KEY secret through the
-# tauri.updater.conf.json overlay. Each installer's artifact carries its
-# .sig beside it, for tools/release/make_latest_json.py. Pushes to main must
-# be signed; a pull request without access to the secret (from a fork)
-# builds unsigned installers, with a warning, which can't be released.
+# updater.rs), which no other build of the app has, and the
+# tauri.updater.conf.json overlay, but never signed by the build
+# (--no-sign): no job that builds anything ever has the updater's signing
+# key. Signing, by run:
+#   - push, pull request: unsigned installers, no .sig; they can't be
+#     released.
+#   - dispatched on main (a release, `gh workflow run dist.yml --ref main`):
+#     the sign job, the only job that names the key's secrets, runs in the
+#     release environment (deployments from main only) once the GUI checks
+#     have passed on these very files. It signs each installer as `cargo
+#     tauri build` would (tools/release/sign_installers.py: the same .sig,
+#     bound to the app's version), checks each signature is by the app's
+#     key, makes the update manifest from them as a dry run, and puts each
+#     installer's artifact back with its .sig beside it, for
+#     tools/release/make_latest_json.py.
+#   - dispatched on another branch, or a pull request from a release/
+#     branch: unsigned, and sign-rehearsal does all of that with a throwaway
+#     key made for the run instead, uploading nothing, so a change to the
+#     signing is tried before it reaches a release.
+#
+# Every action is pinned to a commit (Dependabot proposes updates:
+# .github/dependabot.yml), and every job builds with one Rust release,
+# RUST_TOOLCHAIN below.
 #
 # Every installer carries gospel-getter-cli beside the app, as a Tauri sidecar
 # (bundle.externalBin, in the tauri.sidecar.conf.json overlay, since tauri-build
@@ -53,7 +71,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: dist-${{ github.workflow }}-${{ github.ref }}
+  group: dist-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
@@ -120,23 +138,6 @@ jobs:
             src-tauri
             ui-leptos
 
-      - name: Decide on updater signing
-        id: signing
-        shell: bash
-        env:
-          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
-          EVENT: ${{ github.event_name }}
-        run: |
-          if [ "$HAS_KEY" = "true" ]; then
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-          elif [ "$EVENT" = "pull_request" ]; then
-            echo "::warning::No updater signing key (pull requests from forks get no secrets): building unsigned installers without .sig files. They can't be released."
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret isn't available, so the updater artifacts can't be signed. Builds on $EVENT must be signed; set the secret (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD) in the repository's Actions secrets."
-            exit 1
-          fi
-
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
 
@@ -156,17 +157,13 @@ jobs:
           mkdir -p binaries
           strip -o "binaries/gospel-getter-cli-$triple" target/release/gospel-getter-cli
 
+      # Unsigned on every run (see the top of this file): the sign job signs
+      # these very files on a run dispatched on main.
       - name: Build AppImage and deb bundles
         env:
           GOSPEL_GETTER_SELF_UPDATE: "1"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
-            cargo tauri build --bundles appimage,deb --config tauri.sidecar.conf.json --config tauri.updater.conf.json
-          else
-            cargo tauri build --bundles appimage,deb --config tauri.sidecar.conf.json
-          fi
+          cargo tauri build --bundles appimage,deb --config tauri.sidecar.conf.json --config tauri.updater.conf.json --no-sign
 
       - name: Check the build fetched no tools itself
         working-directory: .
@@ -196,16 +193,6 @@ jobs:
           deb="$(realpath "$deb")"
           echo "appimage=$appimage" >> "$GITHUB_OUTPUT"
           echo "deb=$deb" >> "$GITHUB_OUTPUT"
-          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
-            for file in "$appimage" "$deb"; do
-              if [ ! -s "$file.sig" ]; then
-                echo "::error::the signed build produced no updater signature $file.sig"
-                exit 1
-              fi
-            done
-            echo "appimage_sig=$appimage.sig" >> "$GITHUB_OUTPUT"
-            echo "deb_sig=$deb.sig" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: "Smoke test: AppImage extracts and launches without crashing"
         run: |
@@ -293,18 +280,14 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gospel-getter-linux-appimage
-          path: |
-            ${{ steps.artifacts.outputs.appimage }}
-            ${{ steps.artifacts.outputs.appimage_sig }}
+          path: ${{ steps.artifacts.outputs.appimage }}
           if-no-files-found: error
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gospel-getter-linux-deb
-          path: |
-            ${{ steps.artifacts.outputs.deb }}
-            ${{ steps.artifacts.outputs.deb_sig }}
+          path: ${{ steps.artifacts.outputs.deb }}
           if-no-files-found: error
 
       - name: Upload the CLI on its own
@@ -365,23 +348,6 @@ jobs:
             src-tauri
             ui-leptos
 
-      - name: Decide on updater signing
-        id: signing
-        shell: bash
-        env:
-          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
-          EVENT: ${{ github.event_name }}
-        run: |
-          if [ "$HAS_KEY" = "true" ]; then
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-          elif [ "$EVENT" = "pull_request" ]; then
-            echo "::warning::No updater signing key (pull requests from forks get no secrets): building unsigned installers without .sig files. They can't be released."
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret isn't available, so the updater artifacts can't be signed. Builds on $EVENT must be signed; set the secret (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD) in the repository's Actions secrets."
-            exit 1
-          fi
-
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
 
@@ -414,19 +380,14 @@ jobs:
           Copy-Item target/release/gospel-getter-cli.exe "binaries/gospel-getter-cli-$triple.exe"
 
       # bundle.targets is "all" in tauri.conf.json, so this produces both
-      # an NSIS setup.exe and an MSI on Windows.
+      # an NSIS setup.exe and an MSI on Windows. Unsigned on every run, as
+      # for the linux job.
       - name: Build Windows installers
         shell: pwsh
         env:
           GOSPEL_GETTER_SELF_UPDATE: "1"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          if ("${{ steps.signing.outputs.signed }}" -eq "true") {
-            cargo tauri build --config tauri.sidecar.conf.json --config tauri.updater.conf.json
-          } else {
-            cargo tauri build --config tauri.sidecar.conf.json
-          }
+          cargo tauri build --config tauri.sidecar.conf.json --config tauri.updater.conf.json --no-sign
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Check the build fetched no tools itself
@@ -444,32 +405,15 @@ jobs:
             exit 1
           }
           "nsis=$($nsis.FullName)" >> $env:GITHUB_OUTPUT
-          $signed = "${{ steps.signing.outputs.signed }}" -eq "true"
-          if ($signed) {
-            $sig = "$($nsis.FullName).sig"
-            if (-not (Test-Path $sig) -or (Get-Item $sig).Length -eq 0) {
-              Write-Error "the signed build produced no updater signature $sig"
-              exit 1
-            }
-            "nsis_sig=$sig" >> $env:GITHUB_OUTPUT
-          }
 
+          # A release needs the MSI as much as the setup.exe (its update
+          # manifest names both: tools/release/make_latest_json.py).
           $msi = Get-ChildItem -Path "target/release/bundle/msi" -Filter *.msi -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($msi) {
-            "msi=$($msi.FullName)" >> $env:GITHUB_OUTPUT
-            "msi_built=true" >> $env:GITHUB_OUTPUT
-            if ($signed) {
-              $sig = "$($msi.FullName).sig"
-              if (-not (Test-Path $sig) -or (Get-Item $sig).Length -eq 0) {
-                Write-Error "the signed build produced no updater signature $sig"
-                exit 1
-              }
-              "msi_sig=$sig" >> $env:GITHUB_OUTPUT
-            }
-          } else {
-            Write-Warning "No MSI installer was produced; only the NSIS setup.exe is available this run."
-            "msi_built=false" >> $env:GITHUB_OUTPUT
+          if (-not $msi) {
+            Write-Error "cargo tauri build did not produce an MSI under target/release/bundle/msi"
+            exit 1
           }
+          "msi=$($msi.FullName)" >> $env:GITHUB_OUTPUT
 
       - name: "Smoke test: silent install and uninstall (NSIS)"
         shell: pwsh
@@ -525,23 +469,82 @@ jobs:
           }
           Write-Host "Silent install/uninstall smoke test passed."
 
+      # The MSI the same way, once the NSIS install above is gone: Windows
+      # Installer's own uninstall entry (WindowsInstaller = 1), the sidecar
+      # beside the app, and nothing left registered after msiexec /x.
+      - name: "Smoke test: silent install and uninstall (MSI)"
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $msi = "${{ steps.artifacts.outputs.msi }}"
+          $log = Join-Path $env:RUNNER_TEMP "msi-install.log"
+          # 3010: done, a restart would finish it (nothing here needs one).
+          $done = @(0, 3010)
+
+          Write-Host "Running silent install: msiexec /i $msi /qn"
+          # Start-Process joins its arguments with spaces: the paths are
+          # quoted here (the MSI's name has a space in it).
+          $install = Start-Process -FilePath msiexec.exe -ArgumentList "/i", "`"$msi`"", "/qn", "/norestart", "/l*v", "`"$log`"" -Wait -PassThru
+          if ($done -notcontains $install.ExitCode) {
+            if (Test-Path $log) { Get-Content $log -Tail 60 }
+            Write-Error "msiexec /i exited with $($install.ExitCode)"
+            exit 1
+          }
+
+          $uninstallRoots = @(
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+            "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+            "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+          )
+          $msiEntries = {
+            Get-ChildItem $uninstallRoots -ErrorAction SilentlyContinue |
+              Get-ItemProperty -ErrorAction SilentlyContinue |
+              Where-Object { $_.DisplayName -like "*Gospel Getter*" -and $_.WindowsInstaller -eq 1 }
+          }
+          $entry = & $msiEntries | Select-Object -First 1
+          if (-not $entry) {
+            Write-Error "No Windows Installer uninstall entry for Gospel Getter after msiexec /i: the install likely failed."
+            exit 1
+          }
+          Write-Host "Registered: $($entry.DisplayName) v$($entry.DisplayVersion) ($($entry.PSChildName))"
+          $location = "$($entry.InstallLocation)".Trim('"')
+          if (-not $location -or -not (Test-Path -LiteralPath $location -PathType Container)) {
+            Write-Error "the install location '$($entry.InstallLocation)' isn't a folder"
+            exit 1
+          }
+          Write-Host "Install directory contents:"
+          Get-ChildItem -LiteralPath $location | Format-Table Name, Length
+          $printed = & (Join-Path $location "gospel-getter-cli.exe") --version
+          if ($LASTEXITCODE -ne 0 -or -not ($printed -match '^gospel-getter-cli ')) {
+            Write-Error "gospel-getter-cli.exe isn't beside the app, or printed nothing: '$printed'"
+            exit 1
+          }
+          Write-Host "Sidecar: $printed"
+
+          Write-Host "Running silent uninstall: msiexec /x $msi /qn"
+          $remove = Start-Process -FilePath msiexec.exe -ArgumentList "/x", "`"$msi`"", "/qn", "/norestart" -Wait -PassThru
+          if ($done -notcontains $remove.ExitCode) {
+            Write-Error "msiexec /x exited with $($remove.ExitCode)"
+            exit 1
+          }
+          if (& $msiEntries) {
+            Write-Error "The Windows Installer uninstall entry for Gospel Getter is still present after msiexec /x."
+            exit 1
+          }
+          Write-Host "MSI install/uninstall smoke test passed."
+
       - name: Upload NSIS installer artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gospel-getter-windows-nsis-installer
-          path: |
-            ${{ steps.artifacts.outputs.nsis }}
-            ${{ steps.artifacts.outputs.nsis_sig }}
+          path: ${{ steps.artifacts.outputs.nsis }}
           if-no-files-found: error
 
-      - name: Upload MSI installer artifact (when built)
-        if: steps.artifacts.outputs.msi_built == 'true'
+      - name: Upload MSI installer artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gospel-getter-windows-msi-installer
-          path: |
-            ${{ steps.artifacts.outputs.msi }}
-            ${{ steps.artifacts.outputs.msi_sig }}
+          path: ${{ steps.artifacts.outputs.msi }}
           if-no-files-found: error
 
       - name: Upload the CLI on its own
@@ -792,3 +795,126 @@ jobs:
           name: gui-check-windows
           path: ${{ runner.temp }}/gui-check
           if-no-files-found: warn
+
+  # The release's updater signatures (see the top of this file): only on a
+  # run dispatched on main, and only once both platforms' GUI checks have
+  # passed on the very files it signs (nothing reads the installer
+  # artifacts after this job puts them back). The only job that names the
+  # signing key's secrets; it builds nothing of the repository's.
+  sign:
+    name: Sign the installers (release)
+    needs: [linux, windows, gui-linux, gui-windows]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    environment: release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      # From crates.io, exactly, in this job: no cache, nothing another job
+      # built.
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+
+      - name: Download the Linux installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: gospel-getter-linux-*
+          path: installers
+
+      - name: Download the Windows installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: gospel-getter-windows-*
+          path: installers
+
+      - name: Sign the installers
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tools/release/sign_installers.py installers
+
+      # Each installer's artifact again, now with its .sig beside it, under
+      # the name a release takes it by (tools/release/README.md).
+      - name: Put back the AppImage artifact, signed
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gospel-getter-linux-appimage
+          path: installers/gospel-getter-linux-appimage/
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Put back the deb artifact, signed
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gospel-getter-linux-deb
+          path: installers/gospel-getter-linux-deb/
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Put back the NSIS installer artifact, signed
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gospel-getter-windows-nsis-installer
+          path: installers/gospel-getter-windows-nsis-installer/
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Put back the MSI installer artifact, signed
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gospel-getter-windows-msi-installer
+          path: installers/gospel-getter-windows-msi-installer/
+          if-no-files-found: error
+          overwrite: true
+
+  # The sign job's steps on a run that can't be released, with a key made
+  # for the run in place of the release's (and checked against its own
+  # public key): a run dispatched on another branch, or a pull request from
+  # a release/ branch. It uploads nothing, and names no secret.
+  sign-rehearsal:
+    name: Signing rehearsal (throwaway key)
+    needs: [linux, windows]
+    if: (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+
+      - name: Download the Linux installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: gospel-getter-linux-*
+          path: installers
+
+      - name: Download the Windows installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: gospel-getter-windows-*
+          path: installers
+
+      # Without a password, as `cargo tauri signer generate --ci` makes it.
+      - name: Make a throwaway signing key
+        run: cargo tauri signer generate --ci --write-keys "$RUNNER_TEMP/rehearsal.key"
+
+      - name: Sign the installers with it
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 tools/release/sign_installers.py installers \
+            --private-key-path "$RUNNER_TEMP/rehearsal.key" \
+            --pubkey-file "$RUNNER_TEMP/rehearsal.key.pub"

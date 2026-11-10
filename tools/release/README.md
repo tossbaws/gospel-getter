@@ -12,7 +12,10 @@ can't see the release as an update.
    the release commit. That's the run dispatched after the merge
    (`gh workflow run dist.yml --ref main`): the merge's own push run builds
    nothing. Each artifact also holds the installer's `.sig`
-   updater signature. Rename both files of each pair to the stable names:
+   updater signature, which the run's last job, "Sign the installers
+   (release)", puts there once both platforms' GUI checks have passed (see
+   `sign_installers.py` below): take them after it has finished. No other
+   run is signed. Rename both files of each pair to the stable names:
 
    | Platform key | Asset | Signature |
    |---|---|---|
@@ -51,6 +54,35 @@ ever offered the `.deb`, an MSI install the MSI, and so on. The app also
 requires the version inside each signature to match the manifest's
 (`requireSignedVersion`), which stops an old, validly signed build from
 being passed off as a new one.
+
+## `sign_installers.py`: the updater signatures
+
+No job that builds an installer has the updater's signing key: every
+build is unsigned (`cargo tauri build --no-sign`). On a run dispatched on
+`main`, dist.yml's `sign` job, in the `release` environment (which deploys
+from `main` only) and the only job that names the key's secrets, downloads
+the four installers, and this script signs each one as `cargo tauri build`
+would have (`cargo tauri signer sign --app-version`, the version in
+`src-tauri/tauri.conf.json`), checks each signature is for that version
+and by the key in `tauri.conf.json`, and makes the update manifest from
+them in a scratch folder as a dry run. The job then puts each installer's
+artifact back with its `.sig` beside it.
+
+A run dispatched on another branch, and a pull request from a `release/`
+branch, rehearse this (the `sign-rehearsal` job) with a throwaway key made
+for the run, uploading nothing:
+
+```sh
+cargo tauri signer generate --ci --write-keys rehearsal.key
+python3 tools/release/sign_installers.py DIR \
+    --private-key-path rehearsal.key --pubkey-file rehearsal.key.pub
+```
+
+The release's key and its password are repository secrets
+(`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). Moving
+them into the `release` environment, so that only its jobs can read them,
+needs their values, so only the key's owner can do it; the workflow already
+names them nowhere else.
 
 ## `site_version_gate.py`: when the website deploys
 

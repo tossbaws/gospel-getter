@@ -671,9 +671,10 @@ mod tests {
 
     /// The updater reads the release's `latest.json`, checks every download
     /// against the committed public key and the version it was signed for,
-    /// and is only signed for in dist.yml (through the overlay), so local
-    /// and install.sh builds need no private key. The overlay publishes the
-    /// installers as they are, not zipped as for Tauri v1
+    /// and its installers are only signed in dist.yml (the overlay makes
+    /// them updater artifacts; a release run's sign job signs them), so
+    /// local and install.sh builds need no private key. The overlay
+    /// publishes the installers as they are, not zipped as for Tauri v1
     /// (`"v1Compatible"`), which the updater, built without its `zip`
     /// feature, couldn't unpack. The webview gets no permission at all, so
     /// no updater or process permission.

@@ -426,9 +426,9 @@ const TEST_FEATURE: &str = "gui-test-updater";
 const TEST_BUILD_STEP: &str = "Build the GUI-check test app";
 const TEST_ARTIFACT: &str = "gui-check-test-app-";
 
-/// One step of a dist.yml job: its job, its name (if it has one) and its
+/// One step of a workflow's job: its job, its name (if it has one) and its
 /// text. Crude, as `cargo_package_version` is, but enough for the shape
-/// this workflow keeps: jobs at two spaces, steps at `      - `.
+/// these workflows keep: jobs at two spaces, steps at `      - `.
 #[derive(Debug)]
 struct Step {
     job: String,
@@ -437,10 +437,14 @@ struct Step {
 }
 
 fn dist_steps() -> Vec<Step> {
+    workflow_steps(DIST_YML)
+}
+
+fn workflow_steps(workflow: &str) -> Vec<Step> {
     let mut steps: Vec<Step> = Vec::new();
     let mut job = String::new();
     let mut in_jobs = false;
-    for line in DIST_YML.lines() {
+    for line in workflow.lines() {
         if line == "jobs:" {
             in_jobs = true;
             continue;
@@ -602,8 +606,13 @@ fn no_release_or_packaging_build_enables_the_gui_test_updater() {
 /// A dist.yml job's own keys (`name:`, `if:`, `needs:` and so on), up to its
 /// `steps:`, trimmed, without comments or what's nested under them.
 fn dist_job_keys(job: &str) -> Vec<&'static str> {
+    job_keys(DIST_YML, job)
+}
+
+/// A workflow job's own keys, as for [`dist_job_keys`].
+fn job_keys<'a>(workflow: &'a str, job: &str) -> Vec<&'a str> {
     let header = format!("  {job}:");
-    DIST_YML
+    workflow
         .lines()
         .skip_while(|l| *l != header)
         .skip(1)
@@ -618,9 +627,9 @@ fn dist_job_keys(job: &str) -> Vec<&'static str> {
 /// after the merge (`gh workflow run dist.yml`), which joined the same
 /// concurrency group as the merge's push run and cancelled it: a red X on
 /// every release commit. So the push of a release-prep merge builds nothing,
-/// and a dispatched run waits for the run in progress instead of cancelling
-/// it. Pull requests (a release/ branch's too) and other pushes build as
-/// before.
+/// and a dispatched run never cancels the run in progress (it is now a group
+/// of its own, too: `a_push_never_cancels_a_dispatched_run`). Pull requests
+/// (a release/ branch's too) and other pushes build as before.
 #[test]
 fn a_release_merge_never_cancels_its_own_build() {
     for job in ["linux", "windows"] {
@@ -661,7 +670,7 @@ fn a_release_merge_never_cancels_its_own_build() {
     );
     assert!(
         cancel.contains("github.event_name != 'workflow_dispatch'"),
-        "a dispatched run should wait, and only it: {cancel}"
+        "only a dispatched run should leave the run in progress be: {cancel}"
     );
 }
 
@@ -1030,6 +1039,36 @@ fn file_name(path: &std::path::Path) -> String {
         .unwrap_or_default()
 }
 
+/// A workflow's jobs, as (id, text): from each `  id:` under `jobs:` to the
+/// next.
+fn workflow_jobs(workflow: &str) -> Vec<(String, String)> {
+    let mut jobs: Vec<(String, String)> = Vec::new();
+    let mut in_jobs = false;
+    for line in workflow.lines() {
+        if line == "jobs:" {
+            in_jobs = true;
+            continue;
+        }
+        if !in_jobs {
+            continue;
+        }
+        if line.len() > 2
+            && line.starts_with("  ")
+            && !line.starts_with("   ")
+            && line.trim_end().ends_with(':')
+            && !line.trim_start().starts_with('#')
+        {
+            jobs.push((line.trim().trim_end_matches(':').to_owned(), String::new()));
+            continue;
+        }
+        if let Some((_, text)) = jobs.last_mut() {
+            text.push_str(line);
+            text.push('\n');
+        }
+    }
+    jobs
+}
+
 /// Every action a workflow or the repository's own action uses is pinned to
 /// a commit, not a tag or branch that can be moved under it (D-01), with
 /// the release it is in a comment, which Dependabot keeps up to date
@@ -1116,6 +1155,247 @@ fn release_builds_use_one_pinned_rust() {
             install.job
         );
     }
+}
+
+/// The updater's signing key (D-01). Its secrets are named by one job
+/// alone, dist.yml's sign job: in the release environment (which deploys
+/// from main only), on a run dispatched on main. Nothing hands every secret
+/// on (`secrets: inherit`, `toJSON(secrets)`), and no workflow-wide `env`
+/// carries them into every job. The jobs that build never see the key:
+/// they're the same on every run, unsigned.
+#[test]
+fn only_the_release_job_has_the_signing_key() {
+    const KEY: &str = "TAURI_SIGNING_PRIVATE_KEY";
+    let mut holders = Vec::new();
+    for (file, text) in github_files() {
+        for everything in ["secrets: inherit", "toJSON(secrets)", "toJson(secrets)"] {
+            assert!(!text.contains(everything), "{file}: {everything}");
+        }
+        let outside_jobs = text.split("\njobs:\n").next().unwrap_or_default();
+        assert!(
+            !outside_jobs
+                .lines()
+                .any(|l| l.contains(KEY) && !l.trim_start().starts_with('#')),
+            "{file} names {KEY} outside its jobs"
+        );
+        if file.starts_with("actions/") {
+            assert!(!text.contains(KEY), "{file} names {KEY}");
+            continue;
+        }
+        for (job, body) in workflow_jobs(&text) {
+            if !body.contains(KEY) {
+                continue;
+            }
+            let keys = job_keys(&text, &job);
+            assert!(
+                keys.contains(&"environment: release"),
+                "{file}: job {job} has the signing key outside the release environment: {keys:#?}"
+            );
+            assert!(
+                keys.contains(
+                    &"if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
+                ),
+                "{file}: job {job} has the signing key on more than a run dispatched on main: {keys:#?}"
+            );
+            holders.push(format!("{file} {job}"));
+        }
+    }
+    assert_eq!(holders, ["workflows/dist.yml sign"]);
+}
+
+/// The installers' artifacts: the build jobs upload them, and the sign job
+/// puts each back, signed, under the same name.
+const INSTALLER_ARTIFACTS: [(&str, &str); 4] = [
+    ("linux", "gospel-getter-linux-appimage"),
+    ("linux", "gospel-getter-linux-deb"),
+    ("windows", "gospel-getter-windows-nsis-installer"),
+    ("windows", "gospel-getter-windows-msi-installer"),
+];
+
+/// How a release's installers are signed (D-01, see the top of dist.yml).
+/// Every build is unsigned (`--no-sign`), with the updater overlay, as a
+/// release is built. On a run dispatched on main, the sign job signs those
+/// very files once both platforms' GUI checks have passed on them, by
+/// tools/release/sign_installers.py (which checks each signature and makes
+/// the update manifest as a dry run), and puts each installer's artifact
+/// back with its .sig, under the name a release takes it by. On a run
+/// dispatched on another branch, or a release/ branch's pull request, the
+/// rehearsal does the same with a throwaway key, uploading nothing.
+#[test]
+fn only_a_release_run_signs_and_it_signs_what_was_checked() {
+    let steps = dist_steps();
+    let builds: Vec<&str> = steps
+        .iter()
+        .filter(|s| s.job == "linux" || s.job == "windows")
+        .flat_map(|s| s.text.lines())
+        .filter(|l| {
+            let l = l.trim_start();
+            l.strip_prefix("run: ")
+                .unwrap_or(l)
+                .starts_with("cargo tauri build")
+        })
+        .collect();
+    assert!(
+        builds.len() >= 2,
+        "both jobs' installer builds: {builds:#?}"
+    );
+    for build in builds {
+        assert!(
+            build.contains("--config tauri.updater.conf.json") && build.ends_with(" --no-sign"),
+            "an installer build that isn't the release's, unsigned: {build}"
+        );
+    }
+
+    let keys = dist_job_keys("sign");
+    assert!(
+        keys.contains(&"needs: [linux, windows, gui-linux, gui-windows]"),
+        "the sign job should wait for the builds and both GUI checks: {keys:#?}"
+    );
+    let job = |name: &str| -> Vec<&Step> { steps.iter().filter(|s| s.job == name).collect() };
+    let sign = job("sign");
+    let signs: Vec<&&Step> = sign
+        .iter()
+        .filter(|s| s.text.contains("tools/release/sign_installers.py"))
+        .collect();
+    assert_eq!(signs.len(), 1, "{sign:#?}");
+    assert!(
+        signs[0]
+            .text
+            .contains("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"),
+        "{signs:#?}"
+    );
+    for (built_by, artifact) in INSTALLER_ARTIFACTS {
+        let name = format!("          name: {artifact}\n");
+        assert!(
+            job(built_by)
+                .iter()
+                .any(|s| s.text.contains("actions/upload-artifact@") && s.text.contains(&name)),
+            "job {built_by} doesn't upload {artifact}"
+        );
+        let put_back: Vec<&&Step> = sign
+            .iter()
+            .filter(|s| s.text.contains("actions/upload-artifact@") && s.text.contains(&name))
+            .collect();
+        assert_eq!(put_back.len(), 1, "the sign job puts {artifact} back once");
+        let text = &put_back[0].text;
+        assert!(
+            text.contains(&format!("          path: installers/{artifact}/\n"))
+                && text.contains("          overwrite: true\n")
+                && text.contains("          if-no-files-found: error\n"),
+            "{text}"
+        );
+    }
+    // Uploaded to nowhere else: the release's artifacts are the four above.
+    assert_eq!(
+        sign.iter()
+            .filter(|s| s.text.contains("actions/upload-artifact@"))
+            .count(),
+        INSTALLER_ARTIFACTS.len()
+    );
+
+    let keys = dist_job_keys("sign-rehearsal");
+    let condition = keys
+        .iter()
+        .find_map(|k| k.strip_prefix("if: "))
+        .expect("the rehearsal has an if:");
+    assert!(
+        condition.contains(
+            "github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'"
+        ) && condition.contains("startsWith(github.head_ref, 'release/')"),
+        "{condition}"
+    );
+    assert!(!keys.iter().any(|k| k.starts_with("environment:")));
+    let rehearsal = job("sign-rehearsal");
+    assert!(
+        rehearsal.iter().any(|s| s
+            .text
+            .contains("python3 tools/release/sign_installers.py installers \\")
+            && s.text
+                .contains("--private-key-path \"$RUNNER_TEMP/rehearsal.key\"")
+            && s.text
+                .contains("--pubkey-file \"$RUNNER_TEMP/rehearsal.key.pub\"")),
+        "{rehearsal:#?}"
+    );
+    assert!(
+        !rehearsal
+            .iter()
+            .any(|s| s.text.contains("actions/upload-artifact@")),
+        "the rehearsal's signatures are worthless: it uploads nothing"
+    );
+    // Both get their signer the same way, from crates.io, in the job.
+    for name in ["sign", "sign-rehearsal"] {
+        assert!(
+            job(name).iter().any(|s| s.text.contains(
+                "cargo install tauri-cli --version \"${{ env.TAURI_CLI_VERSION }}\" --locked"
+            )),
+            "job {name}"
+        );
+        assert!(
+            !job(name).iter().any(|s| s.text.contains("rust-cache")),
+            "job {name} restores a cache"
+        );
+    }
+}
+
+/// A push to main never cancels a dispatched run, a release's build (D-05):
+/// a dispatched run is a concurrency group of its own, by its run id. Push
+/// and pull request runs still cancel the run in progress on their ref.
+#[test]
+fn a_push_never_cancels_a_dispatched_run() {
+    let group = DIST_YML
+        .lines()
+        .skip_while(|l| *l != "concurrency:")
+        .find_map(|l| l.trim().strip_prefix("group: "))
+        .expect("dist.yml has a concurrency group");
+    assert_eq!(
+        group,
+        "dist-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}"
+    );
+}
+
+/// The MSI is released and offered by the updater as much as the
+/// setup.exe, so a build without one fails (D-04), and it's installed,
+/// checked and removed again (msiexec /i, /x) as the setup.exe is.
+#[test]
+fn the_msi_is_required_and_installed_and_removed() {
+    let steps = dist_steps();
+    let windows: Vec<&Step> = steps.iter().filter(|s| s.job == "windows").collect();
+    let locate = windows
+        .iter()
+        .find(|s| s.name == "Locate built artifacts")
+        .expect("the windows job locates its installers");
+    assert!(
+        locate
+            .text
+            .contains("Write-Error \"cargo tauri build did not produce an MSI"),
+        "{locate:#?}"
+    );
+    assert!(!locate.text.contains("Write-Warning"), "{locate:#?}");
+    let smoke = windows
+        .iter()
+        .find(|s| s.name.contains("(MSI)"))
+        .expect("the windows job smoke-tests the MSI");
+    for needle in [
+        "msiexec.exe -ArgumentList \"/i\"",
+        "msiexec.exe -ArgumentList \"/x\"",
+        "\"/qn\"",
+        "$_.WindowsInstaller -eq 1",
+        "gospel-getter-cli.exe",
+        "--version",
+    ] {
+        assert!(smoke.text.contains(needle), "{needle}: {smoke:#?}");
+    }
+    let upload = windows
+        .iter()
+        .find(|s| {
+            s.text
+                .contains("name: gospel-getter-windows-msi-installer\n")
+        })
+        .expect("the windows job uploads the MSI");
+    assert!(
+        !upload.text.contains("        if:"),
+        "the MSI's upload is conditional: {upload:#?}"
+    );
 }
 
 /// The page asks Tauri for nothing but the app's own commands
