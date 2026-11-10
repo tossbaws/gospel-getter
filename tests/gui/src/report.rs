@@ -256,6 +256,30 @@ impl Check {
     pub fn number(self) -> u8 {
         self as u8
     }
+
+    /// Every check, by number: the app's as shipped, started again, and
+    /// the updater's.
+    pub fn all() -> Vec<Check> {
+        let mut all: Vec<Check> = Check::SHIPPED
+            .iter()
+            .chain(&Check::RELAUNCH)
+            .chain(&Check::UPDATER)
+            .copied()
+            .collect();
+        all.sort_unstable();
+        all
+    }
+}
+
+/// Every check, one to a line as results.txt names it (`3 export-notes`),
+/// by number: what `gui-check --list` prints, and `scripts/gui-check.sh`
+/// reads, so its results.txt names every check even when the run is cut
+/// short.
+pub fn list() -> String {
+    Check::all()
+        .into_iter()
+        .map(|check| format!("{} {}\n", check.number(), check.name()))
+        .collect()
 }
 
 /// The run's results so far.
@@ -293,10 +317,8 @@ impl Report {
 
     /// Whether every check ran and passed.
     pub fn all_passed(&self) -> bool {
-        Check::SHIPPED
+        Check::all()
             .iter()
-            .chain(&Check::RELAUNCH)
-            .chain(&Check::UPDATER)
             .all(|check| matches!(self.results.get(check), Some(Ok(_))))
     }
 
@@ -322,5 +344,54 @@ impl Report {
         if let Err(e) = tokio::fs::write(&self.path, self.lines()).await {
             eprintln!("gui-check: could not write {}: {e}", self.path.display());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each check is in one group, once, and they're numbered 1 to the
+    /// last with no gap, each with a name of its own: results.txt and
+    /// `gui-check --list` name every one.
+    #[test]
+    fn every_check_is_listed_once_by_number() {
+        let all = Check::all();
+        let numbers: Vec<u8> = all.iter().map(|check| check.number()).collect();
+        let last = u8::try_from(all.len()).expect("fewer than 256 checks");
+        assert_eq!(numbers, (1..=last).collect::<Vec<_>>(), "{all:?}");
+        let mut names: Vec<&str> = all.iter().map(|check| check.name()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), all.len(), "two checks share a name");
+        for name in names {
+            assert!(
+                !name.is_empty() && !name.contains(char::is_whitespace),
+                "{name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_list_is_one_check_to_a_line_as_results_txt_names_it() {
+        let list = list();
+        let lines: Vec<&str> = list.lines().collect();
+        assert_eq!(lines.len(), Check::all().len());
+        assert_eq!(lines[0], "1 driver");
+        assert!(lines.contains(&"9 update-banner"), "{list}");
+        assert!(list.ends_with('\n'));
+    }
+
+    /// A run passes only when every listed check passed.
+    #[test]
+    fn all_passed_needs_every_listed_check() {
+        let mut report = Report::new(std::path::Path::new("unused"));
+        for check in Check::all() {
+            report.results.insert(check, Ok("fine".to_owned()));
+        }
+        assert!(report.all_passed());
+        let last = *Check::all().last().expect("checks");
+        report.results.remove(&last);
+        assert!(!report.all_passed());
     }
 }

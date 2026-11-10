@@ -39,6 +39,24 @@ use report::Report;
 const CHECKS_STACK: usize = 32 * 1024 * 1024;
 
 fn main() -> ExitCode {
+    // `--list`: every check, as results.txt names them, for
+    // `scripts/gui-check.sh` (and anyone wanting to know what a run does).
+    // Nothing else is an argument: the checks' settings are the
+    // environment's (`config.rs`).
+    match std::env::args().nth(1).as_deref() {
+        None => {}
+        Some("--list") => {
+            print!("{}", report::list());
+            return ExitCode::SUCCESS;
+        }
+        Some(other) => {
+            eprintln!(
+                "gui-check: unknown argument {other:?}; --list prints the checks, \
+                 and scripts/gui-check.sh runs them"
+            );
+            return ExitCode::from(2);
+        }
+    }
     let checks = std::thread::Builder::new()
         .name("gui-check".to_owned())
         .stack_size(CHECKS_STACK)
