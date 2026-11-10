@@ -53,8 +53,7 @@ use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Serialize;
-use wasm_bindgen::closure::Closure;
-use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::JsValue;
 use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge::{self, NoteRequest, OtherNote};
@@ -158,6 +157,8 @@ struct Editor {
     busy: StoredValue<bool>,
     /// The pause in typing being waited for, to keep a draft.
     draft_timer: StoredValue<Option<i32>>,
+    /// What that timer calls: one callback, made once (`dom::kept_callback`).
+    draft_later: StoredValue<Option<js_sys::Function>, LocalStorage>,
     title: RwSignal<String>,
     passage_html: RwSignal<String>,
     text_shown: RwSignal<String>,
@@ -241,10 +242,14 @@ impl Editor {
     // ---- Drafts.
 
     fn cancel_draft_timer(self) {
-        if let (Some(timer), Some(window)) = (self.draft_timer.get_value(), web_sys::window()) {
-            window.clear_timeout_with_handle(timer);
-        }
+        dom::clear_timeout(self.draft_timer.get_value());
         self.draft_timer.set_value(None);
+    }
+
+    /// The pause in typing has come: the text is kept as a draft.
+    fn on_draft_timer(self) {
+        self.draft_timer.set_value(None);
+        self.keep_draft();
     }
 
     /// Something was typed: the text is kept as a draft once typing
@@ -257,16 +262,10 @@ impl Editor {
         });
         self.update_controls();
         self.cancel_draft_timer();
-        let later = Closure::once_into_js(move || {
-            self.draft_timer.set_value(None);
-            self.keep_draft();
-        });
-        let timer = web_sys::window().and_then(|w| {
-            w.set_timeout_with_callback_and_timeout_and_arguments_0(
-                later.unchecked_ref(),
-                note_text::DRAFT_DELAY_MS,
-            )
-            .ok()
+        let timer = self.draft_later.with_value(|later| {
+            later
+                .as_ref()
+                .and_then(|later| dom::set_timeout(later, note_text::DRAFT_DELAY_MS))
         });
         match timer {
             Some(timer) => self.draft_timer.set_value(Some(timer)),
@@ -772,6 +771,8 @@ impl Editor {
     }
 
     fn listen(self) {
+        self.draft_later
+            .set_value(Some(dom::kept_callback(move || self.on_draft_timer())));
         dom::on_document_event(bridge::NOTE_EVENT, move |event: CustomEvent| {
             event.prevent_default();
             match bridge::note_request(&event) {
@@ -825,6 +826,7 @@ pub fn NoteEditor() -> impl IntoView {
         next_id: StoredValue::new(0),
         busy: StoredValue::new(false),
         draft_timer: StoredValue::new(None),
+        draft_later: StoredValue::new_local(None),
         title: RwSignal::new(String::new()),
         passage_html: RwSignal::new(String::new()),
         text_shown: RwSignal::new(String::new()),

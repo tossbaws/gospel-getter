@@ -27,7 +27,6 @@
 use std::cell::RefCell;
 
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{HtmlButtonElement, HtmlElement, HtmlOptionElement, HtmlSelectElement};
@@ -77,6 +76,9 @@ struct State {
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
+    /// What the toast's timer calls ([`fade_toast`]): one callback, made
+    /// once (`dom::kept_callback`).
+    static FADE_TOAST: js_sys::Function = dom::kept_callback(fade_toast);
 }
 
 /// The glue's state, never held while anything else runs.
@@ -211,9 +213,7 @@ pub fn set_data_status_with_action(
 /// [`set_data_status`], fading after `duration` ms: the toast, unless it's
 /// hidden.
 fn show_data_status(message: &str, is_error: bool, duration: i32) -> Option<HtmlElement> {
-    if let (Some(timer), Some(window)) = (with(|s| s.toast_timer.take()), web_sys::window()) {
-        window.clear_timeout_with_handle(timer);
-    }
+    dom::clear_timeout(with(|s| s.toast_timer.take()));
     let status = by_id("data-status")?;
     // An action's button, about to go with the message it ended.
     let had_focus = dom::active_element().is_some_and(|active| status.contains(Some(&active)));
@@ -238,24 +238,25 @@ fn show_data_status(message: &str, is_error: bool, duration: i32) -> Option<Html
         &JsValue::from_str(&bottom),
     );
     let _ = status.class_list().remove_1("is-hidden");
-    let fade = Closure::once_into_js(move || {
-        if let Some(status) = by_id("data-status") {
-            let _ = status.class_list().add_1("is-hidden");
-            if let Ok(Some(action)) = status.query_selector(".toast-action") {
-                let had_focus = dom::active_element().is_some_and(|a| a == action);
-                action.remove();
-                if had_focus {
-                    bridge::focus_home();
-                }
-            }
-        }
-    });
-    let timer = web_sys::window().and_then(|w| {
-        w.set_timeout_with_callback_and_timeout_and_arguments_0(fade.unchecked_ref(), duration)
-            .ok()
-    });
+    let timer = FADE_TOAST.with(|fade| dom::set_timeout(fade, duration));
     with(|s| s.toast_timer = timer);
     Some(status)
+}
+
+/// The toast's time is up: it fades, and its button (if it has one) goes,
+/// focus in it going home.
+fn fade_toast() {
+    with(|s| s.toast_timer = None);
+    if let Some(status) = by_id("data-status") {
+        let _ = status.class_list().add_1("is-hidden");
+        if let Ok(Some(action)) = status.query_selector(".toast-action") {
+            let had_focus = dom::active_element().is_some_and(|a| a == action);
+            action.remove();
+            if had_focus {
+                bridge::focus_home();
+            }
+        }
+    }
 }
 
 /// An export or import is running, or done: ☰'s Import data… is disabled

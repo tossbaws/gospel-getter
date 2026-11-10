@@ -115,6 +115,9 @@ struct State {
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
+    /// What the scrolling's timer calls ([`save_place_soon`]): one
+    /// callback, made once (`dom::kept_callback`).
+    static SAVE_PLACE: js_sys::Function = dom::kept_callback(save_place);
 }
 
 /// The reader's state, never held while the page is told anything (its
@@ -775,17 +778,9 @@ fn save_place() {
 /// A scroll: where the reader is is saved once the page has been still for
 /// [`PLACE_SAVE_MS`].
 fn save_place_soon() {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let save = Closure::once_into_js(save_place);
-    let timer = window
-        .set_timeout_with_callback_and_timeout_and_arguments_0(save.unchecked_ref(), PLACE_SAVE_MS)
-        .ok();
+    let timer = SAVE_PLACE.with(|save| dom::set_timeout(save, PLACE_SAVE_MS));
     let replaced = with(|s| std::mem::replace(&mut s.place_timer, timer));
-    if let Some(replaced) = replaced {
-        window.clear_timeout_with_handle(replaced);
-    }
+    dom::clear_timeout(replaced);
 }
 
 /// Boot's chapter is on screen: the verse the reader was at goes back to

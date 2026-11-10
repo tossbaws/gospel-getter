@@ -95,6 +95,9 @@ struct Elements {
 thread_local! {
     static ELEMENTS: RefCell<Option<Rc<Elements>>> = const { RefCell::new(None) };
     static STATE: RefCell<State> = RefCell::new(State::default());
+    /// What the status line's timer calls ([`clear_status`]): one callback,
+    /// made once (`dom::kept_callback`).
+    static CLEAR_STATUS: js_sys::Function = dom::kept_callback(clear_status);
 }
 
 fn elements() -> Option<Rc<Elements>> {
@@ -455,17 +458,13 @@ fn window_height() -> f64 {
         .unwrap_or(0.0)
 }
 
-fn later(ms: i32, f: impl FnOnce() + 'static) -> Option<i32> {
+/// Runs `f` in `ms`, once. It's never cancelled (it gives no handle to
+/// cancel it with), so its callback is always called, and so freed; a
+/// timer that may be cancelled has a callback of its own, made once
+/// (`dom::kept_callback`), as the status line's has.
+fn later(ms: i32, f: impl FnOnce() + 'static) {
     let f = Closure::once_into_js(f);
-    web_sys::window()?
-        .set_timeout_with_callback_and_timeout_and_arguments_0(f.unchecked_ref(), ms)
-        .ok()
-}
-
-fn cancel(timer: Option<i32>) {
-    if let (Some(timer), Some(window)) = (timer, web_sys::window()) {
-        window.clear_timeout_with_handle(timer);
-    }
+    let _ = dom::set_timeout(f.unchecked_ref(), ms);
 }
 
 /// A value as a JavaScript template would write it: a string as itself,
@@ -504,7 +503,7 @@ fn set_action_status(message: &str, is_error: bool, undo: Option<JsValue>, durat
         s.undo = undo;
         s.status_timer.take()
     });
-    cancel(timer);
+    dom::clear_timeout(timer);
     els.status.set_text_content(Some(message));
     toggle_class(&els.status, "is-error", is_error);
     if has_undo
@@ -517,17 +516,22 @@ fn set_action_status(message: &str, is_error: bool, undo: Option<JsValue>, durat
         let _ = els.status.append_with_node_1(&button);
     }
     if !message.is_empty() && !is_error {
-        let timer = later(duration, || {
-            let Some(els) = elements() else {
-                return;
-            };
-            let had_focus = contains_focus(&els.status);
-            status(String::new(), false);
-            if had_focus && els.note_add.is_connected() {
-                dom::focus(&els.note_add);
-            }
-        });
+        let timer = CLEAR_STATUS.with(|clear| dom::set_timeout(clear, duration));
         with(|s| s.status_timer = timer);
+    }
+}
+
+/// The status line's time is up: it's cleared, focus in it (its Undo)
+/// going to + Add note.
+fn clear_status() {
+    with(|s| s.status_timer = None);
+    let Some(els) = elements() else {
+        return;
+    };
+    let had_focus = contains_focus(&els.status);
+    status(String::new(), false);
+    if had_focus && els.note_add.is_connected() {
+        dom::focus(&els.note_add);
     }
 }
 
@@ -2207,7 +2211,7 @@ fn on_shift_pointer(event: &web_sys::MouseEvent) {
             sync_ghost();
             if with(|s| s.ghost_press || s.swallow_click) {
                 // After the gesture's click, which comes straight after.
-                let _ = later(0, || {
+                later(0, || {
                     with(|s| {
                         s.ghost_press = false;
                         s.swallow_click = false;
@@ -2801,6 +2805,6 @@ pub fn mount() {
     // allow it again.
     dom::on(&document, "focusin", |_| sync_ghost());
     dom::on(&document, "focusout", |_| {
-        let _ = later(0, sync_ghost);
+        later(0, sync_ghost);
     });
 }
