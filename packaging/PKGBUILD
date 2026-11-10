@@ -3,10 +3,13 @@
 # DRAFT — the metadata, dependencies, and build/package() steps below
 # reflect the actual project layout (src-tauri/, the real dependency list
 # this binary links against, the generated icon set) and there's no
-# placeholder repo URL left. It has NOT been build-tested via `makepkg`
-# and has NOT been submitted to the AUR. `source=` points at the GitHub
-# tag for this version (v$_pkgver); it only resolves once that tag has
-# been pushed. Before this can be submitted to the AUR:
+# placeholder repo URL left. It has NOT been submitted to the AUR. It has
+# been built with `makepkg` once, from the v2.28.0 tag's archive in a clean
+# archlinux:base-devel container (2026-11-09): the page and the app built
+# offline, and the package installed, with gospel-getter-cli running.
+# `source=` points at the GitHub tag for this version (v$_pkgver); it only
+# resolves once that tag has been pushed. Before this can be submitted to
+# the AUR:
 #
 #   1. Confirm the v$_pkgver tag exists on GitHub (it's created as part of
 #      cutting a GitHub release at this version).
@@ -14,13 +17,15 @@
 #      github.com):
 #        updpkgsums
 #      sha256sums is deliberately left as SKIP below rather than a
-#      fabricated value — do not hand-write a checksum here.
-#   3. Build it for real from a clean checkout of the tagged tarball, not
-#      from a working tree:
-#        makepkg -si
-#      and fix whatever that turns up — this is a different code path
-#      (extracting a release tarball, not building in place) and hasn't
-#      been exercised.
+#      fabricated value — do not hand-write a checksum here. (The tools'
+#      sha256sums_* are real: each matches its release's own.)
+#   3. Build it again from the tag being submitted, in a clean chroot or
+#      container, not from a working tree, and go through what namcap and
+#      makepkg still report: the libraries the binary links directly
+#      (namcap names cairo, dbus, gdk-pixbuf2, glib2, glibc,
+#      hicolor-icon-theme, libgcc and libsoup3 as only implicitly
+#      satisfied), build paths left in the binary ("reference to
+#      $srcdir"), and an empty -debug package.
 #   4. Only then create an AUR account and `git push` this file to a new
 #      aur.archlinux.org/gospel-getter.git — see
 #      https://wiki.archlinux.org/title/AUR_submission_guidelines
@@ -57,6 +62,10 @@ license=('MIT')
 depends=('webkit2gtk-4.1' 'gtk3')
 # rust-wasm: the wasm32-unknown-unknown target the page compiles to.
 makedepends=('cargo' 'rust-wasm')
+# Not makepkg's LTO: its -flto=auto in CFLAGS makes the SQLite that
+# libsqlite3-sys builds (with the cc crate) GCC LTO objects, which the Rust
+# linker (lld) can't read, so the app and the CLI fail to link.
+options=('!lto')
 backup=()
 _trunk=0.21.14
 _wasm_bindgen=0.2.129

@@ -322,9 +322,10 @@ pieces (`ui-leptos/`, compiled to WebAssembly) are built first by
 and the target (`rustup target add wasm32-unknown-unknown`). See
 `ui-leptos/README.md`.
 
-**Arch Linux.** `packaging/PKGBUILD` is a draft. It hasn't been tested with
-`makepkg` and is **not published to the AUR**; the file lists what's left
-to do.
+**Arch Linux.** `packaging/PKGBUILD` is a draft and is **not published to
+the AUR**. It builds with `makepkg` from a release's tagged source (checked
+with 2.28.0's, in a clean Arch container); the file lists what's left before
+it can be submitted.
 
 Every push to `main` also builds untagged installers as
 [workflow artifacts](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml).
