@@ -82,6 +82,46 @@ const RESTORE_INVOKE_JS: &str =
     "if (window.__guiCheckCore) window.__TAURI__.core = window.__guiCheckCore;
     return window.__TAURI__.core === window.__guiCheckCore;";
 
+/// Before a go-to's Enter ([`Run::go_to`]): marks the pane on screen (the
+/// wait is for one without the mark), and starts noting what happens from
+/// Enter on, for the wait's failure to say (check 45 once timed out with
+/// the box closed and John 3 still read, which could have been Enter's
+/// `get_reading` left unanswered, a later load overtaking it, or Enter
+/// landing on another control). The page's `invoke` is a stand-in until
+/// [`GO_TO_FORGET_JS`]: each command still goes to the page's own `invoke`
+/// and its answer back as it came, and is noted with whether that answer
+/// has come. Each key pressed is noted with what it landed on. Prepended
+/// with [`DESCRIBE_JS`].
+const GO_TO_NOTE_JS: &str = "const inner = document.getElementById('reading-pane-inner');
+    if (inner) inner.dataset.guiCheckOld = '1';
+    const tauri = window.__TAURI__;
+    const core = tauri.core;
+    const noted = { core, commands: [], keys: [] };
+    noted.key = (e) => noted.keys.push(`${e.key} on ${describe(e.target)}`);
+    tauri.core = Object.assign({}, core, {
+        invoke(cmd, args, options) {
+            let sent;
+            try { sent = JSON.stringify(args); } catch (e) { sent = '?'; }
+            const call = { said: `${cmd} ${sent}`, answer: 'not yet answered' };
+            noted.commands.push(call);
+            const answer = core.invoke(cmd, args, options);
+            answer.then(() => { call.answer = 'answered'; }, (e) => { call.answer = `failed: ${e}`; });
+            return answer;
+        },
+    });
+    document.addEventListener('keydown', noted.key, true);
+    window.__guiCheckGoTo = noted;
+    return tauri.core !== core;";
+
+/// Stops what [`GO_TO_NOTE_JS`] started: the page's own `invoke` back.
+const GO_TO_FORGET_JS: &str = "const noted = window.__guiCheckGoTo;
+    if (noted) {
+        document.removeEventListener('keydown', noted.key, true);
+        window.__TAURI__.core = noted.core;
+        delete window.__guiCheckGoTo;
+    }
+    return null;";
+
 /// The plain-text fallback's line (`ui/index.html`).
 const PLAIN_TEXT: &str =
     "This chapter is shown as plain text: the rest of the reader isn’t available.";
@@ -97,7 +137,8 @@ impl Run<'_> {
     /// heading already says it, and the redraw clears the selection: so the
     /// pane on screen is marked first, and the wait is for one without the
     /// mark. Nothing done after it (a click, j) lands on a pane about to be
-    /// replaced.
+    /// replaced. If the chapter isn't read, the failure says what Enter
+    /// landed on and what was sent and answered since ([`GO_TO_NOTE_JS`]).
     pub(super) async fn go_to(&self, reference: &str, heading: &str) -> Result<Value> {
         self.plain_reading().await?;
         self.open_search_by_key().await?;
@@ -110,27 +151,45 @@ impl Run<'_> {
                 Vec::new(),
             )
             .await?;
-        self.ui
-            .js(
-                "const inner = document.getElementById('reading-pane-inner');
-                 if (inner) inner.dataset.guiCheckOld = '1'; return null;",
-                Vec::new(),
-            )
+        let noting = self
+            .ui
+            .js(&format!("{DESCRIBE_JS} {GO_TO_NOTE_JS}"), Vec::new())
             .await?;
-        self.ui.press("press Enter (go there)", Key::Enter).await?;
-        self.ui
-            .wait_with(
-                &format!("{heading} to be read in a pane drawn afresh, the box closed"),
-                &format!(
-                    "const seen = (() => {{ {HERE_JS} }})();
-                     const inner = document.getElementById('reading-pane-inner');
-                     return [seen.heading === arguments[0] && seen.title === `${{seen.reference}} — Gospel Getter`
-                         && !!inner && inner.dataset.guiCheckOld === undefined
-                         && document.getElementById('search-panel').hidden, seen];"
-                ),
-                vec![json!(heading)],
-            )
-            .await
+        ensure!(
+            noting == Value::Bool(true),
+            "the page's invoke couldn't be wrapped"
+        );
+        let read = async {
+            self.ui.press("press Enter (go there)", Key::Enter).await?;
+            self.ui
+                .wait_with(
+                    &format!("{heading} to be read in a pane drawn afresh, the box closed"),
+                    &format!(
+                        "{DESCRIBE_JS} const seen = (() => {{ {HERE_JS} }})();
+                         const inner = document.getElementById('reading-pane-inner');
+                         const box = document.getElementById('search-panel');
+                         const read = seen.heading === arguments[0] && seen.title === `${{seen.reference}} — Gospel Getter`
+                             && !!inner && inner.dataset.guiCheckOld === undefined && box.hidden;
+                         if (!read) {{
+                             const noted = window.__guiCheckGoTo;
+                             seen.box = box.hidden ? 'closed' : 'open';
+                             seen.pane = !inner ? 'none'
+                                 : inner.dataset.guiCheckOld === undefined ? 'drawn afresh' : 'the one before Enter';
+                             seen.focus = describe(document.activeElement);
+                             seen.keys = noted ? noted.keys : null;
+                             seen.sent = noted ? noted.commands.map((c) => `${{c.said}}: ${{c.answer}}`) : null;
+                         }}
+                         return [read, seen];"
+                    ),
+                    vec![json!(heading)],
+                )
+                .await
+        }
+        .await;
+        let forgot = self.ui.js(GO_TO_FORGET_JS, Vec::new()).await;
+        let read = read?;
+        forgot?;
+        Ok(read)
     }
 
     /// Check 38: the chapter's end turns the chapter, from its top: Next,
