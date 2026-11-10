@@ -108,6 +108,9 @@ struct State {
     place_timer: Option<i32>,
     /// The chapter Try again reads again.
     retry: Option<(i64, i64)>,
+    /// The translation is being switched for a jump that follows at once
+    /// ([`switch_for_jump`]): the chapter on screen isn't read again in it.
+    jump_follows: bool,
     /// Each bundled translation's credit, from boot, for About.
     credits: Vec<String>,
     history: History,
@@ -1133,6 +1136,17 @@ pub fn start(home: Home, sent: Option<Sent>) -> Load {
     run(Request::Start { home }, sent)
 }
 
+/// Switches to translation `code` for a jump asked for straight after
+/// (Recent places): everything that hears of a new translation hears of it
+/// (the Library's previews, Aa, the search box), but the chapter on screen
+/// isn't read again in it first, as `Request::Load` with a translation
+/// doesn't; the jump reads its own (C-04).
+pub fn switch_for_jump(code: &str) {
+    with(|s| s.jump_follows = true);
+    aa::choose_translation(code);
+    with(|s| s.jump_follows = false);
+}
+
 /// Starts what `request` asks for, now (anything it sends is sent within
 /// this call); its end is the load's: whether a chapter was put on screen.
 pub fn ask(request: Request) -> Load {
@@ -1195,6 +1209,10 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
         }
         Request::Translation => {
             show_translation();
+            // A jump follows, and reads its own chapter in it.
+            if with(|s| s.jump_follows) {
+                return Box::pin(async { false });
+            }
             let inner = pane_inner();
             let number = |name| {
                 inner

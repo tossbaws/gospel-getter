@@ -23,7 +23,6 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{Element, HtmlElement, HtmlOptionElement, HtmlSelectElement};
 
-use crate::aa;
 use crate::bridge;
 use crate::dom;
 use crate::ipc;
@@ -270,7 +269,7 @@ fn go_recent(index: usize) {
         return;
     };
     if place.translation != bridge::translation_code() {
-        aa::choose_translation(&place.translation);
+        reader::switch_for_jump(&place.translation);
     }
     let load = reader::ask(Request::Jump {
         book_id: place.book_id,
