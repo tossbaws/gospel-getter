@@ -40,6 +40,8 @@ mod contention_tests;
 mod findings_tests;
 #[cfg(test)]
 mod read_only_tests;
+#[cfg(test)]
+mod search_tests;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 #[cfg(test)]

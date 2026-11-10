@@ -17,7 +17,7 @@ use gospel_getter_core::domain::query::SearchQuery;
 use gospel_getter_core::passage_reference::passage_reference;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use super::{Library, MAX_PASSAGE_VERSES, OPEN_THE_APP};
 
@@ -120,8 +120,9 @@ struct Search {
     /// The first verse with the quote's first words, if any: book, chapter
     /// and verse. It may only have those words in another case or punctuation.
     closest: Option<(i64, i64, i64)>,
-    /// The quote's words are in more verses than were read, in a way that could
-    /// have hidden it: see [`may_have_missed`].
+    /// Not every place it could be was seen: the quote's words are in more
+    /// verses than were read, in a way that could have hidden it (see
+    /// [`may_have_missed`]), or it's in more places than are given.
     cut_short: bool,
 }
 
@@ -271,9 +272,17 @@ impl Library {
         })
     }
 
-    /// Where the quote is in this translation, by phrase search, then reading
-    /// each chapter a search suggests. Stops at the first phrase that leads to
-    /// the quote, so `places` are in Bible order.
+    /// Where the quote is in this translation: every place, by phrase search,
+    /// then reading each chapter a search suggests. Every phrase is searched
+    /// for, not only until one leads to the quote: a place one phrase finds,
+    /// another can't, as when a verse ends among its words (the quote in one
+    /// verse and across two, say). Each chapter is read once, and a place
+    /// found again is the same place; `places` are in Bible order.
+    ///
+    /// Bounded: at most one search of [`MAX_CANDIDATES`] verses for each of the
+    /// phrases (each different phrase once), and once more than
+    /// `MAX_CANDIDATES` places are known it stops, keeping the first of them,
+    /// and says it hasn't seen them all (`cut_short`).
     async fn search_for(&self, translation: &Translation, quote: &str) -> anyhow::Result<Search> {
         if !db::search::search_index_is_current(&self.pool, translation.id).await? {
             bail!("The search index isn't built yet. {OPEN_THE_APP}");
@@ -281,16 +290,25 @@ impl Library {
         let words = quote_words(quote);
         let limit = i64::from(MAX_CANDIDATES);
         let mut search = Search::default();
+        // By book, chapter and verses: Bible order, each place once.
+        let mut places = BTreeMap::new();
+        let mut searched = HashSet::new();
         let mut chapters_read = HashSet::new();
         let mut too_common = HashSet::new();
-        for (tried, phrase) in phrases_of(&words).enumerate() {
+        let mut too_many = false;
+        for phrase in phrases_of(&words) {
+            // Repeated words make the same phrase more than once.
+            let first = searched.is_empty();
+            if !searched.insert(phrase) {
+                continue;
+            }
             let query = SearchQuery {
                 words: Vec::new(),
                 phrases: vec![phrase.to_vec()],
             };
             let (total, hits) =
                 db::search::search_verses(&self.pool, translation.id, &query, limit, 0).await?;
-            if tried == 0 {
+            if first {
                 search.closest = hits
                     .first()
                     .map(|hit| (hit.book_id, hit.chapter, hit.verse));
@@ -306,24 +324,22 @@ impl Library {
                     .joined_chapter(translation, hit.book_id, hit.chapter)
                     .await?;
                 let name = &self.book(hit.book_id)?.name;
-                search
-                    .places
-                    .extend(
-                        joined
-                            .places_of(quote)
-                            .into_iter()
-                            .map(|(verses, text)| QuotePlace {
-                                reference: passage_reference(name, hit.chapter, Some(verses)),
-                                text: text.to_string(),
-                            }),
-                    );
+                for (verses, text) in joined.places_of(quote) {
+                    places
+                        .entry((hit.book_id, hit.chapter, verses))
+                        .or_insert_with(|| QuotePlace {
+                            reference: passage_reference(name, hit.chapter, Some(verses)),
+                            text: text.to_string(),
+                        });
+                }
             }
-            if !search.places.is_empty() {
+            if places.len() > MAX_CANDIDATES as usize {
+                too_many = true;
                 break;
             }
         }
-        search.places.truncate(MAX_CANDIDATES as usize);
-        search.cut_short = may_have_missed(&words, &too_common);
+        search.places = places.into_values().take(MAX_CANDIDATES as usize).collect();
+        search.cut_short = too_many || may_have_missed(&words, &too_common);
         Ok(search)
     }
 

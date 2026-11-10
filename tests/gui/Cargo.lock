@@ -269,6 +269,7 @@ dependencies = [
  "serde_json",
  "thirtyfour",
  "tokio",
+ "windows-sys",
 ]
 
 [[package]]

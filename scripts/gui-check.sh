@@ -11,7 +11,8 @@
 # The out-dir (default target/gui-check/<timestamp>/) gets results.txt (one
 # PASS/FAIL line per check, with the reason), steps.log, screenshots/*.png
 # (taken by WebKit or WebView2 through WebDriver), app.log, driver.log
-# (tauri-driver with the native driver's own output) and environment.txt.
+# (tauri-driver with the native driver's own output) and environment.txt;
+# on Windows, launched.txt too (the apps gui-launch started).
 # Exit code 0 only if every check passed.
 #
 # Checks 1 to 8, 14 to 16 (the Library), 17 to 19 (search and the
@@ -34,10 +35,11 @@
 # references, Copy as Markdown), 67 (the bar's Back, Forward and Recent
 # places), 68 (the bar's chapter arrows), 69 (Compare with Notes: the
 # notes beside a text that never moves), 71 (☰ → Export data…'s chooser,
-# and the Library's Notes tab without a button) and 72 (Aa's Single-key
+# and the Library's Notes tab without a button), 72 (Aa's Single-key
 # shortcuts off: G and / do nothing, Ctrl+K still opens the palette, and the
-# shortcuts sheet says so) run on the app given; for 58 (a cold start to
-# the saved chapter), 59 (at the verse the reader was at), 26 and 45 it is
+# shortcuts sheet says so) and 73 (the app started again while it's open:
+# the second launch hands over and exits) run on the app given; for 58 (a
+# cold start to the saved chapter), 59 (at the verse the reader was at), 26 and 45 it is
 # closed and started again on the same data, and for 65 (a note being typed
 # as the app quits, offered back as a draft) once more. The updater's checks (9 to 13) run on
 # GUI_CHECK_UPDATER_APP: the GUI checks' test build (cargo build --release
@@ -73,7 +75,12 @@
 # is why this runs there only. Edge WebDriver runs with --verbose (its log
 # goes to driver.log), the app is started through tests/gui's gui-launch so
 # its own log reaches app.log, and windows-timeline.log follows the app's
-# processes while the checks run.
+# processes while the checks run. Edge WebDriver ends a session by
+# terminating gui-launch, so gui-launch ties the app to itself (a job
+# object) and records it in launched.txt (pid, creation time, program);
+# before each session starts, the checks make sure every app recorded has
+# exited, since the next would otherwise hand over to it (one app at a
+# time) and exit.
 # Since WebView2 Runtime 150 an elevated app ignores the variable Edge
 # WebDriver opens the app's debugging port with, so CI sets the HKLM policy
 # for it (see the gui-windows job in dist.yml); this script never changes
@@ -466,9 +473,13 @@ else
     launch="$(cygpath -w "$launcher")"
     mkdir -p "$work/export"
     export_dir="$(cygpath -w "$work/export")"
-    # gui-launch gives the app as shipped (not the test build) this proxy.
+    # gui-launch gives the app as shipped (not the test build) this proxy,
+    # and records each app it starts in GUI_LAUNCH_PIDS, which the checks
+    # read to make sure it has exited before they start the next.
+    : >"$out/launched.txt"
     run_env=(env GUI_LAUNCH_TARGET="$(cygpath -w "$app")" GUI_LAUNCH_LOG="$(cygpath -w "$out/app.log")"
         GUI_LAUNCH_CUT_OFF_PROXY="$cut_off_proxy"
+        GUI_LAUNCH_PIDS="$(cygpath -w "$out/launched.txt")"
         GOSPEL_GETTER_TEST_UPDATER="$(cygpath -w "$updater_settings")")
     if [[ -n $updater_app ]]; then
         # The same launcher under another name, which starts the test build

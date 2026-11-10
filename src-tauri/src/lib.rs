@@ -28,7 +28,8 @@ pub use gospel_getter_core::{book_aliases, db, domain, passage_reference, verse_
 
 use anyhow::Context;
 use tauri::Manager;
-use tracing::{Level, info};
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 
 use commands::AppState;
@@ -38,11 +39,17 @@ use db::create_pool;
 /// where it was last time.
 pub fn run() {
     tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
+        // Up to info, but only warnings from zbus (the session bus that
+        // `window::single_instance_plugin` uses on Linux): its connections'
+        // info-level spans would fill the log on every launch.
+        .with_env_filter(EnvFilter::new("info,zbus=warn"))
         .with_span_events(FmtSpan::CLOSE)
         .init();
 
     tauri::Builder::default()
+        // First, before anything else starts: a second launch hands over to
+        // the app already open and exits (see `window::single_instance_plugin`).
+        .plugin(window::single_instance_plugin())
         // Native open/save dialogs, used only from Rust (see
         // `commands::export_reader_data`); the webview gets no dialog or
         // file-system permission.
@@ -140,23 +147,36 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
     let db_path = app_data_dir.join(db::DATABASE_FILE);
     info!("Using database at {}", db_path.display());
 
-    // Best-effort: if we can't resolve the home directory, or the legacy
-    // database isn't there, `migrate_legacy_db_if_needed` is a no-op and
-    // we just proceed to create a fresh database, same as any other first
-    // run.
+    // If we can't resolve the home directory, or the legacy database isn't
+    // there, `migrate_legacy_db_if_needed` is a no-op and we just proceed to
+    // create a fresh database, same as any other first run. If it's there
+    // and can't be brought over, the app doesn't start: a fresh database
+    // in its place would be taken for the migrated one on every later
+    // launch, and the reader's place left behind for good. Nothing was
+    // changed, so the next launch simply tries again.
     if let Ok(home_dir) = app.path().home_dir() {
         let legacy_db_path = home_dir.join(".local/share/gospel-getter/data/gospel_getter.db");
-        match db::migrate_legacy_db_if_needed(&db_path, &legacy_db_path) {
+        let migrated = tauri::async_runtime::block_on(db::migrate_legacy_db_if_needed(
+            &db_path,
+            &legacy_db_path,
+        ));
+        match migrated {
             Ok(true) => info!(
                 "Migrated legacy database from {} to {}",
                 legacy_db_path.display(),
                 db_path.display()
             ),
             Ok(false) => {}
-            Err(e) => tracing::warn!(
-                "Failed to migrate legacy database from {}: {e}",
-                legacy_db_path.display()
-            ),
+            Err(e) => {
+                tracing::error!(
+                    "Failed to migrate legacy database from {}: {e:#}. It was left as it \
+                     was and no database was created at {}, so the next launch tries again.",
+                    legacy_db_path.display(),
+                    db_path.display()
+                );
+                tell_migration_failed(app, &legacy_db_path, &e);
+                return Ok(());
+            }
         }
     }
 
@@ -177,6 +197,31 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// What the reader is told when the earlier Gospel Getter's database
+/// couldn't be brought over, so the app hasn't started: there's no window
+/// yet, so it's a native message, and the app quits when it's closed.
+fn tell_migration_failed(app: &tauri::App, legacy_db_path: &std::path::Path, e: &anyhow::Error) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    let handle = app.handle().clone();
+    app.dialog()
+        .message(migration_failed_message(legacy_db_path, e))
+        .title("Gospel Getter couldn't start")
+        .kind(MessageDialogKind::Error)
+        .show(move |_| handle.exit(1));
+}
+
+/// The words of [`tell_migration_failed`].
+fn migration_failed_message(legacy_db_path: &std::path::Path, e: &anyhow::Error) -> String {
+    format!(
+        "Gospel Getter couldn't bring over the database of the earlier Gospel Getter, so it \
+         hasn't started: starting without it would leave your reading place behind. Nothing \
+         was changed.\n\nThat database is {}. If the earlier Gospel Getter is open, close it, \
+         then open Gospel Getter again to try once more. To start without it instead, move that \
+         file somewhere else first.\n\nWhat went wrong: {e:#}",
+        legacy_db_path.display()
+    )
 }
 
 /// Connect to the database, run migrations/seeding, and load the books and
@@ -242,6 +287,27 @@ fn spawn_search_index_build(state: &AppState) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod migration_tests {
+    /// The reader is told where the earlier database is, that nothing was
+    /// changed, how to try again or start without it, and what went wrong.
+    #[test]
+    fn a_failed_migration_tells_the_reader_where_the_file_is_and_what_to_do() {
+        let path = std::path::Path::new("/home/reader/.local/share/gospel-getter/data/x.db");
+        let e = anyhow::anyhow!("disk I/O error").context("Failed to snapshot it");
+        let message = super::migration_failed_message(path, &e);
+        for part in [
+            "/home/reader/.local/share/gospel-getter/data/x.db",
+            "Nothing was changed.",
+            "open Gospel Getter again to try once more",
+            "move that file somewhere else first",
+            "What went wrong: Failed to snapshot it: disk I/O error",
+        ] {
+            assert!(message.contains(part), "{part:?} in {message:?}");
+        }
+    }
 }
 
 #[cfg(test)]

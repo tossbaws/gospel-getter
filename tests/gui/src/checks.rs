@@ -32,8 +32,9 @@
 //! references in the card, the Library and the margin, and Copy as
 //! Markdown (66, `notes`); an AI-flagged finding saved by gospel-getter-cli
 //! while the app runs, shown in the margin, opened and kept as the
-//! reader's note (70, `findings`); and, last, the plain-text fallback (44,
-//! `reader`);
+//! reader's note (70, `findings`); the app opened again while it's open,
+//! the second launch handing over and exiting (73, `instance`); and, last,
+//! the plain-text fallback (44, `reader`);
 //! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
 //! Then the app started again on the same data, keeping Aa's settings (26)
 //! and the chapter's lists as left (45), at the verse the first session
@@ -46,7 +47,9 @@ mod beside;
 mod card;
 mod dialogs;
 mod display;
+mod exited;
 mod findings;
+mod instance;
 mod keys;
 mod library;
 mod margin;
@@ -474,6 +477,13 @@ async fn shipped(
             );
         }
         report.record(Check::AiFindings, findings).await;
+        // The app opened again while it's open (73): the second launch
+        // hands over and exits.
+        let second = run.second_launch().await;
+        if second.is_err() {
+            run.failure_screenshot(Check::SecondLaunch).await;
+        }
+        report.record(Check::SecondLaunch, second).await;
 
         if let Err(e) = run.vellum_screenshots().await {
             run.failure_screenshot(Check::Screenshots).await;
@@ -578,8 +588,11 @@ async fn shipped(
 }
 
 /// Starts `app` through tauri-driver: a WebDriver session whose browser
-/// is the app.
+/// is the app. First, every app started before has exited (Windows; see
+/// `exited`): the app is one at a time, and would otherwise hand over to
+/// one still running and exit.
 async fn start_session(config: &Config, app: &str, started: Instant) -> Result<WebDriver> {
+    exited::earlier_apps_exited(config, started).await?;
     log_line(
         started,
         &format!("start the app through tauri-driver ({app})"),

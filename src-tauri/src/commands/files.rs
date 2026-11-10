@@ -34,7 +34,8 @@ pub(crate) struct TempFile {
 }
 
 impl TempFile {
-    /// Close it and rename it over `target` (replacing any file there).
+    /// Close it and rename it over `target` (replacing any file there, which
+    /// then has this file's permissions, not its own).
     fn persist_as(mut self, target: &Path) -> std::io::Result<()> {
         drop(self.file.take());
         let path = self.path.as_ref().expect("not yet persisted");
@@ -76,17 +77,25 @@ fn temp_names(name: &str) -> impl Iterator<Item = String> + '_ {
 /// Create a brand-new file in `dir` with the first of `names` not already
 /// taken. An existing file is never opened, truncated or removed: a name
 /// that exists is skipped.
+///
+/// On Unix it's created readable and writable by the reader alone (mode
+/// 0600, which the umask can only narrow), before a byte is written: an
+/// export holds their notes and highlights, and their own folders may be
+/// open to others on the computer. Renamed into place, it keeps that mode,
+/// so replacing an export never leaves it more readable than it was. On
+/// Windows it gets the folder's inherited permissions, as any new file
+/// there does (and the rename keeps them).
 pub(crate) fn create_temp_file(
     dir: &Path,
     names: impl IntoIterator<Item = String>,
 ) -> std::io::Result<TempFile> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     for name in names {
         let path = dir.join(name);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
+        match options.open(&path) {
             Ok(file) => {
                 return Ok(TempFile {
                     file: Some(file),

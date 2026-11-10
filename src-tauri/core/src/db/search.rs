@@ -15,9 +15,9 @@
 //! Bible order.
 
 use anyhow::{Context, bail};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, SqliteConnection, SqlitePool};
 
-use crate::db::{Db, WritePool};
+use crate::db::Db;
 use crate::domain::kjv_markup::{KJV, VerseText};
 use crate::domain::query::SearchQuery;
 
@@ -55,11 +55,12 @@ pub struct SearchHit {
 
 /// Index every translation that isn't indexed yet, or whose verse count no
 /// longer matches what was indexed (`seed_missing` also clears the record
-/// for anything it seeds), or all of them if the index holds an older
-/// kind of content (see `SEARCH_CONTENT_VERSION`). Each translation is
-/// indexed in its own transaction, so the database stays usable in
-/// between. Returns the ids of the translations it (re)indexed — none at
-/// all on a normal launch.
+/// for anything it seeds), or whose index is missing verses all the same,
+/// or all of them if the index holds an older kind of content (see
+/// `SEARCH_CONTENT_VERSION`). Each translation is indexed a book at a time,
+/// each book in its own transaction, so the database stays usable in
+/// between (see `index_translation`). Returns the ids of the translations
+/// it (re)indexed — none at all on a normal launch.
 pub async fn ensure_search_index(db: &Db) -> anyhow::Result<Vec<i64>> {
     forget_outdated_index(db).await?;
 
@@ -73,9 +74,23 @@ pub async fn ensure_search_index(db: &Db) -> anyhow::Result<Vec<i64>> {
         let (verse_count, indexed_count) =
             verse_and_indexed_counts(db.read(), translation_id).await?;
         if indexed_count == Some(verse_count) {
-            continue;
+            let mut reader = db
+                .read()
+                .acquire()
+                .await
+                .context("Failed to check the search index")?;
+            let coverage = Coverage::of(&mut reader, translation_id).await?;
+            if coverage.is_complete() {
+                continue;
+            }
+            // An index left by an older version, which could mark one
+            // complete that another copy of the app had cleared part of.
+            tracing::warn!(
+                "Translation {translation_id} was marked indexed for search, but isn't \
+                 ({coverage:?}); indexing it again"
+            );
         }
-        index_translation(db, translation_id, verse_count).await?;
+        index_translation(db, translation_id).await?;
         indexed.push(translation_id);
     }
     Ok(indexed)
@@ -160,135 +175,327 @@ async fn forget_outdated_index(db: &Db) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// (Re)index one translation. It's done a book at a time, each in its own
-/// short transaction, so a write of the reader's own waits its turn behind
-/// one book at most (reads don't wait at all); what's indexed is read on
-/// the read pool, between the writes. The translation only counts as
-/// indexed once the last book is in; if the app quits part-way, the next
-/// launch starts that translation over.
-async fn index_translation(db: &Db, translation_id: i64, verse_count: i64) -> anyhow::Result<()> {
-    // The rowid encoding needs every coordinate to fit its field.
-    let (max_book, max_chapter, max_verse): (Option<i64>, Option<i64>, Option<i64>) =
-        sqlx::query_as(
-            "SELECT MAX(book_id), MAX(chapter), MAX(verse) FROM verses WHERE translation_id = $1",
+/// How many times a translation's books are indexed before it's given up
+/// on: once, and again for any that turn out to be missing verses when it's
+/// published (something else cleared them meanwhile).
+const INDEX_ROUNDS: usize = 3;
+
+/// (Re)index one translation (see [`TranslationBuild`]): every book, then
+/// the record that it's indexed, which is only written for an index that
+/// holds every verse. Books found missing verses then are indexed again.
+async fn index_translation(db: &Db, translation_id: i64) -> anyhow::Result<()> {
+    let build = TranslationBuild::plan(db, translation_id).await?;
+    let mut books = build.books.clone();
+    for _ in 0..INDEX_ROUNDS {
+        for &book_id in &books {
+            build
+                .index_book(db, book_id)
+                .await
+                .with_context(|| format!("Failed to index book {book_id} for search"))?;
+        }
+        match build.publish(db).await? {
+            Published::Complete { verses } => {
+                tracing::info!("Indexed translation {translation_id} for search ({verses} verses)");
+                return Ok(());
+            }
+            Published::Incomplete(coverage) => {
+                tracing::warn!(
+                    "Translation {translation_id}'s search index was missing verses as it was \
+                     finished ({coverage:?}), so it isn't marked indexed; indexing those books \
+                     again"
+                );
+                books = coverage.books_to_index(&build.books);
+            }
+        }
+    }
+    bail!(
+        "Translation {translation_id}'s search index was still missing verses after \
+         {INDEX_ROUNDS} tries"
+    )
+}
+
+/// One translation's (re)indexing, a step at a time, so that two copies of
+/// the app (or the app and an older version) building it at once can never
+/// leave it marked indexed while it's missing verses:
+///
+/// - [`index_book`](Self::index_book) replaces one book's rows with its
+///   verses' text in one short transaction, so the index is never missing
+///   part of a book, and a reader's own write waits behind one book at most
+///   (reads don't wait at all). Two builds writing the same book just
+///   replace it with the same text, one after the other.
+/// - [`publish`](Self::publish) records the translation as indexed only if,
+///   in that same transaction, the index holds exactly its verses: every
+///   one, and nothing else (see [`Coverage`]). It's a few milliseconds'
+///   check, not a count copied from `verses`.
+/// - Both only write while the index holds this version's kind of content
+///   ([`SEARCH_CONTENT_VERSION`]): one that a newer version has taken over
+///   (to rebuild with its own) isn't this build's to write to.
+///
+/// Nothing is cleared up front, so a build that's stopped part-way (the
+/// app quits) takes nothing away from the index that another build, or an
+/// earlier launch, put there; and a translation that was indexed stays
+/// searchable while it's indexed again.
+#[derive(Debug)]
+pub(super) struct TranslationBuild {
+    translation_id: i64,
+    code: String,
+    /// Its books, in order.
+    pub(super) books: Vec<i64>,
+}
+
+/// What [`TranslationBuild::publish`] found.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Published {
+    /// The index holds every verse, and is recorded as indexed.
+    Complete { verses: i64 },
+    /// It doesn't, and isn't recorded.
+    Incomplete(Coverage),
+}
+
+impl TranslationBuild {
+    /// What indexing `translation_id` involves: its books.
+    pub(super) async fn plan(db: &Db, translation_id: i64) -> anyhow::Result<Self> {
+        // The rowid encoding needs every coordinate to fit its field.
+        let (max_book, max_chapter, max_verse): (Option<i64>, Option<i64>, Option<i64>) =
+            sqlx::query_as(
+                "SELECT MAX(book_id), MAX(chapter), MAX(verse) FROM verses \
+                 WHERE translation_id = $1",
+            )
+            .bind(translation_id)
+            .fetch_one(db.read())
+            .await
+            .context("Failed to check verse coordinates")?;
+        if translation_id < 1
+            || max_book.unwrap_or(0) >= TRANSLATION_STRIDE / BOOK_STRIDE
+            || max_chapter.unwrap_or(0) >= BOOK_STRIDE / CHAPTER_STRIDE
+            || max_verse.unwrap_or(0) >= CHAPTER_STRIDE
+        {
+            bail!("translation {translation_id} has coordinates too large to index for search");
+        }
+        let code: String = sqlx::query_scalar("SELECT code FROM translations WHERE id = $1")
+            .bind(translation_id)
+            .fetch_one(db.read())
+            .await
+            .context("Failed to read the translation to index")?;
+        let books: Vec<i64> = sqlx::query_scalar(
+            "SELECT DISTINCT book_id FROM verses WHERE translation_id = $1 ORDER BY book_id",
         )
         .bind(translation_id)
-        .fetch_one(db.read())
+        .fetch_all(db.read())
         .await
-        .context("Failed to check verse coordinates")?;
-    if translation_id < 1
-        || max_book.unwrap_or(0) >= TRANSLATION_STRIDE / BOOK_STRIDE
-        || max_chapter.unwrap_or(0) >= BOOK_STRIDE / CHAPTER_STRIDE
-        || max_verse.unwrap_or(0) >= CHAPTER_STRIDE
-    {
-        bail!("translation {translation_id} has coordinates too large to index for search");
+        .context("Failed to list books to index")?;
+        Ok(Self {
+            translation_id,
+            code,
+            books,
+        })
     }
 
-    let mut tx = crate::db::begin_write(db.write())
-        .await
-        .context("Failed to start search index transaction")?;
-    sqlx::query("DELETE FROM search_index_state WHERE translation_id = $1")
-        .bind(translation_id)
-        .execute(&mut *tx)
-        .await
-        .context("Failed to reset search index state")?;
-    let (lo, hi) = translation_rowids(translation_id);
-    sqlx::query("DELETE FROM verse_search WHERE rowid >= $1 AND rowid < $2")
-        .bind(lo)
-        .bind(hi)
-        .execute(&mut *tx)
-        .await
-        .context("Failed to clear stale search index rows")?;
-    tx.commit()
-        .await
-        .context("Failed to commit search index reset")?;
-
-    let code: String = sqlx::query_scalar("SELECT code FROM translations WHERE id = $1")
-        .bind(translation_id)
-        .fetch_one(db.read())
-        .await
-        .context("Failed to read the translation to index")?;
-    let books: Vec<i64> = sqlx::query_scalar(
-        "SELECT DISTINCT book_id FROM verses WHERE translation_id = $1 ORDER BY book_id",
-    )
-    .bind(translation_id)
-    .fetch_all(db.read())
-    .await
-    .context("Failed to list books to index")?;
-    for book_id in books {
-        if code == KJV {
-            index_book_as_shown(db, translation_id, book_id).await
-        } else {
-            index_book_as_stored(db.write(), translation_id, book_id).await
-        }
-        .with_context(|| format!("Failed to index book {book_id} for search"))?;
-    }
-
-    sqlx::query(
-        "INSERT INTO search_index_state (translation_id, verse_count) VALUES ($1, $2) \
-         ON CONFLICT (translation_id) DO UPDATE SET verse_count = excluded.verse_count",
-    )
-    .bind(translation_id)
-    .bind(verse_count)
-    .execute(db.write().pool())
-    .await
-    .context("Failed to record search index state")?;
-
-    tracing::info!("Indexed translation {translation_id} for search ({verse_count} verses)");
-    Ok(())
-}
-
-/// Index one book's stored text, as is, in one transaction that starts
-/// with the write lock (see `begin_write`: a write into the full-text table
-/// reads before it writes).
-async fn index_book_as_stored(
-    writer: &WritePool,
-    translation_id: i64,
-    book_id: i64,
-) -> anyhow::Result<()> {
-    let mut tx = crate::db::begin_write(writer).await?;
-    sqlx::query(
-        "INSERT INTO verse_search (rowid, text) \
-         SELECT translation_id * $3 + book_id * $4 + chapter * $5 + verse, text \
-         FROM verses WHERE translation_id = $1 AND book_id = $2",
-    )
-    .bind(translation_id)
-    .bind(book_id)
-    .bind(TRANSLATION_STRIDE)
-    .bind(BOOK_STRIDE)
-    .bind(CHAPTER_STRIDE)
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    Ok(())
-}
-
-/// Index one KJV book's plain text as the app shows it (see `VerseText`),
-/// in one transaction that starts with the write lock.
-async fn index_book_as_shown(db: &Db, translation_id: i64, book_id: i64) -> anyhow::Result<()> {
-    let verses: Vec<(i64, i64, String)> = sqlx::query_as(
-        "SELECT chapter, verse, text FROM verses \
-         WHERE translation_id = $1 AND book_id = $2 ORDER BY chapter, verse",
-    )
-    .bind(translation_id)
-    .bind(book_id)
-    .fetch_all(db.read())
-    .await?;
-    let mut tx = crate::db::begin_write(db.write()).await?;
-    for (chapter, verse, stored) in verses {
-        sqlx::query("INSERT INTO verse_search (rowid, text) VALUES ($1, $2)")
-            .bind(
-                translation_id * TRANSLATION_STRIDE
-                    + book_id * BOOK_STRIDE
-                    + chapter * CHAPTER_STRIDE
-                    + verse,
+    /// Replace one book's rows in the index with its verses' text, in one
+    /// transaction that starts with the write lock (see `begin_write`: a
+    /// write into the full-text table reads before it writes). The KJV's
+    /// text as the app shows it (see `VerseText`) is made first, on the read
+    /// pool, so the writer isn't held for it.
+    pub(super) async fn index_book(&self, db: &Db, book_id: i64) -> anyhow::Result<()> {
+        let shown = if self.code == KJV {
+            let verses: Vec<(i64, i64, String)> = sqlx::query_as(
+                "SELECT chapter, verse, text FROM verses \
+                 WHERE translation_id = $1 AND book_id = $2 ORDER BY chapter, verse",
             )
-            .bind(VerseText::new(KJV, &stored).text)
+            .bind(self.translation_id)
+            .bind(book_id)
+            .fetch_all(db.read())
+            .await?;
+            Some(
+                verses
+                    .into_iter()
+                    .map(|(chapter, verse, stored)| {
+                        let rowid = self.translation_id * TRANSLATION_STRIDE
+                            + book_id * BOOK_STRIDE
+                            + chapter * CHAPTER_STRIDE
+                            + verse;
+                        (rowid, VerseText::new(KJV, &stored).text)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
+
+        let mut tx = crate::db::begin_write(db.write()).await?;
+        ensure_current_content(&mut tx).await?;
+        let (lo, hi) = book_rowids(self.translation_id, book_id);
+        sqlx::query("DELETE FROM verse_search WHERE rowid >= $1 AND rowid < $2")
+            .bind(lo)
+            .bind(hi)
             .execute(&mut *tx)
             .await?;
+        match shown {
+            Some(verses) => {
+                for (rowid, text) in verses {
+                    sqlx::query("INSERT INTO verse_search (rowid, text) VALUES ($1, $2)")
+                        .bind(rowid)
+                        .bind(text)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+            }
+            None => {
+                sqlx::query(
+                    "INSERT INTO verse_search (rowid, text) \
+                     SELECT translation_id * $3 + book_id * $4 + chapter * $5 + verse, text \
+                     FROM verses WHERE translation_id = $1 AND book_id = $2",
+                )
+                .bind(self.translation_id)
+                .bind(book_id)
+                .bind(TRANSLATION_STRIDE)
+                .bind(BOOK_STRIDE)
+                .bind(CHAPTER_STRIDE)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        tx.commit().await?;
+        Ok(())
     }
-    tx.commit().await?;
+
+    /// Record the translation as indexed, if the index holds exactly its
+    /// verses, checked in the same transaction (with the write lock, so
+    /// nothing changes the index in between). Rows for books it no longer
+    /// has (a translation since cleared out and seeded again) go first.
+    pub(super) async fn publish(&self, db: &Db) -> anyhow::Result<Published> {
+        let mut tx = crate::db::begin_write(db.write())
+            .await
+            .context("Failed to start the search index's last transaction")?;
+        ensure_current_content(&mut tx).await?;
+        let (lo, hi) = translation_rowids(self.translation_id);
+        sqlx::query(
+            "DELETE FROM verse_search WHERE rowid >= $1 AND rowid < $2 \
+             AND rowid / $3 % 100 NOT IN \
+                 (SELECT DISTINCT book_id FROM verses WHERE translation_id = $4)",
+        )
+        .bind(lo)
+        .bind(hi)
+        .bind(BOOK_STRIDE)
+        .bind(self.translation_id)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to clear the index of books no longer there")?;
+        let coverage = Coverage::of(&mut tx, self.translation_id).await?;
+        if !coverage.is_complete() {
+            // Rolled back as it's dropped: nothing is recorded.
+            return Ok(Published::Incomplete(coverage));
+        }
+        sqlx::query(
+            "INSERT INTO search_index_state (translation_id, verse_count) VALUES ($1, $2) \
+             ON CONFLICT (translation_id) DO UPDATE SET verse_count = excluded.verse_count",
+        )
+        .bind(self.translation_id)
+        .bind(coverage.verses)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to record search index state")?;
+        tx.commit()
+            .await
+            .context("Failed to commit search index state")?;
+        Ok(Published::Complete {
+            verses: coverage.verses,
+        })
+    }
+}
+
+/// Refuse to write to an index that holds another version's kind of content
+/// (`search_index_version`): a newer version of the app is rebuilding it
+/// with its own. Within a write transaction, so it can't change before the
+/// write.
+async fn ensure_current_content(tx: &mut SqliteConnection) -> anyhow::Result<()> {
+    let version: Option<i64> =
+        sqlx::query_scalar("SELECT version FROM search_index_version WHERE id = 1")
+            .fetch_optional(&mut *tx)
+            .await
+            .context("Failed to read search index version")?;
+    if version != Some(SEARCH_CONTENT_VERSION) {
+        bail!(
+            "The search index now holds content version {version:?}, not this version's \
+             {SEARCH_CONTENT_VERSION}: another version of the app is building it"
+        );
+    }
     Ok(())
+}
+
+/// How much of one translation the index holds: how many verses it has,
+/// how many rows the index has in its range, how many of its verses have
+/// none, and the books they're in. Complete when no verse is missing and
+/// there's no row besides (each verse has one rowid, so then the rows are
+/// exactly the verses).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Coverage {
+    pub(super) verses: i64,
+    pub(super) rows: i64,
+    pub(super) missing: i64,
+    pub(super) books_missing_verses: Vec<i64>,
+}
+
+impl Coverage {
+    /// Read on `conn` (a reader, or a write transaction).
+    pub(super) async fn of(
+        conn: &mut SqliteConnection,
+        translation_id: i64,
+    ) -> anyhow::Result<Self> {
+        let verses: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM verses WHERE translation_id = $1")
+                .bind(translation_id)
+                .fetch_one(&mut *conn)
+                .await
+                .context("Failed to count verses")?;
+        let (lo, hi) = translation_rowids(translation_id);
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM verse_search WHERE rowid >= $1 AND rowid < $2",
+        )
+        .bind(lo)
+        .bind(hi)
+        .fetch_one(&mut *conn)
+        .await
+        .context("Failed to count the search index's rows")?;
+        // Each verse's book, if the index has no row for it.
+        let missing_books: Vec<i64> = sqlx::query_scalar(
+            "SELECT v.book_id FROM verses v WHERE v.translation_id = $1 \
+             AND NOT EXISTS (SELECT 1 FROM verse_search s WHERE s.rowid = \
+                 v.translation_id * $2 + v.book_id * $3 + v.chapter * $4 + v.verse) \
+             ORDER BY v.book_id",
+        )
+        .bind(translation_id)
+        .bind(TRANSLATION_STRIDE)
+        .bind(BOOK_STRIDE)
+        .bind(CHAPTER_STRIDE)
+        .fetch_all(&mut *conn)
+        .await
+        .context("Failed to check the search index's verses")?;
+        let missing = i64::try_from(missing_books.len()).context("Too many verses")?;
+        let mut books_missing_verses = missing_books;
+        books_missing_verses.dedup();
+        Ok(Self {
+            verses,
+            rows,
+            missing,
+            books_missing_verses,
+        })
+    }
+
+    pub(super) fn is_complete(&self) -> bool {
+        self.missing == 0 && self.rows == self.verses
+    }
+
+    /// The books to index again to complete it: those missing verses, or
+    /// every one of `books` if it has rows besides its verses' (which only
+    /// indexing a book again clears).
+    fn books_to_index(&self, books: &[i64]) -> Vec<i64> {
+        if self.rows > self.verses - self.missing {
+            books.to_vec()
+        } else {
+            self.books_missing_verses.clone()
+        }
+    }
 }
 
 /// The FTS5 query for `query`: every word and every phrase must appear

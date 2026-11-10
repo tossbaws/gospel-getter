@@ -284,22 +284,49 @@ struct RawCrossRef {
 }
 
 /// Populate `cross_references` from the bundled dataset, but only if it's
-/// currently empty.
+/// currently empty. A quick look first, so a normal launch doesn't parse
+/// the dataset; then `seed_cross_references`, which looks again with the
+/// write lock held, so two copies of the app starting at once (both finding
+/// it empty here) seed it once between them.
 pub async fn seed_cross_references_if_empty(writer: &WritePool) -> anyhow::Result<()> {
-    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM cross_references")
-        .fetch_one(writer.pool())
-        .await
-        .context("Failed to check cross-reference count")?;
-    if count > 0 {
+    if cross_references_present(writer.pool()).await? {
         return Ok(());
     }
+    let books = bundled_cross_references()?;
+    seed_cross_references(writer, &books).await?;
+    Ok(())
+}
 
-    let books: Vec<RawCrossRefBook> = serde_json::from_str(CROSS_REFERENCES_JSON)
-        .context("Failed to parse bundled cross-reference data")?;
+/// Whether `cross_references` has any rows.
+async fn cross_references_present(
+    conn: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+) -> anyhow::Result<bool> {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM cross_references)")
+        .fetch_one(conn)
+        .await
+        .context("Failed to check for cross-references")
+}
 
+/// The bundled cross-reference dataset, parsed.
+fn bundled_cross_references() -> anyhow::Result<Vec<RawCrossRefBook>> {
+    serde_json::from_str(CROSS_REFERENCES_JSON)
+        .context("Failed to parse bundled cross-reference data")
+}
+
+/// Insert `books`' cross-references, in one transaction that starts with the
+/// write lock, only if the table is still empty once that's held: another
+/// copy of the app may have seeded it since this one looked. Whether this
+/// seeded it.
+async fn seed_cross_references(
+    writer: &WritePool,
+    books: &[RawCrossRefBook],
+) -> anyhow::Result<bool> {
     let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start cross-reference seed transaction")?;
+    if cross_references_present(&mut *tx).await? {
+        return Ok(false);
+    }
 
     for (book_index, book) in books.iter().enumerate() {
         let book_id = book_index as i64 + 1;
@@ -333,5 +360,49 @@ pub async fn seed_cross_references_if_empty(writer: &WritePool) -> anyhow::Resul
         .await
         .context("Failed to commit cross-reference seed transaction")?;
     tracing::info!("Seeded cross-reference data");
-    Ok(())
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::test_support::prepared_database;
+
+    async fn count(writer: &WritePool) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM cross_references")
+            .fetch_one(writer.pool())
+            .await
+            .expect("count")
+    }
+
+    /// Two copies of the app start at once on a database with no
+    /// cross-references: each looks and finds none, then each seeds as the
+    /// write lock lets it, one after the other. One dataset results, as
+    /// one seed makes it.
+    #[tokio::test]
+    async fn two_seeders_both_past_their_first_look_seed_the_cross_references_once() {
+        let (db, one) = prepared_database("xref_two_seeders").await;
+        let one_dataset = count(one.write()).await;
+        assert!(one_dataset > 0);
+        sqlx::query("DELETE FROM cross_references")
+            .execute(one.write().pool())
+            .await
+            .expect("empty it, as on a first launch");
+        let two = db.connect().await;
+
+        assert!(!cross_references_present(one.write().pool()).await.unwrap());
+        assert!(!cross_references_present(two.write().pool()).await.unwrap());
+        let books = bundled_cross_references().unwrap();
+
+        assert!(seed_cross_references(one.write(), &books).await.unwrap());
+        assert!(!seed_cross_references(two.write(), &books).await.unwrap());
+        assert_eq!(count(one.write()).await, one_dataset);
+        assert_eq!(count(two.write()).await, one_dataset);
+
+        // And a later launch's whole step does nothing.
+        seed_cross_references_if_empty(two.write()).await.unwrap();
+        assert_eq!(count(one.write()).await, one_dataset);
+        two.close().await;
+        one.close().await;
+    }
 }
