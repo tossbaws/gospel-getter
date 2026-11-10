@@ -9,6 +9,10 @@ name: CI
 # It runs on pushes to leptos too, so a pull request into leptos starts
 # from leptos's caches: a pull request can only restore caches saved on
 # its own ref, its base branch, or main.
+#
+# Every action is pinned to a commit (Dependabot proposes updates:
+# .github/dependabot.yml). CI builds with the current stable Rust; release
+# builds pin theirs (RUST_TOOLCHAIN in dist.yml).
 
 on:
   push:
@@ -25,7 +29,7 @@ jobs:
       run:
         working-directory: src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # The release tools: the update manifest generator and the website's
       # deploy gate (stdlib-only Python).
@@ -49,8 +53,9 @@ jobs:
         run: scripts/test-install.sh
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
+          toolchain: stable
           components: rustfmt, clippy
           # The page's Rust pieces (ui-leptos/) compile to WebAssembly.
           targets: wasm32-unknown-unknown
@@ -80,7 +85,7 @@ jobs:
         run: cat .github/ci/cargo-config.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ hashFiles('.github/ci/cargo-config.toml') }}
           workspaces: |
@@ -141,11 +146,12 @@ jobs:
       matrix:
         shard: [1, 2]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Install Trunk
@@ -163,7 +169,7 @@ jobs:
 
       # Both shards build the same thing; one saves it.
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ hashFiles('.github/ci/cargo-config.toml') }}
           save-if: ${{ matrix.shard == 1 }}
@@ -184,7 +190,7 @@ jobs:
         run: cargo build --example frontend_bridge
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
@@ -211,11 +217,12 @@ jobs:
         working-directory: .
         run: git config --global core.autocrlf false
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
 
       # The app crate embeds the page Trunk builds into dist/, so the
@@ -226,7 +233,7 @@ jobs:
           set: trunk
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             src-tauri

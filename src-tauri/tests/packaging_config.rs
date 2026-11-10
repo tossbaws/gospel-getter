@@ -992,6 +992,132 @@ fn the_windows_gui_checks_launch_the_app_by_its_name() {
     );
 }
 
+/// The repository's workflows and its own actions, as (file name, text):
+/// every one in their folders, so a new one is checked too.
+fn github_files() -> Vec<(String, String)> {
+    let github = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github");
+    let read = |path: &std::path::Path| {
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    };
+    let mut files = Vec::new();
+    let workflows = std::fs::read_dir(github.join("workflows")).expect(".github/workflows");
+    for entry in workflows {
+        let path = entry.expect("a workflow").path();
+        if path
+            .extension()
+            .is_some_and(|ext| ext == "yml" || ext == "yaml")
+        {
+            files.push((format!("workflows/{}", file_name(&path)), read(&path)));
+        }
+    }
+    let actions = std::fs::read_dir(github.join("actions")).expect(".github/actions");
+    for entry in actions {
+        let dir = entry.expect("an action").path();
+        for name in ["action.yml", "action.yaml"] {
+            let path = dir.join(name);
+            if path.is_file() {
+                files.push((format!("actions/{}/{name}", file_name(&dir)), read(&path)));
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+fn file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Every action a workflow or the repository's own action uses is pinned to
+/// a commit, not a tag or branch that can be moved under it (D-01), with
+/// the release it is in a comment, which Dependabot keeps up to date
+/// (`.github/dependabot.yml`). The repository's own actions (`./…`) are
+/// the commit's own. dtolnay/rust-toolchain has no releases, only branches:
+/// its comment says which.
+#[test]
+fn every_action_is_pinned_to_a_commit() {
+    let files = github_files();
+    assert!(
+        files.iter().any(|(f, _)| f == "workflows/dist.yml")
+            && files.iter().any(|(f, _)| f.starts_with("actions/")),
+        "{:?}",
+        files.iter().map(|(f, _)| f).collect::<Vec<_>>()
+    );
+    let mut pinned = 0;
+    for (file, text) in &files {
+        for (at, line) in text.lines().enumerate() {
+            let key = line.trim_start();
+            let key = key.strip_prefix("- ").unwrap_or(key);
+            let Some(uses) = key.strip_prefix("uses:") else {
+                continue;
+            };
+            let uses = uses.trim();
+            if uses.starts_with("./") {
+                continue;
+            }
+            let place = format!("{file}:{}: {}", at + 1, line.trim());
+            let (action, comment) = uses
+                .split_once(" # ")
+                .unwrap_or_else(|| panic!("{place}: no comment naming its release"));
+            let (name, commit) = action
+                .split_once('@')
+                .unwrap_or_else(|| panic!("{place}: not pinned"));
+            assert!(
+                commit.len() == 40
+                    && commit
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                "{place}: pinned to `{commit}`, not a full commit SHA"
+            );
+            if name != "dtolnay/rust-toolchain" {
+                let release = comment.trim().strip_prefix('v').unwrap_or_default();
+                let parts: Vec<&str> = release.split('.').collect();
+                assert!(
+                    parts.len() == 3
+                        && parts
+                            .iter()
+                            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())),
+                    "{place}: the comment should name its release, as `# vX.Y.Z`"
+                );
+            }
+            pinned += 1;
+        }
+    }
+    assert!(pinned > 0, "no actions found");
+}
+
+/// Release builds use one Rust, set in one place (`RUST_TOOLCHAIN` in
+/// dist.yml), an exact release: not whatever is stable on the day.
+#[test]
+fn release_builds_use_one_pinned_rust() {
+    let pinned = DIST_YML
+        .lines()
+        .find_map(|l| l.strip_prefix("  RUST_TOOLCHAIN: "))
+        .expect("dist.yml sets RUST_TOOLCHAIN")
+        .trim_matches('"');
+    let parts: Vec<&str> = pinned.split('.').collect();
+    assert!(
+        parts.len() == 3 && parts.iter().all(|p| p.parse::<u32>().is_ok()),
+        "RUST_TOOLCHAIN should be an exact release, X.Y.Z: {pinned}"
+    );
+    let installs: Vec<Step> = dist_steps()
+        .into_iter()
+        .filter(|s| s.text.contains("dtolnay/rust-toolchain@"))
+        .collect();
+    assert!(!installs.is_empty());
+    for install in &installs {
+        assert!(
+            install
+                .text
+                .contains("          toolchain: ${{ env.RUST_TOOLCHAIN }}\n"),
+            "job {} installs another Rust: {install:#?}",
+            install.job
+        );
+    }
+}
+
 /// The page asks Tauri for nothing but the app's own commands
 /// (`core.invoke`) and an update's progress (`core.Channel`), which Tauri 2
 /// doesn't gate by permissions for the app's own page, so it gets no

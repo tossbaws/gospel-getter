@@ -62,6 +62,11 @@ env:
   # (tools/ci/build-tools.txt, set bundler), and a version with none pinned
   # stops the build.
   TAURI_CLI_VERSION: "2.12.4"
+  # The Rust every job here builds with, so a release is built by a known
+  # compiler rather than whatever is stable that day (ci.yml follows
+  # stable). It was CI's stable when it was set; move it on deliberately,
+  # once CI is green on the new one.
+  RUST_TOOLCHAIN: "1.99.1"
 
 jobs:
   linux:
@@ -79,11 +84,12 @@ jobs:
       run:
         working-directory: src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           # The page's Rust pieces (ui-leptos/) compile to WebAssembly.
           targets: wasm32-unknown-unknown
 
@@ -108,7 +114,7 @@ jobs:
             patchelf build-essential libssl-dev libfuse2 xvfb file
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             src-tauri
@@ -284,7 +290,7 @@ jobs:
           echo ".deb installed and removed cleanly"
 
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gospel-getter-linux-appimage
           path: |
@@ -293,7 +299,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload deb artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gospel-getter-linux-deb
           path: |
@@ -302,7 +308,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload the CLI on its own
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gospel-getter-cli-linux-x86_64
           path: src-tauri/binaries/gospel-getter-cli-x86_64-unknown-linux-gnu
@@ -318,7 +324,7 @@ jobs:
           cp target/release/gospel_getter "$RUNNER_TEMP/gui-check-test-app/"
 
       - name: Upload the GUI-check test app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gui-check-test-app-linux
           path: ${{ runner.temp }}/gui-check-test-app
@@ -334,11 +340,12 @@ jobs:
       run:
         working-directory: src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           # The page's Rust pieces (ui-leptos/) compile to WebAssembly.
           targets: wasm32-unknown-unknown
 
@@ -352,7 +359,7 @@ jobs:
           set: trunk
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             src-tauri
@@ -519,7 +526,7 @@ jobs:
           Write-Host "Silent install/uninstall smoke test passed."
 
       - name: Upload NSIS installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gospel-getter-windows-nsis-installer
           path: |
@@ -529,7 +536,7 @@ jobs:
 
       - name: Upload MSI installer artifact (when built)
         if: steps.artifacts.outputs.msi_built == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gospel-getter-windows-msi-installer
           path: |
@@ -538,7 +545,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload the CLI on its own
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gospel-getter-cli-windows-x86_64
           path: src-tauri/binaries/gospel-getter-cli-x86_64-pc-windows-msvc.exe
@@ -558,7 +565,7 @@ jobs:
 
       - name: Upload the GUI-check test app
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gui-check-test-app-windows
           path: ${{ runner.temp }}/gui-check-test-app
@@ -582,11 +589,12 @@ jobs:
       GUI_CHECK_BUDGET: "300"
       GUI_CHECK_STEP_TIMEOUT: "20"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
 
       # ImageMagick: a picture of the private display when a check fails
@@ -600,7 +608,7 @@ jobs:
             libwebkit2gtk-4.1-0 libgtk-3-0
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: tests/gui
 
@@ -614,13 +622,13 @@ jobs:
           cargo clippy --locked --all-targets -- -D warnings
 
       - name: Download the AppImage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: gospel-getter-linux-appimage
           path: appimage
 
       - name: Download the GUI-check test app
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: gui-check-test-app-linux
           path: gui-check-test-app
@@ -639,7 +647,7 @@ jobs:
 
       - name: Upload the results and screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gui-check-linux
           path: ${{ runner.temp }}/gui-check
@@ -666,13 +674,15 @@ jobs:
       # (target/release/gospel_getter.exe).
       GUI_EXE: gospel_getter.exe
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: tests/gui
 
@@ -692,7 +702,7 @@ jobs:
           cygpath -w "$PWD" >> "$GITHUB_PATH"
 
       - name: Download the NSIS installer
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: gospel-getter-windows-nsis-installer
           path: nsis
@@ -755,7 +765,7 @@ jobs:
           Get-ItemProperty -Path $key | Format-List
 
       - name: Download the GUI-check test app
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: gui-check-test-app-windows
           path: gui-check-test-app
@@ -777,7 +787,7 @@ jobs:
 
       - name: Upload the results and screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gui-check-windows
           path: ${{ runner.temp }}/gui-check
