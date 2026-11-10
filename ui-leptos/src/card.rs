@@ -210,6 +210,10 @@ struct State {
     /// The Library's bookmarks (for the markers and the Bookmark button).
     bookmarks: Vec<Bookmark>,
     bookmarks_loaded: bool,
+    /// A bookmark is being added or removed, until the bookmarks it leaves
+    /// are back: Bookmark (and B) do nothing meanwhile, so a second press
+    /// never sends the first one's change again (C-03).
+    bookmark_pending: bool,
     /// Every highlight, by book, chapter and verse. Highlights belong to no
     /// one translation, like bookmarks.
     highlights: HashMap<(i64, i64, i64), String>,
@@ -1219,7 +1223,7 @@ fn on_library_loaded(event: &CustomEvent) {
 }
 
 fn toggle_bookmark() -> Task {
-    let ready = with(|s| s.selection.is_some() && s.chapter.is_some());
+    let ready = with(|s| s.selection.is_some() && s.chapter.is_some() && !s.bookmark_pending);
     if !ready {
         return Box::pin(async {});
     }
@@ -1244,18 +1248,26 @@ fn toggle_bookmark() -> Task {
         (None, Some(args)) => send("add_bookmark", &args),
         (None, None) => return Box::pin(async {}),
     };
+    with(|s| s.bookmark_pending = true);
     Box::pin(async move {
-        if let Err(e) = answer(sent).await {
-            ipc::log_error("Failed to change bookmark", &e);
-            status_for(
-                attempt,
-                text::bookmark_failed(removing, &ipc::error_text(&e)),
-                true,
-            );
-            return;
+        let changed = answer(sent).await;
+        if changed.is_ok() {
+            refresh_library(&["bookmarks"]).await;
         }
-        refresh_library(&["bookmarks"]).await;
-        status_for(attempt, text::bookmark_done(removing), false);
+        // The bookmarks are as this change left them: the next press is
+        // the next change.
+        with(|s| s.bookmark_pending = false);
+        match changed {
+            Ok(_) => status_for(attempt, text::bookmark_done(removing), false),
+            Err(e) => {
+                ipc::log_error("Failed to change bookmark", &e);
+                status_for(
+                    attempt,
+                    text::bookmark_failed(removing, &ipc::error_text(&e)),
+                    true,
+                );
+            }
+        }
     })
 }
 

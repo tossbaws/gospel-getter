@@ -257,3 +257,42 @@ test('markers show in reading mode and use the verse number color', () =>
         const readerModeRules = css.slice(css.indexOf('@media screen'), css.indexOf('\n        .ref-btn {'));
         assert.ok(!readerModeRules.includes('is-bookmarked'), 'reading mode does not hide markers');
     }));
+
+// C-03: a second press of Bookmark while the first one's change is on its
+// way isn't that change sent again: the bookmark changes once per change,
+// and the next press, once it's done, changes it back.
+test('C-03: Bookmark pressed twice at once changes the bookmark once; pressed again later, it toggles back', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        const sent = (before, cmd) => app.calls.slice(before).filter((c) => c.cmd === cmd).length;
+        app.click(app.verse(16));
+        let before = app.calls.length;
+        app.click(app.bookmarkButton());
+        app.click(app.bookmarkButton());
+        await app.idle(before, 'list_bookmarks');
+        assert.equal(sent(before, 'add_bookmark'), 1, 'added once');
+        assert.equal(sent(before, 'remove_bookmark'), 0);
+        assert.equal(app.bookmarkButton().textContent, '★ Remove bookmark');
+        assert.deepEqual(app.bookmarkedVerseNumbers(), [16]);
+        assert.deepEqual(app.bookmarkItems().map((b) => b.reference), ['John 3:16']);
+
+        before = app.calls.length;
+        app.click(app.bookmarkButton());
+        app.click(app.bookmarkButton());
+        await app.idle(before, 'list_bookmarks');
+        assert.equal(sent(before, 'remove_bookmark'), 1, 'removed once');
+        assert.equal(sent(before, 'add_bookmark'), 0);
+        assert.equal(app.bookmarkButton().textContent, '★ Bookmark');
+        assert.deepEqual(app.bookmarkedVerseNumbers(), []);
+        assert.deepEqual(app.bookmarkItems(), []);
+
+        // A change that fails lets the next press through.
+        app.failCommand('add_bookmark', 'The bookmark couldn’t be saved.');
+        app.click(app.bookmarkButton());
+        await app.until(() => app.status().classList.contains('is-error'), 'the failure');
+        app.failCommand('add_bookmark', null);
+        before = app.calls.length;
+        app.click(app.bookmarkButton());
+        await app.idle(before, 'list_bookmarks');
+        assert.equal(sent(before, 'add_bookmark'), 1);
+        assert.equal(app.bookmarkButton().textContent, '★ Remove bookmark');
+    }));
