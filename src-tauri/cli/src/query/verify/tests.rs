@@ -470,6 +470,150 @@ async fn a_common_phrase_says_it_was_not_all_checked() {
     install.close().await;
 }
 
+/// The references of `answer`'s `found_at`, in its order.
+fn found_at(answer: &Value) -> Vec<&str> {
+    answer["found_at"]
+        .as_array()
+        .map(|places| {
+            places
+                .iter()
+                .map(|p| p["reference"].as_str().expect("a reference"))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Every place, wherever a verse ends: the quote whole within one verse
+/// (1 Samuel 16:2) and running across two (Genesis 4:14–15, the end of 14
+/// among its words). The first phrase searched for, all of its words, is in
+/// 1 Samuel 16:2 alone; the other place is found by the shorter ones, so a
+/// search that stops at the first phrase to find a place misses it.
+#[tokio::test]
+async fn every_place_is_found_whole_in_a_verse_and_across_verses() {
+    let install = Install::indexed("verify_every_place").await;
+    let quote = "kill me.\u{201d} Yahweh said";
+    let both = ["Genesis 4:14\u{2013}15", "1 Samuel 16:2"];
+
+    let answer = install.check(quote, None, "web").await;
+    assert_eq!(answer["status"], "exact_part", "{answer}");
+    assert_eq!(answer["reference"], both[0]);
+    assert_eq!(found_at(&answer), both);
+    assert_eq!(
+        answer["message"],
+        "This is an exact part of Genesis 4:14\u{2013}15 in the WEB. It's in 2 places; \
+         found_at lists them."
+    );
+    install.assert_it_keeps_its_promise(quote, &answer).await;
+
+    // Given either, it's there, with no search.
+    for reference in ["Genesis 4:14-15", "1 Samuel 16:2"] {
+        let answer = install.check(quote, Some(reference), "web").await;
+        assert_eq!(answer["status"], "exact_part", "{answer}");
+        assert!(answer.get("found_at").is_none(), "{answer}");
+    }
+
+    // Given neither, it's elsewhere: in both.
+    let answer = install.check(quote, Some("John 3:16"), "web").await;
+    assert_eq!(answer["status"], "elsewhere", "{answer}");
+    assert_eq!(found_at(&answer), both);
+    assert_eq!(
+        answer["message"],
+        "This isn't in John 3:16 in the WEB as quoted, but it is in Genesis 4:14\u{2013}15. \
+         It's in 2 places; found_at lists them."
+    );
+    install.assert_it_keeps_its_promise(quote, &answer).await;
+    install.close().await;
+}
+
+/// One quote across two verses in two places, a verse ending after a
+/// different word in each: both are found, in Bible order.
+#[tokio::test]
+async fn a_quote_split_differently_in_each_place_is_found_in_each() {
+    let install = Install::indexed("verify_split_differently").await;
+    for (quote, places) in [
+        // "…asked him," | "saying, “Teacher, Moses said…"; and
+        // "…asked him, saying," | "“Teacher, Moses wrote…".
+        (
+            "asked him, saying, \u{201c}Teacher, Moses",
+            ["Matthew 22:23\u{2013}24", "Mark 12:18\u{2013}19"],
+        ),
+        // After its first word in Matthew, after its fourth in Mark.
+        (
+            "Thaddaeus; Simon the Zealot; and",
+            ["Matthew 10:3\u{2013}4", "Mark 3:18\u{2013}19"],
+        ),
+    ] {
+        let answer = install.check(quote, None, "web").await;
+        assert_eq!(answer["status"], "exact_part", "{quote}: {answer}");
+        assert_eq!(answer["reference"], places[0], "{quote}");
+        assert_eq!(found_at(&answer), places, "{quote}");
+        assert!(
+            answer["message"]
+                .as_str()
+                .is_some_and(|m| m.ends_with(" It's in 2 places; found_at lists them.")),
+            "{quote}: {answer}"
+        );
+        install.assert_it_keeps_its_promise(quote, &answer).await;
+    }
+    install.close().await;
+}
+
+/// Repeated words, and a quote twice in one verse: each place once.
+#[tokio::test]
+async fn a_repeated_phrase_is_each_place_once() {
+    let install = Install::indexed("verify_repeated").await;
+    for (quote, places) in [
+        ("Holy, holy, holy", ["Isaiah 6:3", "Revelation 4:8"]),
+        // Twice in Ecclesiastes 1:2.
+        (
+            "Vanity of vanities",
+            ["Ecclesiastes 1:2", "Ecclesiastes 12:8"],
+        ),
+    ] {
+        let answer = install.check(quote, None, "web").await;
+        assert_eq!(answer["status"], "exact_part", "{quote}: {answer}");
+        assert_eq!(found_at(&answer), places, "{quote}");
+        install.assert_it_keeps_its_promise(quote, &answer).await;
+    }
+    install.close().await;
+}
+
+/// In more places than are given: the first of those found, each once, in
+/// Bible order, and the answer says there are at least that many.
+#[tokio::test]
+async fn too_many_places_are_cut_off_and_said_to_be() {
+    let install = Install::indexed("verify_too_many").await;
+    let answer = install.check("of the LORD", None, "kjv").await;
+    let message = answer["message"].as_str().expect("a message");
+    assert!(
+        message.ends_with(" It's in at least 200 places; found_at lists those."),
+        "{message}"
+    );
+    let references = found_at(&answer);
+    assert_eq!(references.len(), MAX_CANDIDATES as usize);
+    let order: Vec<(i64, i64, i64)> = references
+        .iter()
+        .map(|reference| {
+            let (book, at) = reference.rsplit_once(' ').expect("a book and a place");
+            let book_id = (1..=66)
+                .find(|&id| install.library.book(id).is_ok_and(|b| b.name == book))
+                .expect("a book");
+            let (chapter, verses) = at.split_once(':').expect("chapter:verse");
+            let first = verses.split('\u{2013}').next().expect("a verse");
+            (
+                book_id,
+                chapter.parse().expect("a chapter"),
+                first.parse().expect("a verse"),
+            )
+        })
+        .collect();
+    assert!(
+        order.windows(2).all(|pair| pair[0] < pair[1]),
+        "in Bible order, each once: {references:?}"
+    );
+    install.close().await;
+}
+
 #[test]
 fn only_a_phrase_that_could_hide_the_quote_counts_as_too_common() {
     let quote = quote_words("a b c d");
