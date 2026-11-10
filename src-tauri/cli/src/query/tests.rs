@@ -1125,6 +1125,81 @@ async fn notes_are_marked_as_the_readers_and_can_be_filtered() {
     pool.close().await;
 }
 
+/// `list_findings` matches a request exactly, as saving tells requests
+/// apart (the table's uniqueness) and the app groups them: "grief" and
+/// "Grief" are two requests, each listed on its own.
+#[tokio::test]
+async fn list_findings_matches_a_request_exactly() {
+    let (db, pool) = prepared_database("cli_findings_exact").await;
+    let finding = |verse: i64, request: &str| db::NewFinding {
+        passage: db::Passage {
+            book_id: JOHN,
+            chapter: 11,
+            verse_start: verse,
+            verse_end: verse,
+        },
+        agent: "Claude".to_string(),
+        request: request.to_string(),
+        created_at: None,
+    };
+    let saved = db::findings::add_findings(
+        pool.write(),
+        &[
+            finding(35, "grief"),
+            finding(35, "Grief"),
+            finding(33, "grief"),
+        ],
+    )
+    .await
+    .expect("save the findings");
+    assert_eq!(
+        saved.saved.len(),
+        3,
+        "two requests, so nothing already saved"
+    );
+
+    let listed = |request: &str| {
+        Request::ListFindings(ListFindingsArgs {
+            request: Some(request.to_string()),
+            book: None,
+            offset: None,
+            limit: None,
+        })
+    };
+    let requests = |answer: &Value| -> Vec<(String, String)> {
+        answer["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .map(|f| {
+                (
+                    f["reference"].as_str().expect("a reference").to_string(),
+                    f["request"].as_str().expect("a request").to_string(),
+                )
+            })
+            .collect()
+    };
+    let grief = ask(&db, listed("grief")).await;
+    assert_eq!(grief["total"], 2);
+    assert_eq!(
+        requests(&grief),
+        [
+            ("John 11:33".to_string(), "grief".to_string()),
+            ("John 11:35".to_string(), "grief".to_string()),
+        ]
+    );
+    let capital = ask(&db, listed("Grief")).await;
+    assert_eq!(capital["total"], 1);
+    assert_eq!(
+        requests(&capital),
+        [("John 11:35".to_string(), "Grief".to_string())]
+    );
+    // Trimmed, as it's trimmed when saved; but no other case.
+    assert_eq!(ask(&db, listed("  grief ")).await["total"], 2);
+    assert_eq!(ask(&db, listed("GRIEF")).await["total"], 0);
+    pool.close().await;
+}
+
 /// The list limit: 100 unless asked, at most 500.
 #[test]
 fn a_list_page_is_capped() {

@@ -56,7 +56,8 @@ pub struct SaveFindingsArgs {
 #[derive(Debug, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ListFindingsArgs {
-    /// Only the findings for this request, in any case.
+    /// Only the findings for this request, exactly as it was saved: case
+    /// counts, so "grief" and "Grief" are two requests, as they are saved.
     #[arg(long)]
     pub request: Option<String>,
     /// Only findings in this book, such as Job or 1 Cor.
@@ -345,17 +346,16 @@ impl Library {
             .as_deref()
             .map(|name| self.book_named(name).map(|b| b.id))
             .transpose()?;
-        let request = args.request.as_deref().map(|r| r.trim().to_lowercase());
+        // Exactly, as the table tells requests apart (its uniqueness) and the
+        // app groups them: what "grief" lists is what saving "grief" again
+        // finds already saved.
+        let request = args.request.as_deref().map(str::trim);
         let (offset, limit) = page_of(args.offset, args.limit);
         let all: Vec<_> = findings::all_findings(&self.pool)
             .await?
             .into_iter()
             .filter(|f| book_id.is_none_or(|id| f.book_id == id))
-            .filter(|f| {
-                request
-                    .as_deref()
-                    .is_none_or(|r| f.request.to_lowercase() == r)
-            })
+            .filter(|f| request.is_none_or(|r| f.request == r))
             .collect();
         let total = all.len();
         let mut found = Vec::new();

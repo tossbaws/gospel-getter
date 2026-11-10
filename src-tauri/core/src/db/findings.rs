@@ -498,7 +498,8 @@ pub struct FindingRequest {
     pub request: String,
     /// Who found them, each once, in the order they first did.
     pub agents: Vec<String>,
-    /// How many verses they mark in all.
+    /// How many verses they mark in all, each verse once however many of
+    /// them mark it.
     pub verse_count: i64,
     /// When the latest of them was found.
     pub latest: String,
@@ -511,9 +512,12 @@ pub async fn list_requests(pool: &SqlitePool) -> anyhow::Result<Vec<FindingReque
     Ok(group_requests(all_findings(pool).await?))
 }
 
-/// `findings` (in Bible order) grouped by request: each group's findings in
-/// that order, its agents in the order they first found one, the groups the
-/// latest found first (then by request).
+/// `findings` (in Bible order) grouped by request, exactly as it was saved
+/// (as the table's uniqueness counts it: "grief" and "Grief" are two): each
+/// group's findings in that order, every one of them kept, its agents in the
+/// order they first found one, the verses they mark counted once each
+/// ([`verses_marked`]), the groups the latest found first (then by
+/// request).
 pub fn group_requests(findings: Vec<Finding>) -> Vec<FindingRequest> {
     let mut groups: Vec<FindingRequest> = Vec::new();
     for finding in findings {
@@ -531,13 +535,13 @@ pub fn group_requests(findings: Vec<Finding>) -> Vec<FindingRequest> {
             }
         };
         let group = &mut groups[at];
-        group.verse_count += finding.verse_end - finding.verse_start + 1;
         if finding.created_at > group.latest {
             group.latest.clone_from(&finding.created_at);
         }
         group.findings.push(finding);
     }
     for group in &mut groups {
+        group.verse_count = verses_marked(&group.findings);
         let mut by_age: Vec<&Finding> = group.findings.iter().collect();
         by_age.sort_by(|a, b| (&a.created_at, a.id).cmp(&(&b.created_at, b.id)));
         for finding in by_age {
@@ -552,6 +556,39 @@ pub fn group_requests(findings: Vec<Finding>) -> Vec<FindingRequest> {
             .then_with(|| a.request.cmp(&b.request))
     });
     groups
+}
+
+/// How many verses `findings` mark: each verse of each book and chapter
+/// once, however many of the findings' ranges cover it (John 11:33-35 and
+/// John 11:35 mark three), and the same verse number in another chapter or
+/// book as another verse.
+fn verses_marked(findings: &[Finding]) -> i64 {
+    let mut ranges: Vec<(i64, i64, i64, i64)> = findings
+        .iter()
+        .map(|f| (f.book_id, f.chapter, f.verse_start, f.verse_end))
+        .collect();
+    ranges.sort_unstable();
+    let mut count = 0;
+    // The run of overlapping ranges being joined: its book, chapter, first
+    // and last verse.
+    let mut run: Option<(i64, i64, i64, i64)> = None;
+    for (book, chapter, start, end) in ranges {
+        match &mut run {
+            Some((b, c, _, last)) if *b == book && *c == chapter && start <= *last => {
+                *last = (*last).max(end);
+            }
+            _ => {
+                if let Some((_, _, first, last)) = run {
+                    count += last - first + 1;
+                }
+                run = Some((book, chapter, start, end));
+            }
+        }
+    }
+    if let Some((_, _, first, last)) = run {
+        count += last - first + 1;
+    }
+    count
 }
 
 /// Remove one finding, returning it as it was (to bring back with
@@ -896,5 +933,71 @@ mod tests {
         let ids: Vec<i64> = groups[0].findings.iter().map(|f| f.id).collect();
         assert_eq!(ids, [1, 2, 4]);
         assert_eq!(groups[1].verse_count, 1);
+    }
+
+    fn range(id: i64, at: (i64, i64), verses: (i64, i64), request: &str) -> Finding {
+        Finding {
+            book_id: at.0,
+            chapter: at.1,
+            verse_start: verses.0,
+            verse_end: verses.1,
+            ..finding(id, verses.0, request, "Claude", "2026-11-07T00:00:00.000Z")
+        }
+    }
+
+    /// A verse two of a request's findings mark is counted once, and every
+    /// finding is kept, each with its own range.
+    #[test]
+    fn a_request_counts_each_verse_once_however_many_findings_mark_it() {
+        let findings = vec![
+            range(1, (43, 11), (33, 35), "grief"),
+            range(2, (43, 11), (35, 35), "grief"),
+            range(3, (43, 11), (34, 36), "grief"),
+            range(4, (43, 11), (40, 41), "grief"),
+            range(5, (43, 11), (33, 35), "tears"),
+        ];
+        let groups = group_requests(findings.clone());
+        let counts: Vec<(&str, i64)> = groups
+            .iter()
+            .map(|g| (g.request.as_str(), g.verse_count))
+            .collect();
+        // 33-36 and 40-41: six verses, not 3 + 1 + 3 + 2.
+        assert_eq!(counts, [("grief", 6), ("tears", 3)]);
+        let kept: Vec<&Finding> = groups.iter().flat_map(|g| &g.findings).collect();
+        assert_eq!(kept.len(), findings.len(), "every finding is kept");
+        for f in &findings {
+            assert!(kept.contains(&f), "{f:?}");
+        }
+    }
+
+    /// The same verse numbers in another chapter, or another book, are
+    /// other verses.
+    #[test]
+    fn the_same_verse_number_elsewhere_is_another_verse() {
+        let groups = group_requests(vec![
+            range(1, (43, 11), (35, 35), "grief"),
+            range(2, (43, 12), (35, 35), "grief"),
+            range(3, (42, 11), (35, 35), "grief"),
+            range(4, (42, 11), (34, 35), "grief"),
+            range(5, (1, 1), (1, 3), "grief"),
+            range(6, (1, 1), (4, 5), "grief"),
+        ]);
+        // John 11:35, John 12:35, Luke 11:34-35, Genesis 1:1-5.
+        assert_eq!(groups[0].verse_count, 1 + 1 + 2 + 5);
+    }
+
+    /// Requests are told apart exactly as they were saved, as the table's
+    /// uniqueness tells them apart.
+    #[test]
+    fn requests_differing_only_in_case_are_two_requests() {
+        let groups = group_requests(vec![
+            range(1, (43, 11), (35, 35), "grief"),
+            range(2, (43, 11), (35, 35), "Grief"),
+        ]);
+        let requests: Vec<(&str, i64, usize)> = groups
+            .iter()
+            .map(|g| (g.request.as_str(), g.verse_count, g.findings.len()))
+            .collect();
+        assert_eq!(requests, [("Grief", 1, 1), ("grief", 1, 1)]);
     }
 }

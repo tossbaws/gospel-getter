@@ -1112,7 +1112,12 @@ async fn saving_findings_says_what_was_saved_already_there_or_not_read() {
     let refused = refusal(&path, &args);
     assert!(refused.contains("at most 500"), "{refused}");
 
-    let listed = answer(&path, &["list-findings", "--request", "GRIEF"]);
+    // Exactly the request saved: case counts, as it does when saving.
+    assert_eq!(
+        answer(&path, &["list-findings", "--request", "GRIEF"])["total"],
+        0
+    );
+    let listed = answer(&path, &["list-findings", "--request", "grief"]);
     assert_eq!(listed["saving_enabled"], true);
     assert_eq!(listed["total"], 4);
     assert_eq!(
