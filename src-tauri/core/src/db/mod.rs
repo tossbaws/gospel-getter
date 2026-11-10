@@ -32,7 +32,7 @@ pub use models::*;
 pub use notes::{Note, NoteBodyError, NoteError, NoteLimit, Passage};
 pub use queries::*;
 pub use search::{SearchHit, ensure_search_index};
-pub use seed::{seed_cross_references_if_empty, seed_missing};
+pub use seed::{seed_cross_references_if_empty, seed_missing, upgrade_bundled_data};
 
 #[cfg(test)]
 mod contention_tests;
@@ -50,10 +50,15 @@ pub mod test_support;
 mod tests;
 
 /// Bring a database up to date: create any missing tables (including ones
-/// added since the database was created), then seed whatever bundled data
-/// is missing. Safe to run on every launch, against a fresh database or
-/// one from any earlier version. The search index is built separately
-/// (`ensure_search_index`), in the background.
+/// added since the database was created), seed whatever bundled data
+/// is missing, and bring translations seeded by an earlier version up to
+/// date (`upgrade_bundled_data`). Safe to run on every launch, against a
+/// fresh database or one from any earlier version. The search index is
+/// built separately (`ensure_search_index`), in the background.
+///
+/// An upgrade that fails is logged, not returned: the translation's rows
+/// are as they were, which the app reads as it always has, and the next
+/// launch tries again.
 pub async fn prepare(writer: &WritePool) -> anyhow::Result<()> {
     use anyhow::Context;
     migrate(writer)
@@ -62,6 +67,12 @@ pub async fn prepare(writer: &WritePool) -> anyhow::Result<()> {
     seed_missing(writer)
         .await
         .context("Failed to seed Bible data")?;
+    if let Err(e) = upgrade_bundled_data(writer).await {
+        tracing::warn!(
+            "Couldn't bring the bundled translations up to date; they're as they were, and the \
+             next launch tries again: {e:#}"
+        );
+    }
     seed_cross_references_if_empty(writer)
         .await
         .context("Failed to seed cross-reference data")?;

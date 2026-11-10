@@ -248,6 +248,63 @@ async fn get_passage_says_what_a_translation_does_not_number() {
     pool.close().await;
 }
 
+/// The five verses the WEB's file has with no text are ones it doesn't
+/// number, and are said to be, as the BSB's are: never given as a verse
+/// with no words. Its other verses come as ever, and the KJV numbers them.
+#[tokio::test]
+async fn get_passage_says_what_the_web_does_not_number() {
+    let (db, pool) = fresh_database("cli_passage_web_gap").await;
+    assert_eq!(
+        refused(&db, passage_of("Luke 17:36", Some("web"))).await,
+        "In Luke 17:36, verse 36 isn't numbered in the World English Bible."
+    );
+    let answer = ask(&db, passage_of("Luke 17:35-37", Some("web"))).await;
+    let verses = answer["verses"].as_array().unwrap();
+    let numbers: Vec<_> = verses
+        .iter()
+        .map(|v| v["verse"].as_i64().unwrap())
+        .collect();
+    assert_eq!(numbers, [35, 37]);
+    assert_eq!(
+        verses[0]["text"].as_str().unwrap(),
+        bundled("web")[41].chapters[16][34].as_str()
+    );
+    assert_eq!(
+        answer["notice"],
+        "In Luke 17:35\u{2013}37, verse 36 isn't numbered in the World English Bible."
+    );
+    for (reference, says) in [
+        (
+            "Acts 8:37",
+            "In Acts 8:37, verse 37 isn't numbered in the World English Bible.",
+        ),
+        (
+            "Acts 15:34",
+            "In Acts 15:34, verse 34 isn't numbered in the World English Bible.",
+        ),
+        (
+            "Acts 24:7",
+            "In Acts 24:7, verse 7 isn't numbered in the World English Bible.",
+        ),
+        // Past the end of the WEB's Romans 16 now.
+        (
+            "Romans 16:25",
+            "Romans 16:25 isn't numbered in the World English Bible \u{2014} Romans 16 ends at \
+             verse 24 there.",
+        ),
+    ] {
+        assert_eq!(
+            refused(&db, passage_of(reference, Some("web"))).await,
+            says,
+            "{reference}"
+        );
+    }
+    let kjv = ask(&db, passage_of("Luke 17:36", Some("kjv"))).await;
+    assert_eq!(kjv["verses"][0]["verse"], 36);
+    assert!(!kjv["verses"][0]["text"].as_str().unwrap().is_empty());
+    pool.close().await;
+}
+
 /// References that can't be read, and translations that aren't there, are
 /// refused in the app's own words.
 #[tokio::test]
@@ -786,6 +843,14 @@ async fn compare_gives_each_translation_its_own_verses() {
             .as_str()
             .unwrap()
             .contains("isn't numbered")
+    );
+    assert_eq!(gap["columns"][1]["verses"].as_array().unwrap().len(), 1);
+    // The WEB's verses with no text are such gaps too, never empty verses.
+    let gap = ask(&db, compare("Luke 17:36", Some(&["web", "kjv"]))).await;
+    assert_eq!(gap["columns"][0]["verses"], json!([]));
+    assert_eq!(
+        gap["columns"][0]["notice"],
+        "In Luke 17:36, verse 36 isn't numbered in the World English Bible."
     );
     assert_eq!(gap["columns"][1]["verses"].as_array().unwrap().len(), 1);
 

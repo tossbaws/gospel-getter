@@ -197,7 +197,8 @@ test('a bookmark whose verse the translation does not number opens its chapter w
 
 test('a bookmark only partly numbered in the translation says so and selects nothing', () =>
     withApp({ book: 'Romans', chapter: 16, translation: 'kjv' }, async (app) => {
-        // Romans 16 has 27 verses in the KJV and 25 in the WEB.
+        // Romans 16 has 27 verses in the KJV and 24 in the WEB (its file's
+        // 25th has no text: a verse the WEB doesn't number).
         app.click(app.verse(24));
         app.click(app.verse(27), { shiftKey: true });
         await bookmarkSelection(app);
@@ -210,7 +211,7 @@ test('a bookmark only partly numbered in the translation says so and selects not
         const [item] = app.bookmarkItems();
         assert.equal(item.preview, storedVerse('web', 'Romans', 16, 24));
         assert.ok(item.partial);
-        assert.deepEqual(app.bookmarkedVerseNumbers(), [24, 25], 'only the verses the WEB numbers are marked');
+        assert.deepEqual(app.bookmarkedVerseNumbers(), [24], 'only the verses the WEB numbers are marked');
 
         app.openLibrary();
         app.click(item.open);
