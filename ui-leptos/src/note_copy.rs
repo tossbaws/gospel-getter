@@ -9,10 +9,11 @@
 //! row in the Library. A copy asked for before its answer is in waits for
 //! it and tries anyway, as the card's own Copy does, and says so if that
 //! fails. Each answer is kept for its note and translation until the
-//! note's text changes.
+//! note's text changes, for the [`KEPT`] notes asked for most recently
+//! (AUD-08): one that's gone is asked for again when it's next shown or
+//! pointed at, before its Copy as Markdown can be pressed.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use serde::Serialize;
@@ -30,9 +31,48 @@ struct Entry {
     done: js_sys::Promise,
 }
 
+/// How many notes' Markdown is kept at once, by note and translation: more
+/// than the card's notes on one passage and the Library rows pointed at on
+/// the way to a Copy as Markdown, and few enough that a long session's
+/// notes, deleted or not, aren't all kept.
+const KEPT: usize = 32;
+
+/// Values by key, the most recently used last, never more than `cap` of
+/// them: the least recently used goes first.
+struct Recent<K, V> {
+    entries: Vec<(K, V)>,
+    cap: usize,
+}
+
+impl<K: PartialEq, V> Recent<K, V> {
+    const fn new(cap: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            cap,
+        }
+    }
+
+    /// The value of `key`, now the most recently used.
+    fn get(&mut self, key: &K) -> Option<&V> {
+        let at = self.entries.iter().position(|(k, _)| k == key)?;
+        let entry = self.entries.remove(at);
+        self.entries.push(entry);
+        self.entries.last().map(|(_, v)| v)
+    }
+
+    /// Keeps `value` as `key`'s, the most recently used, in place of any
+    /// before; the least recently used go until there are `cap`.
+    fn insert(&mut self, key: K, value: V) {
+        self.entries.retain(|(k, _)| *k != key);
+        self.entries.push((key, value));
+        let over = self.entries.len().saturating_sub(self.cap);
+        self.entries.drain(..over);
+    }
+}
+
 thread_local! {
     /// By note and translation.
-    static ASKED: RefCell<HashMap<(i64, String), Entry>> = RefCell::new(HashMap::new());
+    static ASKED: RefCell<Recent<(i64, String), Entry>> = const { RefCell::new(Recent::new(KEPT)) };
 }
 
 #[derive(Serialize)]
@@ -47,7 +87,7 @@ struct NoteMarkdownArgs<'a> {
 /// fail.
 pub fn prefetch(id: i64, body: &str) {
     let code = bridge::translation_code();
-    let asked = ASKED.with_borrow(|asked| {
+    let asked = ASKED.with_borrow_mut(|asked| {
         asked
             .get(&(id, code.clone()))
             .is_some_and(|e| e.body == body && !matches!(*e.answer.borrow(), Some(Err(_))))
@@ -121,7 +161,7 @@ pub fn copy_failed(error: &str) -> String {
 pub fn copy(id: i64, reference: String, body: &str, report: impl Fn(String, bool) + 'static) {
     prefetch(id, body);
     let code = bridge::translation_code();
-    let Some((answer, done)) = ASKED.with_borrow(|asked| {
+    let Some((answer, done)) = ASKED.with_borrow_mut(|asked| {
         asked
             .get(&(id, code))
             .map(|e| (e.answer.clone(), e.done.clone()))
@@ -158,4 +198,33 @@ pub fn copy(id: i64, reference: String, body: &str, report: impl Fn(String, bool
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keys(recent: &Recent<u32, &str>) -> Vec<u32> {
+        recent.entries.iter().map(|(k, _)| *k).collect()
+    }
+
+    /// AUD-08: what's kept stays bounded, the least recently used going
+    /// first; one used again is kept the longest.
+    #[test]
+    fn at_most_cap_are_kept_the_least_recently_used_going_first() {
+        let mut recent = Recent::new(3);
+        for key in 1..=5 {
+            recent.insert(key, "markdown");
+        }
+        assert_eq!(keys(&recent), [3, 4, 5]);
+        assert!(recent.get(&1).is_none(), "the oldest went");
+        assert_eq!(recent.get(&3), Some(&"markdown"));
+        recent.insert(6, "markdown");
+        assert_eq!(keys(&recent), [5, 3, 6], "3 was used again: 4 went");
+        // A key asked again replaces its value, not adding one.
+        recent.insert(5, "changed");
+        assert_eq!(keys(&recent), [3, 6, 5]);
+        assert_eq!(recent.get(&5), Some(&"changed"));
+        assert_eq!(recent.entries.len(), 3);
+    }
 }
