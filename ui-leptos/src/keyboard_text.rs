@@ -20,6 +20,22 @@ pub struct Press<'a> {
     pub meta: bool,
     pub alt: bool,
     pub shift: bool,
+    /// AltGr is held (`getModifierState("AltGraph")`): the key is the
+    /// character AltGr types, as `[` and `]` are on German, French,
+    /// Spanish, Italian and Nordic layouts. Windows reports AltGr as Ctrl
+    /// and Alt as well, so they don't count against a character then.
+    pub alt_graph: bool,
+}
+
+impl Press<'_> {
+    /// Whether the key is a character typed without Ctrl, Cmd or Alt: as
+    /// typed, or with AltGr (whose Ctrl and Alt are AltGr's own).
+    fn plain(&self) -> bool {
+        if self.meta {
+            return false;
+        }
+        self.alt_graph || (!self.ctrl && !self.alt)
+    }
 }
 
 /// What a key is for, once nothing else has it (a field, the search box,
@@ -77,7 +93,7 @@ pub fn route(press: &Press) -> Option<Route> {
     let lower = key.to_lowercase();
     let lower_key = lower.as_str();
     let ctrl = press.ctrl || press.meta;
-    let plain = !ctrl && !press.alt;
+    let plain = press.plain();
     let shift = press.shift;
 
     if key == "Escape" {
@@ -139,11 +155,12 @@ pub fn route(press: &Press) -> Option<Route> {
 }
 
 /// Whether `press` is a character key pressed on its own: one character (a
-/// letter, a digit or a symbol, with Shift or not, as `?` and `J` are),
-/// with no Ctrl, Cmd or Alt. These are the shortcuts Aa's "Single-key
-/// shortcuts" turns off; the arrows and Escape aren't characters.
+/// letter, a digit or a symbol, with Shift or AltGr or not, as `?`, `J`
+/// and a German `[` are), with no Ctrl, Cmd or Alt. These are the
+/// shortcuts Aa's "Single-key shortcuts" turns off; the arrows and Escape
+/// aren't characters.
 pub fn character_only(press: &Press) -> bool {
-    !press.ctrl && !press.meta && !press.alt && press.key.chars().count() == 1
+    press.plain() && press.key.chars().count() == 1
 }
 
 /// What `press` is for ([`route`]) with single-key shortcuts on
@@ -267,6 +284,50 @@ mod tests {
         route(&p)
     }
 
+    /// C-02: AltGr's characters are the characters, though Windows also
+    /// says Ctrl and Alt for AltGr.
+    #[test]
+    fn altgr_characters_are_plain_keys() {
+        let altgr = |key| Press {
+            key,
+            ctrl: true,
+            alt: true,
+            alt_graph: true,
+            ..Press::default()
+        };
+        assert_eq!(route(&altgr("[")), Some(Route::Book(Which::Prev)));
+        assert_eq!(route(&altgr("]")), Some(Route::Book(Which::Next)));
+        assert_eq!(route(&altgr("/")), Some(Route::Search));
+        assert_eq!(route(&altgr("?")), Some(Route::Shortcuts));
+        // As Linux reports it: AltGr alone.
+        let linux = Press {
+            key: "]",
+            alt_graph: true,
+            ..Press::default()
+        };
+        assert_eq!(route(&linux), Some(Route::Book(Which::Next)));
+        // They're single keys, which Aa can turn off.
+        assert!(character_only(&altgr("[")));
+        assert_eq!(route_for(&altgr("["), false), None);
+        assert_eq!(route_for(&altgr("["), true), Some(Route::Book(Which::Prev)));
+        // Ctrl and Alt without AltGr are still no character.
+        let ctrl_alt = Press {
+            alt_graph: false,
+            ..altgr("[")
+        };
+        assert_eq!(route(&ctrl_alt), None);
+        assert!(!character_only(&ctrl_alt));
+        // Cmd is never AltGr's.
+        let cmd = Press {
+            meta: true,
+            ..altgr("[")
+        };
+        assert_eq!(route(&cmd), None);
+        // AltGr's Ctrl and Alt aren't Ctrl's shortcuts or Alt's history.
+        assert_eq!(route(&altgr("b")), None);
+        assert_eq!(route(&altgr("c")), Some(Route::Compare));
+    }
+
     #[test]
     fn each_key_has_its_route() {
         assert_eq!(route(&press("Escape")), Some(Route::Escape));
@@ -348,6 +409,7 @@ mod tests {
                             meta,
                             alt,
                             shift,
+                            alt_graph: false,
                         };
                         let on = route_for(&press, true);
                         assert_eq!(on, route(&press), "{}: on is as before", row.id);
