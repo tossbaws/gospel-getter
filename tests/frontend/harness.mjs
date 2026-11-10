@@ -41,6 +41,7 @@ const LEPTOS_WASM = readFileSync(new URL('dist/ui-leptos_bg.wasm', root));
 // independent of the database the bridge serves from.
 export const BIBLES = {
     kjv: JSON.parse(read('src-tauri/data/kjv.json')),
+    // Five verses the WEB doesn't number are empty strings (`isNumbered`).
     web: JSON.parse(read('src-tauri/data/web.json')),
     // A verse the BSB doesn't number is null; its footnotes are apart.
     bsb: JSON.parse(read('src-tauri/data/bsb.json')),
@@ -53,10 +54,17 @@ export const bookId = (name) => {
     return index + 1;
 };
 
+/**
+ * Whether a bundled file's entry is a verse the translation numbers: not
+ * null (the BSB's), and not empty (the WEB's five, Luke 17:36, Acts 8:37,
+ * 15:34, 24:7 and Romans 16:25), the seed step's own rule.
+ */
+export const isNumbered = (text) => typeof text === 'string' && text !== '';
+
 /** A verse's stored text: exactly the string in the bundled data file. */
 export function storedVerse(code, book, chapter, verse) {
     const text = BIBLES[code][bookId(book) - 1].chapters[chapter - 1][verse - 1];
-    if (typeof text !== 'string') throw new Error(`no ${code} ${book} ${chapter}:${verse}`);
+    if (!isNumbered(text)) throw new Error(`no ${code} ${book} ${chapter}:${verse}`);
     return text;
 }
 
@@ -69,8 +77,10 @@ export function shownVerse(code, book, chapter, verse) {
     return backend('__verse_text', { code, text: storedVerse(code, book, chapter, verse) });
 }
 
+/** The chapter's last verse in the translation: the last one it numbers. */
 export function verseCount(code, book, chapter) {
-    return BIBLES[code][bookId(book) - 1].chapters[chapter - 1].length;
+    const verses = BIBLES[code][bookId(book) - 1].chapters[chapter - 1];
+    return verses.findLastIndex(isNumbered) + 1;
 }
 
 // ---- The bridge process

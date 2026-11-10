@@ -59,7 +59,7 @@ fn assert_verses_match_bundled(snapshot: &[(i64, i64, i64, i64, Vec<u8>)]) {
 
 /// `verses` must hold exactly these translations' bundled text, byte for
 /// byte, and nothing else. A verse a translation doesn't number (`null` in
-/// its file) has no row.
+/// its file, or no text at all: the WEB's five) has no row.
 fn assert_verses_match(snapshot: &[(i64, i64, i64, i64, Vec<u8>)], translations: &[(i64, &str)]) {
     let mut expected = Vec::new();
     for &(translation_id, code) in translations {
@@ -79,7 +79,9 @@ fn assert_verses_match(snapshot: &[(i64, i64, i64, i64, Vec<u8>)], translations:
         for (b, chapters) in books.into_iter().enumerate() {
             for (c, verses) in chapters.into_iter().enumerate() {
                 for (v, text) in verses.into_iter().enumerate() {
-                    let Some(text) = text else { continue };
+                    let Some(text) = text.filter(|t| !t.is_empty()) else {
+                        continue;
+                    };
                     expected.push((
                         translation_id,
                         b as i64 + 1,
@@ -117,6 +119,7 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
         "verse_search",
         "search_index_state",
         "search_index_version",
+        "translation_data_version",
     ] {
         assert!(tables.iter().any(|t| t == table), "missing table {table}");
     }
@@ -130,7 +133,14 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
             .fetch_all(pool.read())
             .await
             .unwrap();
-    assert_eq!(state, vec![(KJV, 31_100), (WEB, 31_103), (BSB, 31_086)]);
+    // The WEB's file has 31,103 verses, five of them with no text, which
+    // the WEB doesn't number and which aren't seeded.
+    assert_eq!(state, vec![(KJV, 31_100), (WEB, 31_098), (BSB, 31_086)]);
+    // Each seeded as bundled now: the WEB past its one step.
+    assert_eq!(
+        data_versions(pool.read()).await,
+        [(KJV, 1), (WEB, 2), (BSB, 1)]
+    );
 
     let bookmarks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bookmarks")
         .fetch_one(pool.read())
@@ -241,6 +251,397 @@ async fn user_version(pool: &sqlx::SqlitePool) -> i64 {
         .unwrap()
 }
 
+/// The verses the WEB's file has with no text, which the WEB doesn't
+/// number: Luke 17:36, Acts 8:37, 15:34, 24:7 and Romans 16:25, as
+/// (book, chapter, verse).
+const WEB_UNNUMBERED: [(i64, i64, i64); 5] = [
+    (42, 17, 36),
+    (44, 8, 37),
+    (44, 15, 34),
+    (44, 24, 7),
+    (45, 16, 25),
+];
+
+/// [`WEB_UNNUMBERED`] as (translation, book, chapter, verse).
+fn web_unnumbered() -> Vec<(i64, i64, i64, i64)> {
+    WEB_UNNUMBERED
+        .iter()
+        .map(|&(b, c, v)| (WEB, b, c, v))
+        .collect()
+}
+
+/// Each translation's recorded data version (`seed::DATA_STEPS`).
+async fn data_versions(pool: &sqlx::SqlitePool) -> Vec<(i64, i64)> {
+    sqlx::query_as(
+        "SELECT translation_id, version FROM translation_data_version ORDER BY translation_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// The search index's rowid of a WEB verse (`db::search`'s encoding).
+fn web_rowid((book, chapter, verse): (i64, i64, i64)) -> i64 {
+    WEB * 100_000_000 + book * 1_000_000 + chapter * 1_000 + verse
+}
+
+/// No verses, as [`empty_web_verses`] lists them.
+const NONE: Vec<(i64, i64, i64)> = Vec::new();
+
+/// The WEB's rows (book, chapter, verse) with no text.
+async fn empty_web_verses(pool: &sqlx::SqlitePool) -> Vec<(i64, i64, i64)> {
+    sqlx::query_as(
+        "SELECT book_id, chapter, verse FROM verses WHERE translation_id = $1 AND text = '' \
+         ORDER BY book_id, chapter, verse",
+    )
+    .bind(WEB)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// How many of the WEB's verses with no text the search index has a row for.
+async fn indexed_web_unnumbered(pool: &sqlx::SqlitePool) -> i64 {
+    let mut indexed = 0;
+    for verse in WEB_UNNUMBERED {
+        let found: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM verse_search WHERE rowid = $1")
+            .bind(web_rowid(verse))
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        indexed += found;
+    }
+    indexed
+}
+
+/// The WEB's recorded search index count.
+async fn web_index_count(pool: &sqlx::SqlitePool) -> Option<i64> {
+    sqlx::query_scalar("SELECT verse_count FROM search_index_state WHERE translation_id = $1")
+        .bind(WEB)
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+}
+
+/// Make a database `fresh_database` prepared and indexed what 2.29.0 left
+/// as it closed: no data versions recorded (2.29.0 had none), and the WEB's
+/// five verses with no text stored as empty verses, indexed and counted
+/// like every other, as 2.29.0's seed and index build left them.
+async fn as_2_29_0_left_it(pool: &Db) {
+    sqlx::query("DROP TABLE IF EXISTS translation_data_version")
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+    for verse @ (book, chapter, number) in WEB_UNNUMBERED {
+        sqlx::query(
+            "INSERT OR IGNORE INTO verses (translation_id, book_id, chapter, verse, text) \
+             VALUES ($1, $2, $3, $4, '')",
+        )
+        .bind(WEB)
+        .bind(book)
+        .bind(chapter)
+        .bind(number)
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+        let mut tx = super::begin_write(pool.write()).await.unwrap();
+        sqlx::query("DELETE FROM verse_search WHERE rowid = $1")
+            .bind(web_rowid(verse))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO verse_search (rowid, text) VALUES ($1, '')")
+            .bind(web_rowid(verse))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    }
+    sqlx::query(
+        "UPDATE search_index_state SET verse_count = \
+         (SELECT COUNT(*) FROM verses WHERE translation_id = $1) WHERE translation_id = $1",
+    )
+    .bind(WEB)
+    .execute(pool.write().pool())
+    .await
+    .unwrap();
+
+    // As 2.29.0 left it: those five stored and indexed, the index complete.
+    assert_eq!(empty_web_verses(pool.read()).await, WEB_UNNUMBERED);
+    assert_eq!(indexed_web_unnumbered(pool.read()).await, 5);
+    assert_eq!(web_index_count(pool.read()).await, Some(31_103));
+    assert_eq!(ensure_search_index(pool).await.unwrap(), Vec::<i64>::new());
+}
+
+/// Every row of the reader's own tables, each as its columns' SQL literals.
+async fn readers_tables(pool: &sqlx::SqlitePool) -> Vec<String> {
+    let mut rows = Vec::new();
+    for table in [
+        "notes",
+        "bookmarks",
+        "highlights",
+        "ai_findings",
+        "reading_position",
+        "reading_place",
+        "app_settings",
+    ] {
+        let columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info($1) ORDER BY cid")
+                .bind(table)
+                .fetch_all(pool)
+                .await
+                .unwrap();
+        assert!(!columns.is_empty(), "{table}");
+        let row = columns
+            .iter()
+            .map(|c| format!("quote(\"{c}\")"))
+            .collect::<Vec<_>>()
+            .join(" || '|' || ");
+        // Table and column names from the list above and the schema.
+        let found: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT '{table}: ' || {row} FROM \"{table}\" ORDER BY rowid"
+        )))
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        rows.extend(found);
+    }
+    rows
+}
+
+/// The reader's records on Luke 17:36 and Romans 16:25, two of the verses
+/// the WEB doesn't number: a note, a bookmark, a highlight, an AI finding,
+/// and the reading place, in the WEB at Luke 17:36.
+async fn records_on_the_webs_unnumbered_verses(pool: &Db) {
+    let luke_17_36 = Passage {
+        book_id: 42,
+        chapter: 17,
+        verse_start: 36,
+        verse_end: 36,
+    };
+    add_note(pool.write(), &luke_17_36, "Two in the field.", None)
+        .await
+        .unwrap();
+    add_bookmark(pool.write(), 42, 17, 35, 37).await.unwrap();
+    set_highlights(pool.write(), 45, 16, 25, 25, HighlightColor::Blue)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO ai_findings (book_id, chapter, verse_start, verse_end, agent, request) \
+         VALUES (42, 17, 36, 36, 'Claude', 'taken')",
+    )
+    .execute(pool.write().pool())
+    .await
+    .unwrap();
+    save_reading_position_at(
+        pool.write(),
+        WEB,
+        42,
+        17,
+        Some(TopVerse {
+            verse: 36,
+            offset_px: Some(12.0),
+        }),
+    )
+    .await
+    .unwrap();
+}
+
+/// A new install seeds the WEB without the five verses its file has with
+/// no text: they're ones it doesn't number, as the BSB's `null`s are, so
+/// they have no row, and the WEB has five fewer verses than its file's
+/// entries. Every verse it does have is its text, byte for byte.
+#[tokio::test]
+async fn the_web_is_seeded_without_the_verses_it_does_not_number() {
+    let (_db, pool) = fresh_database("web_unnumbered_seed").await;
+    let entries: usize = bundled("web")
+        .iter()
+        .map(|b| b.chapters.iter().map(Vec::len).sum::<usize>())
+        .sum();
+    assert_eq!(entries, 31_103);
+    let web_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM verses WHERE translation_id = $1")
+        .bind(WEB)
+        .fetch_one(pool.read())
+        .await
+        .unwrap();
+    assert_eq!(web_rows, 31_098);
+    assert_eq!(entries as i64 - web_rows, 5);
+    let empty: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM verses WHERE text = ''")
+        .fetch_one(pool.read())
+        .await
+        .unwrap();
+    assert_eq!(empty, 0, "no translation has a verse with no text");
+    for (book, chapter, verse) in WEB_UNNUMBERED {
+        assert_eq!(
+            bundled("web")[book as usize - 1].chapters[chapter as usize - 1][verse as usize - 1],
+            "",
+            "the file's entry for {book} {chapter}:{verse}"
+        );
+        let row: Option<String> = sqlx::query_scalar(
+            "SELECT text FROM verses \
+             WHERE translation_id = $1 AND book_id = $2 AND chapter = $3 AND verse = $4",
+        )
+        .bind(WEB)
+        .bind(book)
+        .bind(chapter)
+        .bind(verse)
+        .fetch_optional(pool.read())
+        .await
+        .unwrap();
+        assert_eq!(row, None, "{book} {chapter}:{verse}");
+        // The KJV numbers each of them.
+        let kjv: Option<String> = sqlx::query_scalar(
+            "SELECT text FROM verses \
+             WHERE translation_id = $1 AND book_id = $2 AND chapter = $3 AND verse = $4",
+        )
+        .bind(KJV)
+        .bind(book)
+        .bind(chapter)
+        .bind(verse)
+        .fetch_optional(pool.read())
+        .await
+        .unwrap();
+        assert!(
+            kjv.is_some_and(|t| !t.is_empty()),
+            "{book} {chapter}:{verse}"
+        );
+    }
+    assert_eq!(indexed_web_unnumbered(pool.read()).await, 0);
+    assert_verses_match_bundled(&verses_snapshot(pool.read()).await);
+}
+
+/// The first launch after upgrading from 2.29.0 takes the WEB's five empty
+/// verses out, with their search index rows, and keeps the index complete
+/// (no rebuild); the reader's notes, bookmarks, highlights, findings and
+/// reading place on those verses keep their coordinates, and every other
+/// verse is as it was. The next launch changes nothing at all.
+#[tokio::test]
+async fn upgrading_from_2_29_0_takes_out_the_webs_empty_verses_once() {
+    let (db, pool) = fresh_database("web_unnumbered_upgrade").await;
+    as_2_29_0_left_it(&pool).await;
+    records_on_the_webs_unnumbered_verses(&pool).await;
+    let verses_before = verses_snapshot(pool.read()).await;
+    let readers_before = readers_tables(pool.read()).await;
+    assert_eq!(readers_before.len(), 6, "{readers_before:?}");
+
+    // Exactly what startup does.
+    pool.close().await;
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+
+    // The five are gone, and nothing else.
+    assert_eq!(empty_web_verses(pool.read()).await, NONE);
+    let verses_after = verses_snapshot(pool.read()).await;
+    let expected: Vec<_> = verses_before
+        .iter()
+        .filter(|(t, b, c, v, _)| !web_unnumbered().contains(&(*t, *b, *c, *v)))
+        .cloned()
+        .collect();
+    assert_eq!(verses_before.len() - expected.len(), 5);
+    assert!(verses_after == expected, "only the five are taken out");
+    assert_verses_match_bundled(&verses_after);
+    // The reader's tables, row for row.
+    assert_eq!(readers_tables(pool.read()).await, readers_before);
+    // The search index lost their rows, kept its count right, and is
+    // complete as it is: nothing to rebuild.
+    assert_eq!(indexed_web_unnumbered(pool.read()).await, 0);
+    assert_eq!(web_index_count(pool.read()).await, Some(31_098));
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
+    assert_eq!(data_versions(pool.read()).await, [(WEB, 2)]);
+    let (total, _) = search_verses(pool.read(), WEB, &terms(&["field"]), 1, 0)
+        .await
+        .unwrap();
+    assert!(total > 0);
+
+    // The next launch: every row of every table is as the first left it,
+    // rowids included (a copy of the file, made once it's closed and its
+    // write-ahead log is folded in).
+    pool.close().await;
+    let snapshot = TempDb::new("web_unnumbered_upgrade_snapshot");
+    for suffix in ["-wal", "-shm"] {
+        assert!(
+            !super::connect::beside(&db.path(), suffix).exists(),
+            "{suffix}"
+        );
+    }
+    std::fs::copy(db.path(), snapshot.path()).unwrap();
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
+    assert_same_database(&pool, &snapshot.path()).await;
+}
+
+/// An upgrade that fails part-way leaves everything as it was, the five
+/// empty verses, their index rows and count, and the version unrecorded,
+/// and the app starts all the same; the next launch makes it.
+#[tokio::test]
+async fn a_failed_upgrade_changes_nothing_and_is_made_next_launch() {
+    let (db, pool) = fresh_database("web_unnumbered_failed").await;
+    as_2_29_0_left_it(&pool).await;
+    records_on_the_webs_unnumbered_verses(&pool).await;
+    pool.close().await;
+    let pool = db.connect().await;
+    migrate(pool.write()).await.unwrap();
+    let verses_before = verses_snapshot(pool.read()).await;
+    let readers_before = readers_tables(pool.read()).await;
+
+    // Its last write, recording the version, fails: on the writer's one
+    // connection, a trigger that refuses it.
+    sqlx::query(
+        "CREATE TEMP TRIGGER refuse_the_version BEFORE INSERT ON translation_data_version \
+         BEGIN SELECT RAISE(ABORT, 'refused for the test'); END",
+    )
+    .execute(pool.write().pool())
+    .await
+    .unwrap();
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(verses_snapshot(pool.read()).await, verses_before);
+    assert_eq!(empty_web_verses(pool.read()).await, WEB_UNNUMBERED);
+    assert_eq!(indexed_web_unnumbered(pool.read()).await, 5);
+    assert_eq!(web_index_count(pool.read()).await, Some(31_103));
+    assert_eq!(data_versions(pool.read()).await, Vec::<(i64, i64)>::new());
+    assert_eq!(readers_tables(pool.read()).await, readers_before);
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
+
+    // The next launch, a new connection without the trigger.
+    pool.close().await;
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(empty_web_verses(pool.read()).await, NONE);
+    assert_eq!(indexed_web_unnumbered(pool.read()).await, 0);
+    assert_eq!(web_index_count(pool.read()).await, Some(31_098));
+    assert_eq!(data_versions(pool.read()).await, [(WEB, 2)]);
+    assert_eq!(readers_tables(pool.read()).await, readers_before);
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
+}
+
+/// A translation a newer version of the app has brought past this one's
+/// latest data version is left as it is, as `migrate` leaves a newer
+/// schema; one recorded at its latest isn't changed either, even with an
+/// empty verse in it.
+#[tokio::test]
+async fn data_past_this_versions_steps_is_left_alone() {
+    let (db, pool) = fresh_database("web_unnumbered_newer").await;
+    as_2_29_0_left_it(&pool).await;
+    pool.close().await;
+    let pool = db.connect().await;
+    migrate(pool.write()).await.unwrap();
+    for version in [3, 2] {
+        sqlx::query(
+            "INSERT INTO translation_data_version (translation_id, version) VALUES ($1, $2) \
+             ON CONFLICT (translation_id) DO UPDATE SET version = excluded.version",
+        )
+        .bind(WEB)
+        .bind(version)
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+        prepare(pool.write()).await.unwrap();
+        assert_eq!(empty_web_verses(pool.read()).await, WEB_UNNUMBERED);
+        assert_eq!(data_versions(pool.read()).await, [(WEB, version)]);
+    }
+}
+
 /// `migrate` records the schema's version, which `SCHEMA_VERSION` names,
 /// and leaves a newer one (from a later app) as it is.
 #[tokio::test]
@@ -292,11 +693,25 @@ async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_searc
         vec![KJV, WEB, BSB]
     );
 
-    // The KJV and WEB rows are untouched; the BSB, which 2.1.0 didn't
-    // have, is added after them, exactly as bundled.
-    assert_verses_match(&verses_before, &[(KJV, "kjv"), (WEB, "web")]);
+    // The KJV's rows are untouched, and so are the WEB's but for the five
+    // verses with no text, which it doesn't number (2.1.0 to 2.29.0 seeded
+    // them as empty verses); the BSB, which 2.1.0 didn't have, is added
+    // after them, exactly as bundled.
+    let numbered_before: Vec<_> = verses_before
+        .iter()
+        .filter(|(.., text)| !text.is_empty())
+        .cloned()
+        .collect();
+    assert_eq!(verses_before.len() - numbered_before.len(), 5);
+    let empty_before: Vec<_> = verses_before
+        .iter()
+        .filter(|(.., text)| text.is_empty())
+        .map(|&(t, b, c, v, _)| (t, b, c, v))
+        .collect();
+    assert_eq!(empty_before, web_unnumbered());
+    assert_verses_match(&numbered_before, &[(KJV, "kjv"), (WEB, "web")]);
     let verses_after = verses_snapshot(pool.read()).await;
-    assert_eq!(verses_after[..verses_before.len()], verses_before[..]);
+    assert_eq!(verses_after[..numbered_before.len()], numbered_before[..]);
     assert_verses_match_bundled(&verses_after);
     // Every other row is as it was; the BSB is listed after the two.
     let mut others_expected = others_before.clone();

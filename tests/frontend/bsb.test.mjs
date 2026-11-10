@@ -207,6 +207,49 @@ test('a verse the BSB doesn’t number: no row, and a notice that says so when i
         assert.equal(app.notice(), "Matthew 17:21 isn't numbered in the Berean Standard Bible. Showing the whole chapter.");
     }));
 
+test('the verses the WEB doesn’t number (empty in its file) are left out as the BSB’s are, never shown empty', () =>
+    withApp({ book: 'Luke', chapter: 17, translation: 'web' }, async (app) => {
+        assert.equal(BIBLES.web[bookId('Luke') - 1].chapters[16][35], '', 'fixture: empty in the file');
+        assert.equal(app.heading(), 'Luke 17');
+        const shown = (code) => [...app.document.querySelectorAll(`.chapter-main .verse[data-translation="${code}"]`)];
+        // No verse 36 at all: not a number with nothing beside it.
+        assert.equal(app.document.querySelector('.chapter-main .verse[data-translation="web"][data-verse="36"]'), null);
+        assert.deepEqual(
+            shown('web').map((v) => Number(v.dataset.verse)),
+            [...Array(37).keys()].map((i) => i + 1).filter((n) => n !== 36),
+        );
+        for (const verse of shown('web')) {
+            assert.notEqual(verseText(verse).trim(), '', `Luke 17:${verse.dataset.verse} has words`);
+        }
+        assert.equal(verseText(app.verse(35, 'web')), storedVerse('web', 'Luke', 17, 35));
+        assert.equal(verseText(app.verse(37, 'web')), storedVerse('web', 'Luke', 17, 37));
+
+        // Going to it: the chapter, and why nothing is selected.
+        await app.search('Luke 17:36');
+        const before = app.calls.length;
+        app.key('Enter', {}, app.searchInput());
+        await app.idle(before, 'get_reading');
+        assert.equal(app.heading(), 'Luke 17');
+        assert.deepEqual(app.selectedVerseNumbers(), []);
+        assert.equal(app.notice(), "Luke 17:36 isn't numbered in the World English Bible. Showing the whole chapter.");
+
+        // The backend's passage says so too, as for the BSB.
+        const passage = await backend('get_passage', { translationCode: 'web', bookId: bookId('Luke'), chapter: 17, start: 35, end: 37 });
+        assert.deepEqual(passage.verses.map((v) => v.number), [35, 37]);
+        assert.equal(passage.notice, "In Luke 17:35–37, verse 36 isn't numbered in the World English Bible.");
+        assert.deepEqual(passage.verses.map((v) => v.text), [storedVerse('web', 'Luke', 17, 35), storedVerse('web', 'Luke', 17, 37)]);
+    }));
+
+test('compare: each verse the WEB doesn’t number is a gap beside the KJV’s', () =>
+    withApp({ book: 'Acts', chapter: 8, translation: 'kjv', compare: true, storage: { 'gospel-getter-compare-with': 'web' } }, async (app) => {
+        const gap = app.document.querySelector('.compare-gap[data-gap-verse="37"]');
+        assert.ok(gap, 'Acts 8:37 is a gap in the WEB');
+        assert.equal(gap.dataset.code, 'WEB');
+        assert.match(gap.textContent, /Not numbered in the WEB/);
+        assert.ok(app.verse(37, 'kjv'));
+        assert.equal(app.document.querySelector('.verse[data-translation="web"][data-verse="37"]'), null);
+    }));
+
 const PAIRS = [
     ['kjv', 'bsb'], ['kjv', 'web'],
     ['bsb', 'kjv'], ['bsb', 'web'],
