@@ -853,6 +853,84 @@ async fn temporary_files_never_reuse_or_disturb_an_existing_file() {
     );
 }
 
+/// The process's umask, set for a test and put back when it's dropped.
+#[cfg(unix)]
+struct Umask(libc::mode_t);
+
+#[cfg(unix)]
+impl Umask {
+    fn set(mask: libc::mode_t) -> Self {
+        // SAFETY: umask only swaps the process's file mode mask; it can't
+        // fail and touches no memory.
+        Self(unsafe { libc::umask(mask) })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Umask {
+    fn drop(&mut self) {
+        // SAFETY: as in `set`.
+        unsafe { libc::umask(self.0) };
+    }
+}
+
+/// Under the usual umask (022, which leaves a new file readable by
+/// everyone), a backup and a Markdown export are each readable by the
+/// reader alone (0600) from the moment the file exists, before a byte is in
+/// it; replacing a private one leaves it private, and replacing one others
+/// could read leaves it private too: never broader.
+#[cfg(unix)]
+#[tokio::test]
+async fn exports_are_private_from_the_start_and_when_they_replace_a_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    let set_mode = |path: &Path, mode: u32| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    let (db, state) = app("rd_private_exports").await;
+    let dir = db.path().parent().unwrap().to_path_buf();
+    let _umask = Umask::set(0o022);
+
+    let temp = commands::create_temp_file(&dir, [".private.tmp".to_string()]).unwrap();
+    assert_eq!(mode(temp.path()), 0o600, "the temporary file, still empty");
+    drop(temp);
+
+    let backup = file(&db, "new.gospel-getter.json");
+    export_to(&state, &backup, Preferences::default()).await;
+    assert_eq!(mode(&backup), 0o600, "a new backup");
+
+    let notes = commands::NotesFile {
+        file_name: "notes.md".to_string(),
+        contents: "# My notes\n".to_string(),
+        notes: 0,
+    };
+    let markdown = file(&db, "new-notes.md");
+    commands::save_notes_export(&notes, &markdown)
+        .await
+        .unwrap();
+    assert_eq!(mode(&markdown), 0o600, "a new Markdown export");
+
+    for (name, was) in [
+        ("private.gospel-getter.json", 0o600),
+        ("shared.gospel-getter.json", 0o644),
+        ("private-notes.md", 0o600),
+        ("shared-notes.md", 0o644),
+    ] {
+        let path = file(&db, name);
+        std::fs::write(&path, "an earlier export").unwrap();
+        set_mode(&path, was);
+        if name.ends_with(".md") {
+            commands::save_notes_export(&notes, &path).await.unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), notes.contents);
+        } else {
+            export_to(&state, &path, Preferences::default()).await;
+            assert!(reader_data::parse(&std::fs::read(&path).unwrap()).is_ok());
+        }
+        assert_eq!(mode(&path), 0o600, "{name}, {was:o} before");
+    }
+    assert_eq!(temp_leftovers(&dir), Vec::<String>::new());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn simultaneous_saves_to_one_file_each_complete_cleanly() {
     let (db, state) = app("rd_concurrent").await;

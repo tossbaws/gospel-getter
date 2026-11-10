@@ -96,3 +96,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 sha2 = "0.10"
+
+# Only for the exports' privacy test (`reader_data_tests`), which sets the
+# umask to the usual 022 to show an export is private whatever it is. Already
+# in the tree.
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
