@@ -3,7 +3,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, shownVerse, storedVerse } from './harness.mjs';
+import { backend, closeBridge, openApp, settle, shownVerse, storedVerse } from './harness.mjs';
 
 after(closeBridge);
 
@@ -276,6 +276,87 @@ test('Show more says how many more it shows, of how many, down to the last page'
         assert.equal(app.searchResults().length, n);
         assert.equal(app.searchStatus(), `${n} verses in the WEB.`);
         assert.equal(more.hidden, true, 'hidden once everything is shown');
+    }));
+
+// AUD-02: Show more belongs to the verses shown. Once the box's words or
+// the translation change, the old Show more goes at once; pressed anyway,
+// it searches what's typed from its first page; and no page of one search
+// is ever added to another's verses.
+const refs = (app) => app.searchResults().map((r) => r.querySelector('.search-ref').textContent);
+const firstPage = async (query, translationCode) =>
+    (await backend('search', { query, translationCode, offset: 0 })).results.map((r) => r.reference);
+const searchesSince = (app, before) => app.calls.slice(before).filter((c) => c.cmd === 'search').map((c) => c.args);
+const pressShowMore = (app) => app.document.getElementById('search-more')
+    .dispatchEvent(new app.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+test('AUD-02: typing before the debounce: the old Show more goes, and pressed anyway it starts the new words afresh', () =>
+    withApp({ translation: 'web' }, async (app) => {
+        const more = app.document.getElementById('search-more');
+        await app.search('love');
+        assert.equal(more.hidden, false);
+        const before = app.calls.length;
+        app.type(app.searchInput(), 'grace');
+        assert.equal(more.hidden, true, 'gone as soon as the words change');
+        pressShowMore(app);
+        await app.idle(before, 'search');
+        const sent = searchesSince(app, before);
+        assert.ok(sent.length > 0);
+        assert.ok(sent.every((a) => a.offset === 0 && a.query === 'grace'), JSON.stringify(sent));
+        assert.deepEqual(refs(app), await firstPage('grace', 'web'), 'the new words’ first page, nothing else');
+        assert.match(app.searchStatus(), / in the WEB, showing 50\.$/);
+        assert.equal(more.hidden, false, 'the new words’ own Show more');
+    }));
+
+test('AUD-02: while the new words’ answer is on its way, the old Show more adds nothing to them', () =>
+    withApp({ translation: 'web' }, async (app) => {
+        const more = app.document.getElementById('search-more');
+        await app.search('love');
+        const loved = refs(app);
+        const release = app.holdCommand('search');
+        const before = app.calls.length;
+        app.type(app.searchInput(), 'grace');
+        await app.until(() => searchesSince(app, before).length > 0, 'the new search to be sent');
+        assert.equal(more.hidden, true);
+        assert.deepEqual(refs(app), loved, 'the old verses stay meanwhile');
+        pressShowMore(app);
+        await settle();
+        release();
+        await app.idle(before, 'search');
+        const sent = searchesSince(app, before);
+        assert.ok(sent.every((a) => a.offset === 0 && a.query === 'grace'), JSON.stringify(sent));
+        assert.deepEqual(refs(app), await firstPage('grace', 'web'));
+        assert.match(app.searchStatus(), / in the WEB, showing 50\.$/);
+    }));
+
+test('AUD-02: a translation switch: the old Show more goes, and the words are searched afresh in the new one', () =>
+    withApp({ translation: 'web' }, async (app) => {
+        const more = app.document.getElementById('search-more');
+        await app.search('love');
+        assert.equal(more.hidden, false);
+        const select = app.document.getElementById('translation-select');
+        const release = app.holdCommand('search');
+        const before = app.calls.length;
+        select.value = 'kjv';
+        select.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+        assert.equal(more.hidden, true, 'gone as soon as the translation changes');
+        pressShowMore(app);
+        await settle();
+        release();
+        await app.idle(before, 'search');
+        const sent = searchesSince(app, before);
+        assert.ok(sent.length > 0);
+        assert.ok(sent.every((a) => a.offset === 0 && a.translationCode === 'kjv'), JSON.stringify(sent));
+        assert.deepEqual(refs(app), await firstPage('love', 'kjv'));
+        assert.match(app.searchStatus(), / in the KJV, showing 50\.$/);
+
+        // Its own Show more adds its own next page.
+        const first = refs(app);
+        const again = app.calls.length;
+        app.click(more);
+        await app.idle(again, 'search');
+        assert.deepEqual(searchesSince(app, again).map((a) => [a.query, a.translationCode, a.offset]), [['love', 'kjv', 50]]);
+        assert.deepEqual(refs(app).slice(0, first.length), first);
+        assert.equal(refs(app).length, 100);
     }));
 
 test('switching translation reruns the search in the new translation', () =>

@@ -57,6 +57,11 @@ const DEBOUNCE_MS: i32 = 150;
 /// What the Go to and Verses groups show: the last search's answer (a
 /// page of verses keeps the pages before it, for Show more), kept while the
 /// next one is on its way.
+///
+/// Show more belongs to the verses shown (AUD-02): their words and
+/// translation are kept with them, it shows only while the box and the
+/// translation being read are still those, and a page is added only to the
+/// verses of its own search. Anything else starts from the first page.
 #[derive(Clone)]
 enum Shown {
     Passage {
@@ -76,7 +81,25 @@ enum Shown {
         verses: Vec<SearchVerse>,
         /// A book typed by name alone: its first chapter, offered first.
         go_to: Option<GoTo>,
+        /// What was searched for them, as typed, and in which translation.
+        query: String,
+        translation_code: String,
     },
+}
+
+impl Shown {
+    /// Whether these are the verses of a search for `query` in
+    /// `translation_code`: only then is there more of them to show.
+    fn is_search_for(&self, query: &str, translation_code: &str) -> bool {
+        match self {
+            Shown::Text {
+                query: shown,
+                translation_code: code,
+                ..
+            } => shown == query && code == translation_code,
+            Shown::Passage { .. } => false,
+        }
+    }
 }
 
 /// What was searched last, and in which translation.
@@ -279,15 +302,27 @@ impl Search {
             if self.state.with_value(|s| s.token) != token {
                 return false;
             }
+            // A later page whose first ones are no longer shown is no page
+            // to add: what's typed is searched from its first page instead.
+            let follows_on = offset == 0
+                || self.state.with_value(|s| {
+                    s.shown
+                        .as_ref()
+                        .is_some_and(|shown| shown.is_search_for(&query, &translation_code))
+                });
+            if answer.is_ok() && !follows_on {
+                self.search_now(0);
+                return false;
+            }
             match answer {
                 Ok(answer) => {
                     self.state.update_value(|s| {
                         s.last = Some(LastSearch {
-                            query,
-                            translation_code,
+                            query: query.clone(),
+                            translation_code: translation_code.clone(),
                         });
                     });
-                    self.show_answer(answer, offset > 0);
+                    self.show_answer(answer, query, translation_code, offset > 0);
                 }
                 Err(e) => {
                     ipc::log_error("Search failed", &e);
@@ -329,9 +364,17 @@ impl Search {
         self.state.update_value(|s| s.timer = handle);
     }
 
-    /// The search's answer (added to what's shown, for Show more), and its
-    /// status line.
-    fn show_answer(self, answer: SearchAnswer, append: bool) {
+    /// The answer of a search for `query` in `translation_code`, and its
+    /// status line. A later page (Show more, `more`) is added to what's
+    /// shown when that's this same search's verses; anything else replaces
+    /// it.
+    fn show_answer(
+        self,
+        answer: SearchAnswer,
+        query: String,
+        translation_code: String,
+        more: bool,
+    ) {
         match answer {
             SearchAnswer::Passage {
                 book_id,
@@ -360,13 +403,11 @@ impl Search {
                 go_to,
             } => {
                 let page = results.len();
-                let code = self.state.with_value(|s| {
-                    s.last
-                        .as_ref()
-                        .map(|l| l.translation_code.clone())
-                        .filter(|c| !c.is_empty())
-                });
-                let code = code.unwrap_or_else(bridge::translation_code);
+                let code = if translation_code.is_empty() {
+                    bridge::translation_code()
+                } else {
+                    translation_code.clone()
+                };
                 // A book's name alone offers its first chapter first.
                 let status = text::verses_status(
                     total,
@@ -376,8 +417,13 @@ impl Search {
                     go_to.as_ref().map(|g| g.reference.as_str()),
                 );
                 self.state.update_value(|s| {
-                    let mut verses = match (append, s.shown.take()) {
-                        (true, Some(Shown::Text { verses, .. })) => verses,
+                    let mut verses = match s.shown.take() {
+                        Some(Shown::Text {
+                            verses,
+                            query: shown,
+                            translation_code: code,
+                            ..
+                        }) if more && shown == query && code == translation_code => verses,
                         _ => Vec::new(),
                     };
                     verses.extend(results);
@@ -388,6 +434,8 @@ impl Search {
                         page_size,
                         verses,
                         go_to,
+                        query,
+                        translation_code,
                     });
                 });
                 self.set_status(&status, false);
@@ -402,6 +450,25 @@ impl Search {
             }
         }
         self.render();
+    }
+
+    /// Where Show more goes on from in `shown`: the next page of its
+    /// verses, while they're the search for what the box holds now in the
+    /// translation being read, and there are more; otherwise there's none.
+    fn more_offset(self, shown: Option<&Shown>) -> Option<i64> {
+        let shown = shown?;
+        if !shown.is_search_for(&self.value(), &bridge::translation_code()) {
+            return None;
+        }
+        match shown {
+            Shown::Text {
+                total,
+                offset,
+                page,
+                ..
+            } => text::more_from(*offset, *page, *total),
+            Shown::Passage { .. } => None,
+        }
     }
 
     // ---- The listbox.
@@ -464,10 +531,9 @@ impl Search {
             groups.push(group_view("commands", "Commands", options));
         }
         let mut more = None;
+        let current = self.more_offset(shown.as_ref());
         if let Some(Shown::Text {
             total,
-            offset,
-            page,
             page_size,
             verses,
             ..
@@ -484,8 +550,8 @@ impl Search {
                     .collect();
                 groups.push(group_view("verses", "Verses", options));
             }
-            more = text::more_from(*offset, *page, *total)
-                .map(|next| (next, text::more_label(next, *page_size, *total)));
+            // Only for what's typed now, in the translation read now.
+            more = current.map(|next| (next, text::more_label(next, *page_size, *total)));
         }
 
         while let Some(child) = results.first_child() {
@@ -733,10 +799,11 @@ impl Search {
         if closest(&target, "#search-more").is_some() {
             self.cancel_enter();
             self.state.update_value(|s| s.moved = true);
+            // The next page of the verses shown, if they're still what's
+            // asked for; otherwise what's typed, from its first page.
             let offset = self
-                .more
-                .get_untracked()
-                .and_then(|more| data_number(&more, "data-offset"))
+                .state
+                .with_value(|s| self.more_offset(s.shown.as_ref()))
                 .unwrap_or(0);
             self.search_now(offset);
         }
@@ -799,11 +866,13 @@ impl Search {
             }
         });
         // A new translation: what's typed is searched again in it (and an
-        // Enter waiting for the old one's search is let go).
+        // Enter waiting for the old one's search is let go). Meanwhile the
+        // old translation's verses have no more to show in this one.
         if let Some(select) = by_id("translation-select") {
             dom::on(&select, "change", move |_| {
                 self.cancel_enter();
                 if !palette::js_trim(&self.value()).is_empty() {
+                    self.render();
                     self.search_now(0);
                 }
             });
