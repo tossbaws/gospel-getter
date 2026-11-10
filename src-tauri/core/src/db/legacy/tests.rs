@@ -108,12 +108,16 @@ async fn reading_position(db: &Path) -> Option<(i64, i64, i64)> {
     position
 }
 
-/// Every file in `dir`, by name, with its bytes.
+/// Every file in `dir`, by name, with its bytes, except SQLite's `-shm`
+/// shared-memory index: it isn't part of the database, every connection (a
+/// reader too) works in it, and on Windows an open connection's byte-range
+/// locks make it unreadable to anyone else.
 fn files_in(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     fs::read_dir(dir)
         .expect("list the directory")
         .map(|entry| entry.expect("an entry"))
         .filter(|entry| entry.file_type().is_ok_and(|t| t.is_file()))
+        .filter(|entry| !entry.file_name().to_string_lossy().ends_with("-shm"))
         .map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
             (name, fs::read(entry.path()).expect("read a file"))

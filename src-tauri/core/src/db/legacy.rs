@@ -133,8 +133,11 @@ impl Snapshot {
             .with_context(|| format!("Failed to close {}", legacy.display()))?;
         copied?;
         // On disk before it's published: `VACUUM INTO` doesn't sync its
-        // output.
-        std::fs::File::open(target)
+        // output. Opened for writing: Windows refuses to flush a file
+        // opened read-only (FlushFileBuffers needs write access).
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(target)
             .and_then(|file| file.sync_all())
             .with_context(|| format!("Failed to save {}", target.display()))?;
         Ok(snapshot)
