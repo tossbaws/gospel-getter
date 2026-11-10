@@ -287,10 +287,7 @@ fn the_window_state_plugin_restores_a_hidden_window_before_showing_it() {
 
     let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
     assert_eq!(capability["windows"], serde_json::json!(["main"]));
-    assert_eq!(
-        capability["permissions"],
-        serde_json::json!(["core:default"])
-    );
+    assert_eq!(capability["permissions"], serde_json::json!([]));
 }
 
 /// One app at a time: the official single-instance plugin is a desktop
@@ -330,10 +327,7 @@ fn the_single_instance_plugin_is_registered_first() {
     );
 
     let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
-    assert_eq!(
-        capability["permissions"],
-        serde_json::json!(["core:default"])
-    );
+    assert_eq!(capability["permissions"], serde_json::json!([]));
 }
 
 /// The webview's Content Security Policy, as `tauri.conf.json` sets it.
@@ -794,10 +788,7 @@ fn the_app_gets_no_way_to_run_the_sidecar() {
     assert!(!CARGO_TOML.contains("tauri-plugin-shell"));
     assert!(!LIB_RS.contains("tauri_plugin_shell"));
     let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
-    assert_eq!(
-        capability["permissions"],
-        serde_json::json!(["core:default"])
-    );
+    assert_eq!(capability["permissions"], serde_json::json!([]));
 }
 
 #[test]
@@ -999,4 +990,42 @@ fn the_windows_gui_checks_launch_the_app_by_its_name() {
         test_app.text.contains(&format!("target/release/{exe}")),
         "{test_app:#?}"
     );
+}
+
+/// The page asks Tauri for nothing but the app's own commands
+/// (`core.invoke`) and an update's progress (`core.Channel`), which Tauri 2
+/// doesn't gate by permissions for the app's own page, so it gets no
+/// permissions at all (B-07): not `core:default`, whose event, menu, path,
+/// window and webview permissions nothing used. A plugin's command
+/// (`plugin:…`) called from the page would need its own permission here.
+#[test]
+fn the_page_gets_no_permissions() {
+    let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
+    assert_eq!(capability["windows"], serde_json::json!(["main"]));
+    assert_eq!(capability["permissions"], serde_json::json!([]));
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut sources = vec![root.join("ui/index.html"), root.join("ui/leptos-loader.js")];
+    for entry in std::fs::read_dir(root.join("ui-leptos/src")).expect("ui-leptos/src") {
+        sources.push(entry.expect("a ui-leptos module").path());
+    }
+    let mut uses = 0;
+    for path in sources {
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        assert!(!text.contains("plugin:"), "{path:?} calls a plugin");
+        assert!(!text.contains("__TAURI_INTERNALS__"), "{path:?}");
+        for (at, _) in text.match_indices("__TAURI__") {
+            let rest = &text[at + "__TAURI__".len()..];
+            let near = &rest[..rest.len().min(200)];
+            assert!(
+                rest.starts_with(".core.invoke")
+                    || rest.starts_with(".core.Channel")
+                    || (rest.starts_with("\", \"core\"]")
+                        && (near.contains("js_name = invoke") || near.contains("\"Channel\""))),
+                "{path:?} reaches more of Tauri than core.invoke and core.Channel: {near}"
+            );
+            uses += 1;
+        }
+    }
+    assert!(uses > 0, "the page's calls to Tauri weren't found");
 }
