@@ -54,12 +54,18 @@ pub struct Saved<'a> {
     pub bookmarks: u64,
     pub highlights: u64,
     pub notes: u64,
+    /// The AI findings.
+    pub findings: u64,
+    /// Whether the file holds AI findings and the AI agents setting (it
+    /// does when there are findings or the setting is on).
+    pub findings_included: bool,
     pub has_position: bool,
     pub preferences: u64,
 }
 
 /// What Export data… says it saved: always the bookmarks, then whatever
-/// else there was, and where.
+/// else there was (the AI findings, and the AI agents setting when the file
+/// holds it, included), and where.
 pub fn export_saved(saved: &Saved) -> String {
     let mut parts = vec![plural(saved.bookmarks, "bookmark")];
     if saved.highlights > 0 {
@@ -68,11 +74,17 @@ pub fn export_saved(saved: &Saved) -> String {
     if saved.notes > 0 {
         parts.push(plural(saved.notes, "note"));
     }
+    if saved.findings > 0 {
+        parts.push(plural(saved.findings, "AI finding"));
+    }
     if saved.has_position {
         parts.push("your reading position".to_owned());
     }
     if saved.preferences > 0 {
         parts.push("your display settings".to_owned());
+    }
+    if saved.findings_included {
+        parts.push("the AI agents setting".to_owned());
     }
     format!(
         "Saved {} to {}. Bible text isn’t included.",
@@ -136,11 +148,54 @@ mod tests {
             notes: 1,
             has_position: true,
             preferences: 9,
+            ..Saved::default()
         };
         assert_eq!(
             export_saved(&all),
             "Saved 1 bookmark, 3 highlighted verses, 1 note, your reading position, your display \
              settings to C:\\b.json. Bible text isn’t included."
+        );
+    }
+
+    /// A backup of AI findings counts them, and says it holds the AI agents
+    /// setting whenever the file does.
+    #[test]
+    fn an_export_counts_its_ai_findings() {
+        let findings_only = Saved {
+            path: "/home/r/gg.json",
+            findings: 3,
+            findings_included: true,
+            ..Saved::default()
+        };
+        assert_eq!(
+            export_saved(&findings_only),
+            "Saved 0 bookmarks, 3 AI findings, the AI agents setting to /home/r/gg.json. Bible \
+             text isn’t included."
+        );
+        let one = Saved {
+            path: "/b.json",
+            bookmarks: 2,
+            notes: 1,
+            findings: 1,
+            findings_included: true,
+            has_position: true,
+            preferences: 4,
+            ..Saved::default()
+        };
+        assert_eq!(
+            export_saved(&one),
+            "Saved 2 bookmarks, 1 note, 1 AI finding, your reading position, your display \
+             settings, the AI agents setting to /b.json. Bible text isn’t included."
+        );
+        // The setting on with no findings: the file holds the setting.
+        let setting = Saved {
+            path: "/c.json",
+            findings_included: true,
+            ..Saved::default()
+        };
+        assert_eq!(
+            export_saved(&setting),
+            "Saved 0 bookmarks, the AI agents setting to /c.json. Bible text isn’t included."
         );
     }
 

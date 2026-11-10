@@ -329,16 +329,12 @@ async fn dispatch(
         }
         // Like the app's commands of the same names, with `pick()` in place
         // of the native dialogs.
-        "export_reader_data" => {
-            let data = commands::build_reader_data(state, arg(args, "preferences")?).await?;
-            match pick()? {
-                None => Ok(to_value(commands::ExportOutcome::Cancelled)?),
-                Some(path) => match commands::save_reader_data(&data, &path).await {
-                    Ok(outcome) => Ok(to_value(outcome)?),
-                    Err(e) => Err(format!("The file couldn't be saved: {e:#}")),
-                },
-            }
-        }
+        "export_reader_data" => answer(
+            commands::export_reader_data_with(state, arg(args, "preferences")?, |_| async {
+                pick().map_err(|e| format!("{e:#}"))
+            })
+            .await,
+        )?,
         "get_notes_export_options" => {
             let (now, tz) = clock()?;
             match commands::notes_export_options(state, now, &tz).await {
@@ -365,48 +361,35 @@ async fn dispatch(
             let layout: Option<NotesLayout> = arg(args, "layout")?;
             let (now, tz) = clock()?;
             let filter = arg(args, "filter")?;
-            match commands::build_notes_export_as(
-                state,
-                layout.unwrap_or_default(),
-                &code,
-                &filter,
-                now,
-                &tz,
-            )
-            .await
-            {
-                Err(message) => Err(message),
-                Ok(file) => match pick()? {
-                    None => Ok(to_value(commands::NotesExportOutcome::Cancelled)?),
-                    Some(path) => match commands::save_notes_export(&file, &path).await {
-                        Ok(outcome) => Ok(to_value(outcome)?),
-                        Err(e) => Err(format!("The file couldn't be saved: {e:#}")),
-                    },
-                },
-            }
+            answer(
+                commands::export_notes_with(
+                    state,
+                    layout.unwrap_or_default(),
+                    &code,
+                    &filter,
+                    now,
+                    &tz,
+                    |_| async { pick().map_err(|e| format!("{e:#}")) },
+                )
+                .await,
+            )?
         }
         "export_notes_by_book" => {
             let code: String = arg(args, "translationCode")?;
             let (now, tz) = clock()?;
             let layout: Option<NotesLayout> = arg(args, "layout")?;
-            match commands::build_notes_export_by_book_as(
-                state,
-                layout.unwrap_or_default(),
-                &code,
-                &arg(args, "filter")?,
-                now,
-                &tz,
-            )
-            .await
-            {
-                Err(message) => Err(message),
-                Ok(files) => match pick()? {
-                    None => Ok(to_value(commands::NotesFolderOutcome::Cancelled)?),
-                    Some(folder) => {
-                        answer(commands::notes_folder_chosen(state, files, folder).await)?
-                    }
-                },
-            }
+            answer(
+                commands::export_notes_by_book_with(
+                    state,
+                    layout.unwrap_or_default(),
+                    &code,
+                    &arg(args, "filter")?,
+                    now,
+                    &tz,
+                    || async { pick().map_err(|e| format!("{e:#}")) },
+                )
+                .await,
+            )?
         }
         "confirm_notes_export_by_book" => answer(
             commands::confirm_notes_folder(state, arg(args, "token")?, arg(args, "replace")?).await,

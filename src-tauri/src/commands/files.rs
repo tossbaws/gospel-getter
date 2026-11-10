@@ -112,6 +112,25 @@ pub(crate) fn create_temp_file(
     ))
 }
 
+/// `dialog` in front of the app's main window, as its parent: it stays above
+/// the window, and, where the platform does this, the window waits for it,
+/// so nothing is changed behind it while it's open.
+pub(super) fn over_main_window<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    dialog: tauri_plugin_dialog::FileDialogBuilder<R>,
+) -> tauri_plugin_dialog::FileDialogBuilder<R> {
+    #[cfg(desktop)]
+    {
+        use tauri::Manager;
+        if let Some(window) = app.get_webview_window(crate::window::MAIN) {
+            return dialog.set_parent(&window);
+        }
+    }
+    #[cfg(not(desktop))]
+    let _ = app;
+    dialog
+}
+
 /// Runs a blocking native file dialog off the async runtime's worker
 /// threads, and turns its answer into a path (`None` if cancelled).
 pub(super) async fn run_dialog(

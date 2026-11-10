@@ -2918,3 +2918,121 @@ async fn an_import_past_the_findings_limit_changes_nothing() {
     assert_eq!(full.findings_added, MAX_FINDINGS);
     assert_eq!(finding_rows(&state).await.len(), MAX_FINDINGS);
 }
+
+/// A backup's answer counts its AI findings, and says when the file holds
+/// them and the AI agents setting (format 4), so a backup of findings alone
+/// isn't reported as saving nothing.
+#[tokio::test]
+async fn a_backup_counts_its_ai_findings() {
+    let (db, state) = app("rd_findings_counted").await;
+    let empty = serde_json::to_value(
+        export_to(&state, &file(&db, "empty.json"), Preferences::default()).await,
+    )
+    .unwrap();
+    assert_eq!(empty["status"], "saved");
+    assert_eq!(
+        (&empty["findings"], &empty["findingsIncluded"]),
+        (&Value::from(0), &Value::from(false)),
+        "{empty}"
+    );
+
+    let finding = |verse: i64| crate::db::NewFinding {
+        passage: Passage {
+            book_id: 43,
+            chapter: 11,
+            verse_start: verse,
+            verse_end: verse,
+        },
+        agent: "Claude".to_string(),
+        request: "grief".to_string(),
+        created_at: None,
+    };
+    state
+        .store
+        .add_findings(&[finding(33), finding(34), finding(35)])
+        .await
+        .unwrap();
+    let path = file(&db, "findings.json");
+    let saved =
+        serde_json::to_value(export_to(&state, &path, Preferences::default()).await).unwrap();
+    assert_eq!(
+        (
+            &saved["bookmarks"],
+            &saved["highlights"],
+            &saved["notes"],
+            &saved["findings"],
+            &saved["findingsIncluded"],
+        ),
+        (
+            &Value::from(0),
+            &Value::from(0),
+            &Value::from(0),
+            &Value::from(3),
+            &Value::from(true),
+        ),
+        "{saved}"
+    );
+    let written: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(written["findings"].as_array().map(Vec::len), Some(3));
+
+    // The setting on and no findings: the file holds the setting.
+    let (db, state) = app("rd_findings_setting").await;
+    state.store.set_findings_enabled(true).await.unwrap();
+    let setting = serde_json::to_value(
+        export_to(&state, &file(&db, "setting.json"), Preferences::default()).await,
+    )
+    .unwrap();
+    assert_eq!(
+        (&setting["findings"], &setting["findingsIncluded"]),
+        (&Value::from(0), &Value::from(true)),
+        "{setting}"
+    );
+}
+
+/// What the reader changes while the save dialog is open is in the backup,
+/// and its answer counts what the file holds: the backup is gathered once
+/// the file is chosen. Cancelling writes nothing.
+#[tokio::test]
+async fn a_backup_holds_what_changed_while_its_dialog_was_open() {
+    let (db, state) = app("rd_dialog_edits").await;
+    state.store.add_bookmark(43, 3, 16, 16).await.unwrap();
+    let path = file(&db, "during.gospel-getter.json");
+    let outcome = commands::export_reader_data_with(&state, Preferences::default(), |suggested| {
+        let (state, path) = (&state, path.clone());
+        async move {
+            assert!(
+                suggested.starts_with("gospel-getter-")
+                    && suggested.ends_with(reader_data::FILE_SUFFIX),
+                "{suggested}"
+            );
+            // While the dialog is open.
+            state.store.add_bookmark(45, 5, 8, 8).await.unwrap();
+            state
+                .store
+                .add_note(&john_3(17, 17), "Written while the dialog was open", None)
+                .await
+                .unwrap();
+            Ok(Some(path))
+        }
+    })
+    .await
+    .unwrap();
+    let outcome = serde_json::to_value(outcome).unwrap();
+    assert_eq!(
+        (&outcome["bookmarks"], &outcome["notes"]),
+        (&Value::from(2), &Value::from(1)),
+        "{outcome}"
+    );
+    let written: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(written["bookmarks"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        written["notes"][0]["body"],
+        "Written while the dialog was open"
+    );
+
+    let cancelled =
+        commands::export_reader_data_with(&state, Preferences::default(), |_| async { Ok(None) })
+            .await
+            .unwrap();
+    assert!(matches!(cancelled, ExportOutcome::Cancelled));
+}
