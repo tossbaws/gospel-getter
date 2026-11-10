@@ -76,7 +76,7 @@ pub async fn passage_text(
         return Err(format!("Verses {start} to {end} aren't a passage."));
     }
     let unreadable = |e: anyhow::Error| {
-        tracing::error!("Failed to read {} {chapter}: {e}", book.name);
+        tracing::error!("Failed to read {} {chapter}: {e:#}", book.name);
         format!("{} {chapter} couldn't be read.", book.name)
     };
     let chapter_verses = state
@@ -189,7 +189,7 @@ pub async fn copy_text(
         .chapter_verses(translation.id, book_id, chapter)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to read {} {chapter}: {e}", book.name);
+            tracing::error!("Failed to read {} {chapter}: {e:#}", book.name);
             format!("{} {chapter} couldn't be read.", book.name)
         })?
         .into_iter()

@@ -4,6 +4,7 @@
 
 pub mod commands;
 pub mod credit_links;
+pub mod log_file;
 pub mod markdown;
 pub mod notes_export;
 pub mod passage_copy;
@@ -29,21 +30,35 @@ pub use gospel_getter_core::{book_aliases, db, domain, passage_reference, verse_
 use anyhow::Context;
 use tauri::Manager;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use commands::AppState;
 use db::create_pool;
+use log_file::LogFile;
 
 /// Start the app: set up logging, open the database and show the window
 /// where it was last time.
 pub fn run() {
-    tracing_subscriber::fmt()
-        // Up to info, but only warnings from zbus (the session bus that
-        // `window::single_instance_plugin` uses on Linux): its connections'
-        // info-level spans would fill the log on every launch.
-        .with_env_filter(EnvFilter::new("info,zbus=warn"))
-        .with_span_events(FmtSpan::CLOSE)
+    // What `RUST_LOG` asks for, or `log_file::DEFAULT_LOG_FILTER`, to stderr
+    // and, once `setup_app` has the app's log folder, to the log files.
+    let log = LogFile::new(log_file::MAX_LOG_BYTES, log_file::LOG_FILES);
+    tracing_subscriber::registry()
+        .with(log_file::log_filter(
+            std::env::var("RUST_LOG").ok().as_deref(),
+        ))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_span_events(FmtSpan::CLOSE),
+        )
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(log.clone())
+                .with_ansi(false)
+                .with_span_events(FmtSpan::CLOSE),
+        )
         .init();
 
     tauri::Builder::default()
@@ -59,7 +74,8 @@ pub fn run() {
         // also only from Rust, so nothing takes over link clicks in the page.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::PendingUpdate::default())
-        .setup(|app| {
+        .setup(move |app| {
+            open_log_file(app, &log);
             setup_app(app).map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })
         })
         .invoke_handler(invoke_handler())
@@ -131,6 +147,18 @@ fn invoke_handler<R: tauri::Runtime>()
         support_link::open_support_page,
         web_link::open_web_link,
     ]
+}
+
+/// Keep the log in the app's log folder from now on, as well as on stderr.
+/// Without it the app still runs, logging to stderr alone.
+fn open_log_file(app: &tauri::App, log: &LogFile) {
+    match app.path().app_log_dir() {
+        Ok(dir) => match log.open_in(&dir) {
+            Ok(()) => info!("Logging to {}", dir.display()),
+            Err(e) => tracing::warn!("Failed to keep a log file in {}: {e:#}", dir.display()),
+        },
+        Err(e) => tracing::warn!("Failed to find the app's log folder: {e}"),
+    }
 }
 
 /// Resolve where this app's database lives, migrate the pre-Tauri

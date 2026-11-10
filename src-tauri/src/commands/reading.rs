@@ -436,7 +436,7 @@ pub async fn home(state: &AppState) -> HomeDto {
             ),
             Ok(None) => ((default_translation_id, 1, 1, None), false),
             Err(e) => {
-                tracing::error!("Failed to load reading position: {e}");
+                tracing::error!("Failed to load reading position: {e:#}");
                 ((default_translation_id, 1, 1, None), true)
             }
         };
