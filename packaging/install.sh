@@ -13,6 +13,7 @@ DESKTOP_DIR="$HOME/.local/share/applications"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_TAURI="$REPO_ROOT/src-tauri"
 INSTALLED_APPIMAGE="$BIN_DIR/gospel-getter.AppImage"
+BUNDLE_DIR="$SRC_TAURI/target/release/bundle/appimage"
 
 echo "==> Building $APP_NAME (Tauri AppImage)"
 if ! command -v cargo >/dev/null 2>&1; then
@@ -41,11 +42,47 @@ fi
 #     already stripped by cargo/rustc, so this doesn't leave debug info
 #     behind, just the still-unstripped system libraries bundled from
 #     /usr/lib).
+#
+# The bundle folder can keep AppImages from older builds, so which one to
+# install is decided by identity, not by whichever `find` lists first: the
+# one AppImage written after this build started, carrying the version in
+# src-tauri/tauri.conf.json. Anything else stops here with what's there, and
+# nothing in the folder is deleted.
+VERSION="$(grep -m1 -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' "$SRC_TAURI/tauri.conf.json" |
+  sed -E 's/.*"([^"]+)"$/\1/' || true)"
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+  echo "error: couldn't read the app's version from src-tauri/tauri.conf.json" >&2
+  exit 1
+fi
+BUILD_STARTED="$(mktemp)"
+trap 'rm -f "$BUILD_STARTED"' EXIT
 (cd "$SRC_TAURI" && APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 cargo tauri build --bundles appimage)
 
-APPIMAGE="$(find "$SRC_TAURI/target/release/bundle/appimage" -maxdepth 1 -name '*.AppImage' | head -n1)"
-if [[ -z "$APPIMAGE" ]]; then
-  echo "error: build finished but no .AppImage was found under target/release/bundle/appimage" >&2
+# Prints the AppImages in the bundle folder, one per line: those written
+# after the build started with `-newer "$BUILD_STARTED"`, else all of them.
+appimages() {
+  [[ -d "$BUNDLE_DIR" ]] || return 0
+  find "$BUNDLE_DIR" -maxdepth 1 -type f -name '*.AppImage' "$@" | sort
+}
+mapfile -t BUILT < <(appimages -newer "$BUILD_STARTED")
+if ((${#BUILT[@]} == 0)); then
+  echo "error: the build finished but wrote no .AppImage to $BUNDLE_DIR" >&2
+  mapfile -t OLDER < <(appimages)
+  if ((${#OLDER[@]} > 0)); then
+    echo "These are from earlier builds, so none was installed:" >&2
+    printf '  %s\n' "${OLDER[@]##*/}" >&2
+  fi
+  exit 1
+fi
+if ((${#BUILT[@]} > 1)); then
+  echo "error: the build wrote more than one .AppImage to $BUNDLE_DIR, so which to install is ambiguous:" >&2
+  printf '  %s\n' "${BUILT[@]##*/}" >&2
+  echo "Nothing was installed." >&2
+  exit 1
+fi
+APPIMAGE="${BUILT[0]}"
+if [[ "$(basename "$APPIMAGE")" != *"_${VERSION}_"*.AppImage ]]; then
+  echo "error: the build wrote $(basename "$APPIMAGE"), which isn't version $VERSION (src-tauri/tauri.conf.json), so it wasn't installed" >&2
   exit 1
 fi
 
