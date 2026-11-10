@@ -516,8 +516,8 @@ pub async fn list_requests(pool: &SqlitePool) -> anyhow::Result<Vec<FindingReque
 /// (as the table's uniqueness counts it: "grief" and "Grief" are two): each
 /// group's findings in that order, every one of them kept, its agents in the
 /// order they first found one, the verses they mark counted once each
-/// ([`verses_marked`]), the groups the latest found first (then by
-/// request).
+/// however many of its findings mark them, the groups the latest found
+/// first (then by request).
 pub fn group_requests(findings: Vec<Finding>) -> Vec<FindingRequest> {
     let mut groups: Vec<FindingRequest> = Vec::new();
     for finding in findings {
