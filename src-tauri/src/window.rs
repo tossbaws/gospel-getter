@@ -83,6 +83,28 @@ pub fn centered_on(window: Rect, screen: Rect, min: (u32, u32)) -> Rect {
     }
 }
 
+/// Where a window that isn't reachable goes ([`centered_on`]), and the
+/// inner size to give it for that: `window` and `screen` are outer (the
+/// window's frame, its title bar and borders, included), `frame` is the
+/// window's outer size less its inner size, and `min` its minimum inner
+/// size. Setting a window's size sets its inner size, so the frame comes off
+/// what it's centered at, and goes onto the minimum, so the inner size is
+/// still no smaller than that.
+pub fn recovered(
+    window: Rect,
+    screen: Rect,
+    frame: (u32, u32),
+    min: (u32, u32),
+) -> (Rect, (u32, u32)) {
+    let outer_min = (min.0.saturating_add(frame.0), min.1.saturating_add(frame.1));
+    let to = centered_on(window, screen, outer_min);
+    let inner = (
+        to.width.saturating_sub(frame.0),
+        to.height.saturating_sub(frame.1),
+    );
+    (to, inner)
+}
+
 /// `size` (physical pixels at `scale`), grown if needed to the window's
 /// minimum (`min`, in logical pixels). `None` if it's already big enough.
 /// A size saved on a screen with a different scale can come back smaller.
@@ -103,7 +125,7 @@ mod desktop {
     use tauri::{LogicalSize, PhysicalPosition, PhysicalSize, WebviewWindowBuilder};
     use tauri_plugin_window_state::{StateFlags, WindowExt};
 
-    use super::{MAIN, Rect, STATE_FILE, at_least, centered_on, reachable};
+    use super::{MAIN, Rect, STATE_FILE, at_least, reachable, recovered};
 
     /// What comes back on launch: size, position and maximized state. Not
     /// visibility (the window is always shown) or decorations (always the
@@ -255,9 +277,15 @@ mod desktop {
             (min.0 * primary.scale_factor()).ceil() as u32,
             (min.1 * primary.scale_factor()).ceil() as u32,
         );
-        let to = centered_on(here, rect(area.position, area.size), min_physical);
+        let inner = window.inner_size()?;
+        let frame = (
+            here.width.saturating_sub(inner.width),
+            here.height.saturating_sub(inner.height),
+        );
+        let (to, (width, height)) =
+            recovered(here, rect(area.position, area.size), frame, min_physical);
         tracing::info!("The window was off screen at {here:?}; moving it to {to:?}");
-        window.set_size(PhysicalSize::new(to.width, to.height))?;
+        window.set_size(PhysicalSize::new(width, height))?;
         window.set_position(PhysicalPosition::new(to.x, to.y))?;
         Ok(())
     }
@@ -266,6 +294,57 @@ mod desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Brought back on screen, a window is centered at its outer size, and
+    /// given the inner size that has: the outer less its frame, never the
+    /// outer size itself (which would grow it by the frame, past the
+    /// screen). Its inner size is still no smaller than its minimum.
+    #[test]
+    fn a_window_brought_back_keeps_its_frame_on_the_screen() {
+        let screen = Rect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1040,
+        };
+        let away = Rect {
+            x: 5000,
+            y: 3000,
+            width: 1282,
+            height: 939,
+        };
+        // A title bar of 37 and a border of 1 on each side.
+        let frame = (2, 38);
+        let (to, inner) = recovered(away, screen, frame, (800, 600));
+        assert_eq!((to.width, to.height), (1282, 939));
+        assert_eq!(inner, (1280, 901));
+        assert_eq!((to.x, to.y), (319, 50));
+
+        // Bigger than the screen: the outer size fits it, the frame inside.
+        let huge = Rect {
+            width: 4000,
+            height: 3000,
+            ..away
+        };
+        let (to, inner) = recovered(huge, screen, frame, (800, 600));
+        assert_eq!((to.x, to.y, to.width, to.height), (0, 0, 1920, 1040));
+        assert_eq!(inner, (1918, 1002));
+
+        // A screen smaller than the minimum: the inner size is the minimum,
+        // and the frame is around it.
+        let tiny = Rect {
+            width: 700,
+            height: 500,
+            ..screen
+        };
+        let (to, inner) = recovered(away, tiny, frame, (800, 600));
+        assert_eq!(inner, (800, 600));
+        assert_eq!((to.width, to.height), (802, 638));
+
+        // No frame (some window managers report none): as before.
+        let (to, inner) = recovered(away, screen, (0, 0), (800, 600));
+        assert_eq!(inner, (to.width, to.height));
+    }
 
     const LAPTOP: Rect = Rect {
         x: 0,

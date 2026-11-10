@@ -41,13 +41,37 @@ pub async fn get_chapter_last_verse(
     book_id: i64,
     chapter: i64,
 ) -> anyhow::Result<i64> {
-    let last: Option<i64> =
-        sqlx::query_scalar("SELECT MAX(verse) FROM verses WHERE book_id = $1 AND chapter = $2")
-            .bind(book_id)
-            .bind(chapter)
-            .fetch_one(pool)
-            .await
-            .context("Failed to look up the chapter's last verse")?;
+    chapter_last_verse(pool, book_id, chapter).await
+}
+
+/// [`chapter_last_verse`]'s query: each translation's last verse in the
+/// chapter, then the highest of them. The verses' only index starts with
+/// the translation, so a query that leaves it out (`MAX(verse) WHERE
+/// book_id AND chapter`) walks every entry of every translation; asked per
+/// translation, each is one seek into that index.
+pub(crate) const CHAPTER_LAST_VERSE_SQL: &str = "SELECT MAX(( \
+         SELECT MAX(verse) FROM verses v \
+         WHERE v.translation_id = t.id AND v.book_id = $1 AND v.chapter = $2 \
+     )) FROM translations t";
+
+/// The highest verse number any translation has in one chapter (0 if none
+/// has the chapter), on any connection: the read pool, or the writing
+/// connection inside a transaction, which checks a passage before saving
+/// it.
+pub(crate) async fn chapter_last_verse<'e, E>(
+    executor: E,
+    book_id: i64,
+    chapter: i64,
+) -> anyhow::Result<i64>
+where
+    E: sqlx::SqliteExecutor<'e>,
+{
+    let last: Option<i64> = sqlx::query_scalar(CHAPTER_LAST_VERSE_SQL)
+        .bind(book_id)
+        .bind(chapter)
+        .fetch_one(executor)
+        .await
+        .context("Failed to look up the chapter's last verse")?;
     Ok(last.unwrap_or(0))
 }
 
@@ -240,6 +264,50 @@ pub async fn get_chapter_cross_references(
     .fetch_all(pool)
     .await
     .context("Failed to fetch cross references")
+}
+
+/// The verses one translation numbers in each of `passages` (book, chapter,
+/// first and last verse), in verse order, each passage's at its own place:
+/// what [`get_verse_range`] gives for each, read in one query however many
+/// passages there are.
+pub async fn verses_of_passages(
+    pool: &SqlitePool,
+    translation_id: i64,
+    passages: &[[i64; 4]],
+) -> anyhow::Result<Vec<Vec<Verse>>> {
+    let mut verses: Vec<Vec<Verse>> = vec![Vec::new(); passages.len()];
+    if passages.is_empty() {
+        return Ok(verses);
+    }
+    // The passages go to SQLite as one JSON array, as highlighted passages'
+    // previews do (`highlights::list_highlight_passages`).
+    let rows: Vec<(i64, i64, String)> = sqlx::query_as(
+        "WITH p AS (SELECT key AS position, \
+             json_extract(value, '$[0]') AS book_id, json_extract(value, '$[1]') AS chapter, \
+             json_extract(value, '$[2]') AS verse_start, json_extract(value, '$[3]') AS verse_end \
+             FROM json_each($2)) \
+         SELECT p.position, v.verse, v.text FROM p \
+         JOIN verses v ON v.translation_id = $1 AND v.book_id = p.book_id \
+             AND v.chapter = p.chapter AND v.verse BETWEEN p.verse_start AND p.verse_end \
+         ORDER BY p.position, v.verse",
+    )
+    .bind(translation_id)
+    .bind(serde_json::to_string(passages).context("Failed to encode passages")?)
+    .fetch_all(pool)
+    .await
+    .context("Failed to fetch the passages' verses")?;
+    for (position, verse, text) in rows {
+        let at = usize::try_from(position)
+            .ok()
+            .and_then(|at| verses.get_mut(at))
+            .with_context(|| format!("A verse came back for passage {position}, not asked for"))?;
+        at.push(Verse {
+            verse,
+            text,
+            footnotes: Vec::new(),
+        });
+    }
+    Ok(verses)
 }
 
 /// The text of a verse or verse range, for expanding a cross-reference.

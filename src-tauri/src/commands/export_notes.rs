@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
-use super::{AppState, failed, run_dialog, write_atomically};
+use super::{AppState, failed, over_main_window, run_dialog, write_atomically};
 use crate::db::{self, Note};
 use crate::notes_export::{BookFile, Commentary, NotesExport, NotesFilter, NotesLayout};
 
@@ -63,6 +63,17 @@ pub struct NotesExportOptions {
     pub dates: crate::notes_export::DatePresets,
 }
 
+/// Where every note is and when it was written, without their text: all
+/// the export dialog's choices and live count read.
+async fn note_places(state: &AppState) -> Result<Vec<db::notes::NotePlace>, String> {
+    state
+        .store
+        .note_places()
+        .await
+        .context("Failed to read where the notes are")
+        .map_err(failed(NOTES_UNREADABLE))
+}
+
 /// The export dialog's choices: the books with notes, and date presets
 /// that end today in `tz`.
 pub async fn notes_export_options<Tz: chrono::TimeZone>(
@@ -70,7 +81,7 @@ pub async fn notes_export_options<Tz: chrono::TimeZone>(
     now: chrono::DateTime<chrono::Utc>,
     tz: &Tz,
 ) -> Result<NotesExportOptions, String> {
-    let notes = notes_to_export(state).await?;
+    let notes = note_places(state).await?;
     Ok(NotesExportOptions {
         books: crate::notes_export::noted_books(&notes, &state.books),
         dates: crate::notes_export::date_presets(crate::notes_export::local_date(now, tz)),
@@ -85,8 +96,8 @@ pub async fn count_notes_to_export<Tz: chrono::TimeZone>(
     tz: &Tz,
 ) -> Result<usize, String> {
     filter.check(&state.books)?;
-    let notes = notes_to_export(state).await?;
-    Ok(notes.iter().filter(|n| filter.matches(n, tz)).count())
+    let notes = note_places(state).await?;
+    Ok(notes.iter().filter(|n| filter.matches(*n, tz)).count())
 }
 
 /// What an export is made from, read once: the translation its verses are
@@ -426,6 +437,66 @@ async fn save_notes_folder(
     }
 }
 
+/// Export the notes `filter` asks for, in `layout` (the quoted one in
+/// `translation_code`), to the file `choose` answers with (given the name
+/// to suggest; `None` if the reader cancelled). The export is made before
+/// the dialog opens, so a problem is reported without asking for a file
+/// name first, and made again once the file is chosen: a note written or
+/// changed while the dialog was open is in the file, and "Saved N" counts
+/// what the file holds. Dates are `now`, in `tz`.
+pub async fn export_notes_with<Tz, F, Fut>(
+    state: &AppState,
+    layout: NotesLayout,
+    translation_code: &str,
+    filter: &NotesFilter,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+    choose: F,
+) -> Result<NotesExportOutcome, String>
+where
+    Tz: chrono::TimeZone,
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Option<PathBuf>, String>>,
+{
+    let first = build_notes_export_as(state, layout, translation_code, filter, now, tz).await?;
+    let Some(path) = choose(first.file_name).await? else {
+        return Ok(NotesExportOutcome::Cancelled);
+    };
+    let file = build_notes_export_as(state, layout, translation_code, filter, now, tz).await?;
+    save_notes_export(&file, &path).await.map_err(|e| {
+        tracing::error!("Notes export failed: {e:#}");
+        format!("The file couldn't be saved: {e:#}")
+    })
+}
+
+/// Export the notes `filter` asks for as one file per book, in `layout`,
+/// into the folder `choose` answers with (`None` if the reader cancelled):
+/// made before the dialog opens, to report a problem first, and again once
+/// the folder is chosen, as [`export_notes_with`] does. Files already there
+/// are replaced only once the reader says so ([`notes_folder_chosen`]).
+pub async fn export_notes_by_book_with<Tz, F, Fut>(
+    state: &AppState,
+    layout: NotesLayout,
+    translation_code: &str,
+    filter: &NotesFilter,
+    now: chrono::DateTime<chrono::Utc>,
+    tz: &Tz,
+    choose: F,
+) -> Result<NotesFolderOutcome, String>
+where
+    Tz: chrono::TimeZone,
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<Option<PathBuf>, String>>,
+{
+    build_notes_export_by_book_as(state, layout, translation_code, filter, now, tz).await?;
+    let Some(folder) = choose().await? else {
+        return Ok(NotesFolderOutcome::Cancelled);
+    };
+    let files =
+        build_notes_export_by_book_as(state, layout, translation_code, filter, now, tz).await?;
+    notes_folder_chosen(state, files, folder).await
+}
+
 /// Write a notes export to `path`, completely or not at all (as
 /// `save_reader_data` does).
 pub async fn save_notes_export(
@@ -457,23 +528,24 @@ pub async fn export_notes_by_book<R: tauri::Runtime>(
     layout: Option<NotesLayout>,
 ) -> Result<NotesFolderOutcome, String> {
     use tauri_plugin_dialog::DialogExt;
-    let files = build_notes_export_by_book_as(
+    export_notes_by_book_with(
         &state,
         layout.unwrap_or_default(),
         &translation_code,
         &filter,
         chrono::Utc::now(),
         &chrono::Local,
+        || {
+            let dialog = over_main_window(
+                &app,
+                app.dialog()
+                    .file()
+                    .set_title("Export notes: choose a folder for one file per book"),
+            );
+            run_dialog(move || dialog.blocking_pick_folder())
+        },
     )
-    .await?;
-    let dialog = app
-        .dialog()
-        .file()
-        .set_title("Export notes: choose a folder for one file per book");
-    let Some(folder) = run_dialog(move || dialog.blocking_pick_folder()).await? else {
-        return Ok(NotesFolderOutcome::Cancelled);
-    };
-    notes_folder_chosen(&state, files, folder).await
+    .await
 }
 
 /// The reader's Replace (`replace`) or Cancel for the folder export
@@ -518,30 +590,26 @@ pub async fn export_notes<R: tauri::Runtime>(
     layout: Option<NotesLayout>,
 ) -> Result<NotesExportOutcome, String> {
     use tauri_plugin_dialog::DialogExt;
-    // Built before the dialog opens, so a problem is reported without
-    // asking for a file name first.
-    let file = build_notes_export_as(
+    export_notes_with(
         &state,
         layout.unwrap_or_default(),
         &translation_code,
         &filter,
         chrono::Utc::now(),
         &chrono::Local,
+        |suggested| {
+            let dialog = over_main_window(
+                &app,
+                app.dialog()
+                    .file()
+                    .add_filter("Markdown", &["md"])
+                    .set_title("Export notes")
+                    .set_file_name(suggested),
+            );
+            run_dialog(move || dialog.blocking_save_file())
+        },
     )
-    .await?;
-    let dialog = app
-        .dialog()
-        .file()
-        .add_filter("Markdown", &["md"])
-        .set_title("Export notes")
-        .set_file_name(&file.file_name);
-    let Some(path) = run_dialog(move || dialog.blocking_save_file()).await? else {
-        return Ok(NotesExportOutcome::Cancelled);
-    };
-    save_notes_export(&file, &path).await.map_err(|e| {
-        tracing::error!("Notes export failed: {e:#}");
-        format!("The file couldn't be saved: {e:#}")
-    })
+    .await
 }
 
 /// The notes `filter` asks for as a commentary, for the page to print (the
@@ -561,6 +629,117 @@ mod tests {
     use crate::commands::*;
     use crate::db::Passage;
     use crate::db::test_support::bundled;
+
+    /// A note written while the save dialog (or the folder dialog) is open
+    /// is in the export, and "Saved N" counts it: the export is made again
+    /// once the file or folder is chosen. Before the dialog, a problem is
+    /// still reported without asking for a file name.
+    #[tokio::test]
+    async fn a_notes_export_holds_what_was_written_while_its_dialog_was_open() {
+        let (db, state) = app_state("notes_dialog_edits").await;
+        let john = |verse: i64| Passage {
+            book_id: 43,
+            chapter: 3,
+            verse_start: verse,
+            verse_end: verse,
+        };
+        let romans = Passage {
+            book_id: 45,
+            chapter: 5,
+            verse_start: 8,
+            verse_end: 8,
+        };
+        let filter = NotesFilter::default();
+        let now = chrono::Utc::now();
+        let refused = export_notes_with(
+            &state,
+            NotesLayout::Quoted,
+            "kjv",
+            &filter,
+            now,
+            &chrono::Utc,
+            |_| async { panic!("no dialog when there are no notes") },
+        )
+        .await;
+        assert_eq!(refused.unwrap_err(), "There are no notes to export.");
+
+        state
+            .store
+            .add_note(&john(16), "Before the dialog", None)
+            .await
+            .unwrap();
+        let folder = db.path().with_file_name("notes-export");
+        std::fs::create_dir_all(&folder).unwrap();
+        for layout in [NotesLayout::Quoted, NotesLayout::Commentary] {
+            let path = folder.join(format!("{layout:?}.md"));
+            let written = format!("While the {layout:?} dialog was open");
+            let outcome = export_notes_with(
+                &state,
+                layout,
+                "kjv",
+                &filter,
+                now,
+                &chrono::Utc,
+                |suggested| {
+                    let (state, path, written) = (&state, path.clone(), written.clone());
+                    async move {
+                        assert!(suggested.ends_with(".md"), "{suggested}");
+                        state
+                            .store
+                            .add_note(&john(17), &written, None)
+                            .await
+                            .unwrap();
+                        Ok(Some(path))
+                    }
+                },
+            )
+            .await
+            .unwrap();
+            let NotesExportOutcome::Saved { notes, .. } = outcome else {
+                panic!("saved");
+            };
+            let markdown = std::fs::read_to_string(&path).unwrap();
+            assert!(markdown.contains("Before the dialog"), "{markdown}");
+            assert!(markdown.contains(&written), "{markdown}");
+            assert_eq!(notes, state.store.notes().await.unwrap().len());
+        }
+
+        // One file per book: a note in a new book while the folder dialog
+        // is open is a file of its own.
+        let by_book = folder.join("by-book");
+        std::fs::create_dir_all(&by_book).unwrap();
+        let outcome = export_notes_by_book_with(
+            &state,
+            NotesLayout::Quoted,
+            "kjv",
+            &filter,
+            now,
+            &chrono::Utc,
+            || {
+                let (state, by_book) = (&state, by_book.clone());
+                async move {
+                    state
+                        .store
+                        .add_note(&romans, "Romans, while the folder dialog was open", None)
+                        .await
+                        .unwrap();
+                    Ok(Some(by_book))
+                }
+            },
+        )
+        .await
+        .unwrap();
+        let NotesFolderOutcome::Saved { files, notes, .. } = outcome else {
+            panic!("saved: {outcome:?}");
+        };
+        assert_eq!(files, 2, "John and Romans");
+        assert_eq!(notes, state.store.notes().await.unwrap().len());
+        let romans_file = std::fs::read_dir(&by_book)
+            .unwrap()
+            .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())
+            .find(|text| text.contains("Romans, while the folder dialog was open"));
+        assert!(romans_file.is_some());
+    }
 
     #[tokio::test]
     async fn notes_export_quotes_each_note_in_the_chosen_translation() {

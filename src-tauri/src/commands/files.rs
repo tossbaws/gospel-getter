@@ -7,17 +7,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(super) fn write_atomically(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     use std::io::Write;
-    let name = path
-        .file_name()
-        .with_context(|| format!("{} isn't a file name", path.display()))?
-        .to_string_lossy()
-        .into_owned();
+    path.file_name()
+        .with_context(|| format!("{} isn't a file name", path.display()))?;
     let dir = match path.parent() {
         Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
         _ => PathBuf::from("."),
     };
     let write = || -> std::io::Result<()> {
-        let mut temp = create_temp_file(&dir, temp_names(&name))?;
+        let mut temp = create_temp_file(&dir, temp_names())?;
         let file = temp.file.as_mut().expect("open until persisted");
         file.write_all(bytes)?;
         file.sync_all()?;
@@ -60,9 +57,12 @@ impl Drop for TempFile {
     }
 }
 
-/// Hidden candidate names beside `name`, unique to this process, this
-/// moment and each attempt, so simultaneous saves never share one.
-fn temp_names(name: &str) -> impl Iterator<Item = String> + '_ {
+/// Hidden candidate names for a temporary file, unique to this process,
+/// this moment and each attempt, so simultaneous saves never share one.
+/// None has the target's name in it, so each is at most 68 bytes (".gg-",
+/// a process id, two hexadecimal counts and ".tmp") however long that name
+/// is: a name up to the file system's limit (255 bytes) can be saved.
+fn temp_names() -> impl Iterator<Item = String> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let pid = std::process::id();
     let nanos = std::time::SystemTime::now()
@@ -70,7 +70,7 @@ fn temp_names(name: &str) -> impl Iterator<Item = String> + '_ {
         .map_or(0, |d| d.as_nanos());
     (0..64).map(move |_| {
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        format!(".{name}.{pid}-{nanos:x}-{n:x}.tmp")
+        format!(".gg-{pid}-{nanos:x}-{n:x}.tmp")
     })
 }
 
@@ -112,6 +112,25 @@ pub(crate) fn create_temp_file(
     ))
 }
 
+/// `dialog` in front of the app's main window, as its parent: it stays above
+/// the window, and, where the platform does this, the window waits for it,
+/// so nothing is changed behind it while it's open.
+pub(super) fn over_main_window<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    dialog: tauri_plugin_dialog::FileDialogBuilder<R>,
+) -> tauri_plugin_dialog::FileDialogBuilder<R> {
+    #[cfg(desktop)]
+    {
+        use tauri::Manager;
+        if let Some(window) = app.get_webview_window(crate::window::MAIN) {
+            return dialog.set_parent(&window);
+        }
+    }
+    #[cfg(not(desktop))]
+    let _ = app;
+    dialog
+}
+
 /// Runs a blocking native file dialog off the async runtime's worker
 /// threads, and turns its answer into a path (`None` if cancelled).
 pub(super) async fn run_dialog(
@@ -126,4 +145,50 @@ pub(super) async fn run_dialog(
                 .map_err(|e| format!("That location can't be used: {e}"))
         })
         .transpose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A name as long as most file systems allow (255 bytes) has room for
+    /// nothing more, so the temporary file it's written through can't be
+    /// named after it; a 250-byte name is saved, completely, and nothing is
+    /// left beside it.
+    #[test]
+    fn a_long_legal_file_name_is_saved() {
+        let dir = std::env::temp_dir().join(format!(
+            "gospel_getter_long_name_{}_{:x}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        std::fs::create_dir_all(&dir).expect("make a scratch folder");
+        let name = format!("{}.gospel-getter.json", "n".repeat(250 - 19));
+        assert_eq!(name.len(), 250);
+        let target = dir.join(&name);
+        let saved = write_atomically(&target, b"the whole file");
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .expect("list it")
+            .map(|e| e.expect("an entry").file_name())
+            .collect();
+        let read = std::fs::read(&target);
+        std::fs::remove_dir_all(&dir).expect("remove the scratch folder");
+        saved.expect("a 250-byte name is saved");
+        assert_eq!(read.expect("the saved file"), b"the whole file");
+        assert_eq!(left, [std::ffi::OsString::from(name)], "nothing else");
+    }
+
+    /// Every candidate name is short, hidden and never the same twice.
+    #[test]
+    fn temporary_names_are_bounded_hidden_and_distinct() {
+        let names: Vec<String> = temp_names().chain(temp_names()).collect();
+        for name in &names {
+            assert!(name.starts_with(".gg-") && name.ends_with(".tmp"), "{name}");
+            assert!(name.len() <= 68, "{name}");
+        }
+        let distinct: std::collections::HashSet<_> = names.iter().collect();
+        assert_eq!(distinct.len(), names.len());
+    }
 }

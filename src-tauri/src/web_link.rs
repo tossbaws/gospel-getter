@@ -40,15 +40,16 @@ mod desktop {
     use crate::credit_links::messages::OPEN_FAILED;
 
     /// Open a note's web link `url` in the system browser. Anything but an
-    /// `http` or `https` address is refused.
+    /// `http` or `https` address is refused. The link is the reader's own
+    /// words, so the log (kept in a file) never has it.
     #[tauri::command]
     pub fn open_web_link(url: String) -> Result<(), String> {
         let address = web_address(&url).map_err(|message| {
-            tracing::error!("Refused to open a note's link that isn't a web address: {url:?}");
+            tracing::error!("Refused to open a note's link that isn't a web address");
             message.to_string()
         })?;
         open::that_detached(address.as_str()).map_err(|e| {
-            tracing::error!("Failed to open {address}: {e}");
+            tracing::error!("Failed to open a note's web link: {e}");
             OPEN_FAILED.to_string()
         })
     }

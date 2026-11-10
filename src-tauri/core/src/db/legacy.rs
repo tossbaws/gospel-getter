@@ -144,7 +144,10 @@ impl Snapshot {
     }
 
     /// A new, empty file in `dir` (which `VACUUM INTO` accepts as its
-    /// target), with a name no other launch is using.
+    /// target), with a name no other launch is using. On Unix it's made
+    /// readable and writable by the reader alone (mode 0600), as the
+    /// database it becomes is kept (`create_pool`): `VACUUM INTO` keeps the
+    /// mode of the file it writes into.
     fn reserve(dir: &Path) -> anyhow::Result<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let pid = std::process::id();
@@ -154,11 +157,11 @@ impl Snapshot {
         for _ in 0..64 {
             let n = NEXT.fetch_add(1, Ordering::Relaxed);
             let path = dir.join(format!(".{pid}-{nanos:x}-{n:x}.legacy-migration.tmp"));
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+            match options.open(&path) {
                 Ok(_) => return Ok(Self { path: Some(path) }),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(e) => {

@@ -123,14 +123,7 @@ pub(crate) async fn check_passage(
         return Err(BookmarkError::NoSuchChapter { book_id, chapter });
     }
 
-    let last_verse: Option<i64> =
-        sqlx::query_scalar("SELECT MAX(verse) FROM verses WHERE book_id = $1 AND chapter = $2")
-            .bind(book_id)
-            .bind(chapter)
-            .fetch_one(&mut *conn)
-            .await
-            .context("Failed to look up chapter length")?;
-    let last_verse = last_verse.unwrap_or(0);
+    let last_verse = crate::db::queries::chapter_last_verse(&mut *conn, book_id, chapter).await?;
     if verse_end > last_verse {
         return Err(BookmarkError::NoSuchVerse {
             book_id,
@@ -227,6 +220,21 @@ pub async fn list_bookmarks(
         " ORDER BY p.created_at DESC, p.id DESC",
     ))
     .bind(translation_id)
+    .fetch_all(pool)
+    .await
+    .context("Failed to fetch bookmarks")
+}
+
+/// Every bookmark, newest first (as [`list_bookmarks`] orders them), as it's
+/// stored: no translation's text, for a caller that reads only some of
+/// their verses (a page of them, with [`verses_of_passages`]).
+///
+/// [`verses_of_passages`]: crate::db::queries::verses_of_passages
+pub async fn bookmarks_newest_first(pool: &SqlitePool) -> anyhow::Result<Vec<Bookmark>> {
+    sqlx::query_as::<_, Bookmark>(
+        "SELECT id, book_id, chapter, verse_start, verse_end, created_at FROM bookmarks \
+         ORDER BY created_at DESC, id DESC",
+    )
     .fetch_all(pool)
     .await
     .context("Failed to fetch bookmarks")

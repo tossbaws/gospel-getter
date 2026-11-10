@@ -4,6 +4,7 @@
 
 pub mod commands;
 pub mod credit_links;
+pub mod log_file;
 pub mod markdown;
 pub mod notes_export;
 pub mod passage_copy;
@@ -29,21 +30,35 @@ pub use gospel_getter_core::{book_aliases, db, domain, passage_reference, verse_
 use anyhow::Context;
 use tauri::Manager;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use commands::AppState;
 use db::create_pool;
+use log_file::LogFile;
 
 /// Start the app: set up logging, open the database and show the window
 /// where it was last time.
 pub fn run() {
-    tracing_subscriber::fmt()
-        // Up to info, but only warnings from zbus (the session bus that
-        // `window::single_instance_plugin` uses on Linux): its connections'
-        // info-level spans would fill the log on every launch.
-        .with_env_filter(EnvFilter::new("info,zbus=warn"))
-        .with_span_events(FmtSpan::CLOSE)
+    // What `RUST_LOG` asks for, or `log_file::DEFAULT_LOG_FILTER`, to stderr
+    // and, once `setup_app` has the app's log folder, to the log files.
+    let log = LogFile::new(log_file::MAX_LOG_BYTES, log_file::LOG_FILES);
+    tracing_subscriber::registry()
+        .with(log_file::log_filter(
+            std::env::var("RUST_LOG").ok().as_deref(),
+        ))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_span_events(FmtSpan::CLOSE),
+        )
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(log.clone())
+                .with_ansi(false)
+                .with_span_events(FmtSpan::CLOSE),
+        )
         .init();
 
     tauri::Builder::default()
@@ -59,7 +74,8 @@ pub fn run() {
         // also only from Rust, so nothing takes over link clicks in the page.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::PendingUpdate::default())
-        .setup(|app| {
+        .setup(move |app| {
+            open_log_file(app, &log);
             setup_app(app).map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })
         })
         .invoke_handler(invoke_handler())
@@ -133,6 +149,18 @@ fn invoke_handler<R: tauri::Runtime>()
     ]
 }
 
+/// Keep the log in the app's log folder from now on, as well as on stderr.
+/// Without it the app still runs, logging to stderr alone.
+fn open_log_file(app: &tauri::App, log: &LogFile) {
+    match app.path().app_log_dir() {
+        Ok(dir) => match log.open_in(&dir) {
+            Ok(()) => info!("Logging to {}", dir.display()),
+            Err(e) => tracing::warn!("Failed to keep a log file in {}: {e:#}", dir.display()),
+        },
+        Err(e) => tracing::warn!("Failed to find the app's log folder: {e}"),
+    }
+}
+
 /// Resolve where this app's database lives, migrate the pre-Tauri
 /// (systemd/browser-wrapper) install's database into place on first run if
 /// there is one, connect, and load everything into `AppState` — all before
@@ -143,7 +171,7 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
         .path()
         .app_data_dir()
         .context("Failed to resolve the app data directory")?;
-    std::fs::create_dir_all(&app_data_dir).context("Failed to create the app data directory")?;
+    db::create_private_dir(&app_data_dir).context("Failed to create the app data directory")?;
     let db_path = app_data_dir.join(db::DATABASE_FILE);
     info!("Using database at {}", db_path.display());
 
@@ -180,8 +208,7 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
         }
     }
 
-    let database_url = format!("sqlite:{}", db_path.display());
-    let state = tauri::async_runtime::block_on(init_state(&database_url))
+    let state = tauri::async_runtime::block_on(init_state(&db_path))
         .context("Failed to initialize application state")?;
     spawn_search_index_build(&state);
     app.manage(state);
@@ -226,8 +253,8 @@ fn migration_failed_message(legacy_db_path: &std::path::Path, e: &anyhow::Error)
 
 /// Connect to the database, run migrations/seeding, and load the books and
 /// translations that stay in memory for the life of the app.
-async fn init_state(database_url: &str) -> anyhow::Result<AppState> {
-    let database = create_pool(database_url)
+async fn init_state(db_path: &std::path::Path) -> anyhow::Result<AppState> {
+    let database = create_pool(db_path)
         .await
         .context("Failed to connect to database")?;
 

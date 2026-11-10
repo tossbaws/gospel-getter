@@ -42,7 +42,7 @@ impl TempDb {
     /// Open (creating if needed) this database's connections, as the app
     /// does: the read pool and the one writer.
     pub async fn connect(&self) -> Db {
-        create_pool(&format!("sqlite:{}", self.path().display()))
+        create_pool(&self.path())
             .await
             .expect("connect to test database")
     }
@@ -139,7 +139,7 @@ fn build_templates() -> Templates {
         .build()
         .expect("a runtime for the template build");
     runtime.block_on(async {
-        let db = create_pool(&format!("sqlite:{}", work.display()))
+        let db = create_pool(&work)
             .await
             .expect("create the template database");
         prepare(db.write())
@@ -351,9 +351,7 @@ pub fn bundled_bsb() -> Vec<RawBsbBook> {
 /// are only a sample — enough that the current seed step must leave them
 /// alone, as it would a real install's.
 pub async fn write_v2_1_0_database(path: &Path) {
-    let pool = create_pool(&format!("sqlite:{}", path.display()))
-        .await
-        .expect("create v2.1.0 database");
+    let pool = create_pool(path).await.expect("create v2.1.0 database");
     for statement in V2_1_0_SCHEMA {
         sqlx::query(*statement)
             .execute(pool.write().pool())

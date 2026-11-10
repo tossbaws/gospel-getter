@@ -4,11 +4,13 @@
 
 use anyhow::Context;
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
-use super::{AppState, app_version, book_name, failed, run_dialog, write_atomically};
+use super::{
+    AppState, app_version, book_name, failed, over_main_window, run_dialog, write_atomically,
+};
 use crate::db::notes::grouped;
 use crate::db::reader_data::{ApplyImportError, FindingsImport};
 use crate::db::{self, NoteLimit};
@@ -68,12 +70,18 @@ impl From<&NewPosition> for PositionPreviewDto {
 pub enum ExportOutcome {
     /// The reader closed the save dialog; no file was written.
     Cancelled,
-    /// The file was completely written.
+    /// The file was completely written, with what was in it.
     Saved {
         path: String,
         bookmarks: usize,
         highlights: usize,
         notes: usize,
+        /// The AI findings.
+        findings: usize,
+        /// Whether the file holds AI findings and the AI agents setting
+        /// ("Let AI agents save findings"): format 4, written when there
+        /// are findings or the setting is on.
+        findings_included: bool,
         has_position: bool,
         preferences: usize,
     },
@@ -320,8 +328,52 @@ pub async fn save_reader_data(data: &ReaderData, path: &Path) -> anyhow::Result<
         bookmarks: data.bookmarks.len(),
         highlights: data.highlights.len(),
         notes: data.notes.len(),
+        findings: data.findings.len(),
+        findings_included: data.format_version == reader_data::FORMAT_VERSION,
         has_position: data.reading_position.is_some(),
         preferences: data.preferences.count(),
+    })
+}
+
+/// The name the save dialog suggests for a backup made now: the day it's
+/// made on, by the database's clock (as the file's `exportedAt` is).
+async fn suggested_backup_name(state: &AppState) -> anyhow::Result<String> {
+    let now = state.store.now().await?;
+    Ok(format!(
+        "gospel-getter-{}{}",
+        now.get(..10).unwrap_or("export"),
+        reader_data::FILE_SUFFIX
+    ))
+}
+
+/// Export the reader's data to the file `choose` answers with (given the
+/// name to suggest; `None` if the reader cancelled). What's saved is read
+/// once the file is chosen, not before the dialog opens: anything the
+/// reader changed while it was open is in the file, and the counts the
+/// answer gives are what the file holds.
+pub async fn export_reader_data_with<F, Fut>(
+    state: &AppState,
+    preferences: Preferences,
+    choose: F,
+) -> Result<ExportOutcome, String>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Option<PathBuf>, String>>,
+{
+    let suggested = suggested_backup_name(state)
+        .await
+        .context("Failed to read the date for the file's name")
+        .map_err(failed("Your data couldn't be read for export."))?;
+    let Some(path) = choose(suggested).await? else {
+        return Ok(ExportOutcome::Cancelled);
+    };
+    let data = build_reader_data(state, preferences)
+        .await
+        .context("Failed to gather data to export")
+        .map_err(failed("Your data couldn't be read for export."))?;
+    save_reader_data(&data, &path).await.map_err(|e| {
+        tracing::error!("Export failed: {e:#}");
+        format!("The file couldn't be saved: {e:#}")
     })
 }
 
@@ -554,9 +606,12 @@ fn reader_data_dialog<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> tauri_plugin_dialog::FileDialogBuilder<R> {
     use tauri_plugin_dialog::DialogExt;
-    app.dialog().file().add_filter(
-        "Gospel Getter bookmarks, highlights, notes and settings",
-        &["json"],
+    over_main_window(
+        app,
+        app.dialog().file().add_filter(
+            "Gospel Getter bookmarks, highlights, notes and settings",
+            &["json"],
+        ),
     )
 }
 
@@ -568,27 +623,13 @@ pub async fn export_reader_data<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     preferences: Preferences,
 ) -> Result<ExportOutcome, String> {
-    // Gathered before the dialog opens, so a failure is reported without
-    // asking for a file name first.
-    let data = build_reader_data(&state, preferences)
-        .await
-        .context("Failed to gather data to export")
-        .map_err(failed("Your data couldn't be read for export."))?;
-    let suggested = format!(
-        "gospel-getter-{}{}",
-        data.exported_at.get(..10).unwrap_or("export"),
-        reader_data::FILE_SUFFIX
-    );
-    let dialog = reader_data_dialog(&app)
-        .set_title("Export bookmarks, highlights, notes and settings")
-        .set_file_name(suggested);
-    let Some(path) = run_dialog(move || dialog.blocking_save_file()).await? else {
-        return Ok(ExportOutcome::Cancelled);
-    };
-    save_reader_data(&data, &path).await.map_err(|e| {
-        tracing::error!("Export failed: {e:#}");
-        format!("The file couldn't be saved: {e:#}")
+    export_reader_data_with(&state, preferences, |suggested| {
+        let dialog = reader_data_dialog(&app)
+            .set_title("Export bookmarks, highlights, notes and settings")
+            .set_file_name(suggested);
+        run_dialog(move || dialog.blocking_save_file())
     })
+    .await
 }
 
 /// Choose a file to import with the native open dialog, and preview it.

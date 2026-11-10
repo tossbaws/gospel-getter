@@ -346,11 +346,27 @@ fn passage(book: &Book, spec: &str) -> Interpretation {
         ))
     };
 
-    let (chapter_part, verse_part) = match spec.split_once([':', '.']) {
+    // One period closing the reference, as at the end of a sentence ("John
+    // 3:16."), isn't part of it.
+    let read = spec.trim();
+    let read = read.strip_suffix('.').unwrap_or(read);
+    let (chapter_part, verse_part) = match read.split_once([':', '.']) {
         Some((c, v)) => (c, Some(v)),
-        None => (spec, None),
+        None => (read, None),
     };
     let Some(chapter) = number(chapter_part) else {
+        // In a one-chapter book, "Jude 5-7" is a range of verses, as "Jude
+        // 5" is a verse (below); only a book of more than one chapter has
+        // chapters to range over.
+        if verse_part.is_none()
+            && book.chapter_count == 1
+            && let Some((first, last)) = chapter_part.split_once(['-', '\u{2013}', '\u{2014}'])
+        {
+            return match (number(first), number(last)) {
+                (Some(first), Some(last)) => checked(book, 1, Some((first, last))),
+                _ => unreadable(),
+            };
+        }
         if verse_part.is_none() && chapter_part.contains(['-', '\u{2013}', '\u{2014}']) {
             return Interpretation::InvalidReference(format!(
                 "Go to one chapter at a time, for example {} {}.",
@@ -369,11 +385,17 @@ fn passage(book: &Book, spec: &str) -> Interpretation {
         None => None,
         Some(v) => {
             let (first, last) = match v.split_once(['-', '\u{2013}', '\u{2014}']) {
-                // "John 3:16-4:2": a range into another chapter.
+                // "Gen 1:1-1:3": the chapter named again, the same one.
                 Some((a, b)) if number(a).is_some() && b.contains([':', '.']) => {
-                    return Interpretation::InvalidReference(
-                        "A passage has to stay within one chapter.".to_string(),
-                    );
+                    match b.split_once([':', '.']) {
+                        Some((c, w)) if number(c) == Some(chapter) => (number(a), number(w)),
+                        // "John 3:16-4:2": a range into another chapter.
+                        _ => {
+                            return Interpretation::InvalidReference(
+                                "A passage has to stay within one chapter.".to_string(),
+                            );
+                        }
+                    }
                 }
                 Some((a, b)) => (number(a), number(b)),
                 None => (number(v), number(v)),
@@ -390,7 +412,13 @@ fn passage(book: &Book, spec: &str) -> Interpretation {
         None if book.chapter_count == 1 && chapter > 1 => (1, Some((chapter, chapter))),
         _ => (chapter, verses),
     };
+    checked(book, chapter, verses)
+}
 
+/// The passage at `chapter` and `verses` of `book`, or why it can't be one:
+/// a chapter the book doesn't have, a verse before the first, or a range
+/// that runs backwards.
+fn checked(book: &Book, chapter: i64, verses: Option<(i64, i64)>) -> Interpretation {
     if chapter < 1 || chapter > book.chapter_count {
         let chapters = if book.chapter_count == 1 {
             "1 chapter".to_string()
@@ -550,10 +578,12 @@ fn is_spaces(s: &str) -> bool {
 }
 
 /// How long the chapter and verses at the start of `s` are ("3", "3:16",
-/// "3:16-18", with ":" or "." and any dash), if they stand alone: `None`
-/// for a range of chapters ("3-4") or into another chapter ("3:16-4:2"),
-/// a number too long to be a chapter or verse, or one run on into another
-/// (":30:15") or into a word.
+/// "3:16-18", "3:16-3:18", with ":" or "." and any dash, or "5-7", a range
+/// of verses in a one-chapter book), if they stand alone: `None` for a
+/// number too long to be a chapter or verse, or one run on into another
+/// (":30:15") or into a word. Whether the book can have them (a range of
+/// chapters, "John 3-4", or into another chapter, "John 3:16-4:2", it
+/// can't) is for [`passage`] to say.
 fn spec_length(s: &str) -> Option<usize> {
     let digits = |from: usize| s[from..].bytes().take_while(u8::is_ascii_digit).count();
     // A separator (":" or "." for the verse, a dash for a range) at
@@ -585,10 +615,23 @@ fn spec_length(s: &str) -> Option<usize> {
                 return None;
             }
             end += dash + last;
+            // "1:1-1:3": the chapter named again, then its verse.
+            if let Some(sep) = separator(end, true) {
+                let verse = digits(end + sep);
+                if verse > 3 {
+                    return None;
+                }
+                end += sep + verse;
+            }
         }
-    } else if separator(end, false).is_some() {
-        // "John 3-4": chapters, which Go to won't open either.
-        return None;
+    } else if let Some(dash) = separator(end, false) {
+        // "Jude 5-7": verses in a one-chapter book ("John 3-4", chapters,
+        // which Go to won't open, `passage` refuses).
+        let last = digits(end + dash);
+        if last > 3 {
+            return None;
+        }
+        end += dash + last;
     }
     // Standing alone: no more numbers run on, nor a word.
     let rest = &s[end..];
@@ -683,6 +726,87 @@ mod tests {
         ];
         for (input, expected) in cases {
             assert_eq!(&interpret(input, &books), expected, "input {input:?}");
+        }
+    }
+
+    /// In a one-chapter book a range is of verses ("Jude 5-7"), as a
+    /// number alone is a verse ("Jude 5"); a range may name its chapter
+    /// twice if it's the same one; and one period may close a reference.
+    #[test]
+    fn one_chapter_ranges_repeated_chapters_and_a_closing_period_are_read() {
+        let books = books();
+        let cases: &[(&str, Interpretation)] = &[
+            ("Jude 5-7", at(65, 1, Some((5, 7)))),
+            ("Jude 5\u{2013}7", at(65, 1, Some((5, 7)))),
+            ("jude 1-25", at(65, 1, Some((1, 25)))),
+            ("Philemon 4-6", at(57, 1, Some((4, 6)))),
+            ("phm 4 \u{2014} 6", at(57, 1, Some((4, 6)))),
+            ("3 John 2-4", at(64, 1, Some((2, 4)))),
+            ("2 John 1-3", at(63, 1, Some((1, 3)))),
+            ("Obadiah 1-4", at(31, 1, Some((1, 4)))),
+            ("Jude 5-7.", at(65, 1, Some((5, 7)))),
+            ("Gen 1:1-1:3", at(1, 1, Some((1, 3)))),
+            ("John 3:16-3:18", at(43, 3, Some((16, 18)))),
+            ("John 3.16-3.18", at(43, 3, Some((16, 18)))),
+            ("Jude 1:3-1:5", at(65, 1, Some((3, 5)))),
+            ("John 3:16.", at(43, 3, Some((16, 16)))),
+            ("John 3:16-18.", at(43, 3, Some((16, 18)))),
+            ("John 3.", at(43, 3, None)),
+            ("Jude 5.", at(65, 1, Some((5, 5)))),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(&interpret(input, &books), expected, "input {input:?}");
+        }
+
+        let unreadable = |reference: &str, book: &str| {
+            format!(
+                "Couldn't read \u{201c}{reference}\u{201d} as a reference. Try something like \
+                 {book} 1:1 or {book} 1:1\u{2013}3."
+            )
+        };
+        let refused: &[(&str, String)] = &[
+            (
+                "Jude 7-5",
+                "That range runs backwards. Try Jude 1:5\u{2013}7.".to_string(),
+            ),
+            (
+                "Jude 0-3",
+                "No such chapter or verse: Jude 1:0. Verses start at 1.".to_string(),
+            ),
+            // A book of more than one chapter still has chapters to range
+            // over, and Go to opens one at a time.
+            (
+                "John 3-4",
+                "Go to one chapter at a time, for example John 3.".to_string(),
+            ),
+            (
+                "Gen 1:1-2:3",
+                "A passage has to stay within one chapter.".to_string(),
+            ),
+            (
+                "Jude 1:3-2:1",
+                "A passage has to stay within one chapter.".to_string(),
+            ),
+            // One closing period only.
+            ("John 3:16..", unreadable("John 3:16..", "John")),
+            ("Jude 5-7-9", unreadable("Jude 5-7-9", "Jude")),
+        ];
+        for (input, message) in refused {
+            assert_eq!(
+                interpret(input, &books),
+                Interpretation::InvalidReference(message.clone()),
+                "input {input:?}"
+            );
+        }
+        // No one-chapter book's range is ever answered with the advice to
+        // go to one chapter at a time.
+        for book in books.iter().filter(|b| b.chapter_count == 1) {
+            let input = format!("{} 2-3", book.name);
+            assert_eq!(
+                interpret(&input, &books),
+                at(book.id, 1, Some((2, 3))),
+                "input {input:?}"
+            );
         }
     }
 
@@ -1191,6 +1315,47 @@ mod tests {
                 _ => &[],
             };
             assert_eq!(found, expected, "{text:?}");
+        }
+    }
+
+    /// A range of verses in a one-chapter book, a range naming its chapter
+    /// twice, and a reference closing a sentence are linked in a note as
+    /// Go to reads them.
+    #[test]
+    fn one_chapter_ranges_and_repeated_chapters_are_found_in_a_note() {
+        assert_eq!(
+            found("see Jude 5-7"),
+            [("Jude 5-7", at(65, 1, Some((5, 7))))]
+        );
+        for (text, typed, expected) in [
+            (
+                "Read Philemon 4-6.",
+                "Philemon 4-6",
+                at(57, 1, Some((4, 6))),
+            ),
+            (
+                "(3 John 2\u{2013}4)",
+                "3 John 2\u{2013}4",
+                at(64, 1, Some((2, 4))),
+            ),
+            ("Phm 6-7, then", "Phm 6-7", at(57, 1, Some((6, 7)))),
+            ("See Gen 1:1-1:3.", "Gen 1:1-1:3", at(1, 1, Some((1, 3)))),
+            ("John 3:16.", "John 3:16", at(43, 3, Some((16, 16)))),
+        ] {
+            assert_eq!(found(text), [(typed, expected)], "{text:?}");
+        }
+        // Still not references: chapters of a longer book, a range into
+        // another chapter, run on into more numbers, or a word-like
+        // abbreviation with no verse.
+        for text in [
+            "John 3-4",
+            "Gen 1:1-2:3",
+            "Jude 5-7-9",
+            "Jude 5-7:1",
+            "Jude 1:1-1:3:5",
+            "Jud 5-7",
+        ] {
+            assert_eq!(found(text), [], "{text:?}");
         }
     }
 

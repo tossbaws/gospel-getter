@@ -300,6 +300,10 @@ struct Exported {
     #[serde(default)]
     notes: u64,
     #[serde(default)]
+    findings: u64,
+    #[serde(default)]
+    findings_included: bool,
+    #[serde(default)]
     has_position: bool,
     #[serde(default)]
     preferences: u64,
@@ -340,6 +344,8 @@ pub fn export_data() {
                     bookmarks: outcome.bookmarks,
                     highlights: outcome.highlights,
                     notes: outcome.notes,
+                    findings: outcome.findings,
+                    findings_included: outcome.findings_included,
                     has_position: outcome.has_position,
                     preferences: outcome.preferences,
                 }),

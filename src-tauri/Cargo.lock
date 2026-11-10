@@ -1664,6 +1664,7 @@ name = "gospel_getter_core"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "libc",
  "serde",
  "serde_json",
  "sqlx",

@@ -87,6 +87,23 @@ const fileData = (overrides = {}) => ({
     ...overrides,
 });
 
+test('A backup of AI findings counts them and names the AI agents setting, not just “0 bookmarks”', () =>
+    withApp({ book: 'John', chapter: 11, translation: 'kjv' }, async (app) => {
+        await backend('__save_findings', {
+            request: 'grief',
+            agent: 'Claude',
+            references: [33, 34, 35].map((verse) => ({ bookId: 43, chapter: 11, verse })),
+        });
+        const path = newPath('findings');
+        await exportData(app, path);
+
+        assert.equal(dataStatus(app),
+            `Saved 0 bookmarks, 3 AI findings, your reading position, your display settings, the AI agents setting to ${path}. Bible text isn’t included.`);
+        const json = JSON.parse(readFileSync(path, 'utf8'));
+        assert.equal(json.format_version, 4);
+        assert.equal(json.findings.length, 3);
+    }));
+
 test('Export saves bookmarks, reading position and display settings to the chosen file', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
         await bookmarkVerse(app, 16);

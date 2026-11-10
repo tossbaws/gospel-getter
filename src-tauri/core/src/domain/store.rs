@@ -217,6 +217,12 @@ impl Store {
         db::notes::list_notes(self.db.read()).await
     }
 
+    /// Where every note is and when it was written, without their text (see
+    /// `db::notes::note_places`).
+    pub async fn note_places(&self) -> anyhow::Result<Vec<db::notes::NotePlace>> {
+        db::notes::note_places(self.db.read()).await
+    }
+
     /// The AI findings on one chapter, in the order they're shown.
     pub async fn chapter_findings(
         &self,

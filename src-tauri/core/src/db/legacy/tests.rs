@@ -261,6 +261,17 @@ async fn a_closed_legacy_database_is_left_exactly_as_it_was() {
         assert_eq!(files_in(legacy.parent().expect("a folder")), before);
         assert_eq!(reading_position(&dir.new_db()).await, Some((1, 43, 3)));
         assert_eq!(names_in(&dir.app_dir()), ["gospel_getter.db"]);
+        // The reader's alone from the moment it's there, as `create_pool`
+        // keeps it, whatever the umask.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(dir.new_db())
+                .expect("the new database")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o077, 0, "{label}: {mode:o}");
+        }
     }
 }
 
