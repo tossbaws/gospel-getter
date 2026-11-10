@@ -339,15 +339,25 @@ mod desktop {
     }
 
     /// Close the database, so nothing is left half-written when the app
-    /// exits for an installer or restarts. Safe to call from synchronous
-    /// code on a runtime thread (the Windows `on_before_exit` hook): the
-    /// pool is closed from a separate thread.
+    /// exits for an installer or restarts. Blocks until it's closed: call it
+    /// from synchronous code off the runtime's workers (the Windows
+    /// `on_before_exit` hook, run where the install runs, or
+    /// `spawn_blocking`). The pool is closed from a thread of its own.
     fn close_database<R: Runtime>(app: &AppHandle<R>) {
         let store = app.state::<AppState>().store.clone();
         let closed =
             std::thread::spawn(move || tauri::async_runtime::block_on(store.close())).join();
         if closed.is_err() {
             tracing::error!("Failed to close the database before updating");
+        }
+    }
+
+    /// Save the window's size and place, as on an ordinary exit (see
+    /// `window::state_plugin`).
+    fn save_window_state<R: Runtime>(app: &AppHandle<R>) {
+        use tauri_plugin_window_state::AppHandleExt;
+        if let Err(e) = app.save_window_state(crate::window::state_flags()) {
+            tracing::warn!("Failed to save the window's size and position: {e}");
         }
     }
 
@@ -367,9 +377,12 @@ mod desktop {
         match settings.mode {
             UpdateMode::SelfUpdate => {
                 // Windows only: runs right before the installer starts and
-                // the app exits.
+                // the app exits, with `process::exit`, so no exit event
+                // comes: the window's size and place are saved here, as the
+                // window-state plugin saves them on an ordinary exit.
                 let handle = app.clone();
                 builder = builder.on_before_exit(move || {
+                    save_window_state(&handle);
                     close_database(&handle);
                     handle.cleanup_before_exit();
                 });
@@ -476,17 +489,29 @@ mod desktop {
         }
 
         // On Windows this runs `on_before_exit`, starts the installer and
-        // exits.
-        update.install(bytes).map_err(|e| {
-            tracing::error!(
-                "Failed to install update {}: {}",
-                update.version,
-                with_causes(&e)
-            );
-            install_message(classify(&e)).to_string()
-        })?;
+        // exits. Elsewhere it can take minutes (a .deb waits on pkexec's
+        // password prompt; an AppImage is copied), so it runs off the
+        // runtime's workers, as closing the database does.
+        let installing = update.clone();
+        tokio::task::spawn_blocking(move || installing.install(bytes))
+            .await
+            .map_err(|e| {
+                tracing::error!("The install of update {} stopped: {e}", update.version);
+                install_message(Problem::Other).to_string()
+            })?
+            .map_err(|e| {
+                tracing::error!(
+                    "Failed to install update {}: {}",
+                    update.version,
+                    with_causes(&e)
+                );
+                install_message(classify(&e)).to_string()
+            })?;
         tracing::info!("Installed update {}; restarting", update.version);
-        close_database(&app);
+        let closing = app.clone();
+        if let Err(e) = tokio::task::spawn_blocking(move || close_database(&closing)).await {
+            tracing::error!("Failed to close the database before restarting: {e}");
+        }
         app.restart();
     }
 
