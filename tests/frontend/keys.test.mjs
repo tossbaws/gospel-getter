@@ -161,6 +161,26 @@ test('[ and ] go to the book before and after, at chapter 1, from the top', () =
         assert.equal(app.heading(), 'Luke 1');
     }));
 
+// C-02: on German, French, Spanish, Italian and Nordic layouts [ and ] are
+// AltGr's, and on Windows a key typed with AltGr also says Ctrl and Alt;
+// the characters are still [ and ].
+test('C-02: [ and ] typed with AltGr go to the book before and after', () =>
+    withApp({ book: 'John', chapter: 3 }, async (app) => {
+        const altGr = { ctrlKey: true, altKey: true, modifierAltGraph: true };
+        const event = await press(app, ']', altGr);
+        assert.ok(event.getModifierState('AltGraph'), 'the event says AltGr');
+        assert.ok(event.defaultPrevented);
+        assert.equal(app.heading(), 'Acts 1');
+        await press(app, '[', altGr);
+        await press(app, '[', { modifierAltGraph: true });
+        assert.equal(app.heading(), 'Luke 1');
+        // Ctrl+Alt without AltGr is no [ or ].
+        const before = app.calls.length;
+        await press(app, ']', { ctrlKey: true, altKey: true });
+        assert.equal(app.calls.slice(before).filter((c) => c.cmd === 'get_reading').length, 0);
+        assert.equal(app.heading(), 'Luke 1');
+    }));
+
 test('[ in Genesis and ] in Revelation say there’s no book there', () =>
     withApp({ book: 'Genesis', chapter: 5 }, async (app) => {
         let before = app.calls.length;

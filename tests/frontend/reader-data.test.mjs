@@ -191,6 +191,39 @@ test('an invalid file is explained and changes nothing', () =>
         assert.equal(el(app, 'import-cancel').textContent, 'Cancel');
     }));
 
+// C-01: an import that succeeded leaves nothing under way, so the next
+// file that can't be imported can still be closed.
+test('C-01: after a successful import, an invalid file’s dialog still closes, by Close or Escape', () =>
+    withApp({ book: 'John', chapter: 3 }, async (app) => {
+        const good = writeFile(fileData({ reading_position: null, preferences: {} }));
+        const bad = writeFile('this is not json');
+        await clickData(app, 'import-data-btn', good);
+        let before = app.calls.length;
+        app.click(el(app, 'import-confirm'));
+        await app.idle(before, 'apply_import');
+        assert.ok(!overlayOpen(app), 'the import closed its dialog');
+
+        await clickData(app, 'import-data-btn', bad);
+        assert.ok(overlayOpen(app));
+        assert.equal(el(app, 'import-title').textContent, 'This file can’t be imported');
+        const close = el(app, 'import-cancel');
+        assert.equal(close.textContent, 'Close');
+        assert.equal(close.disabled, false, 'Close works');
+        assert.equal(el(app, 'import-panel').getAttribute('aria-busy'), null, 'nothing is under way');
+        before = app.calls.length;
+        await app.key('Escape', {}, close);
+        await app.idle(before);
+        assert.ok(!overlayOpen(app), 'Escape closes it');
+        assert.equal(app.document.activeElement, el(app, 'menu-toggle'));
+
+        // And Close, the next time.
+        await clickData(app, 'import-data-btn', bad);
+        assert.ok(overlayOpen(app));
+        assert.equal(el(app, 'import-cancel').disabled, false);
+        await app.click(el(app, 'import-cancel'));
+        assert.ok(!overlayOpen(app), 'Close closes it');
+    }));
+
 test('a file from a newer version is refused clearly', () =>
     withApp({}, async (app) => {
         const path = writeFile({ format: 'gospel-getter-reader-data', format_version: 5, exported_at: 'x', app_version: '9.0.0' });

@@ -80,6 +80,14 @@ pub const DRAFT_DAYS: f64 = 30.0;
 
 const DAY_MS: f64 = 24.0 * 60.0 * 60.0 * 1000.0;
 
+/// Whether a draft kept at `at` is still kept at `now`: within
+/// [`DRAFT_DAYS`] of it. A draft kept "in the future", by a clock since put
+/// back, counts as just kept (no time has passed since), so it isn't lost
+/// to the clock; it ages from when the clock catches up with it.
+fn within_days(at: f64, now: f64) -> bool {
+    (now - at).max(0.0) <= DRAFT_DAYS * DAY_MS
+}
+
 /// The verses a draft is on: a note's own, or a new note's. Any
 /// translation's: a note belongs to none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,13 +138,14 @@ pub fn worth_keeping(text: &str, initial: &str) -> bool {
 }
 
 impl Drafts {
-    /// Drops the drafts older than [`DRAFT_DAYS`] (or kept in the future,
-    /// by a clock since put back), then all but the newest [`MAX_DRAFTS`].
-    /// Whether any went.
+    /// Drops the drafts older than [`DRAFT_DAYS`], then all but the newest
+    /// [`MAX_DRAFTS`]. A draft kept in the future, by a clock since put
+    /// back, stays (see `within_days`): like any other, it goes once the
+    /// clock says it's older than that, or it's one too many. Whether any
+    /// went.
     pub fn prune(&mut self, now: f64) -> bool {
         let before = self.drafts.len();
-        self.drafts
-            .retain(|d| d.at <= now && now - d.at <= DRAFT_DAYS * DAY_MS);
+        self.drafts.retain(|d| within_days(d.at, now));
         self.drafts.sort_by(|a, b| a.at.total_cmp(&b.at));
         let over = self.drafts.len().saturating_sub(MAX_DRAFTS);
         self.drafts.drain(..over);
@@ -169,21 +178,21 @@ impl Drafts {
 
     /// The draft to offer when the editor opens with `key` on `passage`,
     /// the note saying `saved` (nothing, for a new note): one kept within
-    /// [`DRAFT_DAYS`] on the same verses, whose text is something other
-    /// than what's saved.
+    /// [`DRAFT_DAYS`] (or in the future, see `within_days`) on the same
+    /// verses, whose text is something other than what's saved.
     pub fn offer(&self, key: &str, passage: DraftPassage, saved: &str, now: f64) -> Option<&Draft> {
         self.drafts.iter().find(|d| {
             d.key == key
                 && d.passage == passage
-                && d.at <= now
-                && now - d.at <= DRAFT_DAYS * DAY_MS
+                && within_days(d.at, now)
                 && worth_keeping(&d.text, saved)
         })
     }
 }
 
 /// How long ago something was, in words: "a moment ago", "5 minutes
-/// ago", "2 hours ago", "yesterday", "3 days ago".
+/// ago", "2 hours ago", "yesterday", "3 days ago". Time to come (a clock
+/// since put back) is no time: "a moment ago".
 pub fn ago(elapsed_ms: f64) -> String {
     let minutes = (elapsed_ms.max(0.0) / 60_000.0).floor() as u64;
     let hours = minutes / 60;
@@ -319,9 +328,6 @@ mod tests {
         drafts
             .drafts
             .push(draft("note:2", "just in", NOW - 30.0 * DAY_MS));
-        drafts
-            .drafts
-            .push(draft("note:3", "from a clock ahead", NOW + 60_000.0));
         assert!(drafts.prune(NOW));
         assert_eq!(
             drafts
@@ -372,6 +378,46 @@ mod tests {
         assert_eq!(offered("Loved.", other, NOW), None);
         assert_eq!(offered("Loved.", JOHN_3_16, NOW + 31.0 * DAY_MS), None);
         assert_eq!(drafts.offer("note:8", JOHN_3_16, "", NOW), None);
+    }
+
+    /// AUD-04: a draft kept while the clock was ahead isn't lost when the
+    /// clock is put back. It's kept, offered as just kept, and ages from
+    /// then as any other; the limits still hold.
+    #[test]
+    fn a_draft_from_a_clock_since_put_back_is_kept_and_offered() {
+        let ahead = NOW + 10.0 * 60_000.0;
+        let mut drafts = Drafts::default();
+        drafts.put(draft("note:3", "from a clock ahead", ahead));
+        assert!(!drafts.prune(NOW), "kept, not dropped");
+        assert_eq!(drafts.drafts.len(), 1);
+        let offered = drafts.offer("note:3", JOHN_3_16, "", NOW).cloned();
+        assert_eq!(
+            offered.as_ref().map(|d| d.text.as_str()),
+            Some("from a clock ahead"),
+            "and offered"
+        );
+        assert_eq!(
+            offered.map(|d| draft_offer(d.at, NOW)).as_deref(),
+            Some("You have unsaved text from a moment ago."),
+            "no time has passed"
+        );
+
+        // Once the clock has caught up, it ages as any other.
+        let later = ahead + DRAFT_DAYS * DAY_MS;
+        assert!(drafts.offer("note:3", JOHN_3_16, "", later).is_some());
+        assert!(!drafts.prune(later));
+        assert!(drafts.offer("note:3", JOHN_3_16, "", later + 1.0).is_none());
+        assert!(drafts.prune(later + 1.0), "too old by then");
+        assert!(drafts.drafts.is_empty());
+
+        // The most kept still holds, the ones ahead counted as the newest.
+        let mut drafts = Drafts::default();
+        for i in 0..MAX_DRAFTS {
+            drafts.put(draft(&format!("note:{i}"), "text", NOW - 1000.0));
+        }
+        drafts.put(draft("note:ahead", "text", ahead));
+        assert_eq!(drafts.drafts.len(), MAX_DRAFTS);
+        assert!(drafts.drafts.iter().any(|d| d.key == "note:ahead"));
     }
 
     #[test]

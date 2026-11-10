@@ -52,7 +52,6 @@ use leptos::html;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use serde::de::DeserializeOwned;
-use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent, MouseEvent};
 
@@ -134,6 +133,8 @@ struct Library {
     query: RwSignal<String>,
     /// The pause being waited for, if one is.
     search_timer: StoredValue<Option<i32>>,
+    /// What that timer calls: one callback, made once (`dom::kept_callback`).
+    search_later: StoredValue<Option<js_sys::Function>, LocalStorage>,
     note_search: NodeRef<html::Input>,
     /// Each list's latest reload, by `List::index`.
     tokens: StoredValue<[u64; 3]>,
@@ -195,6 +196,7 @@ impl Library {
             filter: RwSignal::new(text::ALL.to_string()),
             query: RwSignal::new(String::new()),
             search_timer: StoredValue::new(None),
+            search_later: StoredValue::new_local(None),
             note_search: NodeRef::new(),
             tokens: StoredValue::new([0; 3]),
             focus: StoredValue::new(Generation::default()),
@@ -757,25 +759,23 @@ impl Library {
     // ---- The Notes tab's search.
 
     fn cancel_search_timer(self) {
-        if let (Some(timer), Some(window)) = (self.search_timer.get_value(), web_sys::window()) {
-            window.clear_timeout_with_handle(timer);
-        }
+        dom::clear_timeout(self.search_timer.get_value());
         self.search_timer.set_value(None);
+    }
+
+    /// Typing has paused: the list follows the box.
+    fn on_search_timer(self) {
+        self.search_timer.set_value(None);
+        self.search_now();
     }
 
     /// The list follows the box once typing pauses.
     fn on_search_input(self) {
         self.cancel_search_timer();
-        let later = Closure::once_into_js(move || {
-            self.search_timer.set_value(None);
-            self.search_now();
-        });
-        let timer = web_sys::window().and_then(|w| {
-            w.set_timeout_with_callback_and_timeout_and_arguments_0(
-                later.unchecked_ref(),
-                text::SEARCH_DELAY_MS,
-            )
-            .ok()
+        let timer = self.search_later.with_value(|later| {
+            later
+                .as_ref()
+                .and_then(|later| dom::set_timeout(later, text::SEARCH_DELAY_MS))
         });
         match timer {
             Some(timer) => self.search_timer.set_value(Some(timer)),
@@ -1107,6 +1107,9 @@ pub fn mount() {
         return;
     };
     let library = Library::new();
+    library
+        .search_later
+        .set_value(Some(dom::kept_callback(move || library.on_search_timer())));
     leptos::mount::mount_to(holder.clone(), move || lists(library)).forget();
     // The rows' clicks: a click on a row clicks its open button, which
     // comes back up to the same list.

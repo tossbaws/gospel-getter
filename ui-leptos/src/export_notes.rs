@@ -14,7 +14,11 @@
 //! stays open for a folder, and asks (Replace or Cancel).
 //!
 //! It's opened from ☰ → Export data… → My notes (`export_choice`), or the
-//! command palette's Export notes…, while there are notes.
+//! command palette's Export notes…, while there are notes. It opens once
+//! its choices are in, if nothing newer has been done since: another modal
+//! opened meanwhile (a note editor, say) has the keyboard, and this one
+//! then opens not at all, says nothing and takes no focus (AUD-05,
+//! `bridge::modal_claim`).
 //!
 //! A small modal, as the page's note panel: it has the keyboard while open
 //! (a capturing `keydown` on `window`, stopping every other handler), Escape
@@ -42,6 +46,7 @@ use crate::dto::{
     Commentary, CommentaryArgs, ConfirmFolderArgs, CountArgs, ExportArgs, ExportOptions,
     ExportOutcome, Filter, FolderOutcome, NotedBook,
 };
+use crate::intent::Claim;
 use crate::ipc;
 use crate::text::{
     Fields, build_filter, chapter_value, commentary_markup, count_line, plural, replace_question,
@@ -74,8 +79,9 @@ struct ReplaceQuestion {
 struct Busy {
     /// An export is being written (the dialog is closed meanwhile).
     exporting: bool,
-    /// The choices are being fetched to open the dialog.
-    opening: bool,
+    /// The choices are being fetched to open the dialog, for the opening
+    /// that claimed this (see the module's notes).
+    opening: Option<Claim>,
     /// Only the latest count gets to show: each request takes the next
     /// number, and an answer whose number is stale is dropped.
     count_token: u64,
@@ -284,15 +290,31 @@ impl Dialog {
     /// on every book, and on All time.
     fn open(self, request: OpenRequest, return_to: Option<HtmlElement>) {
         let busy = self.busy.get_value();
-        if busy.exporting || busy.opening || request.note_count == 0 {
+        // One opening at a time, unless something newer has let the one
+        // under way go.
+        let opening = busy.opening.is_some_and(bridge::modal_holds);
+        if busy.exporting || opening || request.note_count == 0 {
             return;
         }
+        let claim = bridge::modal_claim();
         self.return_to.set_value(return_to);
-        self.busy.update_value(|b| b.opening = true);
+        self.busy.update_value(|b| b.opening = Some(claim));
         spawn_local(async move {
             let result =
                 ipc::invoke::<ExportOptions>("get_notes_export_options", JsValue::UNDEFINED).await;
-            self.busy.update_value(|b| b.opening = false);
+            self.busy.update_value(|b| {
+                if b.opening == Some(claim) {
+                    b.opening = None;
+                }
+            });
+            // Another modal opened meanwhile, or this was asked for again:
+            // this opening is no longer what the reader is doing.
+            if !bridge::modal_holds(claim) {
+                if let Err(e) = &result {
+                    ipc::log_error("Failed to prepare a notes export since left", e);
+                }
+                return;
+            }
             let options = match result {
                 Ok(options) => options,
                 Err(e) => {
@@ -329,6 +351,16 @@ impl Dialog {
             // The checklist is on screen once the reactive system has
             // caught up with those changes.
             tick().await;
+            if !self.open.get_untracked() {
+                return;
+            }
+            // A modal that opened as this one did has the keyboard: this
+            // one goes again, leaving focus to it.
+            if !bridge::modal_holds(claim) {
+                self.open.set(false);
+                self.busy.update_value(|b| b.count_token += 1);
+                return;
+            }
             self.focus_first_box();
             self.refresh_count();
         });

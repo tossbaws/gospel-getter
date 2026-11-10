@@ -1,6 +1,7 @@
 //! Small DOM helpers the pieces share: focus that never scrolls the page,
-//! "is this element usable", the Tab trap's arithmetic, and listening for
-//! the page's events and the keyboard. As the page's scripts do them.
+//! "is this element usable", the Tab trap's arithmetic, listening for the
+//! page's events and the keyboard, and timers. As the page's scripts do
+//! them.
 
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -126,6 +127,37 @@ pub fn on(target: &web_sys::EventTarget, name: &str, handler: impl Fn(web_sys::E
     let handler = Closure::<dyn Fn(web_sys::Event)>::new(handler);
     let _ = target.add_event_listener_with_callback(name, handler.as_ref().unchecked_ref());
     handler.forget();
+}
+
+/// A callback for `setTimeout` ([`set_timeout`]) made once and kept for as
+/// long as the page lives, as the listeners above are: one per timer that's
+/// started again and again (a debounce, a fade), never one per start. A
+/// timer cancelled or replaced before it fires then leaves nothing behind,
+/// where a `Closure::once_into_js` handed to `setTimeout` is freed only
+/// once it's called (AUD-06). What it does when it fires it reads then.
+pub fn kept_callback(f: impl Fn() + 'static) -> js_sys::Function {
+    let callback = Closure::<dyn Fn()>::new(f);
+    let function = callback
+        .as_ref()
+        .unchecked_ref::<js_sys::Function>()
+        .clone();
+    callback.forget();
+    function
+}
+
+/// `setTimeout(callback, ms)`: its handle, for [`clear_timeout`], or `None`
+/// if it couldn't be set.
+pub fn set_timeout(callback: &js_sys::Function, ms: i32) -> Option<i32> {
+    web_sys::window()?
+        .set_timeout_with_callback_and_timeout_and_arguments_0(callback, ms)
+        .ok()
+}
+
+/// `clearTimeout(handle)`, if there's one.
+pub fn clear_timeout(handle: Option<i32>) {
+    if let (Some(handle), Some(window)) = (handle, web_sys::window()) {
+        window.clear_timeout_with_handle(handle);
+    }
 }
 
 /// Listens for `keydown` on `window`, capturing: before any of the page's

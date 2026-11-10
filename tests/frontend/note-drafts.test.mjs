@@ -382,3 +382,113 @@ test('drafts are in no backup and no notes export: both are as they were', async
         assert.ok(!withDrafts.notes.includes('PRIVATE DRAFT'));
     });
 });
+
+// ---- AUD-01: a draft offered while a save or delete is on its way stays
+// as it is: Restore and Discard are off (and do nothing if pressed), so no
+// draft goes into, or out of, a text that's already on its way. Whatever
+// the answer, nothing restored disappears unsaved: a failure leaves the
+// draft offered, and Restore works again.
+
+/** The editor on note `note`, its draft `text` offered (kept 5 minutes ago). */
+async function editorOffering(note, text) {
+    const passage = { book: JOHN, chapter: 3, start: note.verseStart, end: note.verseEnd };
+    const storage = {
+        [DRAFTS_KEY]: JSON.stringify({ drafts: [{ key: `note:${note.id}`, passage, text, at: Date.now() - 5 * 60_000 }] }),
+    };
+    const app = await open({ storage });
+    await select(app, note.verseStart);
+    await openEditor(app, 'edit');
+    assert.ok(offerShown(app), 'the draft is offered');
+    return app;
+}
+
+/** Presses Restore and Discard as a reader would, whatever their state. */
+async function pressRestoreAndDiscard(app) {
+    for (const id of ['note-draft-restore', 'note-draft-discard']) {
+        el(app, id).dispatchEvent(new app.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+        await settle();
+    }
+}
+
+for (const [label, button, cmd] of [['Save', 'note-save', 'update_note'], ['Delete', 'note-delete', 'delete_note']]) {
+    test(`AUD-01: Restore and Discard do nothing while ${label} is on its way; it succeeds`, async () => {
+        const [note] = await seed([[16, 16, 'Loved.']]);
+        const app = await editorOffering(note, 'Loved, all of it.');
+        try {
+            const release = app.holdCommand(cmd);
+            const before = app.calls.length;
+            app.click(el(app, button));
+            await app.until(() => app.calls.slice(before).some((c) => c.cmd === cmd), `${cmd} to be sent`);
+            await settle();
+            assert.equal(el(app, 'note-draft-restore').disabled, true, 'Restore is off meanwhile');
+            assert.equal(el(app, 'note-draft-discard').disabled, true, 'Discard is off meanwhile');
+            await pressRestoreAndDiscard(app);
+            assert.equal(input(app).value, 'Loved.', 'the text on its way is the text shown');
+            assert.ok(offerShown(app), 'the draft is still offered');
+            assert.deepEqual(keptTexts(app), [[`note:${note.id}`, 'Loved, all of it.']], 'and still kept');
+
+            release();
+            await app.until(() => !panelOpen(app), 'the editor to close');
+            await app.idle(before);
+            const notes = await backend('list_all_notes');
+            if (cmd === 'update_note') {
+                assert.deepEqual(notes.map((n) => n.body), ['Loved.'], 'what was saved is what was shown');
+            } else {
+                assert.deepEqual(notes, [], 'deleted');
+            }
+        } finally {
+            app.close();
+        }
+    });
+
+    test(`AUD-01: Restore and Discard do nothing while ${label} is on its way; it fails, and the draft is still there`, async () => {
+        const [note] = await seed([[16, 16, 'Loved.']]);
+        const app = await editorOffering(note, 'Loved, all of it.');
+        try {
+            const release = app.holdFailure(cmd, `simulated ${cmd} failure`);
+            const before = app.calls.length;
+            app.click(el(app, button));
+            await app.until(() => app.calls.slice(before).some((c) => c.cmd === cmd), `${cmd} to be sent`);
+            await settle();
+            assert.equal(el(app, 'note-draft-restore').disabled, true);
+            assert.equal(el(app, 'note-draft-discard').disabled, true);
+            await pressRestoreAndDiscard(app);
+            assert.equal(input(app).value, 'Loved.');
+
+            release();
+            await app.until(() => el(app, 'note-error').textContent !== '', 'the failure to be said');
+            await app.idle(before);
+            assert.ok(panelOpen(app), 'the editor stays');
+            assert.ok(offerShown(app), 'the draft is still offered');
+            assert.deepEqual(keptTexts(app), [[`note:${note.id}`, 'Loved, all of it.']], 'and still kept');
+            assert.equal(el(app, 'note-draft-restore').disabled, false, 'Restore works again');
+            assert.equal(el(app, 'note-draft-discard').disabled, false);
+            app.click(el(app, 'note-draft-restore'));
+            await settle();
+            assert.equal(input(app).value, 'Loved, all of it.', 'restored');
+            assert.deepEqual((await backend('list_all_notes')).map((n) => n.body), ['Loved.'], 'nothing changed');
+        } finally {
+            app.close();
+        }
+    });
+}
+
+// AUD-04: a draft kept while the clock was ahead (since put back) isn't
+// lost: it's offered as just kept, and stays kept, until it's as old as any
+// draft that goes.
+test('AUD-04: a draft from a clock since put back is offered, as just kept, and still kept', async () => {
+    const [note] = await seed([[16, 16, 'Loved.']]);
+    const passage = { book: JOHN, chapter: 3, start: 16, end: 16 };
+    const ahead = { key: `note:${note.id}`, passage, text: 'Written while the clock was fast.', at: Date.now() + 10 * 60_000 };
+    await withApp({ storage: { [DRAFTS_KEY]: JSON.stringify({ drafts: [ahead] }) } }, async (app) => {
+        await select(app, 16);
+        await openEditor(app, 'edit');
+        assert.ok(offerShown(app), 'offered');
+        assert.equal(offerText(app), 'You have unsaved text from a moment ago.');
+        assert.equal(input(app).value, 'Loved.', 'never put in the text box unasked');
+        assert.deepEqual(keptTexts(app), [[`note:${note.id}`, 'Written while the clock was fast.']], 'still kept');
+        app.click(el(app, 'note-draft-restore'));
+        await settle();
+        assert.equal(input(app).value, 'Written while the clock was fast.');
+    });
+});

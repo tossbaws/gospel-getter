@@ -53,8 +53,7 @@ use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Serialize;
-use wasm_bindgen::closure::Closure;
-use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::JsValue;
 use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge::{self, NoteRequest, OtherNote};
@@ -158,6 +157,8 @@ struct Editor {
     busy: StoredValue<bool>,
     /// The pause in typing being waited for, to keep a draft.
     draft_timer: StoredValue<Option<i32>>,
+    /// What that timer calls: one callback, made once (`dom::kept_callback`).
+    draft_later: StoredValue<Option<js_sys::Function>, LocalStorage>,
     title: RwSignal<String>,
     passage_html: RwSignal<String>,
     text_shown: RwSignal<String>,
@@ -170,6 +171,8 @@ struct Editor {
     body: NodeRef<html::Div>,
     others_box: NodeRef<html::Details>,
     draft_box: NodeRef<html::Div>,
+    draft_restore: NodeRef<html::Button>,
+    draft_discard: NodeRef<html::Button>,
     input: NodeRef<html::Textarea>,
     length: NodeRef<html::P>,
     buttons: NodeRef<html::Div>,
@@ -188,15 +191,18 @@ impl Editor {
         self.input.get().map(|i| i.value()).unwrap_or_default()
     }
 
-    /// Save and Delete, and the length line, for the text as it is now.
+    /// Save and Delete, the draft offer's Restore and Discard, and the
+    /// length line, for the text as it is now.
     fn update_controls(self) {
         let text = self.text();
         let busy = self.busy.get_value();
         if let Some(save) = self.save.get() {
             save.set_disabled(!note_text::can_save(&text, busy));
         }
-        if let Some(delete) = self.delete.get() {
-            delete.set_disabled(busy);
+        for button in [self.delete, self.draft_restore, self.draft_discard] {
+            if let Some(button) = button.get() {
+                button.set_disabled(busy);
+            }
         }
         if let Some(length) = self.length.get() {
             length.set_text_content(Some(&note_text::length_line(&text)));
@@ -206,7 +212,9 @@ impl Editor {
     /// While a save or delete is on its way, through the refresh after it,
     /// the text is read-only (still focusable, and read out), so nothing
     /// typed meanwhile is lost when the editor closes, and Save stays off,
-    /// so one save is one note.
+    /// so one save is one note. A draft offered stays as it is meanwhile:
+    /// Restore and Discard are off too, so no draft is put in the text box
+    /// (or forgotten) while the text that's going is on its way.
     fn set_busy(self, busy: bool) {
         if busy {
             self.cancel_draft_timer();
@@ -234,10 +242,14 @@ impl Editor {
     // ---- Drafts.
 
     fn cancel_draft_timer(self) {
-        if let (Some(timer), Some(window)) = (self.draft_timer.get_value(), web_sys::window()) {
-            window.clear_timeout_with_handle(timer);
-        }
+        dom::clear_timeout(self.draft_timer.get_value());
         self.draft_timer.set_value(None);
+    }
+
+    /// The pause in typing has come: the text is kept as a draft.
+    fn on_draft_timer(self) {
+        self.draft_timer.set_value(None);
+        self.keep_draft();
     }
 
     /// Something was typed: the text is kept as a draft once typing
@@ -250,16 +262,10 @@ impl Editor {
         });
         self.update_controls();
         self.cancel_draft_timer();
-        let later = Closure::once_into_js(move || {
-            self.draft_timer.set_value(None);
-            self.keep_draft();
-        });
-        let timer = web_sys::window().and_then(|w| {
-            w.set_timeout_with_callback_and_timeout_and_arguments_0(
-                later.unchecked_ref(),
-                note_text::DRAFT_DELAY_MS,
-            )
-            .ok()
+        let timer = self.draft_later.with_value(|later| {
+            later
+                .as_ref()
+                .and_then(|later| dom::set_timeout(later, note_text::DRAFT_DELAY_MS))
         });
         match timer {
             Some(timer) => self.draft_timer.set_value(Some(timer)),
@@ -326,8 +332,12 @@ impl Editor {
     }
 
     /// Restore: the draft goes in the text box, to be saved with Save (or
-    /// kept as the draft it is).
+    /// kept as the draft it is). Not while a save or delete is on its way
+    /// (see [`Self::set_busy`]).
     fn restore_draft(self) {
+        if self.busy.get_value() {
+            return;
+        }
         let Some(offered) = self
             .session
             .with_value(|s| s.as_ref().and_then(|s| s.offered.clone()))
@@ -352,8 +362,12 @@ impl Editor {
     }
 
     /// Discard: the draft offered is forgotten (unless what's typed since
-    /// has taken its place), and the text box keeps what it has.
+    /// has taken its place), and the text box keeps what it has. Not while
+    /// a save or delete is on its way (see [`Self::set_busy`]).
     fn discard_draft(self) {
+        if self.busy.get_value() {
+            return;
+        }
         let Some((key, offered)) = self.session.with_value(|s| {
             s.as_ref()
                 .and_then(|s| Some((s.draft_key.clone(), s.offered.clone()?)))
@@ -757,6 +771,8 @@ impl Editor {
     }
 
     fn listen(self) {
+        self.draft_later
+            .set_value(Some(dom::kept_callback(move || self.on_draft_timer())));
         dom::on_document_event(bridge::NOTE_EVENT, move |event: CustomEvent| {
             event.prevent_default();
             match bridge::note_request(&event) {
@@ -810,6 +826,7 @@ pub fn NoteEditor() -> impl IntoView {
         next_id: StoredValue::new(0),
         busy: StoredValue::new(false),
         draft_timer: StoredValue::new(None),
+        draft_later: StoredValue::new_local(None),
         title: RwSignal::new(String::new()),
         passage_html: RwSignal::new(String::new()),
         text_shown: RwSignal::new(String::new()),
@@ -821,6 +838,8 @@ pub fn NoteEditor() -> impl IntoView {
         body: NodeRef::new(),
         others_box: NodeRef::new(),
         draft_box: NodeRef::new(),
+        draft_restore: NodeRef::new(),
+        draft_discard: NodeRef::new(),
         input: NodeRef::new(),
         length: NodeRef::new(),
         buttons: NodeRef::new(),
@@ -905,6 +924,7 @@ pub fn NoteEditor() -> impl IntoView {
                                 id="note-draft-restore"
                                 class="import-confirm"
                                 aria-describedby="note-draft-text"
+                                node_ref=editor.draft_restore
                                 on:click=move |_| editor.restore_draft()
                             >
                                 "Restore"
@@ -914,6 +934,7 @@ pub fn NoteEditor() -> impl IntoView {
                                 id="note-draft-discard"
                                 class="reader-mode-btn"
                                 aria-describedby="note-draft-text"
+                                node_ref=editor.draft_discard
                                 on:click=move |_| editor.discard_draft()
                             >
                                 "Discard"

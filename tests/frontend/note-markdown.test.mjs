@@ -325,3 +325,37 @@ test('files already in the folder are replaced only when the reader says so', as
         assert.deepEqual(readdirSync(folder).sort(), ['19 Psalms.md', '43 John.md']);
     });
 });
+
+// AUD-08: the notes' Markdown asked for ahead of Copy as Markdown is kept
+// for the notes pointed at most recently, not for every note ever pointed
+// at: one pointed at long ago is asked for again when it's pointed at
+// again, and its Copy still copies within the click.
+test('AUD-08: only the notes pointed at most recently keep their Markdown; one pointed at long ago asks again, and copies', async () => {
+    const PSALMS = bookId('Psalms');
+    const notes = await seed(Array.from({ length: 60 }, (_, i) => [PSALMS, i + 1, 1, 1, `Psalm ${i + 1}, noted.`]));
+    await withApp({}, async (app) => {
+        app.openLibrary('notes');
+        const rows = () => [...app.document.querySelectorAll('#note-list .note-item')];
+        await app.until(() => rows().length === notes.length, 'every note listed');
+        const asked = (id) => app.calls.filter((c) => c.cmd === 'get_note_markdown' && c.args.id === id).length;
+        const point = async (row) => {
+            row.dispatchEvent(new app.window.Event('pointerover', { bubbles: true }));
+            await app.idle();
+        };
+        const first = rows()[0];
+        const firstId = Number(first.dataset.noteId);
+        for (const row of rows()) await point(row);
+        assert.equal(asked(firstId), 1);
+        // Pointed at again just now: still kept.
+        const last = rows().at(-1);
+        await point(last);
+        assert.equal(asked(Number(last.dataset.noteId)), 1, 'the most recent is kept');
+
+        // Long ago: asked for again, before the click, which copies it.
+        await point(first);
+        assert.equal(asked(firstId), 2, 'asked again');
+        app.click(first.querySelector('.note-list-copy'));
+        await app.until(() => app.clipboardWrites.length === 1, 'the copy');
+        assert.equal(app.clipboardWrites[0], await backend('get_note_markdown', { id: firstId, translationCode: 'kjv' }));
+    });
+});

@@ -231,6 +231,7 @@ fn on_keydown(event: &KeyboardEvent) {
         meta: event.meta_key(),
         alt: event.alt_key(),
         shift: event.shift_key(),
+        alt_graph: event.get_modifier_state("AltGraph"),
     };
     let single_keys = prefs::on(&preferences::SINGLE_KEY_SHORTCUTS);
     let Some(route) = text::route_for(&press, single_keys) else {

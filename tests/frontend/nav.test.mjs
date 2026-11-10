@@ -250,6 +250,34 @@ test('a recent place opens in the translation it was read in', () =>
         assert.equal(el(app, 'ref-text').textContent, 'John 3 · KJV');
     }));
 
+// C-04: switching translation for a recent place reads only that place's
+// chapter, not the one on screen first; everything else that hears of the
+// new translation still does (the Library's previews, the search box).
+test('C-04: a recent place in another translation reads only its own chapter', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        await jump(app, 'Romans', 8);
+        app.open('translation');
+        await waitFor(app, () => app.click(app.document.querySelector('#translation-choices [data-value="web"]')));
+        app.key('Escape', {}, app.document.activeElement);
+        await jump(app, 'Psalms', 23);
+        await app.search('shepherd');
+        app.key('Escape', {}, app.searchInput());
+        openMenu(app);
+        assert.deepEqual(rows(app), ['Psalms 23 · WEByou are here', 'Romans 8 · WEB', 'John 3 · KJV']);
+        const before = app.calls.length;
+        await waitFor(app, () => app.click(items(app)[2]));
+        await app.idle(before);
+        const reads = app.calls.slice(before).filter((c) => c.cmd === 'get_reading').map((c) => [c.args.bookId, c.args.chapter, c.args.translationCode]);
+        assert.deepEqual(reads, [[43, 3, 'kjv']], 'only the place’s chapter, in its translation');
+        assert.equal(app.heading(), 'John 3');
+        assert.equal(el(app, 'translation-select').value, 'kjv');
+        assert.equal(el(app, 'translation-toggle').textContent, 'KJV');
+        assert.equal(el(app, 'ref-text').textContent, 'John 3 · KJV');
+        const since = app.calls.slice(before);
+        assert.ok(since.some((c) => c.cmd === 'list_bookmarks' && c.args.translationCode === 'kjv'), 'the Library’s previews follow');
+        assert.ok(since.some((c) => c.cmd === 'search' && c.args.translationCode === 'kjv' && c.args.query === 'shepherd'), 'and the search box');
+    }));
+
 test('recent places last across a restart, on this computer only: not a display setting, and in no backup', async () => {
     let storage;
     await withApp({ book: 'John', chapter: 3 }, async (app) => {

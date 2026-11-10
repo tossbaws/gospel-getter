@@ -89,7 +89,8 @@
 //!   mounted.
 //!
 //! Direct calls, where the page's script used to be in between: the toast
-//! ([`toast`], `page`), a modal opening ([`modal_opening`]), an export or
+//! ([`toast`], `page`), a modal opening ([`modal_opening`]) or getting
+//! ready to ([`modal_claim`], [`modal_holds`]), an export or
 //! import running ([`data_busy`]), an import's reloads ([`imported`]), the
 //! chooser's two choices ([`export_everything`], [`export_notes`]), what
 //! the palette's commands need ([`palette_state`]) and the commands whose
@@ -298,6 +299,19 @@ pub fn ready() {
 /// before the modal takes focus (`page`).
 pub fn modal_opening(close_search: bool) {
     crate::page::modal_opening(close_search);
+}
+
+/// A modal of this crate is getting ready to open, and will once an answer
+/// is in (Export notes, its choices): its claim. Any modal opening before
+/// then ([`modal_opening`]), or another claiming, supersedes it (`page`).
+pub fn modal_claim() -> crate::intent::Claim {
+    crate::page::modal_claim()
+}
+
+/// Whether the modal that claimed `claim` ([`modal_claim`]) may still open
+/// and take focus: nothing newer has opened or claimed since.
+pub fn modal_holds(claim: crate::intent::Claim) -> bool {
+    crate::page::modal_holds(claim)
 }
 
 /// The welcome is asked to open (`page`): a cancelable `CustomEvent` whose

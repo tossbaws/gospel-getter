@@ -330,3 +330,67 @@ test('the palette’s Export notes… and Export data… are as they were, and s
         assert.equal(reason(app, 'Export notes…'), 'There are no notes yet');
         assert.equal(reason(app, 'Export data…'), null);
     })));
+
+// AUD-05: My notes' dialog opens once its choices are in, unless another
+// modal opened meanwhile: a note editor opened (and typed in) while they
+// were on their way keeps the keyboard and focus, and Export notes neither
+// opens nor says anything, whether its choices came or failed. Nothing
+// typed is touched.
+const notePanelOpen = (app) => !el(app, 'note-overlay').hidden;
+
+/** My notes, its choices held (to `succeed` or fail), then a note editor opened and typed in. */
+async function editorOpenedWhileMyNotesWaits(app, succeed) {
+    const release = succeed
+        ? app.holdCommand('get_notes_export_options')
+        : app.holdFailure('get_notes_export_options', 'simulated get_notes_export_options failure');
+    await app.openExport();
+    const before = app.calls.length;
+    await app.click(myNotes(app));
+    assert.ok(!chooserOpen(app));
+    await app.until(() => app.calls.slice(before).some((c) => c.cmd === 'get_notes_export_options'), 'the choices to be asked for');
+    assert.ok(!notesDialogOpen(app), 'not yet');
+
+    // Waiting from here: the choices are still held.
+    const meanwhile = app.calls.length;
+    app.click(app.verse(17));
+    await app.idle(meanwhile, 'list_notes');
+    app.click(app.actions().querySelector('.verse-note-btn'));
+    await app.until(() => notePanelOpen(app), 'the note editor');
+    const input = el(app, 'note-input');
+    app.type(input, 'Typed while the export got ready.');
+    await settle();
+    assert.equal(app.document.activeElement, input);
+
+    const toastBefore = app.toast().textContent;
+    release();
+    await app.idle(before);
+    await settle();
+    return { input, toastBefore };
+}
+
+for (const succeed of [true, false]) {
+    test(`AUD-05: a note editor opened while My notes’ choices are on its way keeps the keyboard (the choices ${succeed ? 'come' : 'fail'})`, () =>
+        withApp({}, async (app) => {
+            const { input, toastBefore } = await editorOpenedWhileMyNotesWaits(app, succeed);
+            assert.ok(!notesDialogOpen(app), 'Export notes doesn’t open over it');
+            assert.ok(notePanelOpen(app), 'the editor is still open');
+            assert.equal(app.document.activeElement, input, 'focus stays in it');
+            assert.equal(input.value, 'Typed while the export got ready.', 'what was typed is as it was');
+            assert.equal(app.toast().textContent, toastBefore, 'nothing is said about an export left behind');
+            assert.equal(callsOf(app, 'count_notes_export').length, 0);
+            // The keyboard is the editor's: Escape asks about the text typed.
+            await app.key('Escape', {}, input);
+            assert.ok(!el(app, 'note-discard').hidden, 'the editor asks first');
+            assert.ok(!notesDialogOpen(app));
+
+            // Asked for again afterwards, My notes opens as always.
+            app.click(el(app, 'note-keep-later'));
+            await settle();
+            assert.ok(!notePanelOpen(app));
+            await app.openExport();
+            const before = app.calls.length;
+            await app.click(myNotes(app));
+            await app.idle(before, 'count_notes_export');
+            assert.ok(notesDialogOpen(app));
+        }));
+}

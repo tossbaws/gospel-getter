@@ -157,6 +157,8 @@ impl Import {
         self.shown_preview.set(None);
         self.file_line.set(file_name);
         self.error.set(String::new());
+        // Nothing is being imported: its Close works.
+        self.confirming.set(false);
         self.shown.set(Shown::Invalid {
             message: format!("{message} Nothing was changed."),
             problems,
@@ -251,8 +253,12 @@ impl Import {
         }
     }
 
+    /// Closes the dialog. An import that was under way has answered by
+    /// now (closing is its last step), so the next dialog starts with
+    /// nothing under way.
     fn close(self) {
         self.open.set(false);
+        self.confirming.set(false);
         self.preview.set_value(None);
     }
 
