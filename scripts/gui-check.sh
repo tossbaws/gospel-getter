@@ -7,9 +7,15 @@
 #
 #   [GUI_CHECK_UPDATER_APP=<test build>] \
 #       scripts/gui-check.sh <release binary | AppImage | .exe> [out-dir]
+#   scripts/gui-check.sh --list
+#
+# --list prints every check, by number and name, as results.txt names them:
+# the checks' own list (gui-check --list), which a run's results.txt is
+# made from too.
 #
 # The out-dir (default target/gui-check/<timestamp>/) gets results.txt (one
-# PASS/FAIL line per check, with the reason), steps.log, screenshots/*.png
+# PASS/FAIL line per check, with the reason: every check listed, a check
+# with no result as a FAIL saying why), steps.log, screenshots/*.png
 # (taken by WebKit or WebView2 through WebDriver), app.log, driver.log
 # (tauri-driver with the native driver's own output) and environment.txt;
 # on Windows, launched.txt too (the apps gui-launch started).
@@ -106,22 +112,18 @@
 
 set -euo pipefail
 
+# The whole header above, without its comment marks.
 usage() {
-    sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
+    awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0"
 }
 
-if [[ $# -lt 1 || $# -gt 2 || $1 == -h || $1 == --help ]]; then
+if [[ $# -lt 1 || $# -gt 2 || $1 == -h || $1 == --help || ($1 == --list && $# -ne 1) ]]; then
     usage
     [[ $# -ge 1 && ($1 == -h || $1 == --help) ]] && exit 0
     exit 2
 fi
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-app="$(realpath "$1")"
-updater_app="${GUI_CHECK_UPDATER_APP:-}"
-out="${2:-$repo/target/gui-check/$(date +%Y%m%d-%H%M%S)}"
-budget="${GUI_CHECK_BUDGET:-180}"
-step_timeout="${GUI_CHECK_STEP_TIMEOUT:-10}"
 
 case "$(uname -s)" in
     Linux) platform=linux ;;
@@ -131,6 +133,30 @@ case "$(uname -s)" in
         exit 2
         ;;
 esac
+
+# The checks binary: GUI_CHECK_RUNNER's, else tests/gui, built here.
+build_runner() {
+    runner="${GUI_CHECK_RUNNER:-}"
+    [[ -n $runner ]] && return 0
+    cargo build --quiet --locked --manifest-path "$repo/tests/gui/Cargo.toml" || return 1
+    runner="$repo/tests/gui/target/debug/gui-check"
+    [[ $platform == windows ]] && runner="$runner.exe"
+    return 0
+}
+
+if [[ $1 == --list ]]; then
+    build_runner || {
+        echo "gui-check: tests/gui did not build" >&2
+        exit 1
+    }
+    exec "$runner" --list
+fi
+
+app="$(realpath "$1")"
+updater_app="${GUI_CHECK_UPDATER_APP:-}"
+out="${2:-$repo/target/gui-check/$(date +%Y%m%d-%H%M%S)}"
+budget="${GUI_CHECK_BUDGET:-180}"
+step_timeout="${GUI_CHECK_STEP_TIMEOUT:-10}"
 
 if [[ ! -f $app ]]; then
     echo "gui-check: no such file: $1" >&2
@@ -147,9 +173,9 @@ fi
 mkdir -p "$out/screenshots"
 out="$(realpath "$out")"
 results="$out/results.txt"
-# The checks, as results.txt numbers and names them (tests/gui report.rs).
-checks=("1 driver" "2 csp" "3 export-notes" "4 screenshots" "5 welcome" "6 note-editor" "7 shortcuts" "8 import-preview"
-    "9 update-banner" "10 update-about" "11 update-download" "12 update-link-only" "13 update-offline")
+# The checks, as results.txt numbers and names them: the checks binary's
+# own list (gui-check --list, tests/gui report.rs), once it's built.
+checks=()
 : >"$results"
 work="$(mktemp -d "${TMPDIR:-/tmp}/gui-check.XXXXXXXX")"
 # The test build's updater settings, which the checks write.
@@ -164,13 +190,18 @@ log() {
 }
 
 # A failure before the checks could run still leaves a results file that
-# says so, one FAIL per check.
+# says so: one FAIL per check, or, before the checks could be listed, one
+# for the run.
 setup_failed() {
     log "setup failed: $*"
     local check
-    for check in "${checks[@]}"; do
-        echo "FAIL $check: not run: setup failed: $*"
-    done >"$results"
+    if ((${#checks[@]})); then
+        for check in "${checks[@]}"; do
+            echo "FAIL $check: not run: setup failed: $*"
+        done >"$results"
+    else
+        echo "FAIL setup: no check ran, and the checks couldn't be listed: $*" >"$results"
+    fi
     exit 1
 }
 
@@ -269,15 +300,13 @@ log "out: $out"
 
 # ---- The checks binary. ----
 
-runner="${GUI_CHECK_RUNNER:-}"
-if [[ -z $runner ]]; then
-    log "building tests/gui"
-    cargo build --quiet --locked --manifest-path "$repo/tests/gui/Cargo.toml" \
-        || setup_failed "tests/gui did not build"
-    runner="$repo/tests/gui/target/debug/gui-check"
-    [[ $platform == windows ]] && runner="$runner.exe"
-fi
+[[ -z ${GUI_CHECK_RUNNER:-} ]] && log "building tests/gui"
+build_runner || setup_failed "tests/gui did not build"
 [[ -x $runner ]] || setup_failed "no gui-check binary at $runner"
+listed="$("$runner" --list)" || setup_failed "gui-check --list failed"
+mapfile -t checks <<<"${listed//$'\r'/}"
+[[ ${#checks[@]} -gt 0 && -n ${checks[0]} ]] || setup_failed "gui-check --list listed no checks"
+log "${#checks[@]} checks"
 
 tauri_driver="${TAURI_DRIVER:-$(command -v tauri-driver || true)}"
 [[ -n $tauri_driver ]] || setup_failed "tauri-driver is not installed (cargo install tauri-driver --locked)"

@@ -148,7 +148,10 @@ downloads the wasm-bindgen and wasm-opt versions it needs into its own
 cache the first time: wasm-bindgen's is this crate's in `Cargo.lock`, and
 wasm-opt's is pinned in `Trunk.toml` (`[tools] wasm_opt`). CI doesn't let
 Trunk download them: it fetches those releases and Trunk's own itself
-(`tools/ci/build-tools.txt`), and puts them on `PATH`.
+(`tools/ci/build-tools.txt`), and puts them on `PATH`. Trunk builds from
+`Cargo.lock` as committed (`locked = true` in `Trunk.toml`), so after
+changing this crate's dependencies, update the lock file first (`cargo
+update -p <crate>`, or a plain `cargo build` here) and commit it with them.
 
 You need Trunk (`cargo install trunk --locked`, or a release binary) and the
 target (`rustup target add wasm32-unknown-unknown`). Anything that builds the

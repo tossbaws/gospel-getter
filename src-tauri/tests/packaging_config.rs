@@ -13,6 +13,8 @@ const PKGBUILD: &str = include_str!("../../packaging/PKGBUILD");
 const LIB_RS: &str = include_str!("../src/lib.rs");
 const CAPABILITY: &str = include_str!("../capabilities/default.json");
 const DIST_YML: &str = include_str!("../../.github/workflows/dist.yml");
+const CI_YML: &str = include_str!("../../.github/workflows/ci.yml");
+const TRUNK_TOML: &str = include_str!("../../Trunk.toml");
 const INSTALL_SH: &str = include_str!("../../packaging/install.sh");
 const WINDOWS_PACKAGING: &str = include_str!("../../packaging/windows/README.md");
 const SIDECAR_CONF: &str = include_str!("../tauri.sidecar.conf.json");
@@ -287,10 +289,7 @@ fn the_window_state_plugin_restores_a_hidden_window_before_showing_it() {
 
     let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
     assert_eq!(capability["windows"], serde_json::json!(["main"]));
-    assert_eq!(
-        capability["permissions"],
-        serde_json::json!(["core:default"])
-    );
+    assert_eq!(capability["permissions"], serde_json::json!([]));
 }
 
 /// One app at a time: the official single-instance plugin is a desktop
@@ -330,10 +329,7 @@ fn the_single_instance_plugin_is_registered_first() {
     );
 
     let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
-    assert_eq!(
-        capability["permissions"],
-        serde_json::json!(["core:default"])
-    );
+    assert_eq!(capability["permissions"], serde_json::json!([]));
 }
 
 /// The webview's Content Security Policy, as `tauri.conf.json` sets it.
@@ -432,9 +428,9 @@ const TEST_FEATURE: &str = "gui-test-updater";
 const TEST_BUILD_STEP: &str = "Build the GUI-check test app";
 const TEST_ARTIFACT: &str = "gui-check-test-app-";
 
-/// One step of a dist.yml job: its job, its name (if it has one) and its
+/// One step of a workflow's job: its job, its name (if it has one) and its
 /// text. Crude, as `cargo_package_version` is, but enough for the shape
-/// this workflow keeps: jobs at two spaces, steps at `      - `.
+/// these workflows keep: jobs at two spaces, steps at `      - `.
 #[derive(Debug)]
 struct Step {
     job: String,
@@ -443,10 +439,14 @@ struct Step {
 }
 
 fn dist_steps() -> Vec<Step> {
+    workflow_steps(DIST_YML)
+}
+
+fn workflow_steps(workflow: &str) -> Vec<Step> {
     let mut steps: Vec<Step> = Vec::new();
     let mut job = String::new();
     let mut in_jobs = false;
-    for line in DIST_YML.lines() {
+    for line in workflow.lines() {
         if line == "jobs:" {
             in_jobs = true;
             continue;
@@ -608,8 +608,13 @@ fn no_release_or_packaging_build_enables_the_gui_test_updater() {
 /// A dist.yml job's own keys (`name:`, `if:`, `needs:` and so on), up to its
 /// `steps:`, trimmed, without comments or what's nested under them.
 fn dist_job_keys(job: &str) -> Vec<&'static str> {
+    job_keys(DIST_YML, job)
+}
+
+/// A workflow job's own keys, as for [`dist_job_keys`].
+fn job_keys<'a>(workflow: &'a str, job: &str) -> Vec<&'a str> {
     let header = format!("  {job}:");
-    DIST_YML
+    workflow
         .lines()
         .skip_while(|l| *l != header)
         .skip(1)
@@ -624,9 +629,9 @@ fn dist_job_keys(job: &str) -> Vec<&'static str> {
 /// after the merge (`gh workflow run dist.yml`), which joined the same
 /// concurrency group as the merge's push run and cancelled it: a red X on
 /// every release commit. So the push of a release-prep merge builds nothing,
-/// and a dispatched run waits for the run in progress instead of cancelling
-/// it. Pull requests (a release/ branch's too) and other pushes build as
-/// before.
+/// and a dispatched run never cancels the run in progress (it is now a group
+/// of its own, too: `a_push_never_cancels_a_dispatched_run`). Pull requests
+/// (a release/ branch's too) and other pushes build as before.
 #[test]
 fn a_release_merge_never_cancels_its_own_build() {
     for job in ["linux", "windows"] {
@@ -667,7 +672,7 @@ fn a_release_merge_never_cancels_its_own_build() {
     );
     assert!(
         cancel.contains("github.event_name != 'workflow_dispatch'"),
-        "a dispatched run should wait, and only it: {cancel}"
+        "only a dispatched run should leave the run in progress be: {cancel}"
     );
 }
 
@@ -794,10 +799,7 @@ fn the_app_gets_no_way_to_run_the_sidecar() {
     assert!(!CARGO_TOML.contains("tauri-plugin-shell"));
     assert!(!LIB_RS.contains("tauri_plugin_shell"));
     let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
-    assert_eq!(
-        capability["permissions"],
-        serde_json::json!(["core:default"])
-    );
+    assert_eq!(capability["permissions"], serde_json::json!([]));
 }
 
 #[test]
@@ -999,4 +1001,513 @@ fn the_windows_gui_checks_launch_the_app_by_its_name() {
         test_app.text.contains(&format!("target/release/{exe}")),
         "{test_app:#?}"
     );
+}
+
+/// The repository's workflows and its own actions, as (file name, text):
+/// every one in their folders, so a new one is checked too.
+fn github_files() -> Vec<(String, String)> {
+    let github = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github");
+    let read = |path: &std::path::Path| {
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    };
+    let mut files = Vec::new();
+    let workflows = std::fs::read_dir(github.join("workflows")).expect(".github/workflows");
+    for entry in workflows {
+        let path = entry.expect("a workflow").path();
+        if path
+            .extension()
+            .is_some_and(|ext| ext == "yml" || ext == "yaml")
+        {
+            files.push((format!("workflows/{}", file_name(&path)), read(&path)));
+        }
+    }
+    let actions = std::fs::read_dir(github.join("actions")).expect(".github/actions");
+    for entry in actions {
+        let dir = entry.expect("an action").path();
+        for name in ["action.yml", "action.yaml"] {
+            let path = dir.join(name);
+            if path.is_file() {
+                files.push((format!("actions/{}/{name}", file_name(&dir)), read(&path)));
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+fn file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// A workflow's jobs, as (id, text): from each `  id:` under `jobs:` to the
+/// next.
+fn workflow_jobs(workflow: &str) -> Vec<(String, String)> {
+    let mut jobs: Vec<(String, String)> = Vec::new();
+    let mut in_jobs = false;
+    for line in workflow.lines() {
+        if line == "jobs:" {
+            in_jobs = true;
+            continue;
+        }
+        if !in_jobs {
+            continue;
+        }
+        if line.len() > 2
+            && line.starts_with("  ")
+            && !line.starts_with("   ")
+            && line.trim_end().ends_with(':')
+            && !line.trim_start().starts_with('#')
+        {
+            jobs.push((line.trim().trim_end_matches(':').to_owned(), String::new()));
+            continue;
+        }
+        if let Some((_, text)) = jobs.last_mut() {
+            text.push_str(line);
+            text.push('\n');
+        }
+    }
+    jobs
+}
+
+/// Every action a workflow or the repository's own action uses is pinned to
+/// a commit, not a tag or branch that can be moved under it (D-01), with
+/// the release it is in a comment, which Dependabot keeps up to date
+/// (`.github/dependabot.yml`). The repository's own actions (`./…`) are
+/// the commit's own. dtolnay/rust-toolchain has no releases, only branches:
+/// its comment says which.
+#[test]
+fn every_action_is_pinned_to_a_commit() {
+    let files = github_files();
+    assert!(
+        files.iter().any(|(f, _)| f == "workflows/dist.yml")
+            && files.iter().any(|(f, _)| f.starts_with("actions/")),
+        "{:?}",
+        files.iter().map(|(f, _)| f).collect::<Vec<_>>()
+    );
+    let mut pinned = 0;
+    for (file, text) in &files {
+        for (at, line) in text.lines().enumerate() {
+            let key = line.trim_start();
+            let key = key.strip_prefix("- ").unwrap_or(key);
+            let Some(uses) = key.strip_prefix("uses:") else {
+                continue;
+            };
+            let uses = uses.trim();
+            if uses.starts_with("./") {
+                continue;
+            }
+            let place = format!("{file}:{}: {}", at + 1, line.trim());
+            let (action, comment) = uses
+                .split_once(" # ")
+                .unwrap_or_else(|| panic!("{place}: no comment naming its release"));
+            let (name, commit) = action
+                .split_once('@')
+                .unwrap_or_else(|| panic!("{place}: not pinned"));
+            assert!(
+                commit.len() == 40
+                    && commit
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                "{place}: pinned to `{commit}`, not a full commit SHA"
+            );
+            if name != "dtolnay/rust-toolchain" {
+                let release = comment.trim().strip_prefix('v').unwrap_or_default();
+                let parts: Vec<&str> = release.split('.').collect();
+                assert!(
+                    parts.len() == 3
+                        && parts
+                            .iter()
+                            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())),
+                    "{place}: the comment should name its release, as `# vX.Y.Z`"
+                );
+            }
+            pinned += 1;
+        }
+    }
+    assert!(pinned > 0, "no actions found");
+}
+
+/// Release builds use one Rust, set in one place (`RUST_TOOLCHAIN` in
+/// dist.yml), an exact release: not whatever is stable on the day.
+#[test]
+fn release_builds_use_one_pinned_rust() {
+    let pinned = DIST_YML
+        .lines()
+        .find_map(|l| l.strip_prefix("  RUST_TOOLCHAIN: "))
+        .expect("dist.yml sets RUST_TOOLCHAIN")
+        .trim_matches('"');
+    let parts: Vec<&str> = pinned.split('.').collect();
+    assert!(
+        parts.len() == 3 && parts.iter().all(|p| p.parse::<u32>().is_ok()),
+        "RUST_TOOLCHAIN should be an exact release, X.Y.Z: {pinned}"
+    );
+    let installs: Vec<Step> = dist_steps()
+        .into_iter()
+        .filter(|s| s.text.contains("dtolnay/rust-toolchain@"))
+        .collect();
+    assert!(!installs.is_empty());
+    for install in &installs {
+        assert!(
+            install
+                .text
+                .contains("          toolchain: ${{ env.RUST_TOOLCHAIN }}\n"),
+            "job {} installs another Rust: {install:#?}",
+            install.job
+        );
+    }
+}
+
+/// The updater's signing key (D-01). Its secrets are named by one job
+/// alone, dist.yml's sign job: in the release environment (which deploys
+/// from main only), on a run dispatched on main. Nothing hands every secret
+/// on (`secrets: inherit`, `toJSON(secrets)`), and no workflow-wide `env`
+/// carries them into every job. The jobs that build never see the key:
+/// they're the same on every run, unsigned.
+#[test]
+fn only_the_release_job_has_the_signing_key() {
+    const KEY: &str = "TAURI_SIGNING_PRIVATE_KEY";
+    let mut holders = Vec::new();
+    for (file, text) in github_files() {
+        for everything in ["secrets: inherit", "toJSON(secrets)", "toJson(secrets)"] {
+            assert!(!text.contains(everything), "{file}: {everything}");
+        }
+        let outside_jobs = text.split("\njobs:\n").next().unwrap_or_default();
+        assert!(
+            !outside_jobs
+                .lines()
+                .any(|l| l.contains(KEY) && !l.trim_start().starts_with('#')),
+            "{file} names {KEY} outside its jobs"
+        );
+        if file.starts_with("actions/") {
+            assert!(!text.contains(KEY), "{file} names {KEY}");
+            continue;
+        }
+        for (job, body) in workflow_jobs(&text) {
+            if !body.contains(KEY) {
+                continue;
+            }
+            let keys = job_keys(&text, &job);
+            assert!(
+                keys.contains(&"environment: release"),
+                "{file}: job {job} has the signing key outside the release environment: {keys:#?}"
+            );
+            assert!(
+                keys.contains(
+                    &"if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
+                ),
+                "{file}: job {job} has the signing key on more than a run dispatched on main: {keys:#?}"
+            );
+            holders.push(format!("{file} {job}"));
+        }
+    }
+    assert_eq!(holders, ["workflows/dist.yml sign"]);
+}
+
+/// The installers' artifacts: the build jobs upload them, and the sign job
+/// puts each back, signed, under the same name.
+const INSTALLER_ARTIFACTS: [(&str, &str); 4] = [
+    ("linux", "gospel-getter-linux-appimage"),
+    ("linux", "gospel-getter-linux-deb"),
+    ("windows", "gospel-getter-windows-nsis-installer"),
+    ("windows", "gospel-getter-windows-msi-installer"),
+];
+
+/// How a release's installers are signed (D-01, see the top of dist.yml).
+/// Every build is unsigned (`--no-sign`), with the updater overlay, as a
+/// release is built. On a run dispatched on main, the sign job signs those
+/// very files once both platforms' GUI checks have passed on them, by
+/// tools/release/sign_installers.py (which checks each signature and makes
+/// the update manifest as a dry run), and puts each installer's artifact
+/// back with its .sig, under the name a release takes it by. On a run
+/// dispatched on another branch, or a release/ branch's pull request, the
+/// rehearsal does the same with a throwaway key, uploading nothing.
+#[test]
+fn only_a_release_run_signs_and_it_signs_what_was_checked() {
+    let steps = dist_steps();
+    let builds: Vec<&str> = steps
+        .iter()
+        .filter(|s| s.job == "linux" || s.job == "windows")
+        .flat_map(|s| s.text.lines())
+        .filter(|l| {
+            let l = l.trim_start();
+            l.strip_prefix("run: ")
+                .unwrap_or(l)
+                .starts_with("cargo tauri build")
+        })
+        .collect();
+    assert!(
+        builds.len() >= 2,
+        "both jobs' installer builds: {builds:#?}"
+    );
+    for build in builds {
+        assert!(
+            build.contains("--config tauri.updater.conf.json") && build.ends_with(" --no-sign"),
+            "an installer build that isn't the release's, unsigned: {build}"
+        );
+    }
+
+    let keys = dist_job_keys("sign");
+    assert!(
+        keys.contains(&"needs: [linux, windows, gui-linux, gui-windows]"),
+        "the sign job should wait for the builds and both GUI checks: {keys:#?}"
+    );
+    let job = |name: &str| -> Vec<&Step> { steps.iter().filter(|s| s.job == name).collect() };
+    let sign = job("sign");
+    let signs: Vec<&&Step> = sign
+        .iter()
+        .filter(|s| s.text.contains("tools/release/sign_installers.py"))
+        .collect();
+    assert_eq!(signs.len(), 1, "{sign:#?}");
+    assert!(
+        signs[0]
+            .text
+            .contains("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"),
+        "{signs:#?}"
+    );
+    for (built_by, artifact) in INSTALLER_ARTIFACTS {
+        let name = format!("          name: {artifact}\n");
+        assert!(
+            job(built_by)
+                .iter()
+                .any(|s| s.text.contains("actions/upload-artifact@") && s.text.contains(&name)),
+            "job {built_by} doesn't upload {artifact}"
+        );
+        let put_back: Vec<&&Step> = sign
+            .iter()
+            .filter(|s| s.text.contains("actions/upload-artifact@") && s.text.contains(&name))
+            .collect();
+        assert_eq!(put_back.len(), 1, "the sign job puts {artifact} back once");
+        let text = &put_back[0].text;
+        assert!(
+            text.contains(&format!("          path: installers/{artifact}/\n"))
+                && text.contains("          overwrite: true\n")
+                && text.contains("          if-no-files-found: error\n"),
+            "{text}"
+        );
+    }
+    // Uploaded to nowhere else: the release's artifacts are the four above.
+    assert_eq!(
+        sign.iter()
+            .filter(|s| s.text.contains("actions/upload-artifact@"))
+            .count(),
+        INSTALLER_ARTIFACTS.len()
+    );
+
+    let keys = dist_job_keys("sign-rehearsal");
+    let condition = keys
+        .iter()
+        .find_map(|k| k.strip_prefix("if: "))
+        .expect("the rehearsal has an if:");
+    assert!(
+        condition.contains(
+            "github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'"
+        ) && condition.contains("startsWith(github.head_ref, 'release/')"),
+        "{condition}"
+    );
+    assert!(!keys.iter().any(|k| k.starts_with("environment:")));
+    let rehearsal = job("sign-rehearsal");
+    assert!(
+        rehearsal.iter().any(|s| s
+            .text
+            .contains("python3 tools/release/sign_installers.py installers \\")
+            && s.text
+                .contains("--private-key-path \"$RUNNER_TEMP/rehearsal.key\"")
+            && s.text
+                .contains("--pubkey-file \"$RUNNER_TEMP/rehearsal.key.pub\"")),
+        "{rehearsal:#?}"
+    );
+    assert!(
+        !rehearsal
+            .iter()
+            .any(|s| s.text.contains("actions/upload-artifact@")),
+        "the rehearsal's signatures are worthless: it uploads nothing"
+    );
+    // Both get their signer the same way, from crates.io, in the job.
+    for name in ["sign", "sign-rehearsal"] {
+        assert!(
+            job(name).iter().any(|s| s.text.contains(
+                "cargo install tauri-cli --version \"${{ env.TAURI_CLI_VERSION }}\" --locked"
+            )),
+            "job {name}"
+        );
+        assert!(
+            !job(name).iter().any(|s| s.text.contains("rust-cache")),
+            "job {name} restores a cache"
+        );
+    }
+}
+
+/// A push to main never cancels a dispatched run, a release's build (D-05):
+/// a dispatched run is a concurrency group of its own, by its run id. Push
+/// and pull request runs still cancel the run in progress on their ref.
+#[test]
+fn a_push_never_cancels_a_dispatched_run() {
+    let group = DIST_YML
+        .lines()
+        .skip_while(|l| *l != "concurrency:")
+        .find_map(|l| l.trim().strip_prefix("group: "))
+        .expect("dist.yml has a concurrency group");
+    assert_eq!(
+        group,
+        "dist-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}"
+    );
+}
+
+/// The MSI is released and offered by the updater as much as the
+/// setup.exe, so a build without one fails (D-04), and it's installed,
+/// checked and removed again (msiexec /i, /x) as the setup.exe is.
+#[test]
+fn the_msi_is_required_and_installed_and_removed() {
+    let steps = dist_steps();
+    let windows: Vec<&Step> = steps.iter().filter(|s| s.job == "windows").collect();
+    let locate = windows
+        .iter()
+        .find(|s| s.name == "Locate built artifacts")
+        .expect("the windows job locates its installers");
+    assert!(
+        locate
+            .text
+            .contains("Write-Error \"cargo tauri build did not produce an MSI"),
+        "{locate:#?}"
+    );
+    assert!(!locate.text.contains("Write-Warning"), "{locate:#?}");
+    let smoke = windows
+        .iter()
+        .find(|s| s.name.contains("(MSI)"))
+        .expect("the windows job smoke-tests the MSI");
+    for needle in [
+        "msiexec.exe -ArgumentList \"/i\"",
+        "msiexec.exe -ArgumentList \"/x\"",
+        "\"/qn\"",
+        "$_.WindowsInstaller -eq 1",
+        "gospel-getter-cli.exe",
+        "--version",
+    ] {
+        assert!(smoke.text.contains(needle), "{needle}: {smoke:#?}");
+    }
+    let upload = windows
+        .iter()
+        .find(|s| {
+            s.text
+                .contains("name: gospel-getter-windows-msi-installer\n")
+        })
+        .expect("the windows job uploads the MSI");
+    assert!(
+        !upload.text.contains("        if:"),
+        "the MSI's upload is conditional: {upload:#?}"
+    );
+}
+
+/// CI runs the doc tests (the `compile_fail` ones guard what the CLI's
+/// `FindingsWriter` can write) on Linux and Windows, and Clippy on the
+/// build every installer is, without features, as well as with them all
+/// (D-02). The page's crate is built, linted and tested from its lock file
+/// as committed (D-03): `--locked`, and Trunk's `locked`. The GUI checks'
+/// own crate is linted and unit-tested on both platforms (D-08).
+#[test]
+fn ci_runs_the_doc_tests_both_clippys_and_locked_builds() {
+    let ci = workflow_steps(CI_YML);
+    let runs = |job: &str, command: &str| {
+        ci.iter()
+            .any(|s| s.job == job && s.text.lines().any(|l| l.trim_end().ends_with(command)))
+    };
+    for job in ["build-and-test", "test-windows"] {
+        assert!(runs(job, "run: cargo test --doc"), "job {job}");
+        assert!(runs(job, "run: cargo test --all-targets"), "job {job}");
+    }
+    assert!(runs(
+        "build-and-test",
+        "run: cargo clippy --all-targets --all-features -- -D warnings"
+    ));
+    assert!(runs(
+        "build-and-test",
+        "run: cargo clippy --all-targets -- -D warnings"
+    ));
+
+    let mut ui_steps = 0;
+    for step in ci
+        .iter()
+        .filter(|s| s.text.contains("working-directory: ui-leptos"))
+    {
+        for line in step.text.lines().filter(|l| l.contains("cargo ")) {
+            ui_steps += 1;
+            assert!(
+                line.contains("cargo fmt") || line.contains(" --locked"),
+                "job {}: {line}",
+                step.job
+            );
+        }
+    }
+    assert!(ui_steps > 0);
+    let build: Vec<&str> = TRUNK_TOML
+        .lines()
+        .skip_while(|l| *l != "[build]")
+        .skip(1)
+        .take_while(|l| !l.starts_with('['))
+        .collect();
+    assert!(build.contains(&"locked = true"), "{build:#?}");
+    let conf: Value = serde_json::from_str(TAURI_CONF).unwrap();
+    for command in ["beforeDevCommand", "beforeBuildCommand"] {
+        // Plain Trunk, which reads Trunk.toml (and so builds locked).
+        let run = conf["build"][command].as_str().unwrap_or_default();
+        assert!(
+            run.starts_with("trunk build") && !run.contains("--config"),
+            "{command}: {run}"
+        );
+    }
+
+    let gui = |steps: &[Step], job: &str| {
+        let step = steps
+            .iter()
+            .find(|s| s.job == job && s.text.contains("working-directory: tests/gui"))
+            .unwrap_or_else(|| panic!("job {job} doesn't check tests/gui"));
+        assert!(
+            step.text
+                .contains("cargo clippy --locked --all-targets -- -D warnings\n")
+                && step.text.contains("cargo test --locked\n"),
+            "{step:#?}"
+        );
+    };
+    gui(&ci, "test-windows");
+    gui(&dist_steps(), "gui-linux");
+}
+
+/// The page asks Tauri for nothing but the app's own commands
+/// (`core.invoke`) and an update's progress (`core.Channel`), which Tauri 2
+/// doesn't gate by permissions for the app's own page, so it gets no
+/// permissions at all (B-07): not `core:default`, whose event, menu, path,
+/// window and webview permissions nothing used. A plugin's command
+/// (`plugin:…`) called from the page would need its own permission here.
+#[test]
+fn the_page_gets_no_permissions() {
+    let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
+    assert_eq!(capability["windows"], serde_json::json!(["main"]));
+    assert_eq!(capability["permissions"], serde_json::json!([]));
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut sources = vec![root.join("ui/index.html"), root.join("ui/leptos-loader.js")];
+    for entry in std::fs::read_dir(root.join("ui-leptos/src")).expect("ui-leptos/src") {
+        sources.push(entry.expect("a ui-leptos module").path());
+    }
+    let mut uses = 0;
+    for path in sources {
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        assert!(!text.contains("plugin:"), "{path:?} calls a plugin");
+        assert!(!text.contains("__TAURI_INTERNALS__"), "{path:?}");
+        for (at, _) in text.match_indices("__TAURI__") {
+            let rest = &text[at + "__TAURI__".len()..];
+            let near = &rest[..rest.len().min(200)];
+            assert!(
+                rest.starts_with(".core.invoke")
+                    || rest.starts_with(".core.Channel")
+                    || (rest.starts_with("\", \"core\"]")
+                        && (near.contains("js_name = invoke") || near.contains("\"Channel\""))),
+                "{path:?} reaches more of Tauri than core.invoke and core.Channel: {near}"
+            );
+            uses += 1;
+        }
+    }
+    assert!(uses > 0, "the page's calls to Tauri weren't found");
 }

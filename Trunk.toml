@@ -16,6 +16,10 @@ minify = "never"
 # harness needs can't be loaded by; the page inlines its own loader instead
 # (ui/leptos-loader.js).
 inject_scripts = false
+# Built from ui-leptos/Cargo.lock as committed (cargo build --locked), never
+# a fresh resolution: the page an installer embeds is the one CI tested,
+# and the AUR recipe's `cargo fetch --locked` stays in step.
+locked = true
 
 # The tools' versions. wasm-bindgen's is the crate's in ui-leptos/Cargo.lock,
 # which Trunk reads itself. wasm-opt's is pinned here (Trunk's own default for

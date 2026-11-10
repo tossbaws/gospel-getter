@@ -10,7 +10,11 @@
 //! trust. Each line of the record names one app by its pid, the moment it
 //! was created and its program's full path: together they tell the app
 //! from any process given the same pid later, so nothing but an app the
-//! run itself started is ever waited for or stopped.
+//! run itself started is ever waited for or stopped. The pid and the
+//! creation time are enough on their own (a pid goes to another process
+//! only once its process is gone, and that one is created later); the path
+//! is checked as well whenever Windows says it, which it doesn't for a
+//! process that is exiting ([`Identity::AppExiting`]).
 
 use anyhow::{Context, Result};
 
@@ -25,7 +29,40 @@ pub struct Launched {
     pub path: String,
 }
 
+/// What a running process that holds an app's pid is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Identity {
+    /// The app: the same pid, created at the same moment, running the same
+    /// program.
+    App,
+    /// The app, by its pid and the moment it was created, which no other
+    /// process can share; Windows no longer says what program it runs, as
+    /// it doesn't once a process is exiting.
+    AppExiting,
+    /// Another process, created at another moment, holds the pid now.
+    CreatedOtherwise,
+    /// Created at the app's moment, but running another program: not the
+    /// app.
+    OtherProgram,
+}
+
 impl Launched {
+    /// What a running process holding this app's pid is, from when Windows
+    /// says it was created and the program it runs (`None`: Windows refused
+    /// to say, as it does for a process that is exiting). Only a creation
+    /// time that differs, or a program that does, says it isn't the app;
+    /// a refusal never does.
+    pub fn identify(&self, created: u64, path: Option<&str>) -> Identity {
+        if created != self.created {
+            return Identity::CreatedOtherwise;
+        }
+        match path {
+            None => Identity::AppExiting,
+            Some(path) if path.eq_ignore_ascii_case(&self.path) => Identity::App,
+            Some(_) => Identity::OtherProgram,
+        }
+    }
+
     /// The record's line for this app, newline included.
     pub fn to_line(&self) -> String {
         format!("{}\t{}\t{}\n", self.pid, self.created, self.path)
@@ -65,7 +102,7 @@ pub mod process {
     use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
 
     use windows_sys::Win32::Foundation::{
-        ERROR_INVALID_PARAMETER, FILETIME, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, FILETIME, WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::System::Threading::{
         GetProcessTimes, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -73,7 +110,7 @@ pub mod process {
         WaitForSingleObject,
     };
 
-    use super::Launched;
+    use super::{Identity, Launched};
 
     /// A process, held open: while it is, its pid can't go to another.
     #[derive(Debug)]
@@ -83,22 +120,22 @@ pub mod process {
         /// Opens the process `pid` to watch and stop it, or `None` if no
         /// process has that pid.
         pub fn open(pid: u32) -> io::Result<Option<Self>> {
-            let access =
-                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE | PROCESS_TERMINATE;
-            // SAFETY: OpenProcess takes no pointers; a null handle is
-            // checked for before the handle is used.
-            let handle = unsafe { OpenProcess(access, 0, pid) };
-            if handle.is_null() {
-                let e = io::Error::last_os_error();
-                // What OpenProcess says when there is no such process.
-                return match e.raw_os_error() {
-                    Some(code) if code == ERROR_INVALID_PARAMETER as i32 => Ok(None),
-                    _ => Err(e),
-                };
+            open(
+                pid,
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE | PROCESS_TERMINATE,
+            )
+        }
+
+        /// When the process `pid` was created, or `None` if no process has
+        /// that pid: asked with the least access there is
+        /// (`PROCESS_QUERY_LIMITED_INFORMATION`, which Windows grants for
+        /// nearly every process), for a process [`Process::open`] couldn't
+        /// open.
+        pub fn created_at(pid: u32) -> io::Result<Option<u64>> {
+            match open(pid, PROCESS_QUERY_LIMITED_INFORMATION)? {
+                Some(process) => created(process.0.as_handle()).map(Some),
+                None => Ok(None),
             }
-            // SAFETY: `handle` is a process handle just opened, owned by
-            // nothing else, and closed only by the `OwnedHandle`.
-            Ok(Some(Self(unsafe { OwnedHandle::from_raw_handle(handle) })))
         }
 
         /// Whether it has exited.
@@ -122,12 +159,48 @@ pub mod process {
             Ok(())
         }
 
-        /// Whether this is `app`: the same pid, created at the same moment,
-        /// running the same program.
-        pub fn is(&self, app: &Launched) -> io::Result<bool> {
-            Ok(created(self.0.as_handle())? == app.created
-                && path(self.0.as_handle())?.eq_ignore_ascii_case(&app.path))
+        /// What this process, which holds `app`'s pid, is
+        /// ([`Launched::identify`]). Windows tells anyone allowed to query a
+        /// process when it was created, even once it's exiting, but refuses
+        /// to say what program an exiting process runs
+        /// (STATUS_PROCESS_IS_TERMINATING, which reaches Win32 as
+        /// ERROR_ACCESS_DENIED): that refusal, after the creation time is
+        /// read, is the only one taken as an answer, and it can't make the
+        /// process anything but the app.
+        pub fn identify(&self, app: &Launched) -> io::Result<Identity> {
+            let created = created(self.0.as_handle())?;
+            if created != app.created {
+                return Ok(app.identify(created, None));
+            }
+            match path(self.0.as_handle()) {
+                Ok(path) => Ok(app.identify(created, Some(&path))),
+                Err(e) if e.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => {
+                    Ok(app.identify(created, None))
+                }
+                Err(e) => Err(e),
+            }
         }
+    }
+
+    /// Opens the process `pid` with `access`, or `None` if no process has
+    /// that pid.
+    fn open(pid: u32, access: u32) -> io::Result<Option<Process>> {
+        // SAFETY: OpenProcess takes no pointers; a null handle is checked
+        // for before the handle is used.
+        let handle = unsafe { OpenProcess(access, 0, pid) };
+        if handle.is_null() {
+            let e = io::Error::last_os_error();
+            // What OpenProcess says when there is no such process.
+            return match e.raw_os_error() {
+                Some(code) if code == ERROR_INVALID_PARAMETER as i32 => Ok(None),
+                _ => Err(e),
+            };
+        }
+        // SAFETY: `handle` is a process handle just opened, owned by
+        // nothing else, and closed only by the `OwnedHandle`.
+        Ok(Some(Process(unsafe {
+            OwnedHandle::from_raw_handle(handle)
+        })))
     }
 
     /// What the record says about the process `handle` (gui-launch's own
@@ -213,6 +286,32 @@ mod tests {
         assert!(Launched::parse_all("")?.is_empty());
         assert!(Launched::parse_all("\n")?.is_empty());
         Ok(())
+    }
+
+    /// Only a creation time or a program that differs says a process isn't
+    /// the app; Windows refusing to name the program of the process created
+    /// at the app's moment never does.
+    #[test]
+    fn a_process_is_the_app_by_its_creation_and_program() {
+        let app = Launched {
+            pid: 7896,
+            created: 134_388_119_117_684_485,
+            path: r"C:\Users\runneradmin\AppData\Local\Gospel Getter\gospel_getter.exe".to_owned(),
+        };
+        let shouted = app.path.to_uppercase();
+        assert_eq!(app.identify(app.created, Some(&app.path)), Identity::App);
+        assert_eq!(app.identify(app.created, Some(&shouted)), Identity::App);
+        assert_eq!(app.identify(app.created, None), Identity::AppExiting);
+        assert_eq!(
+            app.identify(app.created, Some(r"C:\Windows\System32\svchost.exe")),
+            Identity::OtherProgram
+        );
+        for path in [Some(app.path.as_str()), None] {
+            assert_eq!(
+                app.identify(app.created + 1, path),
+                Identity::CreatedOtherwise
+            );
+        }
     }
 
     #[test]

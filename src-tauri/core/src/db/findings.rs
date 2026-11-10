@@ -717,9 +717,10 @@ pub async fn keep_as_mine(writer: &WritePool, id: i64, body: &str) -> Result<Not
 /// the write lock at the start of its one transaction), so a running app and
 /// this take turns rather than fail. Open it for one save and close it.
 ///
-/// Handing it to something that writes notes doesn't compile:
+/// Handing it to something that writes notes doesn't compile (a
+/// `FindingsWriter` isn't a `WritePool`: E0308):
 ///
-/// ```compile_fail
+/// ```compile_fail,E0308
 /// use gospel_getter_core::db::{FindingsWriter, Passage, notes};
 ///
 /// async fn try_to_write_a_note(writer: &FindingsWriter, passage: &Passage) {
@@ -727,9 +728,9 @@ pub async fn keep_as_mine(writer: &WritePool, id: i64, body: &str) -> Result<Not
 /// }
 /// ```
 ///
-/// nor does reaching for its connection:
+/// nor does reaching for its connection (a private field: E0616):
 ///
-/// ```compile_fail
+/// ```compile_fail,E0616
 /// use gospel_getter_core::db::FindingsWriter;
 ///
 /// fn connection(writer: &FindingsWriter) -> &sqlx::SqlitePool {

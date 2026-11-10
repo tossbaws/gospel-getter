@@ -1,120 +1,121 @@
-//! Lightweight regression checks on `ui/index.html`'s CSS and script,
-//! without a browser or JS test framework — plain substring/brace-matching
-//! assertions against the bundled static asset, the same file Tauri loads
-//! into the webview at `frontendDist`.
+//! Lightweight regression checks on the page's source, `ui/index.html`
+//! (its markup, CSS and script), and its pieces written in Rust
+//! (`ui-leptos/src`), without a browser or JS test framework: plain
+//! substring/brace-matching assertions. Tauri loads `dist/index.html`
+//! (`frontendDist`), which Trunk builds from this file and the pieces; it
+//! keeps the page's inline scripts and stylesheet as they are (`minify =
+//! "never"` in `Trunk.toml`), so what these read is what ships.
+
+use std::sync::LazyLock;
 
 const HTML: &str = include_str!("../../ui/index.html");
 
 use gospel_getter_lib::preferences::{self, Preference, Values};
 
-/// The page's pieces written in Rust (`ui-leptos/src`), which own the
+/// Where the page's pieces written in Rust live.
+fn pieces_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui-leptos/src")
+}
+
+/// The page's pieces written in Rust (`ui-leptos/src`), as (file name,
+/// source): every module there, read from the folder when the tests run,
+/// so a new one is read too (`the_pieces_are_every_module`). They own the
 /// modal dialogs' markup and keyboard handling, the Library's tabs and
-/// lists, the search box and its palette, the table of shortcuts, the
-/// book and chapter picker's books and chapters, Aa with the translations
-/// and the saved settings, the header's surfaces with the picker's
-/// shapes, the reader (the chapter's markup, its loading and the passage
-/// history), the selection card (copying, and the card's bookmark,
-/// highlight and notes), and what was the page's main script (the keyboard
-/// and click dispatchers, boot, and the page's glue): checks of those read
-/// them where they now live.
-const PIECES: [(&str, &str); 36] = [
-    (
-        "findings.rs",
-        include_str!("../../ui-leptos/src/findings.rs"),
-    ),
-    (
-        "findings_text.rs",
-        include_str!("../../ui-leptos/src/findings_text.rs"),
-    ),
-    (
-        "export_choice.rs",
-        include_str!("../../ui-leptos/src/export_choice.rs"),
-    ),
-    (
-        "export_notes.rs",
-        include_str!("../../ui-leptos/src/export_notes.rs"),
-    ),
-    (
-        "shortcuts.rs",
-        include_str!("../../ui-leptos/src/shortcuts.rs"),
-    ),
-    ("welcome.rs", include_str!("../../ui-leptos/src/welcome.rs")),
-    ("nav.rs", include_str!("../../ui-leptos/src/nav.rs")),
-    (
-        "nav_text.rs",
-        include_str!("../../ui-leptos/src/nav_text.rs"),
-    ),
-    (
-        "import_preview.rs",
-        include_str!("../../ui-leptos/src/import_preview.rs"),
-    ),
-    (
-        "note_editor.rs",
-        include_str!("../../ui-leptos/src/note_editor.rs"),
-    ),
-    ("bridge.rs", include_str!("../../ui-leptos/src/bridge.rs")),
-    ("about.rs", include_str!("../../ui-leptos/src/about.rs")),
-    ("updates.rs", include_str!("../../ui-leptos/src/updates.rs")),
-    ("library.rs", include_str!("../../ui-leptos/src/library.rs")),
-    ("search.rs", include_str!("../../ui-leptos/src/search.rs")),
-    (
-        "shortcut_table.rs",
-        include_str!("../../ui-leptos/src/shortcut_table.rs"),
-    ),
-    ("picker.rs", include_str!("../../ui-leptos/src/picker.rs")),
-    (
-        "picker_text.rs",
-        include_str!("../../ui-leptos/src/picker_text.rs"),
-    ),
-    ("aa.rs", include_str!("../../ui-leptos/src/aa.rs")),
-    ("aa_text.rs", include_str!("../../ui-leptos/src/aa_text.rs")),
-    (
-        "surfaces.rs",
-        include_str!("../../ui-leptos/src/surfaces.rs"),
-    ),
-    (
-        "surfaces_text.rs",
-        include_str!("../../ui-leptos/src/surfaces_text.rs"),
-    ),
-    ("reader.rs", include_str!("../../ui-leptos/src/reader.rs")),
-    (
-        "reader_text.rs",
-        include_str!("../../ui-leptos/src/reader_text.rs"),
-    ),
-    ("card.rs", include_str!("../../ui-leptos/src/card.rs")),
-    (
-        "card_text.rs",
-        include_str!("../../ui-leptos/src/card_text.rs"),
-    ),
-    ("margin.rs", include_str!("../../ui-leptos/src/margin.rs")),
-    (
-        "margin_text.rs",
-        include_str!("../../ui-leptos/src/margin_text.rs"),
-    ),
-    (
-        "note_markdown.rs",
-        include_str!("../../ui-leptos/src/note_markdown.rs"),
-    ),
-    (
-        "note_links.rs",
-        include_str!("../../ui-leptos/src/note_links.rs"),
-    ),
-    (
-        "keyboard.rs",
-        include_str!("../../ui-leptos/src/keyboard.rs"),
-    ),
-    (
-        "keyboard_text.rs",
-        include_str!("../../ui-leptos/src/keyboard_text.rs"),
-    ),
-    ("clicks.rs", include_str!("../../ui-leptos/src/clicks.rs")),
-    ("boot.rs", include_str!("../../ui-leptos/src/boot.rs")),
-    ("page.rs", include_str!("../../ui-leptos/src/page.rs")),
-    (
-        "page_text.rs",
-        include_str!("../../ui-leptos/src/page_text.rs"),
-    ),
-];
+/// lists, the search box and its palette, the table of shortcuts, the book
+/// and chapter picker's books and chapters, Aa with the translations and
+/// the saved settings, the header's surfaces with the picker's shapes, the
+/// reader (the chapter's markup, its loading and the passage history), the
+/// selection card (copying, and the card's bookmark, highlight and notes),
+/// and what was the page's main script (the keyboard and click dispatchers,
+/// boot, and the page's glue): checks of those read them where they now
+/// live, and the "nothing anywhere does X" checks read every one.
+static PIECES: LazyLock<Vec<(&'static str, &'static str)>> = LazyLock::new(|| {
+    let dir = pieces_dir();
+    let mut pieces: Vec<(&'static str, &'static str)> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+        .map(|entry| entry.expect("a ui-leptos/src entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+        .map(|path| {
+            let name = path
+                .file_name()
+                .expect("a file name")
+                .to_string_lossy()
+                .into_owned();
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            // Read once for the whole test run, and kept for it.
+            (
+                &*Box::leak(name.into_boxed_str()),
+                &*Box::leak(source.into_boxed_str()),
+            )
+        })
+        .collect();
+    pieces.sort_unstable();
+    pieces
+});
+
+/// Every module of the page's crate is read, and nothing else: the pieces
+/// are the crate's root and the modules it declares, which are every file
+/// in `ui-leptos/src` (a flat folder). The modules it takes from elsewhere
+/// with `#[path]` (`shared/`, which the backend compiles too) aren't
+/// pieces; they must be there all the same.
+#[test]
+fn the_pieces_are_every_module() {
+    let names: Vec<&str> = PIECES.iter().map(|(name, _)| *name).collect();
+    let mut files: Vec<String> = std::fs::read_dir(pieces_dir())
+        .expect("ui-leptos/src")
+        .map(|entry| entry.expect("an entry").path())
+        .inspect(|path| assert!(path.is_file(), "ui-leptos/src isn't flat: {path:?}"))
+        .map(|path| {
+            path.file_name()
+                .expect("a name")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    files.sort_unstable();
+    assert_eq!(names, files, "every file in ui-leptos/src is a piece");
+
+    let mut modules = vec!["lib.rs".to_owned()];
+    let mut elsewhere = Vec::new();
+    let mut path_attribute = None;
+    for line in piece("lib.rs").lines().map(str::trim) {
+        if let Some(path) = line
+            .strip_prefix("#[path = \"")
+            .and_then(|rest| rest.strip_suffix("\"]"))
+        {
+            path_attribute = Some(path);
+            continue;
+        }
+        let declared = line
+            .strip_prefix("pub(crate) ")
+            .or_else(|| line.strip_prefix("pub "))
+            .unwrap_or(line)
+            .strip_prefix("mod ")
+            .and_then(|rest| rest.strip_suffix(';'));
+        match (declared, path_attribute.take()) {
+            (Some(_), Some(path)) => elsewhere.push(path),
+            (Some(module), None) => modules.push(format!("{module}.rs")),
+            (None, _) => {}
+        }
+    }
+    modules.sort_unstable();
+    assert_eq!(
+        names, modules,
+        "the pieces are lib.rs and the modules it declares in ui-leptos/src"
+    );
+    assert!(
+        !elsewhere.is_empty(),
+        "lib.rs's #[path] modules weren't found"
+    );
+    for path in elsewhere {
+        let file = pieces_dir().join(path);
+        assert!(
+            file.is_file() && !path.starts_with("./") && path.starts_with("../"),
+            "lib.rs's #[path] module {path} should be a file outside ui-leptos/src"
+        );
+    }
+}
 
 /// One piece's source, by file name.
 fn piece(name: &str) -> &'static str {
@@ -4878,7 +4879,7 @@ fn the_export_chooser_is_a_modal_in_tested_theme_colors() {
         assert!(chooser.contains(needle), "{needle}");
     }
     assert!(tag_of("export-data-btn").contains(r#"title="Save a backup, or export your notes""#));
-    for (file, source) in std::iter::once(("index.html", HTML)).chain(PIECES) {
+    for (file, source) in std::iter::once(("index.html", HTML)).chain(PIECES.iter().copied()) {
         assert!(
             !source.contains("export-notes-btn") && !source.contains("export_button"),
             "{file} still has the Library's Export notes… button"
@@ -4955,7 +4956,7 @@ fn nothing_is_left_of_the_old_tour() {
         "Start reading",
     ] {
         assert!(!HTML.contains(gone), "`{gone}` is left of the tour");
-        for (file, source) in PIECES {
+        for &(file, source) in PIECES.iter() {
             assert!(
                 !source.contains(gone),
                 "`{gone}` is left of the tour in {file}"
@@ -5490,7 +5491,7 @@ fn a_timed_out_update_check_says_the_backends_offline_message() {
         gospel_getter_lib::updater::CHECK_TIMEOUT,
         std::time::Duration::from_secs(20)
     );
-    for (file, source) in std::iter::once(("index.html", HTML)).chain(PIECES) {
+    for (file, source) in std::iter::once(("index.html", HTML)).chain(PIECES.iter().copied()) {
         assert!(!source.contains(offline), "{file} repeats the message");
         assert!(!source.contains("Couldn’t reach GitHub"), "{file}");
         assert!(
