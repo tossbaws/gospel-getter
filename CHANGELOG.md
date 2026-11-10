@@ -4,6 +4,68 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.29.1] - 2026-11-10
+
+Fixes for verse ranges in one-chapter books, the WEB's verses it doesn't
+number, note drafts, search, backups and the data folder, and a small log
+file for when something goes wrong. Updating keeps your bookmarks,
+highlights, notes, findings, reading position and settings.
+
+### Fixed
+- **Import data…**: after an import, choosing a file that can't be
+  imported no longer leaves its dialog impossible to close.
+- Note drafts: pressing **Restore** while a note was being saved or
+  deleted could lose the restored text; Restore and Discard now wait for
+  it. A draft saved while the computer's clock ran fast is no longer
+  deleted when the clock is put right.
+- Search: **Show more** after changing the words or the translation no
+  longer mixes two searches' results.
+- Verse ranges in one-chapter books ("Jude 5-7", "3 John 2-4") work in Go
+  to, in links in your notes and for AI agents, as do "Gen 1:1-1:3" and a
+  reference ending in a period ("John 3:16.").
+- The WEB's verses it doesn't number (Luke 17:36, Acts 8:37, 15:34 and
+  24:7, and Romans 16:25) say so, as the BSB's do, instead of showing an
+  empty verse. Updating takes the five out once; your notes, bookmarks,
+  highlights and findings on them stay as they are.
+- Backups and exports: "Saved …" counts AI findings; a backup or notes
+  export holds what changed while its save dialog was open; and file
+  dialogs open over Gospel Getter's window and stay with it.
+- The data folder and the database are yours alone on Linux, as backups
+  and exports already are, and a data folder whose path has `%`, `?` or `#`
+  in it opens the database in it. A path that isn't valid UTF-8 is refused
+  instead of opening a database at a similar name.
+- Pressing **Bookmark** twice quickly changes the bookmark once; `[` and
+  `]` work on keyboards that type them with AltGr; and opening a place
+  from **Recent places** in another translation no longer loads the
+  chapter you're on again first.
+- The window's size and place are kept when Gospel Getter updates itself
+  on Windows, and a window brought back from off the screen no longer
+  grows by its frame.
+- AI agents: `list_findings --request` lists that request only, exactly
+  as it was saved (capitals count), and a request counts each verse once
+  where its findings overlap. `list_bookmarks`, `list_highlights` and
+  `list_notes` answer faster.
+- Smaller fixes: a file with a very long name can be saved; finding a
+  chapter's last verse is one quick lookup; the notes export's count reads
+  no note text; **My notes** no longer opens over a note editor opened
+  while it was getting ready; and timers and the note-copy cache no longer
+  keep memory they don't need.
+- The app keeps a small log of what it did and what went wrong (never your
+  notes or what you search for): `gospel-getter.log`, up to 1 MB with the
+  two before it, in `~/.local/share/com.tossbaws.gospel-getter/logs` on
+  Linux and `%LOCALAPPDATA%\com.tossbaws.gospel-getter\logs` on Windows.
+  `RUST_LOG` sets how much it says.
+- Backups keep the same data formats: 3, or 4 with AI findings or the
+  switch on, restored by the same versions as before.
+
+Behind the scenes, nothing you'll see changes: release installers are
+signed only in a job of their own that runs only for a release, so no
+build has the signing key; CI's actions are pinned to exact commits; CI
+runs more tests (doc tests, Clippy without all features, the GUI checks'
+own tests, locked builds of the page); each Windows build installs and
+removes the MSI as well as the setup.exe; and the app's page is given no
+Tauri permissions, since it uses none.
+
 ## [2.29.0] - 2026-11-10
 
 One Gospel Getter at a time, a safe move from the browser-based version,
