@@ -51,6 +51,28 @@ jobs:
             # (tauri-apps/wry#1355, closed as "will be fixed with the move
             # to gtk4").
             RUSTSEC-2024-0370
+            # zvariant, zvariant_derive and zbus_names are unmaintained (no
+            # known vulnerability): zbus 6 took them in. They come with zbus
+            # 5, which tauri-plugin-single-instance 2.5.5, the latest 2.x,
+            # uses on Linux to hand a second launch to the running app over
+            # the session bus. Revisit when the plugin moves to zbus 6
+            # (tauri-apps/plugins-workspace#3716).
+            RUSTSEC-2026-0370
+            RUSTSEC-2026-0371
+            RUSTSEC-2026-0372
+            # libsqlite3-sys 0.37 bundles SQLite 3.53, which can return
+            # uninitialized memory when it opens a database beside a -wal
+            # file of another page size that someone less trusted wrote
+            # (CVE-2026-119375; fixed in libsqlite3-sys 0.39, SQLite 3.54).
+            # It comes with sqlx-sqlite 0.9.0, the latest sqlx, which takes
+            # only libsqlite3-sys below 0.38, so the fix can't be taken yet.
+            # Nothing puts such a pair in front of it: the app and the CLI
+            # open only their own database in the app's data folder (and,
+            # once, the reader's own database from before the Tauri app; the
+            # CLI's --db is the reader's own choice). Remove this when sqlx
+            # ships a release that takes libsqlite3-sys 0.39
+            # (tossbaws/gospel-getter#205).
+            RUSTSEC-2026-0459
           )
           args=()
           for id in "${ignored[@]}"; do args+=(--ignore "$id"); done

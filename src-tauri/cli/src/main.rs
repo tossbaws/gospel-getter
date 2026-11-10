@@ -83,8 +83,9 @@ enum Command {
     /// The AI-flagged findings saved, in Bible order: where, by whom, for what.
     #[command(name = "list_findings", visible_aliases = ["findings", "list-findings"])]
     ListFindings(ListFindingsArgs),
-    /// Mark verses as AI-flagged findings for one of the reader's requests,
-    /// once they've turned that on in the app (Aa, then AI agents). Only the
+    /// Mark verses as AI-flagged findings for one of the reader's requests:
+    /// only when they ask for verses to be saved, noted or marked, and once
+    /// they've turned that on in the app (Aa, then AI agents). Only the
     /// places: nothing about what the verses say.
     #[command(name = "save_findings", visible_alias = "save-findings")]
     SaveFindings(SaveFindingsArgs),

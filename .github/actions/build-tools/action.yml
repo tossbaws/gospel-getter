@@ -1,0 +1,42 @@
+name: Build tools
+description: >-
+  Trunk with its wasm-bindgen and wasm-opt on PATH (set trunk), or the Tauri
+  bundler's AppImage or NSIS and WiX tools in its tools folder (set bundler),
+  as pinned in tools/ci/build-tools.txt: restored from a cache keyed by their
+  exact versions and SHA-256s, else fetched with the workflow's token (gh
+  release download), never anonymously, and every file checked against its
+  SHA-256 before use, a cached one too. See tools/ci/build_tools.py. The job
+  checks out the repository first; set bundler needs TAURI_CLI_VERSION in the
+  environment.
+inputs:
+  set:
+    description: trunk or bundler
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Plan the ${{ inputs.set }} tools
+      id: plan
+      shell: bash
+      env:
+        TOOL_SET: ${{ inputs.set }}
+        PYTHONDONTWRITEBYTECODE: "1"
+      run: |
+        py=python3; [ "$RUNNER_OS" = Windows ] && py=python
+        "$py" "$GITHUB_WORKSPACE/tools/ci/build_tools.py" plan "$TOOL_SET"
+
+    - name: Restore the ${{ inputs.set }} tools
+      uses: actions/cache@v5
+      with:
+        path: ${{ steps.plan.outputs.path }}
+        key: ${{ steps.plan.outputs.key }}
+
+    - name: Check and lay out the ${{ inputs.set }} tools
+      shell: bash
+      env:
+        TOOL_SET: ${{ inputs.set }}
+        GH_TOKEN: ${{ github.token }}
+        PYTHONDONTWRITEBYTECODE: "1"
+      run: |
+        py=python3; [ "$RUNNER_OS" = Windows ] && py=python
+        "$py" "$GITHUB_WORKSPACE/tools/ci/build_tools.py" install "$TOOL_SET"

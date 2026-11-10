@@ -145,7 +145,10 @@ Tauri runs it for you: `cargo tauri dev` and `cargo tauri build` call
 `trunk build` and `trunk build --release` first (`beforeDevCommand`,
 `beforeBuildCommand`). Run them from `src-tauri/`, as CI does. Trunk
 downloads the wasm-bindgen and wasm-opt versions it needs into its own
-cache the first time.
+cache the first time: wasm-bindgen's is this crate's in `Cargo.lock`, and
+wasm-opt's is pinned in `Trunk.toml` (`[tools] wasm_opt`). CI doesn't let
+Trunk download them: it fetches those releases and Trunk's own itself
+(`tools/ci/build-tools.txt`), and puts them on `PATH`.
 
 You need Trunk (`cargo install trunk --locked`, or a release binary) and the
 target (`rustup target add wasm32-unknown-unknown`). Anything that builds the

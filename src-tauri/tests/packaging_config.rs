@@ -914,3 +914,89 @@ fn the_translations_text_is_a_static() {
 fn pkgbuild_installs_the_cli() {
     assert!(PKGBUILD.contains("usr/bin/gospel-getter-cli"));
 }
+
+/// The page (dist/) isn't in the source archive, and plain cargo doesn't run
+/// Tauri's beforeBuildCommand, so the AUR recipe builds it with Trunk before
+/// the app, for WebAssembly, with Trunk's tools from its own sources and
+/// nothing downloaded during build() (GG-20). tools/ci checks those tools are
+/// CI's.
+#[test]
+fn pkgbuild_builds_the_page_before_the_app() {
+    let build: String = PKGBUILD
+        .lines()
+        .skip_while(|l| *l != "build() {")
+        .take_while(|l| *l != "}")
+        .collect::<Vec<_>>()
+        .join("\n");
+    let page = build
+        .find("trunk build --release --offline --frozen")
+        .unwrap_or_else(|| panic!("build() doesn't build the page offline: {build}"));
+    let app = build
+        .find("cargo build --release --frozen")
+        .unwrap_or_else(|| panic!("build() doesn't build the app offline: {build}"));
+    assert!(page < app, "the app is built before its page: {build}");
+    assert!(
+        PKGBUILD
+            .lines()
+            .any(|l| l.starts_with("makedepends=(") && l.contains("'rust-wasm'")),
+        "the recipe needs the wasm32 target (rust-wasm)"
+    );
+    for releases in [
+        "https://github.com/trunk-rs/trunk/releases/download/",
+        "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/",
+        "https://github.com/WebAssembly/binaryen/releases/download/",
+    ] {
+        assert_eq!(
+            PKGBUILD.matches(releases).count(),
+            2,
+            "{releases} should be a source for x86_64 and for aarch64"
+        );
+    }
+}
+
+/// gui-windows launches the installed app by its name, the app crate's
+/// binary, which the windows job also builds as the test app, never the
+/// first program its folder lists: the CLI sidecar sits beside it (GG-19).
+#[test]
+fn the_windows_gui_checks_launch_the_app_by_its_name() {
+    let package = CARGO_TOML
+        .lines()
+        .find_map(|l| l.strip_prefix("name = \""))
+        .and_then(|rest| rest.strip_suffix('"'))
+        .expect("Cargo.toml's [package] name");
+    let exe = format!("{package}.exe");
+    let keys = dist_job_keys("gui-windows");
+    let env_line = format!("GUI_EXE: {exe}");
+    assert!(
+        DIST_YML.lines().any(|l| l.trim() == env_line),
+        "gui-windows should name the app's program, {exe}: {keys:#?}"
+    );
+    let steps = dist_steps();
+    let install = steps
+        .iter()
+        .find(|s| s.job == "gui-windows" && s.name.starts_with("Install the app"))
+        .expect("gui-windows installs the app");
+    assert!(install.text.contains("$env:GUI_EXE"), "{install:#?}");
+    assert!(
+        !install
+            .text
+            .lines()
+            .skip_while(|l| !l.contains("$location"))
+            .any(|l| l.contains("Select-Object -First 1")),
+        "the app's program is picked by the folder's order: {install:#?}"
+    );
+    for name in ["gospel-getter-cli.exe", "uninstall.exe"] {
+        assert!(
+            install.text.contains(name),
+            "{name} isn't known: {install:#?}"
+        );
+    }
+    let test_app = steps
+        .iter()
+        .find(|s| s.job == "windows" && s.name == TEST_BUILD_STEP)
+        .expect("the windows job builds the test app");
+    assert!(
+        test_app.text.contains(&format!("target/release/{exe}")),
+        "{test_app:#?}"
+    );
+}

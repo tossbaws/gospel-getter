@@ -16,3 +16,10 @@ minify = "never"
 # harness needs can't be loaded by; the page inlines its own loader instead
 # (ui/leptos-loader.js).
 inject_scripts = false
+
+# The tools' versions. wasm-bindgen's is the crate's in ui-leptos/Cargo.lock,
+# which Trunk reads itself. wasm-opt's is pinned here (Trunk's own default for
+# 0.21.14), so Trunk uses exactly this one, never another wasm-opt on PATH; CI
+# fetches the same release (tools/ci/build-tools.txt).
+[tools]
+wasm_opt = "version_123"

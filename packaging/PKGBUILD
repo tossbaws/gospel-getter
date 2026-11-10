@@ -3,10 +3,13 @@
 # DRAFT — the metadata, dependencies, and build/package() steps below
 # reflect the actual project layout (src-tauri/, the real dependency list
 # this binary links against, the generated icon set) and there's no
-# placeholder repo URL left. It has NOT been build-tested via `makepkg`
-# and has NOT been submitted to the AUR. `source=` points at the GitHub
-# tag for this version (v$_pkgver); it only resolves once that tag has
-# been pushed. Before this can be submitted to the AUR:
+# placeholder repo URL left. It has NOT been submitted to the AUR. It has
+# been built with `makepkg` once, from the v2.28.0 tag's archive in a clean
+# archlinux:base-devel container (2026-11-09): the page and the app built
+# offline, and the package installed, with gospel-getter-cli running.
+# `source=` points at the GitHub tag for this version (v$_pkgver); it only
+# resolves once that tag has been pushed. Before this can be submitted to
+# the AUR:
 #
 #   1. Confirm the v$_pkgver tag exists on GitHub (it's created as part of
 #      cutting a GitHub release at this version).
@@ -14,13 +17,15 @@
 #      github.com):
 #        updpkgsums
 #      sha256sums is deliberately left as SKIP below rather than a
-#      fabricated value — do not hand-write a checksum here.
-#   3. Build it for real from a clean checkout of the tagged tarball, not
-#      from a working tree:
-#        makepkg -si
-#      and fix whatever that turns up — this is a different code path
-#      (extracting a release tarball, not building in place) and hasn't
-#      been exercised.
+#      fabricated value — do not hand-write a checksum here. (The tools'
+#      sha256sums_* are real: each matches its release's own.)
+#   3. Build it again from the tag being submitted, in a clean chroot or
+#      container, not from a working tree, and go through what namcap and
+#      makepkg still report: the libraries the binary links directly
+#      (namcap names cairo, dbus, gdk-pixbuf2, glib2, glibc,
+#      hicolor-icon-theme, libgcc and libsoup3 as only implicitly
+#      satisfied), build paths left in the binary ("reference to
+#      $srcdir"), and an empty -debug package.
 #   4. Only then create an AUR account and `git push` this file to a new
 #      aur.archlinux.org/gospel-getter.git — see
 #      https://wiki.archlinux.org/title/AUR_submission_guidelines
@@ -31,6 +36,15 @@
 # installs it plus gospel-getter-cli (built with it), its desktop launcher,
 # icon, and license to their standard system-wide locations. There's no service to enable: it's a
 # normal windowed app that only runs while it's open.
+#
+# The app embeds its page, dist/, which isn't in the source archive: Trunk
+# builds it (ui/index.html with ui-leptos/ compiled to WebAssembly), and
+# plain cargo doesn't run Tauri's beforeBuildCommand, so build() runs Trunk
+# first. Trunk's tools are the releases CI uses, pinned below with their
+# checksums, so nothing is downloaded during build(): Trunk itself,
+# wasm-bindgen (its version has to be ui-leptos/Cargo.lock's exactly) and
+# binaryen's wasm-opt (Trunk.toml's [tools] wasm_opt).
+# src-tauri/tests/packaging_config.rs checks these versions agree.
 
 pkgname=gospel-getter
 # The release's own version, as its tag has it (v$_pkgver). pkgver can't
@@ -46,14 +60,61 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/tossbaws/gospel-getter"
 license=('MIT')
 depends=('webkit2gtk-4.1' 'gtk3')
-makedepends=('cargo')
+# rust-wasm: the wasm32-unknown-unknown target the page compiles to.
+makedepends=('cargo' 'rust-wasm')
+# Not makepkg's LTO: its -flto=auto in CFLAGS makes the SQLite that
+# libsqlite3-sys builds (with the cc crate) GCC LTO objects, which the Rust
+# linker (lld) can't read, so the app and the CLI fail to link.
+options=('!lto')
 backup=()
+_trunk=0.21.14
+_wasm_bindgen=0.2.129
+_binaryen=123
 source=("$pkgname-$_pkgver.tar.gz::https://github.com/tossbaws/gospel-getter/archive/refs/tags/v$_pkgver.tar.gz")
+source_x86_64=("trunk-$_trunk-x86_64-unknown-linux-gnu.tar.gz::https://github.com/trunk-rs/trunk/releases/download/v$_trunk/trunk-x86_64-unknown-linux-gnu.tar.gz"
+               "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$_wasm_bindgen/wasm-bindgen-$_wasm_bindgen-x86_64-unknown-linux-musl.tar.gz"
+               "https://github.com/WebAssembly/binaryen/releases/download/version_$_binaryen/binaryen-version_$_binaryen-x86_64-linux.tar.gz")
+source_aarch64=("trunk-$_trunk-aarch64-unknown-linux-gnu.tar.gz::https://github.com/trunk-rs/trunk/releases/download/v$_trunk/trunk-aarch64-unknown-linux-gnu.tar.gz"
+                "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$_wasm_bindgen/wasm-bindgen-$_wasm_bindgen-aarch64-unknown-linux-gnu.tar.gz"
+                "https://github.com/WebAssembly/binaryen/releases/download/version_$_binaryen/binaryen-version_$_binaryen-aarch64-linux.tar.gz")
 sha256sums=('SKIP') # replace with `updpkgsums` against the v$_pkgver tag; never hand-write
+# The tools' own: each matches the checksum its release publishes.
+sha256sums_x86_64=('f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b'
+                   '82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e'
+                   'e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe')
+sha256sums_aarch64=('b1d8e60e454f7fc182d9a4d95d1506ffbae947d8ba90f8f6f02da93b60f980f9'
+                    '1797c349a0f45d30946e8986b184135e12839ab576c9a04203e85febfc5dcb35'
+                    '4b6bd61ba6cd3b18c993b4657d93426c782f9b91b74be0d38018cd8be1319376')
+
+prepare() {
+  # Trunk's tools, by name, where only build() looks.
+  local triple
+  case "$CARCH" in
+    x86_64) triple=x86_64-unknown-linux-musl ;;
+    aarch64) triple=aarch64-unknown-linux-gnu ;;
+  esac
+  mkdir -p "$srcdir/tools"
+  ln -sf "$srcdir/trunk" "$srcdir/tools/trunk"
+  ln -sf "$srcdir/wasm-bindgen-$_wasm_bindgen-$triple/wasm-bindgen" "$srcdir/tools/wasm-bindgen"
+  ln -sf "$srcdir/binaryen-version_$_binaryen/bin/wasm-opt" "$srcdir/tools/wasm-opt"
+
+  # Every crate both builds need, so build() runs offline: the page's (for
+  # WebAssembly) and the app's (for this machine).
+  cd "$pkgname-$_pkgver"
+  cargo fetch --locked --manifest-path ui-leptos/Cargo.toml
+  cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target "$(rustc -vV | sed -n 's/^host: //p')"
+}
 
 build() {
-  cd "$pkgname-$_pkgver/src-tauri"
-  cargo build --release --locked
+  cd "$pkgname-$_pkgver"
+  # The page first, into dist/. --offline: Trunk uses the tools above (it
+  # refuses any other version rather than download one) and builds the
+  # WebAssembly with cargo offline too.
+  PATH="$srcdir/tools:$PATH" trunk build --release --offline --frozen
+  test -s dist/index.html
+
+  cd src-tauri
+  cargo build --release --frozen
 }
 
 package() {

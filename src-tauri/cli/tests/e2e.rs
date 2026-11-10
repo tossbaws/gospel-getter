@@ -666,9 +666,17 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
             "exactly",
             "never summarise, paraphrase or interpret it",
             "save_findings",
+            // C1: saving only on the reader's request; a lookup earns an
+            // offer (C5), not a save.
+            "only when the reader asks you to save, note or mark them",
+            "A request only to find, list or quote verses isn't one",
         ] {
             assert!(instructions.contains(words), "{words}: {instructions}");
         }
+        assert!(
+            !instructions.contains("you can mark them"),
+            "{instructions}"
+        );
 
         let tools = mcp.ask(2, "tools/list", json!({}));
         let tools = tools["tools"].as_array().expect("the tools");
@@ -1288,7 +1296,8 @@ async fn an_install_without_the_findings_tables_says_to_open_the_app_once() {
 
 /// Over MCP: the client's name is the agent's when it gives none, the two
 /// tools mirror the subcommands, and the description says what saving is
-/// for and what it never does (C5, C3).
+/// for, that it needs the reader to ask for it, and what it never does (C5,
+/// C1, C3).
 #[tokio::test]
 async fn the_mcp_server_saves_findings_in_the_clients_name() {
     let db = closed_install("e2e_mcp_findings").await;
@@ -1309,7 +1318,8 @@ async fn the_mcp_server_saves_findings_in_the_clients_name() {
     let description = save["description"].as_str().unwrap();
     for words in [
         "note every verse that deals with grief so I can read them",
-        "only when the reader asks",
+        "only when the reader asks you to save, note or mark verses",
+        "A request only to find, list or quote verses isn't one: answer it, and offer to save them",
         "beside the verse",
         "marked as found by you",
         "Save only the locations: never summarise, paraphrase or explain the verses",
