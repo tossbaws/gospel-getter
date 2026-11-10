@@ -38,6 +38,7 @@ use crate::card::{self, Ask};
 use crate::card_text::Slot;
 use crate::dom;
 use crate::dto::PositionPreview;
+use crate::intent::{Claim, Generation};
 use crate::ipc;
 use crate::keyboard;
 use crate::page_text::{self as text, Saved};
@@ -68,6 +69,10 @@ struct State {
     welcome_waiting: Option<JsValue>,
     /// The launch check, asked before the updater was there.
     update_check_waiting: bool,
+    /// The modals' intents: a modal that gets ready to open before it does
+    /// (Export notes, fetching its choices) claims it, and any modal that
+    /// opens meanwhile moves it on ([`modal_opening`]).
+    modals: Generation,
 }
 
 thread_local! {
@@ -402,11 +407,25 @@ pub fn open_export_notes(return_focus: Option<HtmlElement>) {
 
 /// A modal of the pieces' is about to open: popovers and panels go (focus
 /// left alone, the modal takes it), and the search box with `close_search`.
+/// A modal still getting ready to open ([`modal_claim`]) won't now.
 pub fn modal_opening(close_search: bool) {
+    with(|s| s.modals.cancel());
     surfaces::close(false);
     if close_search && search_shown() {
         set_search_open(false);
     }
+}
+
+/// A modal is getting ready to open (its answer is on its way): its claim,
+/// which any modal opening before it does supersedes ([`modal_holds`]).
+pub fn modal_claim() -> Claim {
+    with(|s| s.modals.claim())
+}
+
+/// Whether the modal that claimed `claim` may still open: no other modal
+/// has opened, and none has claimed, since.
+pub fn modal_holds(claim: Claim) -> bool {
+    with(|s| s.modals.holds(claim))
 }
 
 /// ☰ → Import data…: the import preview runs the open dialog, the preview
