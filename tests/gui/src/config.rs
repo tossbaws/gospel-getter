@@ -30,6 +30,10 @@ pub struct Config {
     pub session_timeout: Duration,
     /// Linux: the private X display, the only one xdotool may touch.
     pub xvfb: Option<Xvfb>,
+    /// Linux: the run's own `XDG_RUNTIME_DIR`, which everything the script
+    /// starts has: how the app's WebKit helpers are told apart from any
+    /// other process (`gui_check::helpers`).
+    pub runtime_dir: Option<String>,
     /// What tauri-driver starts for the updater checks (9 to 13): the GUI
     /// checks' test build of the app (feature `gui-test-updater`), through
     /// its own wrapper. Without one, those checks fail as not run.
@@ -85,6 +89,11 @@ impl Config {
                 DEFAULT_SESSION_TIMEOUT
             },
             xvfb,
+            runtime_dir: if cfg!(target_os = "linux") {
+                Some(var("XDG_RUNTIME_DIR")?)
+            } else {
+                None
+            },
             updater_app: std::env::var("GUI_UPDATER_APP")
                 .ok()
                 .filter(|v| !v.is_empty()),
