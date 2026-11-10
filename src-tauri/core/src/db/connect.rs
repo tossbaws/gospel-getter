@@ -8,7 +8,6 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use sqlx::{Sqlite, SqlitePool, Transaction};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::time::Duration;
 
 /// The app's identifier, `identifier` in `tauri.conf.json`: its data folder
@@ -102,21 +101,29 @@ impl WritePool {
 /// transactions, never the database. And every connection waits up to
 /// [`BUSY_TIMEOUT`] for a lock rather than failing at once (see
 /// [`begin_write`] for the one wait SQLite won't make).
-pub async fn create_pool(database_url: &str) -> anyhow::Result<Db> {
-    if let Some(path) = database_url.strip_prefix("sqlite:") {
-        let path = path.split('?').next().unwrap_or(path);
-        if let Some(parent) = std::path::Path::new(path).parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent).context(format!(
-                "Failed to create database directory {}",
-                parent.display()
-            ))?;
-        }
+///
+/// `path` is the database file's path, never a URL: no character in it
+/// (`?`, `#`, `%`) is read as anything but part of a name, so the folder
+/// made and the file opened are the ones named. SQLite (through sqlx) takes
+/// only UTF-8 file names, so a path that isn't is refused before anything
+/// is made, rather than opening a file of a similar name.
+pub async fn create_pool(path: &Path) -> anyhow::Result<Db> {
+    anyhow::ensure!(
+        path.to_str().is_some(),
+        "The database's path, {}, isn't valid UTF-8, which SQLite needs.",
+        path.display()
+    );
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        create_dir_privately(parent)
+            .with_context(|| format!("Failed to create database directory {}", parent.display()))?;
     }
+    #[cfg(unix)]
+    keep_database_private(path)?;
 
-    let options = SqliteConnectOptions::from_str(database_url)
-        .context(format!("Invalid database URL: {}", database_url))?
+    let options = SqliteConnectOptions::new()
+        .filename(path)
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
@@ -129,16 +136,108 @@ pub async fn create_pool(database_url: &str) -> anyhow::Result<Db> {
         .acquire_timeout(WRITE_QUEUE_TIMEOUT)
         .connect_with(options.clone())
         .await
-        .context(format!("Failed to connect to database at {}", database_url))?;
+        .with_context(|| format!("Failed to connect to database at {}", path.display()))?;
     let read = SqlitePoolOptions::new()
         .max_connections(READ_CONNECTIONS)
         .connect_with(options.pragma("query_only", "ON"))
         .await
-        .context(format!("Failed to connect to database at {}", database_url))?;
+        .with_context(|| format!("Failed to connect to database at {}", path.display()))?;
+    // Made by now (the writer switched the file to WAL), with the
+    // database's own mode; any left from an earlier run were seen to above.
+    #[cfg(unix)]
+    for suffix in ["-wal", "-shm"] {
+        keep_private(&beside(path, suffix));
+    }
     Ok(Db {
         read,
         write: WritePool(write),
     })
+}
+
+/// Make the app's data folder, `dir`, and any folder above it that's
+/// missing, and keep it the reader's alone: on Unix it's made with mode
+/// 0700, and one made by an earlier version (0755, as the umask left it)
+/// loses its group and other permissions, as the reader's exports already
+/// have (their own folders may be open to others on the computer). Making
+/// it can fail; narrowing an existing folder's permissions is only logged
+/// if it fails (a folder this account doesn't own, say), since the app works
+/// without it. On Windows the folder gets its parent's inherited
+/// permissions, as any new folder there does.
+pub fn create_private_dir(dir: &Path) -> anyhow::Result<()> {
+    create_dir_privately(dir).with_context(|| format!("Failed to create {}", dir.display()))?;
+    #[cfg(unix)]
+    keep_private(dir);
+    Ok(())
+}
+
+/// Make `dir` and any folder above it that's missing, each (on Unix) with
+/// mode 0700; one that's already there is left as it is.
+fn create_dir_privately(dir: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
+}
+
+/// Keep the database at `path` and the files SQLite keeps beside it
+/// readable and writable by the reader alone (mode 0600). A new database is
+/// made here, empty, at that mode, before SQLite opens it: an empty file is
+/// an empty database, and SQLite gives the `-wal` and `-shm` it makes the
+/// database's own mode. One made by an earlier version (0644) loses its
+/// group and other permissions, as does any `-wal`, `-shm` or `-journal`
+/// left beside it.
+#[cfg(unix)]
+fn keep_database_private(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+    {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            for file in [
+                path.to_path_buf(),
+                beside(path, "-wal"),
+                beside(path, "-shm"),
+                beside(path, "-journal"),
+            ] {
+                keep_private(&file);
+            }
+        }
+        Err(e) => {
+            return Err(e).with_context(|| format!("Failed to create {}", path.display()));
+        }
+    }
+    Ok(())
+}
+
+/// Take the group and other permissions away from `path`, a file or
+/// folder, if it has any; the owner's stay as they are. Nothing there is
+/// nothing to do, and a failure is logged, not returned: the app works
+/// without this.
+#[cfg(unix)]
+fn keep_private(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = match std::fs::metadata(path) {
+        Ok(metadata) => metadata.permissions().mode(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+        Err(e) => {
+            tracing::warn!("Couldn't check who can read {}: {e}", path.display());
+            return;
+        }
+    };
+    if mode & 0o077 == 0 {
+        return;
+    }
+    if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode & !0o077)) {
+        tracing::warn!(
+            "Couldn't make {} readable by this account alone: {e}",
+            path.display()
+        );
+    }
 }
 
 /// One of the files SQLite keeps beside a database: `path` and `suffix`

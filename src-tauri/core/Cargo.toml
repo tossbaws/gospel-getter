@@ -31,3 +31,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"], optio
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+
+# Only for the database's privacy test (`db::path_tests`), which sets the
+# umask to the usual 022 to show the data folder and database are private
+# whatever it is. Already in the tree.
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"

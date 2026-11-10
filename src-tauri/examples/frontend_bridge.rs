@@ -606,10 +606,12 @@ async fn dispatch(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let path = std::env::args()
-        .nth(1)
-        .context("usage: frontend_bridge <database path>")?;
-    let pool = db::create_pool(&format!("sqlite:{path}")).await?;
+    let path = std::path::PathBuf::from(
+        std::env::args_os()
+            .nth(1)
+            .context("usage: frontend_bridge <database path>")?,
+    );
+    let pool = db::create_pool(&path).await?;
     db::prepare(pool.write()).await?;
     db::ensure_search_index(&pool).await?;
     let state = AppState::load(pool.clone()).await?;

@@ -143,7 +143,7 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
         .path()
         .app_data_dir()
         .context("Failed to resolve the app data directory")?;
-    std::fs::create_dir_all(&app_data_dir).context("Failed to create the app data directory")?;
+    db::create_private_dir(&app_data_dir).context("Failed to create the app data directory")?;
     let db_path = app_data_dir.join(db::DATABASE_FILE);
     info!("Using database at {}", db_path.display());
 
@@ -180,8 +180,7 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
         }
     }
 
-    let database_url = format!("sqlite:{}", db_path.display());
-    let state = tauri::async_runtime::block_on(init_state(&database_url))
+    let state = tauri::async_runtime::block_on(init_state(&db_path))
         .context("Failed to initialize application state")?;
     spawn_search_index_build(&state);
     app.manage(state);
@@ -226,8 +225,8 @@ fn migration_failed_message(legacy_db_path: &std::path::Path, e: &anyhow::Error)
 
 /// Connect to the database, run migrations/seeding, and load the books and
 /// translations that stay in memory for the life of the app.
-async fn init_state(database_url: &str) -> anyhow::Result<AppState> {
-    let database = create_pool(database_url)
+async fn init_state(db_path: &std::path::Path) -> anyhow::Result<AppState> {
+    let database = create_pool(db_path)
         .await
         .context("Failed to connect to database")?;
 
