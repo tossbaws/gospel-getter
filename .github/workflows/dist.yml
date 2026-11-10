@@ -58,7 +58,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  TAURI_CLI_VERSION: "^2.0.0"
+  # Exactly: the bundler's tools are pinned for this version
+  # (tools/ci/build-tools.txt, set bundler), and a version with none pinned
+  # stops the build.
+  TAURI_CLI_VERSION: "2.12.4"
 
 jobs:
   linux:
@@ -85,11 +88,13 @@ jobs:
           targets: wasm32-unknown-unknown
 
       # `cargo tauri build` runs Trunk first (build.beforeBuildCommand in
-      # tauri.conf.json) to build the page into dist/.
+      # tauri.conf.json) to build the page into dist/. Trunk and the
+      # wasm-bindgen and wasm-opt it runs come from a cache, or else with the
+      # workflow's token, never anonymously (see .github/actions/build-tools).
       - name: Install Trunk
-        uses: jetli/trunk-action@v0.5.1
+        uses: ./.github/actions/build-tools
         with:
-          version: "v0.21.14"
+          set: trunk
 
       # webkit2gtk/gtk3 headers to build against, plus the bundling
       # toolchain: patchelf (rpath rewriting), libfuse2 (AppImages are
@@ -129,6 +134,13 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
 
+      # What the bundler would download for the AppImage (linuxdeploy, its
+      # AppImage plugin, AppRun), the same way as Trunk above.
+      - name: Install the bundler's tools
+        uses: ./.github/actions/build-tools
+        with:
+          set: bundler
+
       # Stripped: nothing else strips it, and a backtrace on it has no use.
       - name: Build the CLI sidecar
         run: |
@@ -149,6 +161,10 @@ jobs:
           else
             cargo tauri build --bundles appimage,deb --config tauri.sidecar.conf.json
           fi
+
+      - name: Check the build fetched no tools itself
+        working-directory: .
+        run: python3 tools/ci/build_tools.py check trunk bundler
 
       - name: Locate built artifacts
         id: artifacts
@@ -327,11 +343,13 @@ jobs:
           targets: wasm32-unknown-unknown
 
       # `cargo tauri build` runs Trunk first (build.beforeBuildCommand in
-      # tauri.conf.json) to build the page into dist/.
+      # tauri.conf.json) to build the page into dist/. Trunk and the
+      # wasm-bindgen and wasm-opt it runs come from a cache, or else with the
+      # workflow's token, never anonymously (see .github/actions/build-tools).
       - name: Install Trunk
-        uses: jetli/trunk-action@v0.5.1
+        uses: ./.github/actions/build-tools
         with:
-          version: "v0.21.14"
+          set: trunk
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -359,6 +377,13 @@ jobs:
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+
+      # What the bundler would download for the installers (NSIS with its
+      # nsis_tauri_utils plugin, and WiX), the same way as Trunk above.
+      - name: Install the bundler's tools
+        uses: ./.github/actions/build-tools
+        with:
+          set: bundler
 
       # Static, so it starts on a Windows without the Visual C++ runtime, as the
       # app does: tauri-build links the app's statically, and this program has
@@ -396,6 +421,11 @@ jobs:
             cargo tauri build --config tauri.sidecar.conf.json
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Check the build fetched no tools itself
+        working-directory: .
+        shell: bash
+        run: python tools/ci/build_tools.py check trunk bundler
 
       - name: Locate built artifacts
         id: artifacts
@@ -632,6 +662,9 @@ jobs:
       GUI_CHECK_STEP_TIMEOUT: "20"
       # The app's window comes up about 10s after launch on a cold runner.
       GUI_CHECK_SESSION_TIMEOUT: "60"
+      # The installed app's program, as the windows job builds it
+      # (target/release/gospel_getter.exe).
+      GUI_EXE: gospel_getter.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -682,9 +715,21 @@ jobs:
           if (-not $location -or -not (Test-Path -LiteralPath $location -PathType Container)) {
             Write-Error "the install location '$($entry.InstallLocation)' isn't a folder"; exit 1
           }
-          $exe = Get-ChildItem -LiteralPath $location -Filter *.exe |
-            Where-Object { $_.Name -notlike "uninstall*" } | Select-Object -First 1
-          if (-not $exe) { Write-Error "no app .exe in $location"; exit 1 }
+          # The app by its known name, never by the folder's order: the app
+          # crate's binary (tauri.conf.json sets no mainBinaryName), beside the
+          # CLI sidecar and the uninstaller. Any other program there makes the
+          # layout ambiguous, so it stops here rather than guess.
+          $programs = @(Get-ChildItem -LiteralPath $location -Filter *.exe -File | ForEach-Object Name)
+          $expected = @($env:GUI_EXE, "gospel-getter-cli.exe", "uninstall.exe")
+          Write-Host "Programs in ${location}: $($programs -join ', ')"
+          if ($programs -notcontains $env:GUI_EXE) {
+            Write-Error "the app's $env:GUI_EXE isn't in $location (found: $($programs -join ', '))"; exit 1
+          }
+          $unexpected = @($programs | Where-Object { $expected -notcontains $_ })
+          if ($unexpected.Count -gt 0) {
+            Write-Error "unexpected programs beside the app in ${location}: $($unexpected -join ', '); which is the app is ambiguous"; exit 1
+          }
+          $exe = Get-Item -LiteralPath (Join-Path $location $env:GUI_EXE)
           Write-Host "Installed: $($exe.FullName)"
           "exe=$($exe.FullName)" >> $env:GITHUB_OUTPUT
 

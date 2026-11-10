@@ -1,0 +1,44 @@
+# The build tools CI downloads from GitHub releases, each pinned by the
+# SHA-256 of its release asset. tools/ci/build_tools.py fetches them with the
+# workflow's token (gh release download), not anonymously, into a cache keyed
+# by these rows, checks every file against its SHA-256 on every run (a cache
+# hit too), and lays them out where Trunk and the Tauri bundler look, so they
+# never download them themselves. See .github/actions/build-tools.
+#
+# Each version is set in one place, and a row here only pins its files:
+#   trunk         here: the one Trunk version every row of it carries
+#   wasm-bindgen  ui-leptos/Cargo.lock (the CLI has to match the crate)
+#   wasm-opt      Trunk.toml, [tools] wasm_opt
+#   bundler set   TAURI_CLI_VERSION in .github/workflows/dist.yml: its rows
+#                 carry that tauri-cli version, and name the files its
+#                 tauri-bundler looks for (tauri-bundler's linuxdeploy.rs,
+#                 nsis/mod.rs and msi/mod.rs) under its tools folder
+#                 (~/.cache/tauri, %LOCALAPPDATA%\tauri)
+# A version with no rows here stops the build, saying what to add.
+#
+# Each SHA-256 here is the one the release publishes (its .sha256 file or
+# the asset's GitHub digest); the bundler's NSIS, nsis_tauri_utils and WiX
+# also match the SHA-1 and SHA-256 tauri-bundler 2.10.4 pins for them.
+# linuxdeploy-plugin-appimage's "continuous" release can be rebuilt
+# upstream: then its download no longer matches and the build stops (a
+# cached copy still matches), until its new SHA-256 is checked and put here.
+#
+# install, where the file goes:
+#   bin=<member>   that member of the archive, into the tools' bin folder (on PATH)
+#   file=<path>    the file itself, at <path> under the bundler's tools folder
+#   unzip=<dir>    the zip, unpacked into <dir> under the bundler's tools folder
+#   unzip-top=<dir> the zip's one top-level folder, as <dir> there
+#
+# set     os       tool                         version      repository                               tag                      asset                                                    sha256                                                            install
+trunk     Linux    trunk                        0.21.14      trunk-rs/trunk                           v0.21.14                 trunk-x86_64-unknown-linux-gnu.tar.gz                    f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b  bin=trunk
+trunk     Linux    wasm-bindgen                 0.2.129      wasm-bindgen/wasm-bindgen                0.2.129                  wasm-bindgen-0.2.129-x86_64-unknown-linux-musl.tar.gz    82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e  bin=wasm-bindgen-0.2.129-x86_64-unknown-linux-musl/wasm-bindgen
+trunk     Linux    wasm-opt                     version_123  WebAssembly/binaryen                     version_123              binaryen-version_123-x86_64-linux.tar.gz                 e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe  bin=binaryen-version_123/bin/wasm-opt
+trunk     Windows  trunk                        0.21.14      trunk-rs/trunk                           v0.21.14                 trunk-x86_64-pc-windows-msvc.zip                         cd6ac15b9daff0365e5695036791ef2ce3c63f61c014f5a8c532363266e4569c  bin=trunk.exe
+trunk     Windows  wasm-bindgen                 0.2.129      wasm-bindgen/wasm-bindgen                0.2.129                  wasm-bindgen-0.2.129-x86_64-pc-windows-msvc.tar.gz       79e348c169d0c10c0b287647f1e753d0985353ca96800bc29be8f4261baf13e6  bin=wasm-bindgen-0.2.129-x86_64-pc-windows-msvc/wasm-bindgen.exe
+trunk     Windows  wasm-opt                     version_123  WebAssembly/binaryen                     version_123              binaryen-version_123-x86_64-windows.tar.gz               7b3568424a0f871a52865d5c78177db646b1832a8c487321e27703103f936880  bin=binaryen-version_123/bin/wasm-opt.exe
+bundler   Linux    apprun                       2.12.4       tauri-apps/binary-releases               apprun-old               AppRun-x86_64                                            f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f  file=AppRun-x86_64
+bundler   Linux    linuxdeploy                  2.12.4       tauri-apps/binary-releases               linuxdeploy-07333c6      linuxdeploy-x86_64.AppImage                              36a2d7e274d12e1050d0e9ecfe11d339ed54720b2bec464c286d53f8b07f5c62  file=linuxdeploy-07333c6-x86_64.AppImage
+bundler   Linux    linuxdeploy-plugin-appimage  2.12.4       linuxdeploy/linuxdeploy-plugin-appimage  continuous               linuxdeploy-plugin-appimage-x86_64.AppImage              49d6a17160675a6bd1781699aae6bdf7692d98552e02a3671d2183d10547842e  file=linuxdeploy-plugin-appimage.AppImage
+bundler   Windows  nsis                         2.12.4       tauri-apps/binary-releases               nsis-3.13                nsis-3.13.zip                                            ba63dffc4410ee89193e1cb5a41989991bd77c61068da17e3156d136b7b0b3d8  unzip-top=NSIS
+bundler   Windows  nsis-tauri-utils             2.12.4       tauri-apps/nsis-tauri-utils              nsis_tauri_utils-v0.5.3  nsis_tauri_utils.dll                                     5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709  file=NSIS/Plugins/x86-unicode/additional/nsis_tauri_utils.dll
+bundler   Windows  wix                          2.12.4       wixtoolset/wix3                          wix3141rtm               wix314-binaries.zip                                      6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31  unzip=WixTools314

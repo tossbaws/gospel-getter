@@ -35,6 +35,19 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 -m unittest discover -s tools/release -v
 
+      # CI's build tools (tools/ci: what .github/actions/build-tools fetches,
+      # and that the other places naming those tools agree with it).
+      - name: Test the build tools' pins
+        working-directory: .
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s tools/ci -v
+
+      # Which AppImage packaging/install.sh installs (nothing is built).
+      - name: Test the install script
+        working-directory: .
+        run: scripts/test-install.sh
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -44,11 +57,13 @@ jobs:
 
       # Trunk builds the page (ui/index.html with ui-leptos) into dist/,
       # which the app crate embeds, so it runs before anything that builds
-      # the app crate.
+      # the app crate. Trunk and the wasm-bindgen and wasm-opt it runs come
+      # from a cache, or else with the workflow's token, never anonymously
+      # (see .github/actions/build-tools).
       - name: Install Trunk
-        uses: jetli/trunk-action@v0.5.1
+        uses: ./.github/actions/build-tools
         with:
-          version: "v0.21.14"
+          set: trunk
 
       # Tauri's Linux runtime (webkit2gtk/gtk3) isn't preinstalled on the
       # runner image, and both building and even just `cargo check`/`cargo
@@ -91,6 +106,10 @@ jobs:
         working-directory: .
         run: trunk build --release
 
+      - name: Check Trunk fetched no tools itself
+        working-directory: .
+        run: python3 tools/ci/build_tools.py check trunk
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -130,9 +149,9 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Install Trunk
-        uses: jetli/trunk-action@v0.5.1
+        uses: ./.github/actions/build-tools
         with:
-          version: "v0.21.14"
+          set: trunk
 
       - name: Install Tauri Linux dependencies
         run: |
@@ -156,6 +175,9 @@ jobs:
       # as steps of their own.
       - name: Build the page (Trunk)
         run: trunk build --release
+
+      - name: Check Trunk fetched no tools itself
+        run: python3 tools/ci/build_tools.py check trunk
 
       - name: Build the frontend bridge
         working-directory: src-tauri
@@ -199,9 +221,9 @@ jobs:
       # The app crate embeds the page Trunk builds into dist/, so the
       # page is built before the tests.
       - name: Install Trunk
-        uses: jetli/trunk-action@v0.5.1
+        uses: ./.github/actions/build-tools
         with:
-          version: "v0.21.14"
+          set: trunk
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -213,6 +235,11 @@ jobs:
       - name: Build the page (Trunk)
         working-directory: .
         run: trunk build --release
+
+      - name: Check Trunk fetched no tools itself
+        working-directory: .
+        shell: bash
+        run: python tools/ci/build_tools.py check trunk
 
       - name: Test
         run: cargo test --all-targets
