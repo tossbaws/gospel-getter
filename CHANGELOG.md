@@ -4,6 +4,61 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.29.0] - 2026-11-10
+
+One Gospel Getter at a time, a safe move from the browser-based version,
+and a search index and quote checks that leave nothing out. Updating keeps
+your bookmarks, highlights, notes, findings, reading position and settings.
+
+### Changed
+- Opening Gospel Getter while it's already open brings the window that's
+  open forward, unminimised and focused, instead of starting a second copy
+  on the same data.
+
+### Fixed
+- Coming from the old browser-based Gospel Getter, the first launch brings
+  its database over as a snapshot it has checked, with everything it has
+  saved, even while it's still running, and never half a copy. If that
+  can't be done, the old file is left as it was, and Gospel Getter says
+  what went wrong and what to do (close the earlier Gospel Getter if it's
+  open and open Gospel Getter again, or move that file somewhere else to
+  start without it), and doesn't start. The next launch tries again.
+- The search index is marked complete only when every verse is in it,
+  even if two launches build it at once. An index an older version left
+  short is built again.
+- Cross-references are added once, even when two launches start together.
+  Before, both could add them, leaving every cross-reference twice. An
+  install where that already happened stays as it is.
+- Quote checks (`verify_quote`, in `gospel-getter-cli` and over MCP) list
+  every place a quote is, each once and in Bible order, including where it
+  runs across the end of a verse. Before, a quote whole in one verse could
+  hide the same words elsewhere across two. With more than 200 places, it
+  lists 200 and says "at least".
+- Backups and Markdown exports are readable only by you on Linux, from the
+  moment they're written, and replacing one keeps it so. Before, they could
+  be readable by anyone on the computer.
+- AI agents save findings only when you ask them to save, note or mark
+  verses. Asked only to find, list or quote verses, they answer and can
+  offer to save them. That's what Gospel Getter asks of the agent; what the
+  app enforces is still **Let AI agents save findings**.
+- `packaging/install.sh` installs the AppImage it has just built, never an
+  older one left beside it. If there's none, more than one, or one of
+  another version, it stops, says what's there and deletes nothing.
+- The draft Arch recipe (`packaging/PKGBUILD`) builds the app's page before
+  the app, with Trunk and its tools pinned and checksummed, and the build
+  itself runs offline. It has been built with `makepkg` in a clean Arch
+  container, and it's still not on the AUR.
+- Backups keep the same data formats: 3, or 4 with AI findings or the
+  switch on, restored by the same versions as before.
+
+Behind the scenes, nothing you'll see changes: CI keeps the tools it
+builds with cached and checks each against its pinned checksum before
+using it, so a build with them cached downloads none of them, and
+`gospel-getter-cli`'s MCP library is rmcp 3.9.0, for RUSTSEC-2026-0462. On
+Linux, one app at a time works over the session bus, so the app again
+carries D-Bus libraries that three advisories mark as unmaintained, with no
+known vulnerability (RUSTSEC-2026-0370 to 0372, as before 2.16.2).
+
 ## [2.28.0] - 2026-11-09
 
 A switch for the keys that work pressed on their own, imports that name
