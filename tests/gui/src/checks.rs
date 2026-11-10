@@ -32,8 +32,9 @@
 //! references in the card, the Library and the margin, and Copy as
 //! Markdown (66, `notes`); an AI-flagged finding saved by gospel-getter-cli
 //! while the app runs, shown in the margin, opened and kept as the
-//! reader's note (70, `findings`); and, last, the plain-text fallback (44,
-//! `reader`);
+//! reader's note (70, `findings`); the app opened again while it's open,
+//! the second launch handing over and exiting (73, `instance`); and, last,
+//! the plain-text fallback (44, `reader`);
 //! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
 //! Then the app started again on the same data, keeping Aa's settings (26)
 //! and the chapter's lists as left (45), at the verse the first session
@@ -47,6 +48,7 @@ mod card;
 mod dialogs;
 mod display;
 mod findings;
+mod instance;
 mod keys;
 mod library;
 mod margin;
@@ -474,6 +476,13 @@ async fn shipped(
             );
         }
         report.record(Check::AiFindings, findings).await;
+        // The app opened again while it's open (73): the second launch
+        // hands over and exits.
+        let second = run.second_launch().await;
+        if second.is_err() {
+            run.failure_screenshot(Check::SecondLaunch).await;
+        }
+        report.record(Check::SecondLaunch, second).await;
 
         if let Err(e) = run.vellum_screenshots().await {
             run.failure_screenshot(Check::Screenshots).await;

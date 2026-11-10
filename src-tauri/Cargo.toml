@@ -72,6 +72,10 @@ tauri-plugin-updater = { version = "~2.13", default-features = false, features =
 open = { version = "5", features = ["shellexecute-on-windows"] }
 # The window comes back where it was (see `window.rs`).
 tauri-plugin-window-state = "~2.5"
+# One app at a time: opening Gospel Getter again shows the window already
+# open (see `window::single_instance_plugin`). On Linux it asks over the
+# session bus (D-Bus), on Windows through a named mutex and a message window.
+tauri-plugin-single-instance = "~2.5"
 
 # Only for `examples/frontend_bridge.rs` (the frontend tests' stdio bridge);
 # the app itself doesn't read stdin.

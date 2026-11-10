@@ -82,11 +82,12 @@ pub enum Check {
     AiFindings = 70,
     ExportChoice = 71,
     SingleKeys = 72,
+    SecondLaunch = 73,
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 62] = [
+    pub const SHIPPED: [Check; 63] = [
         Check::Driver,
         Check::Csp,
         Check::ExportNotes,
@@ -148,6 +149,7 @@ impl Check {
         Check::NotesSearch,
         Check::NoteMarkdown,
         Check::AiFindings,
+        Check::SecondLaunch,
         Check::PlainText,
     ];
 
@@ -246,6 +248,7 @@ impl Check {
             Check::AiFindings => "ai-findings",
             Check::ExportChoice => "export-choice",
             Check::SingleKeys => "single-key-switch",
+            Check::SecondLaunch => "second-launch",
         }
     }
 

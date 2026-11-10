@@ -1,4 +1,6 @@
-//! The main window: its title, and its size and place from the last run.
+//! The main window: its title, its size and place from the last run, and
+//! the one window there is however often the app is opened
+//! (`single_instance_plugin`).
 //!
 //! `tauri.conf.json` describes the window, with `create: false` and
 //! `visible: false`; [`create_main_window`] builds it from that, restores
@@ -135,6 +137,44 @@ mod desktop {
             y: position.y,
             width: size.width,
             height: size.height,
+        }
+    }
+
+    /// One app at a time. Opening Gospel Getter while it's already open
+    /// (from the launcher, the desktop or a command line) doesn't start a
+    /// second app on the same database: the second process hands over to
+    /// the first and exits, before it reads or writes anything, and the
+    /// window already open comes forward ([`show_main_window`]). It must be
+    /// the first plugin registered, so that nothing else starts first.
+    ///
+    /// On Linux the app owns a name on the session bus
+    /// (`com.tossbaws.gospel-getter.SingleInstance`), so it's one app per
+    /// login session: without a session bus it starts as before, with no
+    /// guard. On Windows it's a named mutex. The arguments of the second
+    /// launch are ignored: the app takes none.
+    pub fn single_instance_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+        tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tracing::info!("Gospel Getter was opened again; showing the window already open");
+            show_main_window(app);
+        })
+    }
+
+    /// Bring the main window forward: out of the taskbar if it was
+    /// minimised, shown, and focused. Nothing happens if it doesn't exist
+    /// yet (the app is still starting, and shows it once it's ready).
+    pub fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+        use tauri::Manager;
+        let Some(window) = app.get_webview_window(MAIN) else {
+            return;
+        };
+        for (what, done) in [
+            ("unminimize", window.unminimize()),
+            ("show", window.show()),
+            ("focus", window.set_focus()),
+        ] {
+            if let Err(e) = done {
+                tracing::warn!("Failed to {what} the window: {e}");
+            }
         }
     }
 

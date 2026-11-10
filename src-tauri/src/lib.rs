@@ -28,7 +28,8 @@ pub use gospel_getter_core::{book_aliases, db, domain, passage_reference, verse_
 
 use anyhow::Context;
 use tauri::Manager;
-use tracing::{Level, info};
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 
 use commands::AppState;
@@ -38,11 +39,17 @@ use db::create_pool;
 /// where it was last time.
 pub fn run() {
     tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
+        // Up to info, but only warnings from zbus (the session bus that
+        // `window::single_instance_plugin` uses on Linux): its connections'
+        // info-level spans would fill the log on every launch.
+        .with_env_filter(EnvFilter::new("info,zbus=warn"))
         .with_span_events(FmtSpan::CLOSE)
         .init();
 
     tauri::Builder::default()
+        // First, before anything else starts: a second launch hands over to
+        // the app already open and exits (see `window::single_instance_plugin`).
+        .plugin(window::single_instance_plugin())
         // Native open/save dialogs, used only from Rust (see
         // `commands::export_reader_data`); the webview gets no dialog or
         // file-system permission.

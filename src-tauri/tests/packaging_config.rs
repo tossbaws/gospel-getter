@@ -293,6 +293,49 @@ fn the_window_state_plugin_restores_a_hidden_window_before_showing_it() {
     );
 }
 
+/// One app at a time: the official single-instance plugin is a desktop
+/// dependency, built for the Tauri 2 the app uses, and the first plugin
+/// registered (as its documentation requires), so a second launch hands
+/// over and exits before any other plugin or the app's own setup (the
+/// database) starts. It has no commands, so the webview gets no permission
+/// for it. That a second launch really exits is GUI check 73's.
+#[test]
+fn the_single_instance_plugin_is_registered_first() {
+    let desktop = CARGO_TOML
+        .split(
+            "[target.'cfg(not(any(target_os = \"android\", target_os = \"ios\")))'.dependencies]",
+        )
+        .nth(1)
+        .and_then(|rest| rest.split("\n[").next())
+        .expect("Cargo.toml has a desktop dependencies table");
+    assert!(
+        desktop
+            .lines()
+            .any(|l| l.starts_with("tauri-plugin-single-instance = \"~2.")),
+        "tauri-plugin-single-instance should be a desktop dependency"
+    );
+    assert!(
+        CARGO_LOCK.contains("name = \"tauri-plugin-single-instance\"\nversion = \"2."),
+        "Cargo.lock should resolve a 2.x single-instance plugin"
+    );
+    assert!(
+        CARGO_LOCK.contains("name = \"tauri\"\nversion = \"2."),
+        "the plugin is for Tauri 2"
+    );
+
+    let first = LIB_RS.find(".plugin(").expect("lib.rs registers plugins");
+    assert!(
+        LIB_RS[first..].starts_with(".plugin(window::single_instance_plugin())"),
+        "the single-instance plugin should be registered before any other"
+    );
+
+    let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
+    assert_eq!(
+        capability["permissions"],
+        serde_json::json!(["core:default"])
+    );
+}
+
 /// The webview's Content Security Policy, as `tauri.conf.json` sets it.
 /// Tauri adds hashes for the page's inline `<script>`s and `<style>` at
 /// build time (asset CSP modification stays on), so the page's own code
