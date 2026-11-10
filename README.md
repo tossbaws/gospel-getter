@@ -327,8 +327,10 @@ the AUR**. It builds with `makepkg` from a release's tagged source (checked
 with 2.28.0's, in a clean Arch container); the file lists what's left before
 it can be submitted.
 
-Every push to `main` also builds untagged installers as
-[workflow artifacts](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml).
+Pushes to `main` also build untagged installers as
+[workflow artifacts](https://github.com/tossbaws/gospel-getter/actions/workflows/dist.yml),
+except a release-prep merge's, which builds nothing (a release's installers
+come from the run dispatched on its commit).
 These expire after a while, so use a release unless you want a specific
 `main` build.
 

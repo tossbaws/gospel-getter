@@ -28,7 +28,18 @@ build that too, build it first and name it for its target, as the `windows` job
 in `.github/workflows/dist.yml` does, and add
 `--config tauri.sidecar.conf.json`.
 
-**Not verified as part of the Tauri migration** — that work happened on
-Linux, and Linux artifact verification (the AppImage) was the hard
-requirement. A Windows build should be tried on an actual Windows machine
-before it's relied on.
+**What CI checks on Windows.** The `windows` job in
+`.github/workflows/dist.yml` builds both installers on a Windows runner for
+every pull request and push to `main` (except a release-prep merge's push,
+whose installers come from the run dispatched on it), and installs and
+removes each silently: the setup.exe (`/S`) and the MSI (`msiexec /i` and
+`/x`). It checks each one registers itself, puts `gospel-getter-cli.exe`
+beside the app (which it runs), and leaves nothing registered once removed;
+a build without the MSI fails. The `test-windows` job in
+`.github/workflows/ci.yml` runs the Rust tests on Windows. Before a release
+(a run dispatched by hand, or a pull request from a `release/` branch), the
+`gui-windows` job installs the setup.exe and drives the installed app
+through its own window with the GUI checks (`scripts/gui-check.sh`). What
+CI doesn't cover is a person's desktop: SmartScreen's warning for an
+installer that isn't code-signed, and Windows editions other than the
+runner's Windows Server.
