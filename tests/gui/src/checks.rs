@@ -47,6 +47,7 @@ mod beside;
 mod card;
 mod dialogs;
 mod display;
+mod exited;
 mod findings;
 mod instance;
 mod keys;
@@ -587,8 +588,11 @@ async fn shipped(
 }
 
 /// Starts `app` through tauri-driver: a WebDriver session whose browser
-/// is the app.
+/// is the app. First, every app started before has exited (Windows; see
+/// `exited`): the app is one at a time, and would otherwise hand over to
+/// one still running and exit.
 async fn start_session(config: &Config, app: &str, started: Instant) -> Result<WebDriver> {
+    exited::earlier_apps_exited(config, started).await?;
     log_line(
         started,
         &format!("start the app through tauri-driver ({app})"),

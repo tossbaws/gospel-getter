@@ -38,6 +38,10 @@ pub struct Config {
     /// check (`GOSPEL_GETTER_TEST_UPDATER`, set for the app by the script),
     /// and the checks write.
     pub updater_settings: Option<PathBuf>,
+    /// Windows: where gui-launch records each app it starts
+    /// (`GUI_LAUNCH_PIDS`, see `gui_check::launched`), each to have exited
+    /// before the next session starts.
+    pub launched: Option<PathBuf>,
 }
 
 /// Starting the app (a cold start seeds its database) may take longer than
@@ -85,6 +89,11 @@ impl Config {
                 .ok()
                 .filter(|v| !v.is_empty()),
             updater_settings: std::env::var_os("GUI_TEST_UPDATER_FILE").map(PathBuf::from),
+            launched: if cfg!(windows) {
+                Some(PathBuf::from(var("GUI_LAUNCH_PIDS")?))
+            } else {
+                None
+            },
         })
     }
 }
