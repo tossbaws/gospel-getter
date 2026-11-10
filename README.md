@@ -383,7 +383,10 @@ Upgrading keeps your data.
   folder. On Linux that's
   `~/.local/share/com.tossbaws.gospel-getter/gospel_getter.db`; on Windows
   it's under `%APPDATA%\com.tossbaws.gospel-getter\`. SQLite may keep
-  `-wal` and `-shm` files beside it; they belong with the database.
+  `-wal` and `-shm` files beside it; they belong with the database. On Linux
+  the folder is yours alone (mode 0700) and the database and its files are
+  too (0600), as exports are; an earlier version's are narrowed to that when
+  the app starts.
 - **Upgrades keep your data.** A new version adds any new tables and builds
   the search index once, in the background, without changing scripture
   text, your reading position, bookmarks, highlights or notes. 2.10.0
@@ -414,6 +417,12 @@ Upgrading keeps your data.
   when it was on).
 - The window's size and place are kept in `window-state.json`, beside the
   database, and aren't exported either.
+- The app's log (what it did and anything that went wrong, never your notes
+  or what you search for) is kept in `gospel-getter.log` in the app's log
+  folder (`~/.local/share/com.tossbaws.gospel-getter/logs` on Linux,
+  `%LOCALAPPDATA%\com.tossbaws.gospel-getter\logs` on Windows), up to 1 MB,
+  with the two before it as `gospel-getter.1.log` and `gospel-getter.2.log`.
+  `RUST_LOG` sets how much it says (for example `RUST_LOG=debug`).
 - Coming from the old browser-based Gospel Getter (the local server on
   `localhost:3002`)? The first launch copies its database from
   `~/.local/share/gospel-getter/data/gospel_getter.db` (everything it has
