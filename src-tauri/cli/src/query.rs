@@ -945,61 +945,62 @@ impl Library {
         })
     }
 
-    /// A record's passage, its verses quoted in `translation`.
-    async fn record_passage(
+    /// Records' passages (book, chapter, first and last verse), each with
+    /// its verses quoted in `translation`, in the order given: one query
+    /// for all of their verses, however many records there are.
+    async fn record_passages(
         &self,
         translation: &Translation,
-        book_id: i64,
-        chapter: i64,
-        (verse_start, verse_end): (i64, i64),
-    ) -> anyhow::Result<RecordPassageOut> {
-        let book = self.book(book_id)?;
-        let verses = db::get_verse_range(
-            &self.pool,
-            translation.id,
-            book_id,
-            chapter,
-            verse_start,
-            verse_end,
-        )
-        .await?
-        .into_iter()
-        .map(|v| QuoteOut {
-            verse: v.verse,
-            text: VerseText::new(&translation.code, &v.text).text,
-        })
-        .collect();
-        Ok(RecordPassageOut {
-            reference: passage_reference(&book.name, chapter, Some((verse_start, verse_end))),
-            book: book.name.clone(),
-            chapter,
-            verse_start,
-            verse_end,
-            verses,
-        })
+        passages: &[[i64; 4]],
+    ) -> anyhow::Result<Vec<RecordPassageOut>> {
+        let verses = db::verses_of_passages(&self.pool, translation.id, passages).await?;
+        passages
+            .iter()
+            .zip(verses)
+            .map(|(&[book_id, chapter, verse_start, verse_end], verses)| {
+                let book = self.book(book_id)?;
+                Ok(RecordPassageOut {
+                    reference: passage_reference(
+                        &book.name,
+                        chapter,
+                        Some((verse_start, verse_end)),
+                    ),
+                    book: book.name.clone(),
+                    chapter,
+                    verse_start,
+                    verse_end,
+                    verses: verses
+                        .into_iter()
+                        .map(|v| QuoteOut {
+                            verse: v.verse,
+                            text: VerseText::new(&translation.code, &v.text).text,
+                        })
+                        .collect(),
+                })
+            })
+            .collect()
     }
 
     async fn list_bookmarks(&self, args: ListBookmarksArgs) -> anyhow::Result<BookmarksOut> {
         let translation = self.translation(args.translation.as_deref()).await?;
         let (offset, limit) = page_of(args.offset, args.limit);
-        let all = db::bookmarks::list_bookmarks(&self.pool, translation.id).await?;
+        // The rows alone, then the verses of only the page's.
+        let all = db::bookmarks::bookmarks_newest_first(&self.pool).await?;
         let total = all.len();
-        let mut bookmarks = Vec::new();
-        for found in page(all, offset, limit) {
-            let b = found.bookmark;
-            bookmarks.push(BookmarkOut {
+        let shown: Vec<_> = page(all, offset, limit).collect();
+        let passages: Vec<[i64; 4]> = shown
+            .iter()
+            .map(|b| [b.book_id, b.chapter, b.verse_start, b.verse_end])
+            .collect();
+        let bookmarks = shown
+            .into_iter()
+            .zip(self.record_passages(translation, &passages).await?)
+            .map(|(b, passage)| BookmarkOut {
                 id: b.id,
-                passage: self
-                    .record_passage(
-                        translation,
-                        b.book_id,
-                        b.chapter,
-                        (b.verse_start, b.verse_end),
-                    )
-                    .await?,
+                passage,
                 created_at: b.created_at,
-            });
-        }
+            })
+            .collect();
         Ok(BookmarksOut {
             translation: translation.code.clone(),
             total,
@@ -1018,27 +1019,27 @@ impl Library {
             .transpose()
             .map_err(|e| anyhow!("{e}."))?;
         let (offset, limit) = page_of(args.offset, args.limit);
-        let all: Vec<_> = db::highlights::list_highlight_passages(&self.pool, translation.id)
-            .await?
-            .into_iter()
-            .filter(|h| color.is_none_or(|c| h.passage.color == c))
-            .collect();
+        // The passages alone, then the verses of only the page's.
+        let all: Vec<_> = db::highlights::group_into_passages(
+            &db::highlights::list_highlights(&self.pool).await?,
+        )
+        .into_iter()
+        .filter(|h| color.is_none_or(|c| h.color == c))
+        .collect();
         let total = all.len();
-        let mut highlights = Vec::new();
-        for found in page(all, offset, limit) {
-            let h = found.passage;
-            highlights.push(HighlightOut {
+        let shown: Vec<_> = page(all, offset, limit).collect();
+        let passages: Vec<[i64; 4]> = shown
+            .iter()
+            .map(|h| [h.book_id, h.chapter, h.verse_start, h.verse_end])
+            .collect();
+        let highlights = shown
+            .into_iter()
+            .zip(self.record_passages(translation, &passages).await?)
+            .map(|(h, passage)| HighlightOut {
                 color: h.color,
-                passage: self
-                    .record_passage(
-                        translation,
-                        h.book_id,
-                        h.chapter,
-                        (h.verse_start, h.verse_end),
-                    )
-                    .await?,
-            });
-        }
+                passage,
+            })
+            .collect();
         Ok(HighlightsOut {
             translation: translation.code.clone(),
             total,
@@ -1064,28 +1065,27 @@ impl Library {
             .filter(|n| {
                 needle
                     .as_deref()
-                    .is_none_or(|needle| n.body.to_lowercase().contains(needle))
+                    .is_none_or(|needle| contains_lowercased(&n.body, needle))
             })
             .collect();
         let total = all.len();
-        let mut notes = Vec::new();
-        for n in page(all, offset, limit) {
-            notes.push(NoteOut {
+        let shown: Vec<_> = page(all, offset, limit).collect();
+        let passages: Vec<[i64; 4]> = shown
+            .iter()
+            .map(|n| [n.book_id, n.chapter, n.verse_start, n.verse_end])
+            .collect();
+        let notes = shown
+            .into_iter()
+            .zip(self.record_passages(translation, &passages).await?)
+            .map(|(n, passage)| NoteOut {
                 id: n.id,
                 source: READER_NOTE,
-                passage: self
-                    .record_passage(
-                        translation,
-                        n.book_id,
-                        n.chapter,
-                        (n.verse_start, n.verse_end),
-                    )
-                    .await?,
+                passage,
                 body: n.body,
                 created_at: n.created_at,
                 updated_at: n.updated_at,
-            });
-        }
+            })
+            .collect();
         Ok(NotesOut {
             translation: translation.code.clone(),
             total,
@@ -1094,6 +1094,24 @@ impl Library {
             notes,
         })
     }
+}
+
+/// Whether `text`, lowercased, contains `needle` (lowercased already): what
+/// `text.to_lowercase().contains(needle)` says, without lowercasing a copy
+/// of `text` when it's all ASCII, as most notes are. Lowercasing ASCII
+/// leaves it ASCII, so it can't contain a needle that isn't.
+fn contains_lowercased(text: &str, needle: &str) -> bool {
+    if !text.is_ascii() {
+        return text.to_lowercase().contains(needle);
+    }
+    if needle.is_empty() {
+        return true;
+    }
+    needle.is_ascii()
+        && text
+            .as_bytes()
+            .windows(needle.len())
+            .any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
 /// An answer as a tool gives it: compact JSON.

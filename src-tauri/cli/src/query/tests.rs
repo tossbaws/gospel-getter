@@ -1200,6 +1200,265 @@ async fn list_findings_matches_a_request_exactly() {
     pool.close().await;
 }
 
+/// A record's passage as the list tools gave it before they read a page's
+/// verses in one query: that record's own `get_verse_range`, each verse's
+/// text as `VerseText` shows it.
+async fn passage_record_by_record(
+    pool: &Db,
+    translation: &Translation,
+    [book_id, chapter, verse_start, verse_end]: [i64; 4],
+) -> Value {
+    let books = db::get_all_books(pool.read()).await.expect("the books");
+    let book = &books
+        .iter()
+        .find(|b| b.id == book_id)
+        .expect("the book")
+        .name;
+    let verses: Vec<Value> = db::get_verse_range(
+        pool.read(),
+        translation.id,
+        book_id,
+        chapter,
+        verse_start,
+        verse_end,
+    )
+    .await
+    .expect("the verses")
+    .into_iter()
+    .map(|v| json!({"verse": v.verse, "text": VerseText::new(&translation.code, &v.text).text}))
+    .collect();
+    json!({
+        "reference": passage_reference(book, chapter, Some((verse_start, verse_end))),
+        "book": book,
+        "chapter": chapter,
+        "verse_start": verse_start,
+        "verse_end": verse_end,
+        "verses": verses,
+    })
+}
+
+/// The list tools' answers are what they were when each record's verses
+/// were read on their own: every translation, every page, filtered or not,
+/// with verses a translation doesn't number, KJV markup, and notes matched
+/// by `--contains` exactly as lowercasing each whole note matched them
+/// (letters whose lowercase isn't one letter, or isn't ASCII, included).
+#[tokio::test]
+async fn the_list_tools_answer_as_reading_each_record_on_its_own_did() {
+    let (db, pool) = fresh_database("cli_lists_batched").await;
+    for (book_id, chapter, verses) in [
+        (JOHN, 3, (16, 17)),
+        (ROMANS, 5, (8, 8)),
+        (40, 17, (20, 22)),
+        (PSALMS, 23, (1, 6)),
+        (1, 1, (1, 1)),
+    ] {
+        db::bookmarks::add_bookmark(pool.write(), book_id, chapter, verses.0, verses.1)
+            .await
+            .expect("add a bookmark");
+    }
+    for (book_id, chapter, verses, color) in [
+        (JOHN, 3, (5, 5), HighlightColor::Yellow),
+        (JOHN, 3, (6, 7), HighlightColor::Pink),
+        (JOHN, 3, (16, 17), HighlightColor::Pink),
+        (40, 17, (21, 21), HighlightColor::Blue),
+        (40, 18, (10, 12), HighlightColor::Green),
+        (PSALMS, 23, (4, 4), HighlightColor::Yellow),
+    ] {
+        db::highlights::set_highlights(pool.write(), book_id, chapter, verses.0, verses.1, color)
+            .await
+            .expect("set a highlight");
+    }
+    let bodies = [
+        "God so loved the world",
+        "LOVE is patient",
+        "\u{3a3}\u{39f}\u{3a6}\u{399}\u{391}\u{3a3} wisdom",
+        "\u{130}stanbul, love",
+        "the \u{212a}elvin sign",
+        "Stra\u{df}e",
+        "plain words",
+    ];
+    for (i, body) in (0_i64..).zip(bodies) {
+        add_note(&pool, JOHN, 3 + i, (1, 2 + i % 3), body).await;
+    }
+    add_note(&pool, 40, 17, (21, 21), "Matthew's missing verse").await;
+
+    let translations = db::get_all_translations(pool.read())
+        .await
+        .expect("translations");
+    assert!(translations.len() >= 3);
+    for translation in &translations {
+        let code = Some(translation.code.clone());
+        for (offset, limit) in [(None, None), (Some(1), Some(2)), (Some(4), Some(3))] {
+            let answer = ask(
+                &db,
+                Request::ListBookmarks(ListBookmarksArgs {
+                    translation: code.clone(),
+                    offset,
+                    limit,
+                }),
+            )
+            .await;
+            let all = db::bookmarks::list_bookmarks(pool.read(), translation.id)
+                .await
+                .expect("bookmarks");
+            assert_eq!(answer["total"], all.len());
+            let mut expected = Vec::new();
+            for found in page(all, offset.unwrap_or(0), limit.unwrap_or(100)) {
+                let b = found.bookmark;
+                let mut record = passage_record_by_record(
+                    &pool,
+                    translation,
+                    [b.book_id, b.chapter, b.verse_start, b.verse_end],
+                )
+                .await;
+                record["id"] = json!(b.id);
+                record["created_at"] = json!(b.created_at);
+                expected.push(record);
+            }
+            assert_eq!(answer["bookmarks"], json!(expected), "{}", translation.code);
+
+            for color in [None, Some("pink"), Some("Yellow")] {
+                let answer = ask(
+                    &db,
+                    Request::ListHighlights(ListHighlightsArgs {
+                        color: color.map(str::to_string),
+                        translation: code.clone(),
+                        offset,
+                        limit,
+                    }),
+                )
+                .await;
+                let all: Vec<_> =
+                    db::highlights::list_highlight_passages(pool.read(), translation.id)
+                        .await
+                        .expect("highlights")
+                        .into_iter()
+                        .filter(|h| {
+                            color.is_none_or(|c| h.passage.color.as_str() == c.to_lowercase())
+                        })
+                        .collect();
+                assert_eq!(answer["total"], all.len());
+                let mut expected = Vec::new();
+                for found in page(all, offset.unwrap_or(0), limit.unwrap_or(100)) {
+                    let h = found.passage;
+                    let mut record = passage_record_by_record(
+                        &pool,
+                        translation,
+                        [h.book_id, h.chapter, h.verse_start, h.verse_end],
+                    )
+                    .await;
+                    record["color"] = json!(h.color.as_str());
+                    expected.push(record);
+                }
+                assert_eq!(
+                    answer["highlights"],
+                    json!(expected),
+                    "{} {color:?}",
+                    translation.code
+                );
+            }
+
+            for contains in [
+                None,
+                Some("love"),
+                Some("LOVE"),
+                Some("\u{3c3}\u{3bf}\u{3c6}"),
+                Some("\u{3c3} wis"),
+                Some("\u{3c2} wis"),
+                Some("i\u{307}stanbul"),
+                Some("istanbul"),
+                Some("kelvin"),
+                Some("\u{212a}"),
+                Some("strasse"),
+                Some("stra\u{df}e"),
+                Some(""),
+            ] {
+                let answer = ask(
+                    &db,
+                    Request::ListNotes(ListNotesArgs {
+                        book: None,
+                        contains: contains.map(str::to_string),
+                        translation: code.clone(),
+                        offset,
+                        limit,
+                    }),
+                )
+                .await;
+                let all: Vec<_> = db::notes::list_notes(pool.read())
+                    .await
+                    .expect("notes")
+                    .into_iter()
+                    .filter(|n| {
+                        contains.is_none_or(|c| n.body.to_lowercase().contains(&c.to_lowercase()))
+                    })
+                    .collect();
+                assert_eq!(answer["total"], all.len(), "{contains:?}");
+                let mut expected = Vec::new();
+                for n in page(all, offset.unwrap_or(0), limit.unwrap_or(100)) {
+                    let mut record = passage_record_by_record(
+                        &pool,
+                        translation,
+                        [n.book_id, n.chapter, n.verse_start, n.verse_end],
+                    )
+                    .await;
+                    record["id"] = json!(n.id);
+                    record["source"] = json!("reader_note");
+                    record["body"] = json!(n.body);
+                    record["created_at"] = json!(n.created_at);
+                    record["updated_at"] = json!(n.updated_at);
+                    expected.push(record);
+                }
+                assert_eq!(
+                    answer["notes"],
+                    json!(expected),
+                    "{} {contains:?}",
+                    translation.code
+                );
+            }
+        }
+    }
+    pool.close().await;
+}
+
+/// `contains_lowercased` says what lowercasing the whole text says.
+#[test]
+fn contains_lowercased_is_lowercasing_the_whole_text() {
+    let texts = [
+        "God so loved the world",
+        "LOVE",
+        "",
+        "\u{3a3}\u{39f}\u{3a6}\u{399}\u{391}\u{3a3} wisdom",
+        "\u{130}stanbul",
+        "the \u{212a}elvin sign",
+        "Stra\u{df}e",
+    ];
+    let needles = [
+        "",
+        "love",
+        "o",
+        "god so",
+        "\u{3c3}",
+        "\u{3c2}",
+        "i\u{307}",
+        "i",
+        "k",
+        "kelvin",
+        "\u{df}",
+        "ss",
+        "world!",
+        "the kelvin",
+    ];
+    for text in texts {
+        for needle in needles {
+            assert_eq!(
+                contains_lowercased(text, needle),
+                text.to_lowercase().contains(needle),
+                "{text:?} {needle:?}"
+            );
+        }
+    }
+}
+
 /// The list limit: 100 unless asked, at most 500.
 #[test]
 fn a_list_page_is_capped() {

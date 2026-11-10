@@ -225,6 +225,21 @@ pub async fn list_bookmarks(
     .context("Failed to fetch bookmarks")
 }
 
+/// Every bookmark, newest first (as [`list_bookmarks`] orders them), as it's
+/// stored: no translation's text, for a caller that reads only some of
+/// their verses (a page of them, with [`verses_of_passages`]).
+///
+/// [`verses_of_passages`]: crate::db::queries::verses_of_passages
+pub async fn bookmarks_newest_first(pool: &SqlitePool) -> anyhow::Result<Vec<Bookmark>> {
+    sqlx::query_as::<_, Bookmark>(
+        "SELECT id, book_id, chapter, verse_start, verse_end, created_at FROM bookmarks \
+         ORDER BY created_at DESC, id DESC",
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to fetch bookmarks")
+}
+
 /// Remove a bookmark. Returns whether there was one to remove.
 pub async fn remove_bookmark(writer: &WritePool, id: i64) -> anyhow::Result<bool> {
     let result = sqlx::query("DELETE FROM bookmarks WHERE id = $1")
