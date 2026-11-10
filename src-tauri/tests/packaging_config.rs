@@ -13,6 +13,8 @@ const PKGBUILD: &str = include_str!("../../packaging/PKGBUILD");
 const LIB_RS: &str = include_str!("../src/lib.rs");
 const CAPABILITY: &str = include_str!("../capabilities/default.json");
 const DIST_YML: &str = include_str!("../../.github/workflows/dist.yml");
+const CI_YML: &str = include_str!("../../.github/workflows/ci.yml");
+const TRUNK_TOML: &str = include_str!("../../Trunk.toml");
 const INSTALL_SH: &str = include_str!("../../packaging/install.sh");
 const WINDOWS_PACKAGING: &str = include_str!("../../packaging/windows/README.md");
 const SIDECAR_CONF: &str = include_str!("../tauri.sidecar.conf.json");
@@ -1396,6 +1398,80 @@ fn the_msi_is_required_and_installed_and_removed() {
         !upload.text.contains("        if:"),
         "the MSI's upload is conditional: {upload:#?}"
     );
+}
+
+/// CI runs the doc tests (the `compile_fail` ones guard what the CLI's
+/// `FindingsWriter` can write) on Linux and Windows, and Clippy on the
+/// build every installer is, without features, as well as with them all
+/// (D-02). The page's crate is built, linted and tested from its lock file
+/// as committed (D-03): `--locked`, and Trunk's `locked`. The GUI checks'
+/// own crate is linted and unit-tested on both platforms (D-08).
+#[test]
+fn ci_runs_the_doc_tests_both_clippys_and_locked_builds() {
+    let ci = workflow_steps(CI_YML);
+    let runs = |job: &str, command: &str| {
+        ci.iter()
+            .any(|s| s.job == job && s.text.lines().any(|l| l.trim_end().ends_with(command)))
+    };
+    for job in ["build-and-test", "test-windows"] {
+        assert!(runs(job, "run: cargo test --doc"), "job {job}");
+        assert!(runs(job, "run: cargo test --all-targets"), "job {job}");
+    }
+    assert!(runs(
+        "build-and-test",
+        "run: cargo clippy --all-targets --all-features -- -D warnings"
+    ));
+    assert!(runs(
+        "build-and-test",
+        "run: cargo clippy --all-targets -- -D warnings"
+    ));
+
+    let mut ui_steps = 0;
+    for step in ci
+        .iter()
+        .filter(|s| s.text.contains("working-directory: ui-leptos"))
+    {
+        for line in step.text.lines().filter(|l| l.contains("cargo ")) {
+            ui_steps += 1;
+            assert!(
+                line.contains("cargo fmt") || line.contains(" --locked"),
+                "job {}: {line}",
+                step.job
+            );
+        }
+    }
+    assert!(ui_steps > 0);
+    let build: Vec<&str> = TRUNK_TOML
+        .lines()
+        .skip_while(|l| *l != "[build]")
+        .skip(1)
+        .take_while(|l| !l.starts_with('['))
+        .collect();
+    assert!(build.contains(&"locked = true"), "{build:#?}");
+    let conf: Value = serde_json::from_str(TAURI_CONF).unwrap();
+    for command in ["beforeDevCommand", "beforeBuildCommand"] {
+        // Plain Trunk, which reads Trunk.toml (and so builds locked).
+        let run = conf["build"][command].as_str().unwrap_or_default();
+        assert!(
+            run.starts_with("trunk build") && !run.contains("--config"),
+            "{command}: {run}"
+        );
+    }
+
+    let gui = |steps: &[Step], job: &str| {
+        let step = steps
+            .iter()
+            .find(|s| s.job == job && s.text.contains("working-directory: tests/gui"))
+            .unwrap_or_else(|| panic!("job {job} doesn't check tests/gui"));
+        assert!(
+            step.text
+                .contains("cargo clippy --locked --all-targets -- -D warnings\n")
+                && step.text.contains("cargo test --locked\n"),
+            "{step:#?}"
+        );
+    };
+    gui(&ci, "test-windows");
+    gui(&dist_steps(), "gui-linux");
 }
 
 /// The page asks Tauri for nothing but the app's own commands

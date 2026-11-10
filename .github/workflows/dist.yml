@@ -618,11 +618,14 @@ jobs:
       - name: Install tauri-driver
         run: cargo install tauri-driver --version 2.1.0 --locked
 
-      - name: Check formatting and lints (tests/gui)
+      # The checks' own crate: formatting, lints and its unit tests (ci.yml's
+      # test-windows does the same on Windows, for its Windows code).
+      - name: Check formatting and lints, and test (tests/gui)
         working-directory: tests/gui
         run: |
           cargo fmt -- --check
           cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
 
       - name: Download the AppImage
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0

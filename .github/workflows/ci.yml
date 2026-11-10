@@ -31,8 +31,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      # The release tools: the update manifest generator and the website's
-      # deploy gate (stdlib-only Python).
+      # The release tools: the update manifest generator, the installers'
+      # signer (dist.yml's sign job) and the website's deploy gate
+      # (stdlib-only Python).
       - name: Test the release tools
         working-directory: .
         env:
@@ -98,15 +99,16 @@ jobs:
 
       - name: Clippy (ui-leptos, no warnings allowed)
         working-directory: ui-leptos
-        run: cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings
+        run: cargo clippy --locked --target wasm32-unknown-unknown --all-targets -- -D warnings
 
       # The dialog's pure logic (words, numbers, the filter) is tested on
       # the host; the component itself is tested through the page, in
       # frontend-tests.
       - name: Test (ui-leptos)
         working-directory: ui-leptos
-        run: cargo test
+        run: cargo test --locked
 
+      # From ui-leptos/Cargo.lock as committed: Trunk.toml sets locked.
       - name: Build the page (Trunk)
         working-directory: .
         run: trunk build --release
@@ -121,6 +123,11 @@ jobs:
       - name: Clippy (no warnings allowed)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      # The build every installer is: no features (the run above has the
+      # GUI checks' gui-test-updater on).
+      - name: Clippy, default features (no warnings allowed)
+        run: cargo clippy --all-targets -- -D warnings
+
       # The doc comments' links and code spans resolve (no warnings).
       - name: Docs
         env:
@@ -132,6 +139,12 @@ jobs:
 
       - name: Test
         run: cargo test --all-targets
+
+      # The doc tests, which --all-targets leaves out: among them the
+      # compile_fail ones that keep the CLI's FindingsWriter from writing
+      # anything but findings.
+      - name: Doc tests
+        run: cargo test --doc
 
   # Behavior tests for ui/index.html and its Rust pieces (selection, copy,
   # bookmarks, search, compare, the notes export), run in jsdom against the
@@ -178,7 +191,8 @@ jobs:
             ui-leptos
 
       # What `npm test` builds before it runs the tests (`npm run build`),
-      # as steps of their own.
+      # as steps of their own. Trunk.toml has Trunk build from
+      # ui-leptos/Cargo.lock as committed.
       - name: Build the page (Trunk)
         run: trunk build --release
 
@@ -223,6 +237,8 @@ jobs:
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
           toolchain: stable
+          # Clippy for the GUI checks' crate (tests/gui) below.
+          components: clippy
           targets: wasm32-unknown-unknown
 
       # The app crate embeds the page Trunk builds into dist/, so the
@@ -238,7 +254,9 @@ jobs:
           workspaces: |
             src-tauri
             ui-leptos
+            tests/gui
 
+      # From ui-leptos/Cargo.lock as committed: Trunk.toml sets locked.
       - name: Build the page (Trunk)
         working-directory: .
         run: trunk build --release
@@ -250,3 +268,15 @@ jobs:
 
       - name: Test
         run: cargo test --all-targets
+
+      - name: Doc tests
+        run: cargo test --doc
+
+      # The GUI checks' own crate, with its Windows-only code (gui-launch's
+      # job object, the record of the apps it started): its lints and unit
+      # tests. The checks themselves run in dist.yml.
+      - name: Clippy and tests (tests/gui)
+        working-directory: tests/gui
+        run: |
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
