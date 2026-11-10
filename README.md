@@ -516,6 +516,11 @@ deals with grief so I can read them"*, and it can mark each verse it finds in
 Gospel Getter with `save_findings`, so you can go through them and read each
 one for yourself, and judge whether it got them right.
 
+- **Only when you ask.** Gospel Getter tells an agent to save findings only
+  when you ask it to save, note or mark verses. Ask it only to find or list
+  them, and it answers and can offer to save them. That's what its
+  instructions ask of the agent; the app can't check what you asked. What the
+  app does enforce is the setting below.
 - **Off until you turn it on.** In the app, choose **Aa**, then under **AI
   agents** turn on **Let AI agents save findings**. Until you do, the tool
   answers with how to turn it on, and saves nothing.
