@@ -423,15 +423,9 @@ async fn check_finding_passage(
                     .fetch_optional(&mut *conn)
                     .await
                     .context("Failed to look up book")?;
-            let last_verse: Option<i64> = sqlx::query_scalar(
-                "SELECT MAX(verse) FROM verses WHERE book_id = $1 AND chapter = $2",
-            )
-            .bind(book_id)
-            .bind(chapter)
-            .fetch_one(&mut *conn)
-            .await
-            .context("Failed to look up chapter length")?;
-            let limits = (chapter_count.unwrap_or(0), last_verse.unwrap_or(0));
+            let last_verse =
+                crate::db::queries::chapter_last_verse(&mut *conn, book_id, chapter).await?;
+            let limits = (chapter_count.unwrap_or(0), last_verse);
             checked.insert((book_id, chapter), limits);
             limits
         }

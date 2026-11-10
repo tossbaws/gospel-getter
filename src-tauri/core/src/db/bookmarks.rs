@@ -123,14 +123,7 @@ pub(crate) async fn check_passage(
         return Err(BookmarkError::NoSuchChapter { book_id, chapter });
     }
 
-    let last_verse: Option<i64> =
-        sqlx::query_scalar("SELECT MAX(verse) FROM verses WHERE book_id = $1 AND chapter = $2")
-            .bind(book_id)
-            .bind(chapter)
-            .fetch_one(&mut *conn)
-            .await
-            .context("Failed to look up chapter length")?;
-    let last_verse = last_verse.unwrap_or(0);
+    let last_verse = crate::db::queries::chapter_last_verse(&mut *conn, book_id, chapter).await?;
     if verse_end > last_verse {
         return Err(BookmarkError::NoSuchVerse {
             book_id,

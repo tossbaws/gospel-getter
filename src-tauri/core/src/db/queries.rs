@@ -41,13 +41,37 @@ pub async fn get_chapter_last_verse(
     book_id: i64,
     chapter: i64,
 ) -> anyhow::Result<i64> {
-    let last: Option<i64> =
-        sqlx::query_scalar("SELECT MAX(verse) FROM verses WHERE book_id = $1 AND chapter = $2")
-            .bind(book_id)
-            .bind(chapter)
-            .fetch_one(pool)
-            .await
-            .context("Failed to look up the chapter's last verse")?;
+    chapter_last_verse(pool, book_id, chapter).await
+}
+
+/// [`chapter_last_verse`]'s query: each translation's last verse in the
+/// chapter, then the highest of them. The verses' only index starts with
+/// the translation, so a query that leaves it out (`MAX(verse) WHERE
+/// book_id AND chapter`) walks every entry of every translation; asked per
+/// translation, each is one seek into that index.
+pub(crate) const CHAPTER_LAST_VERSE_SQL: &str = "SELECT MAX(( \
+         SELECT MAX(verse) FROM verses v \
+         WHERE v.translation_id = t.id AND v.book_id = $1 AND v.chapter = $2 \
+     )) FROM translations t";
+
+/// The highest verse number any translation has in one chapter (0 if none
+/// has the chapter), on any connection: the read pool, or the writing
+/// connection inside a transaction, which checks a passage before saving
+/// it.
+pub(crate) async fn chapter_last_verse<'e, E>(
+    executor: E,
+    book_id: i64,
+    chapter: i64,
+) -> anyhow::Result<i64>
+where
+    E: sqlx::SqliteExecutor<'e>,
+{
+    let last: Option<i64> = sqlx::query_scalar(CHAPTER_LAST_VERSE_SQL)
+        .bind(book_id)
+        .bind(chapter)
+        .fetch_one(executor)
+        .await
+        .context("Failed to look up the chapter's last verse")?;
     Ok(last.unwrap_or(0))
 }
 

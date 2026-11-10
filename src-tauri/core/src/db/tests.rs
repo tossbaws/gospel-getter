@@ -1752,3 +1752,61 @@ async fn an_older_app_opens_and_saves_a_database_with_a_place_in_it() {
         Some(place(WEB, 45, 8, None))
     );
 }
+
+/// A chapter's length is read with one seek into the verses' index per
+/// translation, never a walk through every translation's verses (the index
+/// starts with the translation), and it's still the highest verse any
+/// translation has there.
+#[tokio::test]
+async fn a_chapter_s_last_verse_is_one_index_seek_per_translation() {
+    use super::queries::{CHAPTER_LAST_VERSE_SQL, chapter_last_verse};
+    let (_db, pool) = prepared_database("chapter_last_verse").await;
+    let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "EXPLAIN QUERY PLAN {CHAPTER_LAST_VERSE_SQL}"
+    )))
+    .bind(43_i64)
+    .bind(3_i64)
+    .fetch_all(pool.read())
+    .await
+    .expect("explain the chapter's last verse");
+    let details: Vec<&str> = plan.iter().map(|(_, _, _, d)| d.as_str()).collect();
+    assert!(
+        details
+            .iter()
+            .any(|d| d.starts_with("SEARCH v USING COVERING INDEX")
+                && d.ends_with("(translation_id=? AND book_id=? AND chapter=?)")),
+        "{details:#?}"
+    );
+    assert!(
+        !details
+            .iter()
+            .any(|d| d.starts_with("SCAN v") || d.contains("SCAN verses")),
+        "{details:#?}"
+    );
+
+    // The same answer a walk through every verse gives, here and on the
+    // writing connection, and 0 for a chapter no translation has.
+    for (book_id, chapter) in [(1, 1), (19, 119), (43, 3), (65, 1), (66, 22), (65, 2)] {
+        let walked: Option<i64> =
+            sqlx::query_scalar("SELECT MAX(verse) FROM verses WHERE book_id = $1 AND chapter = $2")
+                .bind(book_id)
+                .bind(chapter)
+                .fetch_one(pool.read())
+                .await
+                .expect("walk the chapter");
+        let walked = walked.unwrap_or(0);
+        let read = chapter_last_verse(pool.read(), book_id, chapter)
+            .await
+            .expect("read the chapter's last verse");
+        let mut conn = pool.write().pool().acquire().await.expect("the writer");
+        let written = chapter_last_verse(&mut *conn, book_id, chapter)
+            .await
+            .expect("read it on the writer");
+        assert_eq!((read, written), (walked, walked), "{book_id} {chapter}");
+        assert_eq!(
+            read == 0,
+            (book_id, chapter) == (65, 2),
+            "{book_id} {chapter}"
+        );
+    }
+}
