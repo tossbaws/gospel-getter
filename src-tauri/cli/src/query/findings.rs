@@ -19,7 +19,7 @@ use gospel_getter_core::db::findings::{
     self, DEFAULT_AGENT, FindingsError, HOW_TO_TURN_ON, NOT_READY, normalize_agent,
     normalize_request,
 };
-use gospel_getter_core::db::{FindingsWriter, Passage};
+use gospel_getter_core::db::{self, FindingsWriter, Passage};
 use gospel_getter_core::passage_reference::passage_reference;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -35,7 +35,7 @@ const MAX_SAVE_REFERENCES: usize = MAX_BATCH_VERSES;
 pub const AI_FINDING: &str = "ai_finding";
 
 /// Arguments of `save_findings`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SaveFindingsArgs {
     /// The reader's topic in a few words, as they asked it: "grief" or "the sun". A short label: at most 60 characters, with no colon, semicolon, dash (— or –) or line break. The app shows it with each finding.
@@ -53,7 +53,7 @@ pub struct SaveFindingsArgs {
 }
 
 /// Arguments of `list_findings`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ListFindingsArgs {
     /// Only the findings for this request, exactly as it was saved: case
@@ -154,9 +154,14 @@ pub async fn save_findings(
     args: SaveFindingsArgs,
     client: Option<String>,
 ) -> anyhow::Result<SaveFindingsOut> {
-    let library = Library::open(database).await?;
-    let found = library.findings_to_save(&args).await;
-    library.close().await;
+    // Read once more if the app started meanwhile (see `query::run`).
+    let found = db::read_only_once_more_if_changed(database, || async {
+        let library = Library::open(database).await?;
+        let found = library.findings_to_save(&args).await;
+        library.close().await;
+        found
+    })
+    .await;
     let ToSave {
         request,
         translation,

@@ -271,9 +271,13 @@ pub(crate) fn beside(path: &Path, suffix: &str) -> PathBuf {
 /// its `-wal` and `-shm` files are there, and this reads through them, seeing
 /// everything committed. Once it has closed they're gone, and SQLite would
 /// create them again even for a read-only connection, so the file is opened as
-/// immutable instead, which needs neither. That's safe for a short read if the
-/// app starts meanwhile, since it writes to `-wal` first; so open a new
-/// connection for each read rather than keeping this one.
+/// immutable instead, which needs neither. An immutable read takes it that the
+/// file can't change while it reads. If the app starts meanwhile, it writes to
+/// `-wal` first, but it can fold that into the file itself (a checkpoint)
+/// before the read is over, and the read could then see some pages from
+/// before and some from after: so read through [`read_only_once_more_if_changed`],
+/// which reads again if the files changed, and open a new connection for each
+/// read rather than keeping this one.
 ///
 /// A `-wal` holding data with no `-shm` (a database copied without it, say)
 /// can't be read without creating one, and refuses.
@@ -302,6 +306,80 @@ pub async fn open_read_only(path: &Path) -> anyhow::Result<SqlitePool> {
         .connect_with(options)
         .await
         .with_context(|| format!("Failed to open {} read-only", path.display()))
+}
+
+/// The database file and the `-wal` and `-shm` beside it, as they were at one
+/// moment: whether each is there, and the size and time last changed of the
+/// first two. Taken before and after a read, it tells whether the files
+/// changed while it read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilesAsSeen {
+    database: Option<Stamp>,
+    wal: Option<Stamp>,
+    shm: bool,
+}
+
+/// A file's size and the time it last changed (if the platform has it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+impl Stamp {
+    fn of(path: &Path) -> Option<Self> {
+        std::fs::metadata(path).ok().map(|metadata| Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+        })
+    }
+}
+
+impl FilesAsSeen {
+    /// The database at `path` and the files beside it, as they are now.
+    pub fn now(path: &Path) -> Self {
+        Self {
+            database: Stamp::of(path),
+            wal: Stamp::of(&beside(path, "-wal")),
+            shm: beside(path, "-shm").exists(),
+        }
+    }
+
+    /// Whether [`open_read_only`] opens the database immutable, the files
+    /// being as these are: with no `-wal`, or an empty one and no `-shm`.
+    pub fn immutable(&self) -> bool {
+        self.wal.is_none_or(|wal| !self.shm && wal.len == 0)
+    }
+}
+
+/// Run `read`, which reads the database at `path` through [`open_read_only`]
+/// (opening it afresh each time it's run): once, and once more if that read
+/// may have seen a torn file. That's a read opened immutable (the app was
+/// closed) while the database or its `-wal` changed (the app started, and
+/// may have written into the file itself, see [`open_read_only`]): the files
+/// are looked at before and after it. By the second read the app has its
+/// `-wal` and `-shm`, and it reads through them, as any read of a running
+/// app's database does (or, if the app has closed again, the file has
+/// stopped changing). A read through the `-wal` and `-shm` sees only what's
+/// committed, however the app writes meanwhile, so it's never made twice.
+pub async fn read_only_once_more_if_changed<T, F, Fut>(
+    path: &Path,
+    mut read: F,
+) -> anyhow::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let seen = FilesAsSeen::now(path);
+    let first = read().await;
+    if !seen.immutable() || FilesAsSeen::now(path) == seen {
+        return first;
+    }
+    tracing::info!(
+        "{} changed while it was read without the app; reading it again",
+        path.display()
+    );
+    read().await
 }
 
 /// Starts a transaction that writes, on the writing connection once it's

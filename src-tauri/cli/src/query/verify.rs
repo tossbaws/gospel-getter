@@ -33,7 +33,7 @@ const PHRASE_STARTS: usize = 32;
 const SHOWN_CHARS: usize = 40;
 
 /// Arguments of `verify_quote`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VerifyQuoteArgs {
     /// The quotation. Compared character for character: only whitespace around the whole of it is trimmed.

@@ -58,7 +58,7 @@ const MAX_BATCH_VERSES: usize = 500;
 // the argument schema's descriptions.
 
 /// Arguments of `get_passage`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GetPassageArgs {
     /// A reference, as the app's Go to reads it: "John 3:16", "John 3:16-18" or "Psalm 23". Or several, separated by commas or semicolons: "John 3:16, 18; Rom 5:8".
@@ -69,7 +69,7 @@ pub struct GetPassageArgs {
 }
 
 /// Arguments of `get_passages`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GetPassagesArgs {
     /// References, each as the app's Go to reads it: at most 50, and at most 500 verses in all.
@@ -81,7 +81,7 @@ pub struct GetPassagesArgs {
 }
 
 /// Arguments of `search`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchArgs {
     /// Words a verse must have; words in double quotes must be side by side.
@@ -98,7 +98,7 @@ pub struct SearchArgs {
 }
 
 /// Arguments of `compare`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CompareArgs {
     /// A reference, as the app's Go to reads it: "John 3:16", "John 3:16-18" or "Psalm 23".
@@ -109,7 +109,7 @@ pub struct CompareArgs {
 }
 
 /// Arguments of `get_cross_references`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GetCrossReferencesArgs {
     /// A reference, as the app's Go to reads it: "John 3:16", "John 3:16-18" or "Psalm 23".
@@ -117,7 +117,7 @@ pub struct GetCrossReferencesArgs {
 }
 
 /// Arguments of `list_bookmarks`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ListBookmarksArgs {
     /// The translation to quote the verses in. Default: the one the reader last read.
@@ -132,7 +132,7 @@ pub struct ListBookmarksArgs {
 }
 
 /// Arguments of `list_highlights`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ListHighlightsArgs {
     /// Only this color: yellow, green, blue or pink.
@@ -150,7 +150,7 @@ pub struct ListHighlightsArgs {
 }
 
 /// Arguments of `list_notes`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ListNotesArgs {
     /// Only notes on this book, such as Philippians or Phil.
@@ -171,7 +171,7 @@ pub struct ListNotesArgs {
 }
 
 /// One question, from either front end.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Request {
     ListTranslations,
     GetPassage(GetPassageArgs),
@@ -458,14 +458,22 @@ pub struct NoteOut {
 
 // ---- Answering.
 
-/// Answer one question: open the database, read, and close it again. Saving
-/// findings opens it twice: to read and check everything, then to save.
+/// Answer one question: open the database, read, and close it again, and
+/// read once more if that read was of the closed app's database and the app
+/// started meanwhile (`db::read_only_once_more_if_changed`), when it may have
+/// seen the file half-written. Saving findings opens it twice: to read and
+/// check everything, then to save.
 pub async fn run(database: &Path, request: Request) -> anyhow::Result<Answer> {
     if let Request::SaveFindings { args, client } = request {
         return Ok(Answer::SavedFindings(
             save_findings(database, args, client).await?,
         ));
     }
+    db::read_only_once_more_if_changed(database, || answer_once(database, request.clone())).await
+}
+
+/// One read for `request`: open the install, answer, and close it.
+async fn answer_once(database: &Path, request: Request) -> anyhow::Result<Answer> {
     let library = Library::open(database).await?;
     let answer = library.answer(request).await;
     library.close().await;
