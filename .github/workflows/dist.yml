@@ -281,21 +281,21 @@ jobs:
           echo ".deb installed and removed cleanly"
 
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gospel-getter-linux-appimage
           path: ${{ steps.artifacts.outputs.appimage }}
           if-no-files-found: error
 
       - name: Upload deb artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gospel-getter-linux-deb
           path: ${{ steps.artifacts.outputs.deb }}
           if-no-files-found: error
 
       - name: Upload the CLI on its own
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gospel-getter-cli-linux-x86_64
           path: src-tauri/binaries/gospel-getter-cli-x86_64-unknown-linux-gnu
@@ -311,7 +311,7 @@ jobs:
           cp target/release/gospel_getter "$RUNNER_TEMP/gui-check-test-app/"
 
       - name: Upload the GUI-check test app
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gui-check-test-app-linux
           path: ${{ runner.temp }}/gui-check-test-app
@@ -538,21 +538,21 @@ jobs:
           Write-Host "MSI install/uninstall smoke test passed."
 
       - name: Upload NSIS installer artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gospel-getter-windows-nsis-installer
           path: ${{ steps.artifacts.outputs.nsis }}
           if-no-files-found: error
 
       - name: Upload MSI installer artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gospel-getter-windows-msi-installer
           path: ${{ steps.artifacts.outputs.msi }}
           if-no-files-found: error
 
       - name: Upload the CLI on its own
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gospel-getter-cli-windows-x86_64
           path: src-tauri/binaries/gospel-getter-cli-x86_64-pc-windows-msvc.exe
@@ -572,7 +572,7 @@ jobs:
 
       - name: Upload the GUI-check test app
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gui-check-test-app-windows
           path: ${{ runner.temp }}/gui-check-test-app
@@ -657,7 +657,7 @@ jobs:
 
       - name: Upload the results and screenshots
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gui-check-linux
           path: ${{ runner.temp }}/gui-check
@@ -797,7 +797,7 @@ jobs:
 
       - name: Upload the results and screenshots
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gui-check-windows
           path: ${{ runner.temp }}/gui-check
@@ -871,7 +871,7 @@ jobs:
       # re-run of this job replaces what a failed attempt uploaded, always
       # from the build's artifacts as they were.
       - name: Upload the signed AppImage
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gospel-getter-linux-appimage-signed
           path: installers/gospel-getter-linux-appimage/
@@ -879,7 +879,7 @@ jobs:
           overwrite: true
 
       - name: Upload the signed deb
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gospel-getter-linux-deb-signed
           path: installers/gospel-getter-linux-deb/
@@ -887,7 +887,7 @@ jobs:
           overwrite: true
 
       - name: Upload the signed NSIS installer
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gospel-getter-windows-nsis-installer-signed
           path: installers/gospel-getter-windows-nsis-installer/
@@ -895,7 +895,7 @@ jobs:
           overwrite: true
 
       - name: Upload the signed MSI installer
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gospel-getter-windows-msi-installer-signed
           path: installers/gospel-getter-windows-msi-installer/
