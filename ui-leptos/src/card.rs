@@ -583,6 +583,7 @@ fn render_selection() {
         s.show_all_notes = false;
     });
     els.notes.remove();
+    crate::note_copy::show_in_card(&[]);
     let Some(last) = last else {
         close_preview(false);
         let verse = with(|s| s.card_verse.take());
@@ -1672,6 +1673,7 @@ fn render_notes_section() {
     let Some((reference, notes, error, show_all)) = shown.filter(|_| els.actions.is_connected())
     else {
         els.notes.remove();
+        crate::note_copy::show_in_card(&[]);
         place_card();
         return;
     };
@@ -1681,11 +1683,13 @@ fn render_notes_section() {
         .set_attribute("aria-label", &format!("Notes for {reference}"));
     els.notes
         .set_inner_html(&text::notes_html(&notes, &error, show_all));
-    // Copy as Markdown writes within its click: each note's Markdown is
-    // asked for now.
-    for note in &notes {
-        crate::note_copy::prefetch(note.id, &note.body);
-    }
+    // Copy as Markdown writes within its click or key press: the Markdown
+    // of each note shown is asked for now, and kept while it's shown.
+    let shown: Vec<crate::note_copy::Copyable> = text::notes_shown(&notes, show_all)
+        .iter()
+        .map(Into::into)
+        .collect();
+    crate::note_copy::show_in_card(&shown);
     let _ = els.xrefs.before_with_node_1(&els.notes);
     // "more" only where the text is cut short.
     for body in query_all(&els.notes, ".note-card-body[id]") {
@@ -2573,14 +2577,9 @@ pub fn ask(ask: Ask) -> bool {
                 return false;
             };
             let attempt = with(State::attempt);
-            crate::note_copy::copy(
-                note.id,
-                note.reference,
-                &note.body,
-                move |message, is_error| {
-                    status_for(attempt, message, is_error);
-                },
-            );
+            crate::note_copy::copy(&(&note).into(), note.reference, move |message, is_error| {
+                status_for(attempt, message, is_error);
+            });
             true
         }
         Ask::ShowAll => {

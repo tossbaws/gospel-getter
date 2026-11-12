@@ -702,6 +702,8 @@ impl Editor {
                 }
             };
             self.forget_draft(session.id, &session.draft_key);
+            // Its id may be the next note's (SQLite's row ids).
+            crate::note_copy::forget(id);
             card::refresh_notes().await;
             if self.same_session(session.id) {
                 self.close();
