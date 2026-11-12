@@ -611,7 +611,7 @@ async fn search_rowids(
          JOIN verses v ON v.translation_id = $6 \
              AND v.book_id = page.id / $7 % 100 \
              AND v.chapter = page.id / $8 % 1000 \
-             AND v.verse = page.id % $8 \
+             AND v.verse = page.id % $8 AND v.text <> '' \
          ORDER BY page.id",
     )
     .bind(&expression)

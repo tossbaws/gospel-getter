@@ -279,6 +279,16 @@ pub fn preview_failed(reference: &str, failure: &str) -> String {
     format!("Couldn't read {reference}: {failure}")
 }
 
+/// The notes the Notes section shows: the first [`NOTES_SHOWN`], or all
+/// of them with `show_all`.
+pub fn notes_shown(notes: &[SelectionNote], show_all: bool) -> &[SelectionNote] {
+    if show_all {
+        notes
+    } else {
+        &notes[..notes.len().min(NOTES_SHOWN)]
+    }
+}
+
 /// The selection's Notes section: up to [`NOTES_SHOWN`] notes (all of
 /// them with `show_all`), each its text as Markdown (`note_markdown`,
 /// the references in it links to their passages) with its "more" (shown
@@ -291,11 +301,7 @@ pub fn notes_html(notes: &[SelectionNote], error: &str, show_all: bool) -> Strin
             escape_html(error)
         );
     }
-    let shown = if show_all {
-        notes
-    } else {
-        &notes[..notes.len().min(NOTES_SHOWN)]
-    };
+    let shown = notes_shown(notes, show_all);
     let (s24, s28, s32) = (" ".repeat(24), " ".repeat(28), " ".repeat(32));
     let cards: String = shown
         .iter()

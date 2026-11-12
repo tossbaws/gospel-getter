@@ -176,14 +176,22 @@ pub async fn stored_notes<'c>(
 }
 
 /// The highest verse number any installed translation has, per
-/// `(book, chapter)` — the limit a bookmark's range is checked against.
+/// `(book, chapter)`, or that the bundled data had there before a step took
+/// it away (`seed::RETIRED_VERSES`) — the limit a bookmark's range is
+/// checked against.
 pub async fn last_verses(pool: &SqlitePool) -> anyhow::Result<HashMap<(i64, i64), i64>> {
     let rows: Vec<(i64, i64, i64)> =
         sqlx::query_as("SELECT book_id, chapter, MAX(verse) FROM verses GROUP BY book_id, chapter")
             .fetch_all(pool)
             .await
             .context("Failed to read chapter lengths")?;
-    Ok(rows.into_iter().map(|(b, c, v)| ((b, c), v)).collect())
+    let mut last: HashMap<(i64, i64), i64> =
+        rows.into_iter().map(|(b, c, v)| ((b, c), v)).collect();
+    for (book, chapter, verse) in crate::db::seed::RETIRED_VERSES {
+        let at = last.entry((book, chapter)).or_default();
+        *at = (*at).max(verse);
+    }
+    Ok(last)
 }
 
 /// The current time in the database's timestamp format.

@@ -95,8 +95,10 @@ pub const FILE_SUFFIX: &str = ".gospel-getter.json";
 ///   and the AI findings switch, `false` being longer than `true`) takes
 ///   614 bytes.
 ///
-/// A highlight is one verse, and the bundled translations number 31,109
-/// verses between them, so at most 7,186,179 bytes of highlights. With
+/// A highlight is one verse, and a record can be on 31,109 (the 31,105 the
+/// bundled translations number between them, and the 4 the KJV numbered
+/// until 2.29.2, `seed::RETIRED_VERSES`), so at most 7,186,179 bytes of
+/// highlights. With
 /// every verse highlighted, the notes at both their limits and the AI
 /// findings at theirs, a file of 50,000 bookmarks is 126,206,793 bytes
 /// (120.4 MiB), and one of 92,611 fits. Without notes, every bookmark there
@@ -1741,7 +1743,8 @@ mod tests {
         assert_eq!(findings, 7_080_000);
 
         // The verses a highlight or bookmark can be on: in each chapter,
-        // up to the last any bundled translation numbers.
+        // up to the last any bundled translation numbers, or the bundled
+        // data numbered before a step took it away (the KJV's four, 2.29.2).
         let mut last_verses: HashMap<(usize, usize), usize> = HashMap::new();
         let mut count = |book: usize, chapter: usize, verses: usize| {
             let last = last_verses.entry((book, chapter)).or_default();
@@ -1758,6 +1761,10 @@ mod tests {
             for (c, verses) in book.chapters.iter().enumerate() {
                 count(b, c, verses.len());
             }
+        }
+        for (b, c, v) in crate::db::seed::RETIRED_VERSES {
+            let n = |n: i64| usize::try_from(n).unwrap();
+            count(n(b) - 1, n(c) - 1, n(v));
         }
         let verses: usize = last_verses.values().sum();
         let ranges: usize = last_verses.values().map(|n| n * (n + 1) / 2).sum();

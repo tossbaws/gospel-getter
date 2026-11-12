@@ -19,8 +19,8 @@ pub mod seed;
 
 pub use bookmarks::{Bookmark, BookmarkError, BookmarkInTranslation};
 pub use connect::{
-    APP_IDENTIFIER, BUSY_TIMEOUT, DATABASE_FILE, Db, WRITE_QUEUE_TIMEOUT, WritePool, begin_write,
-    create_pool, create_private_dir, open_read_only,
+    APP_IDENTIFIER, BUSY_TIMEOUT, DATABASE_FILE, Db, FilesAsSeen, WRITE_QUEUE_TIMEOUT, WritePool,
+    begin_write, create_pool, create_private_dir, open_read_only, read_only_once_more_if_changed,
 };
 pub use findings::{
     Finding, FindingRequest, FindingsError, FindingsWriter, KeepError, NewFinding, SavedFindings,

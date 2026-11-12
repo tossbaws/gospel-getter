@@ -451,6 +451,10 @@ pub struct Note {
     pub verse_end: i64,
     pub reference: String,
     pub body: String,
+    /// When it was written, as the backend stores it: with its passage,
+    /// what tells it from a note given its id after it was deleted
+    /// (`note_copy`).
+    pub created_at: String,
     /// The references typed in it, which its text shows as links.
     #[serde(default)]
     pub links: Vec<NoteLink>,

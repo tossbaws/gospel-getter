@@ -190,18 +190,20 @@ pub async fn add_bookmark(
 /// translation doesn't number it) and `complete` (whether it numbers every
 /// verse of the range: counted, as a translation can leave out a verse in
 /// mid-chapter, as the BSB does Matthew 17:21), from the verses
-/// `passage_preview_sql!(joins)` joins in.
+/// `passage_preview_sql!(joins)` joins in. A row with no text is a verse it
+/// doesn't number, as everywhere verses are read (see `db::queries`).
 macro_rules! passage_preview_sql {
     (columns) => {
         "first.text AS first_verse_text, \
          ((SELECT COUNT(*) FROM verses v WHERE v.translation_id = $1 \
              AND v.book_id = p.book_id AND v.chapter = p.chapter \
-             AND v.verse BETWEEN p.verse_start AND p.verse_end) \
+             AND v.verse BETWEEN p.verse_start AND p.verse_end AND v.text <> '') \
           = p.verse_end - p.verse_start + 1) AS complete"
     };
     (joins) => {
         "LEFT JOIN verses first ON first.translation_id = $1 AND first.book_id = p.book_id \
-             AND first.chapter = p.chapter AND first.verse = p.verse_start"
+             AND first.chapter = p.chapter AND first.verse = p.verse_start \
+             AND first.text <> ''"
     };
 }
 pub(crate) use passage_preview_sql;

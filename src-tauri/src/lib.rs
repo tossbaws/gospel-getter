@@ -76,7 +76,15 @@ pub fn run() {
         .manage(updater::PendingUpdate::default())
         .setup(move |app| {
             open_log_file(app, &log);
-            setup_app(app).map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })
+            // A failure is logged whole, with every cause under it, and told
+            // in a native message, which quits the app with code 1 when it's
+            // closed. Handed to Tauri, it would panic with its outer words
+            // alone, and log nothing.
+            if let Err(e) = setup_app(app) {
+                tracing::error!("Gospel Getter couldn't start: {e:#}");
+                tell_start_failed(app, log.path().as_deref(), &e);
+            }
+            Ok(())
         })
         .invoke_handler(invoke_handler())
         .run(app_context())
@@ -226,17 +234,45 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The title of the native message that says the app couldn't start.
+const START_FAILED_TITLE: &str = "Gospel Getter couldn't start";
+
 /// What the reader is told when the earlier Gospel Getter's database
 /// couldn't be brought over, so the app hasn't started: there's no window
 /// yet, so it's a native message, and the app quits when it's closed.
 fn tell_migration_failed(app: &tauri::App, legacy_db_path: &std::path::Path, e: &anyhow::Error) {
+    tell_and_quit(app, migration_failed_message(legacy_db_path, e));
+}
+
+/// What the reader is told when anything else stopped the app starting
+/// (`setup_app` failed): a native message, as for a failed migration, and
+/// the app quits with code 1 when it's closed.
+fn tell_start_failed(app: &tauri::App, log: Option<&std::path::Path>, e: &anyhow::Error) {
+    tell_and_quit(app, start_failed_message(log, e));
+}
+
+/// Show `message` as a native error, titled [`START_FAILED_TITLE`] (there's
+/// no window), and quit with code 1 once it's closed.
+fn tell_and_quit(app: &tauri::App, message: String) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
     let handle = app.handle().clone();
     app.dialog()
-        .message(migration_failed_message(legacy_db_path, e))
-        .title("Gospel Getter couldn't start")
+        .message(message)
+        .title(START_FAILED_TITLE)
         .kind(MessageDialogKind::Error)
         .show(move |_| handle.exit(1));
+}
+
+/// The words of [`tell_start_failed`]: that it couldn't start, what went
+/// wrong (the error and every cause under it, which name only the app's own
+/// steps and files, never anything of the reader's), and where the log is
+/// (`log`, if one could be kept).
+fn start_failed_message(log: Option<&std::path::Path>, e: &anyhow::Error) -> String {
+    let log = match log {
+        Some(path) => format!("The log has this too: {}", path.display()),
+        None => "No log file could be kept, so this message is all there is to go on.".to_string(),
+    };
+    format!("Gospel Getter couldn't start.\n\nWhat went wrong: {e:#}\n\n{log}")
 }
 
 /// The words of [`tell_migration_failed`].
@@ -334,6 +370,36 @@ mod migration_tests {
         ] {
             assert!(message.contains(part), "{part:?} in {message:?}");
         }
+    }
+
+    /// Any other failure to start says so in plain words, with what went
+    /// wrong down to its root cause, and where the log is; nothing else, so
+    /// nothing of the reader's (only the error's own words, which name the
+    /// app's steps and files).
+    #[test]
+    fn a_failed_start_says_what_went_wrong_and_where_the_log_is() {
+        let root = std::io::Error::other("(code: 14) unable to open database file");
+        let e = anyhow::Error::new(root)
+            .context("Failed to connect to database at /home/reader/data/gospel_getter.db")
+            .context("Failed to initialize application state");
+        let log = std::path::Path::new("/home/reader/data/logs/gospel-getter.log");
+        assert_eq!(
+            super::start_failed_message(Some(log), &e),
+            "Gospel Getter couldn't start.\n\nWhat went wrong: Failed to initialize application \
+             state: Failed to connect to database at /home/reader/data/gospel_getter.db: (code: \
+             14) unable to open database file\n\nThe log has this too: \
+             /home/reader/data/logs/gospel-getter.log"
+        );
+        let unlogged = super::start_failed_message(None, &e);
+        assert!(
+            unlogged.contains("unable to open database file"),
+            "{unlogged}"
+        );
+        assert!(
+            unlogged
+                .ends_with("No log file could be kept, so this message is all there is to go on."),
+            "{unlogged}"
+        );
     }
 }
 

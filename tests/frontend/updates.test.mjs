@@ -604,3 +604,37 @@ test('Check now during an install from the banner leaves the banner and its prog
         assert.equal(aboutUpdate(app).hidden, true, 'About doesn’t offer it a second time');
         assert.equal(app.calls.filter((c) => c.cmd === 'install_update').length, 1);
     }));
+
+// D2-03: the launch check finishing while Check now's check is still on
+// its way leaves Check now disabled: one check at a time, whichever
+// finishes first. Once both are done, it can be pressed again.
+test('D2-03: the launch check finishing during Check now’s check leaves Check now disabled; only one Check now runs', () =>
+    withApp({ hold: ['check_for_update'] }, async (app) => {
+        assert.equal(checks(app), 1, 'the launch check, held');
+        app.open('about');
+        const button = $(app, 'update-check-btn');
+        // Check now's own check is held apart from the launch check.
+        const releaseManual = app.holdCommand('check_for_update');
+        app.click(button);
+        assert.equal(button.disabled, true, 'one check at a time');
+        await app.until(() => checks(app) === 2, 'Check now’s check');
+        const [launch, manual] = app.calls.filter((c) => c.cmd === 'check_for_update');
+
+        // The launch check finishes (no update), Check now's still running.
+        app.release('check_for_update');
+        await app.until(() => launch.done, 'the launch check');
+        await new Promise((r) => setTimeout(r, 20));
+        assert.equal(manual.done, false);
+        assert.equal(button.disabled, true, 'still disabled while Check now’s check runs');
+        assert.equal(checkStatus(app).textContent, 'Checking for updates…');
+        // A press on it does nothing, as on any disabled button.
+        if (!button.disabled) app.click(button);
+        assert.equal(checks(app), 2, 'no second Check now');
+
+        releaseManual();
+        await app.until(() => manual.done, 'Check now’s check');
+        await app.idle(0);
+        assert.equal(checkStatus(app).textContent, `Gospel Getter ${VERSION} is the latest version.`);
+        assert.equal(button.disabled, false, 'Check now can be pressed again');
+        assert.equal(checks(app), 2);
+    }));
