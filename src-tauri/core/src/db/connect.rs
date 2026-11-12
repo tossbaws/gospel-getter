@@ -66,6 +66,20 @@ impl Db {
         self.write.0.close().await;
         self.read.close().await;
     }
+
+    /// Fold the write-ahead log into the database file and empty it
+    /// (`PRAGMA wal_checkpoint(TRUNCATE)`), on the writing connection, in
+    /// its turn, so the file alone holds everything committed. Every
+    /// connection stays open, and the app carries on as before. `false` if a
+    /// read still under way kept part of the log from being folded in (it
+    /// is the next time).
+    pub async fn checkpoint(&self) -> anyhow::Result<bool> {
+        let (busy, _, _): (i64, i64, i64) = sqlx::query_as("PRAGMA wal_checkpoint(TRUNCATE)")
+            .fetch_one(&self.write.0)
+            .await
+            .context("Failed to fold the write-ahead log into the database")?;
+        Ok(busy == 0)
+    }
 }
 
 /// The one connection the app writes with, as a pool of one: callers
