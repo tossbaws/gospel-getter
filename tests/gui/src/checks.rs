@@ -41,7 +41,9 @@
 //! left at the top (59, `place`), a second session, which quits with a
 //! note being typed, offered back as a draft when the app is started once
 //! more (65, `notes`); and, in a last session on the GUI checks' test
-//! build, the updater (9 to 13, `updates`).
+//! build, the updater (9 to 13, `updates`). Before any of it, with no
+//! session, the app started on a database it can't open, saying why in a
+//! native message and its log, and exiting with code 1 (74, `startup`).
 
 mod beside;
 mod card;
@@ -58,6 +60,7 @@ mod picker;
 mod place;
 mod reader;
 mod search;
+mod startup;
 mod surfaces;
 mod updates;
 
@@ -213,6 +216,11 @@ pub async fn run(config: &Config, report: &mut Report) {
     if let Err(e) = &server {
         log_line(started, &format!("no updater checks: {e:#}"));
     }
+
+    // A start-up that fails (74), first: no other app is running yet for it
+    // to hand over to, and it never has a window, so no session.
+    let failed_start = startup::startup_failure(config, started).await;
+    report.record(Check::StartupFailure, failed_start).await;
 
     let (looks, saved, left_at) = shipped(config, report, started).await;
     display::restart(config, report, started, looks, saved, left_at).await;

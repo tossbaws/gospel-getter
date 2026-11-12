@@ -165,8 +165,8 @@ export async function backend(cmd, args = {}, channels = {}) {
  * { problem } or { noAnswer: true } (given up on after the app's own time
  * limit, which `checkTimeoutMs` shortens); `install` is { events, problem }
  * (no problem: it restarts, and never answers). Problems are the app's:
- * offline, noReleaseInfo, notForThisInstall, notVerified, notAuthorized,
- * other.
+ * offline, noReleaseInfo, notForThisInstall, notVerified,
+ * packageNotInstalled, installerDidntStart, other.
  */
 export function setUpdate(script) {
     return backend('__set_update', script);

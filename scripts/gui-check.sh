@@ -46,7 +46,10 @@
 # and the Library's Notes tab without a button), 72 (Aa's Single-key
 # shortcuts off: G and / do nothing, Ctrl+K still opens the palette, and the
 # shortcuts sheet says so) and 73 (the app started again while it's open:
-# the second launch hands over and exits) run on the app given; for 58 (a
+# the second launch hands over and exits) run on the app given, as does 74
+# first, with no session (the app started on a data folder of its own whose
+# database is a folder: its native "couldn't start" message, the root cause
+# in its log, exit code 1; Linux only, a SKIP on Windows); for 58 (a
 # cold start to the saved chapter), 59 (at the verse the reader was at), 26 and 45 it is
 # closed and started again on the same data, and for 65 (a note being typed
 # as the app quits, offered back as a draft) once more. The updater's checks (9 to 13) run on

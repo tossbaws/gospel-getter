@@ -15,13 +15,14 @@ use super::notes::{
 };
 use super::search::{SEARCH_CONTENT_VERSION, search_verses};
 use super::test_support::{
-    TempDb, bundled, bundled_bsb, fill_notes, fresh_database, other_tables_snapshot,
-    prepared_database, table_names, verses_snapshot, write_v2_1_0_database,
+    TempDb, WEB_UNNUMBERED, as_2_29_0_left_it, bundled, bundled_bsb, empty_web_verses, fill_notes,
+    fresh_database, indexed_web_unnumbered, other_tables_snapshot, prepared_database, table_names,
+    verses_snapshot, web_index_count, write_v2_1_0_database,
 };
 use super::{
-    BookmarkError, Db, HighlightColor, NoteBodyError, NoteError, ReadingPlace, TopVerse,
-    ensure_search_index, get_reading_place, migrate, prepare, save_reading_position,
-    save_reading_position_at,
+    BookmarkError, Db, HighlightColor, NoteBodyError, NoteError, ReadingPlace, TopVerse, Verse,
+    ensure_search_index, get_chapter_verses, get_reading_place, get_verse_range, migrate, prepare,
+    save_reading_position, save_reading_position_at, verses_of_passages,
 };
 use crate::domain::kjv_markup::VerseText;
 use crate::domain::query::{SearchQuery, search_query, term_marks};
@@ -251,17 +252,6 @@ async fn user_version(pool: &sqlx::SqlitePool) -> i64 {
         .unwrap()
 }
 
-/// The verses the WEB's file has with no text, which the WEB doesn't
-/// number: Luke 17:36, Acts 8:37, 15:34, 24:7 and Romans 16:25, as
-/// (book, chapter, verse).
-const WEB_UNNUMBERED: [(i64, i64, i64); 5] = [
-    (42, 17, 36),
-    (44, 8, 37),
-    (44, 15, 34),
-    (44, 24, 7),
-    (45, 16, 25),
-];
-
 /// [`WEB_UNNUMBERED`] as (translation, book, chapter, verse).
 fn web_unnumbered() -> Vec<(i64, i64, i64, i64)> {
     WEB_UNNUMBERED
@@ -280,98 +270,8 @@ async fn data_versions(pool: &sqlx::SqlitePool) -> Vec<(i64, i64)> {
     .unwrap()
 }
 
-/// The search index's rowid of a WEB verse (`db::search`'s encoding).
-fn web_rowid((book, chapter, verse): (i64, i64, i64)) -> i64 {
-    WEB * 100_000_000 + book * 1_000_000 + chapter * 1_000 + verse
-}
-
 /// No verses, as [`empty_web_verses`] lists them.
 const NONE: Vec<(i64, i64, i64)> = Vec::new();
-
-/// The WEB's rows (book, chapter, verse) with no text.
-async fn empty_web_verses(pool: &sqlx::SqlitePool) -> Vec<(i64, i64, i64)> {
-    sqlx::query_as(
-        "SELECT book_id, chapter, verse FROM verses WHERE translation_id = $1 AND text = '' \
-         ORDER BY book_id, chapter, verse",
-    )
-    .bind(WEB)
-    .fetch_all(pool)
-    .await
-    .unwrap()
-}
-
-/// How many of the WEB's verses with no text the search index has a row for.
-async fn indexed_web_unnumbered(pool: &sqlx::SqlitePool) -> i64 {
-    let mut indexed = 0;
-    for verse in WEB_UNNUMBERED {
-        let found: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM verse_search WHERE rowid = $1")
-            .bind(web_rowid(verse))
-            .fetch_one(pool)
-            .await
-            .unwrap();
-        indexed += found;
-    }
-    indexed
-}
-
-/// The WEB's recorded search index count.
-async fn web_index_count(pool: &sqlx::SqlitePool) -> Option<i64> {
-    sqlx::query_scalar("SELECT verse_count FROM search_index_state WHERE translation_id = $1")
-        .bind(WEB)
-        .fetch_optional(pool)
-        .await
-        .unwrap()
-}
-
-/// Make a database `fresh_database` prepared and indexed what 2.29.0 left
-/// as it closed: no data versions recorded (2.29.0 had none), and the WEB's
-/// five verses with no text stored as empty verses, indexed and counted
-/// like every other, as 2.29.0's seed and index build left them.
-async fn as_2_29_0_left_it(pool: &Db) {
-    sqlx::query("DROP TABLE IF EXISTS translation_data_version")
-        .execute(pool.write().pool())
-        .await
-        .unwrap();
-    for verse @ (book, chapter, number) in WEB_UNNUMBERED {
-        sqlx::query(
-            "INSERT OR IGNORE INTO verses (translation_id, book_id, chapter, verse, text) \
-             VALUES ($1, $2, $3, $4, '')",
-        )
-        .bind(WEB)
-        .bind(book)
-        .bind(chapter)
-        .bind(number)
-        .execute(pool.write().pool())
-        .await
-        .unwrap();
-        let mut tx = super::begin_write(pool.write()).await.unwrap();
-        sqlx::query("DELETE FROM verse_search WHERE rowid = $1")
-            .bind(web_rowid(verse))
-            .execute(&mut *tx)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO verse_search (rowid, text) VALUES ($1, '')")
-            .bind(web_rowid(verse))
-            .execute(&mut *tx)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
-    }
-    sqlx::query(
-        "UPDATE search_index_state SET verse_count = \
-         (SELECT COUNT(*) FROM verses WHERE translation_id = $1) WHERE translation_id = $1",
-    )
-    .bind(WEB)
-    .execute(pool.write().pool())
-    .await
-    .unwrap();
-
-    // As 2.29.0 left it: those five stored and indexed, the index complete.
-    assert_eq!(empty_web_verses(pool.read()).await, WEB_UNNUMBERED);
-    assert_eq!(indexed_web_unnumbered(pool.read()).await, 5);
-    assert_eq!(web_index_count(pool.read()).await, Some(31_103));
-    assert_eq!(ensure_search_index(pool).await.unwrap(), Vec::<i64>::new());
-}
 
 /// Every row of the reader's own tables, each as its columns' SQL literals.
 async fn readers_tables(pool: &sqlx::SqlitePool) -> Vec<String> {
@@ -569,6 +469,60 @@ async fn upgrading_from_2_29_0_takes_out_the_webs_empty_verses_once() {
     prepare(pool.write()).await.unwrap();
     assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
     assert_same_database(&pool, &snapshot.path()).await;
+}
+
+/// Until the upgrade step has run (a database the 2.29.1 app hasn't opened
+/// yet, or one whose step failed), the WEB's five verses are stored with no
+/// text, and every read of verses leaves them out, as it leaves out a verse
+/// with no row: a chapter, a range, passages, and a bookmark's or
+/// highlighted passage's preview, which neither quotes one nor counts it
+/// as numbered. Reading changes nothing: the rows are as they were.
+#[tokio::test]
+async fn reads_leave_out_a_verse_stored_with_no_text() {
+    let (_db, pool) = fresh_database("web_unnumbered_reads").await;
+    as_2_29_0_left_it(&pool).await;
+    add_bookmark(pool.write(), 42, 17, 36, 36).await.unwrap();
+    set_highlights(pool.write(), 42, 17, 35, 37, HighlightColor::Green)
+        .await
+        .unwrap();
+    let before = verses_snapshot(pool.read()).await;
+    let numbers = |verses: &[Verse]| verses.iter().map(|v| v.verse).collect::<Vec<_>>();
+
+    let chapter = numbers(&get_chapter_verses(pool.read(), WEB, 42, 17).await.unwrap());
+    assert!(!chapter.contains(&36), "{chapter:?}");
+    assert!(
+        chapter.contains(&35) && chapter.contains(&37),
+        "{chapter:?}"
+    );
+    let range = get_verse_range(pool.read(), WEB, 42, 17, 35, 37)
+        .await
+        .unwrap();
+    assert_eq!(numbers(&range), [35, 37]);
+    let passages = verses_of_passages(pool.read(), WEB, &[[42, 17, 35, 37], [44, 8, 37, 37]])
+        .await
+        .unwrap();
+    assert_eq!(
+        passages.iter().map(|p| numbers(p)).collect::<Vec<_>>(),
+        [vec![35, 37], vec![]]
+    );
+
+    let bookmark = &list_bookmarks(pool.read(), WEB).await.unwrap()[0];
+    assert_eq!(
+        (bookmark.first_verse_text.as_deref(), bookmark.complete),
+        (None, false)
+    );
+    let highlighted = &list_highlight_passages(pool.read(), WEB).await.unwrap()[0];
+    assert!(highlighted.first_verse_text.is_some());
+    assert!(!highlighted.complete, "verse 36 isn't numbered");
+    // The KJV numbers all three.
+    let highlighted = &list_highlight_passages(pool.read(), KJV).await.unwrap()[0];
+    assert!(highlighted.complete);
+
+    assert_eq!(empty_web_verses(pool.read()).await, WEB_UNNUMBERED);
+    assert!(
+        verses_snapshot(pool.read()).await == before,
+        "no verse changed"
+    );
 }
 
 /// An upgrade that fails part-way leaves everything as it was, the five

@@ -518,7 +518,10 @@ for an agent quoting scripture or finding every place on a topic:
   character for character (quotes up to 10,000 characters): `exact`,
   `exact_part`, `differs`, `elsewhere` or `not_found`, with the first difference
   and the true reference if a phrase search finds it; where two characters only
-  look alike (a no-break space, a curly apostrophe), it says so.
+  look alike (a no-break space, a curly apostrophe), it says so. Given a
+  reference with verses the translation doesn't number, it checks the verses it
+  does and says which it doesn't (`notice`), as `get_passage` does;
+  `save_findings` lists such references in `notices`.
 - `get_passages` gives many passages in one call: at most 50 references and 500
   verses, and a reference that fails doesn't stop the rest.
 - `get_passage` takes several references separated by commas or semicolons

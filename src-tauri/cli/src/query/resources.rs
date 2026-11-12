@@ -4,6 +4,7 @@
 //! read: a book's name.
 
 use anyhow::{anyhow, bail};
+use gospel_getter_core::db;
 use std::path::Path;
 
 use super::{Answer, GetPassageArgs, Library};
@@ -34,28 +35,39 @@ pub fn book_slug(name: &str) -> String {
 /// Every chapter of every translation in the install at `database`, in the
 /// order the app lists the translations, then in Bible order.
 pub async fn chapter_resources(database: &Path) -> anyhow::Result<Vec<ChapterResource>> {
-    let library = Library::open(database).await?;
-    let resources = library.chapter_resources();
-    library.close().await;
-    Ok(resources)
+    // Read once more if the app started meanwhile (see `query::run`).
+    db::read_only_once_more_if_changed(database, || async {
+        let library = Library::open(database).await?;
+        let resources = library.chapter_resources();
+        library.close().await;
+        Ok(resources)
+    })
+    .await
 }
 
 /// The JSON the resource at `uri` holds in the install at `database`, the same
 /// bytes `get_passage`'s tool answers with for its chapter.
 pub async fn read_resource(database: &Path, uri: &str) -> anyhow::Result<String> {
-    let library = Library::open(database).await?;
-    let answer = library.read_resource(uri).await;
-    library.close().await;
-    super::to_json(&answer?)
+    let answer = db::read_only_once_more_if_changed(database, || async {
+        let library = Library::open(database).await?;
+        let answer = library.read_resource(uri).await;
+        library.close().await;
+        answer
+    })
+    .await?;
+    super::to_json(&answer)
 }
 
 /// The name of the book `name` names in the install at `database`, as the
 /// app has it ("Phil" is Philippians), or why there's none.
 pub async fn book_name(database: &Path, name: &str) -> anyhow::Result<String> {
-    let library = Library::open(database).await?;
-    let found = library.book_name(name);
-    library.close().await;
-    found
+    db::read_only_once_more_if_changed(database, || async {
+        let library = Library::open(database).await?;
+        let found = library.book_name(name);
+        library.close().await;
+        found
+    })
+    .await
 }
 
 impl Library {

@@ -2,6 +2,15 @@
 //! and translations, a chapter's verses and cross-references, verse
 //! ranges, and the reading position, with where in its chapter the reader
 //! was.
+//!
+//! A verse row with no text (`text = ''`) is a verse the translation
+//! doesn't number, and every read of verses here, in search and in a
+//! passage's preview leaves it out, as it leaves out a verse with no row.
+//! A database seeded before 2.29.1 stores the WEB's five that way (Luke
+//! 17:36, Acts 8:37, 15:34, 24:7, Romans 16:25) until the app's upgrade
+//! step takes them out (`seed::DataStep::RemoveUnnumbered`), which the
+//! read-only CLI never runs and which a failed upgrade leaves for the next
+//! launch. Reading never changes a row: no translation's text is touched.
 
 use anyhow::Context;
 use sqlx::SqlitePool;
@@ -84,7 +93,7 @@ pub async fn get_chapter_verses(
 ) -> anyhow::Result<Vec<Verse>> {
     let mut verses = sqlx::query_as::<_, Verse>(
         "SELECT verse, text FROM verses \
-         WHERE translation_id = $1 AND book_id = $2 AND chapter = $3 \
+         WHERE translation_id = $1 AND book_id = $2 AND chapter = $3 AND text <> '' \
          ORDER BY verse",
     )
     .bind(translation_id)
@@ -289,6 +298,7 @@ pub async fn verses_of_passages(
          SELECT p.position, v.verse, v.text FROM p \
          JOIN verses v ON v.translation_id = $1 AND v.book_id = p.book_id \
              AND v.chapter = p.chapter AND v.verse BETWEEN p.verse_start AND p.verse_end \
+             AND v.text <> '' \
          ORDER BY p.position, v.verse",
     )
     .bind(translation_id)
@@ -322,7 +332,7 @@ pub async fn get_verse_range(
     sqlx::query_as::<_, Verse>(
         "SELECT verse, text FROM verses \
          WHERE translation_id = $1 AND book_id = $2 AND chapter = $3 \
-         AND verse BETWEEN $4 AND $5 ORDER BY verse",
+         AND verse BETWEEN $4 AND $5 AND text <> '' ORDER BY verse",
     )
     .bind(translation_id)
     .bind(book_id)
