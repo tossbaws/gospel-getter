@@ -15,13 +15,15 @@ use super::notes::{
 };
 use super::search::{SEARCH_CONTENT_VERSION, search_verses};
 use super::test_support::{
-    TempDb, bundled, bundled_bsb, fill_notes, fresh_database, other_tables_snapshot,
-    prepared_database, table_names, verses_snapshot, write_v2_1_0_database,
+    KJV_TAKEN_VERSE, TempDb, WEB_UNNUMBERED, as_2_29_0_left_it, as_2_29_1_left_it, bundled,
+    bundled_bsb, empty_web_verses, fill_notes, fresh_database, indexed_web_unnumbered,
+    other_tables_snapshot, prepared_database, table_names, verses_snapshot, web_index_count,
+    write_v2_1_0_database,
 };
 use super::{
-    BookmarkError, Db, HighlightColor, NoteBodyError, NoteError, ReadingPlace, TopVerse,
-    ensure_search_index, get_reading_place, migrate, prepare, save_reading_position,
-    save_reading_position_at,
+    BookmarkError, Db, HighlightColor, NoteBodyError, NoteError, ReadingPlace, TopVerse, Verse,
+    ensure_search_index, get_chapter_verses, get_reading_place, get_verse_range, migrate, prepare,
+    save_reading_position, save_reading_position_at, verses_of_passages,
 };
 use crate::domain::kjv_markup::VerseText;
 use crate::domain::query::{SearchQuery, search_query, term_marks};
@@ -59,7 +61,7 @@ fn assert_verses_match_bundled(snapshot: &[(i64, i64, i64, i64, Vec<u8>)]) {
 
 /// `verses` must hold exactly these translations' bundled text, byte for
 /// byte, and nothing else. A verse a translation doesn't number (`null` in
-/// its file) has no row.
+/// its file, or no text at all: the WEB's five) has no row.
 fn assert_verses_match(snapshot: &[(i64, i64, i64, i64, Vec<u8>)], translations: &[(i64, &str)]) {
     let mut expected = Vec::new();
     for &(translation_id, code) in translations {
@@ -79,7 +81,9 @@ fn assert_verses_match(snapshot: &[(i64, i64, i64, i64, Vec<u8>)], translations:
         for (b, chapters) in books.into_iter().enumerate() {
             for (c, verses) in chapters.into_iter().enumerate() {
                 for (v, text) in verses.into_iter().enumerate() {
-                    let Some(text) = text else { continue };
+                    let Some(text) = text.filter(|t| !t.is_empty()) else {
+                        continue;
+                    };
                     expected.push((
                         translation_id,
                         b as i64 + 1,
@@ -117,6 +121,7 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
         "verse_search",
         "search_index_state",
         "search_index_version",
+        "translation_data_version",
     ] {
         assert!(tables.iter().any(|t| t == table), "missing table {table}");
     }
@@ -130,7 +135,16 @@ async fn fresh_database_has_every_table_and_a_complete_search_index() {
             .fetch_all(pool.read())
             .await
             .unwrap();
-    assert_eq!(state, vec![(KJV, 31_100), (WEB, 31_103), (BSB, 31_086)]);
+    // The WEB's file has 31,103 verses, five of them with no text, which
+    // the WEB doesn't number and which aren't seeded. The KJV has its
+    // 31,102 since 2.29.2 (31,100 before: ten chapters misnumbered).
+    assert_eq!(state, vec![(KJV, 31_102), (WEB, 31_098), (BSB, 31_086)]);
+    // Each seeded as bundled now: the WEB and the KJV past their one step
+    // each (the KJV's is 2.29.2's).
+    assert_eq!(
+        data_versions(pool.read()).await,
+        [(KJV, 2), (WEB, 2), (BSB, 1)]
+    );
 
     let bookmarks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bookmarks")
         .fetch_one(pool.read())
@@ -241,6 +255,658 @@ async fn user_version(pool: &sqlx::SqlitePool) -> i64 {
         .unwrap()
 }
 
+/// [`WEB_UNNUMBERED`] as (translation, book, chapter, verse).
+fn web_unnumbered() -> Vec<(i64, i64, i64, i64)> {
+    WEB_UNNUMBERED
+        .iter()
+        .map(|&(b, c, v)| (WEB, b, c, v))
+        .collect()
+}
+
+/// Each translation's recorded data version (`seed::DATA_STEPS`).
+async fn data_versions(pool: &sqlx::SqlitePool) -> Vec<(i64, i64)> {
+    sqlx::query_as(
+        "SELECT translation_id, version FROM translation_data_version ORDER BY translation_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// No verses, as [`empty_web_verses`] lists them.
+const NONE: Vec<(i64, i64, i64)> = Vec::new();
+
+/// Every row of the reader's own tables, each as its columns' SQL literals.
+async fn readers_tables(pool: &sqlx::SqlitePool) -> Vec<String> {
+    let mut rows = Vec::new();
+    for table in [
+        "notes",
+        "bookmarks",
+        "highlights",
+        "ai_findings",
+        "reading_position",
+        "reading_place",
+        "app_settings",
+    ] {
+        let columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info($1) ORDER BY cid")
+                .bind(table)
+                .fetch_all(pool)
+                .await
+                .unwrap();
+        assert!(!columns.is_empty(), "{table}");
+        let row = columns
+            .iter()
+            .map(|c| format!("quote(\"{c}\")"))
+            .collect::<Vec<_>>()
+            .join(" || '|' || ");
+        // Table and column names from the list above and the schema.
+        let found: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT '{table}: ' || {row} FROM \"{table}\" ORDER BY rowid"
+        )))
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        rows.extend(found);
+    }
+    rows
+}
+
+/// The reader's records on Luke 17:36 and Romans 16:25, two of the verses
+/// the WEB doesn't number: a note, a bookmark, a highlight, an AI finding,
+/// and the reading place, in the WEB at Luke 17:36.
+async fn records_on_the_webs_unnumbered_verses(pool: &Db) {
+    let luke_17_36 = Passage {
+        book_id: 42,
+        chapter: 17,
+        verse_start: 36,
+        verse_end: 36,
+    };
+    add_note(pool.write(), &luke_17_36, "Two in the field.", None)
+        .await
+        .unwrap();
+    add_bookmark(pool.write(), 42, 17, 35, 37).await.unwrap();
+    set_highlights(pool.write(), 45, 16, 25, 25, HighlightColor::Blue)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO ai_findings (book_id, chapter, verse_start, verse_end, agent, request) \
+         VALUES (42, 17, 36, 36, 'Claude', 'taken')",
+    )
+    .execute(pool.write().pool())
+    .await
+    .unwrap();
+    save_reading_position_at(
+        pool.write(),
+        WEB,
+        42,
+        17,
+        Some(TopVerse {
+            verse: 36,
+            offset_px: Some(12.0),
+        }),
+    )
+    .await
+    .unwrap();
+}
+
+/// A new install seeds the WEB without the five verses its file has with
+/// no text: they're ones it doesn't number, as the BSB's `null`s are, so
+/// they have no row, and the WEB has five fewer verses than its file's
+/// entries. Every verse it does have is its text, byte for byte.
+#[tokio::test]
+async fn the_web_is_seeded_without_the_verses_it_does_not_number() {
+    let (_db, pool) = fresh_database("web_unnumbered_seed").await;
+    let entries: usize = bundled("web")
+        .iter()
+        .map(|b| b.chapters.iter().map(Vec::len).sum::<usize>())
+        .sum();
+    assert_eq!(entries, 31_103);
+    let web_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM verses WHERE translation_id = $1")
+        .bind(WEB)
+        .fetch_one(pool.read())
+        .await
+        .unwrap();
+    assert_eq!(web_rows, 31_098);
+    assert_eq!(entries as i64 - web_rows, 5);
+    let empty: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM verses WHERE text = ''")
+        .fetch_one(pool.read())
+        .await
+        .unwrap();
+    assert_eq!(empty, 0, "no translation has a verse with no text");
+    for (book, chapter, verse) in WEB_UNNUMBERED {
+        assert_eq!(
+            bundled("web")[book as usize - 1].chapters[chapter as usize - 1][verse as usize - 1],
+            "",
+            "the file's entry for {book} {chapter}:{verse}"
+        );
+        let row: Option<String> = sqlx::query_scalar(
+            "SELECT text FROM verses \
+             WHERE translation_id = $1 AND book_id = $2 AND chapter = $3 AND verse = $4",
+        )
+        .bind(WEB)
+        .bind(book)
+        .bind(chapter)
+        .bind(verse)
+        .fetch_optional(pool.read())
+        .await
+        .unwrap();
+        assert_eq!(row, None, "{book} {chapter}:{verse}");
+        // The KJV numbers each of them.
+        let kjv: Option<String> = sqlx::query_scalar(
+            "SELECT text FROM verses \
+             WHERE translation_id = $1 AND book_id = $2 AND chapter = $3 AND verse = $4",
+        )
+        .bind(KJV)
+        .bind(book)
+        .bind(chapter)
+        .bind(verse)
+        .fetch_optional(pool.read())
+        .await
+        .unwrap();
+        assert!(
+            kjv.is_some_and(|t| !t.is_empty()),
+            "{book} {chapter}:{verse}"
+        );
+    }
+    assert_eq!(indexed_web_unnumbered(pool.read()).await, 0);
+    assert_verses_match_bundled(&verses_snapshot(pool.read()).await);
+}
+
+/// The first launch after upgrading from 2.29.0 takes the WEB's five empty
+/// verses out, with their search index rows, and keeps the index complete
+/// (no rebuild); the reader's notes, bookmarks, highlights, findings and
+/// reading place on those verses keep their coordinates, and every other
+/// verse is as it was. The next launch changes nothing at all.
+#[tokio::test]
+async fn upgrading_from_2_29_0_takes_out_the_webs_empty_verses_once() {
+    let (db, pool) = fresh_database("web_unnumbered_upgrade").await;
+    as_2_29_0_left_it(&pool).await;
+    records_on_the_webs_unnumbered_verses(&pool).await;
+    let verses_before = verses_snapshot(pool.read()).await;
+    let readers_before = readers_tables(pool.read()).await;
+    assert_eq!(readers_before.len(), 6, "{readers_before:?}");
+
+    // Exactly what startup does.
+    pool.close().await;
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+
+    // The five are gone, and nothing else.
+    assert_eq!(empty_web_verses(pool.read()).await, NONE);
+    let verses_after = verses_snapshot(pool.read()).await;
+    let expected: Vec<_> = verses_before
+        .iter()
+        .filter(|(t, b, c, v, _)| !web_unnumbered().contains(&(*t, *b, *c, *v)))
+        .cloned()
+        .collect();
+    assert_eq!(verses_before.len() - expected.len(), 5);
+    assert!(verses_after == expected, "only the five are taken out");
+    assert_verses_match_bundled(&verses_after);
+    // The reader's tables, row for row.
+    assert_eq!(readers_tables(pool.read()).await, readers_before);
+    // The search index lost their rows, kept its count right, and is
+    // complete as it is: nothing of the WEB's to rebuild. (The KJV's own
+    // 2.29.2 step seeds it again, the same text here, as this stand-in has
+    // today's KJV, so only the KJV is indexed again.)
+    assert_eq!(indexed_web_unnumbered(pool.read()).await, 0);
+    assert_eq!(web_index_count(pool.read()).await, Some(31_098));
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![KJV]);
+    assert_eq!(data_versions(pool.read()).await, [(KJV, 2), (WEB, 2)]);
+    let (total, _) = search_verses(pool.read(), WEB, &terms(&["field"]), 1, 0)
+        .await
+        .unwrap();
+    assert!(total > 0);
+
+    // The next launch: every row of every table is as the first left it,
+    // rowids included (a copy of the file, made once it's closed and its
+    // write-ahead log is folded in).
+    pool.close().await;
+    let snapshot = TempDb::new("web_unnumbered_upgrade_snapshot");
+    for suffix in ["-wal", "-shm"] {
+        assert!(
+            !super::connect::beside(&db.path(), suffix).exists(),
+            "{suffix}"
+        );
+    }
+    std::fs::copy(db.path(), snapshot.path()).unwrap();
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
+    assert_same_database(&pool, &snapshot.path()).await;
+}
+
+/// Until the upgrade step has run (a database the 2.29.1 app hasn't opened
+/// yet, or one whose step failed), the WEB's five verses are stored with no
+/// text, and every read of verses leaves them out, as it leaves out a verse
+/// with no row: a chapter, a range, passages, and a bookmark's or
+/// highlighted passage's preview, which neither quotes one nor counts it
+/// as numbered. Reading changes nothing: the rows are as they were.
+#[tokio::test]
+async fn reads_leave_out_a_verse_stored_with_no_text() {
+    let (_db, pool) = fresh_database("web_unnumbered_reads").await;
+    as_2_29_0_left_it(&pool).await;
+    add_bookmark(pool.write(), 42, 17, 36, 36).await.unwrap();
+    set_highlights(pool.write(), 42, 17, 35, 37, HighlightColor::Green)
+        .await
+        .unwrap();
+    let before = verses_snapshot(pool.read()).await;
+    let numbers = |verses: &[Verse]| verses.iter().map(|v| v.verse).collect::<Vec<_>>();
+
+    let chapter = numbers(&get_chapter_verses(pool.read(), WEB, 42, 17).await.unwrap());
+    assert!(!chapter.contains(&36), "{chapter:?}");
+    assert!(
+        chapter.contains(&35) && chapter.contains(&37),
+        "{chapter:?}"
+    );
+    let range = get_verse_range(pool.read(), WEB, 42, 17, 35, 37)
+        .await
+        .unwrap();
+    assert_eq!(numbers(&range), [35, 37]);
+    let passages = verses_of_passages(pool.read(), WEB, &[[42, 17, 35, 37], [44, 8, 37, 37]])
+        .await
+        .unwrap();
+    assert_eq!(
+        passages.iter().map(|p| numbers(p)).collect::<Vec<_>>(),
+        [vec![35, 37], vec![]]
+    );
+
+    let bookmark = &list_bookmarks(pool.read(), WEB).await.unwrap()[0];
+    assert_eq!(
+        (bookmark.first_verse_text.as_deref(), bookmark.complete),
+        (None, false)
+    );
+    let highlighted = &list_highlight_passages(pool.read(), WEB).await.unwrap()[0];
+    assert!(highlighted.first_verse_text.is_some());
+    assert!(!highlighted.complete, "verse 36 isn't numbered");
+    // The KJV numbers all three.
+    let highlighted = &list_highlight_passages(pool.read(), KJV).await.unwrap()[0];
+    assert!(highlighted.complete);
+
+    assert_eq!(empty_web_verses(pool.read()).await, WEB_UNNUMBERED);
+    assert!(
+        verses_snapshot(pool.read()).await == before,
+        "no verse changed"
+    );
+}
+
+/// An upgrade that fails part-way leaves everything as it was, the five
+/// empty verses, their index rows and count, and the version unrecorded,
+/// and the app starts all the same; the next launch makes it.
+#[tokio::test]
+async fn a_failed_upgrade_changes_nothing_and_is_made_next_launch() {
+    let (db, pool) = fresh_database("web_unnumbered_failed").await;
+    as_2_29_0_left_it(&pool).await;
+    records_on_the_webs_unnumbered_verses(&pool).await;
+    pool.close().await;
+    let pool = db.connect().await;
+    migrate(pool.write()).await.unwrap();
+    let verses_before = verses_snapshot(pool.read()).await;
+    let readers_before = readers_tables(pool.read()).await;
+
+    // Its last write, recording the version, fails: on the writer's one
+    // connection, a trigger that refuses it.
+    sqlx::query(
+        "CREATE TEMP TRIGGER refuse_the_version BEFORE INSERT ON translation_data_version \
+         BEGIN SELECT RAISE(ABORT, 'refused for the test'); END",
+    )
+    .execute(pool.write().pool())
+    .await
+    .unwrap();
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(verses_snapshot(pool.read()).await, verses_before);
+    assert_eq!(empty_web_verses(pool.read()).await, WEB_UNNUMBERED);
+    assert_eq!(indexed_web_unnumbered(pool.read()).await, 5);
+    assert_eq!(web_index_count(pool.read()).await, Some(31_103));
+    assert_eq!(data_versions(pool.read()).await, Vec::<(i64, i64)>::new());
+    assert_eq!(readers_tables(pool.read()).await, readers_before);
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
+
+    // The next launch, a new connection without the trigger.
+    pool.close().await;
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(empty_web_verses(pool.read()).await, NONE);
+    assert_eq!(indexed_web_unnumbered(pool.read()).await, 0);
+    assert_eq!(web_index_count(pool.read()).await, Some(31_098));
+    // The KJV's 2.29.2 step is made with it, and only the KJV is indexed
+    // again.
+    assert_eq!(data_versions(pool.read()).await, [(KJV, 2), (WEB, 2)]);
+    assert_eq!(readers_tables(pool.read()).await, readers_before);
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![KJV]);
+}
+
+/// A translation a newer version of the app has brought past this one's
+/// latest data version is left as it is, as `migrate` leaves a newer
+/// schema; one recorded at its latest isn't changed either, even with an
+/// empty verse in it.
+#[tokio::test]
+async fn data_past_this_versions_steps_is_left_alone() {
+    let (db, pool) = fresh_database("web_unnumbered_newer").await;
+    as_2_29_0_left_it(&pool).await;
+    pool.close().await;
+    let pool = db.connect().await;
+    migrate(pool.write()).await.unwrap();
+    for version in [3, 2] {
+        sqlx::query(
+            "INSERT INTO translation_data_version (translation_id, version) VALUES ($1, $2) \
+             ON CONFLICT (translation_id) DO UPDATE SET version = excluded.version",
+        )
+        .bind(WEB)
+        .bind(version)
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+        prepare(pool.write()).await.unwrap();
+        assert_eq!(empty_web_verses(pool.read()).await, WEB_UNNUMBERED);
+        // The KJV, with no version recorded, is brought to its latest.
+        assert_eq!(data_versions(pool.read()).await, [(KJV, 2), (WEB, version)]);
+    }
+}
+
+/// The reader's records where the KJV changes in 2.29.2: a note on
+/// Matthew 2:16 (a verse 2.29.1's KJV didn't have, its words then standing
+/// at 2:17's number), a note and a highlight on Matthew 2:23's coordinates
+/// (2.29.1's KJV ended Matthew 2 at 22), a bookmark and an AI finding on
+/// 1 Samuel 20:42–43 (2.29.1's KJV split 20:42 in two; 2.29.2's has no
+/// 20:43), a highlight on Revelation 13:1, and the reading place at
+/// Revelation 12:18 in the KJV (a verse 2.29.2's doesn't have).
+async fn records_where_the_kjv_changes(pool: &Db) {
+    let at = |book_id, chapter, verse_start, verse_end| Passage {
+        book_id,
+        chapter,
+        verse_start,
+        verse_end,
+    };
+    add_note(pool.write(), &at(40, 2, 16, 16), "Herod.", None)
+        .await
+        .unwrap();
+    add_note(pool.write(), &at(40, 2, 23, 23), "Nazareth.", None)
+        .await
+        .unwrap();
+    set_highlights(pool.write(), 40, 2, 23, 23, HighlightColor::Yellow)
+        .await
+        .unwrap();
+    add_bookmark(pool.write(), 9, 20, 42, 43).await.unwrap();
+    sqlx::query(
+        "INSERT INTO ai_findings (book_id, chapter, verse_start, verse_end, agent, request) \
+         VALUES (9, 20, 43, 43, 'Claude', 'parting')",
+    )
+    .execute(pool.write().pool())
+    .await
+    .unwrap();
+    set_highlights(pool.write(), 66, 13, 1, 1, HighlightColor::Pink)
+        .await
+        .unwrap();
+    save_reading_position_at(
+        pool.write(),
+        KJV,
+        66,
+        12,
+        Some(TopVerse {
+            verse: 18,
+            offset_px: Some(4.0),
+        }),
+    )
+    .await
+    .unwrap();
+}
+
+/// The KJV's text of one verse, if it has a row.
+async fn kjv_verse(
+    pool: &sqlx::SqlitePool,
+    (book, chapter, verse): (i64, i64, i64),
+) -> Option<String> {
+    sqlx::query_scalar(
+        "SELECT text FROM verses \
+         WHERE translation_id = $1 AND book_id = $2 AND chapter = $3 AND verse = $4",
+    )
+    .bind(KJV)
+    .bind(book)
+    .bind(chapter)
+    .bind(verse)
+    .fetch_optional(pool)
+    .await
+    .unwrap()
+}
+
+/// How many verses the KJV has.
+async fn kjv_verses(pool: &sqlx::SqlitePool) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM verses WHERE translation_id = $1")
+        .bind(KJV)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// The bundled KJV's text of one verse.
+fn bundled_kjv((book, chapter, verse): (i64, i64, i64)) -> String {
+    bundled("kjv")[book as usize - 1].chapters[chapter as usize - 1][verse as usize - 1].clone()
+}
+
+/// The first launch after upgrading from 2.29.1 seeds the KJV again from
+/// its bundled text: 31,102 verses, Matthew 2:23 and Revelation 13:1 as
+/// bundled, every verse of every translation its bundled text. Every
+/// record of the reader's is as it was, row for row, the ones on verses
+/// the KJV no longer numbers too. Its search index is built again, and
+/// finds the verses where they are now. The next launch changes nothing.
+#[tokio::test]
+async fn upgrading_from_2_29_1_seeds_the_kjv_again_once() {
+    let (db, pool) = fresh_database("kjv_reseed_upgrade").await;
+    as_2_29_1_left_it(&pool).await;
+    records_where_the_kjv_changes(&pool).await;
+    let readers_before = readers_tables(pool.read()).await;
+    assert_eq!(readers_before.len(), 8, "{readers_before:?}");
+    let others_before = other_tables_snapshot(pool.read()).await;
+    // As 2.29.1 has it: no Matthew 2:23, Revelation 12:18 and 13:1 split.
+    assert_eq!(kjv_verse(pool.read(), (40, 2, 23)).await, None);
+    assert_eq!(
+        kjv_verse(pool.read(), (66, 12, 18)).await.as_deref(),
+        Some("And I stood upon the sand of the sea.")
+    );
+    assert_eq!(found_by(pool.read(), KJV, "Nazarene").await, [(40, 2, 22)]);
+    let sand = found_by(pool.read(), KJV, "\"sand of the sea\"").await;
+    assert!(
+        sand.contains(&(66, 12, 18)) && !sand.contains(&KJV_TAKEN_VERSE),
+        "{sand:?}"
+    );
+
+    // Exactly what startup does.
+    pool.close().await;
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+
+    assert_eq!(kjv_verses(pool.read()).await, 31_102);
+    for verse in [(40, 2, 16), (40, 2, 23), KJV_TAKEN_VERSE] {
+        assert_eq!(
+            kjv_verse(pool.read(), verse).await,
+            Some(bundled_kjv(verse)),
+            "{verse:?}"
+        );
+    }
+    assert!(bundled_kjv((40, 2, 23)).contains("Nazarene"));
+    assert!(bundled_kjv(KJV_TAKEN_VERSE).starts_with("And I stood upon the sand of the sea"));
+    for gone in [(9, 20, 43), (11, 22, 54), (64, 1, 15), (66, 12, 18)] {
+        assert_eq!(kjv_verse(pool.read(), gone).await, None, "{gone:?}");
+    }
+    assert_verses_match_bundled(&verses_snapshot(pool.read()).await);
+    // Every record of the reader's, and every other table, as it was.
+    assert_eq!(readers_tables(pool.read()).await, readers_before);
+    assert_eq!(other_tables_snapshot(pool.read()).await, others_before);
+    assert_eq!(
+        data_versions(pool.read()).await,
+        [(KJV, 2), (WEB, 2), (BSB, 1)]
+    );
+
+    // Its search index is built again, and only its.
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![KJV]);
+    assert_eq!(found_by(pool.read(), KJV, "Nazarene").await, [(40, 2, 23)]);
+    let sand = found_by(pool.read(), KJV, "\"sand of the sea\"").await;
+    assert!(
+        sand.contains(&KJV_TAKEN_VERSE) && !sand.contains(&(66, 12, 18)),
+        "{sand:?}"
+    );
+
+    // The next launch: every row of every table is as the first left it.
+    pool.close().await;
+    let snapshot = TempDb::new("kjv_reseed_upgrade_snapshot");
+    std::fs::copy(db.path(), snapshot.path()).unwrap();
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
+    assert_same_database(&pool, &snapshot.path()).await;
+}
+
+/// A new install seeds the KJV as bundled, past its step: nothing to make.
+#[tokio::test]
+async fn a_new_install_seeds_the_kjv_past_its_step() {
+    let (_db, pool) = prepared_database("kjv_reseed_new").await;
+    assert_eq!(kjv_verses(pool.read()).await, 31_102);
+    assert_eq!(
+        super::upgrade_bundled_data(pool.write()).await.unwrap(),
+        Vec::<(String, i64)>::new()
+    );
+    assert_eq!(
+        data_versions(pool.read()).await,
+        [(KJV, 2), (WEB, 2), (BSB, 1)]
+    );
+}
+
+/// A re-seed that fails part-way (an insert refused, after the KJV's rows
+/// were cleared and most inserted again) leaves every row as it was: the
+/// KJV's 31,100 verses, its index and its version. What's logged names no
+/// record of the reader's, and the app starts all the same; the next
+/// launch makes it.
+#[tokio::test]
+async fn a_failed_kjv_reseed_changes_nothing_and_is_made_next_launch() {
+    let (db, pool) = fresh_database("kjv_reseed_failed").await;
+    as_2_29_1_left_it(&pool).await;
+    records_where_the_kjv_changes(&pool).await;
+    pool.close().await;
+    let pool = db.connect().await;
+    migrate(pool.write()).await.unwrap();
+    let verses_before = verses_snapshot(pool.read()).await;
+    let readers_before = readers_tables(pool.read()).await;
+
+    // On the writer's one connection, a trigger that refuses Matthew 2:23,
+    // late in the re-seed.
+    sqlx::query(
+        "CREATE TEMP TRIGGER refuse_a_verse BEFORE INSERT ON verses \
+         WHEN NEW.translation_id = 1 AND NEW.book_id = 40 AND NEW.chapter = 2 \
+             AND NEW.verse = 23 \
+         BEGIN SELECT RAISE(ABORT, 'refused for the test'); END",
+    )
+    .execute(pool.write().pool())
+    .await
+    .unwrap();
+    let error = format!(
+        "{:#}",
+        super::upgrade_bundled_data(pool.write()).await.unwrap_err()
+    );
+    assert!(error.contains("refused for the test"), "{error}");
+    for record in ["Herod.", "Nazareth.", "parting"] {
+        assert!(!error.contains(record), "{error}");
+    }
+    // Startup goes on.
+    prepare(pool.write()).await.unwrap();
+    assert!(
+        verses_snapshot(pool.read()).await == verses_before,
+        "every verse as it was"
+    );
+    assert_eq!(kjv_verses(pool.read()).await, 31_100);
+    assert_eq!(
+        data_versions(pool.read()).await,
+        [(KJV, 1), (WEB, 2), (BSB, 1)]
+    );
+    assert_eq!(readers_tables(pool.read()).await, readers_before);
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), Vec::<i64>::new());
+    assert_eq!(found_by(pool.read(), KJV, "Nazarene").await, [(40, 2, 22)]);
+
+    // The next launch, a new connection without the trigger.
+    pool.close().await;
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(kjv_verses(pool.read()).await, 31_102);
+    assert_verses_match_bundled(&verses_snapshot(pool.read()).await);
+    assert_eq!(
+        data_versions(pool.read()).await,
+        [(KJV, 2), (WEB, 2), (BSB, 1)]
+    );
+    assert_eq!(readers_tables(pool.read()).await, readers_before);
+    assert_eq!(ensure_search_index(&pool).await.unwrap(), vec![KJV]);
+    assert_eq!(found_by(pool.read(), KJV, "Nazarene").await, [(40, 2, 23)]);
+}
+
+/// A record on a verse number 2.29.2's KJV no longer has (`RETIRED_VERSES`:
+/// numbered by 2.29.1's KJV, by no translation since) can be saved again,
+/// as an undo saves a deleted one, and is listed as not numbered, never
+/// with another verse's text; the verse after it is no verse at all.
+#[tokio::test]
+async fn a_record_on_a_verse_the_kjv_numbered_until_2_29_2_can_be_saved_again() {
+    let (_db, pool) = prepared_database("kjv_retired").await;
+    for (book, chapter, verse) in super::seed::RETIRED_VERSES {
+        assert_eq!(kjv_verse(pool.read(), (book, chapter, verse)).await, None);
+        assert_eq!(
+            super::get_chapter_last_verse(pool.read(), book, chapter)
+                .await
+                .unwrap(),
+            verse
+        );
+    }
+    let note = add_note(
+        pool.write(),
+        &Passage {
+            book_id: 64,
+            chapter: 1,
+            verse_start: 15,
+            verse_end: 15,
+        },
+        "Greet the friends.",
+        None,
+    )
+    .await
+    .unwrap();
+    let deleted = delete_note(pool.write(), note.id).await.unwrap().unwrap();
+    let passage = Passage {
+        book_id: deleted.book_id,
+        chapter: deleted.chapter,
+        verse_start: deleted.verse_start,
+        verse_end: deleted.verse_end,
+    };
+    let dates = (deleted.created_at.as_str(), deleted.updated_at.as_str());
+    let restored = add_note(pool.write(), &passage, &deleted.body, Some(dates))
+        .await
+        .unwrap();
+    assert_eq!(
+        (restored.verse_start, restored.body.as_str()),
+        (15, "Greet the friends.")
+    );
+    add_bookmark(pool.write(), 9, 20, 42, 43).await.unwrap();
+    set_highlights(pool.write(), 66, 12, 18, 18, HighlightColor::Blue)
+        .await
+        .unwrap();
+    assert!(matches!(
+        add_bookmark(pool.write(), 64, 1, 16, 16).await,
+        Err(BookmarkError::NoSuchVerse { last_verse: 15, .. })
+    ));
+
+    for translation in [KJV, WEB, BSB] {
+        let bookmark = &list_bookmarks(pool.read(), translation).await.unwrap()[0];
+        assert!(!bookmark.complete, "1 Samuel 20:43 isn't numbered");
+        assert!(bookmark.first_verse_text.is_some(), "20:42 is");
+        let highlighted = &list_highlight_passages(pool.read(), translation)
+            .await
+            .unwrap()[0];
+        assert_eq!(
+            (
+                highlighted.first_verse_text.as_deref(),
+                highlighted.complete
+            ),
+            (None, false)
+        );
+    }
+}
+
 /// `migrate` records the schema's version, which `SCHEMA_VERSION` names,
 /// and leaves a newer one (from a later app) as it is.
 #[tokio::test]
@@ -292,11 +958,26 @@ async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_searc
         vec![KJV, WEB, BSB]
     );
 
-    // The KJV and WEB rows are untouched; the BSB, which 2.1.0 didn't
-    // have, is added after them, exactly as bundled.
-    assert_verses_match(&verses_before, &[(KJV, "kjv"), (WEB, "web")]);
+    // The KJV's text is as it was (this stand-in seeds today's KJV, which
+    // its 2.29.2 step seeds again), and so is the WEB's but for the five
+    // verses with no text, which it doesn't number (2.1.0 to 2.29.0 seeded
+    // them as empty verses); the BSB, which 2.1.0 didn't have, is added
+    // after them, exactly as bundled.
+    let numbered_before: Vec<_> = verses_before
+        .iter()
+        .filter(|(.., text)| !text.is_empty())
+        .cloned()
+        .collect();
+    assert_eq!(verses_before.len() - numbered_before.len(), 5);
+    let empty_before: Vec<_> = verses_before
+        .iter()
+        .filter(|(.., text)| text.is_empty())
+        .map(|&(t, b, c, v, _)| (t, b, c, v))
+        .collect();
+    assert_eq!(empty_before, web_unnumbered());
+    assert_verses_match(&numbered_before, &[(KJV, "kjv"), (WEB, "web")]);
     let verses_after = verses_snapshot(pool.read()).await;
-    assert_eq!(verses_after[..verses_before.len()], verses_before[..]);
+    assert_eq!(verses_after[..numbered_before.len()], numbered_before[..]);
     assert_verses_match_bundled(&verses_after);
     // Every other row is as it was; the BSB is listed after the two.
     let mut others_expected = others_before.clone();
@@ -832,13 +1513,15 @@ async fn bookmarks_are_validated_deduplicated_and_survive_a_restart() {
 async fn bookmarks_follow_each_translations_own_verse_numbering() {
     let (_db, pool) = prepared_database("numbering").await;
 
-    // Matthew 2:23 is numbered in the WEB (23 verses) but not the KJV (22),
-    // and 3 John 1:15 the other way round. Both can be bookmarked.
-    let matthew = add_bookmark(pool.write(), 40, 2, 22, 23).await.unwrap();
-    let third_john = add_bookmark(pool.write(), 64, 1, 15, 15).await.unwrap();
+    // Romans 14:24 is numbered in the WEB (26 verses) but not the KJV (23),
+    // and Romans 16:25 the other way round (the WEB's Romans 16 ends at 24).
+    // Both can be bookmarked. (Until 2.29.2 the KJV's misnumbered Matthew 2
+    // and 3 John were the examples.)
+    let web_only = add_bookmark(pool.write(), 45, 14, 23, 24).await.unwrap();
+    let kjv_only = add_bookmark(pool.write(), 45, 16, 25, 25).await.unwrap();
     assert!(matches!(
-        add_bookmark(pool.write(), 40, 2, 24, 24).await,
-        Err(BookmarkError::NoSuchVerse { last_verse: 23, .. })
+        add_bookmark(pool.write(), 45, 14, 27, 27).await,
+        Err(BookmarkError::NoSuchVerse { last_verse: 26, .. })
     ));
 
     let in_kjv = list_bookmarks(pool.read(), KJV).await.unwrap();
@@ -850,24 +1533,24 @@ async fn bookmarks_follow_each_translations_own_verse_numbering() {
             .expect("bookmark listed")
     };
 
-    let m_kjv = find(&in_kjv, matthew.id);
-    assert!(!m_kjv.complete, "KJV has no Matthew 2:23");
+    let m_kjv = find(&in_kjv, web_only.id);
+    assert!(!m_kjv.complete, "KJV has no Romans 14:24");
     assert_eq!(
         m_kjv.first_verse_text.as_deref(),
-        Some(bundled("kjv")[39].chapters[1][21].as_str()),
-        "KJV preview is its own 2:22, unaltered"
+        Some(bundled("kjv")[44].chapters[13][22].as_str()),
+        "KJV preview is its own 14:23, unaltered"
     );
-    let m_web = find(&in_web, matthew.id);
+    let m_web = find(&in_web, web_only.id);
     assert!(m_web.complete);
     assert_eq!(
         m_web.first_verse_text.as_deref(),
-        Some(bundled("web")[39].chapters[1][21].as_str())
+        Some(bundled("web")[44].chapters[13][22].as_str())
     );
 
-    let j_kjv = find(&in_kjv, third_john.id);
+    let j_kjv = find(&in_kjv, kjv_only.id);
     assert!(j_kjv.complete);
-    let j_web = find(&in_web, third_john.id);
-    assert!(!j_web.complete, "WEB has no 3 John 1:15");
+    let j_web = find(&in_web, kjv_only.id);
+    assert!(!j_web.complete, "WEB has no Romans 16:25");
     assert_eq!(j_web.first_verse_text, None, "never another verse's text");
 
     // The stored coordinates are the same whichever translation views them.
@@ -1107,18 +1790,19 @@ async fn highlighted_passages_preview_each_translations_own_verses() {
     let (_db, pool) = prepared_database("highlight_passages").await;
     assert_eq!(list_highlight_passages(pool.read(), KJV).await.unwrap(), []);
 
-    // John 3:16-18 green with 3:17 recolored pink; Matthew 2:22-23 (2:23
-    // is numbered in the WEB only); 3 John 1:15 (the KJV only).
+    // John 3:16-18 green with 3:17 recolored pink; Romans 14:23-24 (14:24
+    // is numbered in the WEB only); Romans 16:25 (the KJV only). (Until
+    // 2.29.2 the KJV's misnumbered Matthew 2 and 3 John were the examples.)
     set_highlights(pool.write(), 43, 3, 16, 18, HighlightColor::Green)
         .await
         .unwrap();
     set_highlights(pool.write(), 43, 3, 17, 17, HighlightColor::Pink)
         .await
         .unwrap();
-    set_highlights(pool.write(), 40, 2, 22, 23, HighlightColor::Yellow)
+    set_highlights(pool.write(), 45, 14, 23, 24, HighlightColor::Yellow)
         .await
         .unwrap();
-    set_highlights(pool.write(), 64, 1, 15, 15, HighlightColor::Blue)
+    set_highlights(pool.write(), 45, 16, 25, 25, HighlightColor::Blue)
         .await
         .unwrap();
 
@@ -1141,11 +1825,11 @@ async fn highlighted_passages_preview_each_translations_own_verses() {
     assert_eq!(
         summary(&in_kjv),
         [
-            (40, 2, 22, 23, HighlightColor::Yellow, false),
             (43, 3, 16, 16, HighlightColor::Green, true),
             (43, 3, 17, 17, HighlightColor::Pink, true),
             (43, 3, 18, 18, HighlightColor::Green, true),
-            (64, 1, 15, 15, HighlightColor::Blue, true),
+            (45, 14, 23, 24, HighlightColor::Yellow, false),
+            (45, 16, 25, 25, HighlightColor::Blue, true),
         ]
     );
     let texts: Vec<Option<&str>> = in_kjv
@@ -1155,21 +1839,21 @@ async fn highlighted_passages_preview_each_translations_own_verses() {
     assert_eq!(
         texts,
         [
-            Some(bundled("kjv")[39].chapters[1][21].as_str()),
             Some(bundled("kjv")[42].chapters[2][15].as_str()),
             Some(bundled("kjv")[42].chapters[2][16].as_str()),
             Some(bundled("kjv")[42].chapters[2][17].as_str()),
-            Some(bundled("kjv")[63].chapters[0][14].as_str()),
+            Some(bundled("kjv")[44].chapters[13][22].as_str()),
+            Some(bundled("kjv")[44].chapters[15][24].as_str()),
         ],
         "previews are the stored text, unaltered"
     );
 
     let in_web = list_highlight_passages(pool.read(), WEB).await.unwrap();
-    assert!(in_web[0].complete, "the WEB numbers Matthew 2:23");
-    let third_john = &in_web[4];
-    assert!(!third_john.complete, "the WEB has no 3 John 1:15");
+    assert!(in_web[3].complete, "the WEB numbers Romans 14:24");
+    let kjv_only = &in_web[4];
+    assert!(!kjv_only.complete, "the WEB has no Romans 16:25");
     assert_eq!(
-        third_john.first_verse_text, None,
+        kjv_only.first_verse_text, None,
         "never another verse's text"
     );
 }
@@ -1229,14 +1913,16 @@ async fn notes_are_added_edited_listed_and_deleted() {
     let later = add_note(pool.write(), &john_3(21, 21), "Come to the light.", None)
         .await
         .unwrap();
-    // Matthew 2:23 is numbered only in the WEB; it can still have a note.
-    let web_only = Passage {
-        book_id: 40,
-        chapter: 2,
-        verse_start: 23,
-        verse_end: 23,
+    // Luke 17:36 is numbered only in the KJV; it can still have a note.
+    // (Until 2.29.2 the KJV's Matthew 2:23, numbered only in the WEB, was
+    // the example.)
+    let kjv_only = Passage {
+        book_id: 42,
+        chapter: 17,
+        verse_start: 36,
+        verse_end: 36,
     };
-    add_note(pool.write(), &web_only, "Nazarene.", None)
+    add_note(pool.write(), &kjv_only, "Two in the field.", None)
         .await
         .unwrap();
 
@@ -1260,7 +1946,7 @@ async fn notes_are_added_edited_listed_and_deleted() {
         Vec::<i64>::new()
     );
     let everything = note_rows(pool.read()).await;
-    assert_eq!(everything[0].0, 40, "Bible order: Matthew before John");
+    assert_eq!(everything[0].0, 42, "Bible order: Luke before John");
     assert_eq!(everything.len(), 5);
 
     // Editing changes the text and updated_at only.

@@ -80,7 +80,8 @@ fn problem(name: &str) -> anyhow::Result<Problem> {
         "noReleaseInfo" => Problem::NoReleaseInfo,
         "notForThisInstall" => Problem::NotForThisInstall,
         "notVerified" => Problem::NotVerified,
-        "notAuthorized" => Problem::NotAuthorized,
+        "packageNotInstalled" => Problem::PackageNotInstalled,
+        "installerDidntStart" => Problem::InstallerDidntStart,
         "other" => Problem::Other,
         _ => bail!("unknown update problem {name}"),
     })

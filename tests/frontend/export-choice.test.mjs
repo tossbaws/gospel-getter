@@ -394,3 +394,62 @@ for (const succeed of [true, false]) {
             assert.ok(notesDialogOpen(app));
         }));
 }
+
+// D2-01: the same for the keyboard shortcuts sheet and About, opened while
+// My notes' choices are on their way: the newer sheet keeps the keyboard
+// and focus, and Export notes neither opens over it nor says anything,
+// whether its choices came or failed. One Escape closes the sheet, and
+// nothing is open behind it.
+const SHEETS = [
+    {
+        name: 'the keyboard shortcuts sheet',
+        open: (app) => app.key('?', { shiftKey: true }),
+        overlay: 'shortcuts-overlay',
+        panel: 'shortcuts-panel',
+    },
+    {
+        name: 'About',
+        open: (app) => app.open('about'),
+        overlay: 'about-overlay',
+        panel: 'about-panel',
+    },
+];
+
+for (const sheet of SHEETS) {
+    for (const succeed of [true, false]) {
+        test(`D2-01: ${sheet.name} opened while My notes’ choices are on their way keeps the keyboard (the choices ${succeed ? 'come' : 'fail'})`, () =>
+            withApp({}, async (app) => {
+                const sheetOpen = () => !el(app, sheet.overlay).hidden;
+                const release = succeed
+                    ? app.holdCommand('get_notes_export_options')
+                    : app.holdFailure('get_notes_export_options', 'simulated get_notes_export_options failure');
+                await app.openExport();
+                const before = app.calls.length;
+                await app.click(myNotes(app));
+                await app.until(() => app.calls.slice(before).some((c) => c.cmd === 'get_notes_export_options'), 'the choices to be asked for');
+                assert.ok(!notesDialogOpen(app), 'not yet');
+
+                // Waiting from here: the choices are still held.
+                await sheet.open(app);
+                await settle();
+                assert.ok(sheetOpen(), `${sheet.name} is open`);
+                const focused = app.document.activeElement;
+                assert.ok(el(app, sheet.panel).contains(focused), `focus is in ${sheet.name}`);
+                const toastBefore = app.toast().textContent;
+                release();
+                await app.idle(before);
+                await settle();
+
+                assert.ok(!notesDialogOpen(app), 'Export notes doesn’t open over it');
+                assert.ok(sheetOpen(), `${sheet.name} is still open`);
+                assert.equal(app.document.activeElement, focused, 'focus stays where it was');
+                assert.equal(app.toast().textContent, toastBefore, 'nothing is said about an export left behind');
+                assert.equal(callsOf(app, 'count_notes_export').length, 0);
+                const shownDialogs = [...app.document.querySelectorAll('[aria-modal="true"]')].filter((d) => !d.closest('[hidden]'));
+                assert.deepEqual(shownDialogs.map((d) => d.id), [sheet.panel], 'one dialog');
+                await app.key('Escape', {}, app.document.activeElement);
+                assert.ok(!sheetOpen(), 'Escape closes it');
+                assert.ok(!notesDialogOpen(app), 'and nothing is open behind it');
+            }));
+    }
+}

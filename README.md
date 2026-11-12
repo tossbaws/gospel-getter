@@ -312,8 +312,11 @@ newest one:
 
 **Build and install it yourself (Linux).** `packaging/install.sh` builds a
 release AppImage and adds a launcher and icon to your desktop.
-`packaging/uninstall.sh` removes them. Rerun `install.sh` to update after
-changing the code. You'll need Rust and the Tauri CLI
+`packaging/uninstall.sh` removes them. It asks first whether to delete your
+reading data too (your notes, bookmarks, highlights, AI findings and
+reading place, in the app's data folder): only `y` does, so export it
+first (☰ → **Export data…**) if you want a copy. Rerun `install.sh` to
+update after changing the code. You'll need Rust and the Tauri CLI
 (`cargo install tauri-cli --version "^2.0.0" --locked`).
 
 **Run from source.** `cd src-tauri && cargo tauri dev`. The page's Rust
@@ -363,15 +366,15 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.28.0?** Each updates itself to 2.29.0: it
+**Coming from 2.6.0 through 2.29.1?** Each updates itself to 2.29.2: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
-update themselves. The 2.19.0 pre-release updates itself to 2.29.0 the
+update themselves. The 2.19.0 pre-release updates itself to 2.29.2 the
 same way.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.29.0 by hand once, from the
+Install 2.29.2 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -390,12 +393,15 @@ Upgrading keeps your data.
   too (0600), as exports are; an earlier version's are narrowed to that when
   the app starts.
 - **Upgrades keep your data.** A new version adds any new tables and builds
-  the search index once, in the background, without changing scripture
-  text, your reading position, bookmarks, highlights or notes. 2.10.0
-  rebuilds the index once, by itself, so KJV search leaves out the margin
-  notes. 2.16.2 switches the database to write-ahead logging when it first
-  opens it. Moving back to an older
-  version after upgrading hasn't been tested.
+  the search index once, in the background, without changing your reading
+  position, bookmarks, highlights or notes. 2.10.0 rebuilds the index once,
+  by itself, so KJV search leaves out the margin notes. 2.16.2 switches the
+  database to write-ahead logging when it first opens it. 2.29.2 stores the
+  KJV's ten misnumbered chapters again, once, from the text it bundles (see
+  [Data provenance](#data-provenance-and-textual-integrity)), and builds
+  the KJV's search index again; every other verse is left as it was, and
+  your records there stay on the verse numbers they had. Moving back to an
+  older version after upgrading hasn't been tested.
 - Theme, text size, line spacing, width, layout, compare (and which
   translation it compares with) and reading mode are
   display settings stored in the app's web storage, not the database, as
@@ -515,7 +521,10 @@ for an agent quoting scripture or finding every place on a topic:
   character for character (quotes up to 10,000 characters): `exact`,
   `exact_part`, `differs`, `elsewhere` or `not_found`, with the first difference
   and the true reference if a phrase search finds it; where two characters only
-  look alike (a no-break space, a curly apostrophe), it says so.
+  look alike (a no-break space, a curly apostrophe), it says so. Given a
+  reference with verses the translation doesn't number, it checks the verses it
+  does and says which it doesn't (`notice`), as `get_passage` does;
+  `save_findings` lists such references in `notices`.
 - `get_passages` gives many passages in one call: at most 50 references and 500
   verses, and a reference that fails doesn't stop the rest.
 - `get_passage` takes several references separated by commas or semicolons
@@ -599,15 +608,17 @@ one would need a licence that permits an offline copy.
 
 1. Add a JSON file to `src-tauri/data/` shaped like `kjv.json`: 66 books in
    canonical order, each `{"name", "testament", "chapters": [[verse, ...], ...]}`.
-   A verse the translation doesn't number is `null`. Footnotes kept apart
-   from the text go in each book's `footnotes`, as in `bsb.json`.
+   A verse the translation doesn't number is `null` (an empty string is
+   read the same way, as in `web.json`). Footnotes kept apart from the
+   text go in each book's `footnotes`, as in `bsb.json`.
 2. Add an entry to `TRANSLATIONS` and to `TEXTS` in
    `src-tauri/core/src/db/seed.rs`.
 
-Existing installs seed only translations they don't already have. To
-correct the text of one that's already seeded, clear its rows (its
-footnotes, verses and its row in `translations`), or the whole database,
-so it seeds again.
+Existing installs seed only translations they don't already have. A
+change to one they've already seeded is a step in `DATA_STEPS` (in the
+same file), which each install makes once, on its first launch after
+upgrading. To seed one again by hand, clear its rows (its footnotes,
+verses and its row in `translations`), or the whole database.
 
 ## How it's put together
 
@@ -672,7 +683,13 @@ No verse text is altered, cleaned up or "corrected"; every translation is
 stored exactly as its source provides it.
 
 - **KJV** comes from the dataset thiagobodruk/bible, which is
-  MIT-licensed; the KJV text itself is public domain. That source marks translator-supplied words and marginal notes inline as
+  MIT-licensed; the KJV text itself is public domain. Ten chapters that
+  dataset numbered wrongly (1 Samuel 20, 1 Kings 22, Matthew 2, 22 and 26,
+  Mark 4, 7 and 8, 3 John, Revelation 12) and Revelation 13:1 come instead
+  from eBible.org's KJV USFM, kept in
+  [`sources/kjv/`](sources/kjv/README.md) exactly as downloaded, and
+  copied as it is; every other verse is the dataset's, byte for byte, and
+  a test pins them. That source marks translator-supplied words and marginal notes inline as
   `{...}`, in about 56% of verses. These are kept verbatim, including a
   few places where the source's own markup is broken (Hebrews 10:34 has an
   unmatched `}`). The only changes are structural: removing the file's

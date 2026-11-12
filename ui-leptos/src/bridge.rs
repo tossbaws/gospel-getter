@@ -79,8 +79,8 @@
 //!   About closing part way through an install brings the banner back.
 //! - [`NOTE_EVENT`] (`gospel-getter:note`, a [`NoteRequest`], cancelable):
 //!   the card opens the note editor; [`NOTE_OTHERS_EVENT`]
-//!   (`gospel-getter:note-others`) follows the selection's notes while it
-//!   may be open; [`NOTE_DONE_EVENT`] (`gospel-getter:note-done`, `{ action,
+//!   (`gospel-getter:note-others`, `{ passage, others }`) follows the
+//!   selection's notes while it may be open; [`NOTE_DONE_EVENT`] (`gospel-getter:note-done`, `{ action,
 //!   note }`) says what the editor did.
 //! - `aa::COMPARE_CHANGE_EVENT` (`gospel-getter:compare-change`) and
 //!   `aa::LAYOUT_CHANGE_EVENT` (`gospel-getter:layout-change`): Compare or
@@ -497,17 +497,20 @@ pub fn note_request(event: &CustomEvent) -> Result<NoteRequest, JsValue> {
 }
 
 /// The card's notes on the selection have changed while the editor may be
-/// open (adding): a `CustomEvent` whose `detail` is `{ others }`, the
-/// [`OtherNote`]s now. The editor shows them if it's adding.
+/// open (adding): a `CustomEvent` whose `detail` is `{ passage, others }`,
+/// the [`OtherNote`]s now on that [`Passage`], the one they were listed
+/// for. The editor shows them if it's adding on that passage, and no
+/// other (C2-01).
 pub const NOTE_OTHERS_EVENT: &str = "gospel-getter:note-others";
 
 #[derive(Debug, Deserialize)]
 struct Others {
+    passage: Passage,
     others: Vec<OtherNote>,
 }
 
-pub fn note_others(event: &CustomEvent) -> Result<Vec<OtherNote>, JsValue> {
-    detail::<Others>(event).map(|o| o.others)
+pub fn note_others(event: &CustomEvent) -> Result<(Passage, Vec<OtherNote>), JsValue> {
+    detail::<Others>(event).map(|o| (o.passage, o.others))
 }
 
 /// The editor has added, saved or deleted a note (and the card's notes are

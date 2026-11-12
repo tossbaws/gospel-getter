@@ -7,7 +7,8 @@
 // and reading position first. The clipboard is a stub that can succeed,
 // fail, or be missing; get_reading can be made to fail, or (for escaping
 // tests only) it and other commands can have a clearly synthetic answer
-// swapped in. Update checks and
+// swapped in; or it can take writes only within a click or key press, as
+// WebKitGTK's does. Update checks and
 // installs are scripted in the bridge (`setUpdate`), and progress reaches
 // the page through a minimal Tauri `Channel`, as in the app. jsdom has no
 // layout, so the window's width is a number the page's width media
@@ -41,6 +42,7 @@ const LEPTOS_WASM = readFileSync(new URL('dist/ui-leptos_bg.wasm', root));
 // independent of the database the bridge serves from.
 export const BIBLES = {
     kjv: JSON.parse(read('src-tauri/data/kjv.json')),
+    // Five verses the WEB doesn't number are empty strings (`isNumbered`).
     web: JSON.parse(read('src-tauri/data/web.json')),
     // A verse the BSB doesn't number is null; its footnotes are apart.
     bsb: JSON.parse(read('src-tauri/data/bsb.json')),
@@ -53,10 +55,17 @@ export const bookId = (name) => {
     return index + 1;
 };
 
+/**
+ * Whether a bundled file's entry is a verse the translation numbers: not
+ * null (the BSB's), and not empty (the WEB's five, Luke 17:36, Acts 8:37,
+ * 15:34, 24:7 and Romans 16:25), the seed step's own rule.
+ */
+export const isNumbered = (text) => typeof text === 'string' && text !== '';
+
 /** A verse's stored text: exactly the string in the bundled data file. */
 export function storedVerse(code, book, chapter, verse) {
     const text = BIBLES[code][bookId(book) - 1].chapters[chapter - 1][verse - 1];
-    if (typeof text !== 'string') throw new Error(`no ${code} ${book} ${chapter}:${verse}`);
+    if (!isNumbered(text)) throw new Error(`no ${code} ${book} ${chapter}:${verse}`);
     return text;
 }
 
@@ -69,8 +78,10 @@ export function shownVerse(code, book, chapter, verse) {
     return backend('__verse_text', { code, text: storedVerse(code, book, chapter, verse) });
 }
 
+/** The chapter's last verse in the translation: the last one it numbers. */
 export function verseCount(code, book, chapter) {
-    return BIBLES[code][bookId(book) - 1].chapters[chapter - 1].length;
+    const verses = BIBLES[code][bookId(book) - 1].chapters[chapter - 1];
+    return verses.findLastIndex(isNumbered) + 1;
 }
 
 // ---- The bridge process
@@ -155,8 +166,8 @@ export async function backend(cmd, args = {}, channels = {}) {
  * { problem } or { noAnswer: true } (given up on after the app's own time
  * limit, which `checkTimeoutMs` shortens); `install` is { events, problem }
  * (no problem: it restarts, and never answers). Problems are the app's:
- * offline, noReleaseInfo, notForThisInstall, notVerified, notAuthorized,
- * other.
+ * offline, noReleaseInfo, notForThisInstall, notVerified,
+ * packageNotInstalled, installerDidntStart, other.
  */
 export function setUpdate(script) {
     return backend('__set_update', script);
@@ -189,8 +200,11 @@ export async function closeBridge() {
 
 /**
  * Boots the page at `book` `chapter` in `translation` (as a saved reading
- * position) and waits for the reading pane. `clipboard` is 'ok', 'reject'
- * or 'missing'; `compare` and `readerMode` preset those display settings;
+ * position) and waits for the reading pane. `clipboard` is 'ok', 'reject',
+ * 'missing' or 'gesture' (it writes only within `app.click` or `app.key`,
+ * as WebKitGTK's clipboard writes only within the click or key press that
+ * asked: a write after an await is refused); `compare` and `readerMode`
+ * preset those display settings;
  * `failing` maps commands to the error they reject with from the start.
  * `fresh` starts with no saved reading position, as a new install does;
  * `keepPosition` keeps the one the last session saved (with where in its
@@ -241,7 +255,17 @@ export async function openApp({
 
     const calls = [];
     const clipboardWrites = [];
-    const state = { failReading: false, clipboard, failing: new Map(Object.entries(failing)), held: new Map(), heldAnswers: [], heldFailures: [] };
+    const state = { failReading: false, clipboard, gesture: false, failing: new Map(Object.entries(failing)), held: new Map(), heldAnswers: [], heldFailures: [] };
+    // Runs `dispatch` as a click or key press: the clipboard's 'gesture'
+    // mode writes only meanwhile.
+    const gesture = (dispatch) => {
+        state.gesture = true;
+        try {
+            dispatch();
+        } finally {
+            state.gesture = false;
+        }
+    };
     const releases = new Map();
     for (const cmd of hold) {
         state.held.set(cmd, new Promise((resolve) => releases.set(cmd, resolve)));
@@ -316,7 +340,7 @@ export async function openApp({
             };
             const stub = {
                 writeText(text) {
-                    if (state.clipboard === 'reject') {
+                    if (state.clipboard === 'reject' || (state.clipboard === 'gesture' && !state.gesture)) {
                         return Promise.reject(
                             new window.DOMException('The request is not allowed', 'NotAllowedError'),
                         );
@@ -560,15 +584,17 @@ export async function openApp({
         click(el, opts = {}) {
             const init = { bubbles: true, cancelable: true, button: 0, ...opts };
             const down = new window.MouseEvent('mousedown', init);
-            el.dispatchEvent(down);
-            el.dispatchEvent(new window.MouseEvent('mouseup', init));
-            el.dispatchEvent(new window.MouseEvent('click', init));
+            gesture(() => {
+                el.dispatchEvent(down);
+                el.dispatchEvent(new window.MouseEvent('mouseup', init));
+                el.dispatchEvent(new window.MouseEvent('click', init));
+            });
             return flushed(down);
         },
         /** Presses `key` on `target`. Returns the keydown event, which can also be awaited: see `flushed`. */
         key(key, opts = {}, target = document.body) {
             const event = new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...opts });
-            target.dispatchEvent(event);
+            gesture(() => target.dispatchEvent(event));
             return flushed(event);
         },
         type(input, text) {

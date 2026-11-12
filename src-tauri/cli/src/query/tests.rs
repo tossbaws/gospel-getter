@@ -3,7 +3,8 @@
 //! Verses are compared with the bundled text, never with a retyped copy.
 
 use gospel_getter_core::db::test_support::{
-    TempDb, bundled, bundled_bsb, fresh_database, prepared_database,
+    TempDb, WEB_UNNUMBERED, as_2_29_0_left_it, bundled, bundled_bsb, empty_web_verses,
+    fresh_database, prepared_database, verses_snapshot,
 };
 use gospel_getter_core::db::{self, Db, HighlightColor, TopVerse};
 use serde_json::{Value, json};
@@ -246,6 +247,357 @@ async fn get_passage_says_what_a_translation_does_not_number() {
             .contains("John 3 ends at verse 36")
     );
     pool.close().await;
+}
+
+/// The five verses the WEB's file has with no text are ones it doesn't
+/// number, and are said to be, as the BSB's are: never given as a verse
+/// with no words. Its other verses come as ever, and the KJV numbers them.
+#[tokio::test]
+async fn get_passage_says_what_the_web_does_not_number() {
+    let (db, pool) = fresh_database("cli_passage_web_gap").await;
+    assert_eq!(
+        refused(&db, passage_of("Luke 17:36", Some("web"))).await,
+        "In Luke 17:36, verse 36 isn't numbered in the World English Bible."
+    );
+    let answer = ask(&db, passage_of("Luke 17:35-37", Some("web"))).await;
+    let verses = answer["verses"].as_array().unwrap();
+    let numbers: Vec<_> = verses
+        .iter()
+        .map(|v| v["verse"].as_i64().unwrap())
+        .collect();
+    assert_eq!(numbers, [35, 37]);
+    assert_eq!(
+        verses[0]["text"].as_str().unwrap(),
+        bundled("web")[41].chapters[16][34].as_str()
+    );
+    assert_eq!(
+        answer["notice"],
+        "In Luke 17:35\u{2013}37, verse 36 isn't numbered in the World English Bible."
+    );
+    for (reference, says) in [
+        (
+            "Acts 8:37",
+            "In Acts 8:37, verse 37 isn't numbered in the World English Bible.",
+        ),
+        (
+            "Acts 15:34",
+            "In Acts 15:34, verse 34 isn't numbered in the World English Bible.",
+        ),
+        (
+            "Acts 24:7",
+            "In Acts 24:7, verse 7 isn't numbered in the World English Bible.",
+        ),
+        // Past the end of the WEB's Romans 16 now.
+        (
+            "Romans 16:25",
+            "Romans 16:25 isn't numbered in the World English Bible \u{2014} Romans 16 ends at \
+             verse 24 there.",
+        ),
+    ] {
+        assert_eq!(
+            refused(&db, passage_of(reference, Some("web"))).await,
+            says,
+            "{reference}"
+        );
+    }
+    let kjv = ask(&db, passage_of("Luke 17:36", Some("kjv"))).await;
+    assert_eq!(kjv["verses"][0]["verse"], 36);
+    assert!(!kjv["verses"][0]["text"].as_str().unwrap().is_empty());
+    pool.close().await;
+}
+
+/// A database the 2.29.1 app hasn't opened yet, or whose upgrade step
+/// failed, still stores the five verses the WEB doesn't number as verses
+/// with no text (`as_2_29_0_left_it`). Read as this program reads it, with
+/// the app closed (read-only, opened afresh for each question), they're
+/// verses the WEB doesn't number all the same, as on a database the app has
+/// brought up to date: refused alone, left out of a range with the notice,
+/// out of a quote's text, out of a save and out of a bookmark's verses.
+/// Nothing read changes a row: the five are still stored as they were.
+#[tokio::test]
+async fn a_database_not_yet_upgraded_says_what_the_web_does_not_number() {
+    let (db, pool) = fresh_database("cli_web_gap_not_upgraded").await;
+    as_2_29_0_left_it(&pool).await;
+    db::findings::set_findings_enabled(pool.write(), true)
+        .await
+        .expect("turn saving on");
+    db::bookmarks::add_bookmark(pool.write(), 42, 17, 35, 37)
+        .await
+        .expect("bookmark Luke 17:35-37");
+    let stored = verses_snapshot(pool.read()).await;
+    pool.close().await;
+
+    let luke_17_36 = "In Luke 17:36, verse 36 isn't numbered in the World English Bible.";
+    let in_35_to_37 =
+        "In Luke 17:35\u{2013}37, verse 36 isn't numbered in the World English Bible.";
+    assert_eq!(
+        refused(&db, passage_of("Luke 17:36", Some("web"))).await,
+        luke_17_36
+    );
+    let answer = ask(&db, passage_of("Luke 17:35-37", Some("web"))).await;
+    let verses = answer["verses"].as_array().expect("verses");
+    let numbers: Vec<_> = verses
+        .iter()
+        .map(|v| v["verse"].as_i64().expect("a number"))
+        .collect();
+    assert_eq!(numbers, [35, 37]);
+    assert_eq!(answer["notice"], in_35_to_37);
+    for (verse, at) in verses.iter().zip([34, 36]) {
+        assert_eq!(
+            verse["text"].as_str(),
+            Some(bundled("web")[41].chapters[16][at].as_str())
+        );
+    }
+    for (reference, says) in [
+        (
+            "Acts 8:37",
+            "In Acts 8:37, verse 37 isn't numbered in the World English Bible.",
+        ),
+        (
+            "Acts 15:34",
+            "In Acts 15:34, verse 34 isn't numbered in the World English Bible.",
+        ),
+        (
+            "Acts 24:7",
+            "In Acts 24:7, verse 7 isn't numbered in the World English Bible.",
+        ),
+        (
+            "Romans 16:25",
+            "Romans 16:25 isn't numbered in the World English Bible \u{2014} Romans 16 ends at \
+             verse 24 there.",
+        ),
+    ] {
+        assert_eq!(
+            refused(&db, passage_of(reference, Some("web"))).await,
+            says,
+            "{reference}"
+        );
+    }
+    let compared = ask(
+        &db,
+        Request::Compare(CompareArgs {
+            reference: "Luke 17:36".to_string(),
+            translations: Some(vec!["web".to_string(), "kjv".to_string()]),
+        }),
+    )
+    .await;
+    assert_eq!(compared["columns"][0]["verses"], json!([]));
+    assert_eq!(compared["columns"][0]["notice"], luke_17_36);
+    assert_eq!(compared["columns"][1]["verses"][0]["verse"], 36);
+
+    // The two verses' text, joined by one space as get_passage gives it, is
+    // the passage exactly, and says what isn't numbered in it.
+    let text = format!(
+        "{} {}",
+        verses[0]["text"].as_str().expect("35"),
+        verses[1]["text"].as_str().expect("37")
+    );
+    let verified = ask(
+        &db,
+        Request::VerifyQuote(VerifyQuoteArgs {
+            text: text.clone(),
+            reference: Some("Luke 17:35-37".to_string()),
+            translation: Some("web".to_string()),
+        }),
+    )
+    .await;
+    assert_eq!(verified["status"], "exact");
+    assert_eq!(verified["text"], text);
+    assert_eq!(verified["notice"], in_35_to_37);
+    assert!(
+        verified["message"]
+            .as_str()
+            .is_some_and(|m| m.ends_with(in_35_to_37)),
+        "{verified}"
+    );
+
+    // Saving: 17:36 alone isn't read; 17:35-37 saves the two it numbers.
+    let saved = ask(
+        &db,
+        Request::SaveFindings {
+            args: SaveFindingsArgs {
+                request: "two in the field".to_string(),
+                references: vec!["Luke 17:36".to_string(), "Luke 17:35-37".to_string()],
+                agent: Some("Claude".to_string()),
+                translation: Some("web".to_string()),
+            },
+            client: None,
+        },
+    )
+    .await;
+    assert_eq!(
+        saved["errors"],
+        json!([{ "reference": "Luke 17:36", "error": luke_17_36 }])
+    );
+    assert_eq!(
+        saved["verses"],
+        json!([
+            { "reference": "Luke 17:35", "status": "saved" },
+            { "reference": "Luke 17:37", "status": "saved" },
+        ])
+    );
+    assert_eq!(
+        saved["notices"],
+        json!([{ "reference": "Luke 17:35-37", "notice": in_35_to_37 }])
+    );
+
+    let bookmarks = ask(
+        &db,
+        Request::ListBookmarks(ListBookmarksArgs {
+            translation: Some("web".to_string()),
+            offset: None,
+            limit: None,
+        }),
+    )
+    .await;
+    let quoted: Vec<_> = bookmarks["bookmarks"][0]["verses"]
+        .as_array()
+        .expect("verses")
+        .iter()
+        .map(|v| v["verse"].as_i64().expect("a number"))
+        .collect();
+    assert_eq!(quoted, [35, 37]);
+
+    // Nothing was changed: every verse row is as it was, the five included.
+    let pool = db.connect().await;
+    assert_eq!(empty_web_verses(pool.read()).await, WEB_UNNUMBERED);
+    assert!(
+        verses_snapshot(pool.read()).await == stored,
+        "no verse changed"
+    );
+    pool.close().await;
+}
+
+/// A reference past the end of a chapter, as an agent may give one: the
+/// verses there are saved and checked, and both answers say, as get_passage
+/// does, which aren't numbered. Their wording is get_passage's own.
+#[tokio::test]
+async fn saving_and_verifying_say_what_is_not_numbered() {
+    let (db, pool) = fresh_database("cli_notice_kjv").await;
+    db::findings::set_findings_enabled(pool.write(), true)
+        .await
+        .expect("turn saving on");
+    pool.close().await;
+
+    let read = ask(&db, passage_of("John 11:33-60", Some("kjv"))).await;
+    let notice = read["notice"].as_str().expect("a notice").to_string();
+    assert!(
+        notice.starts_with("John 11:58\u{2013}60 isn't numbered in the King James Version"),
+        "{notice}"
+    );
+    let numbered = read["verses"].as_array().expect("verses").len();
+
+    let saved = ask(
+        &db,
+        Request::SaveFindings {
+            args: SaveFindingsArgs {
+                request: "grief".to_string(),
+                references: vec!["John 11:33-60".to_string()],
+                agent: Some("Claude".to_string()),
+                translation: Some("kjv".to_string()),
+            },
+            client: None,
+        },
+    )
+    .await;
+    assert_eq!(saved["saved"], numbered);
+    assert_eq!(saved["errors"], Value::Null);
+    assert_eq!(
+        saved["notices"],
+        json!([{ "reference": "John 11:33-60", "notice": notice }])
+    );
+    assert!(
+        saved["message"].as_str().is_some_and(|m| m.contains(
+            " 1 reference has verses this translation doesn't number; notices says which."
+        )),
+        "{saved}"
+    );
+
+    let wept = read["verses"]
+        .as_array()
+        .and_then(|v| v.iter().find(|v| v["verse"] == 35))
+        .and_then(|v| v["text"].as_str())
+        .expect("John 11:35")
+        .to_string();
+    let verified = ask(
+        &db,
+        Request::VerifyQuote(VerifyQuoteArgs {
+            text: wept,
+            reference: Some("John 11:33-60".to_string()),
+            translation: Some("kjv".to_string()),
+        }),
+    )
+    .await;
+    assert_eq!(verified["status"], "exact_part");
+    assert_eq!(verified["notice"], notice.as_str());
+    assert!(
+        verified["message"]
+            .as_str()
+            .is_some_and(|m| m.ends_with(&format!(". {notice}"))),
+        "{verified}"
+    );
+}
+
+/// A reference the translation numbers throughout: no notice in either
+/// answer, which has exactly the fields it always had.
+#[tokio::test]
+async fn a_fully_numbered_save_and_check_answer_as_before() {
+    let (db, pool) = fresh_database("cli_notice_none").await;
+    db::findings::set_findings_enabled(pool.write(), true)
+        .await
+        .expect("turn saving on");
+    pool.close().await;
+    let keys = |answer: &Value| -> Vec<String> {
+        answer
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect()
+    };
+    let saved = ask(
+        &db,
+        Request::SaveFindings {
+            args: SaveFindingsArgs {
+                request: "grief".to_string(),
+                references: vec!["John 11:33-35".to_string()],
+                agent: Some("Claude".to_string()),
+                translation: Some("kjv".to_string()),
+            },
+            client: None,
+        },
+    )
+    .await;
+    assert_eq!(
+        keys(&saved),
+        [
+            "agent",
+            "already_saved",
+            "message",
+            "request",
+            "saved",
+            "translation",
+            "verses"
+        ]
+    );
+    let read = ask(&db, passage_of("John 3:16", Some("kjv"))).await;
+    let verified = ask(
+        &db,
+        Request::VerifyQuote(VerifyQuoteArgs {
+            text: read["verses"][0]["text"]
+                .as_str()
+                .expect("John 3:16")
+                .to_string(),
+            reference: Some("John 3:16".to_string()),
+            translation: Some("kjv".to_string()),
+        }),
+    )
+    .await;
+    assert_eq!(
+        keys(&verified),
+        ["message", "reference", "status", "text", "translation"]
+    );
+    assert_eq!(verified["message"], "This is exactly John 3:16 in the KJV.");
 }
 
 /// References that can't be read, and translations that aren't there, are
@@ -786,6 +1138,14 @@ async fn compare_gives_each_translation_its_own_verses() {
             .as_str()
             .unwrap()
             .contains("isn't numbered")
+    );
+    assert_eq!(gap["columns"][1]["verses"].as_array().unwrap().len(), 1);
+    // The WEB's verses with no text are such gaps too, never empty verses.
+    let gap = ask(&db, compare("Luke 17:36", Some(&["web", "kjv"]))).await;
+    assert_eq!(gap["columns"][0]["verses"], json!([]));
+    assert_eq!(
+        gap["columns"][0]["notice"],
+        "In Luke 17:36, verse 36 isn't numbered in the World English Bible."
     );
     assert_eq!(gap["columns"][1]["verses"].as_array().unwrap().len(), 1);
 

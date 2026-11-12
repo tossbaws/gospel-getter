@@ -137,16 +137,18 @@ test('invalid references explain themselves and go nowhere', () =>
 
 test('a verse only one translation numbers is checked against the selected one', () =>
     withApp({ book: 'Genesis', chapter: 1, translation: 'kjv' }, async (app) => {
-        await app.search('Matthew 2:23');
-        assert.equal(app.searchStatus(), 'No such chapter or verse: Matthew 2:23. Matthew 2 has 22 verses in the King James Version.');
+        // (Until 2.29.2 the KJV's Matthew 2:23, a verse it was short, was
+        // the example.)
+        await app.search('Romans 14:24');
+        assert.equal(app.searchStatus(), 'No such chapter or verse: Romans 14:24. Romans 14 has 23 verses in the King James Version.');
 
         // Switching translation reruns the search: the WEB numbers it.
         await switchTranslation(app, 'web');
         await app.idle(0, 'search');
         assert.equal(app.searchStatus(), 'Press Enter to go there.');
         await pressEnter(app);
-        assert.equal(app.heading(), 'Matthew 2');
-        assert.deepEqual(app.selectedVerseNumbers(), [23]);
+        assert.equal(app.heading(), 'Romans 14');
+        assert.deepEqual(app.selectedVerseNumbers(), [24]);
     }));
 
 test('word search lists matching verses in Bible order with the words marked', () =>

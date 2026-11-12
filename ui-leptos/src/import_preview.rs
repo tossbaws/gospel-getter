@@ -354,6 +354,8 @@ impl Import {
                     return;
                 }
             };
+            // The notes may all be new, under the ids the old ones had.
+            crate::note_copy::forget_all();
             self.close();
             bridge::focus_home();
             // Aa's switch, shown as it is now the import has set it (the

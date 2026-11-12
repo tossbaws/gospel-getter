@@ -48,8 +48,9 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 -m unittest discover -s tools/ci -v
 
-      # Which AppImage packaging/install.sh installs (nothing is built).
-      - name: Test the install script
+      # Which AppImage packaging/install.sh installs (nothing is built), and
+      # what packaging/uninstall.sh deletes, in a throwaway HOME.
+      - name: Test the install and uninstall scripts
         working-directory: .
         run: scripts/test-install.sh
 

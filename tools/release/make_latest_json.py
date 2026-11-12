@@ -6,7 +6,9 @@ Usage, from the repository root (Python 3 standard library only):
         --notes-file NOTES.md --assets DIR [--out DIR/latest.json]
 
 DIR holds the release's renamed installers and, beside each, the .sig file
-the Tauri CLI wrote for it in dist.yml (renamed the same way):
+the Tauri CLI wrote for it in dist.yml's sign job (renamed the same way),
+both taken from that job's four -signed artifacts
+(gospel-getter-linux-appimage-signed and so on, tools/release/README.md):
 
     Gospel-Getter_amd64.AppImage        Gospel-Getter_amd64.AppImage.sig
     Gospel-Getter_amd64.deb             Gospel-Getter_amd64.deb.sig

@@ -2,3 +2,8 @@
 # and all (see sources/bsb/README.md). Never convert their line endings.
 sources/bsb/bsb.txt -text
 sources/bsb/bsb_usfm.zip binary
+
+# The KJV's raw source, byte for byte as eBible.org publishes it, and the
+# 2.29.1 file's verses it replaced, exactly (see sources/kjv/README.md).
+sources/kjv/eng-kjv2006_usfm.zip binary
+sources/kjv/kjv_2_29_1_replaced.tsv -text

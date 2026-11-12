@@ -161,8 +161,9 @@ pub mod messages {
     pub const DOWNLOAD_FAILED: &str =
         "The update couldn\u{2019}t be downloaded. Check your internet connection and try again.";
     pub const NOT_VERIFIED: &str = "The update couldn\u{2019}t be verified as a genuine Gospel Getter release, so it wasn\u{2019}t installed.";
-    pub const NOT_AUTHORIZED: &str = "Installing the update needs your password, and it wasn\u{2019}t given. Nothing was changed.";
+    pub const PACKAGE_NOT_INSTALLED: &str = "The update wasn\u{2019}t installed: installing it needs your password, and it wasn\u{2019}t given or wasn\u{2019}t accepted, or the package couldn\u{2019}t be installed. Nothing was changed.";
     pub const INSTALL_FAILED: &str = "The update couldn\u{2019}t be installed.";
+    pub const INSTALLER_DIDNT_START: &str = "The update didn\u{2019}t start: its installer couldn\u{2019}t be opened. Nothing was changed, and Gospel Getter is still open. Try again, or download the new version from the releases page.";
     pub const NOTHING_TO_INSTALL: &str =
         "There\u{2019}s no update to install. Check for updates first.";
     pub const LINK_ONLY: &str = "This copy of Gospel Getter can\u{2019}t update itself. Download the new version from the releases page.";
@@ -202,8 +203,18 @@ pub enum Problem {
     NotForThisInstall,
     /// The download's signature or signed version didn't check out.
     NotVerified,
-    /// The reader cancelled or failed the password prompt (.deb).
-    NotAuthorized,
+    /// The .deb wasn't installed: its password prompt was cancelled or
+    /// failed, or the package manager couldn't install it. The updater
+    /// can't tell these apart: it tries pkexec, then a zenity or kdialog
+    /// password prompt, then sudo, and when none installs it says only
+    /// `PackageInstallFailed` (tauri-plugin-updater 2.13.2,
+    /// `try_install_with_privileges`). Either way nothing was changed: the
+    /// .deb has no install scripts, and dpkg undoes an install that fails
+    /// part-way.
+    PackageNotInstalled,
+    /// Windows: the installer didn't start (`ShellExecuteW` refused it,
+    /// after the app had got ready for it). The app carries on as it was.
+    InstallerDidntStart,
     Other,
 }
 
@@ -222,7 +233,8 @@ pub fn install_message(problem: Problem) -> &'static str {
     match problem {
         Problem::Offline => messages::DOWNLOAD_FAILED,
         Problem::NotVerified => messages::NOT_VERIFIED,
-        Problem::NotAuthorized => messages::NOT_AUTHORIZED,
+        Problem::PackageNotInstalled => messages::PACKAGE_NOT_INSTALLED,
+        Problem::InstallerDidntStart => messages::INSTALLER_DIDNT_START,
         _ => messages::INSTALL_FAILED,
     }
 }
@@ -250,7 +262,8 @@ pub use desktop::*;
 
 #[cfg(desktop)]
 mod desktop {
-    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use tauri::ipc::Channel;
     use tauri::{AppHandle, Manager, Runtime, State};
@@ -265,7 +278,13 @@ mod desktop {
 
     /// The update the last check found, for `install_update`.
     #[derive(Default)]
-    pub struct PendingUpdate(Mutex<Option<Update>>);
+    pub struct PendingUpdate {
+        update: Mutex<Option<Update>>,
+        /// Set by the Windows hook ([`installer_hook`]) right before the
+        /// installer is started: an install that returns once it's set
+        /// didn't start the installer.
+        installer_starting: Arc<AtomicBool>,
+    }
 
     /// The bundle type the Tauri bundler marked this binary with.
     fn current_bundle() -> Option<Bundle> {
@@ -333,22 +352,68 @@ mod desktop {
             | Error::SignatureUtf8(_)
             | Error::SignedVersionMismatch { .. }
             | Error::MissingSignedVersion => Problem::NotVerified,
-            Error::AuthenticationFailed => Problem::NotAuthorized,
+            // A cancelled or failed password prompt is this too: the
+            // updater never returns `AuthenticationFailed` from an install.
+            Error::PackageInstallFailed => Problem::PackageNotInstalled,
             _ => Problem::Other,
         }
     }
 
     /// Close the database, so nothing is left half-written when the app
-    /// exits for an installer or restarts. Blocks until it's closed: call it
-    /// from synchronous code off the runtime's workers (the Windows
-    /// `on_before_exit` hook, run where the install runs, or
-    /// `spawn_blocking`). The pool is closed from a thread of its own.
+    /// restarts once an update is installed. Blocks until it's closed: call
+    /// it from synchronous code off the runtime's workers (`spawn_blocking`).
+    /// The pool is closed from a thread of its own.
     fn close_database<R: Runtime>(app: &AppHandle<R>) {
         let store = app.state::<AppState>().store.clone();
         let closed =
             std::thread::spawn(move || tauri::async_runtime::block_on(store.close())).join();
         if closed.is_err() {
             tracing::error!("Failed to close the database before updating");
+        }
+    }
+
+    /// Fold the database's write-ahead log into its file
+    /// (`Store::checkpoint`), leaving every connection open, so the app
+    /// carries on as it was if it doesn't exit. Blocks until it's done: the
+    /// Windows hook calls it, where the install runs, off the runtime's
+    /// workers; it runs on a thread of its own, as [`close_database`] does.
+    fn checkpoint_database<R: Runtime>(app: &AppHandle<R>) {
+        let store = app.state::<AppState>().store.clone();
+        let done =
+            std::thread::spawn(move || tauri::async_runtime::block_on(store.checkpoint())).join();
+        match done {
+            Ok(Ok(true)) => {}
+            Ok(Ok(false)) => tracing::warn!(
+                "Part of the database's write-ahead log was still being read before updating; \
+                 it's folded in the next time the database is opened"
+            ),
+            Ok(Err(e)) => {
+                tracing::error!("Failed to checkpoint the database before updating: {e:#}")
+            }
+            Err(_) => tracing::error!("Failed to checkpoint the database before updating"),
+        }
+    }
+
+    /// The Windows hook (the updater's `on_before_exit`): what runs right
+    /// before the installer is started. If it starts, the updater exits with
+    /// `process::exit` (tauri-plugin-updater 2.13.2, `install_inner`), so no
+    /// exit event comes and nothing else runs; if it doesn't, the install
+    /// returns its error and the app carries on. So this does only what's
+    /// harmless either way: it notes that the installer is starting
+    /// (`starting`), saves the window's size and place, as an ordinary exit
+    /// does, and folds the database's write-ahead log into its file. It
+    /// closes nothing and cleans nothing up: the database stays open and the
+    /// window shown. An exit without closing the database leaves it whole:
+    /// SQLite commits each write atomically, and the write-ahead log is
+    /// empty by then.
+    pub(crate) fn installer_hook<R: Runtime>(
+        app: AppHandle<R>,
+        starting: Arc<AtomicBool>,
+    ) -> impl Fn() + Send + Sync + 'static {
+        move || {
+            starting.store(true, Ordering::SeqCst);
+            save_window_state(&app);
+            checkpoint_database(&app);
         }
     }
 
@@ -364,6 +429,7 @@ mod desktop {
     fn updater<R: Runtime>(
         app: &AppHandle<R>,
         settings: &Settings,
+        installer_starting: &Arc<AtomicBool>,
     ) -> Result<tauri_plugin_updater::Updater, Error> {
         let mut builder = app
             .updater_builder()
@@ -376,16 +442,9 @@ mod desktop {
         }
         match settings.mode {
             UpdateMode::SelfUpdate => {
-                // Windows only: runs right before the installer starts and
-                // the app exits, with `process::exit`, so no exit event
-                // comes: the window's size and place are saved here, as the
-                // window-state plugin saves them on an ordinary exit.
-                let handle = app.clone();
-                builder = builder.on_before_exit(move || {
-                    save_window_state(&handle);
-                    close_database(&handle);
-                    handle.cleanup_before_exit();
-                });
+                // Windows only: runs right before the installer starts.
+                builder =
+                    builder.on_before_exit(installer_hook(app.clone(), installer_starting.clone()));
             }
             UpdateMode::LinkOnly => {
                 if let Some(target) = link_only_target(std::env::consts::OS) {
@@ -418,7 +477,7 @@ mod desktop {
         let settings = settings()?;
         let mode = settings.mode;
         let found = within_check_time(settings.timeout, async {
-            let found = match updater(&app, &settings) {
+            let found = match updater(&app, &settings, &pending.installer_starting) {
                 Ok(updater) => updater.check().await,
                 Err(e) => Err(e),
             };
@@ -429,7 +488,7 @@ mod desktop {
         })
         .await?;
         let info = found.as_ref().map(|u| update_info(u, mode));
-        *pending.0.lock().unwrap_or_else(|e| e.into_inner()) = found;
+        *pending.update.lock().unwrap_or_else(|e| e.into_inner()) = found;
         Ok(info)
     }
 
@@ -448,7 +507,7 @@ mod desktop {
             return Err(messages::LINK_ONLY.to_string());
         }
         let update = pending
-            .0
+            .update
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
@@ -488,31 +547,48 @@ mod desktop {
             return Err(super::test_hook::DOESNT_INSTALL.to_string());
         }
 
-        // On Windows this runs `on_before_exit`, starts the installer and
-        // exits. Elsewhere it can take minutes (a .deb waits on pkexec's
-        // password prompt; an AppImage is copied), so it runs off the
-        // runtime's workers, as closing the database does.
         let installing = update.clone();
-        tokio::task::spawn_blocking(move || installing.install(bytes))
-            .await
-            .map_err(|e| {
-                tracing::error!("The install of update {} stopped: {e}", update.version);
-                install_message(Problem::Other).to_string()
-            })?
-            .map_err(|e| {
-                tracing::error!(
-                    "Failed to install update {}: {}",
-                    update.version,
-                    with_causes(&e)
-                );
-                install_message(classify(&e)).to_string()
-            })?;
+        run_install(&pending.installer_starting, &update.version, move || {
+            installing.install(bytes)
+        })
+        .await?;
         tracing::info!("Installed update {}; restarting", update.version);
         let closing = app.clone();
         if let Err(e) = tokio::task::spawn_blocking(move || close_database(&closing)).await {
             tracing::error!("Failed to close the database before restarting: {e}");
         }
         app.restart();
+    }
+
+    /// Run `install`, the updater's: on Windows it runs [`installer_hook`],
+    /// starts the installer and exits; elsewhere it can take minutes (a .deb
+    /// waits on pkexec's password prompt; an AppImage is copied), so it runs
+    /// off the runtime's workers. If it returns an error, what the reader is
+    /// told: once the hook has run (`installer_starting`), that the
+    /// installer didn't start, and the app carries on; before it, as for any
+    /// failure.
+    pub(crate) async fn run_install(
+        installer_starting: &AtomicBool,
+        version: &str,
+        install: impl FnOnce() -> Result<(), Error> + Send + 'static,
+    ) -> Result<(), String> {
+        installer_starting.store(false, Ordering::SeqCst);
+        let installed = tokio::task::spawn_blocking(install).await.map_err(|e| {
+            tracing::error!("The install of update {version} stopped: {e}");
+            install_message(Problem::Other).to_string()
+        })?;
+        installed.map_err(|e| {
+            if installer_starting.load(Ordering::SeqCst) {
+                tracing::error!(
+                    "The installer for update {version} didn't start, so the app carries on: {}",
+                    with_causes(&e)
+                );
+                install_message(Problem::InstallerDidntStart).to_string()
+            } else {
+                tracing::error!("Failed to install update {version}: {}", with_causes(&e));
+                install_message(classify(&e)).to_string()
+            }
+        })
     }
 
     /// Open the releases page in the system browser (for builds that can't
@@ -663,8 +739,12 @@ mod tests {
             messages::NOT_VERIFIED
         );
         assert_eq!(
-            install_message(Problem::NotAuthorized),
-            messages::NOT_AUTHORIZED
+            install_message(Problem::PackageNotInstalled),
+            messages::PACKAGE_NOT_INSTALLED
+        );
+        assert_eq!(
+            install_message(Problem::InstallerDidntStart),
+            messages::INSTALLER_DIDNT_START
         );
         assert_eq!(install_message(Problem::Other), messages::INSTALL_FAILED);
     }
@@ -787,7 +867,7 @@ mod tests {
             ),
             (Error::MissingSignedVersion, Problem::NotVerified),
             (Error::SignatureUtf8("x".into()), Problem::NotVerified),
-            (Error::AuthenticationFailed, Problem::NotAuthorized),
+            (Error::PackageInstallFailed, Problem::PackageNotInstalled),
             (Error::DebInstallFailed, Problem::Other),
             (Error::InsecureTransportProtocol, Problem::Other),
         ];
@@ -798,6 +878,97 @@ mod tests {
             .unwrap_err()
             .into();
         assert_eq!(classify(&bad_json), Problem::NoReleaseInfo);
+    }
+
+    /// A .deb whose install didn't go ahead (a password prompt cancelled,
+    /// which the updater reports as the package not installed) tells the
+    /// reader nothing was changed, not that the install failed.
+    #[cfg(desktop)]
+    #[test]
+    fn a_deb_not_installed_says_nothing_was_changed() {
+        let error = tauri_plugin_updater::Error::PackageInstallFailed;
+        let message = install_message(classify(&error));
+        assert!(message.ends_with("Nothing was changed."), "{message}");
+        assert!(message.contains("password"), "{message}");
+    }
+
+    /// Windows' install as the updater runs it (`install_inner`), when the
+    /// installer won't start: the hook, then `ShellExecuteW`'s error, here
+    /// injected in its place. The app carries on as it was: the database
+    /// reads and writes, the window is still there, the app's resources are
+    /// still in place (the cleanup before an exit would have cleared them),
+    /// and the reader is told the update didn't start. A failure before the
+    /// hook (a download that can't be unpacked) is told as it always was,
+    /// and leaves the app as it was too.
+    #[cfg(desktop)]
+    #[test]
+    fn an_installer_that_does_not_start_leaves_a_working_app() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tauri::Manager;
+        use tauri_plugin_updater::Error;
+
+        use crate::commands::AppState;
+        use crate::db::test_support::fresh_database;
+
+        /// Something of the app's in its resources table.
+        struct Kept;
+        impl tauri::Resource for Kept {}
+
+        let (db, state) = tauri::async_runtime::block_on(async {
+            let (db, pool) = fresh_database("installer_did_not_start").await;
+            (db, AppState::load(pool).await.expect("load state"))
+        });
+        let data_dir = db.path().parent().expect("its folder").to_path_buf();
+        let app = tauri::test::mock_builder()
+            .plugin(crate::window::state_plugin(&data_dir).expect("the window-state plugin"))
+            .manage(state)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build the mock app");
+        let window =
+            tauri::WebviewWindowBuilder::new(&app, crate::window::MAIN, Default::default())
+                .build()
+                .expect("the window");
+        let kept = app.resources_table().add(Kept);
+        let carries_on = |when: &str| {
+            let store = app.state::<AppState>().store.clone();
+            tauri::async_runtime::block_on(async {
+                let verses = store.chapter_verses(1, 43, 3).await;
+                assert!(verses.is_ok_and(|v| !v.is_empty()), "{when}: reads");
+                let saved = store.save_reading_position(1, 43, 3, None).await;
+                assert!(saved.is_ok(), "{when}: writes: {saved:?}");
+            });
+            assert!(
+                app.get_webview_window(crate::window::MAIN).is_some(),
+                "{when}"
+            );
+            assert!(window.is_visible().expect("visible"), "{when}");
+            assert!(
+                app.resources_table().get::<Kept>(kept).is_ok(),
+                "{when}: nothing cleaned up"
+            );
+        };
+
+        let starting = Arc::new(AtomicBool::new(false));
+        let hook = installer_hook(app.handle().clone(), starting.clone());
+        let answer = tauri::async_runtime::block_on(run_install(&starting, "9.9.9", move || {
+            hook();
+            Err(Error::Io(std::io::Error::from_raw_os_error(2)))
+        }));
+        assert_eq!(answer, Err(messages::INSTALLER_DIDNT_START.to_string()));
+        carries_on("after the hook");
+        assert!(
+            data_dir.join(crate::window::STATE_FILE).is_file(),
+            "the window's size and place were saved"
+        );
+
+        let answer = tauri::async_runtime::block_on(run_install(&starting, "9.9.9", || {
+            Err(Error::InvalidUpdaterFormat)
+        }));
+        assert_eq!(answer, Err(messages::INSTALL_FAILED.to_string()));
+        assert!(!starting.load(Ordering::SeqCst));
+        carries_on("before the hook");
+        drop(db);
     }
 
     /// No network (here, nothing listening on the port): the reader is
