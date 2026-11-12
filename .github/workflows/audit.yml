@@ -62,7 +62,7 @@ jobs:
             RUSTSEC-2026-0370
             RUSTSEC-2026-0371
             RUSTSEC-2026-0372
-            # libsqlite3-sys 0.37 bundles SQLite 3.53, which can return
+            # libsqlite3-sys 0.37 bundles SQLite 3.51.3, which can return
             # uninitialized memory when it opens a database beside a -wal
             # file of another page size that someone less trusted wrote
             # (CVE-2026-119375; fixed in libsqlite3-sys 0.39, SQLite 3.54).
@@ -71,9 +71,9 @@ jobs:
             # Nothing puts such a pair in front of it: the app and the CLI
             # open only their own database in the app's data folder (and,
             # once, the reader's own database from before the Tauri app; the
-            # CLI's --db is the reader's own choice). Remove this when sqlx
-            # ships a release that takes libsqlite3-sys 0.39
-            # (tossbaws/gospel-getter#205).
+            # CLI's --db is the reader's own choice). When a sqlx release
+            # takes libsqlite3-sys 0.39, bump sqlx, `cargo update -p sqlx`
+            # and remove this (tossbaws/gospel-getter#205).
             RUSTSEC-2026-0459
           )
           args=()
