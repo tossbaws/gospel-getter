@@ -161,7 +161,7 @@ pub mod messages {
     pub const DOWNLOAD_FAILED: &str =
         "The update couldn\u{2019}t be downloaded. Check your internet connection and try again.";
     pub const NOT_VERIFIED: &str = "The update couldn\u{2019}t be verified as a genuine Gospel Getter release, so it wasn\u{2019}t installed.";
-    pub const NOT_AUTHORIZED: &str = "Installing the update needs your password, and it wasn\u{2019}t given. Nothing was changed.";
+    pub const PACKAGE_NOT_INSTALLED: &str = "The update wasn\u{2019}t installed: installing it needs your password, and it wasn\u{2019}t given or wasn\u{2019}t accepted, or the package couldn\u{2019}t be installed. Nothing was changed.";
     pub const INSTALL_FAILED: &str = "The update couldn\u{2019}t be installed.";
     pub const NOTHING_TO_INSTALL: &str =
         "There\u{2019}s no update to install. Check for updates first.";
@@ -202,8 +202,15 @@ pub enum Problem {
     NotForThisInstall,
     /// The download's signature or signed version didn't check out.
     NotVerified,
-    /// The reader cancelled or failed the password prompt (.deb).
-    NotAuthorized,
+    /// The .deb wasn't installed: its password prompt was cancelled or
+    /// failed, or the package manager couldn't install it. The updater
+    /// can't tell these apart: it tries pkexec, then a zenity or kdialog
+    /// password prompt, then sudo, and when none installs it says only
+    /// `PackageInstallFailed` (tauri-plugin-updater 2.13.2,
+    /// `try_install_with_privileges`). Either way nothing was changed: the
+    /// .deb has no install scripts, and dpkg undoes an install that fails
+    /// part-way.
+    PackageNotInstalled,
     Other,
 }
 
@@ -222,7 +229,7 @@ pub fn install_message(problem: Problem) -> &'static str {
     match problem {
         Problem::Offline => messages::DOWNLOAD_FAILED,
         Problem::NotVerified => messages::NOT_VERIFIED,
-        Problem::NotAuthorized => messages::NOT_AUTHORIZED,
+        Problem::PackageNotInstalled => messages::PACKAGE_NOT_INSTALLED,
         _ => messages::INSTALL_FAILED,
     }
 }
@@ -333,7 +340,9 @@ mod desktop {
             | Error::SignatureUtf8(_)
             | Error::SignedVersionMismatch { .. }
             | Error::MissingSignedVersion => Problem::NotVerified,
-            Error::AuthenticationFailed => Problem::NotAuthorized,
+            // A cancelled or failed password prompt is this too: the
+            // updater never returns `AuthenticationFailed` from an install.
+            Error::PackageInstallFailed => Problem::PackageNotInstalled,
             _ => Problem::Other,
         }
     }
@@ -663,8 +672,8 @@ mod tests {
             messages::NOT_VERIFIED
         );
         assert_eq!(
-            install_message(Problem::NotAuthorized),
-            messages::NOT_AUTHORIZED
+            install_message(Problem::PackageNotInstalled),
+            messages::PACKAGE_NOT_INSTALLED
         );
         assert_eq!(install_message(Problem::Other), messages::INSTALL_FAILED);
     }
@@ -787,7 +796,7 @@ mod tests {
             ),
             (Error::MissingSignedVersion, Problem::NotVerified),
             (Error::SignatureUtf8("x".into()), Problem::NotVerified),
-            (Error::AuthenticationFailed, Problem::NotAuthorized),
+            (Error::PackageInstallFailed, Problem::PackageNotInstalled),
             (Error::DebInstallFailed, Problem::Other),
             (Error::InsecureTransportProtocol, Problem::Other),
         ];
@@ -798,6 +807,18 @@ mod tests {
             .unwrap_err()
             .into();
         assert_eq!(classify(&bad_json), Problem::NoReleaseInfo);
+    }
+
+    /// A .deb whose install didn't go ahead (a password prompt cancelled,
+    /// which the updater reports as the package not installed) tells the
+    /// reader nothing was changed, not that the install failed.
+    #[cfg(desktop)]
+    #[test]
+    fn a_deb_not_installed_says_nothing_was_changed() {
+        let error = tauri_plugin_updater::Error::PackageInstallFailed;
+        let message = install_message(classify(&error));
+        assert!(message.ends_with("Nothing was changed."), "{message}");
+        assert!(message.contains("password"), "{message}");
     }
 
     /// No network (here, nothing listening on the port): the reader is
