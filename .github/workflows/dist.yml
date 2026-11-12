@@ -56,7 +56,11 @@ name: Distribution Artifacts
 #
 # Every action is pinned to a commit (Dependabot proposes updates:
 # .github/dependabot.yml), and every job builds with one Rust release,
-# RUST_TOOLCHAIN below.
+# RUST_TOOLCHAIN below. Every job has a time limit (timeout-minutes, about
+# three times its slowest green run, more where a cold cache needs it), so
+# a hung runner fails in minutes, not after GitHub's six hours; apt-get
+# retries a failed download and gives up on a silent mirror, in a step
+# with a time limit of its own.
 #
 # Every installer carries gospel-getter-cli beside the app, as a Tauri sidecar
 # (bundle.externalBin, in the tauri.sidecar.conf.json overlay, since tauri-build
@@ -102,6 +106,7 @@ jobs:
     # on a newer Ubuntu won't run on an older one. 22.04 is Tauri's
     # documented minimum baseline for the current AppImage/deb tooling.
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: src-tauri
@@ -129,9 +134,10 @@ jobs:
       # FUSE-mounted at bundle time), and xvfb (to launch the built app
       # headlessly for the smoke test below).
       - name: Install Tauri Linux build & bundling dependencies
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
             patchelf build-essential libssl-dev libfuse2 xvfb file
 
@@ -255,13 +261,14 @@ jobs:
           exit 0
 
       - name: "Smoke test: .deb installs and uninstalls cleanly"
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           deb="${{ steps.artifacts.outputs.deb }}"
           pkg_name="$(dpkg-deb -f "$deb" Package)"
           echo "Package name: $pkg_name"
 
-          sudo apt-get install -y "$deb"
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 "$deb"
           dpkg -s "$pkg_name" | grep -q '^Status: install ok installed'
 
           owned_files="$(dpkg -L "$pkg_name")"
@@ -323,6 +330,7 @@ jobs:
     # Not on the push of a release-prep merge, as for the linux job.
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')
     runs-on: windows-latest
+    timeout-minutes: 55
     defaults:
       run:
         working-directory: src-tauri
@@ -590,7 +598,7 @@ jobs:
     # The same Ubuntu as the build: the AppImage was built against its
     # WebKitGTK, and webkit2gtk-driver comes from it.
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       # A CI runner is slower than a desktop; still bounded.
       GUI_CHECK_BUDGET: "300"
@@ -609,9 +617,10 @@ jobs:
       # The test build is a plain binary (not an AppImage), so it runs on
       # the system's WebKitGTK and GTK.
       - name: Install Xvfb, xdotool, WebKitWebDriver, ImageMagick and the app's runtime
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb xdotool webkit2gtk-driver dbus imagemagick \
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 xvfb xdotool webkit2gtk-driver dbus imagemagick \
             libwebkit2gtk-4.1-0 libgtk-3-0
 
       - name: Cache cargo

@@ -12,7 +12,8 @@ name: CI
 #
 # Every action is pinned to a commit (Dependabot proposes updates:
 # .github/dependabot.yml). CI builds with the current stable Rust; release
-# builds pin theirs (RUST_TOOLCHAIN in dist.yml).
+# builds pin theirs (RUST_TOOLCHAIN in dist.yml). Every job has a time
+# limit, and apt-get retries, as in dist.yml.
 
 on:
   push:
@@ -25,6 +26,7 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: src-tauri
@@ -74,11 +76,15 @@ jobs:
 
       # Tauri's Linux runtime (webkit2gtk/gtk3) isn't preinstalled on the
       # runner image, and both building and even just `cargo check`/`cargo
-      # test` need their headers present to link against.
+      # test` need their headers present to link against. Usually half a
+      # minute; a slow mirror has taken 12 and finished, a hung one never
+      # does, hence its own 15 minutes.
       - name: Install Tauri Linux dependencies
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf build-essential libssl-dev
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf build-essential libssl-dev
 
       # Optimized builds of the few dependencies the tests spend their time
       # in; see the file.
@@ -155,6 +161,7 @@ jobs:
   frontend-tests:
     name: frontend-tests (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -174,9 +181,11 @@ jobs:
           set: trunk
 
       - name: Install Tauri Linux dependencies
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf build-essential libssl-dev
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf build-essential libssl-dev
 
       - name: Configure cargo
         run: cat .github/ci/cargo-config.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
@@ -222,6 +231,7 @@ jobs:
   # are otherwise only run by the dist workflow's smoke test.
   test-windows:
     runs-on: windows-latest
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: src-tauri

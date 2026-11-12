@@ -1129,6 +1129,66 @@ fn every_action_is_pinned_to_a_commit() {
     assert!(pinned > 0, "no actions found");
 }
 
+/// Every job in every workflow has a time limit (`timeout-minutes`), so a
+/// runner that hangs fails in minutes instead of holding on for GitHub's
+/// six hours (M6: a dispatch once sat 28 minutes in `apt-get`). Every
+/// `apt-get update` and `apt-get install` retries a failed download and
+/// gives up on a mirror that stops answering, in a step with a time limit
+/// of its own, so a hung mirror fails that step, not the whole job's time.
+/// Only that each is there: the values are the workflows' to choose.
+#[test]
+fn every_job_has_a_time_limit_and_apt_retries() {
+    let workflows: Vec<(String, String)> = github_files()
+        .into_iter()
+        .filter(|(file, _)| file.starts_with("workflows/"))
+        .collect();
+    assert!(
+        workflows.iter().any(|(f, _)| f == "workflows/dist.yml"),
+        "{:?}",
+        workflows.iter().map(|(f, _)| f).collect::<Vec<_>>()
+    );
+    let mut apt = 0;
+    for (file, text) in &workflows {
+        let jobs = workflow_jobs(text);
+        assert!(!jobs.is_empty(), "{file} has no jobs");
+        for (job, _) in &jobs {
+            let keys = job_keys(text, job);
+            assert!(
+                keys.iter().any(|k| k.starts_with("timeout-minutes: ")),
+                "{file}: job {job} has no timeout-minutes: {keys:#?}"
+            );
+        }
+        for step in workflow_steps(text) {
+            let installs: Vec<&str> = step
+                .text
+                .lines()
+                .filter(|l| !l.trim_start().starts_with('#'))
+                .filter(|l| l.contains("apt-get update") || l.contains("apt-get install"))
+                .collect();
+            if installs.is_empty() {
+                continue;
+            }
+            for line in &installs {
+                assert!(
+                    line.contains(" -o Acquire::Retries=")
+                        && line.contains(" -o Acquire::http::Timeout="),
+                    "{file}: job {}: apt-get without its retries: {line}",
+                    step.job
+                );
+                apt += 1;
+            }
+            assert!(
+                step.text
+                    .lines()
+                    .any(|l| l.starts_with("        timeout-minutes: ")),
+                "{file}: job {}: the step running apt-get has no timeout-minutes of its own: {step:#?}",
+                step.job
+            );
+        }
+    }
+    assert!(apt > 0, "no apt-get found");
+}
+
 /// Release builds use one Rust, set in one place (`RUST_TOOLCHAIN` in
 /// dist.yml), an exact release: not whatever is stable on the day.
 #[test]
