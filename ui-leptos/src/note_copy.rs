@@ -8,10 +8,16 @@
 //! when the card shows the note, and when the pointer or focus comes to its
 //! row in the Library. A copy asked for before its answer is in waits for
 //! it and tries anyway, as the card's own Copy does, and says so if that
-//! fails. Each answer is kept for its note and translation until the
-//! note's text changes, for the [`KEPT`] notes asked for most recently
-//! (AUD-08): one that's gone is asked for again when it's next shown or
-//! pointed at, before its Copy as Markdown can be pressed.
+//! fails. Each answer is kept for its note and translation until the note
+//! changes: its text, or (SQLite giving a deleted note's id to the next
+//! note added) its passage or when it was written, so an answer is never
+//! another note's (N-U-01). A deleted note's answers go at once, and an
+//! import's notes are all asked for anew. The [`KEPT`] notes asked for
+//! most recently are kept (AUD-08), and, however many that leaves out,
+//! every note the card shows, whose Copy as Markdown can be pressed at any
+//! moment, by key as well as by pointer (N-U-03): one that's gone is asked
+//! for again when it's next shown or pointed at, before its Copy as
+//! Markdown can be pressed.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -21,27 +27,74 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
 use crate::bridge;
+use crate::dto::{Note, SelectionNote};
 use crate::ipc;
+
+/// A note, as Copy as Markdown tells it from any other: its id, and what
+/// a note given the same id after it was deleted can't share with it (its
+/// passage and when it was written), with its text, which the Markdown
+/// ends with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Copyable {
+    pub id: i64,
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: i64,
+    pub verse_end: i64,
+    pub created_at: String,
+    pub body: String,
+}
+
+impl From<&SelectionNote> for Copyable {
+    fn from(note: &SelectionNote) -> Self {
+        Self {
+            id: note.id,
+            book_id: note.book_id,
+            chapter: note.chapter,
+            verse_start: note.verse_start,
+            verse_end: note.verse_end,
+            created_at: note.created_at.clone(),
+            body: note.body.clone(),
+        }
+    }
+}
+
+impl From<&Note> for Copyable {
+    fn from(note: &Note) -> Self {
+        Self {
+            id: note.id,
+            book_id: note.book_id,
+            chapter: note.chapter,
+            verse_start: note.verse_start,
+            verse_end: note.verse_end,
+            created_at: note.created_at.clone(),
+            body: note.body.clone(),
+        }
+    }
+}
 
 /// A note's Markdown in one translation: asked for, and in once answered.
 struct Entry {
-    /// The note's text when it was asked for: a different text asks again.
-    body: String,
+    /// The note as it was when it was asked for: any other asks again.
+    note: Copyable,
     answer: Rc<RefCell<Option<Result<String, JsValue>>>>,
     done: js_sys::Promise,
 }
 
-/// How many notes' Markdown is kept at once, by note and translation: more
-/// than the card's notes on one passage and the Library rows pointed at on
-/// the way to a Copy as Markdown, and few enough that a long session's
-/// notes, deleted or not, aren't all kept.
+/// How many notes' Markdown is kept at once, by note and translation,
+/// besides the card's: more than the Library rows pointed at on the way to
+/// a Copy as Markdown, and few enough that a long session's notes, deleted
+/// or not, aren't all kept.
 const KEPT: usize = 32;
 
 /// Values by key, the most recently used last, never more than `cap` of
-/// them: the least recently used goes first.
+/// them besides the pinned: the least recently used of the others goes
+/// first.
 struct Recent<K, V> {
     entries: Vec<(K, V)>,
     cap: usize,
+    /// Kept whatever else is used: what's on screen now.
+    pinned: Vec<K>,
 }
 
 impl<K: PartialEq, V> Recent<K, V> {
@@ -49,6 +102,7 @@ impl<K: PartialEq, V> Recent<K, V> {
         Self {
             entries: Vec::new(),
             cap,
+            pinned: Vec::new(),
         }
     }
 
@@ -65,13 +119,43 @@ impl<K: PartialEq, V> Recent<K, V> {
     fn insert(&mut self, key: K, value: V) {
         self.entries.retain(|(k, _)| *k != key);
         self.entries.push((key, value));
-        let over = self.entries.len().saturating_sub(self.cap);
-        self.entries.drain(..over);
+        self.trim();
+    }
+
+    /// Keeps `keys`' values, in place of those pinned before, however
+    /// many others are used.
+    fn pin(&mut self, keys: Vec<K>) {
+        self.pinned = keys;
+        self.trim();
+    }
+
+    /// Lets go of every value `gone` says is one to forget.
+    fn forget(&mut self, gone: impl Fn(&K) -> bool) {
+        self.entries.retain(|(k, _)| !gone(k));
+    }
+
+    /// The least recently used values that aren't pinned go, until there
+    /// are `cap` besides the pinned.
+    fn trim(&mut self) {
+        let pinned = |k: &K| self.pinned.contains(k);
+        let mut over = self
+            .entries
+            .iter()
+            .filter(|(k, _)| !pinned(k))
+            .count()
+            .saturating_sub(self.cap);
+        self.entries.retain(|(k, _)| {
+            let goes = over > 0 && !pinned(k);
+            if goes {
+                over -= 1;
+            }
+            !goes
+        });
     }
 }
 
 thread_local! {
-    /// By note and translation.
+    /// By note id and translation.
     static ASKED: RefCell<Recent<(i64, String), Entry>> = const { RefCell::new(Recent::new(KEPT)) };
 }
 
@@ -82,21 +166,20 @@ struct NoteMarkdownArgs<'a> {
     translation_code: &'a str,
 }
 
-/// Asks for note `id`'s Markdown in the translation being read, unless
-/// it's been asked for with this `body` (on its way, or in) and didn't
-/// fail.
-pub fn prefetch(id: i64, body: &str) {
+/// Asks for `note`'s Markdown in the translation being read, unless it's
+/// been asked for as the note is now (on its way, or in) and didn't fail.
+pub fn prefetch(note: &Copyable) {
     let code = bridge::translation_code();
     let asked = ASKED.with_borrow_mut(|asked| {
         asked
-            .get(&(id, code.clone()))
-            .is_some_and(|e| e.body == body && !matches!(*e.answer.borrow(), Some(Err(_))))
+            .get(&(note.id, code.clone()))
+            .is_some_and(|e| e.note == *note && !matches!(*e.answer.borrow(), Some(Err(_))))
     });
     if asked {
         return;
     }
     let sent = ipc::args(&NoteMarkdownArgs {
-        id,
+        id: note.id,
         translation_code: &code,
     })
     .and_then(|args| ipc::send("get_note_markdown", args));
@@ -119,14 +202,39 @@ pub fn prefetch(id: i64, body: &str) {
     });
     ASKED.with_borrow_mut(|asked| {
         asked.insert(
-            (id, code),
+            (note.id, code),
             Entry {
-                body: body.to_string(),
+                note: note.clone(),
                 answer,
                 done,
             },
         );
     });
+}
+
+/// The notes the card shows now, whose Copy as Markdown can be pressed at
+/// any moment: theirs is asked for, and kept while they're shown,
+/// however many other notes are asked for meanwhile (N-U-03). None once
+/// the card shows no notes.
+pub fn show_in_card(notes: &[Copyable]) {
+    let code = bridge::translation_code();
+    let keys = notes.iter().map(|n| (n.id, code.clone())).collect();
+    ASKED.with_borrow_mut(|asked| asked.pin(keys));
+    for note in notes {
+        prefetch(note);
+    }
+}
+
+/// Note `id` was deleted: what was asked for it goes, so a note given its
+/// id next starts afresh.
+pub fn forget(id: i64) {
+    ASKED.with_borrow_mut(|asked| asked.forget(|(note, _)| *note == id));
+}
+
+/// Notes were imported, and may have replaced every note (and their
+/// ids): everything asked for goes.
+pub fn forget_all() {
+    ASKED.with_borrow_mut(|asked| asked.forget(|_| true));
 }
 
 /// `navigator.clipboard.writeText(text)`, now.
@@ -155,15 +263,14 @@ pub fn copy_failed(error: &str) -> String {
     format!("Couldn\u{2019}t copy the note: {error}")
 }
 
-/// Copies note `id` (on `reference`, saying `body`) as Markdown, and has
-/// `report` say how it went. Must be called within the click or key press
-/// that asked for it.
-pub fn copy(id: i64, reference: String, body: &str, report: impl Fn(String, bool) + 'static) {
-    prefetch(id, body);
+/// Copies `note` (on `reference`) as Markdown, and has `report` say how it
+/// went. Must be called within the click or key press that asked for it.
+pub fn copy(note: &Copyable, reference: String, report: impl Fn(String, bool) + 'static) {
+    prefetch(note);
     let code = bridge::translation_code();
     let Some((answer, done)) = ASKED.with_borrow_mut(|asked| {
         asked
-            .get(&(id, code))
+            .get(&(note.id, code))
             .map(|e| (e.answer.clone(), e.done.clone()))
     }) else {
         return;
@@ -226,5 +333,39 @@ mod tests {
         assert_eq!(keys(&recent), [3, 6, 5]);
         assert_eq!(recent.get(&5), Some(&"changed"));
         assert_eq!(recent.entries.len(), 3);
+    }
+
+    /// N-U-03: what's pinned (the card's notes) stays however many others
+    /// are used, the others still bounded; let go of, it goes as any other.
+    #[test]
+    fn pinned_values_stay_and_the_others_stay_bounded() {
+        let mut recent = Recent::new(3);
+        recent.pin(vec![1, 2]);
+        for key in 1..=10 {
+            recent.insert(key, "markdown");
+        }
+        assert_eq!(keys(&recent), [1, 2, 8, 9, 10], "the pinned, and 3 others");
+        // More pinned than the cap: all of them, and still 3 others.
+        recent.pin((1..=5).collect());
+        for key in 11..=12 {
+            recent.insert(key, "markdown");
+        }
+        assert_eq!(keys(&recent), [1, 2, 10, 11, 12]);
+        // Not pinned any more: they go first, oldest first.
+        recent.pin(Vec::new());
+        assert_eq!(keys(&recent), [10, 11, 12]);
+        assert!(recent.get(&1).is_none());
+    }
+
+    #[test]
+    fn forgotten_values_go() {
+        let mut recent = Recent::new(3);
+        for key in 1..=3 {
+            recent.insert(key, "markdown");
+        }
+        recent.forget(|k| *k == 2);
+        assert_eq!(keys(&recent), [1, 3]);
+        recent.forget(|_| true);
+        assert!(recent.entries.is_empty());
     }
 }

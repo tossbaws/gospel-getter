@@ -710,7 +710,7 @@ impl Library {
     /// for, so Copy as Markdown can write it within its click.
     fn on_note_near(self, event: &web_sys::Event) {
         if let Some(row) = target_of(event).and_then(|el| self.note_row(&el)) {
-            crate::note_copy::prefetch(row.note.id, &row.note.body);
+            crate::note_copy::prefetch(&(&row.note).into());
         }
     }
 
@@ -721,7 +721,7 @@ impl Library {
     fn on_note_click(self, target: Element) {
         if closest(&target, ".note-list-copy").is_some() {
             if let Some(NoteRow { note, .. }) = self.note_row(&target) {
-                crate::note_copy::copy(note.id, note.reference, &note.body, |message, is_error| {
+                crate::note_copy::copy(&(&note).into(), note.reference, |message, is_error| {
                     bridge::toast(&message, is_error);
                 });
             }

@@ -33,7 +33,7 @@ const PHRASE_STARTS: usize = 32;
 const SHOWN_CHARS: usize = 40;
 
 /// Arguments of `verify_quote`.
-#[derive(Debug, Args, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VerifyQuoteArgs {
     /// The quotation. Compared character for character: only whitespace around the whole of it is trimmed.
@@ -110,6 +110,12 @@ pub struct VerifyQuoteOut {
     /// reference was given and it's in more than one.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub found_at: Vec<QuotePlace>,
+    /// What `get_passage` says of the reference given: which of its verses
+    /// this translation doesn't number. Only with a reference, and only when
+    /// it names one; `text` is the verses it does number, and the message
+    /// ends with this.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
 }
 
 /// What a search for a quote came to.
@@ -155,8 +161,10 @@ impl Library {
             reference: passage.reference,
             text: verses.join(" "),
         };
+        let notice = passage.notice;
         if let Some(status) = verbatim(quote, &checked.text) {
-            return Ok(held(status, translation, checked, Vec::new(), false));
+            let found = held(status, translation, checked, Vec::new(), false);
+            return Ok(with_notice(found, notice));
         }
         let search = self.search_for(translation, quote).await?;
         let difference = first_difference(quote, &checked.text);
@@ -183,7 +191,7 @@ impl Library {
                 ),
             ),
         };
-        Ok(VerifyQuoteOut {
+        let answer = VerifyQuoteOut {
             status,
             translation: translation.code.clone(),
             reference: Some(checked.reference),
@@ -191,7 +199,9 @@ impl Library {
             message,
             difference: Some(difference),
             found_at: search.places,
-        })
+            notice: None,
+        };
+        Ok(with_notice(answer, notice))
     }
 
     /// Where the quote is, given no reference: a place that has it, the whole
@@ -250,6 +260,7 @@ impl Library {
                     text: Some(text.to_string()),
                     difference: Some(difference),
                     found_at: Vec::new(),
+                    notice: None,
                 });
             }
         }
@@ -269,6 +280,7 @@ impl Library {
             message,
             difference: None,
             found_at: Vec::new(),
+            notice: None,
         })
     }
 
@@ -466,7 +478,18 @@ fn held(
         text: Some(text),
         difference: None,
         found_at,
+        notice: None,
     }
+}
+
+/// `answer`, with what `get_passage` said of its reference, if anything: in
+/// its own field, and as the message's last sentence.
+fn with_notice(mut answer: VerifyQuoteOut, notice: Option<String>) -> VerifyQuoteOut {
+    if let Some(notice) = &notice {
+        answer.message = format!("{} {notice}", answer.message);
+    }
+    answer.notice = notice;
+    answer
 }
 
 /// How a translation is named in a message: "KJV".

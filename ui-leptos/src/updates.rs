@@ -60,6 +60,9 @@ type OnMessage = Closure<dyn FnMut(JsValue)>;
 pub struct Updates {
     /// An install is under way.
     installing: StoredValue<bool>,
+    /// How many checks are on their way (the launch check's, Check now's):
+    /// Check now is pressed again only once none is (D2-03).
+    checks: StoredValue<u32>,
     /// The update the last check found.
     offered: StoredValue<Option<UpdateInfo>>,
     /// About has shown it (after which the banner stays away).
@@ -119,6 +122,7 @@ impl Updates {
     pub fn new(version: LocalResource<Option<String>>) -> Self {
         Self {
             installing: StoredValue::new(false),
+            checks: StoredValue::new(0),
             offered: StoredValue::new(None),
             shown_in_about: StoredValue::new(false),
             version,
@@ -316,9 +320,11 @@ impl Updates {
 
     /// Checks for an update: quietly at launch (nothing is said, whatever
     /// happens), or for Check now, which says how it went. What the reader
-    /// sees changes at once; the check runs on.
+    /// sees changes at once; the check runs on. Check now stays disabled
+    /// until no check is on its way, the quiet one included.
     pub fn check(self, quiet: bool) {
         let button = self.check_button.get_untracked();
+        self.checks.update_value(|n| *n += 1);
         if !quiet {
             if let Some(button) = &button {
                 button.set_disabled(true);
@@ -343,7 +349,13 @@ impl Updates {
                     }
                 }
             }
-            if let Some(button) = button {
+            let running = self.checks.try_update_value(|n| {
+                *n = n.saturating_sub(1);
+                *n
+            });
+            if running == Some(0)
+                && let Some(button) = button
+            {
                 button.set_disabled(false);
             }
         });

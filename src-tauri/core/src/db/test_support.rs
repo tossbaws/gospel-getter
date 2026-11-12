@@ -17,6 +17,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::db::{Db, WritePool, begin_write, create_pool, ensure_search_index, prepare};
 
+/// The WEB's id: seeded second (`seed::SEED_ORDER`), on a new install or an
+/// upgrade.
+const WEB: i64 = 2;
+
 /// A database file that's deleted (with any journal) on drop.
 pub struct TempDb {
     dir: PathBuf,
@@ -259,6 +263,241 @@ fn open_lock_file(path: &Path) -> std::io::Result<File> {
         .create(true)
         .truncate(false)
         .open(path)
+}
+
+/// The verses the WEB's file has with no text, which the WEB doesn't
+/// number: Luke 17:36, Acts 8:37, 15:34, 24:7 and Romans 16:25, as
+/// (book, chapter, verse).
+pub const WEB_UNNUMBERED: [(i64, i64, i64); 5] = [
+    (42, 17, 36),
+    (44, 8, 37),
+    (44, 15, 34),
+    (44, 24, 7),
+    (45, 16, 25),
+];
+
+/// The search index's rowid of a WEB verse (`db::search`'s encoding).
+fn web_rowid((book, chapter, verse): (i64, i64, i64)) -> i64 {
+    WEB * 100_000_000 + book * 1_000_000 + chapter * 1_000 + verse
+}
+
+/// The WEB's rows (book, chapter, verse) with no text.
+pub async fn empty_web_verses(pool: &SqlitePool) -> Vec<(i64, i64, i64)> {
+    sqlx::query_as(
+        "SELECT book_id, chapter, verse FROM verses WHERE translation_id = $1 AND text = '' \
+         ORDER BY book_id, chapter, verse",
+    )
+    .bind(WEB)
+    .fetch_all(pool)
+    .await
+    .expect("the WEB's verses with no text")
+}
+
+/// How many of the WEB's verses with no text the search index has a row for.
+pub async fn indexed_web_unnumbered(pool: &SqlitePool) -> i64 {
+    let mut indexed = 0;
+    for verse in WEB_UNNUMBERED {
+        let found: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM verse_search WHERE rowid = $1")
+            .bind(web_rowid(verse))
+            .fetch_one(pool)
+            .await
+            .expect("an index row count");
+        indexed += found;
+    }
+    indexed
+}
+
+/// The WEB's recorded search index count.
+pub async fn web_index_count(pool: &SqlitePool) -> Option<i64> {
+    sqlx::query_scalar("SELECT verse_count FROM search_index_state WHERE translation_id = $1")
+        .bind(WEB)
+        .fetch_optional(pool)
+        .await
+        .expect("the WEB's index count")
+}
+
+/// Make a database `fresh_database` prepared and indexed what 2.29.0 left
+/// as it closed: no data versions recorded (2.29.0 had none), and the WEB's
+/// five verses with no text stored as empty verses, indexed and counted
+/// like every other, as 2.29.0's seed and index build left them. A database
+/// the 2.29.1 app hasn't opened yet, or whose upgrade step failed, is this.
+pub async fn as_2_29_0_left_it(pool: &Db) {
+    let web: i64 = sqlx::query_scalar("SELECT id FROM translations WHERE code = 'web'")
+        .fetch_one(pool.read())
+        .await
+        .expect("the WEB's id");
+    assert_eq!(web, WEB, "the WEB is seeded second");
+    sqlx::query("DROP TABLE IF EXISTS translation_data_version")
+        .execute(pool.write().pool())
+        .await
+        .expect("forget the data versions");
+    for verse @ (book, chapter, number) in WEB_UNNUMBERED {
+        sqlx::query(
+            "INSERT OR IGNORE INTO verses (translation_id, book_id, chapter, verse, text) \
+             VALUES ($1, $2, $3, $4, '')",
+        )
+        .bind(WEB)
+        .bind(book)
+        .bind(chapter)
+        .bind(number)
+        .execute(pool.write().pool())
+        .await
+        .expect("store an empty verse, as 2.29.0 did");
+        let mut tx = begin_write(pool.write()).await.expect("begin a write");
+        sqlx::query("DELETE FROM verse_search WHERE rowid = $1")
+            .bind(web_rowid(verse))
+            .execute(&mut *tx)
+            .await
+            .expect("clear its index row");
+        sqlx::query("INSERT INTO verse_search (rowid, text) VALUES ($1, '')")
+            .bind(web_rowid(verse))
+            .execute(&mut *tx)
+            .await
+            .expect("index it, as 2.29.0 did");
+        tx.commit().await.expect("commit");
+    }
+    sqlx::query(
+        "UPDATE search_index_state SET verse_count = \
+         (SELECT COUNT(*) FROM verses WHERE translation_id = $1) WHERE translation_id = $1",
+    )
+    .bind(WEB)
+    .execute(pool.write().pool())
+    .await
+    .expect("count them, as 2.29.0 did");
+
+    // As 2.29.0 left it: those five stored and indexed, the index complete.
+    assert_eq!(empty_web_verses(pool.read()).await, WEB_UNNUMBERED);
+    assert_eq!(indexed_web_unnumbered(pool.read()).await, 5);
+    assert_eq!(web_index_count(pool.read()).await, Some(31_103));
+    assert_eq!(
+        ensure_search_index(pool).await.expect("check the index"),
+        Vec::<i64>::new()
+    );
+}
+
+/// The KJV's id: seeded first (`seed::SEED_ORDER`).
+const KJV: i64 = 1;
+
+/// The KJV's chapters that 2.29.2 took from eBible.org's USFM, as
+/// (book, chapter): `ingest/kjv.rs`'s `TAKEN`, but for its one verse,
+/// [`KJV_TAKEN_VERSE`].
+pub const KJV_TAKEN_CHAPTERS: [(i64, i64); 10] = [
+    (9, 20),
+    (11, 22),
+    (40, 2),
+    (40, 22),
+    (40, 26),
+    (41, 4),
+    (41, 7),
+    (41, 8),
+    (64, 1),
+    (66, 12),
+];
+
+/// The one verse besides them that 2.29.2 took: Revelation 13:1.
+pub const KJV_TAKEN_VERSE: (i64, i64, i64) = (66, 13, 1);
+
+/// What 2.29.1's bundled KJV had there, every verse, as
+/// "book\tchapter\tverse\ttext" lines (`tests/kjv_source.rs` checks that
+/// putting them back gives 2.29.1's file, byte for byte).
+const KJV_2_29_1_REPLACED: &str = include_str!("../../../../sources/kjv/kjv_2_29_1_replaced.tsv");
+
+/// 2.29.1's KJV text where 2.29.2's differs, as (book, chapter, verse,
+/// text), in order.
+pub fn kjv_2_29_1_verses() -> Vec<(i64, i64, i64, String)> {
+    let names: Vec<String> = bundled("kjv").into_iter().map(|b| b.name).collect();
+    KJV_2_29_1_REPLACED
+        .lines()
+        .map(|line| {
+            let fields: Vec<&str> = line.splitn(4, '\t').collect();
+            let book = names
+                .iter()
+                .position(|n| n == fields[0])
+                .expect("a book of the KJV") as i64
+                + 1;
+            let number = |i: usize| fields[i].parse::<i64>().expect("a number");
+            (book, number(1), number(2), fields[3].to_string())
+        })
+        .collect()
+}
+
+/// Make a database `fresh_database` prepared and indexed what 2.29.1 left
+/// as it closed: the KJV's rows its file had then (31,100 verses: the ten
+/// chapters it numbered wrongly, and Revelation 13:1 without its first
+/// words), recorded at data version 1, its search index built over those,
+/// as 2.29.1's seed and index build left them. A database the 2.29.2 app
+/// hasn't opened yet, or whose upgrade step failed, is this.
+pub async fn as_2_29_1_left_it(pool: &Db) {
+    let kjv: i64 = sqlx::query_scalar("SELECT id FROM translations WHERE code = 'kjv'")
+        .fetch_one(pool.read())
+        .await
+        .expect("the KJV's id");
+    assert_eq!(kjv, KJV, "the KJV is seeded first");
+    let mut tx = begin_write(pool.write()).await.expect("begin a write");
+    for (book, chapter) in KJV_TAKEN_CHAPTERS {
+        sqlx::query(
+            "DELETE FROM verses WHERE translation_id = $1 AND book_id = $2 AND chapter = $3",
+        )
+        .bind(KJV)
+        .bind(book)
+        .bind(chapter)
+        .execute(&mut *tx)
+        .await
+        .expect("clear a chapter 2.29.2 took");
+    }
+    for (book, chapter, verse, text) in kjv_2_29_1_verses() {
+        sqlx::query(
+            "INSERT OR REPLACE INTO verses (translation_id, book_id, chapter, verse, text) \
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(KJV)
+        .bind(book)
+        .bind(chapter)
+        .bind(verse)
+        .bind(text)
+        .execute(&mut *tx)
+        .await
+        .expect("store 2.29.1's verse");
+    }
+    sqlx::query("UPDATE translation_data_version SET version = 1 WHERE translation_id = $1")
+        .bind(KJV)
+        .execute(&mut *tx)
+        .await
+        .expect("record the KJV at 2.29.1's version");
+    tx.commit().await.expect("commit");
+
+    // Its search index, as 2.29.1's build made it: the books with those
+    // chapters indexed again, and the count recorded.
+    let build = crate::db::search::TranslationBuild::plan(pool, KJV)
+        .await
+        .expect("plan the KJV's index");
+    for book in [9, 11, 40, 41, 64, 66] {
+        build.index_book(pool, book).await.expect("index a book");
+    }
+    assert_eq!(
+        build.publish(pool).await.expect("record the index"),
+        crate::db::search::Published::Complete { verses: 31_100 }
+    );
+
+    // As 2.29.1 left it: 31,100 verses, at version 1, the index complete.
+    let verses: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM verses WHERE translation_id = $1")
+        .bind(KJV)
+        .fetch_one(pool.read())
+        .await
+        .expect("count the KJV's verses");
+    assert_eq!(verses, 31_100);
+    let version: i64 = sqlx::query_scalar(
+        "SELECT version FROM translation_data_version WHERE translation_id = $1",
+    )
+    .bind(KJV)
+    .fetch_one(pool.read())
+    .await
+    .expect("the KJV's data version");
+    assert_eq!(version, 1);
+    assert_eq!(
+        ensure_search_index(pool).await.expect("check the index"),
+        Vec::<i64>::new()
+    );
 }
 
 /// The schema as v2.1.0 created it, verbatim — frozen here rather than

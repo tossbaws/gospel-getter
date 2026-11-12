@@ -94,6 +94,12 @@ impl LogFile {
         Ok(())
     }
 
+    /// The file being written, once [`LogFile::open_in`] has given it a
+    /// folder.
+    pub fn path(&self) -> Option<PathBuf> {
+        self.lock().dir.as_deref().map(|dir| file_path(dir, 0))
+    }
+
     fn lock(&self) -> MutexGuard<'_, Files> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -118,6 +124,16 @@ fn open_private(path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
+/// Open `path` emptied, to write from its start, creating it as
+/// [`open_private`] does.
+fn open_emptied(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(path)
+}
+
 impl Files {
     /// Write `line`, starting a new file first if it would take this one
     /// past its size.
@@ -127,7 +143,7 @@ impl Files {
         };
         let len = line.len() as u64;
         if self.written > 0 && self.written.saturating_add(len) > self.max_bytes {
-            self.rotate(&dir)?;
+            self.start_afresh(&dir)?;
         }
         let file = match &mut self.file {
             Some(file) => file,
@@ -138,12 +154,30 @@ impl Files {
         Ok(())
     }
 
+    /// Start the file being written afresh, so the line about to be written
+    /// keeps it within its size: [`Files::rotate`], or, if that fails (an
+    /// older file that can't be removed or renamed), empty the current file
+    /// where it is, so the size still holds; the older files are left as
+    /// they are. The count starts again only once a fresh file is open. If
+    /// neither works, nothing is written and the next line tries again.
+    fn start_afresh(&mut self, dir: &Path) -> io::Result<()> {
+        if let Err(e) = self.rotate(dir) {
+            // Not through `tracing`: this is its writer, under its lock.
+            eprintln!(
+                "Couldn't move the older log files along ({e}), so {} is started afresh in place",
+                file_path(dir, 0).display()
+            );
+            self.file = Some(open_emptied(&file_path(dir, 0))?);
+        }
+        self.written = 0;
+        Ok(())
+    }
+
     /// Move each file one older (the oldest kept is removed), and start the
     /// current one afresh.
     fn rotate(&mut self, dir: &Path) -> io::Result<()> {
         // Closed first: Windows can't rename a file that's open.
         self.file = None;
-        self.written = 0;
         let oldest = file_path(dir, self.keep - 1);
         match std::fs::remove_file(&oldest) {
             Ok(()) => {}
@@ -245,8 +279,10 @@ mod tests {
         let dir = scratch.0.join("logs");
         let log = LogFile::new(100, 3);
         line(&log, "before there's a folder\n");
+        assert_eq!(log.path(), None);
         log.open_in(&dir).expect("open the log");
         assert_eq!(names(&dir), ["gospel-getter.log"]);
+        assert_eq!(log.path(), Some(dir.join("gospel-getter.log")));
 
         for i in 0..20 {
             line(&log, &format!("line {i:02} of the log, 30 bytes\n"));
@@ -293,6 +329,41 @@ mod tests {
         assert_eq!(read(1), "a line longer than the files are\n");
         assert_eq!(read(0), "after\n");
         assert_eq!(names(&scratch.0).len(), 2);
+    }
+
+    /// A rotation that fails (here, the oldest file's name is a folder's,
+    /// which can't be removed as a file) still keeps the log within its
+    /// size: the file being written is started afresh where it is, the line
+    /// that called for it is written, and so is every line after. The folder
+    /// in the way is left as it is.
+    #[test]
+    fn a_failed_rotation_keeps_the_size_and_the_line() {
+        let scratch = Scratch::new("stuck");
+        let dir = &scratch.0;
+        let log = LogFile::new(100, 3);
+        log.open_in(dir).expect("open the log");
+        let in_the_way = file_path(dir, 2);
+        std::fs::create_dir(&in_the_way).expect("a folder in the oldest file's place");
+        std::fs::write(in_the_way.join("theirs"), "not the log's").expect("a file in it");
+        let read = |age: usize| std::fs::read_to_string(file_path(dir, age)).expect("a log file");
+        let numbered = |i: usize| format!("line {i:02} of the log, 30 bytes\n");
+
+        for i in 0..3 {
+            line(&log, &numbered(i));
+        }
+        assert_eq!(read(0).len(), 3 * numbered(0).len());
+        // The fourth would take it past 100 bytes; it can't be rotated.
+        line(&log, &numbered(3));
+        assert_eq!(read(0), numbered(3), "started afresh, with the line kept");
+
+        for i in 4..20 {
+            line(&log, &numbered(i));
+            let text = read(0);
+            assert!(text.len() <= 100, "line {i}: {} bytes", text.len());
+            assert!(text.ends_with(&numbered(i)), "line {i}: {text:?}");
+        }
+        assert!(in_the_way.join("theirs").is_file(), "left as it is");
+        assert!(!file_path(dir, 1).exists(), "nothing was moved along");
     }
 
     /// The log files and their folder are the reader's alone.
