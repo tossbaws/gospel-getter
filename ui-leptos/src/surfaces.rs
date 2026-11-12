@@ -709,6 +709,11 @@ pub fn open(surface: Surface, opener: Option<HtmlElement>) {
     if element(surface).is_none() {
         return;
     }
+    // About is a modal: one still getting ready to open (Export notes)
+    // won't now (D2-01). Whatever is open goes, as below.
+    if surface == Surface::About {
+        bridge::modal_opening(false);
+    }
     if CURRENT.get().is_some() {
         close(false);
     }

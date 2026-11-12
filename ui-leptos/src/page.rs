@@ -628,16 +628,14 @@ fn send_picker_books() {
 // goes back to (what had it, or the button it was opened from).
 
 /// Opens the sheet (`?`, ☰ → Keyboard shortcuts, the palette's command),
-/// unless it's open; focus goes back to `opener`, or to what had it.
+/// unless it's open; focus goes back to `opener`, or to what had it. A
+/// modal, as the others: one still getting ready to open won't now (D2-01).
 pub fn open_shortcuts(opener: Option<HtmlElement>) {
     if shortcuts_open() {
         return;
     }
     let return_focus = opener.or_else(focused);
-    if search_shown() {
-        set_search_open(false);
-    }
-    surfaces::close(false);
+    modal_opening(true);
     if !request(
         bridge::SHORTCUTS_EVENT,
         &[("returnFocus", &element_or_null(return_focus))],
