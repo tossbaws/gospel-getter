@@ -625,13 +625,19 @@ fn job_keys<'a>(workflow: &'a str, job: &str) -> Vec<&'a str> {
         .collect()
 }
 
+/// What a run for a pull request label other than `ci:full` skips: the
+/// builds (and with them every job after them).
+const LABEL_GATE: &str = "github.event.action != 'labeled' || github.event.label.name == 'ci:full'";
+
 /// A release's installers come from the run dispatched on its release commit
 /// after the merge (`gh workflow run dist.yml`), which joined the same
 /// concurrency group as the merge's push run and cancelled it: a red X on
 /// every release commit. So the push of a release-prep merge builds nothing,
 /// and a dispatched run never cancels the run in progress (it is now a group
 /// of its own, too: `a_push_never_cancels_a_dispatched_run`). Pull requests
-/// (a release/ branch's too) and other pushes build as before.
+/// (a release/ branch's too) and other pushes build as before; so does a
+/// dispatched run. The only other run that skips the builds is one for a
+/// pull request label other than `ci:full` ([`LABEL_GATE`]).
 #[test]
 fn a_release_merge_never_cancels_its_own_build() {
     for job in ["linux", "windows"] {
@@ -640,18 +646,14 @@ fn a_release_merge_never_cancels_its_own_build() {
             .iter()
             .find_map(|k| k.strip_prefix("if: "))
             .unwrap_or_else(|| panic!("job {job} has no `if:`: {keys:#?}"));
-        assert!(
-            condition.contains("startsWith(github.event.head_commit.message, 'chore(release):')"),
-            "job {job} builds on a release-prep merge's push: {condition}"
-        );
-        // Only a push skips: a pull request and a dispatched run always build.
-        assert!(
-            condition.starts_with("github.event_name != 'push' || "),
-            "job {job} can skip more than a push: {condition}"
-        );
-        assert!(
-            !condition.contains("pull_request") && !condition.contains("workflow_dispatch"),
-            "job {job}: {condition}"
+        assert_eq!(
+            condition,
+            format!(
+                "(github.event_name != 'push' || !startsWith(github.event.head_commit.message, \
+                 'chore(release):')) && ({LABEL_GATE})"
+            ),
+            "job {job} builds on a release-prep merge's push, or skips more than that and \
+             another label"
         );
     }
 
@@ -1129,6 +1131,180 @@ fn every_action_is_pinned_to_a_commit() {
     assert!(pinned > 0, "no actions found");
 }
 
+/// Every job in every workflow has a time limit (`timeout-minutes`), so a
+/// runner that hangs fails in minutes instead of holding on for GitHub's
+/// six hours (M6: a dispatch once sat 28 minutes in `apt-get`). Every
+/// `apt-get update` and `apt-get install` retries a failed download and
+/// gives up on a mirror that stops answering, in a step with a time limit
+/// of its own, so a hung mirror fails that step, not the whole job's time.
+/// Only that each is there: the values are the workflows' to choose.
+#[test]
+fn every_job_has_a_time_limit_and_apt_retries() {
+    let workflows: Vec<(String, String)> = github_files()
+        .into_iter()
+        .filter(|(file, _)| file.starts_with("workflows/"))
+        .collect();
+    assert!(
+        workflows.iter().any(|(f, _)| f == "workflows/dist.yml"),
+        "{:?}",
+        workflows.iter().map(|(f, _)| f).collect::<Vec<_>>()
+    );
+    let mut apt = 0;
+    for (file, text) in &workflows {
+        let jobs = workflow_jobs(text);
+        assert!(!jobs.is_empty(), "{file} has no jobs");
+        for (job, _) in &jobs {
+            let keys = job_keys(text, job);
+            assert!(
+                keys.iter().any(|k| k.starts_with("timeout-minutes: ")),
+                "{file}: job {job} has no timeout-minutes: {keys:#?}"
+            );
+        }
+        for step in workflow_steps(text) {
+            let installs: Vec<&str> = step
+                .text
+                .lines()
+                .filter(|l| !l.trim_start().starts_with('#'))
+                .filter(|l| l.contains("apt-get update") || l.contains("apt-get install"))
+                .collect();
+            if installs.is_empty() {
+                continue;
+            }
+            for line in &installs {
+                assert!(
+                    line.contains(" -o Acquire::Retries=")
+                        && line.contains(" -o Acquire::http::Timeout="),
+                    "{file}: job {}: apt-get without its retries: {line}",
+                    step.job
+                );
+                apt += 1;
+            }
+            assert!(
+                step.text
+                    .lines()
+                    .any(|l| l.starts_with("        timeout-minutes: ")),
+                "{file}: job {}: the step running apt-get has no timeout-minutes of its own: {step:#?}",
+                step.job
+            );
+        }
+    }
+    assert!(apt > 0, "no apt-get found");
+}
+
+/// Both GUI jobs run the suite once more when it fails
+/// (`GUI_CHECK_RETRY`, scripts/gui-check.sh), which marks a check that
+/// passes only the second time FLAKY, and keeps both attempts' results in
+/// the uploaded artifact (attempt 1's under the run's out-dir). Nothing in
+/// CI builds the checks with their `force-fail` feature, or names the
+/// variable it reads: a check is only ever failed by hand, to try the retry.
+#[test]
+fn the_gui_checks_retry_once_in_ci_and_never_force_a_failure() {
+    let steps = dist_steps();
+    for job in ["gui-linux", "gui-windows"] {
+        let keys = job_keys(DIST_YML, job);
+        assert!(keys.contains(&"env:"), "job {job} has no env: {keys:#?}");
+        let body = workflow_jobs(DIST_YML)
+            .into_iter()
+            .find(|(id, _)| id == job)
+            .map(|(_, body)| body)
+            .unwrap_or_else(|| panic!("no job {job}"));
+        assert!(
+            body.lines().any(|l| l == "      GUI_CHECK_RETRY: \"1\""),
+            "job {job} doesn't retry the suite"
+        );
+        let run = steps
+            .iter()
+            .find(|s| s.job == job && s.text.contains("scripts/gui-check.sh"))
+            .unwrap_or_else(|| panic!("job {job} doesn't run the checks"));
+        let out = run
+            .text
+            .lines()
+            .find_map(|l| l.split_once("scripts/gui-check.sh ").map(|(_, rest)| rest))
+            .expect("the checks' arguments");
+        assert!(out.contains("/gui-check\""), "job {job}: {out}");
+        let upload = steps
+            .iter()
+            .find(|s| s.job == job && s.text.contains("actions/upload-artifact@"))
+            .unwrap_or_else(|| panic!("job {job} uploads nothing"));
+        assert_eq!(
+            with_value(upload, "path"),
+            Some("${{ runner.temp }}/gui-check"),
+            "job {job} uploads the whole out-dir, attempt-1/ too"
+        );
+        assert!(
+            upload.text.contains("        if: always()\n"),
+            "{upload:#?}"
+        );
+    }
+    for (file, text) in github_files() {
+        for name in ["force-fail", "GUI_CHECK_FORCE_FAIL"] {
+            assert!(!text.contains(name), "{file} names {name}");
+        }
+    }
+}
+
+/// Only main saves the Rust caches: every Swatinem/rust-cache step in every
+/// workflow saves only on main (`save-if`, which may also ask more, as the
+/// frontend shards do), so pull requests and other branches restore main's
+/// and don't save copies of it, which pushed main's own out of the
+/// repository's 10 GB. cache-cleanup.yml deletes a pull request's caches when
+/// it closes, with a token that can manage caches and nothing else.
+#[test]
+fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
+    const ON_MAIN: &str = "github.ref == 'refs/heads/main'";
+    let mut caches = 0;
+    for (file, text) in github_files() {
+        for step in workflow_steps(&text) {
+            if !step.text.contains("uses: Swatinem/rust-cache@") {
+                continue;
+            }
+            caches += 1;
+            let save = with_value(&step, "save-if")
+                .unwrap_or_else(|| panic!("{file}: job {}: no save-if: {step:#?}", step.job));
+            assert!(
+                save.starts_with("${{ ") && save.ends_with(" }}") && save.contains(ON_MAIN),
+                "{file}: job {}: saves off main: {save}",
+                step.job
+            );
+            assert!(!save.contains("||"), "{file}: job {}: {save}", step.job);
+        }
+    }
+    assert!(caches > 0, "no rust-cache steps found");
+
+    let (_, cleanup) = github_files()
+        .into_iter()
+        .find(|(file, _)| file == "workflows/cache-cleanup.yml")
+        .expect("workflows/cache-cleanup.yml");
+    let on: Vec<&str> = cleanup
+        .lines()
+        .skip_while(|l| *l != "on:")
+        .skip(1)
+        .take_while(|l| l.starts_with(' '))
+        .map(str::trim)
+        .collect();
+    assert_eq!(on, ["pull_request:", "types: [closed]"]);
+    let permissions: Vec<&str> = cleanup
+        .lines()
+        .skip_while(|l| *l != "permissions:")
+        .skip(1)
+        .take_while(|l| l.starts_with(' '))
+        .map(str::trim)
+        .collect();
+    assert_eq!(permissions, ["actions: write"]);
+    assert!(
+        cleanup.contains("refs/pull/${{ github.event.pull_request.number }}/merge")
+            && cleanup.contains("gh cache delete"),
+        "{cleanup}"
+    );
+    for (_, body) in workflow_jobs(&cleanup) {
+        assert!(
+            !body.contains("permissions:"),
+            "a job asks for more: {body}"
+        );
+        assert!(!body.contains("actions/checkout"), "{body}");
+    }
+}
+
 /// Release builds use one Rust, set in one place (`RUST_TOOLCHAIN` in
 /// dist.yml), an exact release: not whatever is stable on the day.
 #[test]
@@ -1448,7 +1624,141 @@ fn a_push_never_cancels_a_dispatched_run() {
         .expect("dist.yml has a concurrency group");
     assert_eq!(
         group,
-        "dist-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}"
+        "dist-${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || \
+         (github.event.action == 'labeled' && github.event.label.name != 'ci:full')) && \
+         github.run_id || github.ref }}"
+    );
+}
+
+/// The `ci:full` label: a pull request that has it runs gui-windows and
+/// sign-rehearsal (and the windows job's GUI-check test app) in its own
+/// pull_request run, as a release/ branch's does, in place of a run
+/// dispatched by hand that built everything twice; adding the label
+/// (`labeled`) starts that run. A run for any other label builds nothing
+/// ([`LABEL_GATE`]), cancels nothing, and the jobs behind the required
+/// checks never carry a check's name in it, so a skip (which counts as
+/// passing) never stands in for a required check (they stay: "Linux
+/// (AppImage + deb)", "Windows (NSIS installer)", "GUI checks (Linux)"). The label can never reach the sign
+/// job, which has the release's key: its gate is a run dispatched on main
+/// alone (`only_the_release_job_has_the_signing_key`).
+#[test]
+fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
+    const FULL: &str = "contains(github.event.pull_request.labels.*.name, 'ci:full')";
+    let types = DIST_YML
+        .lines()
+        .skip_while(|l| *l != "  pull_request:")
+        .skip(1)
+        .take_while(|l| l.starts_with("    "))
+        .find_map(|l| l.trim().strip_prefix("types: "))
+        .expect("dist.yml's pull_request types");
+    assert_eq!(types, "[opened, synchronize, reopened, labeled]");
+
+    for job in ["gui-windows", "sign-rehearsal"] {
+        let keys = dist_job_keys(job);
+        let condition = keys
+            .iter()
+            .find_map(|k| k.strip_prefix("if: "))
+            .unwrap_or_else(|| panic!("job {job} has no if: {keys:#?}"));
+        assert!(
+            condition.contains(&format!(
+                "github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') \
+                 || {FULL})"
+            )),
+            "job {job}: {condition}"
+        );
+    }
+    let steps = dist_steps();
+    let test_app: Vec<&Step> = steps
+        .iter()
+        .filter(|s| s.job == "windows" && s.name.contains("GUI-check test app"))
+        .collect();
+    assert_eq!(test_app.len(), 2, "{test_app:#?}");
+    let gui_windows = dist_job_keys("gui-windows")
+        .into_iter()
+        .find_map(|k| k.strip_prefix("if: "))
+        .expect("gui-windows's if");
+    for step in test_app {
+        assert!(
+            step.text.contains(&format!("        if: {gui_windows}\n")),
+            "the test app isn't built when gui-windows runs: {step:#?}"
+        );
+    }
+
+    // Another label's run: every job that runs anything is skipped by the
+    // builds' gate, and none behind a required check is named as it is.
+    for (job, required) in [
+        ("linux", "Linux (AppImage + deb)"),
+        ("windows", "Windows (NSIS installer)"),
+        ("gui-linux", "GUI checks (Linux)"),
+    ] {
+        let keys = dist_job_keys(job);
+        let name = keys
+            .iter()
+            .find_map(|k| k.strip_prefix("name: "))
+            .unwrap_or_else(|| panic!("job {job} has no name: {keys:#?}"));
+        let named = name
+            .strip_prefix(&format!("${{{{ ({LABEL_GATE}) && '"))
+            .and_then(|rest| rest.strip_suffix("' }}"))
+            .and_then(|rest| rest.split_once("' || '"))
+            .unwrap_or_else(|| panic!("job {job}'s name doesn't follow the label: {name}"));
+        assert_ne!(named.0, named.1, "job {job}");
+        assert!(
+            !named.1.is_empty() && !named.1.contains("${{"),
+            "job {job}: {name}"
+        );
+        assert_eq!(
+            named.0, required,
+            "job {job}: a required check's name changed"
+        );
+        let needs = keys
+            .iter()
+            .find_map(|k| k.strip_prefix("needs: "))
+            .unwrap_or_default();
+        let gated = keys.iter().any(|k| {
+            k.strip_prefix("if: ")
+                .is_some_and(|c| c.contains(&format!("({LABEL_GATE})")))
+        });
+        assert!(
+            gated || needs.contains("linux") || needs.contains("windows"),
+            "job {job} runs in another label's run: {keys:#?}"
+        );
+    }
+    // The rest run only after the builds, so not in that run either.
+    for job in ["gui-windows", "sign-rehearsal", "sign"] {
+        let keys = dist_job_keys(job);
+        let needs = keys
+            .iter()
+            .find_map(|k| k.strip_prefix("needs: "))
+            .unwrap_or_default();
+        assert!(
+            needs.contains("windows"),
+            "job {job} doesn't wait for the builds: {keys:#?}"
+        );
+    }
+
+    // The sign job: dispatched on main only, whatever the labels.
+    let sign = dist_job_keys("sign");
+    assert!(
+        sign.contains(
+            &"if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
+        ),
+        "{sign:#?}"
+    );
+    for key in &sign {
+        for word in ["ci:full", "label", "pull_request", "head_ref"] {
+            assert!(!key.contains(word), "the sign job's {key} names {word}");
+        }
+    }
+    // Its steps' own lines: what follows the last of them up to the next
+    // job's steps (comments, and that job's own keys) reads into it.
+    assert!(
+        !steps
+            .iter()
+            .filter(|s| s.job == "sign")
+            .flat_map(|s| s.text.lines())
+            .filter(|l| l.starts_with("      ") && !l.trim_start().starts_with('#'))
+            .any(|l| l.contains("ci:full") || l.contains("label")),
+        "a sign step looks at labels"
     );
 }
 

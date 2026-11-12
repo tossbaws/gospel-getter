@@ -122,6 +122,85 @@ const GO_TO_FORGET_JS: &str = "const noted = window.__guiCheckGoTo;
     }
     return null;";
 
+/// Which of a go-to's known failures (check 45 once timed out after a
+/// restart with the box closed and John 3 still read) the page shows,
+/// from what [`Run::go_to`]'s wait saw (`seen`: what's read, the box, the
+/// pane, focus, and the keys and commands noted since Enter): Enter not
+/// reaching the search box, the box left open, nothing sent, Enter's
+/// `get_reading` unanswered or failed, a later load overtaking it, or an
+/// answer that was never drawn.
+fn go_to_candidate(seen: &Value, heading: &str) -> String {
+    let strings = |key: &str| -> Option<Vec<String>> {
+        seen[key].as_array().map(|all| {
+            all.iter()
+                .map(|v| v.as_str().unwrap_or_default().to_owned())
+                .collect()
+        })
+    };
+    let read = seen["heading"].as_str().unwrap_or("nothing");
+    let shown = format!(
+        "the app shows {read} ({}), the box {}, the pane {}, focus on {}",
+        seen["reference"].as_str().unwrap_or("no reference"),
+        seen["box"].as_str().unwrap_or("?"),
+        seen["pane"].as_str().unwrap_or("?"),
+        seen["focus"].as_str().unwrap_or("nothing")
+    );
+    let (Some(keys), Some(sent)) = (strings("keys"), strings("sent")) else {
+        if read == heading {
+            return format!("it came late: {shown}");
+        }
+        return format!(
+            "nothing was noted since Enter (the page was reloaded or replaced?); {shown}"
+        );
+    };
+    let enter: Vec<&String> = keys.iter().filter(|k| k.starts_with("Enter on ")).collect();
+    let loads: Vec<&String> = sent
+        .iter()
+        .filter(|c| c.starts_with("get_reading "))
+        .collect();
+    let cause = if enter.is_empty() {
+        "Enter never reached the page".to_owned()
+    } else if !enter.iter().any(|k| k.as_str() == "Enter on #search-input") {
+        format!(
+            "Enter landed on {}, not the search box",
+            enter[0].trim_start_matches("Enter on ")
+        )
+    } else if seen["box"] == "open" {
+        "Enter reached the search box, which stayed open".to_owned()
+    } else if loads.is_empty() {
+        format!(
+            "Enter closed the box but sent no get_reading (sent: {})",
+            if sent.is_empty() {
+                "nothing".to_owned()
+            } else {
+                sent.join("; ")
+            }
+        )
+    } else if let Some(waiting) = loads.iter().find(|c| c.ends_with(": not yet answered")) {
+        format!("{waiting}: the app never answered it")
+    } else if let Some(failed) = loads.iter().find(|c| c.contains(": failed: ")) {
+        format!("{failed}: the app turned it down")
+    } else if loads.len() > 1 {
+        format!(
+            "{} loads were sent after Enter, so a later one may have overtaken Enter's: {}",
+            loads.len(),
+            loads
+                .iter()
+                .map(|c| c.as_str())
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    } else if seen["pane"] == "drawn afresh" {
+        format!("a pane was drawn afresh, but for {read}, not {heading}")
+    } else {
+        format!(
+            "{} was answered, but no pane was drawn for it",
+            loads[0].trim_end_matches(": answered")
+        )
+    };
+    format!("{cause}; {shown}")
+}
+
 /// The plain-text fallback's line (`ui/index.html`).
 const PLAIN_TEXT: &str =
     "This chapter is shown as plain text: the rest of the reader isn’t available.";
@@ -159,33 +238,47 @@ impl Run<'_> {
             noting == Value::Bool(true),
             "the page's invoke couldn't be wrapped"
         );
+        let landed = format!(
+            "{DESCRIBE_JS} const seen = (() => {{ {HERE_JS} }})();
+             const inner = document.getElementById('reading-pane-inner');
+             const box = document.getElementById('search-panel');
+             const read = seen.heading === arguments[0] && seen.title === `${{seen.reference}} — Gospel Getter`
+                 && !!inner && inner.dataset.guiCheckOld === undefined && box.hidden;
+             if (!read) {{
+                 const noted = window.__guiCheckGoTo;
+                 seen.box = box.hidden ? 'closed' : 'open';
+                 seen.pane = !inner ? 'none'
+                     : inner.dataset.guiCheckOld === undefined ? 'drawn afresh' : 'the one before Enter';
+                 seen.focus = describe(document.activeElement);
+                 seen.keys = noted ? noted.keys : null;
+                 seen.sent = noted ? noted.commands.map((c) => `${{c.said}}: ${{c.answer}}`) : null;
+             }}
+             return [read, seen];"
+        );
         let read = async {
             self.ui.press("press Enter (go there)", Key::Enter).await?;
             self.ui
                 .wait_with(
                     &format!("{heading} to be read in a pane drawn afresh, the box closed"),
-                    &format!(
-                        "{DESCRIBE_JS} const seen = (() => {{ {HERE_JS} }})();
-                         const inner = document.getElementById('reading-pane-inner');
-                         const box = document.getElementById('search-panel');
-                         const read = seen.heading === arguments[0] && seen.title === `${{seen.reference}} — Gospel Getter`
-                             && !!inner && inner.dataset.guiCheckOld === undefined && box.hidden;
-                         if (!read) {{
-                             const noted = window.__guiCheckGoTo;
-                             seen.box = box.hidden ? 'closed' : 'open';
-                             seen.pane = !inner ? 'none'
-                                 : inner.dataset.guiCheckOld === undefined ? 'drawn afresh' : 'the one before Enter';
-                             seen.focus = describe(document.activeElement);
-                             seen.keys = noted ? noted.keys : null;
-                             seen.sent = noted ? noted.commands.map((c) => `${{c.said}}: ${{c.answer}}`) : null;
-                         }}
-                         return [read, seen];"
-                    ),
+                    &landed,
                     vec![json!(heading)],
                 )
                 .await
         }
         .await;
+        // The same condition and the same wait; a failure also says which
+        // of the causes it could be the page shows now, before the noting
+        // stops.
+        let read = match read {
+            Ok(read) => Ok(read),
+            Err(e) => match self.ui.js(&landed, vec![json!(heading)]).await {
+                Ok(now) => Err(e.context(format!(
+                    "going to {reference}: {}",
+                    go_to_candidate(&now[1], heading)
+                ))),
+                Err(_) => Err(e),
+            },
+        };
         let forgot = self.ui.js(GO_TO_FORGET_JS, Vec::new()).await;
         let read = read?;
         forgot?;
@@ -831,5 +924,115 @@ impl Run<'_> {
              again (saved {})",
             seen["saved"], closed["saved"]
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::go_to_candidate;
+
+    fn seen(keys: &[&str], sent: &[&str], pane: &str, box_: &str) -> serde_json::Value {
+        json!({
+            "heading": "John 3", "reference": "John 3 · KJV", "title": "John 3 · KJV — Gospel Getter",
+            "box": box_, "pane": pane, "focus": "#search-input", "keys": keys, "sent": sent,
+        })
+    }
+
+    /// A go-to that times out says which known cause the page shows (run
+    /// 42896282394, check 45: John 3 still read, the box closed).
+    #[test]
+    fn a_go_to_that_timed_out_names_its_likely_cause() {
+        let before = "the one before Enter";
+        let said = |s: serde_json::Value| go_to_candidate(&s, "Psalms 119");
+        let load = "get_reading {\"translation\":\"kjv\",\"book\":19,\"chapter\":119}";
+        assert!(
+            said(seen(&[], &[], before, "closed")).starts_with("Enter never reached the page; ")
+        );
+        assert!(
+            said(seen(&["Enter on #verse-2"], &[], before, "closed"))
+                .starts_with("Enter landed on #verse-2, not the search box; ")
+        );
+        assert!(
+            said(seen(&["Enter on #search-input"], &[], before, "open"))
+                .starts_with("Enter reached the search box, which stayed open; ")
+        );
+        assert!(
+            said(seen(
+                &["Enter on #search-input"],
+                &["search_verses {}: answered"],
+                before,
+                "closed"
+            ))
+            .starts_with(
+                "Enter closed the box but sent no get_reading (sent: search_verses {}: answered); "
+            )
+        );
+        let waiting = format!("{load}: not yet answered");
+        assert!(
+            said(seen(
+                &["Enter on #search-input"],
+                &[&waiting],
+                before,
+                "closed"
+            ))
+            .starts_with(&format!("{waiting}: the app never answered it; "))
+        );
+        let failed = format!("{load}: failed: no such chapter");
+        assert!(
+            said(seen(
+                &["Enter on #search-input"],
+                &[&failed],
+                before,
+                "closed"
+            ))
+            .starts_with(&format!("{failed}: the app turned it down; "))
+        );
+        let answered = format!("{load}: answered");
+        let other = "get_reading {\"translation\":\"kjv\",\"book\":43,\"chapter\":3}: answered";
+        assert!(
+            said(seen(
+                &["Enter on #search-input"],
+                &[&answered, other],
+                before,
+                "closed"
+            ))
+            .starts_with(
+                "2 loads were sent after Enter, so a later one may have overtaken Enter's: "
+            )
+        );
+        assert!(
+            said(seen(
+                &["Enter on #search-input"],
+                &[&answered],
+                "drawn afresh",
+                "closed"
+            ))
+            .starts_with("a pane was drawn afresh, but for John 3, not Psalms 119; ")
+        );
+        let drawn = said(seen(
+            &["Enter on #search-input"],
+            &[&answered],
+            before,
+            "closed",
+        ));
+        assert!(
+            drawn.starts_with(&format!(
+                "{load} was answered, but no pane was drawn for it; "
+            )),
+            "{drawn}"
+        );
+        assert!(
+            drawn.ends_with(
+                "the app shows John 3 (John 3 · KJV), the box closed, the pane the one before \
+                 Enter, focus on #search-input"
+            ),
+            "{drawn}"
+        );
+        // Nothing noted at all.
+        let gone =
+            json!({ "heading": "John 3", "reference": "John 3 · KJV", "keys": null, "sent": null });
+        assert!(said(gone).starts_with("nothing was noted since Enter"));
     }
 }

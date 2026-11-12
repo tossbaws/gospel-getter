@@ -12,11 +12,30 @@ name: Distribution Artifacts
 # run is a concurrency group of its own (its run id), so a later push never
 # cancels a release build, and the dispatch cancels nothing.
 #
+# The ci:full label: a pull request that has it runs gui-windows and
+# sign-rehearsal too, in its own pull_request run, as a release/ branch's
+# does, so a branch needs no run dispatched by hand for them (which built
+# everything twice). Adding the label starts that run (pull_request
+# "labeled"), which cancels the one in progress on the pull request as a
+# push does. Adding any other label (Dependabot labels its pull requests)
+# builds nothing: that run's jobs are skipped, it cancels nothing (a group
+# of its own, its run id), and the jobs behind the required checks (linux,
+# windows, gui-linux) carry other names in it, so a skip, which counts as
+# passing, can never stand in for a required check's result. (GitHub shows
+# a job that never starts, skipped or cancelled first, under its name's
+# expression as written, which is no check's name either.) The release's
+# own run (dispatched on main) and its sign job don't look at labels.
+#
 # Then the GUI checks (scripts/gui-check.sh, tests/gui) drive the built
 # app through its own webview with tauri-driver: gui-linux on the AppImage
-# for every run, advisory (not a required check); gui-windows on the NSIS
-# install only by hand (workflow_dispatch) or for a pull request from a
-# release/ branch, before a release. Their updater checks run on the GUI
+# for every run, a required check ("GUI checks (Linux)" in the main
+# branch's ruleset); gui-windows on the NSIS install only by hand
+# (workflow_dispatch), or for a pull request from a release/ branch or with
+# the ci:full label, before a release. A failed suite runs once more, whole
+# and on fresh data (GUI_CHECK_RETRY): a check that passes only then is
+# FLAKY, warned about and listed in the job's summary, which is what keeps
+# a flake from blocking a merge without passing for a clean run; a check
+# that fails both times fails the job. Their updater checks run on the GUI
 # checks' test build of the app (feature gui-test-updater: its updater
 # reads a test settings file, talks to the checks' own local server, and
 # never installs), which each job builds after its installers are uploaded,
@@ -50,13 +69,19 @@ name: Distribution Artifacts
 #     publishing. The build's own artifacts are never replaced, so a sign
 #     job that fails can be re-run (Re-run failed jobs) on them as built.
 #   - dispatched on another branch, or a pull request from a release/
-#     branch: unsigned, and sign-rehearsal does all of that with a throwaway
-#     key made for the run instead, uploading nothing, so a change to the
-#     signing is tried before it reaches a release.
+#     branch or with the ci:full label: unsigned, and sign-rehearsal does
+#     all of that with a throwaway key made for the run instead, uploading
+#     nothing, so a change to the signing is tried before it reaches a
+#     release. ci:full never reaches the sign job.
 #
 # Every action is pinned to a commit (Dependabot proposes updates:
 # .github/dependabot.yml), and every job builds with one Rust release,
-# RUST_TOOLCHAIN below.
+# RUST_TOOLCHAIN below. Only main's runs save the Rust caches (save-if, as
+# in ci.yml); every other run restores main's. Every job has a time limit
+# (timeout-minutes, about three times its slowest green run, more where a
+# cold cache needs it), so a hung runner fails in minutes, not after
+# GitHub's six hours; apt-get retries a failed download and gives up on a
+# silent mirror, in a step with a time limit of its own.
 #
 # Every installer carries gospel-getter-cli beside the app, as a Tauri sidecar
 # (bundle.externalBin, in the tauri.sidecar.conf.json overlay, since tauri-build
@@ -69,13 +94,17 @@ on:
   push:
     branches: [main]
   pull_request:
+    # The defaults, and labeled: adding ci:full starts a run (see the top).
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A dispatched run, and a run for a label other than ci:full, are groups of
+# their own: they cancel nothing.
 concurrency:
-  group: dist-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  group: dist-${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || (github.event.action == 'labeled' && github.event.label.name != 'ci:full')) && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
@@ -92,16 +121,20 @@ env:
 
 jobs:
   linux:
-    name: Linux (AppImage + deb)
+    # A required check by this name; another in a run for a label other
+    # than ci:full, which builds nothing (see the top of this file).
+    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'ci:full') && 'Linux (AppImage + deb)' || 'Linux (AppImage + deb), not run for this label' }}
     # Not on the push of a release-prep merge: the release's installers come
     # from the run dispatched on the same commit (see the top of this file).
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')
+    # Nor for a label other than ci:full.
+    if: (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')) && (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
     # Tauri's own Linux packaging guidance is to build on the oldest
     # supported Ubuntu LTS, not `ubuntu-latest`: the AppImage/deb bundler
     # links against the build host's glibc/webkit2gtk, and a binary built
     # on a newer Ubuntu won't run on an older one. 22.04 is Tauri's
     # documented minimum baseline for the current AppImage/deb tooling.
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: src-tauri
@@ -129,15 +162,17 @@ jobs:
       # FUSE-mounted at bundle time), and xvfb (to launch the built app
       # headlessly for the smoke test below).
       - name: Install Tauri Linux build & bundling dependencies
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
             patchelf build-essential libssl-dev libfuse2 xvfb file
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             src-tauri
             ui-leptos
@@ -255,13 +290,14 @@ jobs:
           exit 0
 
       - name: "Smoke test: .deb installs and uninstalls cleanly"
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           deb="${{ steps.artifacts.outputs.deb }}"
           pkg_name="$(dpkg-deb -f "$deb" Package)"
           echo "Package name: $pkg_name"
 
-          sudo apt-get install -y "$deb"
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 "$deb"
           dpkg -s "$pkg_name" | grep -q '^Status: install ok installed'
 
           owned_files="$(dpkg -L "$pkg_name")"
@@ -319,10 +355,13 @@ jobs:
           retention-days: 7
 
   windows:
-    name: Windows (NSIS installer)
-    # Not on the push of a release-prep merge, as for the linux job.
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')
+    # A required check by this name, as for the linux job.
+    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'ci:full') && 'Windows (NSIS installer)' || 'Windows (NSIS installer), not run for this label' }}
+    # Not on the push of a release-prep merge, nor for a label other than
+    # ci:full, as for the linux job.
+    if: (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')) && (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
     runs-on: windows-latest
+    timeout-minutes: 55
     defaults:
       run:
         working-directory: src-tauri
@@ -348,6 +387,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             src-tauri
             ui-leptos
@@ -562,7 +602,7 @@ jobs:
       # gui-windows runs: the GUI checks' test build (see the top of this
       # file), for its updater checks.
       - name: Build the GUI-check test app
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
         shell: pwsh
         run: |
           cargo build --release --locked --features gui-test-updater
@@ -571,7 +611,7 @@ jobs:
           Copy-Item target/release/gospel_getter.exe "$env:RUNNER_TEMP/gui-check-test-app/"
 
       - name: Upload the GUI-check test app
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gui-check-test-app-windows
@@ -580,21 +620,28 @@ jobs:
           retention-days: 7
 
   gui-linux:
-    name: GUI checks (Linux)
+    # A required check by this name, as for the linux job.
+    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'ci:full') && 'GUI checks (Linux)' || 'GUI checks (Linux), not run for this label' }}
     # The AppImage the linux job built, driven through its own webview by
-    # tauri-driver and WebKitWebDriver on a private Xvfb display. Advisory:
-    # not a required check (yet). The AppImage is tested as shipped: the
-    # script has its own runtime extract it (--appimage-extract, so no FUSE)
-    # and starts its AppRun.
+    # tauri-driver and WebKitWebDriver on a private Xvfb display. A required
+    # check (see the top of this file for how a flake is kept from blocking
+    # a merge). The AppImage is tested as shipped: the script has its own
+    # runtime extract it (--appimage-extract, so no FUSE) and starts its
+    # AppRun.
     needs: linux
     # The same Ubuntu as the build: the AppImage was built against its
     # WebKitGTK, and webkit2gtk-driver comes from it.
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    # Room for the whole suite twice (GUI_CHECK_RETRY below).
+    timeout-minutes: 25
     env:
       # A CI runner is slower than a desktop; still bounded.
       GUI_CHECK_BUDGET: "300"
       GUI_CHECK_STEP_TIMEOUT: "20"
+      # A failed suite runs once more, whole and on fresh data; a check that
+      # passes only the second time is FLAKY, with a warning and a line in
+      # the job's summary, never a clean pass (scripts/gui-check.sh).
+      GUI_CHECK_RETRY: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -609,14 +656,16 @@ jobs:
       # The test build is a plain binary (not an AppImage), so it runs on
       # the system's WebKitGTK and GTK.
       - name: Install Xvfb, xdotool, WebKitWebDriver, ImageMagick and the app's runtime
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb xdotool webkit2gtk-driver dbus imagemagick \
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 xvfb xdotool webkit2gtk-driver dbus imagemagick \
             libwebkit2gtk-4.1-0 libgtk-3-0
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: tests/gui
 
       - name: Install tauri-driver
@@ -655,6 +704,8 @@ jobs:
           GUI_CHECK_UPDATER_APP="$PWD/gui-check-test-app/gospel_getter" \
             scripts/gui-check.sh "$appimage" "$RUNNER_TEMP/gui-check"
 
+      # Both attempts' results.txt and screenshots when the suite ran twice
+      # (the first in attempt-1/).
       - name: Upload the results and screenshots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -667,17 +718,21 @@ jobs:
     name: GUI checks (Windows)
     # The NSIS installer the windows job built, installed silently and
     # driven through WebView2 by tauri-driver and Edge WebDriver. Before a
-    # release only: by hand, or for a pull request from a release/ branch.
+    # release only: by hand, or for a pull request from a release/ branch or
+    # with the ci:full label.
     # Windows has no private display, so this runs on the runner's desktop;
     # the native save-dialog step stops at "the dialog appeared" (UI
     # Automation finds and closes it).
     needs: windows
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
     runs-on: windows-latest
+    # Room for the whole suite twice (GUI_CHECK_RETRY below).
     timeout-minutes: 30
     env:
       GUI_CHECK_BUDGET: "300"
       GUI_CHECK_STEP_TIMEOUT: "20"
+      # As for gui-linux; the retry deletes the app's data folders first.
+      GUI_CHECK_RETRY: "1"
       # The app's window comes up about 10s after launch on a cold runner.
       GUI_CHECK_SESSION_TIMEOUT: "60"
       # The installed app's program, as the windows job builds it
@@ -694,6 +749,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: tests/gui
 
       # Tauri's WebDriver CI guidance: msedgedriver-tool fetches the Edge
@@ -795,6 +851,7 @@ jobs:
           GUI_CHECK_UPDATER_APP="$tmp/gui-check-test-app/$name" \
             scripts/gui-check.sh "$(cygpath -u "$APP_EXE")" "$tmp/gui-check"
 
+      # Both attempts', as for gui-linux.
       - name: Upload the results and screenshots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -905,13 +962,13 @@ jobs:
   # The sign job's steps on a run that can't be released, with a key made
   # for the run in place of the release's (and checked against its own
   # public key): a run dispatched on another branch, or a pull request from
-  # a release/ branch. The same downloads and the same sign_installers.py
-  # (each installer's SHA-256 recorded, signed, and checked unchanged). It
-  # uploads nothing, and names no secret.
+  # a release/ branch or with the ci:full label. The same downloads and the
+  # same sign_installers.py (each installer's SHA-256 recorded, signed, and
+  # checked unchanged). It uploads nothing, and names no secret.
   sign-rehearsal:
     name: Signing rehearsal (throwaway key)
     needs: [linux, windows]
-    if: (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+    if: (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:

@@ -15,7 +15,11 @@
 //! process given the pid since only by a creation time or a program that
 //! differs, never by a refusal. The app gets [`EXIT_WAIT`] in all to go,
 //! polled; then it's stopped. One that won't stop fails the session's
-//! start, saying so, as does a process that can't be told apart.
+//! start, saying so, as does a process that can't be told apart. Windows
+//! refusing to open the app (by its creation time) or to say what the
+//! process holding its pid is, as it can while a process exits (run
+//! 42879721170: "couldn't tell what pid 7896 is: Access is denied"), is
+//! waited through within the same [`EXIT_WAIT`], never taken as an answer.
 //!
 //! On Linux nothing is recorded: WebKitWebDriver ends the app itself at the
 //! end of a session (the script's wrapper execs it), and the guard there is
@@ -170,29 +174,40 @@ mod windows {
     const POLL: Duration = Duration::from_millis(100);
 
     /// Waits for `app` to have exited, stopping it if it doesn't, and says
-    /// how it went.
+    /// how it went. Windows refusing to say what the process holding its pid
+    /// is, as it can while a process exits, is waited through, never taken
+    /// as an answer, within the same [`EXIT_WAIT`].
     pub(super) async fn exited(
         app: &Launched,
         started: Instant,
         deadline: Instant,
     ) -> Result<String> {
         let name = format!("pid {} ({})", app.pid, app.path);
-        let Some(process) = held(app)? else {
-            return Ok(format!("{name} gone"));
-        };
         let begun = Instant::now();
         let wait = EXIT_WAIT.min(deadline.saturating_duration_since(begun));
+        let until = begun + wait;
+        let Some(process) = held(app, &name, started, until).await? else {
+            return Ok(format!("{name} gone"));
+        };
         // Whatever holds the pid, once it has exited nothing recorded is
         // running under it.
-        if gone_within(&process, SETTLE.min(wait)).await? {
+        if gone_within(
+            &process,
+            SETTLE.min(until.saturating_duration_since(Instant::now())),
+        )
+        .await?
+        {
             return Ok(format!(
                 "{name} exited after {:.2}s",
                 begun.elapsed().as_secs_f64()
             ));
         }
-        let identity = process
-            .identify(app)
-            .with_context(|| format!("couldn't tell what pid {} is", app.pid))?;
+        let Some(identity) = identified(&process, app, &name, started, until).await? else {
+            return Ok(format!(
+                "{name} exited after {:.2}s (Windows wouldn't say what it was meanwhile)",
+                begun.elapsed().as_secs_f64()
+            ));
+        };
         let how = match identity {
             Identity::App => "the same pid, creation time and program",
             Identity::AppExiting => {
@@ -209,7 +224,7 @@ mod windows {
             started,
             &format!("waiting for {name}, started by an earlier session, to exit"),
         );
-        if gone_within(&process, wait.saturating_sub(begun.elapsed())).await? {
+        if gone_within(&process, until.saturating_duration_since(Instant::now())).await? {
             return Ok(format!(
                 "{name} exited after {:.2}s",
                 begun.elapsed().as_secs_f64()
@@ -242,29 +257,103 @@ mod windows {
     }
 
     /// The process holding `app`'s pid, if one does: opened, so that its
-    /// pid can't go to another process while it's watched. `None` only
-    /// when no process has the pid, or when Windows won't let it be opened
-    /// and its creation time shows it's another process.
-    fn held(app: &Launched) -> Result<Option<Process>> {
-        match Process::open(app.pid) {
-            Ok(process) => Ok(process),
-            // The app is the checks' own account's, which can always open
-            // it this way; so is this another process? Only its creation
-            // time says, never the refusal itself.
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                match Process::created_at(app.pid)
-                    .with_context(|| format!("couldn't tell what pid {} is ({e})", app.pid))?
-                {
-                    Some(created) if created == app.created => bail!(
-                        "pid {} is the app gui-launch recorded (created at the moment \
-                         recorded), but couldn't be opened to wait for it: {e}",
-                        app.pid
-                    ),
-                    // Gone, or another process created since.
-                    _ => Ok(None),
+    /// pid can't go to another process while it's watched. `None` when no
+    /// process has the pid, or when Windows won't let it be opened and its
+    /// creation time shows it's another process. When Windows won't let the
+    /// app itself (by its creation time) be opened, as it can refuse a
+    /// process that is exiting, it's asked again every [`POLL`] until the
+    /// app is gone or opens, up to `until`; one that does neither fails,
+    /// saying so, as before.
+    async fn held(
+        app: &Launched,
+        name: &str,
+        started: Instant,
+        until: Instant,
+    ) -> Result<Option<Process>> {
+        let mut said = false;
+        loop {
+            match Process::open(app.pid) {
+                Ok(process) => return Ok(process),
+                // The app is the checks' own account's, which can always
+                // open it this way, unless it's exiting; so is this another
+                // process? Only its creation time says, never the refusal
+                // itself.
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    let created = Process::created_at(app.pid)
+                        .with_context(|| format!("couldn't tell what pid {} is ({e})", app.pid))?;
+                    if !app.is_by_creation(created) {
+                        // Gone, or another process created since.
+                        return Ok(None);
+                    }
+                    if Instant::now() >= until {
+                        bail!(
+                            "pid {} is the app gui-launch recorded (created at the moment \
+                             recorded), but couldn't be opened to wait for it: {e}",
+                            app.pid
+                        );
+                    }
+                    if !said {
+                        said = true;
+                        log_line(
+                            started,
+                            &format!(
+                                "{name} won't open to be waited for ({e}), as Windows can refuse \
+                                 an exiting process: asking again until it's gone"
+                            ),
+                        );
+                    }
+                    tokio::time::sleep(POLL).await;
+                }
+                Err(e) => {
+                    return Err(e).with_context(|| format!("couldn't look for pid {}", app.pid));
                 }
             }
-            Err(e) => Err(e).with_context(|| format!("couldn't look for pid {}", app.pid)),
+        }
+    }
+
+    /// What `process`, which holds `app`'s pid, is (`Process::identify`).
+    /// When Windows won't say even when it was created, as it can refuse an
+    /// exiting process, it's asked again every [`POLL`] while the process
+    /// runs, up to `until`: `None` if it exits meanwhile (nothing recorded
+    /// is running under the pid then, whatever it was). One that neither
+    /// exits nor says can't be told apart from a process given the pid
+    /// since, so it's never stopped: that fails, saying so.
+    async fn identified(
+        process: &Process,
+        app: &Launched,
+        name: &str,
+        started: Instant,
+        until: Instant,
+    ) -> Result<Option<Identity>> {
+        let mut said = false;
+        loop {
+            let identity = process
+                .identify(app)
+                .with_context(|| format!("couldn't tell what pid {} is", app.pid))?;
+            if let Some(identity) = identity {
+                return Ok(Some(identity));
+            }
+            if !said {
+                said = true;
+                log_line(
+                    started,
+                    &format!(
+                        "{name}: Windows won't say when it was created (as it can refuse an exiting \
+                         process); waiting for it to exit or say"
+                    ),
+                );
+            }
+            if gone_within(process, POLL).await? {
+                return Ok(None);
+            }
+            if Instant::now() >= until {
+                bail!(
+                    "couldn't tell what pid {} is: Windows still won't say when the process holding \
+                     it was created, and it hasn't exited, so it can't be told apart from a process \
+                     given the pid since (and isn't stopped)",
+                    app.pid
+                );
+            }
         }
     }
 

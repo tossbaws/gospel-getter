@@ -6,13 +6,19 @@ name: CI
 # and test-windows (the backend's tests on Windows). build-and-test and
 # test-windows are required checks on main; keep their names.
 #
-# It runs on pushes to leptos too, so a pull request into leptos starts
-# from leptos's caches: a pull request can only restore caches saved on
-# its own ref, its base branch, or main.
+# Only main's runs save the Rust caches (save-if); pull requests and other
+# branches restore main's (a run can restore caches saved on its own ref,
+# its base branch, or main) and save none of their own. Each pull request
+# saving its own copy of main's (about 880 MB each) pushed main's own out
+# of the repository's 10 GB, and a cold build takes twice as long.
+# cache-cleanup.yml deletes what a pull request's runs did save (the small
+# caches) once it closes. It still runs on pushes to leptos, which restore
+# main's caches too.
 #
 # Every action is pinned to a commit (Dependabot proposes updates:
 # .github/dependabot.yml). CI builds with the current stable Rust; release
-# builds pin theirs (RUST_TOOLCHAIN in dist.yml).
+# builds pin theirs (RUST_TOOLCHAIN in dist.yml). Every job has a time
+# limit, and apt-get retries, as in dist.yml.
 
 on:
   push:
@@ -25,6 +31,7 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: src-tauri
@@ -74,11 +81,15 @@ jobs:
 
       # Tauri's Linux runtime (webkit2gtk/gtk3) isn't preinstalled on the
       # runner image, and both building and even just `cargo check`/`cargo
-      # test` need their headers present to link against.
+      # test` need their headers present to link against. Usually half a
+      # minute; a slow mirror has taken 12 and finished, a hung one never
+      # does, hence its own 15 minutes.
       - name: Install Tauri Linux dependencies
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf build-essential libssl-dev
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf build-essential libssl-dev
 
       # Optimized builds of the few dependencies the tests spend their time
       # in; see the file.
@@ -89,6 +100,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           key: ${{ hashFiles('.github/ci/cargo-config.toml') }}
           workspaces: |
             src-tauri
@@ -155,6 +167,7 @@ jobs:
   frontend-tests:
     name: frontend-tests (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -174,19 +187,21 @@ jobs:
           set: trunk
 
       - name: Install Tauri Linux dependencies
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf build-essential libssl-dev
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf build-essential libssl-dev
 
       - name: Configure cargo
         run: cat .github/ci/cargo-config.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
 
-      # Both shards build the same thing; one saves it.
+      # Both shards build the same thing; one saves it, on main.
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ matrix.shard == 1 && github.ref == 'refs/heads/main' }}
           key: ${{ hashFiles('.github/ci/cargo-config.toml') }}
-          save-if: ${{ matrix.shard == 1 }}
           workspaces: |
             src-tauri
             ui-leptos
@@ -222,6 +237,7 @@ jobs:
   # are otherwise only run by the dist workflow's smoke test.
   test-windows:
     runs-on: windows-latest
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: src-tauri
@@ -252,6 +268,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             src-tauri
             ui-leptos

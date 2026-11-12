@@ -320,6 +320,45 @@ pub fn is_skip(error: &anyhow::Error) -> bool {
     error.downcast_ref::<Skipped>().is_some()
 }
 
+/// A test of `scripts/gui-check.sh`'s retry, by hand: a check that passed
+/// recorded as failed, when GUI_CHECK_FORCE_FAIL names it ([`forces`]) in a
+/// build with the `force-fail` feature. Without the feature (every build CI
+/// or anyone else makes unless they ask for it) the variable is never read.
+/// The checks never ship in an installer, with or without it.
+fn forced(check: Check) -> Option<String> {
+    if !cfg!(feature = "force-fail") {
+        return None;
+    }
+    let spec = std::env::var("GUI_CHECK_FORCE_FAIL").ok()?;
+    let attempt = std::env::var("GUI_CHECK_ATTEMPT")
+        .ok()
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(1);
+    forces(&spec, check.number(), attempt).then(|| {
+        format!(
+            "forced to fail by GUI_CHECK_FORCE_FAIL={spec} in attempt {attempt} (a test of the \
+             retry, in a gui-check built with the force-fail feature)"
+        )
+    })
+}
+
+/// Whether GUI_CHECK_FORCE_FAIL's `spec` fails check `number` in `attempt`:
+/// a comma-separated list of checks, each `N` (in every attempt) or `N@A`
+/// (in attempt A only).
+fn forces(spec: &str, number: u8, attempt: u32) -> bool {
+    spec.split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .any(|item| {
+            let (check, only) = match item.split_once('@') {
+                Some((check, only)) => (check, Some(only)),
+                None => (item, None),
+            };
+            check.parse::<u8>().ok() == Some(number)
+                && only.is_none_or(|only| only.parse::<u32>().ok() == Some(attempt))
+        })
+}
+
 /// A check's verdict, as results.txt writes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Verdict {
@@ -370,6 +409,10 @@ impl Report {
     /// Records `check`'s outcome (the first one only) and rewrites
     /// results.txt: a pass, a skip ([`skipped`]) or a failure.
     pub async fn record(&mut self, check: Check, outcome: Result<String>) {
+        let outcome = match (outcome, forced(check)) {
+            (Ok(_), Some(why)) => Err(anyhow::anyhow!(why)),
+            (outcome, _) => outcome,
+        };
         self.note(check, outcome);
         self.write().await;
     }
@@ -642,7 +685,168 @@ mod tests {
         assert!(file.ends_with("FAIL 2 csp: no result\n"), "{file}");
         assert_eq!(file.matches("FAIL ").count(), 1, "{file}");
 
+        // After a retry: a FLAKY is a result, neither filled in as a FAIL
+        // nor failing the run, and the totals count it on its own.
+        std::fs::write(
+            &results,
+            "PASS 1 driver: booted\nFLAKY 2 csp: passed on retry: fine; attempt 1: blocked\n",
+        )
+        .expect("results.txt");
+        let (said, file) = collect(&[Check::Driver, Check::Csp], 0);
+        assert_eq!(
+            said,
+            "1 passed, 0 skipped, 0 failed, 1 flaky (passed on retry)\n0\n"
+        );
+        assert!(!file.contains("FAIL "), "{file}");
+
         std::fs::remove_dir_all(&dir).expect("the scratch folder goes");
+    }
+
+    /// scripts/gui-check.sh's retry (retry_suite in gui-check-results.sh),
+    /// no display: a stub attempt writes results.txt and a screenshot and
+    /// exits as told, and a stub checks binary stands in for `gui-check
+    /// --retried` (tested in `retried`), noting how it was called. Attempt
+    /// 1 passing ends it there; failing, it's kept in attempt-1/, the app
+    /// gets fresh data, attempt 2 runs into the out-dir, and the judgement's
+    /// warnings reach stdout and its summary the job's. The run is green only
+    /// when attempt 2 and the judgement both pass.
+    #[cfg(unix)]
+    #[test]
+    fn gui_check_sh_runs_the_suite_once_more_when_it_fails() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let dir = std::env::temp_dir().join(format!(
+            "gui-check-retry-test-{}-{}",
+            std::process::id(),
+            now.as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("a scratch folder");
+        let script = |name: &str, text: &str| {
+            let path = dir.join(name);
+            std::fs::write(&path, text).expect("a stub");
+            let mut perms = std::fs::metadata(&path).expect("the stub").permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+            std::fs::set_permissions(&path, perms).expect("an executable stub");
+            path
+        };
+        // One attempt: $1 is its out-dir; ATTEMPT_<n> its exit code.
+        let attempt = script(
+            "attempt",
+            r#"#!/usr/bin/env bash
+            out=$1; mkdir -p "$out/screenshots"
+            echo "attempt $GUI_CHECK_ATTEMPT" >"$out/screenshots/shot.png"
+            code_var="ATTEMPT_$GUI_CHECK_ATTEMPT"; code=${!code_var}
+            if ((code == 0)); then echo "PASS 7 shortcuts: fine" >"$out/results.txt"
+            else echo "FAIL 7 shortcuts: attempt $GUI_CHECK_ATTEMPT" >"$out/results.txt"; fi
+            exit "$code""#,
+        );
+        // gui-check --retried: notes its arguments, rewrites the results,
+        // writes a summary, warns, and judges as JUDGED says.
+        let runner = script(
+            "gui-check",
+            r#"#!/usr/bin/env bash
+            echo "$*" >"$(dirname "$0")/called"
+            [[ $1 == --retried ]] || exit 2
+            echo "FLAKY 7 shortcuts: passed on retry" >"$3"
+            echo "Flaky (passed on retry)" >"$4"
+            echo "::warning title=Flaky GUI check 7 shortcuts::attempt 1"
+            exit "$JUDGED""#,
+        );
+        let library =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/gui-check-results.sh");
+        let run = |name: &str, codes: [u8; 3]| {
+            let out = dir.join(name);
+            std::fs::create_dir_all(&out).expect("an out-dir");
+            let summary = dir.join(format!("{name}-summary.md"));
+            let _ = std::fs::remove_file(dir.join("called"));
+            let done = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(
+                    r#"set -euo pipefail
+                    source "$1"; out="$2"; runner="$3"; attempt="$4"
+                    fresh_app_data() { echo fresh >>"$out/../fresh-$(basename "$out")"; }
+                    status=0; retry_suite "$attempt" || status=$?
+                    echo "exit $status""#,
+                )
+                .arg("bash")
+                .arg(&library)
+                .arg(&out)
+                .arg(&runner)
+                .arg(&attempt)
+                .env("ATTEMPT_1", codes[0].to_string())
+                .env("ATTEMPT_2", codes[1].to_string())
+                .env("JUDGED", codes[2].to_string())
+                .env("GITHUB_STEP_SUMMARY", &summary)
+                .output()
+                .expect("bash runs");
+            assert!(done.status.success(), "{done:?}");
+            let read = |path: &Path| std::fs::read_to_string(path).unwrap_or_default();
+            (
+                String::from_utf8_lossy(&done.stdout).into_owned(),
+                read(&out.join("results.txt")),
+                read(&out.join("attempt-1/results.txt")),
+                read(&summary),
+                read(&dir.join("called")),
+                read(&dir.join(format!("fresh-{name}"))),
+                read(&out.join("screenshots/shot.png")),
+            )
+        };
+
+        // Attempt 1 passes: nothing more.
+        let (said, results, first, summary, called, fresh, _) = run("clean", [0, 9, 9]);
+        assert_eq!(said, "exit 0\n");
+        assert_eq!(results, "PASS 7 shortcuts: fine\n");
+        assert!(first.is_empty() && summary.is_empty() && called.is_empty() && fresh.is_empty());
+
+        // Attempt 1 fails, attempt 2 passes: kept apart, judged, said.
+        let (said, results, first, summary, called, fresh, shot) = run("flaky", [1, 0, 0]);
+        assert_eq!(
+            said,
+            "::warning title=Flaky GUI check 7 shortcuts::attempt 1\nexit 0\n"
+        );
+        assert_eq!(first, "FAIL 7 shortcuts: attempt 1\n");
+        assert_eq!(shot, "attempt 2\n");
+        let out = dir.join("flaky");
+        assert_eq!(
+            std::fs::read_to_string(out.join("attempt-1/screenshots/shot.png")).ok(),
+            Some("attempt 1\n".to_owned())
+        );
+        assert_eq!(results, "FLAKY 7 shortcuts: passed on retry\n");
+        assert_eq!(summary, "Flaky (passed on retry)\n");
+        assert_eq!(fresh, "fresh\n", "the app's data, fresh once");
+        assert_eq!(
+            called,
+            format!(
+                "--retried {0}/attempt-1/results.txt {0}/results.txt {0}/retry-summary.md\n",
+                out.display()
+            )
+        );
+
+        // A FAIL in attempt 2 fails the run, whatever the judgement says.
+        let (said, ..) = run("twice", [1, 1, 1]);
+        assert!(said.ends_with("exit 1\n"), "{said}");
+        let (said, ..) = run("twice-judged-clean", [1, 1, 0]);
+        assert!(said.ends_with("exit 1\n"), "{said}");
+        // Attempt 2 passing isn't enough if the judgement couldn't pass it.
+        let (said, ..) = run("unjudged", [1, 0, 2]);
+        assert!(said.ends_with("exit 2\n"), "{said}");
+
+        std::fs::remove_dir_all(&dir).expect("the scratch folder goes");
+    }
+
+    /// GUI_CHECK_FORCE_FAIL names checks, each in every attempt or in one.
+    #[test]
+    fn a_forced_failure_names_its_check_and_attempt() {
+        assert!(forces("7", 7, 1) && forces("7", 7, 2));
+        assert!(forces("7@1", 7, 1) && !forces("7@1", 7, 2));
+        assert!(forces("45, 7@2", 7, 2) && forces("45, 7@2", 45, 1));
+        assert!(!forces("7", 8, 1) && !forces("", 7, 1) && !forces("x@1", 7, 1));
+        assert!(!forces("7@x", 7, 1));
+        // Without the feature, nothing is forced, whatever the variable says.
+        if !cfg!(feature = "force-fail") {
+            assert_eq!(forced(Check::Shortcuts), None);
+        }
     }
 
     /// Only the first outcome counts: a later failure doesn't overwrite a

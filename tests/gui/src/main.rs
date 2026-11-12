@@ -23,6 +23,7 @@ mod checks;
 mod config;
 mod native;
 mod report;
+mod retried;
 mod ui;
 mod update_server;
 
@@ -41,18 +42,32 @@ const CHECKS_STACK: usize = 32 * 1024 * 1024;
 fn main() -> ExitCode {
     // `--list`: every check, as results.txt names them, for
     // `scripts/gui-check.sh` (and anyone wanting to know what a run does).
+    // `--retried`: both attempts of a suite run twice, judged (`retried`).
     // Nothing else is an argument: the checks' settings are the
     // environment's (`config.rs`).
-    match std::env::args().nth(1).as_deref() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
         None => {}
-        Some("--list") => {
+        Some("--list") if args.len() == 1 => {
             print!("{}", report::list());
             return ExitCode::SUCCESS;
         }
+        Some("--retried") if args.len() == 4 => {
+            let path = |i: usize| std::path::Path::new(&args[i]);
+            return match retried::run(path(1), path(2), path(3)) {
+                Ok(true) => ExitCode::SUCCESS,
+                Ok(false) => ExitCode::FAILURE,
+                Err(e) => {
+                    eprintln!("gui-check: couldn't judge the retried run: {e:#}");
+                    ExitCode::from(2)
+                }
+            };
+        }
         Some(other) => {
             eprintln!(
-                "gui-check: unknown argument {other:?}; --list prints the checks, \
-                 and scripts/gui-check.sh runs them"
+                "gui-check: unknown arguments {args:?} ({other:?}); --list prints the checks, \
+                 --retried <attempt 1's results.txt> <attempt 2's results.txt> <summary.md> \
+                 judges a suite run twice, and scripts/gui-check.sh runs them"
             );
             return ExitCode::from(2);
         }

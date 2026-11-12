@@ -37,9 +37,11 @@ removes each silently: the setup.exe (`/S`) and the MSI (`msiexec /i` and
 beside the app (which it runs), and leaves nothing registered once removed;
 a build without the MSI fails. The `test-windows` job in
 `.github/workflows/ci.yml` runs the Rust tests on Windows. Before a release
-(a run dispatched by hand, or a pull request from a `release/` branch), the
-`gui-windows` job installs the setup.exe and drives the installed app
-through its own window with the GUI checks (`scripts/gui-check.sh`). What
+(a run dispatched by hand, or a pull request from a `release/` branch or
+with the `ci:full` label), the `gui-windows` job installs the setup.exe and
+drives the installed app through its own window with the GUI checks
+(`scripts/gui-check.sh`). To run them on any other pull request, add the
+`ci:full` label rather than dispatching a run of the branch by hand. What
 CI doesn't cover is a person's desktop: SmartScreen's warning for an
 installer that isn't code-signed, and Windows editions other than the
 runner's Windows Server.

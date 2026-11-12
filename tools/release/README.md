@@ -107,8 +107,13 @@ on the `-signed` names only). Take the release's installers only once an
 attempt of the job has succeeded.
 
 A run dispatched on another branch, and a pull request from a `release/`
-branch, rehearse this (the `sign-rehearsal` job) with a throwaway key made
-for the run, uploading nothing:
+branch or with the `ci:full` label, rehearse this (the `sign-rehearsal`
+job) with a throwaway key made for the run, uploading nothing. To try a
+change to the signing on a pull request, add the label (`gh pr edit
+<number> --add-label ci:full`) rather than dispatching a second run of the
+branch by hand: its own pull_request run then rehearses (and runs the
+Windows GUI checks), and so does every push to it after. The label never
+reaches the `sign` job.
 
 ```sh
 cargo tauri signer generate --ci --write-keys rehearsal.key

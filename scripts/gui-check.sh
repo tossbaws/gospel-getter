@@ -14,7 +14,8 @@
 # made from too.
 #
 # The out-dir (default target/gui-check/<timestamp>/) gets results.txt (one
-# PASS, SKIP or FAIL line per check, with the reason: every check listed, a
+# PASS, SKIP or FAIL line per check, or FLAKY after a retry (see
+# GUI_CHECK_RETRY below), with the reason: every check listed, a
 # check with no result as a FAIL saying why; SKIP is a check that can't run
 # on this platform, as 26, 45 and 65 on Windows), steps.log, screenshots/*.png
 # (taken by WebKit or WebView2 through WebDriver), app.log, driver.log
@@ -114,6 +115,21 @@
 # GUI_CHECK_RUNNER (a prebuilt gui-check binary instead of building
 # tests/gui; gui-launch must be beside it), TAURI_DRIVER and NATIVE_DRIVER
 # (paths, if not on PATH).
+#
+# GUI_CHECK_RETRY=1 (CI: dist.yml sets it for both GUI jobs; off by
+# default, so a run by hand shows every failure): when the suite fails, the
+# whole suite runs once more, from the start on fresh data (a new data
+# folder and session, as the first; on Windows, where the app's data
+# folders are the account's, they're deleted first, so it's honoured there
+# only in CI), never single checks in the first attempt's session. The
+# out-dir keeps attempt 1 in attempt-1/ (its results.txt, screenshots and
+# logs) beside attempt 2's. results.txt then has attempt 2's verdicts, with
+# a check that failed in attempt 1 and passed in attempt 2 as FLAKY (with
+# attempt 1's reason), never PASS; each FLAKY is also a ::warning on stdout
+# and a row of retry-summary.md, which goes into the job's summary
+# ($GITHUB_STEP_SUMMARY). The exit code is 0 only if attempt 2 has no FAIL.
+# See retry_suite in scripts/gui-check-results.sh, and gui-check --retried
+# (tests/gui src/retried.rs).
 
 set -euo pipefail
 
@@ -175,6 +191,46 @@ if [[ -n $updater_app ]]; then
     updater_app="$(realpath "$updater_app")"
 fi
 
+# What results.txt's lines mean (PASS, SKIP, FAIL, FLAKY): complete_results,
+# result_totals and run_status, on $results and $checks; and retry_suite.
+# shellcheck source=scripts/gui-check-results.sh
+source "$repo/scripts/gui-check-results.sh"
+
+# ---- GUI_CHECK_RETRY (CI): the whole suite once more if it fails. ----
+
+# The app's data folders, which a run can't choose on Windows (the
+# account's own), deleted before attempt 2, as on the runner before attempt
+# 1; nothing to do on Linux, where each attempt has its own.
+fresh_app_data() {
+    [[ $platform == windows ]] || return 0
+    local identifier dir
+    identifier="$(sed -n 's/^ *"identifier": *"\([^"]*\)".*/\1/p' "$repo/src-tauri/tauri.conf.json")"
+    [[ -n $identifier ]] || return 1
+    for dir in "${APPDATA:-}" "${LOCALAPPDATA:-}"; do
+        [[ -n $dir ]] || continue
+        dir="$(cygpath -u "$dir")/$identifier"
+        if [[ -e $dir ]]; then
+            echo "[gui-check retry] deleting the app's data from attempt 1: $dir" >&2
+            rm -rf "$dir" || return 1
+        fi
+    done
+}
+
+if [[ ${GUI_CHECK_RETRY:-0} == 1 && -z ${GUI_CHECK_ATTEMPT:-} ]]; then
+    if [[ $platform == windows && ${GITHUB_ACTIONS:-} != true ]]; then
+        echo "gui-check: GUI_CHECK_RETRY deletes the app's data folders on Windows (the account's own), so it's for CI only; running once" >&2
+    elif build_runner; then
+        mkdir -p "$out"
+        out="$(realpath "$out")"
+        # Built once, for both attempts and the judgement.
+        export GUI_CHECK_RUNNER="$runner"
+        status=0
+        retry_suite "$repo/scripts/gui-check.sh" "$app" || status=$?
+        exit "$status"
+    fi
+    # tests/gui didn't build: the run below says so in results.txt.
+fi
+
 mkdir -p "$out/screenshots"
 out="$(realpath "$out")"
 results="$out/results.txt"
@@ -209,11 +265,6 @@ setup_failed() {
     fi
     exit 1
 }
-
-# What results.txt's lines mean (PASS, SKIP, FAIL): complete_results,
-# result_totals and run_status, on $results and $checks.
-# shellcheck source=scripts/gui-check-results.sh
-source "$repo/scripts/gui-check-results.sh"
 
 # ---- Cleanup: everything this run started, whatever happens. ----
 
@@ -679,6 +730,8 @@ fi
     GUI_SESSION_TIMEOUT_SECS="${GUI_CHECK_SESSION_TIMEOUT:-30}" \
     GUI_XVFB_DISPLAY="$xvfb_display" \
     GUI_XVFB_PID="$xvfb_pid" \
+    GUI_CHECK_ATTEMPT="${GUI_CHECK_ATTEMPT:-1}" \
+    GUI_CHECK_FORCE_FAIL="${GUI_CHECK_FORCE_FAIL:-}" \
     "${backstop[@]}" "$runner" \
     2> >(tee -a "$out/steps.log" >&2) &
 status=0
