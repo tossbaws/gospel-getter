@@ -632,13 +632,13 @@ jobs:
           cargo test --locked
 
       - name: Download the AppImage
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gospel-getter-linux-appimage
           path: appimage
 
       - name: Download the GUI-check test app
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gui-check-test-app-linux
           path: gui-check-test-app
@@ -712,7 +712,7 @@ jobs:
           cygpath -w "$PWD" >> "$GITHUB_PATH"
 
       - name: Download the NSIS installer
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gospel-getter-windows-nsis-installer
           path: nsis
@@ -775,7 +775,7 @@ jobs:
           Get-ItemProperty -Path $key | Format-List
 
       - name: Download the GUI-check test app
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gui-check-test-app-windows
           path: gui-check-test-app
@@ -835,25 +835,25 @@ jobs:
       # The build's four artifacts by name, each into a folder of that
       # name (sign_installers.py's layout).
       - name: Download the AppImage
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gospel-getter-linux-appimage
           path: installers/gospel-getter-linux-appimage
 
       - name: Download the deb
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gospel-getter-linux-deb
           path: installers/gospel-getter-linux-deb
 
       - name: Download the NSIS installer
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gospel-getter-windows-nsis-installer
           path: installers/gospel-getter-windows-nsis-installer
 
       - name: Download the MSI installer
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gospel-getter-windows-msi-installer
           path: installers/gospel-getter-windows-msi-installer
@@ -928,25 +928,25 @@ jobs:
       # The build's four artifacts by name, each into a folder of that
       # name (sign_installers.py's layout).
       - name: Download the AppImage
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gospel-getter-linux-appimage
           path: installers/gospel-getter-linux-appimage
 
       - name: Download the deb
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gospel-getter-linux-deb
           path: installers/gospel-getter-linux-deb
 
       - name: Download the NSIS installer
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gospel-getter-windows-nsis-installer
           path: installers/gospel-getter-windows-nsis-installer
 
       - name: Download the MSI installer
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: gospel-getter-windows-msi-installer
           path: installers/gospel-getter-windows-msi-installer
