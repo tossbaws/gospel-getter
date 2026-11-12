@@ -375,6 +375,131 @@ pub async fn as_2_29_0_left_it(pool: &Db) {
     );
 }
 
+/// The KJV's id: seeded first (`seed::SEED_ORDER`).
+const KJV: i64 = 1;
+
+/// The KJV's chapters that 2.29.2 took from eBible.org's USFM, as
+/// (book, chapter): `ingest/kjv.rs`'s `TAKEN`, but for its one verse,
+/// [`KJV_TAKEN_VERSE`].
+pub const KJV_TAKEN_CHAPTERS: [(i64, i64); 10] = [
+    (9, 20),
+    (11, 22),
+    (40, 2),
+    (40, 22),
+    (40, 26),
+    (41, 4),
+    (41, 7),
+    (41, 8),
+    (64, 1),
+    (66, 12),
+];
+
+/// The one verse besides them that 2.29.2 took: Revelation 13:1.
+pub const KJV_TAKEN_VERSE: (i64, i64, i64) = (66, 13, 1);
+
+/// What 2.29.1's bundled KJV had there, every verse, as
+/// "book\tchapter\tverse\ttext" lines (`tests/kjv_source.rs` checks that
+/// putting them back gives 2.29.1's file, byte for byte).
+const KJV_2_29_1_REPLACED: &str = include_str!("../../../../sources/kjv/kjv_2_29_1_replaced.tsv");
+
+/// 2.29.1's KJV text where 2.29.2's differs, as (book, chapter, verse,
+/// text), in order.
+pub fn kjv_2_29_1_verses() -> Vec<(i64, i64, i64, String)> {
+    let names: Vec<String> = bundled("kjv").into_iter().map(|b| b.name).collect();
+    KJV_2_29_1_REPLACED
+        .lines()
+        .map(|line| {
+            let fields: Vec<&str> = line.splitn(4, '\t').collect();
+            let book = names
+                .iter()
+                .position(|n| n == fields[0])
+                .expect("a book of the KJV") as i64
+                + 1;
+            let number = |i: usize| fields[i].parse::<i64>().expect("a number");
+            (book, number(1), number(2), fields[3].to_string())
+        })
+        .collect()
+}
+
+/// Make a database `fresh_database` prepared and indexed what 2.29.1 left
+/// as it closed: the KJV's rows its file had then (31,100 verses: the ten
+/// chapters it numbered wrongly, and Revelation 13:1 without its first
+/// words), recorded at data version 1, its search index built over those,
+/// as 2.29.1's seed and index build left them. A database the 2.29.2 app
+/// hasn't opened yet, or whose upgrade step failed, is this.
+pub async fn as_2_29_1_left_it(pool: &Db) {
+    let kjv: i64 = sqlx::query_scalar("SELECT id FROM translations WHERE code = 'kjv'")
+        .fetch_one(pool.read())
+        .await
+        .expect("the KJV's id");
+    assert_eq!(kjv, KJV, "the KJV is seeded first");
+    let mut tx = begin_write(pool.write()).await.expect("begin a write");
+    for (book, chapter) in KJV_TAKEN_CHAPTERS {
+        sqlx::query(
+            "DELETE FROM verses WHERE translation_id = $1 AND book_id = $2 AND chapter = $3",
+        )
+        .bind(KJV)
+        .bind(book)
+        .bind(chapter)
+        .execute(&mut *tx)
+        .await
+        .expect("clear a chapter 2.29.2 took");
+    }
+    for (book, chapter, verse, text) in kjv_2_29_1_verses() {
+        sqlx::query(
+            "INSERT OR REPLACE INTO verses (translation_id, book_id, chapter, verse, text) \
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(KJV)
+        .bind(book)
+        .bind(chapter)
+        .bind(verse)
+        .bind(text)
+        .execute(&mut *tx)
+        .await
+        .expect("store 2.29.1's verse");
+    }
+    sqlx::query("UPDATE translation_data_version SET version = 1 WHERE translation_id = $1")
+        .bind(KJV)
+        .execute(&mut *tx)
+        .await
+        .expect("record the KJV at 2.29.1's version");
+    tx.commit().await.expect("commit");
+
+    // Its search index, as 2.29.1's build made it: the books with those
+    // chapters indexed again, and the count recorded.
+    let build = crate::db::search::TranslationBuild::plan(pool, KJV)
+        .await
+        .expect("plan the KJV's index");
+    for book in [9, 11, 40, 41, 64, 66] {
+        build.index_book(pool, book).await.expect("index a book");
+    }
+    assert_eq!(
+        build.publish(pool).await.expect("record the index"),
+        crate::db::search::Published::Complete { verses: 31_100 }
+    );
+
+    // As 2.29.1 left it: 31,100 verses, at version 1, the index complete.
+    let verses: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM verses WHERE translation_id = $1")
+        .bind(KJV)
+        .fetch_one(pool.read())
+        .await
+        .expect("count the KJV's verses");
+    assert_eq!(verses, 31_100);
+    let version: i64 = sqlx::query_scalar(
+        "SELECT version FROM translation_data_version WHERE translation_id = $1",
+    )
+    .bind(KJV)
+    .fetch_one(pool.read())
+    .await
+    .expect("the KJV's data version");
+    assert_eq!(version, 1);
+    assert_eq!(
+        ensure_search_index(pool).await.expect("check the index"),
+        Vec::<i64>::new()
+    );
+}
+
 /// The schema as v2.1.0 created it, verbatim — frozen here rather than
 /// shared with `migrate.rs`, which is exactly what's under test.
 const V2_1_0_SCHEMA: &[&str] = &[

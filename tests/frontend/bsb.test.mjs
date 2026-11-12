@@ -372,7 +372,7 @@ test('About credits every bundled text, and the cross-references', () =>
     withApp({}, async (app) => {
         const credits = [...el(app, 'about-credits').querySelectorAll('li')].map((li) => li.textContent);
         assert.deepEqual(credits, [
-            'King James Version (KJV), public domain, from the thiagobodruk/bible dataset',
+            'King James Version (KJV), public domain, from the thiagobodruk/bible dataset and eBible.org',
             'Berean Standard Bible (BSB), public domain, berean.bible',
             'World English Bible (WEB), public domain, from TehShrike/world-english-bible (via ebible.org)',
             'Cross-references from OpenBible.info, CC BY 4.0',

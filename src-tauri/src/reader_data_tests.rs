@@ -117,8 +117,11 @@ async fn export_round_trips_into_a_fresh_install() {
     let (db, a) = app("rd_export").await;
     commands::bookmark_passage(&a, 43, 3, 16, 18).await.unwrap();
     commands::bookmark_passage(&a, 19, 23, 1, 1).await.unwrap();
-    // Matthew 2:23 is numbered only in the WEB; it still travels.
-    commands::bookmark_passage(&a, 40, 2, 23, 23).await.unwrap();
+    // Romans 14:24 is numbered only in the WEB; it still travels. (Until
+    // 2.29.2 the KJV's Matthew 2:23, a verse it was short, was the example.)
+    commands::bookmark_passage(&a, 45, 14, 24, 24)
+        .await
+        .unwrap();
     commands::remember_position(&a, 45, 8, "web").await.unwrap();
     let before = personal(&a).await;
 
@@ -1052,8 +1055,9 @@ async fn highlights_round_trip_in_a_format_2_export() {
     commands::highlight_passage(&a, 19, 23, 1, 1, "green")
         .await
         .unwrap();
-    // Matthew 2:23 is numbered only in the WEB; its highlight still travels.
-    commands::highlight_passage(&a, 40, 2, 23, 23, "blue")
+    // Romans 14:24 is numbered only in the WEB; its highlight still
+    // travels. (Until 2.29.2 the KJV's Matthew 2:23 was the example.)
+    commands::highlight_passage(&a, 45, 14, 24, 24, "blue")
         .await
         .unwrap();
     commands::highlight_passage(&a, 45, 8, 28, 28, "pink")
@@ -1469,14 +1473,18 @@ async fn notes_round_trip_in_a_format_3_export() {
     commands::note_add(&a, john_3(16, 16), "<b>not bold</b> \u{1f54a}")
         .await
         .unwrap();
-    // Matthew 2:23 is numbered only in the WEB; its note still travels.
-    let web_only = Passage {
-        book_id: 40,
-        chapter: 2,
-        verse_start: 23,
-        verse_end: 23,
+    // Luke 17:36 is numbered only in the KJV; its note still travels.
+    // (Until 2.29.2 the KJV's Matthew 2:23, numbered only in the WEB, was
+    // the example.)
+    let kjv_only = Passage {
+        book_id: 42,
+        chapter: 17,
+        verse_start: 36,
+        verse_end: 36,
     };
-    commands::note_add(&a, web_only, "Nazarene.").await.unwrap();
+    commands::note_add(&a, kjv_only, "Two in the field.")
+        .await
+        .unwrap();
     commands::highlight_passage(&a, 43, 3, 16, 16, "yellow")
         .await
         .unwrap();
@@ -1498,8 +1506,8 @@ async fn notes_round_trip_in_a_format_3_export() {
     assert_eq!(
         first,
         &serde_json::json!({
-            "book": 40, "book_name": "Matthew", "chapter": 2, "verse_start": 23,
-            "verse_end": 23, "body": "Nazarene.",
+            "book": 42, "book_name": "Luke", "chapter": 17, "verse_start": 36,
+            "verse_end": 36, "body": "Two in the field.",
             "created_at": before[0].5, "updated_at": before[0].6,
         })
     );
@@ -3035,4 +3043,77 @@ async fn a_backup_holds_what_changed_while_its_dialog_was_open() {
             .await
             .unwrap();
     assert!(matches!(cancelled, ExportOutcome::Cancelled));
+}
+
+/// A backup with the reader's records on the verse numbers 2.29.2's KJV no
+/// longer has (1 Samuel 20:43, 1 Kings 22:54, 3 John 1:15 and Revelation
+/// 12:18: the last verses of four chapters 2.29.1's KJV made a verse too
+/// long, which no translation numbers since) imports whole, as it did into
+/// 2.29.1, and they travel on in the next backup: the coordinates, the
+/// dates, the text, as they were.
+#[tokio::test]
+async fn records_on_verses_the_kjv_numbered_until_2_29_2_still_import() {
+    // A file 2.29.1 could have written: bookmarks on two of them.
+    let (db, a) = app("rd_retired").await;
+    let path = file(&db, "retired.gospel-getter.json");
+    std::fs::write(
+        &path,
+        file_with(
+            r#"{"book": 9, "chapter": 20, "verse_start": 42, "verse_end": 43},
+               {"book": 64, "chapter": 1, "verse_start": 15, "verse_end": 15}"#,
+            "null",
+        ),
+    )
+    .unwrap();
+    let p = preview(&a, &path).await;
+    assert_eq!((p.bookmarks_in_file, p.new_bookmarks), (2, 2));
+    let result = commands::apply_pending_import(&a, p.token, false, true, false)
+        .await
+        .unwrap();
+    assert_eq!(result.added, 2);
+    // A highlight and a note on the other two, saved again as an undo would.
+    commands::highlight_passage(&a, 66, 12, 18, 18, "pink")
+        .await
+        .unwrap();
+    let kings = Passage {
+        book_id: 11,
+        chapter: 22,
+        verse_start: 54,
+        verse_end: 54,
+    };
+    commands::note_add(&a, kings, "Jehoshaphat.").await.unwrap();
+    let before = (
+        personal(&a).await,
+        highlight_rows(&a).await,
+        note_rows(&a).await,
+    );
+
+    let out = file(&db, "retired-out.gospel-getter.json");
+    let ExportOutcome::Saved {
+        bookmarks,
+        highlights,
+        notes,
+        ..
+    } = export_to(&a, &out, Preferences::default()).await
+    else {
+        panic!("expected saved")
+    };
+    assert_eq!((bookmarks, highlights, notes), (2, 1, 1));
+    let (_db_b, b) = app("rd_retired_b").await;
+    let p = preview(&b, &out).await;
+    let result = commands::apply_pending_import(&b, p.token, false, true, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        (result.added, result.highlights_added, result.notes_added),
+        (2, 1, 1)
+    );
+    assert_eq!(
+        (
+            personal(&b).await,
+            highlight_rows(&b).await,
+            note_rows(&b).await
+        ),
+        before
+    );
 }

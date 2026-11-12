@@ -40,7 +40,10 @@ pub const TRANSLATIONS: &[TranslationSource] = &[
         name: "King James Version",
         date: Some("1611/1769"),
         licence: "public domain",
-        credit: "King James Version (KJV), public domain, from the thiagobodruk/bible dataset",
+        // Ten chapters (and Revelation 13:1) from eBible.org's USFM, since
+        // 2.29.2 (`sources/kjv`), the rest from thiagobodruk/bible.
+        credit: "King James Version (KJV), public domain, from the thiagobodruk/bible dataset \
+                 and eBible.org",
     },
     TranslationSource {
         code: "bsb",
@@ -193,21 +196,13 @@ pub async fn seed_missing(writer: &WritePool) -> anyhow::Result<()> {
                 source.code
             ))?;
 
-        let (_, text) = TEXTS
-            .iter()
-            .find(|(code, _)| *code == source.code)
-            .expect("every seeded translation has its text");
-        let books: Vec<RawBook> = serde_json::from_str(text)
-            .context(format!("Failed to parse bundled {} data", source.code))?;
-
-        for (book_index, book) in books.iter().enumerate() {
-            let book_id = book_index as i64 + 1;
-
-            if !books_seeded {
+        let books = bundled_books(source.code)?;
+        if !books_seeded {
+            for (book_index, book) in books.iter().enumerate() {
                 sqlx::query(
                     "INSERT INTO books (id, name, testament, chapter_count) VALUES ($1, $2, $3, $4)",
                 )
-                .bind(book_id)
+                .bind(book_index as i64 + 1)
                 .bind(&book.name)
                 .bind(&book.testament)
                 .bind(book.chapters.len() as i64)
@@ -215,68 +210,8 @@ pub async fn seed_missing(writer: &WritePool) -> anyhow::Result<()> {
                 .await
                 .context(format!("Failed to insert book {}", book.name))?;
             }
-
-            for (chapter_index, verses) in book.chapters.iter().enumerate() {
-                let chapter = chapter_index as i64 + 1;
-                for (verse_index, text) in verses.iter().enumerate() {
-                    let verse = verse_index as i64 + 1;
-                    let Some(text) = numbered(text) else { continue };
-                    sqlx::query(
-                        "INSERT INTO verses (translation_id, book_id, chapter, verse, text) \
-                         VALUES ($1, $2, $3, $4, $5)",
-                    )
-                    .bind(translation_id)
-                    .bind(book_id)
-                    .bind(chapter)
-                    .bind(verse)
-                    .bind(text)
-                    .execute(&mut *tx)
-                    .await
-                    .context(format!(
-                        "Failed to insert {} {} {}:{}",
-                        source.code, book.name, chapter, verse
-                    ))?;
-                }
-            }
         }
-
-        // Its footnotes, numbered in order within each verse; any left by a
-        // translation since cleared out are gone first.
-        sqlx::query("DELETE FROM footnotes WHERE translation_id = $1")
-            .bind(translation_id)
-            .execute(&mut *tx)
-            .await
-            .context(format!("Failed to clear footnotes for {}", source.code))?;
-        for (book_index, book) in books.iter().enumerate() {
-            let mut ordinal = 0;
-            let mut last = (0, 0);
-            for note in &book.footnotes {
-                ordinal = if (note.chapter, note.verse) == last {
-                    ordinal + 1
-                } else {
-                    0
-                };
-                last = (note.chapter, note.verse);
-                sqlx::query(
-                    "INSERT INTO footnotes \
-                     (translation_id, book_id, chapter, verse, ordinal, position, usfm) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                )
-                .bind(translation_id)
-                .bind(book_index as i64 + 1)
-                .bind(note.chapter)
-                .bind(note.verse)
-                .bind(ordinal)
-                .bind(note.at)
-                .bind(&note.usfm)
-                .execute(&mut *tx)
-                .await
-                .context(format!(
-                    "Failed to insert a footnote on {} {} {}:{}",
-                    source.code, book.name, note.chapter, note.verse
-                ))?;
-            }
-        }
+        insert_bundled_rows(&mut tx, translation_id, source.code, &books).await?;
 
         books_seeded = true;
         tracing::info!("Seeded {} ({} books)", source.name, books.len());
@@ -287,6 +222,93 @@ pub async fn seed_missing(writer: &WritePool) -> anyhow::Result<()> {
         .context("Failed to commit seed transaction")?;
 
     Ok(())
+}
+
+/// The bundled translation `code`, parsed.
+fn bundled_books(code: &str) -> anyhow::Result<Vec<RawBook>> {
+    let (_, text) = TEXTS
+        .iter()
+        .find(|(listed, _)| *listed == code)
+        .with_context(|| format!("No bundled text for {code}"))?;
+    serde_json::from_str(text).context(format!("Failed to parse bundled {code} data"))
+}
+
+/// Insert `books`, the bundled translation `code`, as translation
+/// `translation_id`'s rows: every verse it numbers, then its footnotes,
+/// numbered in order within each verse (any left by a translation since
+/// cleared out are gone first). How [`seed_missing`] seeds a translation,
+/// and how a [`DataStep::Reseed`] seeds it again. Returns how many verses
+/// it inserted.
+async fn insert_bundled_rows(
+    conn: &mut sqlx::SqliteConnection,
+    translation_id: i64,
+    code: &str,
+    books: &[RawBook],
+) -> anyhow::Result<usize> {
+    let mut inserted = 0;
+    for (book_index, book) in books.iter().enumerate() {
+        let book_id = book_index as i64 + 1;
+        for (chapter_index, verses) in book.chapters.iter().enumerate() {
+            let chapter = chapter_index as i64 + 1;
+            for (verse_index, text) in verses.iter().enumerate() {
+                let verse = verse_index as i64 + 1;
+                let Some(text) = numbered(text) else { continue };
+                sqlx::query(
+                    "INSERT INTO verses (translation_id, book_id, chapter, verse, text) \
+                     VALUES ($1, $2, $3, $4, $5)",
+                )
+                .bind(translation_id)
+                .bind(book_id)
+                .bind(chapter)
+                .bind(verse)
+                .bind(text)
+                .execute(&mut *conn)
+                .await
+                .context(format!(
+                    "Failed to insert {code} {} {chapter}:{verse}",
+                    book.name
+                ))?;
+                inserted += 1;
+            }
+        }
+    }
+
+    sqlx::query("DELETE FROM footnotes WHERE translation_id = $1")
+        .bind(translation_id)
+        .execute(&mut *conn)
+        .await
+        .context(format!("Failed to clear footnotes for {code}"))?;
+    for (book_index, book) in books.iter().enumerate() {
+        let mut ordinal = 0;
+        let mut last = (0, 0);
+        for note in &book.footnotes {
+            ordinal = if (note.chapter, note.verse) == last {
+                ordinal + 1
+            } else {
+                0
+            };
+            last = (note.chapter, note.verse);
+            sqlx::query(
+                "INSERT INTO footnotes \
+                 (translation_id, book_id, chapter, verse, ordinal, position, usfm) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            )
+            .bind(translation_id)
+            .bind(book_index as i64 + 1)
+            .bind(note.chapter)
+            .bind(note.verse)
+            .bind(ordinal)
+            .bind(note.at)
+            .bind(&note.usfm)
+            .execute(&mut *conn)
+            .await
+            .context(format!(
+                "Failed to insert a footnote on {code} {} {}:{}",
+                book.name, note.chapter, note.verse
+            ))?;
+        }
+    }
+    Ok(inserted)
 }
 
 /// A change to a bundled translation's rows that an install seeded before
@@ -301,6 +323,13 @@ enum DataStep {
     /// is touched: the reader's records on those verses keep their
     /// coordinates, as they do on any verse a translation doesn't number.
     RemoveUnnumbered,
+    /// Seed the translation again: clear its verses, footnotes and search
+    /// index record, and insert its bundled rows as [`seed_missing`] does
+    /// (`ensure_search_index` then indexes it again). Its id, its name and
+    /// the books are kept, and nothing of the reader's is touched: every
+    /// record is keyed by coordinates, never by a verse's row, so each
+    /// stays where it was, beside the verse now numbered there.
+    Reseed,
 }
 
 /// Each bundled translation's steps, in order. A translation's rows as
@@ -319,7 +348,32 @@ const DATA_STEPS: &[(&str, &[DataStep])] = &[
     // 2.29.1: the WEB's five verses with no text (Luke 17:36, Acts 8:37,
     // 15:34, 24:7, Romans 16:25), seeded until then as empty verses.
     ("web", &[DataStep::RemoveUnnumbered]),
+    // 2.29.2: the KJV's ten chapters its source numbered wrongly (1 Samuel
+    // 20, 1 Kings 22, Matthew 2, 22, 26, Mark 4, 7, 8, 3 John, Revelation
+    // 12) and Revelation 13:1, taken from eBible.org's USFM instead
+    // (`sources/kjv`). Every other verse is as before.
+    ("kjv", &[DataStep::Reseed]),
 ];
+
+/// The verses a bundled translation numbered before one of its
+/// `DATA_STEPS` took them away, and that none numbers now, as (book,
+/// chapter, verse): the last verses of the four chapters 2.29.2's KJV step
+/// made a verse shorter, where its earlier source had split a verse in two
+/// (1 Samuel 20:43, 1 Kings 22:54, 3 John 1:15, Revelation 12:18). A record
+/// of the reader's there is still one: it can be saved again (an undo, a
+/// backup imported) as it could before, and is shown as on any verse a
+/// translation doesn't number. Nothing is ever taken off this list.
+pub const RETIRED_VERSES: [(i64, i64, i64); 4] =
+    [(9, 20, 43), (11, 22, 54), (64, 1, 15), (66, 12, 18)];
+
+/// The last of [`RETIRED_VERSES`] in `book_id`'s `chapter`, if it has one.
+pub fn last_retired_verse(book_id: i64, chapter: i64) -> Option<i64> {
+    RETIRED_VERSES
+        .iter()
+        .filter(|&&(b, c, _)| (b, c) == (book_id, chapter))
+        .map(|&(_, _, v)| v)
+        .max()
+}
 
 /// The steps of the translation `code`.
 fn data_steps(code: &str) -> &'static [DataStep] {
@@ -401,6 +455,7 @@ pub async fn upgrade_bundled_data(writer: &WritePool) -> anyhow::Result<Vec<(Str
     if behind(writer.pool()).await?.is_empty() {
         return Ok(Vec::new());
     }
+    let started = std::time::Instant::now();
     let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start the bundled data upgrade transaction")?;
@@ -438,6 +493,7 @@ pub async fn upgrade_bundled_data(writer: &WritePool) -> anyhow::Result<Vec<(Str
     for (code, version) in &upgraded {
         tracing::info!("Brought {code}'s stored data to version {version}");
     }
+    tracing::info!("The bundled data upgrade took {:.0?}", started.elapsed());
     Ok(upgraded)
 }
 
@@ -473,6 +529,29 @@ async fn make_step(
             Ok(format!(
                 "Took out {removed} verses of {} stored with no text, which it doesn't \
                  number: (book, chapter, verse) {unnumbered:?}",
+                translation.code
+            ))
+        }
+        DataStep::Reseed => {
+            let books = bundled_books(&translation.code)?;
+            let removed = sqlx::query("DELETE FROM verses WHERE translation_id = $1")
+                .bind(translation.translation_id)
+                .execute(&mut *conn)
+                .await
+                .context("Failed to clear the verses")?
+                .rows_affected();
+            // Its footnotes are cleared as its rows are inserted.
+            sqlx::query("DELETE FROM search_index_state WHERE translation_id = $1")
+                .bind(translation.translation_id)
+                .execute(&mut *conn)
+                .await
+                .context("Failed to reset the search index state")?;
+            let inserted =
+                insert_bundled_rows(conn, translation.translation_id, &translation.code, &books)
+                    .await?;
+            Ok(format!(
+                "Seeded {} again from its bundled text: {removed} verses replaced by \
+                 {inserted}; its search index is built again",
                 translation.code
             ))
         }
