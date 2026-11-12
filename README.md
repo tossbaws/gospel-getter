@@ -680,7 +680,13 @@ No verse text is altered, cleaned up or "corrected"; every translation is
 stored exactly as its source provides it.
 
 - **KJV** comes from the dataset thiagobodruk/bible, which is
-  MIT-licensed; the KJV text itself is public domain. That source marks translator-supplied words and marginal notes inline as
+  MIT-licensed; the KJV text itself is public domain. Ten chapters that
+  dataset numbered wrongly (1 Samuel 20, 1 Kings 22, Matthew 2, 22 and 26,
+  Mark 4, 7 and 8, 3 John, Revelation 12) and Revelation 13:1 come instead
+  from eBible.org's KJV USFM, kept in
+  [`sources/kjv/`](sources/kjv/README.md) exactly as downloaded, and
+  copied as it is; every other verse is the dataset's, byte for byte, and
+  a test pins them. That source marks translator-supplied words and marginal notes inline as
   `{...}`, in about 56% of verses. These are kept verbatim, including a
   few places where the source's own markup is broken (Hebrews 10:34 has an
   unmatched `}`). The only changes are structural: removing the file's

@@ -1043,7 +1043,9 @@ mod tests {
     /// The export of every KJV verse is byte for byte what 2.9.1 wrote:
     /// a fingerprint (FNV-1a, each verse's Markdown followed by 0xff) of
     /// 2.9.1's own output, taken before the rule moved to
-    /// `domain::kjv_markup`.
+    /// `domain::kjv_markup`. Taken again for 2.29.2's KJV, whose ten
+    /// re-derived chapters are new input (before: 31,100 verses,
+    /// 0x5d3b_b105_7221_fd2b).
     #[test]
     fn every_kjv_verse_exports_as_in_2_9_1() {
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
@@ -1060,7 +1062,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!((verses, hash), (31_100, 0x5d3b_b105_7221_fd2b));
+        assert_eq!((verses, hash), (31_102, 0x9489_f120_5c23_6477));
     }
 
     #[test]

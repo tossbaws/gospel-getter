@@ -44,7 +44,8 @@ pub async fn get_listed_translations(pool: &SqlitePool) -> anyhow::Result<Vec<Tr
 }
 
 /// The highest verse number any translation has in one chapter (0 if none
-/// has the chapter).
+/// has the chapter), or that the bundled data had there before a step took
+/// it away (`seed::RETIRED_VERSES`): the last verse a record can be on.
 pub async fn get_chapter_last_verse(
     pool: &SqlitePool,
     book_id: i64,
@@ -64,9 +65,10 @@ pub(crate) const CHAPTER_LAST_VERSE_SQL: &str = "SELECT MAX(( \
      )) FROM translations t";
 
 /// The highest verse number any translation has in one chapter (0 if none
-/// has the chapter), on any connection: the read pool, or the writing
-/// connection inside a transaction, which checks a passage before saving
-/// it.
+/// has the chapter), or that the bundled data had there before a step took
+/// it away (`seed::RETIRED_VERSES`), on any connection: the read pool, or
+/// the writing connection inside a transaction, which checks a passage
+/// before saving it.
 pub(crate) async fn chapter_last_verse<'e, E>(
     executor: E,
     book_id: i64,
@@ -81,7 +83,8 @@ where
         .fetch_one(executor)
         .await
         .context("Failed to look up the chapter's last verse")?;
-    Ok(last.unwrap_or(0))
+    let retired = crate::db::seed::last_retired_verse(book_id, chapter);
+    Ok(last.unwrap_or(0).max(retired.unwrap_or(0)))
 }
 
 /// Get every verse in one chapter of one translation, in verse order.

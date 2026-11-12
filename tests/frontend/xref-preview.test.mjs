@@ -173,20 +173,23 @@ test('while comparing, the preview is the first column’s translation, labelled
     }));
 
 test('a verse the translation doesn’t number is said so, and Go to is still offered', () =>
-    withApp({ book: 'Leviticus', chapter: 13, translation: 'kjv' }, async (app) => {
-        // Leviticus 13:23 cites Matthew 26:75; the KJV ends Matthew 26 at 74.
-        await clickAndWait(app, app.verse(23), 'list_notes');
-        await clickAndWait(app, chip(app, 'Matthew 26:75'), 'get_passage');
+    withApp({ book: '2 Timothy', chapter: 1, translation: 'web' }, async (app) => {
+        // 2 Timothy 1:9 cites Romans 16:25; the WEB ends Romans 16 at 24.
+        // (Until 2.29.2 the KJV's Matthew 26, a verse short, was the
+        // example; no cross-reference cites a verse today's KJV doesn't
+        // number.)
+        await clickAndWait(app, app.verse(9), 'list_notes');
+        await clickAndWait(app, chip(app, 'Romans 16:25'), 'get_passage');
         assert.deepEqual(shown(app), {
-            title: 'Matthew 26:75 (KJV)',
+            title: 'Romans 16:25 (WEB)',
             numbers: [],
-            notice: 'Matthew 26:75 isn’t numbered in the King James Version — Matthew 26 ends at verse 74 there.'.replace('’', "'"),
-            go: 'Go to Matthew 26:75 →',
+            notice: 'Romans 16:25 isn’t numbered in the World English Bible — Romans 16 ends at verse 24 there.'.replace('’', "'"),
+            go: 'Go to Romans 16:25 →',
         });
         assert.equal(preview(app).querySelector('.xref-preview-text'), null);
         await clickAndWait(app, preview(app).querySelector('.xref-preview-go'), 'get_reading');
-        assert.equal(app.heading(), 'Matthew 26');
-        assert.match(app.notice(), /isn't numbered in the King James Version/);
+        assert.equal(app.heading(), 'Romans 16');
+        assert.match(app.notice(), /isn't numbered in the World English Bible/);
     }));
 
 test('a KJV preview has the italics for supplied words and no footnote markers', () =>
