@@ -242,22 +242,24 @@ test('the list keeps up with highlighting in the reader', () =>
     }));
 
 test('previews follow the translation, and a verse it does not number says so', async () => {
-    // Matthew 2:23 is numbered in the WEB only; Romans 16:25-27 in the KJV only.
+    // Romans 14:24 is numbered in the WEB only; Romans 16:25-27 in the KJV
+    // only. (Until 2.29.2 the KJV's Matthew 2:23, a verse it was short, was
+    // the first.)
     await seed([
-        ['Matthew', 2, 23, 23, 'pink'],
+        ['Romans', 14, 24, 24, 'pink'],
         ['Romans', 16, 24, 27, 'green'],
     ]);
     await withApp({ book: 'John', chapter: 3, translation: 'web', keepBookmarks: true }, async (app) => {
-        let [matthew, romans] = items(app);
-        assert.equal(matthew.preview, storedVerse('web', 'Matthew', 2, 23));
+        let [webOnly, romans] = items(app);
+        assert.equal(webOnly.preview, storedVerse('web', 'Romans', 14, 24));
         assert.equal(romans.preview, storedVerse('web', 'Romans', 16, 24));
         assert.ok(romans.partial, 'the WEB numbers only part of Romans 16:24–27');
 
         await switchTranslation(app, 'kjv');
-        [matthew, romans] = items(app);
-        assert.equal(matthew.reference, 'Matthew 2:23');
-        assert.ok(matthew.missing);
-        assert.equal(matthew.preview, 'Not numbered in the KJV');
+        [webOnly, romans] = items(app);
+        assert.equal(webOnly.reference, 'Romans 14:24');
+        assert.ok(webOnly.missing);
+        assert.equal(webOnly.preview, 'Not numbered in the KJV');
         // The KJV's plain text: "{be} with you all" without its braces.
         assert.match(storedVerse('kjv', 'Romans', 16, 24), /\{be\}/);
         assert.equal(romans.preview, 'The grace of our Lord Jesus Christ be with you all. Amen.');
@@ -266,10 +268,10 @@ test('previews follow the translation, and a verse it does not number says so', 
 
         // Opening it shows the chapter with the bookmarks' notice.
         app.openLibrary('highlights');
-        await clickAndWait(app, matthew.open, 'get_reading');
-        assert.equal(app.heading(), 'Matthew 2');
+        await clickAndWait(app, webOnly.open, 'get_reading');
+        assert.equal(app.heading(), 'Romans 14');
         assert.deepEqual(app.selectedVerseNumbers(), []);
-        assert.match(app.notice(), /^Matthew 2:23 isn't numbered in the King James Version/);
+        assert.match(app.notice(), /^Romans 14:24 isn't numbered in the King James Version/);
     });
 });
 

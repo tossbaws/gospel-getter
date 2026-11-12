@@ -160,9 +160,10 @@ test('bookmarks survive a restart and a translation switch', () =>
         })));
 
 test('a bookmark whose verse the translation does not number opens its chapter with a notice', () =>
-    withApp({ book: 'Matthew', chapter: 2, translation: 'web' }, async (app) => {
-        // Matthew 2 has 23 verses in the WEB, 22 in the KJV.
-        app.click(app.verse(23));
+    withApp({ book: 'Romans', chapter: 14, translation: 'web' }, async (app) => {
+        // Romans 14 has 26 verses in the WEB, 23 in the KJV. (Until 2.29.2
+        // the KJV's Matthew 2, a verse short, was the example.)
+        app.click(app.verse(24));
         await bookmarkSelection(app);
 
         const select = app.document.getElementById('translation-select');
@@ -171,27 +172,27 @@ test('a bookmark whose verse the translation does not number opens its chapter w
         select.dispatchEvent(new app.window.Event('change', { bubbles: true }));
         await app.idle(before, 'list_bookmarks');
         const [item] = app.bookmarkItems();
-        assert.equal(item.reference, 'Matthew 2:23');
+        assert.equal(item.reference, 'Romans 14:24');
         assert.ok(item.missing);
         assert.equal(item.preview, 'Not numbered in the KJV');
         assert.deepEqual(app.bookmarkedVerseNumbers(), [], 'no KJV verse is marked in its place');
 
         app.key('ArrowRight');
-        await app.waitForHeading('Matthew 3');
+        await app.waitForHeading('Romans 15');
         app.openLibrary();
         before = app.calls.length;
         app.click(item.open);
         await app.idle(before, 'get_reading');
-        assert.equal(app.heading(), 'Matthew 2');
+        assert.equal(app.heading(), 'Romans 14');
         assert.deepEqual(app.selectedVerseNumbers(), [], 'never selects a different verse');
         assert.equal(
             app.notice(),
-            "Matthew 2:23 isn't numbered in the King James Version — Matthew 2 ends at verse 22 there. Showing the whole chapter.",
+            "Romans 14:24 isn't numbered in the King James Version — Romans 14 ends at verse 23 there. Showing the whole chapter.",
         );
 
         // Moving on clears the notice.
         app.key('ArrowRight');
-        await app.waitForHeading('Matthew 3');
+        await app.waitForHeading('Romans 15');
         assert.equal(app.notice(), '');
     }));
 

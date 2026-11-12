@@ -259,16 +259,17 @@ mod tests {
         assert_eq!(v["verseStart"], serde_json::Value::Null);
         assert_eq!(v["reference"], "Psalms 23");
 
-        // Matthew 2:23 is numbered in the WEB only.
+        // Romans 14:24 is numbered in the WEB only. (Until 2.29.2 the KJV's
+        // Matthew 2:23, a verse it was short, was the example.)
         assert_eq!(
-            search_in(&state, "Matthew 2:23", "web").await["kind"],
+            search_in(&state, "Romans 14:24", "web").await["kind"],
             "passage"
         );
         assert_eq!(
-            search_in(&state, "Matthew 2:23", "kjv").await,
+            search_in(&state, "Romans 14:24", "kjv").await,
             serde_json::json!({
                 "kind": "invalid",
-                "message": "No such chapter or verse: Matthew 2:23. Matthew 2 has 22 verses in the King James Version."
+                "message": "No such chapter or verse: Romans 14:24. Romans 14 has 23 verses in the King James Version."
             })
         );
         assert_eq!(
