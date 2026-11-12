@@ -23,8 +23,10 @@ const BSB_TXT_SHA256: &str = "2ac3af1de52d4e68261cba91d85c320b7eadc6560e830d99e5
 const BSB_USFM_ZIP_SHA256: &str =
     "f0c56438eb89c98e8f62c5c00461e25cc35b098ad5b179bc350cede759ee5f87";
 
-/// The KJV's and WEB's bundled files, unchanged by the BSB's coming.
-const KJV_JSON_SHA256: &str = "d9446b7a70a71fa431fe84d31f7758a0bda8eb4b6d048e0d098a79d51130b646";
+/// The KJV's and WEB's bundled files, unchanged by the BSB's coming. The
+/// KJV's since 2.29.2, when ten of its chapters were taken from eBible.org's
+/// USFM (`tests/kjv_source.rs`; before, d9446b7a…b646).
+const KJV_JSON_SHA256: &str = "75972ec3ada75da3f317fa1d3ec97e985335383aee17374da51a39559ac0d80d";
 const WEB_JSON_SHA256: &str = "be8550eec61d2991239fba6366e835e623235a2aa5d669d770a61b1ddec1ae72";
 
 /// Every BSB verse, as "book|chapter|verse|text\n" in order, hashed.
@@ -303,11 +305,14 @@ fn the_bsbs_numbering_against_the_bundled_kjvs() {
             }
         }
     }
+    // Since 2.29.2 the KJV numbers every chapter as the BSB does: 1 Samuel
+    // 20:43, 1 Kings 22:54, 3 John 1:15 and Revelation 12:18 (verses the
+    // KJV's earlier source split off) and Matthew 2:23, 22:46, 26:75, Mark
+    // 4:41, 7:37, 8:38 (the last verses of chapters it was a verse short)
+    // are no longer listed.
     assert_eq!(
         only_kjv,
         [
-            "1 Samuel 20:43",
-            "1 Kings 22:54",
             "Matthew 17:21",
             "Matthew 18:11",
             "Matthew 23:14",
@@ -324,21 +329,9 @@ fn the_bsbs_numbering_against_the_bundled_kjvs() {
             "Acts 24:7",
             "Acts 28:29",
             "Romans 16:24",
-            "3 John 1:15",
-            "Revelation 12:18",
         ]
     );
-    assert_eq!(
-        only_bsb,
-        [
-            "Matthew 2:23",
-            "Matthew 22:46",
-            "Matthew 26:75",
-            "Mark 4:41",
-            "Mark 7:37",
-            "Mark 8:38",
-        ]
-    );
+    assert_eq!(only_bsb, Vec::<String>::new());
 }
 
 #[test]
