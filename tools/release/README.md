@@ -116,11 +116,11 @@ python3 tools/release/sign_installers.py DIR \
     --private-key-path rehearsal.key --pubkey-file rehearsal.key.pub
 ```
 
-The release's key and its password are repository secrets
-(`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). Moving
-them into the `release` environment, so that only its jobs can read them,
-needs their values, so only the key's owner can do it; the workflow already
-names them nowhere else.
+The release's key and its password (`TAURI_SIGNING_PRIVATE_KEY`,
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) are secrets of the `release`
+environment only, since 2026-11-11: the repository has no secrets, so only
+a job in that environment, deploying from `main`, can read them. The
+`sign` job is the only one; the workflow names them nowhere else.
 
 ## `site_version_gate.py`: when the website deploys
 
