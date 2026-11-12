@@ -1243,6 +1243,68 @@ fn the_gui_checks_retry_once_in_ci_and_never_force_a_failure() {
     }
 }
 
+/// Only main saves the Rust caches: every Swatinem/rust-cache step in every
+/// workflow saves only on main (`save-if`, which may also ask more, as the
+/// frontend shards do), so pull requests and other branches restore main's
+/// and don't save copies of it, which pushed main's own out of the
+/// repository's 10 GB. cache-cleanup.yml deletes a pull request's caches when
+/// it closes, with a token that can manage caches and nothing else.
+#[test]
+fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
+    const ON_MAIN: &str = "github.ref == 'refs/heads/main'";
+    let mut caches = 0;
+    for (file, text) in github_files() {
+        for step in workflow_steps(&text) {
+            if !step.text.contains("uses: Swatinem/rust-cache@") {
+                continue;
+            }
+            caches += 1;
+            let save = with_value(&step, "save-if")
+                .unwrap_or_else(|| panic!("{file}: job {}: no save-if: {step:#?}", step.job));
+            assert!(
+                save.starts_with("${{ ") && save.ends_with(" }}") && save.contains(ON_MAIN),
+                "{file}: job {}: saves off main: {save}",
+                step.job
+            );
+            assert!(!save.contains("||"), "{file}: job {}: {save}", step.job);
+        }
+    }
+    assert!(caches > 0, "no rust-cache steps found");
+
+    let (_, cleanup) = github_files()
+        .into_iter()
+        .find(|(file, _)| file == "workflows/cache-cleanup.yml")
+        .expect("workflows/cache-cleanup.yml");
+    let on: Vec<&str> = cleanup
+        .lines()
+        .skip_while(|l| *l != "on:")
+        .skip(1)
+        .take_while(|l| l.starts_with(' '))
+        .map(str::trim)
+        .collect();
+    assert_eq!(on, ["pull_request:", "types: [closed]"]);
+    let permissions: Vec<&str> = cleanup
+        .lines()
+        .skip_while(|l| *l != "permissions:")
+        .skip(1)
+        .take_while(|l| l.starts_with(' '))
+        .map(str::trim)
+        .collect();
+    assert_eq!(permissions, ["actions: write"]);
+    assert!(
+        cleanup.contains("refs/pull/${{ github.event.pull_request.number }}/merge")
+            && cleanup.contains("gh cache delete"),
+        "{cleanup}"
+    );
+    for (_, body) in workflow_jobs(&cleanup) {
+        assert!(
+            !body.contains("permissions:"),
+            "a job asks for more: {body}"
+        );
+        assert!(!body.contains("actions/checkout"), "{body}");
+    }
+}
+
 /// Release builds use one Rust, set in one place (`RUST_TOOLCHAIN` in
 /// dist.yml), an exact release: not whatever is stable on the day.
 #[test]

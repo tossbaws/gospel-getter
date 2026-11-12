@@ -6,9 +6,14 @@ name: CI
 # and test-windows (the backend's tests on Windows). build-and-test and
 # test-windows are required checks on main; keep their names.
 #
-# It runs on pushes to leptos too, so a pull request into leptos starts
-# from leptos's caches: a pull request can only restore caches saved on
-# its own ref, its base branch, or main.
+# Only main's runs save the Rust caches (save-if); pull requests and other
+# branches restore main's (a run can restore caches saved on its own ref,
+# its base branch, or main) and save none of their own. Each pull request
+# saving its own copy of main's (about 880 MB each) pushed main's own out
+# of the repository's 10 GB, and a cold build takes twice as long.
+# cache-cleanup.yml deletes what a pull request's runs did save (the small
+# caches) once it closes. It still runs on pushes to leptos, which restore
+# main's caches too.
 #
 # Every action is pinned to a commit (Dependabot proposes updates:
 # .github/dependabot.yml). CI builds with the current stable Rust; release
@@ -95,6 +100,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           key: ${{ hashFiles('.github/ci/cargo-config.toml') }}
           workspaces: |
             src-tauri
@@ -190,12 +196,12 @@ jobs:
       - name: Configure cargo
         run: cat .github/ci/cargo-config.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
 
-      # Both shards build the same thing; one saves it.
+      # Both shards build the same thing; one saves it, on main.
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ matrix.shard == 1 && github.ref == 'refs/heads/main' }}
           key: ${{ hashFiles('.github/ci/cargo-config.toml') }}
-          save-if: ${{ matrix.shard == 1 }}
           workspaces: |
             src-tauri
             ui-leptos
@@ -262,6 +268,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             src-tauri
             ui-leptos

@@ -1,0 +1,43 @@
+name: Cache cleanup
+
+# When a pull request closes, merged or not, deletes the caches its runs
+# saved (under refs/pull/<number>/merge), which nothing restores any more:
+# only a run on that ref could. Only main saves the Rust caches (save-if in
+# ci.yml and dist.yml), but a pull request's runs still save small ones
+# (npm's, and the build tools' when a pull request changes their versions),
+# and the repository's caches share 10 GB, the least recently used evicted
+# first, main's among them.
+#
+# Its token can only manage the repository's caches (actions: write), and
+# it checks out nothing. A pull request from a fork gets a read-only token,
+# so its caches are left to expire (seven days unused).
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  actions: write
+
+jobs:
+  delete-caches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete the pull request's caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        run: |
+          set -euo pipefail
+          deleted=0
+          # A page at a time, until none is left (a few rounds at most).
+          for _ in $(seq 1 10); do
+            ids="$(gh cache list --repo "$GITHUB_REPOSITORY" --ref "$CACHE_REF" --limit 100 --json id --jq '.[].id')"
+            [ -n "$ids" ] || break
+            for id in $ids; do
+              gh cache delete "$id" --repo "$GITHUB_REPOSITORY"
+              deleted=$((deleted + 1))
+            done
+          done
+          echo "Deleted $deleted caches saved under $CACHE_REF."

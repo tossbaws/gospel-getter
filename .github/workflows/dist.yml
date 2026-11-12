@@ -71,11 +71,12 @@ name: Distribution Artifacts
 #
 # Every action is pinned to a commit (Dependabot proposes updates:
 # .github/dependabot.yml), and every job builds with one Rust release,
-# RUST_TOOLCHAIN below. Every job has a time limit (timeout-minutes, about
-# three times its slowest green run, more where a cold cache needs it), so
-# a hung runner fails in minutes, not after GitHub's six hours; apt-get
-# retries a failed download and gives up on a silent mirror, in a step
-# with a time limit of its own.
+# RUST_TOOLCHAIN below. Only main's runs save the Rust caches (save-if, as
+# in ci.yml); every other run restores main's. Every job has a time limit
+# (timeout-minutes, about three times its slowest green run, more where a
+# cold cache needs it), so a hung runner fails in minutes, not after
+# GitHub's six hours; apt-get retries a failed download and gives up on a
+# silent mirror, in a step with a time limit of its own.
 #
 # Every installer carries gospel-getter-cli beside the app, as a Tauri sidecar
 # (bundle.externalBin, in the tauri.sidecar.conf.json overlay, since tauri-build
@@ -166,6 +167,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             src-tauri
             ui-leptos
@@ -380,6 +382,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             src-tauri
             ui-leptos
@@ -656,6 +659,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: tests/gui
 
       - name: Install tauri-driver
@@ -739,6 +743,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: tests/gui
 
       # Tauri's WebDriver CI guidance: msedgedriver-tool fetches the Edge
