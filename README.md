@@ -366,15 +366,15 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.29.0?** Each updates itself to 2.29.1: it
+**Coming from 2.6.0 through 2.29.1?** Each updates itself to 2.29.2: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
-update themselves. The 2.19.0 pre-release updates itself to 2.29.1 the
+update themselves. The 2.19.0 pre-release updates itself to 2.29.2 the
 same way.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.29.1 by hand once, from the
+Install 2.29.2 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -393,12 +393,15 @@ Upgrading keeps your data.
   too (0600), as exports are; an earlier version's are narrowed to that when
   the app starts.
 - **Upgrades keep your data.** A new version adds any new tables and builds
-  the search index once, in the background, without changing scripture
-  text, your reading position, bookmarks, highlights or notes. 2.10.0
-  rebuilds the index once, by itself, so KJV search leaves out the margin
-  notes. 2.16.2 switches the database to write-ahead logging when it first
-  opens it. Moving back to an older
-  version after upgrading hasn't been tested.
+  the search index once, in the background, without changing your reading
+  position, bookmarks, highlights or notes. 2.10.0 rebuilds the index once,
+  by itself, so KJV search leaves out the margin notes. 2.16.2 switches the
+  database to write-ahead logging when it first opens it. 2.29.2 stores the
+  KJV's ten misnumbered chapters again, once, from the text it bundles (see
+  [Data provenance](#data-provenance-and-textual-integrity)), and builds
+  the KJV's search index again; every other verse is left as it was, and
+  your records there stay on the verse numbers they had. Moving back to an
+  older version after upgrading hasn't been tested.
 - Theme, text size, line spacing, width, layout, compare (and which
   translation it compares with) and reading mode are
   display settings stored in the app's web storage, not the database, as

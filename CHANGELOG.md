@@ -4,6 +4,72 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.29.2] - 2026-11-12
+
+Fixes for the KJV's verse numbers in ten chapters, a failed start that
+said nothing, updates that can't be installed, Copy as Markdown and
+dialogs, and search words kept out of the log. Updating keeps your
+bookmarks, highlights, notes, findings, reading position and settings.
+
+### Fixed
+- The KJV: ten chapters had verses at the wrong numbers, so there a verse
+  number could show another verse's words. These are 1 Samuel 20, 1 Kings
+  22, Matthew 2, 22 and 26, Mark 4, 7 and 8, 3 John and Revelation 12,
+  and with them Revelation 13:1, whose start was numbered as Revelation
+  12:18. They're now numbered as in every KJV, taken from eBible.org's KJV
+  as it has them, so they use its typography (’ and ¶, for example);
+  every other verse is exactly as before. Updating makes the change once,
+  then builds the KJV's search index again in the background. **About
+  Gospel Getter** credits eBible.org too.
+- Your notes, bookmarks, highlights and findings in those chapters are
+  kept as they were, on the same verse numbers. Because the numbers were
+  wrong before, one may now sit beside different words: the ones that
+  number has in the KJV. One on a verse number the KJV doesn't have any
+  more (1 Samuel 20:43, 1 Kings 22:54, 3 John 1:15 and Revelation 12:18)
+  is kept, listed as not numbered, and still exports and imports; a
+  reading place there opens its chapter at the top. The 28 New Testament
+  margin notes in those chapters are gone, because eBible.org's KJV
+  doesn't have them.
+- If Gospel Getter can't start, it now says why and where its log is,
+  instead of closing without a word.
+- AI agents and `gospel-getter-cli`: the WEB's verses it doesn't number
+  read as not numbered even before the app has started once since
+  updating, and `save_findings` and `verify_quote` say when a passage has
+  verses that aren't numbered.
+- A search that fails no longer writes the words you searched for in the
+  log.
+- Windows: if an update's installer doesn't start, Gospel Getter stays
+  open and usable and says the update didn't start.
+- Linux (`.deb`): when an update can't be installed, for example because
+  the password prompt was cancelled, the message says nothing was changed.
+- **Copy as Markdown** always copies the note you clicked, with its own
+  passage, and copies at the first click on a verse with many notes.
+- Dialogs no longer open over each other: **Keyboard shortcuts** or
+  **About** opened while **Export notes** is getting ready keeps it from
+  opening on top. Tab stays inside About, and the mouse's Back and Forward
+  buttons don't move the page behind a dialog.
+- Smaller fixes: switching translation while a chapter loads opens the
+  chapter you asked for; changing a highlight while the highlights reload
+  no longer loses either change; **Check now** stays disabled while any
+  update check runs; a click on **Export notes**' **Export…** isn't lost
+  when it also leaves a chapter field; a note editor's **Other notes** are
+  always its own passage's; and a link inside a note link's text shows as
+  text.
+- Files, the log and AI agents: saving a backup or export also writes
+  the folder's change to disk on Linux, and clears Gospel Getter's own
+  temporary files over an hour old from that folder; the log keeps to its
+  size even when it can't start a new file; and an AI agent's read made
+  just as the app starts is made again, so it sees what the app has saved.
+- Backups keep the same data formats: 3, or 4 with AI findings or the
+  switch on, restored by the same versions as before.
+
+Behind the scenes: a release's signed installers are kept as artifacts of
+their own, with each installer's checksum (`INSTALLER-SHA256SUMS`), and
+the unsigned ones are never overwritten; `packaging/uninstall.sh` names
+your data and the menu to export it from, and asks before it removes
+anything; and GUI checks that can't run on Windows say SKIP instead of
+passing.
+
 ## [2.29.1] - 2026-11-10
 
 Fixes for verse ranges in one-chapter books, the WEB's verses it doesn't
