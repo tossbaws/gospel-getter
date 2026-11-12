@@ -1404,7 +1404,8 @@ pub fn mount() {
         dom::on(&html, "mouseleave", |_| save_place());
     }
     export_place();
-    // A mouse's back and forward buttons.
+    // A mouse's back and forward buttons; while a dialog is open, nothing
+    // (as Alt+← and Alt+→, `keyboard`), so the chapter behind it stays.
     if let Some(window) = web_sys::window() {
         dom::on(&window, "mouseup", |event| {
             let Some(event) = event.dyn_ref::<MouseEvent>() else {
@@ -1416,6 +1417,9 @@ pub fn mount() {
                 _ => return,
             };
             event.prevent_default();
+            if crate::page::modal_open() {
+                return;
+            }
             spawn(go_history(step));
         });
     }

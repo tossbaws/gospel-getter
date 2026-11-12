@@ -141,6 +141,19 @@ pub fn shortcuts_open() -> bool {
     overlay_open("shortcuts-overlay")
 }
 
+/// A dialog is open: the import preview, About, the note editor, Export
+/// data…'s chooser, Export notes or the shortcuts sheet. The reader's own
+/// keys (`keyboard`) and a mouse's back and forward buttons (`reader`)
+/// wait meanwhile, so nothing moves behind it (C2-01).
+pub fn modal_open() -> bool {
+    import_open()
+        || about_open()
+        || note_open()
+        || export_choice_open()
+        || export_notes_open()
+        || shortcuts_open()
+}
+
 /// The search box is open (`#search-panel` shown).
 pub fn search_shown() -> bool {
     by_id("search-panel").is_some_and(|panel| !panel.hidden())

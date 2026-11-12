@@ -1585,6 +1585,12 @@ fn refresh_selection_notes() -> Task {
         return Box::pin(async {});
     };
     let sent = send("list_notes", &args);
+    let passage = PassageOut {
+        book_id: args.book_id,
+        chapter: args.chapter,
+        start: args.verse_start,
+        end: args.verse_end,
+    };
     Box::pin(async move {
         let got = answer(sent).await.and_then(|raw| {
             let notes: Vec<SelectionNote> = read(raw.clone())?;
@@ -1612,8 +1618,9 @@ fn refresh_selection_notes() -> Task {
             }
         }
         render_notes_section();
-        // The note editor, if it's open and adding, lists them too.
-        dispatch_others();
+        // The note editor, if it's open and adding on this passage, lists
+        // them too.
+        dispatch_others(&passage);
     })
 }
 
@@ -1638,12 +1645,21 @@ fn others() -> Vec<Other> {
     })
 }
 
-fn dispatch_others() {
+/// Tells the note editor the notes on `passage`, the one they were listed
+/// for: it shows them only if it's adding on that passage (C2-01).
+fn dispatch_others(passage: &PassageOut) {
     #[derive(Serialize)]
-    struct Others {
+    struct Others<'a> {
+        passage: &'a PassageOut,
         others: Vec<Other>,
     }
-    bridge::dispatch(bridge::NOTE_OTHERS_EVENT, &Others { others: others() });
+    bridge::dispatch(
+        bridge::NOTE_OTHERS_EVENT,
+        &Others {
+            passage,
+            others: others(),
+        },
+    );
 }
 
 /// The selection's Notes section, under its actions: shown only when notes
