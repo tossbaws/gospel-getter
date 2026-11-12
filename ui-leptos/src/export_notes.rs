@@ -762,7 +762,11 @@ pub fn ExportNotes() -> impl IntoView {
         });
         dialog.choices_changed();
     };
-    // Once a chapter field is left, it shows the chapter it counts as.
+    // Once a chapter field is left, it shows the chapter it counts as. The
+    // count is already of that chapter (it's read the same way as typed),
+    // so it's asked for again only if the choices it counts did change, or
+    // there's no count to show: Export…, enabled, stays so for a click
+    // whose press left the field (D2-04).
     let settle_chapter = move |field: RwSignal<String>, from: bool| {
         if dialog.chapters_hidden() {
             return;
@@ -775,9 +779,12 @@ pub fn ExportNotes() -> impl IntoView {
         } else {
             book.last_chapter
         };
+        let counted = dialog.filter();
         let value = chapter_value(&field.get_untracked(), book.chapter_count, fallback);
         field.set(value.to_string());
-        dialog.refresh_count();
+        if dialog.filter() != counted || dialog.matches.get_untracked().is_none() {
+            dialog.refresh_count();
+        }
     };
 
     view! {

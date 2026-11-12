@@ -155,3 +155,37 @@ test('if the version can\'t be read, the line stays empty, the link hidden, and 
         assert.deepEqual(app.consoleErrors, []);
         assert.equal(app.heading(), 'John 3');
     }));
+
+// D2-02: About is modal, and its Tab trap brings back focus that got out
+// of it, as the other dialogs' do: a click on its dimmed backdrop (which
+// doesn't close it) leaves focus on the page behind, and Tab then goes to
+// About's first control, Shift+Tab to its last, never into the page.
+test('D2-02: focus that got outside About comes back in with Tab', () =>
+    withApp({}, async (app) => {
+        await app.idle(0, 'get_app_version');
+        app.open('about');
+        await app.idle(0);
+        const panel = $(app, 'about-panel');
+        assert.ok(panel.contains(app.document.activeElement), 'opened with focus inside');
+
+        // The backdrop: About stays open; focus leaves it, as a click on
+        // the page behind leaves it in a webview.
+        await app.click($(app, 'about-overlay'));
+        app.document.activeElement.blur();
+        assert.equal(app.surface('about').hidden, false, 'About stays open');
+        assert.ok(!panel.contains(app.document.activeElement), 'focus is outside About');
+        const tab = await app.key('Tab', {}, app.document.activeElement);
+        assert.ok(tab.defaultPrevented, 'Tab doesn’t walk into the page');
+        assert.equal(app.document.activeElement, $(app, 'about-close'), 'the first control');
+
+        // From a control on the page behind, Shift+Tab: the last.
+        $(app, 'menu-toggle').focus();
+        assert.equal(app.document.activeElement, $(app, 'menu-toggle'));
+        const back = await app.key('Tab', { shiftKey: true }, $(app, 'menu-toggle'));
+        assert.ok(back.defaultPrevented);
+        assert.equal(app.document.activeElement, supportLink(app), 'the last control');
+        // Inside, Tab wraps as before.
+        assert.ok(app.key('Tab', {}, supportLink(app)).defaultPrevented);
+        assert.equal(app.document.activeElement, $(app, 'about-close'));
+        assert.equal(app.surface('about').hidden, false);
+    }));

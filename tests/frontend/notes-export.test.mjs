@@ -754,3 +754,41 @@ test('Print… prints the same commentary: only a print-only container, through 
         assert.equal(html.getAttribute('data-printing'), null);
         assert.equal(container.innerHTML, '');
     }));
+
+// D2-04: a chapter typed, then Export… pressed: the press takes focus from
+// the field (its `change`, then `blur`) before the click lands. The count
+// shown is already for the chapter typed, so leaving the field doesn't
+// count again, and Export… stays enabled for its click: the export runs
+// once, with the range typed.
+test('D2-04: a chapter typed, then Export… pressed (the field left on its mousedown): it exports once, with that range', () =>
+    withNotes(SAMPLE, {}, async (app) => {
+        const path = join(dir, 'd2-04.md');
+        await app.pick(path);
+        await openNotes(app);
+        assert.ok(chaptersShown(app));
+        const from = el(app, 'export-notes-chapter-from');
+        from.focus();
+        const typed = app.calls.length;
+        from.value = '3';
+        from.dispatchEvent(new app.window.Event('input', { bubbles: true }));
+        await app.idle(typed, 'count_notes_export');
+        assert.equal(countLine(app), '2 notes match');
+        assert.ok(!confirm(app).disabled);
+
+        // Any count asked for from here is slow to answer.
+        const release = app.holdCommand('count_notes_export');
+        const press = { bubbles: true, cancelable: true, button: 0 };
+        confirm(app).dispatchEvent(new app.window.MouseEvent('mousedown', press));
+        from.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+        from.blur();
+        await settle();
+        assert.deepEqual(chapterFields(app), ['3', '3']);
+        confirm(app).dispatchEvent(new app.window.MouseEvent('mouseup', press));
+        confirm(app).dispatchEvent(new app.window.MouseEvent('click', press));
+        await app.until(() => exportCalls(app).length === 1, 'the export');
+        release();
+        await app.idle(typed, 'export_notes');
+        assert.deepEqual(exportCalls(app).map((c) => c.filter), [{ ...EVERY, books: [JOHN], chapters: [3, 3] }]);
+        assert.equal(app.toast().textContent, `Exported 2 notes on John to ${path}.`);
+        assert.ok(readFileSync(path, 'utf8').includes(`## John 3:16\n\n> **16** ${storedVerse('kjv', 'John', 3, 16)}\n\nLoved.\n`));
+    }));

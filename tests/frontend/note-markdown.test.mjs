@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, closeBridge, openApp, settle, storedVerse } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-markdown-'));
 after(async () => {
@@ -357,5 +357,191 @@ test('AUD-08: only the notes pointed at most recently keep their Markdown; one p
         app.click(first.querySelector('.note-list-copy'));
         await app.until(() => app.clipboardWrites.length === 1, 'the copy');
         assert.equal(app.clipboardWrites[0], await backend('get_note_markdown', { id: firstId, translationCode: 'kjv' }));
+    });
+});
+
+// N-U-01: SQLite gives a deleted note's id to the next note added. The
+// Markdown asked for ahead of Copy as Markdown is for the note as it was
+// shown (its passage, and when it was written), so a new note under a
+// deleted note's id (here the same words, on John 3:17) copies its own
+// heading and verse, never the deleted one's: in the card, in the Library,
+// and after an import replaces every note. In the WEB, whose Markdown
+// quotes each verse exactly as stored. The clipboard takes writes only
+// within the click, as WebKitGTK's does.
+const AMEN = 'Amen.';
+const VERSE_16 = storedVerse('web', 'John', 3, 16);
+const VERSE_17 = storedVerse('web', 'John', 3, 17);
+
+/** The note "Amen." on John 3:17 as Markdown, its verse exactly as stored. */
+function assertTheNewPassage(copied) {
+    assert.equal(copied, `## John 3:17\n\n> **17** ${VERSE_17}\n>\n> — John 3:17 (WEB)\n\n${AMEN}`);
+    assert.ok(!copied.includes(VERSE_16), 'nothing of the deleted note’s verse');
+}
+
+const markdownAsked = (app, id) => app.calls.filter((c) => c.cmd === 'get_note_markdown' && c.args.id === id);
+
+/** Points at the Library row of note `id` (its Markdown asked for), and waits. */
+async function pointAtRow(app, id) {
+    const row = app.document.querySelector(`#note-list .note-item[data-note-id="${id}"]`);
+    assert.ok(row, `a row for note ${id}`);
+    row.dispatchEvent(new app.window.Event('pointerover', { bubbles: true }));
+    await app.idle();
+    return row;
+}
+
+// What's said once a copy is done, or has failed.
+const COPIED = 'Copied the note on John 3:17 as Markdown.';
+const sayingDone = (line) => line.textContent === COPIED || line.textContent.startsWith('Couldn’t copy the note');
+
+/** Copy as Markdown on the card's only note: what the clipboard got. */
+async function copyFromCard(app) {
+    const writes = app.clipboardWrites.length;
+    const copy = app.document.querySelectorAll('.verse-notes .note-copy');
+    assert.equal(copy.length, 1);
+    app.click(copy[0]);
+    await app.until(() => sayingDone(app.status()), 'the copy');
+    assert.equal(app.status().textContent, COPIED);
+    assert.equal(app.clipboardWrites.length, writes + 1);
+    return app.clipboardWrites.at(-1);
+}
+
+/** Copy as Markdown on note `id`'s Library row: what the clipboard got. */
+async function copyFromRow(app, id) {
+    const writes = app.clipboardWrites.length;
+    const row = await pointAtRow(app, id);
+    assert.ok(!sayingDone(app.toast()), 'nothing said about a copy yet');
+    app.click(row.querySelector('.note-list-copy'));
+    await app.until(() => sayingDone(app.toast()), 'the copy');
+    assert.equal(app.toast().textContent, COPIED);
+    assert.equal(app.clipboardWrites.length, writes + 1);
+    return app.clipboardWrites.at(-1);
+}
+
+test('N-U-01: deleted in the editor and written again on another verse under its id, a note copies its own passage (the card)', async () => {
+    const [old] = await seed([[JOHN, 3, 16, 16, AMEN]], 'web');
+    await withApp({ translation: 'web', clipboard: 'gesture' }, async (app) => {
+        await select(app, 16);
+        await app.idle();
+        assert.equal(markdownAsked(app, old.id).length, 1, 'asked for as the card showed it');
+        // Deleted in the editor.
+        await clickAndWait(app, app.document.querySelector('.verse-notes .note-edit'), null);
+        await clickAndWait(app, el(app, 'note-delete'), 'list_all_notes');
+        assert.deepEqual(await backend('list_all_notes'), []);
+        // The same words on John 3:17.
+        await select(app, 17);
+        app.click(app.actions().querySelector('.verse-note-btn'));
+        await settle();
+        app.type(el(app, 'note-input'), AMEN);
+        await settle();
+        await clickAndWait(app, el(app, 'note-save'), 'list_all_notes');
+        const [added] = await backend('list_all_notes');
+        assert.equal(added.id, old.id, 'fixture: SQLite gave it the deleted note’s id');
+        assert.equal(added.verseStart, 17);
+        assertTheNewPassage(await copyFromCard(app));
+    });
+});
+
+test('N-U-01: a note under a deleted note’s id copies its own passage from the Library, whatever the page was told', async () => {
+    const [old] = await seed([[JOHN, 3, 16, 16, AMEN]], 'web');
+    await withApp({ translation: 'web', clipboard: 'gesture' }, async (app) => {
+        app.openLibrary('notes');
+        await app.idle();
+        await pointAtRow(app, old.id);
+        assert.equal(markdownAsked(app, old.id).length, 1);
+        // Deleted and written again on John 3:17 behind the page's back,
+        // so only the note itself can tell the two apart.
+        await backend('delete_note', { id: old.id });
+        const added = await backend('add_note', { bookId: JOHN, chapter: 3, verseStart: 17, verseEnd: 17, body: AMEN });
+        assert.equal(added.id, old.id, 'fixture: SQLite gave it the deleted note’s id');
+        // A note added in the card reloads the Library's list.
+        app.key('Escape', {}, app.document.activeElement);
+        await select(app, 18);
+        app.click(app.actions().querySelector('.verse-note-btn'));
+        await settle();
+        app.type(el(app, 'note-input'), 'Another.');
+        await settle();
+        await clickAndWait(app, el(app, 'note-save'), 'list_all_notes');
+        app.openLibrary('notes');
+        await app.idle();
+        assertTheNewPassage(await copyFromRow(app, added.id));
+    });
+});
+
+test('N-U-01: after an import replaces every note, one under an old note’s id copies its own passage (the card and the Library)', async () => {
+    const [old] = await seed([[JOHN, 3, 16, 16, AMEN]], 'web');
+    await withApp({ translation: 'web', clipboard: 'gesture' }, async (app) => {
+        await select(app, 16);
+        app.openLibrary('notes');
+        await app.idle();
+        await pointAtRow(app, old.id);
+        assert.equal(markdownAsked(app, old.id).length, 1, 'asked for once, by the card and the row');
+        app.key('Escape', {}, app.document.activeElement);
+
+        const path = join(dir, 'replace.gospel-getter.json');
+        writeFileSync(path, JSON.stringify({
+            format: 'gospel-getter-reader-data',
+            format_version: 3,
+            exported_at: '2026-10-10T00:00:00.000Z',
+            app_version: '2.8.0',
+            reading_position: null,
+            bookmarks: [],
+            notes: [{ book: JOHN, book_name: 'John', chapter: 3, verse_start: 17, verse_end: 17, body: AMEN }],
+        }));
+        await app.pick(path);
+        app.open('menu');
+        let before = app.calls.length;
+        app.click(el(app, 'import-data-btn'));
+        await app.idle(before);
+        const replace = app.document.querySelector('input[name="import-mode"][value="replace"]');
+        replace.checked = true;
+        replace.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+        before = app.calls.length;
+        app.click(el(app, 'import-confirm'));
+        await app.idle(before, 'apply_import');
+        const [added] = await backend('list_all_notes');
+        assert.equal(added.id, old.id, 'fixture: the imported note has the replaced note’s id');
+        assert.equal(added.verseStart, 17);
+
+        await select(app, 17);
+        await app.idle();
+        assertTheNewPassage(await copyFromCard(app));
+        app.openLibrary('notes');
+        await app.idle();
+        assertTheNewPassage(await copyFromRow(app, added.id));
+    });
+});
+
+// N-U-03: the card shows the first notes on a passage and has their
+// Markdown ready for Copy as Markdown, however many other notes' Markdown
+// is asked for (more notes on the passage than are kept, the Library's
+// rows pointed at); what's kept besides is still bounded.
+test('N-U-03: with more notes on a passage than are kept, and the Library pointed at, the card’s first Copy as Markdown copies within its click', async () => {
+    const PSALMS = bookId('Psalms');
+    await seed([
+        ...Array.from({ length: 35 }, (_, i) => [JOHN, 3, 16, 16, `Note ${i + 1} on 3:16.`]),
+        ...Array.from({ length: 40 }, (_, i) => [PSALMS, i + 1, 1, 1, `Psalm ${i + 1}, noted.`]),
+    ], 'web');
+    await withApp({ translation: 'web', clipboard: 'gesture' }, async (app) => {
+        await select(app, 16);
+        await app.idle();
+        const firstCopy = () => app.document.querySelector('.verse-notes .note-copy');
+        const firstId = Number(firstCopy().dataset.noteId);
+        app.openLibrary('notes');
+        const rows = () => [...app.document.querySelectorAll('#note-list .note-item')];
+        await app.until(() => rows().length === 75, 'every note listed');
+        const psalmRows = rows().filter((row) => row.textContent.includes('Psalm'));
+        for (const row of psalmRows) await pointAtRow(app, Number(row.dataset.noteId));
+
+        app.click(firstCopy());
+        await app.until(() => /^(Copied|Couldn’t copy) the note/.test(app.status().textContent), 'the copy');
+        assert.equal(app.status().textContent, 'Copied the note on John 3:16 as Markdown.');
+        assert.deepEqual(app.clipboardWrites, [await backend('get_note_markdown', { id: firstId, translationCode: 'web' })]);
+        assert.ok(app.clipboardWrites[0].includes(`> **16** ${VERSE_16}\n`), 'the verse exactly as stored');
+
+        // Still bounded: the Psalm pointed at first is asked for again.
+        const longAgo = Number(psalmRows[0].dataset.noteId);
+        assert.equal(markdownAsked(app, longAgo).length, 1);
+        await pointAtRow(app, longAgo);
+        assert.equal(markdownAsked(app, longAgo).length, 2, 'asked again');
     });
 });
