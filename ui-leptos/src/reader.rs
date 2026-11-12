@@ -88,6 +88,11 @@ struct State {
     columns: Vec<(String, Vec<i64>)>,
     /// Bumped by each load: an answer to an older one is dropped.
     load_token: u64,
+    /// The chapter (book, chapter) the newest load asked for, until it's
+    /// answered or fails: a translation switched meanwhile reads it in
+    /// the new one, as the same load, so the jump or step it's for still
+    /// lands, and is recorded (C2-02).
+    asked: Option<(i64, i64)>,
     /// A note's Edit waiting for its jump ([`open`]): claimed by the Edit,
     /// cancelled by any newer navigation ([`load_sent`]) and by any note
     /// editor opening (`bridge::NOTE_EVENT`), so a late jump never opens a
@@ -503,6 +508,7 @@ fn send_load(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
     surfaces::let_go_of_place();
     let token = with(|s| {
         s.load_token += 1;
+        s.asked = Some((book_id, chapter));
         // A step's Try again is this load's now (see `retry`); a step's
         // own load begins after it's taken.
         s.history.forget_failed();
@@ -573,7 +579,8 @@ fn send_load(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
 /// A load's answers (the reading, and the comparison or `null`), sent with
 /// `token` in the translation `translation_code` for the layout `layout`:
 /// put on screen, and the position saved, unless a newer load has begun,
-/// the chapter isn't there, or Compare changed on the way.
+/// the chapter isn't there, or the translation or Compare changed on the
+/// way.
 fn answered(
     token: u64,
     book_id: i64,
@@ -584,13 +591,18 @@ fn answered(
     compare_raw: JsValue,
 ) -> Outcome {
     // A newer load has begun: let it win.
-    if with(|s| s.load_token) != token || dto_raw.is_null() || dto_raw.is_undefined() {
+    if with(|s| s.load_token) != token {
         return Outcome::Done(false);
     }
-    // Compare was switched (or its translations changed) on the way: what
-    // came back is for the old layout, so it's asked for again.
-    if compare_layout() != layout {
+    // The translation was switched (`Request::Translation`), or Compare
+    // (or its translations), on the way: what came back is for the old
+    // one, so it's asked for again.
+    if bridge::translation_code() != translation_code || compare_layout() != layout {
         return Outcome::Again;
+    }
+    with(|s| s.asked = None);
+    if dto_raw.is_null() || dto_raw.is_undefined() {
+        return Outcome::Done(false);
     }
     let dto: Reading = match serde_wasm_bindgen::from_value(dto_raw.clone()) {
         Ok(dto) => dto,
@@ -647,6 +659,7 @@ fn answered(
 fn failed(token: u64, error: &JsValue, book_id: i64, chapter: i64) {
     ipc::log_error("Failed to load reading pane", error);
     if with(|s| s.load_token) == token {
+        with(|s| s.asked = None);
         show_failure(&ipc::error_text(error), book_id, chapter);
     }
 }
@@ -1209,8 +1222,11 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
         }
         Request::Translation => {
             show_translation();
-            // A jump follows, and reads its own chapter in it.
-            if with(|s| s.jump_follows) {
+            // A jump follows, and reads its own chapter in it. Or a load is
+            // on its way, which reads the chapter it asked for in it once
+            // its answer is in (`answered`): that one, not the chapter
+            // still on screen, and as its own jump or step (C2-02).
+            if with(|s| s.jump_follows || s.asked.is_some()) {
                 return Box::pin(async { false });
             }
             let inner = pane_inner();
