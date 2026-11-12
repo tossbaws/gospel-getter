@@ -8,8 +8,8 @@
 //! chapters and the books as it always did, and Enter reads the chapter
 //! (23). Checks 22 and 23 run in the shape the window gives (the sidebar,
 //! or the popover where the window can't be 1200 px wide, as on the Windows
-//! runner's screen); 21 and 24 need the sidebar, and on Windows say they
-//! weren't run, and why, when the window can't be made that wide. Hiding and showing the sidebar keeps the reader's place: the first
+//! runner's screen); 21 and 24 need the sidebar, and on Windows are
+//! skipped (SKIP), saying why, when the window can't be made that wide. Hiding and showing the sidebar keeps the reader's place: the first
 //! verse under the bar stays the same, within a line (24, at Aa's Wide
 //! width, where the chapter's column is narrower beside the sidebar, so the
 //! text reflows). Screenshots in Chi Rho here, and in Vellum with check
@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 use thirtyfour::prelude::*;
 
 use super::{DESCRIBE_JS, Run, VISIBLE_JS};
+use crate::report::skipped;
 
 /// The picker's screenshots: the popover and the sidebar in Chi Rho
 /// (checks 20 and 21), and in Vellum (with check 4's).
@@ -215,11 +216,11 @@ impl Run<'_> {
     }
 
     /// A check that needs the sidebar, on a window that can't have it: not
-    /// run on Windows (whose runner's screen is too narrow), and a failure
-    /// elsewhere.
+    /// run on Windows (whose runner's screen is too narrow), a SKIP, and a
+    /// failure elsewhere.
     pub(super) fn not_wide(&self, why: String) -> Result<String> {
         if self.config.xvfb.is_none() {
-            Ok(format!("not run on Windows: {why}"))
+            Err(skipped(format!("not run on Windows: {why}")))
         } else {
             bail!("{why}")
         }
