@@ -86,6 +86,15 @@ pub struct FindingErrorOut {
     pub error: String,
 }
 
+/// A reference `save_findings` read with verses the translation doesn't
+/// number, and what `get_passage` says of them (its `notice`): the verses it
+/// does number were saved.
+#[derive(Debug, Serialize)]
+pub struct FindingNoticeOut {
+    pub reference: String,
+    pub notice: String,
+}
+
 /// The answer of `save_findings`.
 #[derive(Debug, Serialize)]
 pub struct SaveFindingsOut {
@@ -100,6 +109,10 @@ pub struct SaveFindingsOut {
     /// The references that weren't read, each with why.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<FindingErrorOut>,
+    /// The references read with verses the translation doesn't number, each
+    /// with which: only the verses it numbers are in `verses`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notices: Vec<FindingNoticeOut>,
     /// All of this in a sentence or two, for a person.
     pub message: String,
 }
@@ -149,6 +162,7 @@ pub async fn save_findings(
         translation,
         passages,
         errors,
+        notices,
     } = found?;
     let agent = normalize_agent(
         args.agent
@@ -191,6 +205,7 @@ pub async fn save_findings(
         saved.saved.len(),
         saved.already.len(),
         errors.len(),
+        notices.len(),
     );
     Ok(SaveFindingsOut {
         saved: saved.saved.len(),
@@ -200,6 +215,7 @@ pub async fn save_findings(
         translation,
         verses,
         errors,
+        notices,
         message,
     })
 }
@@ -211,6 +227,7 @@ fn saved_message(
     saved: usize,
     already: usize,
     failed: usize,
+    partly_numbered: usize,
 ) -> String {
     let plural = |n: usize, one: &str, many: &str| {
         if n == 1 {
@@ -239,6 +256,12 @@ fn saved_message(
             plural(failed, "reference", "references")
         ));
     }
+    if partly_numbered > 0 {
+        message.push_str(&format!(
+            " {} verses this translation doesn't number; notices says which.",
+            plural(partly_numbered, "reference has", "references have")
+        ));
+    }
     if saved + already > 0 {
         message.push_str(&format!(
             " Gospel Getter shows each beside its verse, marked as found by {agent}, for the \
@@ -255,6 +278,7 @@ struct ToSave {
     /// Each verse once, in the order given, with its reference.
     passages: Vec<(Passage, String)>,
     errors: Vec<FindingErrorOut>,
+    notices: Vec<FindingNoticeOut>,
 }
 
 impl Library {
@@ -298,9 +322,16 @@ impl Library {
         let mut passages: Vec<(Passage, String)> = Vec::new();
         let mut seen = HashSet::new();
         let mut errors = Vec::new();
+        let mut notices = Vec::new();
         for reference in references {
             match self.passage_or_why(translation, &reference).await? {
                 Ok(passage) => {
+                    if let Some(notice) = &passage.notice {
+                        notices.push(FindingNoticeOut {
+                            reference: reference.clone(),
+                            notice: notice.clone(),
+                        });
+                    }
                     let book_id = passage.book_id;
                     for verse in &passage.verses {
                         let at = Passage {
@@ -333,6 +364,7 @@ impl Library {
             translation: translation.code.clone(),
             passages,
             errors,
+            notices,
         })
     }
 
@@ -391,15 +423,27 @@ mod tests {
     #[test]
     fn a_save_says_what_it_did_in_plain_words() {
         assert_eq!(
-            saved_message("grief", "Claude", 2, 1, 1),
+            saved_message("grief", "Claude", 2, 1, 1, 0),
             "Saved 2 findings for \u{201c}grief\u{201d}. 1 was already saved. 1 reference \
              couldn't be read; errors says why. Gospel Getter shows each beside its verse, \
              marked as found by Claude, for the reader to read for themselves."
         );
         assert_eq!(
-            saved_message("grief", "Claude", 0, 0, 2),
+            saved_message("grief", "Claude", 0, 0, 2, 0),
             "Saved 0 findings for \u{201c}grief\u{201d}. 2 references couldn't be read; errors \
              says why."
+        );
+        // A reference with verses the translation doesn't number is said to
+        // have them, once for each such reference.
+        assert_eq!(
+            saved_message("grief", "Claude", 25, 0, 0, 1),
+            "Saved 25 findings for \u{201c}grief\u{201d}. 1 reference has verses this \
+             translation doesn't number; notices says which. Gospel Getter shows each beside \
+             its verse, marked as found by Claude, for the reader to read for themselves."
+        );
+        assert!(
+            saved_message("grief", "Claude", 2, 0, 0, 2)
+                .contains(" 2 references have verses this translation doesn't number;")
         );
     }
 }
