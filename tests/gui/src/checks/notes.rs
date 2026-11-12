@@ -290,6 +290,50 @@ const DRAFT_VERSE: u32 = 2;
 const DRAFTS_JS: &str = "const kept = JSON.parse(localStorage.getItem('gospel-getter-note-drafts') || '{\"drafts\":[]}');
     return kept.drafts.map((d) => [d.key, d.text]);";
 
+/// Which of check 65's known failures the page shows when the editor
+/// doesn't offer the draft (run 42845733910: it opened with no offer, and
+/// the same commit passed two minutes later), from what its wait saw
+/// (`seen`: the editor, the offer, and the drafts in local storage):
+/// the editor not open; the draft not in local storage, as when the app
+/// started again before the last one's WebKit network process wrote it
+/// (what `exited` waits out since #209); or kept, but not offered.
+fn draft_candidate(seen: &Value, text: &str) -> String {
+    let kept: Vec<(String, String)> = seen["kept"]
+        .as_array()
+        .map(|all| {
+            all.iter()
+                .map(|d| {
+                    let field = |i: usize| d[i].as_str().unwrap_or_default().to_owned();
+                    (field(0), field(1))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if seen["editor"] != Value::Bool(true) {
+        return "the note editor isn't open".to_owned();
+    }
+    if let Some((key, _)) = kept.iter().find(|(_, t)| t == text) {
+        return format!(
+            "the draft is in local storage ({key}), but the editor didn't offer it (shown: {}, \
+             said: {:?})",
+            seen["shown"],
+            seen["said"].as_str().unwrap_or_default()
+        );
+    }
+    if kept.is_empty() {
+        return "no draft is in local storage: the app started again without what the last one \
+                kept as typing paused (its WebKit network process hadn't written it?)"
+            .to_owned();
+    }
+    format!(
+        "local storage has other drafts, not this one: {}",
+        kept.iter()
+            .map(|(k, _)| k.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
 /// Where check 65 left its draft: the chapter it's in.
 pub(super) struct DraftLeft {
     pub(super) heading: String,
@@ -348,19 +392,33 @@ impl Run<'_> {
         self.select(DRAFT_VERSE).await?;
         let ui = &self.ui;
         ui.press("press N (write a note)", "n").await?;
-        let offer = ui
+        let offered = format!(
+            "{VISIBLE_JS}
+             const offer = document.getElementById('note-draft');
+             const input = document.getElementById('note-input');
+             const text = document.getElementById('note-draft-text');
+             return [visible(offer) && input.value === '' && /^You have unsaved text from /.test(text.textContent),
+                 {{ shown: visible(offer), said: text.textContent, value: input.value,
+                    editor: visible(document.getElementById('note-panel')),
+                    kept: (() => {{ {DRAFTS_JS} }})() }}];"
+        );
+        let offer = match ui
             .wait(
                 "the editor to offer the draft, its text box empty",
-                &format!(
-                    "{VISIBLE_JS}
-                     const offer = document.getElementById('note-draft');
-                     const input = document.getElementById('note-input');
-                     const text = document.getElementById('note-draft-text');
-                     return [visible(offer) && input.value === '' && /^You have unsaved text from /.test(text.textContent),
-                         {{ shown: visible(offer), said: text.textContent, value: input.value }}];"
-                ),
+                &offered,
             )
-            .await?;
+            .await
+        {
+            Ok(offer) => offer,
+            // The same condition and the same wait; a failure also says
+            // which of the causes it could be the page shows now.
+            Err(e) => {
+                return Err(match ui.js(&offered, Vec::new()).await {
+                    Ok(now) => e.context(draft_candidate(&now[1], DRAFT_TEXT)),
+                    Err(_) => e,
+                });
+            }
+        };
         let had = self
             .ui
             .js(SHOW_THEME_JS, vec![serde_json::json!("chi-rho")])
@@ -790,5 +848,42 @@ impl Run<'_> {
         }
         self.close_with_escape("Aa", "aa-popover").await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{DRAFT_TEXT, draft_candidate};
+
+    /// Check 65's failure says whether the draft reached local storage.
+    #[test]
+    fn a_draft_not_offered_says_where_it_got_to() {
+        let seen = |editor: bool, kept: serde_json::Value| json!({ "shown": false, "said": "", "value": "", "editor": editor, "kept": kept });
+        assert_eq!(
+            draft_candidate(&seen(false, json!([])), DRAFT_TEXT),
+            "the note editor isn't open"
+        );
+        assert!(
+            draft_candidate(&seen(true, json!([])), DRAFT_TEXT)
+                .starts_with("no draft is in local storage: ")
+        );
+        assert!(
+            draft_candidate(
+                &seen(true, json!([["new:19:119:2-2", DRAFT_TEXT]])),
+                DRAFT_TEXT
+            )
+            .starts_with(
+                "the draft is in local storage (new:19:119:2-2), but the editor didn't offer it"
+            )
+        );
+        assert_eq!(
+            draft_candidate(
+                &seen(true, json!([["new:43:3:16-16", "other"]])),
+                DRAFT_TEXT
+            ),
+            "local storage has other drafts, not this one: new:43:3:16-16"
+        );
     }
 }
