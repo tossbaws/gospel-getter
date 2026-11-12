@@ -31,9 +31,17 @@ impl Store {
     }
 
     /// Close every connection, waiting for any in use to be returned. Run
-    /// before the app exits to install an update or restarts.
+    /// before the app restarts once an update is installed.
     pub async fn close(&self) {
         self.db.close().await;
+    }
+
+    /// Fold the write-ahead log into the database file, leaving every
+    /// connection open (`Db::checkpoint`). Run right before the Windows
+    /// installer starts, after which the app exits without closing anything,
+    /// or carries on if the installer didn't start.
+    pub async fn checkpoint(&self) -> anyhow::Result<bool> {
+        self.db.checkpoint().await
     }
 
     /// Get every verse in one chapter of one translation, in verse order.

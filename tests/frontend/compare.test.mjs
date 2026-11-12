@@ -78,7 +78,9 @@ test('C toggles compare, and the mode is remembered across restarts', () =>
             assert.ok(!app.isComparing());
         })));
 
-for (const [book, chapter] of [['Romans', 14], ['Romans', 16], ['3 John', 1], ['Matthew', 2]]) {
+// Since 2.29.2 the KJV numbers 3 John 1 and Matthew 2 as the WEB does, so
+// only Romans 14 (longer in the WEB) and Romans 16 (in the KJV) differ.
+for (const [book, chapter] of [['Romans', 14], ['Romans', 16]]) {
     test(`${book} ${chapter}: rows align by verse number and gaps are shown, not filled`, () =>
         withApp({ book, chapter, compare: true }, async (app) => {
             const counts = { kjv: verseCount('kjv', book, chapter), web: verseCount('web', book, chapter) };

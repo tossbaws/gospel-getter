@@ -20,7 +20,7 @@ use thirtyfour::prelude::*;
 
 use super::{DESCRIBE_JS, Run, Shots, VISIBLE_JS, start_session};
 use crate::config::Config;
-use crate::report::{Check, Report};
+use crate::report::{Check, Report, skipped};
 use crate::ui::{Ui, log_line};
 
 /// The screenshots checks 25 and 27 to 29 take (check 4 lists them): Aa
@@ -527,7 +527,7 @@ impl Run<'_> {
 /// see `place`). Check 26 (check 25 left its settings): the page and Aa
 /// show every setting as it was left; then they're put back as they were
 /// before check 25. Check 45: the lists check 40 left open are open.
-/// Why checks 26, 45 and 65 aren't run on Windows.
+/// Why checks 26, 45 and 65 aren't run on Windows: their SKIP.
 const NOT_ON_WINDOWS: &str = "not run on Windows: Edge WebDriver gives each session's WebView2 a fresh \
     user data folder (WEBVIEW2_USER_DATA_FOLDER, a new scoped_dir per session), so the app started again \
     in a new session can't see the first session's local storage (the app as shipped keeps one folder)";
@@ -559,13 +559,13 @@ pub(super) async fn restart(
     // data folder of its own (WEBVIEW2_USER_DATA_FOLDER, a new
     // `scoped_dir…` each time), so the app started again in a new session
     // can't see what the first one saved in local storage; the app itself
-    // always uses the one folder. Checks 26 and 45 aren't run there. The
-    // reading position is the backend's (its database, in the account's
-    // own folder), so check 58 is.
+    // always uses the one folder. Checks 26, 45 and 65 aren't run there:
+    // SKIP, never PASS. The reading position is the backend's (its
+    // database, in the account's own folder), so check 58 is.
     let windows = config.xvfb.is_none();
     if windows {
         for check in kept_here.into_iter().chain([Check::NoteDraft]) {
-            report.record(check, Ok(NOT_ON_WINDOWS.to_owned())).await;
+            report.record(check, Err(skipped(NOT_ON_WINDOWS))).await;
         }
     }
     let looks = match looks {

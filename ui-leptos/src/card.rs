@@ -219,6 +219,8 @@ struct State {
     highlights: HashMap<(i64, i64, i64), String>,
     highlights_loaded: bool,
     highlights_token: u64,
+    /// Reloads of the highlights still on their way.
+    highlights_reloading: u32,
     /// The chapter's notes, each with the backend's own object for it (for
     /// the margin, which may open one in the note editor).
     chapter_notes: Vec<(SelectionNote, JsValue)>,
@@ -583,6 +585,7 @@ fn render_selection() {
         s.show_all_notes = false;
     });
     els.notes.remove();
+    crate::note_copy::show_in_card(&[]);
     let Some(last) = last else {
         close_preview(false);
         let verse = with(|s| s.card_verse.take());
@@ -1280,12 +1283,17 @@ fn toggle_bookmark() -> Task {
 pub fn refresh_highlights() -> impl Future<Output = ()> + 'static {
     let token = with(|s| {
         s.highlights_token += 1;
+        s.highlights_reloading += 1;
         s.highlights_token
     });
     let sent = ipc::send("list_highlights", JsValue::UNDEFINED);
     async move {
         let got = answer(sent).await.and_then(read::<Vec<Highlight>>);
-        if with(|s| s.highlights_token) != token {
+        let newest = with(|s| {
+            s.highlights_reloading = s.highlights_reloading.saturating_sub(1);
+            s.highlights_token == token
+        });
+        if !newest {
             return;
         }
         match got {
@@ -1386,6 +1394,13 @@ fn highlight_selection(color: Option<String>) -> Task {
     let Some((attempt, (book_id, chapter, start, end))) = found else {
         return Box::pin(async {});
     };
+    // Newer than any reload on its way, which may have been answered
+    // before this change: its answer is dropped, not painted over this
+    // one (C2-04), and the highlights are read again once this is in.
+    let overtook = with(|s| {
+        s.highlights_token += 1;
+        s.highlights_reloading > 0
+    });
     let sent = match &color {
         Some(color) => send(
             "set_highlight",
@@ -1415,6 +1430,9 @@ fn highlight_selection(color: Option<String>) -> Task {
                 text::highlight_failed(color.as_deref(), &ipc::error_text(&e)),
                 true,
             );
+            if overtook {
+                spawn_local(refresh_highlights());
+            }
             return;
         }
         with(|s| {
@@ -1435,6 +1453,11 @@ fn highlight_selection(color: Option<String>) -> Task {
             update_highlight_controls();
         }
         status_for(attempt, text::highlight_done(color.as_deref()), false);
+        // What the reload this overtook would have shown (another change,
+        // an import), read again with this one in it.
+        if overtook {
+            spawn_local(refresh_highlights());
+        }
         // The Library's list, not waited for (as before).
         spawn_local(refresh_library(&["highlights"]));
     })
@@ -1584,6 +1607,12 @@ fn refresh_selection_notes() -> Task {
         return Box::pin(async {});
     };
     let sent = send("list_notes", &args);
+    let passage = PassageOut {
+        book_id: args.book_id,
+        chapter: args.chapter,
+        start: args.verse_start,
+        end: args.verse_end,
+    };
     Box::pin(async move {
         let got = answer(sent).await.and_then(|raw| {
             let notes: Vec<SelectionNote> = read(raw.clone())?;
@@ -1611,8 +1640,9 @@ fn refresh_selection_notes() -> Task {
             }
         }
         render_notes_section();
-        // The note editor, if it's open and adding, lists them too.
-        dispatch_others();
+        // The note editor, if it's open and adding on this passage, lists
+        // them too.
+        dispatch_others(&passage);
     })
 }
 
@@ -1637,12 +1667,21 @@ fn others() -> Vec<Other> {
     })
 }
 
-fn dispatch_others() {
+/// Tells the note editor the notes on `passage`, the one they were listed
+/// for: it shows them only if it's adding on that passage (C2-01).
+fn dispatch_others(passage: &PassageOut) {
     #[derive(Serialize)]
-    struct Others {
+    struct Others<'a> {
+        passage: &'a PassageOut,
         others: Vec<Other>,
     }
-    bridge::dispatch(bridge::NOTE_OTHERS_EVENT, &Others { others: others() });
+    bridge::dispatch(
+        bridge::NOTE_OTHERS_EVENT,
+        &Others {
+            passage,
+            others: others(),
+        },
+    );
 }
 
 /// The selection's Notes section, under its actions: shown only when notes
@@ -1672,6 +1711,7 @@ fn render_notes_section() {
     let Some((reference, notes, error, show_all)) = shown.filter(|_| els.actions.is_connected())
     else {
         els.notes.remove();
+        crate::note_copy::show_in_card(&[]);
         place_card();
         return;
     };
@@ -1681,11 +1721,13 @@ fn render_notes_section() {
         .set_attribute("aria-label", &format!("Notes for {reference}"));
     els.notes
         .set_inner_html(&text::notes_html(&notes, &error, show_all));
-    // Copy as Markdown writes within its click: each note's Markdown is
-    // asked for now.
-    for note in &notes {
-        crate::note_copy::prefetch(note.id, &note.body);
-    }
+    // Copy as Markdown writes within its click or key press: the Markdown
+    // of each note shown is asked for now, and kept while it's shown.
+    let shown: Vec<crate::note_copy::Copyable> = text::notes_shown(&notes, show_all)
+        .iter()
+        .map(Into::into)
+        .collect();
+    crate::note_copy::show_in_card(&shown);
     let _ = els.xrefs.before_with_node_1(&els.notes);
     // "more" only where the text is cut short.
     for body in query_all(&els.notes, ".note-card-body[id]") {
@@ -2573,14 +2615,9 @@ pub fn ask(ask: Ask) -> bool {
                 return false;
             };
             let attempt = with(State::attempt);
-            crate::note_copy::copy(
-                note.id,
-                note.reference,
-                &note.body,
-                move |message, is_error| {
-                    status_for(attempt, message, is_error);
-                },
-            );
+            crate::note_copy::copy(&(&note).into(), note.reference, move |message, is_error| {
+                status_for(attempt, message, is_error);
+            });
             true
         }
         Ask::ShowAll => {

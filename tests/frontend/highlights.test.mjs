@@ -166,12 +166,13 @@ test('highlights show in both compare columns and in the faded neighbors', async
 
 test('a highlight on a verse one translation doesn\'t number shows nothing there', async () => {
     await backend('__reset', {});
-    // Matthew 2:23 is numbered in the WEB, not the KJV.
-    await backend('set_highlight', { bookId: bookId('Matthew'), chapter: 2, verseStart: 23, verseEnd: 23, color: 'green' });
-    await withApp({ book: 'Matthew', chapter: 2, translation: 'web', keepBookmarks: true }, async (app) => {
-        assert.equal(app.verse(23).dataset.highlight, 'green');
+    // Romans 14:24 is numbered in the WEB, not the KJV. (Until 2.29.2 the
+    // KJV's Matthew 2:23, a verse it was short, was the example.)
+    await backend('set_highlight', { bookId: bookId('Romans'), chapter: 14, verseStart: 24, verseEnd: 24, color: 'green' });
+    await withApp({ book: 'Romans', chapter: 14, translation: 'web', keepBookmarks: true }, async (app) => {
+        assert.equal(app.verse(24).dataset.highlight, 'green');
     });
-    await withApp({ book: 'Matthew', chapter: 2, translation: 'kjv', keepBookmarks: true }, async (app) => {
+    await withApp({ book: 'Romans', chapter: 14, translation: 'kjv', keepBookmarks: true }, async (app) => {
         assert.equal(app.document.querySelectorAll('.chapter-main .verse[data-highlight]').length, 0);
         assert.deepEqual(app.consoleErrors, []);
     });

@@ -126,3 +126,41 @@ test('the keyboard reaches each row’s link and its secondary button, in that o
         assert.deepEqual(focusable, [row.querySelector('.bookmark-open'), row.querySelector('.note-list-edit'), row.querySelector('.note-list-copy')]);
         assert.ok(focusable.every((b) => b.tabIndex === 0 && b.type === 'button'));
     }));
+
+test('records on verses the KJV numbered until 2.29.2 stay listed, as not numbered', async () => {
+    // 3 John 1:15, Revelation 12:18 and 1 Samuel 20:43: halves of verses
+    // the KJV's earlier source split in two, which no translation numbers
+    // now. Each can still be saved (as an undo or an import saves it).
+    await backend('__reset', { bookId: JOHN, chapter: 3, translationCode: 'kjv' });
+    await backend('add_bookmark', { bookId: bookId('3 John'), chapter: 1, verseStart: 15, verseEnd: 15 });
+    await backend('set_highlight', { bookId: bookId('Revelation'), chapter: 12, verseStart: 18, verseEnd: 18, color: 'pink' });
+    await backend('add_note', { bookId: bookId('1 Samuel'), chapter: 20, verseStart: 43, verseEnd: 43, body: 'Jonathan went into the city.' });
+    for (const [translation, name] of [['kjv', 'King James Version'], ['web', 'World English Bible']]) {
+        const app = await openApp({ book: 'Romans', chapter: 8, translation, keepBookmarks: true });
+        try {
+            const shown = (list) => rowsOf(app, list).map((row) => [
+                row.querySelector('.bookmark-ref').textContent,
+                row.querySelector('.bookmark-preview, .note-preview').textContent,
+                row.querySelector('.bookmark-preview')?.classList.contains('is-missing') ?? null,
+            ]);
+            const missing = `Not numbered in the ${translation.toUpperCase()}`;
+            app.openLibrary('bookmarks');
+            assert.deepEqual(shown('bookmark'), [['3 John 1:15', missing, true]]);
+            app.openLibrary('highlights');
+            assert.deepEqual(shown('highlight'), [['Revelation 12:18', missing, true]]);
+            app.openLibrary('notes');
+            assert.deepEqual(shown('note'), [['1 Samuel 20:43', 'Jonathan went into the city.', null]]);
+
+            await clickRow(app, rowsOf(app, 'note')[0]);
+            assert.equal(app.heading(), '1 Samuel 20');
+            assert.deepEqual(app.selectedVerseNumbers(), [], 'never selects a different verse');
+            assert.equal(
+                app.notice(),
+                `1 Samuel 20:43 isn't numbered in the ${name} — 1 Samuel 20 ends at verse 42 there. Showing the whole chapter.`,
+            );
+            assert.deepEqual(app.consoleErrors, []);
+        } finally {
+            app.close();
+        }
+    }
+});

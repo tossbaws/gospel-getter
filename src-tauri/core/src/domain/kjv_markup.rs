@@ -1,7 +1,9 @@
 //! The bundled KJV's inline `{…}` markup, and how the app shows it.
 //!
-//! The KJV's source (thiagobodruk/bible) marks two things with braces, and
-//! the database stores them verbatim (see the README's "Data provenance"):
+//! The KJV's source (thiagobodruk/bible, and for ten chapters eBible.org's
+//! USFM read into the same markup: `sources/kjv`) marks two things with
+//! braces, and the database stores them verbatim (see the README's "Data
+//! provenance"):
 //!
 //! - **translator-supplied words**, which printed KJVs set in italics:
 //!   "The LORD {is} my shepherd";
@@ -676,8 +678,11 @@ mod tests {
         assert_eq!(unmarked, ["Luke 10:22", "Luke 17:36"]);
         assert_eq!(colons.len(), 7, "{colons:?}");
         assert!(colons.contains(&"Genesis 30:27".to_string()));
-        assert_eq!((changed, notes, supplied), (17_362, 7_862, 21_521));
-        assert_eq!((with_lemma, longest_lemma), (7_851, 6));
+        // 2.29.2's ten chapters from eBible.org (`sources/kjv`) have 28 fewer
+        // notes (its New Testament has none) and one fewer supplied span:
+        // before, (17_362, 7_862, 21_521) and 7_851 with a lemma.
+        assert_eq!((changed, notes, supplied), (17_342, 7_834, 21_520));
+        assert_eq!((with_lemma, longest_lemma), (7_823, 6));
         assert_eq!(
             without_lemma,
             [
