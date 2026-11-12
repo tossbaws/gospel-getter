@@ -7,21 +7,29 @@ Tauri CLI as `cargo tauri`):
         [--private-key-path KEY --pubkey-file KEY.pub]
 
 DIR holds the four installers the dist.yml jobs built, each in the folder
-of the artifact it was downloaded into (download-artifact's layout):
+of the build artifact it was downloaded into, by its name:
 
     gospel-getter-linux-appimage/Gospel Getter_X.Y.Z_amd64.AppImage
     gospel-getter-linux-deb/Gospel Getter_X.Y.Z_amd64.deb
     gospel-getter-windows-nsis-installer/Gospel Getter_X.Y.Z_x64-setup.exe
     gospel-getter-windows-msi-installer/Gospel Getter_X.Y.Z_x64_en-US.msi
 
-Each gets the .sig beside it that `cargo tauri build` writes when it signs
-(`cargo tauri signer sign --app-version`, the same signature, bound to the
-version in src-tauri/tauri.conf.json), and each signature is checked: for
-that version, and by the key the app trusts (the updater pubkey in
-tauri.conf.json, or --pubkey-file). Then, for a release version, the
-update manifest is made from them in a scratch folder
-(make_latest_json.build_manifest), so a run that signs is one a release
-can take; nothing is written there but the .sig files.
+They're the build's own artifacts, as built: never one this signed before
+(a folder with a .sig or an INSTALLER-SHA256SUMS, or a *-signed artifact,
+is refused). First each installer's SHA-256 is written beside it, in
+INSTALLER-SHA256SUMS (as `sha256sum` writes it, and checks it with -c).
+Then each gets the .sig beside it that `cargo tauri build` writes when it
+signs (`cargo tauri signer sign --app-version`, the same signature, bound
+to the version in src-tauri/tauri.conf.json), and each signature is
+checked: for that version, and by the key the app trusts (the updater
+pubkey in tauri.conf.json, or --pubkey-file). Signing only adds the .sig,
+so each installer is hashed again and must be what was recorded. Then,
+for a release version, the update manifest is made from them in a
+scratch folder (make_latest_json.build_manifest), so a run that signs is
+one a release can take. Nothing is written in DIR but the .sig and
+INSTALLER-SHA256SUMS files: dist.yml's sign job uploads each folder as
+the build artifact's name with -signed after it, leaving the build's
+artifacts as they were, so a failed sign job can be run again on them.
 
 The key is the Tauri CLI's to read: TAURI_SIGNING_PRIVATE_KEY and
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD in the environment (dist.yml's sign
@@ -33,6 +41,7 @@ without a password). This script never reads the key itself.
 import argparse
 import base64
 import binascii
+import hashlib
 import json
 import os
 import shlex
@@ -45,6 +54,13 @@ import make_latest_json
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONF = REPO_ROOT / "src-tauri" / "tauri.conf.json"
+
+# Beside each installer: its SHA-256, recorded before it's signed.
+SUMS = "INSTALLER-SHA256SUMS"
+
+# What dist.yml's sign job puts after a build artifact's name for the one
+# it uploads, signed.
+SIGNED_SUFFIX = "-signed"
 
 # Each installer, by the end of its file name, and its platform key in the
 # update manifest (make_latest_json.PLATFORMS).
@@ -78,6 +94,79 @@ def find_installers(root: Path) -> dict[str, Path]:
     if problems:
         raise SigningError(f"under {root}: {'; '.join(problems)}")
     return {key: paths[0] for key, paths in found.items()}
+
+
+def sha256(path: Path) -> str:
+    """The file's SHA-256, in hex."""
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def refuse_signed_artifacts(root: Path) -> None:
+    """No folder of a signed artifact (`*-signed`) among the downloads:
+    only the build's own artifacts are signed."""
+    signed = sorted(p.name for p in root.rglob(f"*{SIGNED_SUFFIX}") if p.is_dir())
+    if signed:
+        raise SigningError(
+            f"{', '.join(signed)} under {root}: a signed artifact, not the build's own; "
+            "sign the build's artifacts as they were built"
+        )
+
+
+def refuse_signed_before(installers: dict[str, Path]) -> None:
+    """Nothing signed or hashed before: the installers as they were built."""
+    for installer in installers.values():
+        for stale in (installer.with_name(installer.name + ".sig"), installer.with_name(SUMS)):
+            if stale.exists():
+                raise SigningError(
+                    f"{stale.name} is already beside {installer.name}: these installers were signed before"
+                )
+
+
+def record_hashes(installers: dict[str, Path]) -> dict[str, str]:
+    """Writes each installer's SHA-256 beside it, in SUMS (`sha256sum`'s
+    format), before it's signed; returns them, by platform key. Each
+    installer is in its artifact's own folder, which the SUMS goes up with."""
+    folders = [installer.parent for installer in installers.values()]
+    if len(set(folders)) != len(folders):
+        raise SigningError("two installers share a folder: each should be in its own artifact's")
+    hashes = {}
+    for key, installer in installers.items():
+        hashes[key] = sha256(installer)
+        installer.with_name(SUMS).write_text(f"{hashes[key]}  {installer.name}\n", encoding="utf-8")
+    return hashes
+
+
+def recorded_hash(installer: Path) -> str:
+    """The SHA-256 recorded for `installer` in the SUMS beside it."""
+    sums = installer.with_name(SUMS)
+    try:
+        lines = sums.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        raise SigningError(f"no {SUMS} beside {installer.name}") from None
+    for line in lines:
+        digest, sep, name = line.partition("  ")
+        if sep and name == installer.name:
+            return digest
+    raise SigningError(f"{SUMS} beside {installer.name} has no line for it")
+
+
+def check_hashes(installers: dict[str, Path], recorded: dict[str, str]) -> None:
+    """Each installer is byte for byte what it was before it was signed:
+    signing only adds the .sig. Checked against what was recorded, here and
+    in the SUMS file that goes with it."""
+    for key, installer in installers.items():
+        now = sha256(installer)
+        if now != recorded[key]:
+            raise SigningError(
+                f"{installer.name} changed while it was signed: SHA-256 {recorded[key]} before, {now} after"
+            )
+        written = recorded_hash(installer)
+        if written != recorded[key]:
+            raise SigningError(f"{SUMS} beside {installer.name} says {written}, not the {recorded[key]} recorded")
 
 
 def key_id(text: str, what: str) -> bytes:
@@ -190,20 +279,21 @@ def main(argv: list[str] | None = None) -> int:
             pubkey = args.pubkey_file.read_text(encoding="utf-8").strip()
         else:
             pubkey = app_pubkey(args.conf)
+        refuse_signed_artifacts(args.installers)
         installers = find_installers(args.installers)
-        for installer in installers.values():
-            stale = installer.with_name(installer.name + ".sig")
-            if stale.exists():
-                raise SigningError(f"{stale.name} is already there: these installers were signed before")
+        refuse_signed_before(installers)
+        hashes = record_hashes(installers)
         sign(installers, version, shlex.split(args.cli), args.private_key_path)
         for installer in installers.values():
             check_signature(installer, version, pubkey)
+        check_hashes(installers, hashes)
         rehearsal = rehearse_manifest(installers, version)
     except SigningError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    for installer in installers.values():
+    for key, installer in installers.items():
         print(f"Signed {installer.name} for {version} ({installer.name}.sig)")
+        print(f"  SHA-256 {hashes[key]}, the same before and after ({SUMS})")
     print(f"By key {shown(key_id(pubkey, 'the public key'))}; {rehearsal}")
     return 0
 

@@ -70,7 +70,7 @@ use thirtyfour::prelude::*;
 
 use crate::config::Config;
 use crate::native;
-use crate::report::{Check, Report};
+use crate::report::{Check, Report, is_skip};
 use crate::ui::{Ui, log_line};
 use crate::update_server::UpdateServer;
 
@@ -409,7 +409,9 @@ async fn shipped(
             ),
             (Check::SingleKeys, run.single_key_switch().await),
         ] {
-            if result.is_err() {
+            // A skip (the sidebar's checks, on a window that can't be made
+            // wide enough on Windows) is no failure: no screenshot.
+            if result.as_ref().is_err_and(|e| !is_skip(e)) {
                 run.failure_screenshot(check).await;
             }
             report.record(check, result).await;

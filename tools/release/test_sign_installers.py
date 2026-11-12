@@ -3,15 +3,18 @@
 
 The Tauri CLI is stood in for by a small script that writes a signature
 shaped as the CLI writes one, by a key ID the test chooses, and records how
-it was called.
+it was called (and, when a test asks, changes the installer it signs).
 """
 
 import base64
 import contextlib
+import hashlib
 import io
 import json
 import os
 import shlex
+import shutil
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -52,6 +55,9 @@ FAKE_CLI = textwrap.dedent(
         "FakeGlobalSignature==\\n"
     )
     target.with_name(target.name + ".sig").write_text(base64.b64encode(text.encode()).decode())
+    if os.environ.get("FAKE_CHANGE_INSTALLER") == target.name:
+        with open(target, "ab") as installer:
+            installer.write(b" changed")
     """
 )
 
@@ -72,7 +78,7 @@ class SignInstallers(unittest.TestCase):
         self.dir = root / "installers"
         for artifact, name in INSTALLERS.items():
             (self.dir / artifact).mkdir(parents=True)
-            (self.dir / artifact / name).write_bytes(b"installer")
+            (self.dir / artifact / name).write_bytes(f"installer {name}".encode())
         # The CLI beside the installers is no installer.
         (self.dir / "gospel-getter-cli-x86_64-pc-windows-msvc.exe").write_bytes(b"cli")
         self.conf = root / "tauri.conf.json"
@@ -89,6 +95,7 @@ class SignInstallers(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop("FAKE_SIGNED_VERSION", None)
+        os.environ.pop("FAKE_CHANGE_INSTALLER", None)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -189,6 +196,109 @@ class SignInstallers(unittest.TestCase):
         code, _, err = self.run_main()
         self.assertEqual(code, 1)
         self.assertIn("were signed before", err)
+        self.assertEqual(self.calls_made(), [])
+
+    def sums(self, root=None):
+        """Each artifact's INSTALLER-SHA256SUMS under `root`, by artifact."""
+        root = root or self.dir
+        return {
+            artifact: (root / artifact / s.SUMS).read_text(encoding="utf-8")
+            for artifact in INSTALLERS
+            if (root / artifact / s.SUMS).is_file()
+        }
+
+    def test_records_each_installers_sha256_beside_it(self):
+        code, out, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        sums = self.sums()
+        for artifact, name in INSTALLERS.items():
+            digest = hashlib.sha256(f"installer {name}".encode()).hexdigest()
+            # As `sha256sum` writes it: the hash, two spaces, the file's name.
+            self.assertEqual(sums[artifact], f"{digest}  {name}\n")
+            self.assertIn(f"SHA-256 {digest}, the same before and after", out)
+
+    def test_the_record_is_what_sha256sum_checks(self):
+        sha256sum = shutil.which("sha256sum")
+        if sha256sum is None:
+            self.skipTest("no sha256sum here")
+        code, _, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        for artifact in INSTALLERS:
+            checked = subprocess.run(
+                [sha256sum, "-c", s.SUMS], cwd=self.dir / artifact, capture_output=True, text=True
+            )
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
+    def test_refuses_an_installer_that_signing_changed(self):
+        name = INSTALLERS["gospel-getter-windows-nsis-installer"]
+        os.environ["FAKE_CHANGE_INSTALLER"] = name
+        before = hashlib.sha256(f"installer {name}".encode()).hexdigest()
+        code, out, err = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn(f"{name} changed while it was signed: SHA-256 {before} before, ", err)
+        self.assertNotIn("Signed ", out)
+
+    def test_a_hash_that_isnt_the_one_recorded_is_refused(self):
+        installers = s.find_installers(self.dir)
+        recorded = s.record_hashes(installers)
+        s.check_hashes(installers, recorded)
+        key = "linux-x86_64-deb"
+        with self.assertRaisesRegex(s.SigningError, "changed while it was signed"):
+            s.check_hashes(installers, {**recorded, key: "0" * 64})
+        # And the file that goes up with it must say the same.
+        installers[key].with_name(s.SUMS).write_text(f"{'0' * 64}  {installers[key].name}\n")
+        with self.assertRaisesRegex(s.SigningError, "INSTALLER-SHA256SUMS beside .* says 0+, not the"):
+            s.check_hashes(installers, recorded)
+
+    def test_a_failed_sign_job_runs_again_on_the_build_artifacts(self):
+        # The build's artifacts, which the sign job never replaces: each
+        # attempt downloads them afresh.
+        build = Path(self.tmp.name) / "build-artifacts"
+        shutil.copytree(self.dir, build)
+        first = Path(self.tmp.name) / "attempt-1"
+        shutil.copytree(build, first)
+        self.dir = first
+        code, _, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        recorded = self.sums()
+        # What signed once is refused (as when the sign job replaced the
+        # build's artifacts with signed ones, and a re-run took those).
+        code, _, err = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn("were signed before", err)
+        # The re-run's own download: the build's artifacts, as built.
+        second = Path(self.tmp.name) / "attempt-2"
+        shutil.copytree(build, second)
+        self.dir = second
+        code, _, err = self.run_main()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.sums(), recorded, "the same installers, the same hashes")
+        for artifact, name in INSTALLERS.items():
+            self.assertEqual(
+                sorted(p.name for p in (build / artifact).iterdir()), [name], "the build's artifacts are untouched"
+            )
+
+    def test_signs_nothing_when_a_signed_artifact_was_downloaded(self):
+        # A pattern such as gospel-getter-linux-* would also take the sign
+        # job's own gospel-getter-linux-appimage-signed.
+        signed = self.dir / "gospel-getter-linux-appimage-signed"
+        signed.mkdir()
+        name = INSTALLERS["gospel-getter-linux-appimage"]
+        (signed / name).write_bytes(f"installer {name}".encode())
+        (signed / f"{name}.sig").write_text("earlier")
+        code, _, err = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn("gospel-getter-linux-appimage-signed under", err)
+        self.assertIn("a signed artifact, not the build's own", err)
+        self.assertEqual(self.calls_made(), [])
+        self.assertEqual(self.sums(), {})
+
+    def test_signs_nothing_when_an_installer_was_hashed_before(self):
+        artifact = "gospel-getter-windows-msi-installer"
+        (self.dir / artifact / s.SUMS).write_text(f"{'0' * 64}  {INSTALLERS[artifact]}\n")
+        code, _, err = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn("INSTALLER-SHA256SUMS is already beside", err)
         self.assertEqual(self.calls_made(), [])
 
     def test_needs_a_key(self):

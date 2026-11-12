@@ -312,8 +312,11 @@ newest one:
 
 **Build and install it yourself (Linux).** `packaging/install.sh` builds a
 release AppImage and adds a launcher and icon to your desktop.
-`packaging/uninstall.sh` removes them. Rerun `install.sh` to update after
-changing the code. You'll need Rust and the Tauri CLI
+`packaging/uninstall.sh` removes them. It asks first whether to delete your
+reading data too (your notes, bookmarks, highlights, AI findings and
+reading place, in the app's data folder): only `y` does, so export it
+first (☰ → **Export data…**) if you want a copy. Rerun `install.sh` to
+update after changing the code. You'll need Rust and the Tauri CLI
 (`cargo install tauri-cli --version "^2.0.0" --locked`).
 
 **Run from source.** `cd src-tauri && cargo tauri dev`. The page's Rust

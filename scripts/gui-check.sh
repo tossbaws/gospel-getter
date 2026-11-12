@@ -14,12 +14,14 @@
 # made from too.
 #
 # The out-dir (default target/gui-check/<timestamp>/) gets results.txt (one
-# PASS/FAIL line per check, with the reason: every check listed, a check
-# with no result as a FAIL saying why), steps.log, screenshots/*.png
+# PASS, SKIP or FAIL line per check, with the reason: every check listed, a
+# check with no result as a FAIL saying why; SKIP is a check that can't run
+# on this platform, as 26, 45 and 65 on Windows), steps.log, screenshots/*.png
 # (taken by WebKit or WebView2 through WebDriver), app.log, driver.log
 # (tauri-driver with the native driver's own output) and environment.txt;
 # on Windows, launched.txt too (the apps gui-launch started).
-# Exit code 0 only if every check passed.
+# Exit code 0 only if no check failed: every one passed, or was skipped
+# (SKIP isn't a failure, nor a pass: the totals at the end count it apart).
 #
 # Checks 1 to 8, 14 to 16 (the Library), 17 to 19 (search and the
 # palette), 20 to 24 (the book and chapter picker), 25 to 29 (Aa, the
@@ -205,14 +207,10 @@ setup_failed() {
     exit 1
 }
 
-# Every check gets a line in results.txt: those with no result get a FAIL
-# saying why.
-complete_results() {
-    local check
-    for check in "${checks[@]}"; do
-        grep -qE "^(PASS|FAIL) ${check%% *} " "$results" || echo "FAIL $check: $1" >>"$results"
-    done
-}
+# What results.txt's lines mean (PASS, SKIP, FAIL): complete_results,
+# result_totals and run_status, on $results and $checks.
+# shellcheck source=scripts/gui-check-results.sh
+source "$repo/scripts/gui-check-results.sh"
 
 # ---- Cleanup: everything this run started, whatever happens. ----
 
@@ -695,7 +693,8 @@ else
     why="no result: the checks stopped early (exit $status, see steps.log)"
 fi
 complete_results "$why"
-grep -q '^FAIL ' "$results" && ((status == 0)) && status=1
+status="$(run_status "$status")"
+log "results: $(result_totals)"
 log "checks finished (exit $status) in $((SECONDS - started))s"
 cat "$results" >&2
 exit "$status"
