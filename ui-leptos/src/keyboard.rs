@@ -205,12 +205,7 @@ fn not_ours(event: &KeyboardEvent) -> bool {
             return true;
         }
     }
-    page::import_open()
-        || page::about_open()
-        || page::note_open()
-        || page::export_choice_open()
-        || page::export_notes_open()
-        || page::shortcuts_open()
+    page::modal_open()
 }
 
 /// No text is selected on the page (a drag-highlight copies as usual).

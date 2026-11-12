@@ -42,9 +42,13 @@ name: Distribution Artifacts
 #     have passed on these very files. It signs each installer as `cargo
 #     tauri build` would (tools/release/sign_installers.py: the same .sig,
 #     bound to the app's version), checks each signature is by the app's
-#     key, makes the update manifest from them as a dry run, and puts each
-#     installer's artifact back with its .sig beside it, for
-#     tools/release/make_latest_json.py.
+#     key, checks each installer is byte for byte what was built (its
+#     SHA-256, recorded before signing), makes the update manifest from
+#     them as a dry run, and uploads each installer with its .sig and its
+#     SHA-256 (INSTALLER-SHA256SUMS) as an artifact of its own, the build
+#     artifact's name with -signed after it, for tools/release/README.md's
+#     publishing. The build's own artifacts are never replaced, so a sign
+#     job that fails can be re-run (Re-run failed jobs) on them as built.
 #   - dispatched on another branch, or a pull request from a release/
 #     branch: unsigned, and sign-rehearsal does all of that with a throwaway
 #     key made for the run instead, uploading nothing, so a change to the
@@ -801,9 +805,13 @@ jobs:
 
   # The release's updater signatures (see the top of this file): only on a
   # run dispatched on main, and only once both platforms' GUI checks have
-  # passed on the very files it signs (nothing reads the installer
-  # artifacts after this job puts them back). The only job that names the
-  # signing key's secrets; it builds nothing of the repository's.
+  # passed on the very files it signs. It downloads the four build
+  # artifacts by their exact names (never a -signed one, which a pattern
+  # such as gospel-getter-linux-* would also take) and uploads each signed
+  # as <name>-signed, leaving the build's artifacts as they were: a re-run
+  # of a failed attempt signs them again, and replaces whatever -signed
+  # artifacts that attempt uploaded. The only job that names the signing
+  # key's secrets; it builds nothing of the repository's.
   sign:
     name: Sign the installers (release)
     needs: [linux, windows, gui-linux, gui-windows]
@@ -824,17 +832,31 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
 
-      - name: Download the Linux installers
+      # The build's four artifacts by name, each into a folder of that
+      # name (sign_installers.py's layout).
+      - name: Download the AppImage
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: gospel-getter-linux-*
-          path: installers
+          name: gospel-getter-linux-appimage
+          path: installers/gospel-getter-linux-appimage
 
-      - name: Download the Windows installers
+      - name: Download the deb
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: gospel-getter-windows-*
-          path: installers
+          name: gospel-getter-linux-deb
+          path: installers/gospel-getter-linux-deb
+
+      - name: Download the NSIS installer
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: gospel-getter-windows-nsis-installer
+          path: installers/gospel-getter-windows-nsis-installer
+
+      - name: Download the MSI installer
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: gospel-getter-windows-msi-installer
+          path: installers/gospel-getter-windows-msi-installer
 
       - name: Sign the installers
         env:
@@ -843,36 +865,39 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 tools/release/sign_installers.py installers
 
-      # Each installer's artifact again, now with its .sig beside it, under
-      # the name a release takes it by (tools/release/README.md).
-      - name: Put back the AppImage artifact, signed
+      # Each installer with its .sig and INSTALLER-SHA256SUMS beside it, as
+      # the -signed artifact a release takes it from (tools/release/
+      # README.md). Never under a build artifact's own name. overwrite: a
+      # re-run of this job replaces what a failed attempt uploaded, always
+      # from the build's artifacts as they were.
+      - name: Upload the signed AppImage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: gospel-getter-linux-appimage
+          name: gospel-getter-linux-appimage-signed
           path: installers/gospel-getter-linux-appimage/
           if-no-files-found: error
           overwrite: true
 
-      - name: Put back the deb artifact, signed
+      - name: Upload the signed deb
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: gospel-getter-linux-deb
+          name: gospel-getter-linux-deb-signed
           path: installers/gospel-getter-linux-deb/
           if-no-files-found: error
           overwrite: true
 
-      - name: Put back the NSIS installer artifact, signed
+      - name: Upload the signed NSIS installer
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: gospel-getter-windows-nsis-installer
+          name: gospel-getter-windows-nsis-installer-signed
           path: installers/gospel-getter-windows-nsis-installer/
           if-no-files-found: error
           overwrite: true
 
-      - name: Put back the MSI installer artifact, signed
+      - name: Upload the signed MSI installer
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: gospel-getter-windows-msi-installer
+          name: gospel-getter-windows-msi-installer-signed
           path: installers/gospel-getter-windows-msi-installer/
           if-no-files-found: error
           overwrite: true
@@ -880,7 +905,9 @@ jobs:
   # The sign job's steps on a run that can't be released, with a key made
   # for the run in place of the release's (and checked against its own
   # public key): a run dispatched on another branch, or a pull request from
-  # a release/ branch. It uploads nothing, and names no secret.
+  # a release/ branch. The same downloads and the same sign_installers.py
+  # (each installer's SHA-256 recorded, signed, and checked unchanged). It
+  # uploads nothing, and names no secret.
   sign-rehearsal:
     name: Signing rehearsal (throwaway key)
     needs: [linux, windows]
@@ -898,17 +925,31 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
 
-      - name: Download the Linux installers
+      # The build's four artifacts by name, each into a folder of that
+      # name (sign_installers.py's layout).
+      - name: Download the AppImage
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: gospel-getter-linux-*
-          path: installers
+          name: gospel-getter-linux-appimage
+          path: installers/gospel-getter-linux-appimage
 
-      - name: Download the Windows installers
+      - name: Download the deb
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: gospel-getter-windows-*
-          path: installers
+          name: gospel-getter-linux-deb
+          path: installers/gospel-getter-linux-deb
+
+      - name: Download the NSIS installer
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: gospel-getter-windows-nsis-installer
+          path: installers/gospel-getter-windows-nsis-installer
+
+      - name: Download the MSI installer
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: gospel-getter-windows-msi-installer
+          path: installers/gospel-getter-windows-msi-installer
 
       # Without a password, as `cargo tauri signer generate --ci` makes it.
       - name: Make a throwaway signing key

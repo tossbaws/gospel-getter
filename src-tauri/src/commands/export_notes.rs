@@ -776,7 +776,7 @@ mod tests {
                 "<b>Typed</b> HTML.\n\nA second paragraph.",
             ),
             (at(43, 3, 16, 16), "# Not a heading\n- not a list"),
-            (at(40, 2, 23, 23), "Nazareth."),
+            (at(45, 14, 24, 24), "Doxology."),
         ] {
             note_add(&state, passage, body).await.unwrap();
         }
@@ -804,16 +804,17 @@ mod tests {
             verse("kjv", 43, 3, 17),
             verse("kjv", 43, 3, 18),
         )));
-        assert!(!john.contents.contains("Confess") && !john.contents.contains("Nazareth"));
+        assert!(!john.contents.contains("Confess") && !john.contents.contains("Doxology"));
 
-        // Every note: Matthew 2:23 is numbered in the WEB, not the KJV, and
-        // is kept either way.
+        // Every note: Romans 14:24 is numbered in the WEB, not the KJV, and
+        // is kept either way. (Until 2.29.2 the KJV's Matthew 2:23, a verse
+        // it was short, was the example.)
         let kjv = export("kjv", None).await.unwrap();
         assert_eq!(kjv.file_name, "gospel-getter-notes-2026-10-09.md");
         assert_eq!(kjv.notes, 4);
         assert!(kjv.contents.contains(
-            "## Matthew\n\n### Matthew 2:23\n\n\
-             *It isn\u{2019}t numbered in the KJV.*\n\nNazareth.\n"
+            "## Romans\n\n### Romans 14:24\n\n\
+             *It isn\u{2019}t numbered in the KJV.*\n\nDoxology.\n"
         ));
         let web = export("web", None).await.unwrap();
         assert!(
@@ -821,8 +822,8 @@ mod tests {
                 .contains("Verse text: World English Bible \u{b7} 4 notes\n")
         );
         assert!(web.contents.contains(&format!(
-            "### Matthew 2:23\n\n> **23** {}\n\nNazareth.\n",
-            verse("web", 40, 2, 23)
+            "### Romans 14:24\n\n> **24** {}\n\nDoxology.\n",
+            verse("web", 45, 14, 24)
         )));
         assert!(!web.contents.contains("numbered in the"));
         let books: Vec<&str> = web
@@ -830,7 +831,7 @@ mod tests {
             .lines()
             .filter(|l| l.starts_with("## "))
             .collect();
-        assert_eq!(books, ["## Matthew", "## John", "## 1 John"]);
+        assert_eq!(books, ["## John", "## Romans", "## 1 John"]);
 
         // What's asked for is checked, even though the UI never asks for it.
         assert_eq!(

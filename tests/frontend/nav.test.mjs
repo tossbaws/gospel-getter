@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { closeBridge, openApp } from './harness.mjs';
+import { closeBridge, openApp, settle } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-nav-'));
 after(async () => {
@@ -466,4 +466,33 @@ test('in Compare, ‹ and › still name and turn the chapters beside', () =>
         await waitFor(app, () => app.click(next(app)), 'get_compare');
         assert.equal(app.heading(), 'Psalms 24');
         assert.equal(prev(app).title, 'Previous chapter: Psalms 23 (←)');
+    }));
+
+// C2-02: a translation switched while a jump's chapter is on its way: the
+// jump lands on the chapter it asked for, in the new translation, and is
+// recorded (Recent places, Back) as any jump is; the chapter that was on
+// screen isn't read again in its place.
+test('C2-02: a translation switched while a jump’s chapter is on its way: that chapter, in the new one, recorded', () =>
+    withApp({ book: 'John', chapter: 3 }, async (app) => {
+        const release = app.holdCommand('get_reading');
+        const since = app.calls.length;
+        app.click(pickerChapter(app, 'Psalms', 23));
+        await app.until(() => readings(app, since).length === 1, 'Psalm 23 asked for');
+        const select = el(app, 'translation-select');
+        select.value = 'web';
+        select.dispatchEvent(new app.window.Event('change', { bubbles: true }));
+        await settle();
+        release();
+        await app.waitForHeading('Psalms 23');
+        await app.idle(since);
+        assert.equal(app.heading(), 'Psalms 23');
+        assert.equal(app.verse(1).dataset.translation, 'web', 'in the new translation');
+        const last = app.calls.filter((c) => c.cmd === 'get_reading').at(-1);
+        assert.deepEqual([last.args.bookId, last.args.chapter, last.args.translationCode], [19, 23, 'web']);
+        assert.ok(!readings(app, since).some(([book, chapter]) => book === 43 && chapter === 3), 'John 3 isn’t read again');
+        openMenu(app);
+        assert.deepEqual(rows(app), ['Psalms 23 · WEByou are here', 'John 3 · KJV']);
+        app.key('Escape', {}, app.document.activeElement);
+        await waitFor(app, () => app.key('ArrowLeft', { altKey: true }));
+        assert.equal(app.heading(), 'John 3', 'Back returns from the jump');
     }));

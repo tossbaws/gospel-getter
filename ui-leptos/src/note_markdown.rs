@@ -268,7 +268,7 @@ impl Render<'_> {
             if n > 0 {
                 pieces.push(Piece::Break);
             }
-            pieces.extend(scan(self.body, start, end));
+            pieces.extend(scan(self.body, start, end, false));
         }
         match_emphasis(&mut pieces);
         self.write(out, &pieces, between, false);
@@ -419,8 +419,9 @@ fn space_or_punct(c: Option<char>) -> (bool, bool) {
     }
 }
 
-/// The pieces of `body[start..end]`, one line.
-fn scan(body: &str, start: usize, end: usize) -> Vec<Piece> {
+/// The pieces of `body[start..end]`, one line; `in_link`, a link's text,
+/// where no link begins (its brackets and address are text as typed).
+fn scan(body: &str, start: usize, end: usize, in_link: bool) -> Vec<Piece> {
     let line = &body[start..end];
     let mut pieces = Vec::new();
     let mut text_from = 0;
@@ -500,13 +501,13 @@ fn scan(body: &str, start: usize, end: usize) -> Vec<Piece> {
                 text_from = i;
                 continue;
             }
-            '[' => {
+            '[' if !in_link => {
                 if let Some((text_end, address, length)) = web_link(rest) {
                     flush(&mut pieces, text_from, i);
-                    let mut inner = scan(body, start + i + 1, start + i + 1 + text_end);
+                    // No link inside a link (C2-03): a link typed in its
+                    // text, as an address, is text.
+                    let mut inner = scan(body, start + i + 1, start + i + 1 + text_end, true);
                     match_emphasis(&mut inner);
-                    // No link inside a link: an address in its text is
-                    // text.
                     pieces.push(Piece::Link(address, inner));
                     i += length;
                     text_from = i;
@@ -851,6 +852,55 @@ mod tests {
             html("[**bold** https://b.example](https://a.example)"),
             "<p><a class=\"note-web-link\" href=\"https://a.example\" title=\"https://a.example (opens in your browser)\">\
              <strong>bold</strong> https://b.example</a></p>"
+        );
+    }
+
+    /// C2-03: a link typed in a link's text is that text as typed, inside
+    /// the outer link: never an `<a>` in an `<a>`, which HTML doesn't
+    /// allow (a browser would break the outer link in two).
+    #[test]
+    fn a_link_in_a_links_text_is_text() {
+        let anchors = |shown: &str| shown.matches("<a ").count();
+        assert_eq!(
+            html("[a [b](https://b.example/)](https://a.example/)"),
+            "<p><a class=\"note-web-link\" href=\"https://a.example/\" title=\"https://a.example/ (opens in your browser)\">\
+             a [b](https://b.example/)</a></p>"
+        );
+        // Deeper, with emphasis, and in a list's items and on one line.
+        for typed in [
+            "[x [y [*z*](https://c.example)](https://b.example)](https://a.example)",
+            "- [a [b](https://b.example)](https://a.example) and [c](https://c.example)",
+        ] {
+            for layout in [Layout::Blocks, Layout::OneLine] {
+                let shown = note_html(typed, &[], &[], layout);
+                let mut depth = 0i32;
+                for tag in shown.split('<').skip(1) {
+                    if tag.starts_with("a ") {
+                        depth += 1;
+                        assert_eq!(depth, 1, "{typed:?}: an anchor in an anchor: {shown}");
+                    } else if tag.starts_with("/a>") {
+                        depth -= 1;
+                    }
+                }
+                assert_eq!(depth, 0, "{shown}");
+            }
+        }
+        assert_eq!(
+            anchors(&html(
+                "[x [y [*z*](https://c.example)](https://b.example)](https://a.example)"
+            )),
+            1
+        );
+        assert!(
+            html("[x [y [*z*](https://c.example)](https://b.example)](https://a.example)")
+                .contains("x [y [<em>z</em>](https://c.example)](https://b.example)</a>")
+        );
+        assert_eq!(
+            anchors(&html(
+                "- [a [b](https://b.example)](https://a.example) and [c](https://c.example)"
+            )),
+            2,
+            "the outer link and the one after it"
         );
     }
 

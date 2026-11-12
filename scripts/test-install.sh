@@ -7,6 +7,11 @@
 # The bundle folder can already hold an older build's AppImage, which must
 # never be the one installed, and must be left where it was.
 #
+# Then packaging/uninstall.sh, in a throwaway HOME (never yours) with an
+# install and a reading-data folder of its own: it names the reading data
+# it would delete, and keeps it unless the answer is "y" (No, an empty
+# answer, and the end of input all keep it), finishing normally each time.
+#
 #   scripts/test-install.sh
 #
 # Plain bash, no test framework; exit code 0 only if every case passed.
@@ -23,6 +28,7 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/gg-test-install.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 failures=0
+cases=0
 fail() {
   echo "FAIL $CASE: $*" >&2
   failures=$((failures + 1))
@@ -32,6 +38,7 @@ fail() {
 # `cargo tauri build` writes (none at all with no more arguments).
 setup() {
   CASE="$1"
+  cases=$((cases + 1))
   shift
   local root="$WORK/$CASE"
   ROOT="$root"
@@ -137,8 +144,92 @@ elif [[ "$(cat "$(installed)")" != "built: $CURRENT" ]]; then
   fail "didn't install $CURRENT"
 fi
 
+# ---- packaging/uninstall.sh ----
+
+# A fresh HOME for one uninstall case ($1): the app installed as install.sh
+# installs it, its reading-data folder, and another app's folder beside it.
+setup_uninstall() {
+  CASE="$1"
+  cases=$((cases + 1))
+  ROOT="$WORK/$CASE"
+  local home="$ROOT/home"
+  mkdir -p "$ROOT/bin" "$home/.local/bin" "$home/.local/share/applications" \
+    "$home/.local/share/icons/hicolor/512x512/apps" "$home/.local/share/other-app"
+  printf 'appimage\n' >"$home/.local/bin/gospel-getter.AppImage"
+  printf '[Desktop Entry]\n' >"$home/.local/share/applications/gospel-getter.desktop"
+  printf 'png\n' >"$home/.local/share/icons/hicolor/512x512/apps/gospel-getter.png"
+  DATA="$home/.local/share/com.tossbaws.gospel-getter"
+  mkdir -p "$DATA/logs"
+  printf 'notes, bookmarks, highlights\n' >"$DATA/gospel_getter.db"
+  printf '{}\n' >"$DATA/window-state.json"
+  printf 'kept\n' >"$home/.local/share/other-app/data"
+  printf '#!/bin/sh\nexit 0\n' >"$ROOT/bin/update-desktop-database"
+  chmod +x "$ROOT/bin/"*
+}
+
+# Runs packaging/uninstall.sh with stdin from $1; its exit code is in
+# STATUS, its stdout in OUT.
+run_uninstall() {
+  set +e
+  env -i PATH="$ROOT/bin:/usr/bin:/bin" HOME="$ROOT/home" TMPDIR="$ROOT" \
+    bash "$REPO_ROOT/packaging/uninstall.sh" <"$1" >"$ROOT/out.txt" 2>"$ROOT/err.txt"
+  STATUS=$?
+  set -e
+  OUT="$(cat "$ROOT/out.txt")"
+}
+
+# The app's own files are gone, another app's are not, and the run ended
+# normally, having named the reading data before asking.
+uninstalled() {
+  ((STATUS == 0)) || fail "exited $STATUS: $(cat "$ROOT/err.txt")"
+  [[ ! -e "$ROOT/home/.local/bin/gospel-getter.AppImage" ]] || fail "the AppImage is still there"
+  [[ ! -e "$ROOT/home/.local/share/applications/gospel-getter.desktop" ]] || fail "the launcher is still there"
+  [[ "$(cat "$ROOT/home/.local/share/other-app/data" 2>/dev/null)" == kept ]] || fail "another app's data was touched"
+  local said
+  for said in "notes, bookmarks, highlights" "AI findings and reading place" \
+    "Export data… → Everything (backup)" "nothing has been removed yet" "[y/N]" "has been uninstalled."; do
+    [[ "$OUT" == *"$said"* ]] || fail "doesn't say \"$said\": $OUT"
+  done
+  [[ "$OUT" != *"Bible database"* ]] || fail "still calls it the Bible database: $OUT"
+}
+
+data_kept() {
+  [[ "$(cat "$DATA/gospel_getter.db" 2>/dev/null)" == "notes, bookmarks, highlights" ]] || fail "the reading data was deleted"
+  [[ -f "$DATA/window-state.json" ]] || fail "part of the data folder was deleted"
+  [[ "$OUT" == *"Kept $DATA"* ]] || fail "doesn't say it kept the data: $OUT"
+}
+
+# 6. "n": kept.
+setup_uninstall uninstall-no
+printf 'n\n' >"$ROOT/answer"
+run_uninstall "$ROOT/answer"
+uninstalled
+data_kept
+
+# 7. An empty answer (Enter): No, kept.
+setup_uninstall uninstall-empty
+printf '\n' >"$ROOT/answer"
+run_uninstall "$ROOT/answer"
+uninstalled
+data_kept
+
+# 8. No answer at all (the end of input, as from /dev/null): No, kept, and
+# the script still finishes (under set -e, a bare `read` at EOF stopped it).
+setup_uninstall uninstall-eof
+run_uninstall /dev/null
+uninstalled
+data_kept
+
+# 9. "y": the data folder, and only it, is deleted.
+setup_uninstall uninstall-yes
+printf 'y\n' >"$ROOT/answer"
+run_uninstall "$ROOT/answer"
+uninstalled
+[[ ! -e "$DATA" ]] || fail "the data folder is still there"
+[[ "$OUT" == *"Deleted $DATA"* ]] || fail "doesn't say it deleted the data: $OUT"
+
 if ((failures > 0)); then
   echo "$failures check(s) failed" >&2
   exit 1
 fi
-echo "install.sh: all 5 cases passed"
+echo "install.sh and uninstall.sh: all $cases cases passed"

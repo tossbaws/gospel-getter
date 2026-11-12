@@ -1206,7 +1206,8 @@ fn only_the_release_job_has_the_signing_key() {
 }
 
 /// The installers' artifacts: the build jobs upload them, and the sign job
-/// puts each back, signed, under the same name.
+/// signs each and uploads it as an artifact of its own, the name with
+/// [`SIGNED`] after it, never replacing the build's.
 const INSTALLER_ARTIFACTS: [(&str, &str); 4] = [
     ("linux", "gospel-getter-linux-appimage"),
     ("linux", "gospel-getter-linux-deb"),
@@ -1214,15 +1215,34 @@ const INSTALLER_ARTIFACTS: [(&str, &str); 4] = [
     ("windows", "gospel-getter-windows-msi-installer"),
 ];
 
+/// What the sign job puts after a build artifact's name for the one it
+/// uploads, signed (tools/release/sign_installers.py's `SIGNED_SUFFIX`).
+const SIGNED: &str = "-signed";
+
+const RELEASE_README: &str = include_str!("../../tools/release/README.md");
+
+/// The value of a step's `with:` key (`name`, `path`, `pattern`), if it
+/// has one.
+fn with_value<'a>(step: &'a Step, key: &str) -> Option<&'a str> {
+    let prefix = format!("          {key}: ");
+    step.text
+        .lines()
+        .find_map(|l| l.strip_prefix(prefix.as_str()))
+        .map(str::trim)
+}
+
 /// How a release's installers are signed (D-01, see the top of dist.yml).
 /// Every build is unsigned (`--no-sign`), with the updater overlay, as a
 /// release is built. On a run dispatched on main, the sign job signs those
 /// very files once both platforms' GUI checks have passed on them, by
-/// tools/release/sign_installers.py (which checks each signature and makes
-/// the update manifest as a dry run), and puts each installer's artifact
-/// back with its .sig, under the name a release takes it by. On a run
-/// dispatched on another branch, or a release/ branch's pull request, the
-/// rehearsal does the same with a throwaway key, uploading nothing.
+/// tools/release/sign_installers.py (which records each installer's
+/// SHA-256, checks each signature and that the installer didn't change,
+/// and makes the update manifest as a dry run), and uploads each installer
+/// with its .sig as `<build artifact>-signed`, the name a release takes it
+/// by (N-S-01: never the build artifact's own name, so a failed sign job
+/// can be re-run on the build's artifacts as built). On a run dispatched
+/// on another branch, or a release/ branch's pull request, the rehearsal
+/// does the same with a throwaway key, uploading nothing.
 #[test]
 fn only_a_release_run_signs_and_it_signs_what_was_checked() {
     let steps = dist_steps();
@@ -1266,6 +1286,10 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
             .contains("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"),
         "{signs:#?}"
     );
+    let uploads: Vec<&&Step> = sign
+        .iter()
+        .filter(|s| s.text.contains("actions/upload-artifact@"))
+        .collect();
     for (built_by, artifact) in INSTALLER_ARTIFACTS {
         let name = format!("          name: {artifact}\n");
         assert!(
@@ -1274,26 +1298,56 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
                 .any(|s| s.text.contains("actions/upload-artifact@") && s.text.contains(&name)),
             "job {built_by} doesn't upload {artifact}"
         );
-        let put_back: Vec<&&Step> = sign
+        // Never under the build artifact's own name: it stays as built.
+        assert!(
+            !uploads
+                .iter()
+                .any(|s| with_value(s, "name") == Some(artifact)),
+            "the sign job replaces the build's {artifact}: {uploads:#?}"
+        );
+        let signed = format!("{artifact}{SIGNED}");
+        let up: Vec<&&&Step> = uploads
             .iter()
-            .filter(|s| s.text.contains("actions/upload-artifact@") && s.text.contains(&name))
+            .filter(|s| with_value(s, "name") == Some(signed.as_str()))
             .collect();
-        assert_eq!(put_back.len(), 1, "the sign job puts {artifact} back once");
-        let text = &put_back[0].text;
+        assert_eq!(up.len(), 1, "the sign job uploads {signed} once");
+        let text = &up[0].text;
         assert!(
             text.contains(&format!("          path: installers/{artifact}/\n"))
                 && text.contains("          overwrite: true\n")
                 && text.contains("          if-no-files-found: error\n"),
             "{text}"
         );
+        // The release procedure takes the signed one.
+        assert!(
+            RELEASE_README.contains(&format!("`{signed}`")),
+            "tools/release/README.md doesn't name {signed}"
+        );
     }
-    // Uploaded to nowhere else: the release's artifacts are the four above.
-    assert_eq!(
-        sign.iter()
-            .filter(|s| s.text.contains("actions/upload-artifact@"))
-            .count(),
-        INSTALLER_ARTIFACTS.len()
-    );
+    // Uploaded to nowhere else: the release's artifacts are the four above,
+    // each a -signed name.
+    assert_eq!(uploads.len(), INSTALLER_ARTIFACTS.len(), "{uploads:#?}");
+    for upload in &uploads {
+        let name = with_value(upload, "name").unwrap_or_default();
+        assert!(
+            name.ends_with(SIGNED)
+                && INSTALLER_ARTIFACTS
+                    .iter()
+                    .any(|(_, artifact)| name.strip_suffix(SIGNED) == Some(artifact)),
+            "the sign job uploads {name:?}, not a -signed installer artifact: {upload:#?}"
+        );
+    }
+    // overwrite: on the -signed names only, anywhere in dist.yml.
+    for step in &steps {
+        if step.text.contains("          overwrite: true\n") {
+            let name = with_value(step, "name").unwrap_or_default();
+            assert!(
+                step.job == "sign" && name.ends_with(SIGNED),
+                "job {} overwrites {name:?}: {step:#?}",
+                step.job
+            );
+        }
+    }
 
     let keys = dist_job_keys("sign-rehearsal");
     let condition = keys
@@ -1324,6 +1378,49 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
             .any(|s| s.text.contains("actions/upload-artifact@")),
         "the rehearsal's signatures are worthless: it uploads nothing"
     );
+    // Both take the build's four artifacts by their exact names, each into
+    // its own folder, and nothing else: never a -signed one (a pattern such
+    // as gospel-getter-linux-* would take gospel-getter-linux-appimage-signed
+    // too, which a re-run of the sign job would then sign again).
+    for name in ["sign", "sign-rehearsal"] {
+        let downloads: Vec<&Step> = job(name)
+            .into_iter()
+            .filter(|s| s.text.contains("actions/download-artifact@"))
+            .collect();
+        for download in &downloads {
+            assert!(
+                with_value(download, "pattern").is_none(),
+                "job {name} downloads by a pattern, which can take a -signed artifact: {download:#?}"
+            );
+            let artifact = with_value(download, "name").unwrap_or_default();
+            assert!(
+                !artifact.is_empty() && !artifact.ends_with(SIGNED),
+                "job {name} downloads {artifact:?}: {download:#?}"
+            );
+        }
+        let mut names: Vec<&str> = downloads
+            .iter()
+            .filter_map(|s| with_value(s, "name"))
+            .collect();
+        names.sort_unstable();
+        let mut expected: Vec<&str> = INSTALLER_ARTIFACTS.iter().map(|(_, a)| *a).collect();
+        expected.sort_unstable();
+        assert_eq!(
+            names, expected,
+            "job {name} downloads the four build artifacts, once each"
+        );
+        for (_, artifact) in INSTALLER_ARTIFACTS {
+            let into = downloads
+                .iter()
+                .find(|s| with_value(s, "name") == Some(artifact))
+                .and_then(|s| with_value(s, "path"));
+            assert_eq!(
+                into,
+                Some(format!("installers/{artifact}").as_str()),
+                "job {name}: {artifact} goes into its own folder"
+            );
+        }
+    }
     // Both get their signer the same way, from crates.io, in the job.
     for name in ["sign", "sign-rehearsal"] {
         assert!(

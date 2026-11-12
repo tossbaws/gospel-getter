@@ -1,8 +1,12 @@
-//! results.txt: one line per check, PASS or FAIL and why, rewritten as
-//! each result comes in so a run that is cut short still says how far it
-//! got.
+//! results.txt: one line per check, PASS, SKIP or FAIL and why, rewritten
+//! as each result comes in so a run that is cut short still says how far
+//! it got. SKIP is a check that can't run on this platform (on Windows,
+//! checks 26, 45 and 65, and the sidebar's checks when the window can't be
+//! made wide enough): not a failure, so it doesn't fail the run, and never
+//! a pass, so it isn't counted as one.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -83,6 +87,7 @@ pub enum Check {
     ExportChoice = 71,
     SingleKeys = 72,
     SecondLaunch = 73,
+    StartupFailure = 74,
 }
 
 impl Check {
@@ -163,6 +168,10 @@ impl Check {
         Check::DisclosuresKept,
         Check::NoteDraft,
     ];
+
+    /// The app as shipped started on a data folder it can't open, before
+    /// the first session: no WebDriver session, since it never has a window.
+    pub const STARTUP: [Check; 1] = [Check::StartupFailure];
 
     /// The updater's checks, on the GUI checks' test build against the
     /// run's own update server (the third session).
@@ -249,6 +258,7 @@ impl Check {
             Check::ExportChoice => "export-choice",
             Check::SingleKeys => "single-key-switch",
             Check::SecondLaunch => "second-launch",
+            Check::StartupFailure => "startup-failure",
         }
     }
 
@@ -258,11 +268,12 @@ impl Check {
     }
 
     /// Every check, by number: the app's as shipped, started again, and
-    /// the updater's.
+    /// failing to start, and the updater's.
     pub fn all() -> Vec<Check> {
         let mut all: Vec<Check> = Check::SHIPPED
             .iter()
             .chain(&Check::RELAUNCH)
+            .chain(&Check::STARTUP)
             .chain(&Check::UPDATER)
             .copied()
             .collect();
@@ -282,11 +293,70 @@ pub fn list() -> String {
         .collect()
 }
 
+/// Why a check wasn't run here: what a check that can't run on this
+/// platform returns, as its error (so its signature and `?` stay as they
+/// are), for [`Report::record`] to write as SKIP, never PASS or FAIL. Made
+/// by [`skipped`].
+#[derive(Debug)]
+pub struct Skipped(String);
+
+impl fmt::Display for Skipped {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Skipped {}
+
+/// A check's result that says it wasn't run here, and why (`not run on
+/// Windows: …`): SKIP in results.txt.
+pub fn skipped(why: impl Into<String>) -> anyhow::Error {
+    anyhow::Error::new(Skipped(why.into()))
+}
+
+/// Whether a check's error is a skip ([`skipped`]), not a failure: no
+/// failure screenshot for it.
+pub fn is_skip(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<Skipped>().is_some()
+}
+
+/// A check's verdict, as results.txt writes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Verdict {
+    Pass(String),
+    Skip(String),
+    Fail(String),
+}
+
+/// How many checks passed, were skipped and failed, and how many have no
+/// result yet.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Totals {
+    pub passed: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub missing: usize,
+}
+
+impl fmt::Display for Totals {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} passed, {} skipped, {} failed",
+            self.passed, self.skipped, self.failed
+        )?;
+        if self.missing > 0 {
+            write!(f, ", {} with no result", self.missing)?;
+        }
+        Ok(())
+    }
+}
+
 /// The run's results so far.
 #[derive(Debug)]
 pub struct Report {
     path: PathBuf,
-    results: BTreeMap<Check, std::result::Result<String, String>>,
+    results: BTreeMap<Check, Verdict>,
 }
 
 impl Report {
@@ -298,11 +368,20 @@ impl Report {
     }
 
     /// Records `check`'s outcome (the first one only) and rewrites
-    /// results.txt.
+    /// results.txt: a pass, a skip ([`skipped`]) or a failure.
     pub async fn record(&mut self, check: Check, outcome: Result<String>) {
-        let outcome = outcome.map_err(|e| format!("{e:#}"));
-        self.results.entry(check).or_insert(outcome);
+        self.note(check, outcome);
         self.write().await;
+    }
+
+    /// `check`'s outcome, the first one only, as its verdict.
+    fn note(&mut self, check: Check, outcome: Result<String>) {
+        let verdict = match outcome {
+            Ok(detail) => Verdict::Pass(detail),
+            Err(e) if is_skip(&e) => Verdict::Skip(format!("{e:#}")),
+            Err(e) => Verdict::Fail(format!("{e:#}")),
+        };
+        self.results.entry(check).or_insert(verdict);
     }
 
     /// Fails every one of `checks` that has no result yet, with `why`.
@@ -310,24 +389,41 @@ impl Report {
         for &check in checks {
             self.results
                 .entry(check)
-                .or_insert_with(|| Err(why.to_owned()));
+                .or_insert_with(|| Verdict::Fail(why.to_owned()));
         }
         self.write().await;
     }
 
-    /// Whether every check ran and passed.
+    /// How many of the checks passed, were skipped and failed, and how many
+    /// have no result.
+    pub fn totals(&self) -> Totals {
+        let mut totals = Totals::default();
+        for check in Check::all() {
+            match self.results.get(&check) {
+                Some(Verdict::Pass(_)) => totals.passed += 1,
+                Some(Verdict::Skip(_)) => totals.skipped += 1,
+                Some(Verdict::Fail(_)) => totals.failed += 1,
+                None => totals.missing += 1,
+            }
+        }
+        totals
+    }
+
+    /// Whether the run passed: every check has a result, and none failed.
+    /// A SKIP isn't a failure, so it doesn't fail the run, but it's never
+    /// counted as passed ([`Report::totals`]).
     pub fn all_passed(&self) -> bool {
-        Check::all()
-            .iter()
-            .all(|check| matches!(self.results.get(check), Some(Ok(_))))
+        let totals = self.totals();
+        totals.failed == 0 && totals.missing == 0
     }
 
     fn lines(&self) -> String {
         let mut text = String::new();
         for (check, outcome) in &self.results {
             let (verdict, detail) = match outcome {
-                Ok(detail) => ("PASS", detail),
-                Err(reason) => ("FAIL", reason),
+                Verdict::Pass(detail) => ("PASS", detail),
+                Verdict::Skip(reason) => ("SKIP", reason),
+                Verdict::Fail(reason) => ("FAIL", reason),
             };
             // One line per check, whatever the detail holds.
             let detail = detail.replace('\n', " ");
@@ -387,11 +483,185 @@ mod tests {
     fn all_passed_needs_every_listed_check() {
         let mut report = Report::new(std::path::Path::new("unused"));
         for check in Check::all() {
-            report.results.insert(check, Ok("fine".to_owned()));
+            report
+                .results
+                .insert(check, Verdict::Pass("fine".to_owned()));
         }
         assert!(report.all_passed());
         let last = *Check::all().last().expect("checks");
         report.results.remove(&last);
         assert!(!report.all_passed());
+    }
+
+    /// One line for each verdict: PASS with what it saw, SKIP and FAIL
+    /// with why, by number, each on one line.
+    #[test]
+    fn each_verdict_has_its_own_line() {
+        let mut report = Report::new(std::path::Path::new("unused"));
+        report.note(Check::Driver, Ok("booted".to_owned()));
+        report.note(
+            Check::AaRestart,
+            Err(skipped("not run on Windows: a fresh\nuser data folder")),
+        );
+        report.note(Check::Csp, Err(anyhow::anyhow!("blocked")));
+        assert_eq!(
+            report.lines(),
+            "PASS 1 driver: booted\n\
+             FAIL 2 csp: blocked\n\
+             SKIP 26 aa-restart: not run on Windows: a fresh user data folder\n"
+        );
+    }
+
+    /// A skip found under context is still a skip, with all of its reason.
+    #[test]
+    fn a_skip_under_context_is_still_a_skip() {
+        let mut report = Report::new(std::path::Path::new("unused"));
+        let error = skipped("not run on Windows: too narrow").context("check 21");
+        assert!(is_skip(&error));
+        assert!(!is_skip(&anyhow::anyhow!(
+            "not run on Windows: said, not skipped"
+        )));
+        report.note(Check::PickerSidebar, Err(error));
+        assert_eq!(
+            report.lines(),
+            "SKIP 21 picker-sidebar: check 21: not run on Windows: too narrow\n"
+        );
+    }
+
+    /// A skip doesn't fail the run, and isn't counted as passed: the
+    /// totals count skips on their own.
+    #[test]
+    fn a_skip_is_neither_a_pass_nor_a_failure() {
+        let mut report = Report::new(std::path::Path::new("unused"));
+        let all = Check::all();
+        for &check in &all {
+            report.note(check, Ok("fine".to_owned()));
+        }
+        let mut skipping = Report::new(std::path::Path::new("unused"));
+        for &check in &all {
+            if check == Check::NoteDraft {
+                skipping.note(check, Err(skipped("not run on Windows")));
+            } else {
+                skipping.note(check, Ok("fine".to_owned()));
+            }
+        }
+        assert!(skipping.all_passed(), "a skip isn't a failure");
+        let (every, some) = (report.totals(), skipping.totals());
+        assert_eq!(some.passed, every.passed - 1, "a skip isn't a pass");
+        assert_eq!(
+            (some.skipped, some.failed, some.missing),
+            (1, 0, 0),
+            "{some}"
+        );
+        assert_eq!((every.skipped, every.failed, every.missing), (0, 0, 0));
+        assert!(
+            some.to_string().ends_with(" passed, 1 skipped, 0 failed"),
+            "{some}"
+        );
+
+        // A failure still fails it, skips or not, and so does a check
+        // with no result.
+        skipping
+            .results
+            .insert(Check::Csp, Verdict::Fail("blocked".to_owned()));
+        assert!(!skipping.all_passed());
+        assert_eq!(
+            (skipping.totals().skipped, skipping.totals().failed),
+            (1, 1)
+        );
+        let mut short = Report::new(std::path::Path::new("unused"));
+        short.note(Check::Driver, Err(skipped("not run")));
+        assert!(!short.all_passed());
+        let totals = short.totals();
+        assert_eq!((totals.skipped, totals.missing), (1, all.len() - 1));
+        assert!(totals.to_string().contains(" with no result"), "{totals}");
+    }
+
+    /// scripts/gui-check.sh reads results.txt as [`Report`] writes it
+    /// (its scripts/gui-check-results.sh, sourced here, no display): a
+    /// SKIP is a result line, so a skipped check isn't filled in as a FAIL
+    /// and doesn't fail the run, and the totals count it apart. A check
+    /// with no line gets a FAIL, which does fail it.
+    #[cfg(unix)]
+    #[test]
+    fn gui_check_sh_takes_a_skip_as_a_result_but_not_a_failure() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let dir = std::env::temp_dir().join(format!(
+            "gui-check-results-test-{}-{}",
+            std::process::id(),
+            now.as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("a scratch folder");
+        let results = dir.join("results.txt");
+        let mut report = Report::new(&dir);
+        report.note(Check::Driver, Ok("booted".to_owned()));
+        report.note(Check::AaRestart, Err(skipped("not run on Windows: why")));
+        std::fs::write(&results, report.lines()).expect("results.txt");
+        let library =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/gui-check-results.sh");
+        let collect = |checks: &[Check], checks_status: u8| {
+            let out = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(
+                    r#"set -euo pipefail
+                    source "$1"; results="$2"; status="$3"; shift 3; checks=("$@")
+                    complete_results "no result"
+                    result_totals
+                    run_status "$status""#,
+                )
+                .arg("bash")
+                .arg(&library)
+                .arg(&results)
+                .arg(checks_status.to_string())
+                .args(
+                    checks
+                        .iter()
+                        .map(|c| format!("{} {}", c.number(), c.name())),
+                )
+                .output()
+                .expect("bash runs");
+            assert!(out.status.success(), "{out:?}");
+            (
+                String::from_utf8_lossy(&out.stdout).into_owned(),
+                std::fs::read_to_string(&results).expect("results.txt"),
+            )
+        };
+
+        // Every check has a line: nothing filled in, and the run passes.
+        let (said, file) = collect(&[Check::Driver, Check::AaRestart], 0);
+        assert_eq!(said, "1 passed, 1 skipped, 0 failed\n0\n");
+        assert_eq!(file, report.lines(), "the skip was filled in as a FAIL");
+        // The checks' own failure stays theirs.
+        let (said, _) = collect(&[Check::Driver, Check::AaRestart], 5);
+        assert!(said.ends_with("\n5\n"), "{said}");
+        // A check with no line: a FAIL for it, which fails the run.
+        let (said, file) = collect(&[Check::Driver, Check::Csp, Check::AaRestart], 0);
+        assert_eq!(said, "1 passed, 1 skipped, 1 failed\n1\n");
+        assert!(file.ends_with("FAIL 2 csp: no result\n"), "{file}");
+        assert_eq!(file.matches("FAIL ").count(), 1, "{file}");
+
+        std::fs::remove_dir_all(&dir).expect("the scratch folder goes");
+    }
+
+    /// Only the first outcome counts: a later failure doesn't overwrite a
+    /// skip (as when the relaunch's session fails after 26, 45 and 65 were
+    /// skipped on Windows), nor a skip a failure.
+    #[test]
+    fn the_first_outcome_stays() {
+        let mut report = Report::new(std::path::Path::new("unused"));
+        report.note(Check::AaRestart, Err(skipped("not run on Windows")));
+        report.note(Check::AaRestart, Err(anyhow::anyhow!("no session")));
+        report
+            .results
+            .entry(Check::DisclosuresKept)
+            .or_insert_with(|| Verdict::Fail("no session".to_owned()));
+        report.note(Check::DisclosuresKept, Err(skipped("not run on Windows")));
+        assert_eq!(
+            report.lines(),
+            "SKIP 26 aa-restart: not run on Windows\n\
+             FAIL 45 disclosures-kept: no session\n"
+        );
     }
 }

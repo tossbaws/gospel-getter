@@ -2,11 +2,12 @@
 //! the app has committed, whether or not the app is running, and can neither
 //! write nor create a file.
 
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use super::test_support::{TempDb, fresh_database, prepared_database};
-use super::{begin_write, open_read_only};
+use super::{FilesAsSeen, begin_write, open_read_only, read_only_once_more_if_changed};
 use crate::db::search::{search_index_is_current, search_verses, search_verses_in_book};
 use crate::domain::query::SearchQuery;
 
@@ -95,6 +96,89 @@ async fn a_running_apps_database_is_read_through_a_write_in_progress() {
     assert_eq!(std::fs::read(&wal).expect("its log"), wal_before);
     uncommitted.rollback().await.expect("roll back");
     pool.close().await;
+}
+
+/// The app starts while a read of its closed database is under way, opened
+/// immutable: it makes its `-wal` and `-shm` and writes. The files aren't as
+/// they were, so the read is made once more, through them, and sees what the
+/// app has committed. The app's files are left as it made them.
+#[tokio::test]
+async fn a_read_the_app_starts_during_is_made_again() {
+    let (db, pool) = fresh_database("read_only_app_starts").await;
+    pool.close().await;
+    let path = db.path();
+    let app = RefCell::new(None);
+    let reads = RefCell::new(Vec::new());
+    let notes = read_only_once_more_if_changed(&path, || async {
+        let immutable = FilesAsSeen::now(&path).immutable();
+        let reader = open_read_only(&path).await?;
+        let notes = note_count(&reader).await;
+        if app.borrow().is_none() {
+            // The app starts, and saves a note, while this read is open.
+            let started = db.connect().await;
+            sqlx::query(ADD_NOTE)
+                .execute(started.write().pool())
+                .await
+                .expect("the app saves a note");
+            *app.borrow_mut() = Some(started);
+        }
+        reader.close().await;
+        reads.borrow_mut().push((immutable, notes));
+        Ok(notes)
+    })
+    .await
+    .expect("read");
+    assert_eq!(notes, 1, "what the app committed");
+    assert_eq!(reads.into_inner(), [(true, 0), (false, 1)]);
+    app.into_inner().expect("the app").close().await;
+}
+
+/// Nothing changes while a read of the closed database is under way, or the
+/// app is running (its `-wal` and `-shm` there) and writes meanwhile: the
+/// read is made once.
+#[tokio::test]
+async fn a_read_is_made_once_unless_an_immutable_one_saw_a_change() {
+    let (db, pool) = fresh_database("read_only_once").await;
+    pool.close().await;
+    let path = db.path();
+    let reads = Cell::new(0);
+    let notes = read_only_once_more_if_changed(&path, || async {
+        reads.set(reads.get() + 1);
+        let reader = open_read_only(&path).await?;
+        let notes = note_count(&reader).await;
+        reader.close().await;
+        Ok(notes)
+    })
+    .await
+    .expect("read");
+    assert_eq!((notes, reads.get()), (0, 1), "closed, nothing changed");
+
+    let app = db.connect().await;
+    sqlx::query(ADD_NOTE)
+        .execute(app.write().pool())
+        .await
+        .expect("a committed note");
+    assert!(!FilesAsSeen::now(&path).immutable());
+    let reads = Cell::new(0);
+    let notes = read_only_once_more_if_changed(&path, || async {
+        reads.set(reads.get() + 1);
+        let reader = open_read_only(&path).await?;
+        let notes = note_count(&reader).await;
+        sqlx::query(ADD_NOTE)
+            .execute(app.write().pool())
+            .await
+            .expect("the app writes meanwhile");
+        reader.close().await;
+        Ok(notes)
+    })
+    .await
+    .expect("read");
+    assert_eq!(
+        (notes, reads.get()),
+        (1, 1),
+        "running, read through its log"
+    );
+    app.close().await;
 }
 
 /// The app was killed: its `-wal` and `-shm` are left behind, with no one

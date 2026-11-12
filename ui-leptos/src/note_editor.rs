@@ -702,6 +702,8 @@ impl Editor {
                 }
             };
             self.forget_draft(session.id, &session.draft_key);
+            // Its id may be the next note's (SQLite's row ids).
+            crate::note_copy::forget(id);
             card::refresh_notes().await;
             if self.same_session(session.id) {
                 self.close();
@@ -793,7 +795,15 @@ impl Editor {
                 return;
             }
             match bridge::note_others(&event) {
-                Ok(others) => self.set_others(others),
+                // Only the notes on this note's own passage (C2-01).
+                Ok((passage, others)) => {
+                    let ours = self
+                        .session
+                        .with_value(|s| s.as_ref().is_some_and(|s| s.request.passage == passage));
+                    if ours {
+                        self.set_others(others);
+                    }
+                }
                 Err(e) => ipc::log_error("The other notes couldn't be read", &e),
             }
         });

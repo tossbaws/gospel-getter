@@ -209,15 +209,28 @@ pub async fn search(
     translation_code: Option<String>,
     offset: Option<i64>,
 ) -> Result<SearchDto, String> {
-    run_search(
+    answer_search(
         &state,
         &query,
         translation_code.as_deref(),
         offset.unwrap_or(0),
     )
     .await
-    .with_context(|| format!("Search for {query:?} failed"))
-    .map_err(failed("Search failed."))
+}
+
+/// What `search` answers: [`run_search`]'s answer, or the sentence the page
+/// shows for a failure. The failure is logged without the words searched
+/// for, which the log never holds (see `log_file`): only what went wrong.
+pub(crate) async fn answer_search(
+    state: &AppState,
+    query: &str,
+    translation_code: Option<&str>,
+    offset: i64,
+) -> Result<SearchDto, String> {
+    run_search(state, query, translation_code, offset)
+        .await
+        .context("Search failed")
+        .map_err(failed("Search failed."))
 }
 
 #[cfg(test)]
@@ -227,6 +240,7 @@ mod tests {
     use crate::commands::*;
     use crate::db::test_support::{bundled, fresh_database};
     use crate::domain::kjv_markup::VerseText;
+    use crate::log_file::LogFile;
 
     #[tokio::test]
     async fn search_goes_to_references_checked_against_the_translation() {
@@ -245,16 +259,17 @@ mod tests {
         assert_eq!(v["verseStart"], serde_json::Value::Null);
         assert_eq!(v["reference"], "Psalms 23");
 
-        // Matthew 2:23 is numbered in the WEB only.
+        // Romans 14:24 is numbered in the WEB only. (Until 2.29.2 the KJV's
+        // Matthew 2:23, a verse it was short, was the example.)
         assert_eq!(
-            search_in(&state, "Matthew 2:23", "web").await["kind"],
+            search_in(&state, "Romans 14:24", "web").await["kind"],
             "passage"
         );
         assert_eq!(
-            search_in(&state, "Matthew 2:23", "kjv").await,
+            search_in(&state, "Romans 14:24", "kjv").await,
             serde_json::json!({
                 "kind": "invalid",
-                "message": "No such chapter or verse: Matthew 2:23. Matthew 2 has 22 verses in the King James Version."
+                "message": "No such chapter or verse: Romans 14:24. Romans 14 has 23 verses in the King James Version."
             })
         );
         assert_eq!(
@@ -403,5 +418,35 @@ mod tests {
             .unwrap();
         assert_eq!(v["kind"], "unavailable");
         drop(db);
+    }
+
+    /// A search the store fails (here, its connections closed) logs what
+    /// went wrong, into the log file as the app keeps it, and never the
+    /// words searched for; the page gets its one sentence.
+    #[tokio::test]
+    async fn a_failed_search_logs_why_but_never_the_words() {
+        use tracing_subscriber::layer::SubscriberExt;
+        const SENTINEL: &str = "zebulunsentinel";
+        let (db, state) = app_state("cmd_search_private").await;
+        state.store.close().await;
+        let dir = db.path().with_file_name("logs");
+        let log = LogFile::new(crate::log_file::MAX_LOG_BYTES, crate::log_file::LOG_FILES);
+        log.open_in(&dir).expect("open the log");
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(log.clone())
+                .with_ansi(false),
+        );
+        let answer = {
+            let _logging = tracing::subscriber::set_default(subscriber);
+            answer_search(&state, &format!("faith {SENTINEL}"), Some("kjv"), 0).await
+        };
+        assert_eq!(answer.err().as_deref(), Some("Search failed."));
+        let logged = std::fs::read_to_string(dir.join("gospel-getter.log")).expect("the log");
+        assert!(
+            logged.contains("Search failed: Failed to count search results"),
+            "{logged}"
+        );
+        assert!(!logged.contains(SENTINEL), "{logged}");
     }
 }

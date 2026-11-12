@@ -96,6 +96,8 @@ async fn run() -> ExitCode {
     };
     let mut report = Report::new(&config.out_dir);
     checks::run(&config, &mut report).await;
+    // Skips on their own: a SKIP is neither a pass nor a failure.
+    eprintln!("gui-check: {}", report.totals());
     if report.all_passed() {
         ExitCode::SUCCESS
     } else {

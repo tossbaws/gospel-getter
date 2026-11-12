@@ -14,7 +14,9 @@ use crate::db::WritePool;
 /// database never reads (2.20.0's `reading_place`, say: 2.19.1 keeps
 /// saving `reading_position` without it, and the place is used only while
 /// it's for the chapter saved there; 2.26.0's `ai_findings` and
-/// `app_settings`, which 2.25.x and older never open). The first change it
+/// `app_settings`, which 2.25.x and older never open; 2.29.1's
+/// `translation_data_version`, which an older app never reads, and whose
+/// steps leave rows an older app reads as it always has). The first change it
 /// can't make (a
 /// new column, a changed constraint) bumps this to 2, adds a step after the
 /// `CREATE`s that runs only when the stored version is below 2 (an
@@ -351,6 +353,24 @@ pub async fn migrate(writer: &WritePool) -> anyhow::Result<()> {
     .execute(writer.pool())
     .await
     .context("Failed to create search_index_version table")?;
+
+    // Which version of its bundled data each translation's rows are
+    // (`seed::DATA_STEPS`, 2.29.1), so a change to a translation installs
+    // have already seeded is made on each of them once. None for rows
+    // seeded before it: version 1. Deliberately no foreign key, like
+    // `search_index_state`: it mustn't stop a translation's rows being
+    // cleared out for re-seeding, which records the version again.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS translation_data_version (
+            translation_id INTEGER PRIMARY KEY,
+            version INTEGER NOT NULL CHECK (version >= 1)
+        )
+        "#,
+    )
+    .execute(writer.pool())
+    .await
+    .context("Failed to create translation_data_version table")?;
 
     // A database a newer version of the app has opened keeps its own
     // (higher) number, so that version doesn't take it for an older one.

@@ -48,8 +48,9 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 -m unittest discover -s tools/ci -v
 
-      # Which AppImage packaging/install.sh installs (nothing is built).
-      - name: Test the install script
+      # Which AppImage packaging/install.sh installs (nothing is built), and
+      # what packaging/uninstall.sh deletes, in a throwaway HOME.
+      - name: Test the install and uninstall scripts
         working-directory: .
         run: scripts/test-install.sh
 
@@ -204,7 +205,7 @@ jobs:
         run: cargo build --example frontend_bridge
 
       - name: Install Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm

@@ -44,6 +44,11 @@ fn book_rowids(translation_id: i64, book_id: i64) -> (i64, i64) {
     (first, first + BOOK_STRIDE)
 }
 
+/// The rowid of one verse.
+fn verse_rowid(translation_id: i64, (book_id, chapter, verse): (i64, i64, i64)) -> i64 {
+    translation_id * TRANSLATION_STRIDE + book_id * BOOK_STRIDE + chapter * CHAPTER_STRIDE + verse
+}
+
 /// A matching verse, with its text as stored in `verses`.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct SearchHit {
@@ -134,6 +139,37 @@ pub async fn search_index_is_current(
     }
     let (verse_count, indexed_count) = verse_and_indexed_counts(pool, translation_id).await?;
     Ok(indexed_count == Some(verse_count))
+}
+
+/// Take some of a translation's verses out of the index, in the transaction
+/// (`conn`) that then takes them out of `verses`, and out of the verse count
+/// it was recorded as indexed with, if it was. Both checks
+/// `ensure_search_index` makes come out as before: a recorded count that
+/// matched the verses still does (and one that didn't still doesn't), and
+/// an index that held exactly the translation's verses still does, so a
+/// complete index stays complete and isn't built again. Nothing else is
+/// rebuilt.
+pub(super) async fn forget_verses(
+    conn: &mut SqliteConnection,
+    translation_id: i64,
+    verses: &[(i64, i64, i64)],
+) -> anyhow::Result<()> {
+    for &verse in verses {
+        sqlx::query("DELETE FROM verse_search WHERE rowid = $1")
+            .bind(verse_rowid(translation_id, verse))
+            .execute(&mut *conn)
+            .await
+            .context("Failed to take a verse out of the search index")?;
+    }
+    sqlx::query(
+        "UPDATE search_index_state SET verse_count = verse_count - $2 WHERE translation_id = $1",
+    )
+    .bind(translation_id)
+    .bind(i64::try_from(verses.len()).context("Too many verses")?)
+    .execute(&mut *conn)
+    .await
+    .context("Failed to update the search index state")?;
+    Ok(())
 }
 
 /// If the index holds an older kind of content, forget what it covers, so
@@ -310,10 +346,7 @@ impl TranslationBuild {
                 verses
                     .into_iter()
                     .map(|(chapter, verse, stored)| {
-                        let rowid = self.translation_id * TRANSLATION_STRIDE
-                            + book_id * BOOK_STRIDE
-                            + chapter * CHAPTER_STRIDE
-                            + verse;
+                        let rowid = verse_rowid(self.translation_id, (book_id, chapter, verse));
                         (rowid, VerseText::new(KJV, &stored).text)
                     })
                     .collect::<Vec<_>>(),
@@ -578,7 +611,7 @@ async fn search_rowids(
          JOIN verses v ON v.translation_id = $6 \
              AND v.book_id = page.id / $7 % 100 \
              AND v.chapter = page.id / $8 % 1000 \
-             AND v.verse = page.id % $8 \
+             AND v.verse = page.id % $8 AND v.text <> '' \
          ORDER BY page.id",
     )
     .bind(&expression)

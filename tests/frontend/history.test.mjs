@@ -5,7 +5,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, closeBridge, openApp } from './harness.mjs';
+import { backend, closeBridge, openApp, settle } from './harness.mjs';
 
 after(closeBridge);
 
@@ -392,3 +392,62 @@ test('a Forward that fails changes nothing either, and Try again takes the step'
         await forward(app);
         assert.equal(app.heading(), 'Romans 8');
     }));
+
+// C2-01: a mouse's back and forward buttons wait while a dialog is open,
+// as Alt+← and Alt+→ do: the note editor, adding on John 3:16, keeps the
+// chapter behind it, and its "Other notes" stay John 3:16's. Once it's
+// closed, they go back and forward again.
+const otherNotes = (app) => [...app.document.querySelectorAll('#note-others-list .note-others-body')].map((b) => b.textContent);
+const noteEditorOpen = (app) => !app.document.getElementById('note-overlay').hidden;
+const mouseButton = (app, button) => app.window.dispatchEvent(new app.window.MouseEvent('mouseup', { button, bubbles: true, cancelable: true }));
+
+test('C2-01: a mouse’s back and forward buttons wait while the note editor is open, which lists only its own passage’s notes', async () => {
+    await backend('__reset', { bookId: 19, chapter: 23, translationCode: 'kjv' });
+    await backend('add_note', { bookId: 45, chapter: 8, verseStart: 28, verseEnd: 28, body: 'All things.' });
+    await backend('add_note', { bookId: 43, chapter: 3, verseStart: 16, verseEnd: 16, body: 'Loved.' });
+    await withApp({ book: 'Psalms', chapter: 23, translation: 'kjv', keepBookmarks: true }, async (app) => {
+        // Romans 8:28, then John 3:16, each from its note's Library row.
+        for (const [reference, heading] of [['Romans 8:28', 'Romans 8'], ['John 3:16', 'John 3']]) {
+            app.openLibrary('notes');
+            await app.idle(0);
+            const row = [...app.document.querySelectorAll('#note-list .note-item')]
+                .find((r) => r.textContent.includes(reference));
+            await waitFor(app, () => app.click(row.querySelector('.bookmark-open')));
+            assert.equal(app.heading(), heading);
+        }
+        assert.deepEqual(where(app), ['John 3', [16]]);
+        await app.idle(0);
+        app.click(app.actions().querySelector('.verse-note-btn'));
+        await app.until(() => noteEditorOpen(app), 'the note editor');
+        await app.idle(0);
+        assert.deepEqual(otherNotes(app), ['Loved.']);
+
+        for (const button of [3, 4]) {
+            const before = app.calls.length;
+            const event = new app.window.MouseEvent('mouseup', { button, bubbles: true, cancelable: true });
+            app.window.dispatchEvent(event);
+            await app.idle(before);
+            assert.ok(event.defaultPrevented, 'the webview doesn’t go back either');
+            assert.equal(app.calls.slice(before).filter((c) => c.cmd === 'get_reading').length, 0, `button ${button} reads nothing`);
+            assert.deepEqual(where(app), ['John 3', [16]]);
+            assert.ok(noteEditorOpen(app));
+            assert.deepEqual(otherNotes(app), ['Loved.'], 'John 3:16’s, not another passage’s');
+        }
+
+        // The editor's other notes come only for its own passage, whatever
+        // the page says about another's.
+        app.document.dispatchEvent(new app.window.CustomEvent('gospel-getter:note-others', {
+            detail: { passage: { bookId: 45, chapter: 8, start: 28, end: 28 }, others: [{ reference: 'Romans 8:28', date: 'Nov 1, 2026', body: 'All things.' }] },
+        }));
+        await settle();
+        assert.deepEqual(otherNotes(app), ['Loved.']);
+
+        // Closed (nothing typed), the buttons go back and forward again.
+        app.click(app.document.getElementById('note-cancel'));
+        await app.until(() => !noteEditorOpen(app), 'the editor to close');
+        await waitFor(app, () => mouseButton(app, 3));
+        assert.deepEqual(where(app), ['Romans 8', [28]]);
+        await waitFor(app, () => mouseButton(app, 4));
+        assert.deepEqual(where(app), ['John 3', [16]]);
+    });
+});

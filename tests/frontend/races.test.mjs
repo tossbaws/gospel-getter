@@ -154,3 +154,47 @@ test('other failures with no error text say so too, rather than nothing', () =>
         assert.equal(app.toast().textContent, 'Something went wrong.');
         assert.ok(app.toast().classList.contains('is-error'));
     }));
+
+// C2-04: a highlight set from the card is newer than a reload of the
+// highlights already on its way (here a Library removal's, answered before
+// the highlight was set): when that reload lands it's dropped, and the new
+// highlight stays painted, with what the reload brought (the removal).
+test('C2-04: a highlight set while an older reload is on its way stays painted when the reload lands', () =>
+    withApp({ book: 'John', chapter: 3 }, async (app) => {
+        let before = app.calls.length;
+        app.click(app.verse(18));
+        app.click(app.actions().querySelector('.highlight-swatch[data-color="green"]'));
+        await app.idle(before, 'list_highlight_passages');
+        app.key('Escape');
+        before = app.calls.length;
+        app.openLibrary('highlights');
+        await app.idle(before);
+        const removes = () => [...app.document.querySelectorAll('#highlight-list .bookmark-remove')];
+        await app.until(() => removes().length === 1, 'the highlight listed');
+
+        // The removal's reload is answered at once, but arrives late.
+        const since = app.calls.length;
+        const reloads = () => app.calls.slice(since).filter((c) => c.cmd === 'list_highlights');
+        const releaseOld = app.holdAnswer('list_highlights');
+        app.click(removes()[0]);
+        await eventually(() => reloads().length === 1, 'the removal’s reload');
+        // Meanwhile, John 3:16 in yellow, from the card.
+        app.click(app.verse(16));
+        await eventually(() => app.actions()?.querySelector('.highlight-swatch[data-color="yellow"]'), 'the card');
+        app.click(app.actions().querySelector('.highlight-swatch[data-color="yellow"]'));
+        await eventually(() => app.calls.slice(since).some((c) => c.cmd === 'set_highlight' && c.done), 'the highlight saved');
+        await app.until(() => app.verse(16).dataset.highlight === 'yellow', 'the highlight painted');
+        assert.equal(reloads()[0].done, false, 'the older reload is still on its way');
+
+        before = app.calls.length;
+        releaseOld();
+        await app.until(() => app.calls.every((c) => c.done), 'the older reload to land');
+        await app.idle(before);
+        assert.equal(app.verse(16).dataset.highlight, 'yellow', 'still painted');
+        assert.equal(app.verse(18).dataset.highlight, undefined, 'the removal shows too');
+        assert.deepEqual(
+            (await backend('list_highlights')).map((h) => [h.verse, h.color]),
+            [[16, 'yellow']],
+            'as saved',
+        );
+    }));
