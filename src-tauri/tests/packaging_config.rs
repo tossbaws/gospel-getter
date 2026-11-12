@@ -625,13 +625,19 @@ fn job_keys<'a>(workflow: &'a str, job: &str) -> Vec<&'a str> {
         .collect()
 }
 
+/// What a run for a pull request label other than `ci:full` skips: the
+/// builds (and with them every job after them).
+const LABEL_GATE: &str = "github.event.action != 'labeled' || github.event.label.name == 'ci:full'";
+
 /// A release's installers come from the run dispatched on its release commit
 /// after the merge (`gh workflow run dist.yml`), which joined the same
 /// concurrency group as the merge's push run and cancelled it: a red X on
 /// every release commit. So the push of a release-prep merge builds nothing,
 /// and a dispatched run never cancels the run in progress (it is now a group
 /// of its own, too: `a_push_never_cancels_a_dispatched_run`). Pull requests
-/// (a release/ branch's too) and other pushes build as before.
+/// (a release/ branch's too) and other pushes build as before; so does a
+/// dispatched run. The only other run that skips the builds is one for a
+/// pull request label other than `ci:full` ([`LABEL_GATE`]).
 #[test]
 fn a_release_merge_never_cancels_its_own_build() {
     for job in ["linux", "windows"] {
@@ -640,18 +646,14 @@ fn a_release_merge_never_cancels_its_own_build() {
             .iter()
             .find_map(|k| k.strip_prefix("if: "))
             .unwrap_or_else(|| panic!("job {job} has no `if:`: {keys:#?}"));
-        assert!(
-            condition.contains("startsWith(github.event.head_commit.message, 'chore(release):')"),
-            "job {job} builds on a release-prep merge's push: {condition}"
-        );
-        // Only a push skips: a pull request and a dispatched run always build.
-        assert!(
-            condition.starts_with("github.event_name != 'push' || "),
-            "job {job} can skip more than a push: {condition}"
-        );
-        assert!(
-            !condition.contains("pull_request") && !condition.contains("workflow_dispatch"),
-            "job {job}: {condition}"
+        assert_eq!(
+            condition,
+            format!(
+                "(github.event_name != 'push' || !startsWith(github.event.head_commit.message, \
+                 'chore(release):')) && ({LABEL_GATE})"
+            ),
+            "job {job} builds on a release-prep merge's push, or skips more than that and \
+             another label"
         );
     }
 
@@ -1560,7 +1562,141 @@ fn a_push_never_cancels_a_dispatched_run() {
         .expect("dist.yml has a concurrency group");
     assert_eq!(
         group,
-        "dist-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}"
+        "dist-${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || \
+         (github.event.action == 'labeled' && github.event.label.name != 'ci:full')) && \
+         github.run_id || github.ref }}"
+    );
+}
+
+/// The `ci:full` label: a pull request that has it runs gui-windows and
+/// sign-rehearsal (and the windows job's GUI-check test app) in its own
+/// pull_request run, as a release/ branch's does, in place of a run
+/// dispatched by hand that built everything twice; adding the label
+/// (`labeled`) starts that run. A run for any other label builds nothing
+/// ([`LABEL_GATE`]), cancels nothing, and the jobs behind the required
+/// checks never carry a check's name in it, so a skip (which counts as
+/// passing) never stands in for a required check (they stay: "Linux
+/// (AppImage + deb)", "Windows (NSIS installer)", "GUI checks (Linux)"). The label can never reach the sign
+/// job, which has the release's key: its gate is a run dispatched on main
+/// alone (`only_the_release_job_has_the_signing_key`).
+#[test]
+fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
+    const FULL: &str = "contains(github.event.pull_request.labels.*.name, 'ci:full')";
+    let types = DIST_YML
+        .lines()
+        .skip_while(|l| *l != "  pull_request:")
+        .skip(1)
+        .take_while(|l| l.starts_with("    "))
+        .find_map(|l| l.trim().strip_prefix("types: "))
+        .expect("dist.yml's pull_request types");
+    assert_eq!(types, "[opened, synchronize, reopened, labeled]");
+
+    for job in ["gui-windows", "sign-rehearsal"] {
+        let keys = dist_job_keys(job);
+        let condition = keys
+            .iter()
+            .find_map(|k| k.strip_prefix("if: "))
+            .unwrap_or_else(|| panic!("job {job} has no if: {keys:#?}"));
+        assert!(
+            condition.contains(&format!(
+                "github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') \
+                 || {FULL})"
+            )),
+            "job {job}: {condition}"
+        );
+    }
+    let steps = dist_steps();
+    let test_app: Vec<&Step> = steps
+        .iter()
+        .filter(|s| s.job == "windows" && s.name.contains("GUI-check test app"))
+        .collect();
+    assert_eq!(test_app.len(), 2, "{test_app:#?}");
+    let gui_windows = dist_job_keys("gui-windows")
+        .into_iter()
+        .find_map(|k| k.strip_prefix("if: "))
+        .expect("gui-windows's if");
+    for step in test_app {
+        assert!(
+            step.text.contains(&format!("        if: {gui_windows}\n")),
+            "the test app isn't built when gui-windows runs: {step:#?}"
+        );
+    }
+
+    // Another label's run: every job that runs anything is skipped by the
+    // builds' gate, and none behind a required check is named as it is.
+    for (job, required) in [
+        ("linux", "Linux (AppImage + deb)"),
+        ("windows", "Windows (NSIS installer)"),
+        ("gui-linux", "GUI checks (Linux)"),
+    ] {
+        let keys = dist_job_keys(job);
+        let name = keys
+            .iter()
+            .find_map(|k| k.strip_prefix("name: "))
+            .unwrap_or_else(|| panic!("job {job} has no name: {keys:#?}"));
+        let named = name
+            .strip_prefix(&format!("${{{{ ({LABEL_GATE}) && '"))
+            .and_then(|rest| rest.strip_suffix("' }}"))
+            .and_then(|rest| rest.split_once("' || '"))
+            .unwrap_or_else(|| panic!("job {job}'s name doesn't follow the label: {name}"));
+        assert_ne!(named.0, named.1, "job {job}");
+        assert!(
+            !named.1.is_empty() && !named.1.contains("${{"),
+            "job {job}: {name}"
+        );
+        assert_eq!(
+            named.0, required,
+            "job {job}: a required check's name changed"
+        );
+        let needs = keys
+            .iter()
+            .find_map(|k| k.strip_prefix("needs: "))
+            .unwrap_or_default();
+        let gated = keys.iter().any(|k| {
+            k.strip_prefix("if: ")
+                .is_some_and(|c| c.contains(&format!("({LABEL_GATE})")))
+        });
+        assert!(
+            gated || needs.contains("linux") || needs.contains("windows"),
+            "job {job} runs in another label's run: {keys:#?}"
+        );
+    }
+    // The rest run only after the builds, so not in that run either.
+    for job in ["gui-windows", "sign-rehearsal", "sign"] {
+        let keys = dist_job_keys(job);
+        let needs = keys
+            .iter()
+            .find_map(|k| k.strip_prefix("needs: "))
+            .unwrap_or_default();
+        assert!(
+            needs.contains("windows"),
+            "job {job} doesn't wait for the builds: {keys:#?}"
+        );
+    }
+
+    // The sign job: dispatched on main only, whatever the labels.
+    let sign = dist_job_keys("sign");
+    assert!(
+        sign.contains(
+            &"if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
+        ),
+        "{sign:#?}"
+    );
+    for key in &sign {
+        for word in ["ci:full", "label", "pull_request", "head_ref"] {
+            assert!(!key.contains(word), "the sign job's {key} names {word}");
+        }
+    }
+    // Its steps' own lines: what follows the last of them up to the next
+    // job's steps (comments, and that job's own keys) reads into it.
+    assert!(
+        !steps
+            .iter()
+            .filter(|s| s.job == "sign")
+            .flat_map(|s| s.text.lines())
+            .filter(|l| l.starts_with("      ") && !l.trim_start().starts_with('#'))
+            .any(|l| l.contains("ci:full") || l.contains("label")),
+        "a sign step looks at labels"
     );
 }
 

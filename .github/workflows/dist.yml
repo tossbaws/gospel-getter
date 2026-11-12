@@ -12,11 +12,25 @@ name: Distribution Artifacts
 # run is a concurrency group of its own (its run id), so a later push never
 # cancels a release build, and the dispatch cancels nothing.
 #
+# The ci:full label: a pull request that has it runs gui-windows and
+# sign-rehearsal too, in its own pull_request run, as a release/ branch's
+# does, so a branch needs no run dispatched by hand for them (which built
+# everything twice). Adding the label starts that run (pull_request
+# "labeled"), which cancels the one in progress on the pull request as a
+# push does. Adding any other label (Dependabot labels its pull requests)
+# builds nothing: that run's jobs are skipped, it cancels nothing (a group
+# of its own, its run id), and the jobs behind the required checks (linux,
+# windows, gui-linux) carry other names in it, so a skip, which counts as
+# passing, can never stand in for a required check's result. (GitHub shows
+# a job that never starts, skipped or cancelled first, under its name's
+# expression as written, which is no check's name either.) The release's
+# own run (dispatched on main) and its sign job don't look at labels.
+#
 # Then the GUI checks (scripts/gui-check.sh, tests/gui) drive the built
 # app through its own webview with tauri-driver: gui-linux on the AppImage
 # for every run, advisory (not a required check); gui-windows on the NSIS
-# install only by hand (workflow_dispatch) or for a pull request from a
-# release/ branch, before a release. Their updater checks run on the GUI
+# install only by hand (workflow_dispatch), or for a pull request from a
+# release/ branch or with the ci:full label, before a release. Their updater checks run on the GUI
 # checks' test build of the app (feature gui-test-updater: its updater
 # reads a test settings file, talks to the checks' own local server, and
 # never installs), which each job builds after its installers are uploaded,
@@ -50,9 +64,10 @@ name: Distribution Artifacts
 #     publishing. The build's own artifacts are never replaced, so a sign
 #     job that fails can be re-run (Re-run failed jobs) on them as built.
 #   - dispatched on another branch, or a pull request from a release/
-#     branch: unsigned, and sign-rehearsal does all of that with a throwaway
-#     key made for the run instead, uploading nothing, so a change to the
-#     signing is tried before it reaches a release.
+#     branch or with the ci:full label: unsigned, and sign-rehearsal does
+#     all of that with a throwaway key made for the run instead, uploading
+#     nothing, so a change to the signing is tried before it reaches a
+#     release. ci:full never reaches the sign job.
 #
 # Every action is pinned to a commit (Dependabot proposes updates:
 # .github/dependabot.yml), and every job builds with one Rust release,
@@ -73,13 +88,17 @@ on:
   push:
     branches: [main]
   pull_request:
+    # The defaults, and labeled: adding ci:full starts a run (see the top).
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A dispatched run, and a run for a label other than ci:full, are groups of
+# their own: they cancel nothing.
 concurrency:
-  group: dist-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  group: dist-${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || (github.event.action == 'labeled' && github.event.label.name != 'ci:full')) && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
@@ -96,10 +115,13 @@ env:
 
 jobs:
   linux:
-    name: Linux (AppImage + deb)
+    # A required check by this name; another in a run for a label other
+    # than ci:full, which builds nothing (see the top of this file).
+    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'ci:full') && 'Linux (AppImage + deb)' || 'Linux (AppImage + deb), not run for this label' }}
     # Not on the push of a release-prep merge: the release's installers come
     # from the run dispatched on the same commit (see the top of this file).
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')
+    # Nor for a label other than ci:full.
+    if: (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')) && (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
     # Tauri's own Linux packaging guidance is to build on the oldest
     # supported Ubuntu LTS, not `ubuntu-latest`: the AppImage/deb bundler
     # links against the build host's glibc/webkit2gtk, and a binary built
@@ -326,9 +348,11 @@ jobs:
           retention-days: 7
 
   windows:
-    name: Windows (NSIS installer)
-    # Not on the push of a release-prep merge, as for the linux job.
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')
+    # A required check by this name, as for the linux job.
+    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'ci:full') && 'Windows (NSIS installer)' || 'Windows (NSIS installer), not run for this label' }}
+    # Not on the push of a release-prep merge, nor for a label other than
+    # ci:full, as for the linux job.
+    if: (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')) && (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
     runs-on: windows-latest
     timeout-minutes: 55
     defaults:
@@ -570,7 +594,7 @@ jobs:
       # gui-windows runs: the GUI checks' test build (see the top of this
       # file), for its updater checks.
       - name: Build the GUI-check test app
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
         shell: pwsh
         run: |
           cargo build --release --locked --features gui-test-updater
@@ -579,7 +603,7 @@ jobs:
           Copy-Item target/release/gospel_getter.exe "$env:RUNNER_TEMP/gui-check-test-app/"
 
       - name: Upload the GUI-check test app
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gui-check-test-app-windows
@@ -588,7 +612,8 @@ jobs:
           retention-days: 7
 
   gui-linux:
-    name: GUI checks (Linux)
+    # A required check by this name, as for the linux job.
+    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'ci:full') && 'GUI checks (Linux)' || 'GUI checks (Linux), not run for this label' }}
     # The AppImage the linux job built, driven through its own webview by
     # tauri-driver and WebKitWebDriver on a private Xvfb display. Advisory:
     # not a required check (yet). The AppImage is tested as shipped: the
@@ -683,12 +708,13 @@ jobs:
     name: GUI checks (Windows)
     # The NSIS installer the windows job built, installed silently and
     # driven through WebView2 by tauri-driver and Edge WebDriver. Before a
-    # release only: by hand, or for a pull request from a release/ branch.
+    # release only: by hand, or for a pull request from a release/ branch or
+    # with the ci:full label.
     # Windows has no private display, so this runs on the runner's desktop;
     # the native save-dialog step stops at "the dialog appeared" (UI
     # Automation finds and closes it).
     needs: windows
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
     runs-on: windows-latest
     # Room for the whole suite twice (GUI_CHECK_RETRY below).
     timeout-minutes: 30
@@ -925,13 +951,13 @@ jobs:
   # The sign job's steps on a run that can't be released, with a key made
   # for the run in place of the release's (and checked against its own
   # public key): a run dispatched on another branch, or a pull request from
-  # a release/ branch. The same downloads and the same sign_installers.py
-  # (each installer's SHA-256 recorded, signed, and checked unchanged). It
-  # uploads nothing, and names no secret.
+  # a release/ branch or with the ci:full label. The same downloads and the
+  # same sign_installers.py (each installer's SHA-256 recorded, signed, and
+  # checked unchanged). It uploads nothing, and names no secret.
   sign-rehearsal:
     name: Signing rehearsal (throwaway key)
     needs: [linux, windows]
-    if: (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+    if: (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
