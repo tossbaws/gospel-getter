@@ -598,11 +598,16 @@ jobs:
     # The same Ubuntu as the build: the AppImage was built against its
     # WebKitGTK, and webkit2gtk-driver comes from it.
     runs-on: ubuntu-22.04
+    # Room for the whole suite twice (GUI_CHECK_RETRY below).
     timeout-minutes: 25
     env:
       # A CI runner is slower than a desktop; still bounded.
       GUI_CHECK_BUDGET: "300"
       GUI_CHECK_STEP_TIMEOUT: "20"
+      # A failed suite runs once more, whole and on fresh data; a check that
+      # passes only the second time is FLAKY, with a warning and a line in
+      # the job's summary, never a clean pass (scripts/gui-check.sh).
+      GUI_CHECK_RETRY: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -664,6 +669,8 @@ jobs:
           GUI_CHECK_UPDATER_APP="$PWD/gui-check-test-app/gospel_getter" \
             scripts/gui-check.sh "$appimage" "$RUNNER_TEMP/gui-check"
 
+      # Both attempts' results.txt and screenshots when the suite ran twice
+      # (the first in attempt-1/).
       - name: Upload the results and screenshots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -683,10 +690,13 @@ jobs:
     needs: windows
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
     runs-on: windows-latest
+    # Room for the whole suite twice (GUI_CHECK_RETRY below).
     timeout-minutes: 30
     env:
       GUI_CHECK_BUDGET: "300"
       GUI_CHECK_STEP_TIMEOUT: "20"
+      # As for gui-linux; the retry deletes the app's data folders first.
+      GUI_CHECK_RETRY: "1"
       # The app's window comes up about 10s after launch on a cold runner.
       GUI_CHECK_SESSION_TIMEOUT: "60"
       # The installed app's program, as the windows job builds it
@@ -804,6 +814,7 @@ jobs:
           GUI_CHECK_UPDATER_APP="$tmp/gui-check-test-app/$name" \
             scripts/gui-check.sh "$(cygpath -u "$APP_EXE")" "$tmp/gui-check"
 
+      # Both attempts', as for gui-linux.
       - name: Upload the results and screenshots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

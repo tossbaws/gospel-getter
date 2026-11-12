@@ -18,6 +18,12 @@ serde_json = "1"
 thirtyfour = { version = "0.37.8", default-features = false, features = ["reqwest"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "fs", "net", "io-util"] }
 
+[features]
+# A test of scripts/gui-check.sh's retry, by hand: GUI_CHECK_FORCE_FAIL
+# fails the checks it names (src/report.rs). Off unless asked for; CI never
+# turns it on, and the checks never ship in an installer.
+force-fail = []
+
 # Windows: gui-launch ties the app to itself with a job object, and the
 # checks make sure each app it started has exited before the next starts
 # (src/launched.rs). Already in the tree through tokio.

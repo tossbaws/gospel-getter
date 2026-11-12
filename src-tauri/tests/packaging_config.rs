@@ -1189,6 +1189,58 @@ fn every_job_has_a_time_limit_and_apt_retries() {
     assert!(apt > 0, "no apt-get found");
 }
 
+/// Both GUI jobs run the suite once more when it fails
+/// (`GUI_CHECK_RETRY`, scripts/gui-check.sh), which marks a check that
+/// passes only the second time FLAKY, and keeps both attempts' results in
+/// the uploaded artifact (attempt 1's under the run's out-dir). Nothing in
+/// CI builds the checks with their `force-fail` feature, or names the
+/// variable it reads: a check is only ever failed by hand, to try the retry.
+#[test]
+fn the_gui_checks_retry_once_in_ci_and_never_force_a_failure() {
+    let steps = dist_steps();
+    for job in ["gui-linux", "gui-windows"] {
+        let keys = job_keys(DIST_YML, job);
+        assert!(keys.contains(&"env:"), "job {job} has no env: {keys:#?}");
+        let body = workflow_jobs(DIST_YML)
+            .into_iter()
+            .find(|(id, _)| id == job)
+            .map(|(_, body)| body)
+            .unwrap_or_else(|| panic!("no job {job}"));
+        assert!(
+            body.lines().any(|l| l == "      GUI_CHECK_RETRY: \"1\""),
+            "job {job} doesn't retry the suite"
+        );
+        let run = steps
+            .iter()
+            .find(|s| s.job == job && s.text.contains("scripts/gui-check.sh"))
+            .unwrap_or_else(|| panic!("job {job} doesn't run the checks"));
+        let out = run
+            .text
+            .lines()
+            .find_map(|l| l.split_once("scripts/gui-check.sh ").map(|(_, rest)| rest))
+            .expect("the checks' arguments");
+        assert!(out.contains("/gui-check\""), "job {job}: {out}");
+        let upload = steps
+            .iter()
+            .find(|s| s.job == job && s.text.contains("actions/upload-artifact@"))
+            .unwrap_or_else(|| panic!("job {job} uploads nothing"));
+        assert_eq!(
+            with_value(upload, "path"),
+            Some("${{ runner.temp }}/gui-check"),
+            "job {job} uploads the whole out-dir, attempt-1/ too"
+        );
+        assert!(
+            upload.text.contains("        if: always()\n"),
+            "{upload:#?}"
+        );
+    }
+    for (file, text) in github_files() {
+        for name in ["force-fail", "GUI_CHECK_FORCE_FAIL"] {
+            assert!(!text.contains(name), "{file} names {name}");
+        }
+    }
+}
+
 /// Release builds use one Rust, set in one place (`RUST_TOOLCHAIN` in
 /// dist.yml), an exact release: not whatever is stable on the day.
 #[test]
