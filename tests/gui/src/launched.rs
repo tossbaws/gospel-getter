@@ -14,7 +14,9 @@
 //! creation time are enough on their own (a pid goes to another process
 //! only once its process is gone, and that one is created later); the path
 //! is checked as well whenever Windows says it, which it doesn't for a
-//! process that is exiting ([`Identity::AppExiting`]).
+//! process that is exiting ([`Identity::AppExiting`]). Windows refusing to
+//! say ([`refused`]) is never taken as an answer that the process isn't the
+//! app.
 
 use anyhow::{Context, Result};
 
@@ -46,21 +48,51 @@ pub enum Identity {
     OtherProgram,
 }
 
+/// Windows' "Access is denied" (`ERROR_ACCESS_DENIED`).
+pub const ERROR_ACCESS_DENIED: i32 = 5;
+
+/// Windows' "A device attached to the system is not functioning"
+/// (`ERROR_GEN_FAILURE`), which `QueryFullProcessImageNameW` also answers
+/// for a process that is exiting.
+pub const ERROR_GEN_FAILURE: i32 = 31;
+
+/// Whether an error from asking Windows about a process (its raw OS error)
+/// is Windows refusing to say, as it does for a process that is exiting,
+/// rather than the question failing. A refusal is never an answer: it
+/// can't make the process anything but what the rest of what Windows said
+/// makes it.
+pub fn refused(os_error: Option<i32>) -> bool {
+    matches!(os_error, Some(ERROR_ACCESS_DENIED | ERROR_GEN_FAILURE))
+}
+
 impl Launched {
     /// What a running process holding this app's pid is, from when Windows
-    /// says it was created and the program it runs (`None`: Windows refused
-    /// to say, as it does for a process that is exiting). Only a creation
-    /// time that differs, or a program that does, says it isn't the app;
-    /// a refusal never does.
-    pub fn identify(&self, created: u64, path: Option<&str>) -> Identity {
+    /// says it was created and the program it runs, each `None` where
+    /// Windows refused to say ([`refused`]), as it can for a process that is
+    /// exiting. Only a creation time that differs, or a program that does,
+    /// says it isn't the app; a refusal never does. With no creation time,
+    /// nothing can tell it apart from a process given the pid since:
+    /// `None`, neither the app nor another.
+    pub fn identify(&self, created: Option<u64>, path: Option<&str>) -> Option<Identity> {
+        let created = created?;
         if created != self.created {
-            return Identity::CreatedOtherwise;
+            return Some(Identity::CreatedOtherwise);
         }
-        match path {
+        Some(match path {
             None => Identity::AppExiting,
             Some(path) if path.eq_ignore_ascii_case(&self.path) => Identity::App,
             Some(_) => Identity::OtherProgram,
-        }
+        })
+    }
+
+    /// Whether the process holding this app's pid, which Windows refused to
+    /// open to wait for or stop, is the app, by when it was created
+    /// (`created`, asked with the least access there is; `None`: no process
+    /// has the pid now). Only the app's creation time makes it the app,
+    /// exiting; any other is a process given the pid since, and the app is
+    /// gone.
+    pub fn is_by_creation(&self, created: Option<u64>) -> bool {
+        created == Some(self.created)
     }
 
     /// The record's line for this app, newline included.
@@ -102,7 +134,7 @@ pub mod process {
     use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
 
     use windows_sys::Win32::Foundation::{
-        ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, FILETIME, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        ERROR_INVALID_PARAMETER, FILETIME, WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::System::Threading::{
         GetProcessTimes, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -110,7 +142,7 @@ pub mod process {
         WaitForSingleObject,
     };
 
-    use super::{Identity, Launched};
+    use super::{Identity, Launched, refused};
 
     /// A process, held open: while it is, its pid can't go to another.
     #[derive(Debug)]
@@ -160,25 +192,29 @@ pub mod process {
         }
 
         /// What this process, which holds `app`'s pid, is
-        /// ([`Launched::identify`]). Windows tells anyone allowed to query a
-        /// process when it was created, even once it's exiting, but refuses
-        /// to say what program an exiting process runs
-        /// (STATUS_PROCESS_IS_TERMINATING, which reaches Win32 as
-        /// ERROR_ACCESS_DENIED): that refusal, after the creation time is
-        /// read, is the only one taken as an answer, and it can't make the
-        /// process anything but the app.
-        pub fn identify(&self, app: &Launched) -> io::Result<Identity> {
-            let created = created(self.0.as_handle())?;
-            if created != app.created {
+        /// ([`Launched::identify`]): `None` when Windows won't say even when
+        /// it was created. Windows tells anyone allowed to query a process
+        /// when it was created, even once it's exiting, but refuses to say
+        /// what program an exiting process runs (STATUS_PROCESS_IS_TERMINATING,
+        /// which reaches Win32 as ERROR_ACCESS_DENIED, or ERROR_GEN_FAILURE):
+        /// a refusal ([`refused`]) is taken as Windows not saying, never as
+        /// an answer, and any other error is an error.
+        pub fn identify(&self, app: &Launched) -> io::Result<Option<Identity>> {
+            let created = said(created(self.0.as_handle()))?;
+            if created != Some(app.created) {
                 return Ok(app.identify(created, None));
             }
-            match path(self.0.as_handle()) {
-                Ok(path) => Ok(app.identify(created, Some(&path))),
-                Err(e) if e.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => {
-                    Ok(app.identify(created, None))
-                }
-                Err(e) => Err(e),
-            }
+            let path = said(path(self.0.as_handle()))?;
+            Ok(app.identify(created, path.as_deref()))
+        }
+    }
+
+    /// What Windows answered: `None` if it refused to say ([`refused`]).
+    fn said<T>(answer: io::Result<T>) -> io::Result<Option<T>> {
+        match answer {
+            Ok(value) => Ok(Some(value)),
+            Err(e) if refused(e.raw_os_error()) => Ok(None),
+            Err(e) => Err(e),
         }
     }
 
@@ -288,30 +324,78 @@ mod tests {
         Ok(())
     }
 
+    fn recorded() -> Launched {
+        Launched {
+            pid: 7896,
+            created: 134_388_119_117_684_485,
+            path: r"C:\Users\runneradmin\AppData\Local\Gospel Getter\gospel_getter.exe".to_owned(),
+        }
+    }
+
     /// Only a creation time or a program that differs says a process isn't
     /// the app; Windows refusing to name the program of the process created
     /// at the app's moment never does.
     #[test]
     fn a_process_is_the_app_by_its_creation_and_program() {
-        let app = Launched {
-            pid: 7896,
-            created: 134_388_119_117_684_485,
-            path: r"C:\Users\runneradmin\AppData\Local\Gospel Getter\gospel_getter.exe".to_owned(),
-        };
+        let app = recorded();
+        let created = Some(app.created);
         let shouted = app.path.to_uppercase();
-        assert_eq!(app.identify(app.created, Some(&app.path)), Identity::App);
-        assert_eq!(app.identify(app.created, Some(&shouted)), Identity::App);
-        assert_eq!(app.identify(app.created, None), Identity::AppExiting);
+        assert_eq!(app.identify(created, Some(&app.path)), Some(Identity::App));
+        assert_eq!(app.identify(created, Some(&shouted)), Some(Identity::App));
+        assert_eq!(app.identify(created, None), Some(Identity::AppExiting));
         assert_eq!(
-            app.identify(app.created, Some(r"C:\Windows\System32\svchost.exe")),
-            Identity::OtherProgram
+            app.identify(created, Some(r"C:\Windows\System32\svchost.exe")),
+            Some(Identity::OtherProgram)
         );
         for path in [Some(app.path.as_str()), None] {
             assert_eq!(
-                app.identify(app.created + 1, path),
-                Identity::CreatedOtherwise
+                app.identify(Some(app.created + 1), path),
+                Some(Identity::CreatedOtherwise)
             );
         }
+    }
+
+    /// Run 42879721170: pid 7896, exiting, made the checks fail with
+    /// "couldn't tell what pid 7896 is: Access is denied (os error 5)".
+    /// Access denied, and the "device not functioning" Windows also gives
+    /// for an exiting process's program, are refusals, which leave the
+    /// process the app (exiting) when its creation time is the app's, and
+    /// another process when it isn't. Any other error isn't a refusal, and
+    /// with no creation time at all it's neither: it can't be told apart.
+    #[test]
+    fn a_refusal_is_never_an_answer() {
+        assert!(refused(Some(ERROR_ACCESS_DENIED)));
+        assert!(refused(Some(ERROR_GEN_FAILURE)));
+        // ERROR_INVALID_PARAMETER (no such process), ERROR_INVALID_HANDLE.
+        assert!(!refused(Some(87)));
+        assert!(!refused(Some(6)));
+        assert!(!refused(None));
+
+        let app = recorded();
+        assert_eq!(
+            app.identify(Some(app.created), None),
+            Some(Identity::AppExiting),
+            "refused its program, created at the app's moment: the app, exiting"
+        );
+        assert_eq!(
+            app.identify(Some(app.created - 1), None),
+            Some(Identity::CreatedOtherwise),
+            "refused its program, created at another moment: not the app"
+        );
+        for path in [None, Some(app.path.as_str())] {
+            assert_eq!(app.identify(None, path), None, "no creation time");
+        }
+    }
+
+    /// A pid Windows won't open to wait for: the app (exiting) only by the
+    /// app's creation time; with another, or with no process there now,
+    /// the app is gone.
+    #[test]
+    fn a_pid_that_wont_open_is_the_app_only_by_its_creation() {
+        let app = recorded();
+        assert!(app.is_by_creation(Some(app.created)));
+        assert!(!app.is_by_creation(Some(app.created + 10_000_000)));
+        assert!(!app.is_by_creation(None));
     }
 
     #[test]

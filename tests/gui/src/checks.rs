@@ -600,8 +600,39 @@ async fn shipped(
 /// Starts `app` through tauri-driver: a WebDriver session whose browser
 /// is the app. First, every app started before has exited (Windows; see
 /// `exited`): the app is one at a time, and would otherwise hand over to
-/// one still running and exit.
+/// one still running and exit. A start-up Edge WebDriver reports as the
+/// app's browser exiting ([`start_tried_again`]) is tried once more, once
+/// every app started so far, the failed try's too, has exited; any other
+/// failure, or a second, fails as it is.
 async fn start_session(config: &Config, app: &str, started: Instant) -> Result<WebDriver> {
+    match start_session_once(config, app, started).await {
+        Err(first) if start_tried_again(&format!("{first:#}")) => {
+            log_line(
+                started,
+                &format!(
+                    "  the session didn't start: {first:#}; trying once more, once the app that \
+                     try started has exited"
+                ),
+            );
+            start_session_once(config, app, started).await.context(
+                "a second try, after the first failed as the app's browser exited (see steps.log)",
+            )
+        }
+        session => session,
+    }
+}
+
+/// Whether a session that didn't start is tried once more: only when Edge
+/// WebDriver says the browser it started, the app's WebView2, exited
+/// during start-up ("session not created: Chrome instance exited", run
+/// 42741590422, on the updater checks' test build), which a moment's race
+/// with the app before it can cause. Not a timeout, nor any other refusal.
+fn start_tried_again(error: &str) -> bool {
+    error.contains("session not created") && error.contains("instance exited")
+}
+
+/// One try at [`start_session`].
+async fn start_session_once(config: &Config, app: &str, started: Instant) -> Result<WebDriver> {
     exited::earlier_apps_exited(config, started).await?;
     log_line(
         started,
@@ -1368,5 +1399,38 @@ impl Run<'_> {
         self.reader_vellum_screenshots().await?;
         self.card_vellum_screenshots().await?;
         self.keys_vellum_screenshots().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::start_tried_again;
+
+    /// Only Edge WebDriver's "the browser exited" during start-up is tried
+    /// again: not a start that timed out, not another refusal, and not
+    /// WebKitWebDriver's (Linux).
+    #[test]
+    fn only_a_browser_that_exited_at_start_up_is_tried_again() {
+        // Run 42741590422, check 9 on the updater checks' test build.
+        let exited = "no WebDriver session on the test build: tauri-driver could not start a \
+            session on the app: Unable to create WebDriver session:          Status: 500     \
+            Additional info:         session not created: Chrome instance exited. Examine \
+            ChromeDriver verbose log to determine the cause.         Error: session not created";
+        assert!(start_tried_again(exited));
+        assert!(start_tried_again(
+            "tauri-driver could not start a session on the app: session not created: Microsoft \
+             Edge instance exited."
+        ));
+        for other in [
+            "starting the app through tauri-driver timed out after 60s",
+            "tauri-driver could not start a session on the app: session not created: \
+             DevToolsActivePort file doesn't exist",
+            "tauri-driver could not start a session on the app: Unable to create WebDriver \
+             session: error sending request: Connection refused",
+            "couldn't tell what pid 7896 is: Access is denied. (os error 5)",
+            "the app's browser exited",
+        ] {
+            assert!(!start_tried_again(other), "{other}");
+        }
     }
 }
