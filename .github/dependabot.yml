@@ -1,8 +1,9 @@
 # Every `uses:` in the workflows and in .github/actions is pinned to a full
 # commit SHA, with its release in a comment (src-tauri/tests/
 # packaging_config.rs checks it). Dependabot proposes the new SHA and
-# comment when an action releases; minor and patch releases come as one
-# pull request a week, a new major release as one of its own.
+# comment when an action releases, checked weekly: the week's minor and
+# patch releases come as one pull request, and its new major releases as
+# another (one pull request each made five at once, #212 to #216).
 # dtolnay/rust-toolchain has no releases to follow: move its pin by hand.
 version: 2
 updates:
@@ -17,3 +18,6 @@ updates:
         update-types:
           - minor
           - patch
+      actions-major:
+        update-types:
+          - major

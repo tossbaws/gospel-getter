@@ -28,9 +28,14 @@ name: Distribution Artifacts
 #
 # Then the GUI checks (scripts/gui-check.sh, tests/gui) drive the built
 # app through its own webview with tauri-driver: gui-linux on the AppImage
-# for every run, advisory (not a required check); gui-windows on the NSIS
-# install only by hand (workflow_dispatch), or for a pull request from a
-# release/ branch or with the ci:full label, before a release. Their updater checks run on the GUI
+# for every run, a required check ("GUI checks (Linux)" in the main
+# branch's ruleset); gui-windows on the NSIS install only by hand
+# (workflow_dispatch), or for a pull request from a release/ branch or with
+# the ci:full label, before a release. A failed suite runs once more, whole
+# and on fresh data (GUI_CHECK_RETRY): a check that passes only then is
+# FLAKY, warned about and listed in the job's summary, which is what keeps
+# a flake from blocking a merge without passing for a clean run; a check
+# that fails both times fails the job. Their updater checks run on the GUI
 # checks' test build of the app (feature gui-test-updater: its updater
 # reads a test settings file, talks to the checks' own local server, and
 # never installs), which each job builds after its installers are uploaded,
@@ -618,10 +623,11 @@ jobs:
     # A required check by this name, as for the linux job.
     name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'ci:full') && 'GUI checks (Linux)' || 'GUI checks (Linux), not run for this label' }}
     # The AppImage the linux job built, driven through its own webview by
-    # tauri-driver and WebKitWebDriver on a private Xvfb display. Advisory:
-    # not a required check (yet). The AppImage is tested as shipped: the
-    # script has its own runtime extract it (--appimage-extract, so no FUSE)
-    # and starts its AppRun.
+    # tauri-driver and WebKitWebDriver on a private Xvfb display. A required
+    # check (see the top of this file for how a flake is kept from blocking
+    # a merge). The AppImage is tested as shipped: the script has its own
+    # runtime extract it (--appimage-extract, so no FUSE) and starts its
+    # AppRun.
     needs: linux
     # The same Ubuntu as the build: the AppImage was built against its
     # WebKitGTK, and webkit2gtk-driver comes from it.
