@@ -219,6 +219,8 @@ struct State {
     highlights: HashMap<(i64, i64, i64), String>,
     highlights_loaded: bool,
     highlights_token: u64,
+    /// Reloads of the highlights still on their way.
+    highlights_reloading: u32,
     /// The chapter's notes, each with the backend's own object for it (for
     /// the margin, which may open one in the note editor).
     chapter_notes: Vec<(SelectionNote, JsValue)>,
@@ -1281,12 +1283,17 @@ fn toggle_bookmark() -> Task {
 pub fn refresh_highlights() -> impl Future<Output = ()> + 'static {
     let token = with(|s| {
         s.highlights_token += 1;
+        s.highlights_reloading += 1;
         s.highlights_token
     });
     let sent = ipc::send("list_highlights", JsValue::UNDEFINED);
     async move {
         let got = answer(sent).await.and_then(read::<Vec<Highlight>>);
-        if with(|s| s.highlights_token) != token {
+        let newest = with(|s| {
+            s.highlights_reloading = s.highlights_reloading.saturating_sub(1);
+            s.highlights_token == token
+        });
+        if !newest {
             return;
         }
         match got {
@@ -1387,6 +1394,13 @@ fn highlight_selection(color: Option<String>) -> Task {
     let Some((attempt, (book_id, chapter, start, end))) = found else {
         return Box::pin(async {});
     };
+    // Newer than any reload on its way, which may have been answered
+    // before this change: its answer is dropped, not painted over this
+    // one (C2-04), and the highlights are read again once this is in.
+    let overtook = with(|s| {
+        s.highlights_token += 1;
+        s.highlights_reloading > 0
+    });
     let sent = match &color {
         Some(color) => send(
             "set_highlight",
@@ -1416,6 +1430,9 @@ fn highlight_selection(color: Option<String>) -> Task {
                 text::highlight_failed(color.as_deref(), &ipc::error_text(&e)),
                 true,
             );
+            if overtook {
+                spawn_local(refresh_highlights());
+            }
             return;
         }
         with(|s| {
@@ -1436,6 +1453,11 @@ fn highlight_selection(color: Option<String>) -> Task {
             update_highlight_controls();
         }
         status_for(attempt, text::highlight_done(color.as_deref()), false);
+        // What the reload this overtook would have shown (another change,
+        // an import), read again with this one in it.
+        if overtook {
+            spawn_local(refresh_highlights());
+        }
         // The Library's list, not waited for (as before).
         spawn_local(refresh_library(&["highlights"]));
     })
