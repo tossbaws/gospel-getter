@@ -94,6 +94,12 @@ impl LogFile {
         Ok(())
     }
 
+    /// The file being written, once [`LogFile::open_in`] has given it a
+    /// folder.
+    pub fn path(&self) -> Option<PathBuf> {
+        self.lock().dir.as_deref().map(|dir| file_path(dir, 0))
+    }
+
     fn lock(&self) -> MutexGuard<'_, Files> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -273,8 +279,10 @@ mod tests {
         let dir = scratch.0.join("logs");
         let log = LogFile::new(100, 3);
         line(&log, "before there's a folder\n");
+        assert_eq!(log.path(), None);
         log.open_in(&dir).expect("open the log");
         assert_eq!(names(&dir), ["gospel-getter.log"]);
+        assert_eq!(log.path(), Some(dir.join("gospel-getter.log")));
 
         for i in 0..20 {
             line(&log, &format!("line {i:02} of the log, 30 bytes\n"));

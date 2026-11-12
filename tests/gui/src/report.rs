@@ -87,6 +87,7 @@ pub enum Check {
     ExportChoice = 71,
     SingleKeys = 72,
     SecondLaunch = 73,
+    StartupFailure = 74,
 }
 
 impl Check {
@@ -167,6 +168,10 @@ impl Check {
         Check::DisclosuresKept,
         Check::NoteDraft,
     ];
+
+    /// The app as shipped started on a data folder it can't open, before
+    /// the first session: no WebDriver session, since it never has a window.
+    pub const STARTUP: [Check; 1] = [Check::StartupFailure];
 
     /// The updater's checks, on the GUI checks' test build against the
     /// run's own update server (the third session).
@@ -253,6 +258,7 @@ impl Check {
             Check::ExportChoice => "export-choice",
             Check::SingleKeys => "single-key-switch",
             Check::SecondLaunch => "second-launch",
+            Check::StartupFailure => "startup-failure",
         }
     }
 
@@ -262,11 +268,12 @@ impl Check {
     }
 
     /// Every check, by number: the app's as shipped, started again, and
-    /// the updater's.
+    /// failing to start, and the updater's.
     pub fn all() -> Vec<Check> {
         let mut all: Vec<Check> = Check::SHIPPED
             .iter()
             .chain(&Check::RELAUNCH)
+            .chain(&Check::STARTUP)
             .chain(&Check::UPDATER)
             .copied()
             .collect();
