@@ -2792,17 +2792,17 @@ async fn invalid_findings_reject_the_whole_file_and_change_nothing() {
         (
             "a request with commentary",
             finding(r#""agent": "Claude", "request": "grief: here Jesus shows his sorrow""#),
-            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon",
+            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon, a semicolon, a dash (\u{2014} or \u{2013}), a line break or a character that can't be seen.",
         ),
         (
             "a request with an invisible character",
             finding(r#""agent": "Claude", "request": "grief\u200b""#),
-            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon",
+            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon, a semicolon, a dash (\u{2014} or \u{2013}), a line break or a character that can't be seen.",
         ),
         (
             "a request with a line separator",
             finding(r#""agent": "Claude", "request": "grief\u2028Jesus weeps here""#),
-            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon",
+            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon, a semicolon, a dash (\u{2014} or \u{2013}), a line break or a character that can't be seen.",
         ),
         (
             "a body",
