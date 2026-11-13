@@ -542,6 +542,23 @@ mod tests {
         ids(&overlapping(notes, &passage(JOHN, 3, selection)))
     }
 
+    /// Thousands separators go only between groups of three digits, never
+    /// before the first, whatever the number of digits (G-02).
+    #[test]
+    fn numbers_are_grouped_by_thousands() {
+        for (n, shown) in [
+            (0, "0"),
+            (7, "7"),
+            (123, "123"),
+            (1_234, "1,234"),
+            (123_456, "123,456"),
+            (1_234_567, "1,234,567"),
+            (123_456_789, "123,456,789"),
+        ] {
+            assert_eq!(grouped(n), shown, "{n}");
+        }
+    }
+
     #[test]
     fn nothing_overlaps_when_there_are_no_notes() {
         assert_eq!(overlapping_ranges(&[], (16, 21)), Vec::<i64>::new());
