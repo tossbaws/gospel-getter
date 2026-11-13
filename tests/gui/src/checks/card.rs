@@ -117,11 +117,14 @@ const STALE_GHOST_JS: &str = "document.body.dispatchEvent(new KeyboardEvent('key
     window.addEventListener('click', (e) => { if (seen.dropped === null) seen.dropped = e.defaultPrevented; }, true);
     return null;";
 
-/// Where the last pointer move was, in the page (`arguments[0]` true starts
-/// listening for it).
-const LAST_POINTER_JS: &str = "if (arguments[0]) { window.guiCheckPointer = null;
-        window.addEventListener('pointermove', (e) => { window.guiCheckPointer = [e.clientX, e.clientY]; }, true); }
-    return window.guiCheckPointer || null;";
+/// The pointer moves the page has seen since `arguments[0]` was last true
+/// (which starts afresh), the latest last, each where it was in the page
+/// and on the screen: `[clientX, clientY, screenX, screenY]`.
+const POINTER_MOVES_JS: &str = "if (arguments[0]) { window.guiCheckMoves = [];
+        if (!window.guiCheckMovesHeard) { window.guiCheckMovesHeard = true;
+            window.addEventListener('pointermove', (e) => { const moves = window.guiCheckMoves;
+                if (moves.push([e.clientX, e.clientY, e.screenX, e.screenY].map(Math.round)) > 50) moves.shift(); }, true); } }
+    return window.guiCheckMoves || [];";
 
 /// Which Shift.
 #[derive(Debug, Clone, Copy)]
@@ -147,6 +150,19 @@ enum Input {
 /// A verse of the chapter being read, by number.
 fn verse(number: u32) -> String {
     format!(".chapter-main .verse[data-translation][data-verse=\"{number}\"]")
+}
+
+/// The page's (0, 0) in the window, from the pointer moves the page saw
+/// (`POINTER_MOVES_JS`'s) after X put the pointer at `sent` in the window,
+/// `screen` on the screen: the latest move the page saw there. A move the
+/// webview sent of its own accord, at the last place it knew the pointer to
+/// be, isn't X's, whenever it came.
+fn offset_from_moves(moves: &Value, screen: (i64, i64), sent: (i64, i64)) -> Option<(i64, i64)> {
+    let coordinate = |m: &Value, i: usize| m[i].as_f64().map(|v| v.round() as i64);
+    moves.as_array()?.iter().rev().find_map(|m| {
+        let on_screen = (coordinate(m, 2)?, coordinate(m, 3)?);
+        (on_screen == screen).then_some((coordinate(m, 0)? - sent.0, coordinate(m, 1)? - sent.1))
+    })
 }
 
 impl Run<'_> {
@@ -1021,23 +1037,32 @@ impl Run<'_> {
     }
 
     /// Where the page's (0, 0) is in the app's window on the private
-    /// display, from a pointer move to a known place in the window.
+    /// display, from a pointer move to a known place in the window: the
+    /// move the page sees where X has put the pointer on the screen, not
+    /// just the latest it saw. After a scroll the webview sends a move of
+    /// its own, at the last place it knew the pointer to be (where
+    /// WebDriver last clicked, say): one that comes after listening starts
+    /// and before X's move would put every point of this input that far
+    /// off (check 52's two Shift-clicks landing in the sidebar).
     async fn page_offset(&self, xvfb: &native::Xvfb, window: &str) -> Result<(i64, i64)> {
         let ui = &self.ui;
-        ui.js(LAST_POINTER_JS, vec![json!(true)]).await?;
+        ui.js(POINTER_MOVES_JS, vec![json!(true)]).await?;
         xvfb.xdotool(&["mousemove", "--window", window, "--sync", "300", "300"])
             .await?;
+        let screen = xvfb.pointer().await?;
         let seen = ui
-            .wait(
-                "the pointer move to reach the page",
-                &format!("const seen = (() => {{ {LAST_POINTER_JS} }})(); return [!!seen, seen];")
-                    .replace("arguments[0]", "false"),
+            .wait_with(
+                "the pointer move to reach the page, where X put it",
+                &format!(
+                    "const moves = (() => {{ {POINTER_MOVES_JS} }})();
+                     return [moves.some((m) => m[2] === arguments[1] && m[3] === arguments[2]),
+                             {{ screen: [arguments[1], arguments[2]], moves }}];"
+                ),
+                vec![json!(false), json!(screen.0), json!(screen.1)],
             )
             .await?;
-        let (Some(x), Some(y)) = (seen[0].as_i64(), seen[1].as_i64()) else {
-            bail!("no pointer position in the page: {seen}");
-        };
-        Ok((x - 300, y - 300))
+        offset_from_moves(&seen["moves"], screen, (300, 300))
+            .with_context(|| format!("no pointer move where X put it: {seen}"))
     }
 
     /// Lets go of both Shifts and the button, whatever happened before.
@@ -1352,5 +1377,45 @@ impl Run<'_> {
             )
             .await?;
         self.plain_reading().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Check 52's failure, as the page saw it: the webview's own move at
+    /// the place WebDriver had clicked verse 16, then X's at (300, 300).
+    #[test]
+    fn the_offset_is_from_xs_move_not_the_webviews() {
+        let moves = json!([[784, 476, 784, 476], [300, 300, 300, 300]]);
+        assert_eq!(
+            offset_from_moves(&moves, (300, 300), (300, 300)),
+            Some((0, 0))
+        );
+        // The webview's move after X's: it's at X's place by then.
+        let moves = json!([[300, 300, 300, 300], [300, 300, 300, 300]]);
+        assert_eq!(
+            offset_from_moves(&moves, (300, 300), (300, 300)),
+            Some((0, 0))
+        );
+        // Only the webview's so far: no offset yet (the wait goes on).
+        let moves = json!([[784, 476, 784, 476]]);
+        assert_eq!(offset_from_moves(&moves, (300, 300), (300, 300)), None);
+        assert_eq!(offset_from_moves(&json!([]), (300, 300), (300, 300)), None);
+        assert_eq!(
+            offset_from_moves(&json!(null), (300, 300), (300, 300)),
+            None
+        );
+    }
+
+    /// A window elsewhere on the screen, its page lower in it.
+    #[test]
+    fn the_offset_follows_the_window() {
+        let moves = json!([[784, 476, 900, 600], [300, 263, 420, 337.0], [12, 9, 1, 2]]);
+        assert_eq!(
+            offset_from_moves(&moves, (420, 337), (300, 300)),
+            Some((0, -37))
+        );
     }
 }

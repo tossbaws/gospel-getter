@@ -105,6 +105,11 @@ impl Xvfb {
         Ok(stdout)
     }
 
+    /// Where the pointer is on the display's screen.
+    pub async fn pointer(&self) -> Result<(i64, i64)> {
+        pointer_from_shell(&self.xdotool(&["getmouselocation", "--shell"]).await?)
+    }
+
     /// The visible windows whose name contains `fragment`, as
     /// `(id, name)`; none is not an error.
     pub async fn windows_named(&self, fragment: &str) -> Result<Vec<(String, String)>> {
@@ -190,6 +195,24 @@ impl Xvfb {
         self.xdotool(&["key", "--clearmodifiers", "Return"]).await?;
         Ok(())
     }
+}
+
+/// The pointer's place on the screen, from `xdotool getmouselocation
+/// --shell` (`X=…` and `Y=…` lines).
+fn pointer_from_shell(shell: &str) -> Result<(i64, i64)> {
+    let value = |name: &str| {
+        shell
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix(name)?
+                    .strip_prefix('=')?
+                    .trim()
+                    .parse()
+                    .ok()
+            })
+            .with_context(|| format!("no {name} in xdotool getmouselocation's {shell:?}"))
+    };
+    Ok((value("X")?, value("Y")?))
 }
 
 /// The inodes of the Unix sockets listening for X display `n`.
@@ -359,5 +382,13 @@ mod tests {
             "Genesis 1 · KJV — Gospel Getter"
         );
         assert_eq!(regex_escape("a.b(c)"), r"a\.b\(c\)");
+    }
+
+    #[test]
+    fn reads_where_the_pointer_is() {
+        let shell = "X=300\nY=276\nSCREEN=0\nWINDOW=2097168\n";
+        assert_eq!(pointer_from_shell(shell).unwrap(), (300, 276));
+        assert!(pointer_from_shell("SCREEN=0\nWINDOW=1\n").is_err());
+        assert!(pointer_from_shell("X=a\nY=2\n").is_err());
     }
 }
