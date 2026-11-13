@@ -1,6 +1,6 @@
 //! Gospel Getter: an offline Bible reader. The Tauri app itself is
-//! `run`; the modules are public so the frontend test bridge
-//! (`examples/frontend_bridge.rs`) can drive the same command logic.
+//! `run`; the modules and the command handler are public so the frontend
+//! test bridge (`examples/frontend_bridge.rs`) can serve the same commands.
 
 pub mod commands;
 pub mod credit_links;
@@ -102,8 +102,11 @@ pub fn app_context() -> tauri::Context<tauri::Wry> {
     context
 }
 
-/// Every command the frontend can `invoke`.
-fn invoke_handler<R: tauri::Runtime>()
+/// Every command the frontend can `invoke`. Public for the frontend tests'
+/// bridge (`examples/frontend_bridge.rs`), which serves exactly these, on
+/// Tauri's mock runtime, as `ipc_tests` here does.
+#[doc(hidden)]
+pub fn invoke_handler<R: tauri::Runtime>()
 -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         commands::get_app_version,
@@ -1041,5 +1044,87 @@ mod ipc_tests {
             ]
         );
         assert!(!asked.lock().expect("asked").restarted);
+    }
+
+    /// The commands in [`super::invoke_handler`]'s `generate_handler!`,
+    /// read from this file.
+    fn handler_commands() -> Vec<&'static str> {
+        include_str!("lib.rs")
+            .split_once("tauri::generate_handler![")
+            .and_then(|(_, rest)| rest.split_once(']'))
+            .map(|(list, _)| list)
+            .expect("invoke_handler's generate_handler! list")
+            .split(',')
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(|path| path.rsplit("::").next().unwrap_or(path))
+            .collect()
+    }
+
+    /// Every string literal in `source`'s code (not its comments).
+    fn string_literals(source: &str) -> Vec<&str> {
+        let mut literals = Vec::new();
+        for line in source.lines().filter(|l| !l.trim_start().starts_with("//")) {
+            let mut start = None;
+            let mut escaped = false;
+            for (i, c) in line.char_indices() {
+                match (start, c) {
+                    (Some(_), '\\') if !escaped => escaped = true,
+                    (Some(from), '"') if !escaped => {
+                        literals.push(&line[from..i]);
+                        start = None;
+                    }
+                    (None, '"') => start = Some(i + 1),
+                    _ => escaped = false,
+                }
+            }
+        }
+        literals
+    }
+
+    /// The frontend tests' bridge answers every command through the app's
+    /// own handler, as this module calls it, and nothing itself but its
+    /// `__` test hooks: it names no command (no copied arm, no special
+    /// case), hands every other request to `invoke_handler()`, and no
+    /// command's name starts with `__`. The handler list read here is the
+    /// real one: the mock app knows each name, and only those.
+    #[test]
+    fn the_frontend_bridge_answers_no_command_itself() {
+        let bridge = include_str!("../examples/frontend_bridge.rs");
+        let commands = handler_commands();
+        for name in [
+            "get_app_version",
+            "get_reading",
+            "install_update",
+            "open_web_link",
+        ] {
+            assert!(commands.contains(&name), "{name} in {commands:?}");
+        }
+        let literals = string_literals(bridge);
+        assert!(literals.contains(&"__reset"), "{literals:?}");
+        for name in &commands {
+            assert!(!name.starts_with("__"), "{name}");
+            assert!(
+                !literals.contains(name),
+                "the bridge names the command {name}: it must reach the app's handler"
+            );
+        }
+        assert!(bridge.contains(".invoke_handler(gospel_getter_lib::invoke_handler())"));
+        assert!(bridge.contains("cmd.starts_with(\"__\")"));
+
+        let (_db, state) = tauri::async_runtime::block_on(async {
+            let (db, pool) = fresh_database("ipc_bridge").await;
+            (db, AppState::load(pool).await.expect("load state"))
+        });
+        let script = TestScript(Arc::default());
+        let (_app, webview) = scripted_app(state, script, Arc::default());
+        let not_found = |name: &str| Err(json!(format!("Command {name} not found")));
+        for name in &commands {
+            assert_ne!(invoke(&webview, name, json!({})), not_found(name), "{name}");
+        }
+        assert_eq!(
+            invoke(&webview, "get_everything", json!({})),
+            not_found("get_everything")
+        );
     }
 }

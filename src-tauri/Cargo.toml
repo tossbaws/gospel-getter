@@ -77,13 +77,11 @@ tauri-plugin-window-state = "~2.5"
 # session bus (D-Bus), on Windows through a named mutex and a message window.
 tauri-plugin-single-instance = "~2.5"
 
-# Only for `examples/frontend_bridge.rs` (the frontend tests' stdio bridge);
-# the app itself doesn't read stdin.
 [dev-dependencies]
 # Disposable prepared databases (`db::test_support`).
 gospel_getter_core = { path = "core", features = ["test-support"] }
-tokio = { version = "1", features = ["io-std", "io-util"] }
-# Tauri's mock runtime, for driving the commands through real IPC in tests.
+# Tauri's mock runtime, for driving the commands through real IPC in tests
+# and in the frontend tests' bridge (`examples/frontend_bridge.rs`).
 tauri = { version = "2", features = ["test"] }
 # A real connection error, for the updater's "offline" message (`updater.rs`);
 # already a dependency of tauri-plugin-updater.
