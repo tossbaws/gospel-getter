@@ -138,6 +138,9 @@ struct Library {
     note_search: NodeRef<html::Input>,
     /// Each list's latest reload, by `List::index`.
     tokens: StoredValue<[u64; 3]>,
+    /// Each list's latest load, by `List::index`: settled once its answer is
+    /// shown, or dropped as out of date ([`Library::reload`]).
+    loads: StoredValue<[Option<js_sys::Promise>; 3], LocalStorage>,
     /// A removal waiting to move focus to the next row: claimed by each
     /// removal, cancelled by a tab switched, the color filter changed, and
     /// any header surface opening or closing ([`Library::refocus`]).
@@ -199,6 +202,7 @@ impl Library {
             search_later: StoredValue::new_local(None),
             note_search: NodeRef::new(),
             tokens: StoredValue::new([0; 3]),
+            loads: StoredValue::new_local([None, None, None]),
             focus: StoredValue::new(Generation::default()),
             tabs: [NodeRef::new(), NodeRef::new(), NodeRef::new()],
             panels: [NodeRef::new(), NodeRef::new(), NodeRef::new()],
@@ -261,18 +265,34 @@ impl Library {
     // ---- Loading: only the latest reload of a list is shown.
 
     /// Starts reloading `list` (its token taken, and the translation read,
-    /// now); the future finishes once the answer is shown, or dropped
-    /// because a newer reload was asked for.
+    /// now); the future finishes once the answer is shown. If it's dropped
+    /// because a newer reload was asked for, it finishes when that one does,
+    /// so whoever waits on it (a card's bookmark, say) finds the list as new
+    /// as what it changed, never the list from before.
     fn reload(self, list: List) -> impl Future<Output = ()> + 'static {
         let index = list.index();
         self.tokens.update_value(|t| t[index] += 1);
         let token = self.tokens.with_value(|t| t[index]);
         let code = bridge::translation_code();
-        async move {
+        let load = wasm_bindgen_futures::future_to_promise(async move {
             match list {
                 List::Bookmarks => self.load_bookmarks(token, &code).await,
                 List::Highlights => self.load_highlights(token, &code).await,
                 List::Notes => self.load_notes(token).await,
+            }
+            Ok(JsValue::UNDEFINED)
+        });
+        self.loads.update_value(|l| l[index] = Some(load.clone()));
+        async move {
+            let (mut load, mut token) = (Some(load), token);
+            while let Some(waiting) = load.take() {
+                let _ = wasm_bindgen_futures::JsFuture::from(waiting).await;
+                // Dropped for a newer reload, asked for after this one: it
+                // finishes when that one does.
+                let latest = self.tokens.with_value(|t| t[index]);
+                if latest != token {
+                    (load, token) = (self.loads.with_value(|l| l[index].clone()), latest);
+                }
             }
             tick().await;
         }
@@ -470,7 +490,8 @@ impl Library {
     }
 
     /// Lists asked for: each named starts reloading now, and
-    /// `detail.done` settles once all have.
+    /// `detail.done` settles once all have (each with this answer or a
+    /// newer one shown, see [`Library::reload`]).
     fn on_refresh(self, event: CustomEvent) {
         event.prevent_default();
         let lists = match bridge::library_refresh(&event) {
