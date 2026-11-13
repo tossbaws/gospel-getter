@@ -20,9 +20,13 @@
 //! - `backup`: exporting and importing the reader's data.
 //! - `export_notes`: the notes as Markdown.
 //! - `files`: saving a file completely or not at all, and the file dialog.
+//! - `bridge_script`: what the frontend tests' bridge answers in place of
+//!   the file dialogs, the browser, the clock and the updater (never set in
+//!   the app).
 
 mod backup;
 mod bookmarks;
+mod bridge_script;
 mod compare;
 mod export_notes;
 mod files;
@@ -37,6 +41,7 @@ mod state;
 
 pub use backup::*;
 pub use bookmarks::*;
+pub use bridge_script::*;
 pub use compare::*;
 pub use export_notes::*;
 pub(crate) use files::*;

@@ -528,6 +528,19 @@ pub async fn export_notes_by_book<R: tauri::Runtime>(
     layout: Option<NotesLayout>,
 ) -> Result<NotesFolderOutcome, String> {
     use tauri_plugin_dialog::DialogExt;
+    if let Some(script) = state.bridge_script() {
+        let (now, tz) = script.clock();
+        return export_notes_by_book_with(
+            &state,
+            layout.unwrap_or_default(),
+            &translation_code,
+            &filter,
+            now,
+            &tz,
+            || std::future::ready(script.choose_file()),
+        )
+        .await;
+    }
     export_notes_by_book_with(
         &state,
         layout.unwrap_or_default(),
@@ -565,6 +578,10 @@ pub async fn confirm_notes_export_by_book(
 pub async fn get_notes_export_options(
     state: tauri::State<'_, AppState>,
 ) -> Result<NotesExportOptions, String> {
+    if let Some(script) = state.bridge_script() {
+        let (now, tz) = script.clock();
+        return notes_export_options(&state, now, &tz).await;
+    }
     notes_export_options(&state, chrono::Utc::now(), &chrono::Local).await
 }
 
@@ -574,6 +591,10 @@ pub async fn count_notes_export(
     state: tauri::State<'_, AppState>,
     filter: NotesFilter,
 ) -> Result<usize, String> {
+    if let Some(script) = state.bridge_script() {
+        let (_, tz) = script.clock();
+        return count_notes_to_export(&state, &filter, &tz).await;
+    }
     count_notes_to_export(&state, &filter, &chrono::Local).await
 }
 
@@ -590,6 +611,19 @@ pub async fn export_notes<R: tauri::Runtime>(
     layout: Option<NotesLayout>,
 ) -> Result<NotesExportOutcome, String> {
     use tauri_plugin_dialog::DialogExt;
+    if let Some(script) = state.bridge_script() {
+        let (now, tz) = script.clock();
+        return export_notes_with(
+            &state,
+            layout.unwrap_or_default(),
+            &translation_code,
+            &filter,
+            now,
+            &tz,
+            |_| std::future::ready(script.choose_file()),
+        )
+        .await;
+    }
     export_notes_with(
         &state,
         layout.unwrap_or_default(),
@@ -619,6 +653,10 @@ pub async fn get_notes_commentary(
     state: tauri::State<'_, AppState>,
     filter: NotesFilter,
 ) -> Result<Commentary, String> {
+    if let Some(script) = state.bridge_script() {
+        let (now, tz) = script.clock();
+        return notes_commentary(&state, &filter, now, &tz).await;
+    }
     notes_commentary(&state, &filter, chrono::Utc::now(), &chrono::Local).await
 }
 

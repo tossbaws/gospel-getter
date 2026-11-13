@@ -5,7 +5,7 @@ use anyhow::Context;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::{PendingImport, PendingNotesFolder};
+use super::{BridgeScript, PendingImport, PendingNotesFolder};
 use crate::db::{self, Book, Translation};
 use crate::domain::Store;
 
@@ -34,6 +34,9 @@ pub struct AppState {
     /// The next token for what waits on the reader: an import's preview,
     /// or a folder export's question.
     pub(super) next_import_token: AtomicU64,
+    /// What the frontend tests' bridge answers in place of the system
+    /// (`BridgeScript`). Never set in the app.
+    bridge_script: Option<Box<dyn BridgeScript>>,
 }
 
 impl AppState {
@@ -54,7 +57,33 @@ impl AppState {
             pending_import: Mutex::new(None),
             pending_notes_folder: Mutex::new(None),
             next_import_token: AtomicU64::new(1),
+            bridge_script: None,
         })
+    }
+
+    /// `self`, with `script` answering in place of the file dialogs, the
+    /// browser, the clock and the updater: for the frontend tests' bridge
+    /// only (see [`BridgeScript`]).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_bridge_script(mut self, script: impl BridgeScript + 'static) -> Self {
+        self.bridge_script = Some(Box::new(script));
+        self
+    }
+
+    /// The frontend tests' bridge's script, if it set one; never in the app.
+    pub(crate) fn bridge_script(&self) -> Option<&dyn BridgeScript> {
+        self.bridge_script.as_deref()
+    }
+
+    /// Open `url` in the system browser (`open::that_detached`), or, under
+    /// the frontend tests' bridge, what its script does instead.
+    #[cfg(desktop)]
+    pub(crate) fn open_in_browser(&self, url: &str) -> std::io::Result<()> {
+        match self.bridge_script() {
+            Some(script) => script.open_in_browser(url),
+            None => open::that_detached(url),
+        }
     }
 }
 

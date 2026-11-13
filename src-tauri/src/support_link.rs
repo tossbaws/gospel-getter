@@ -15,13 +15,14 @@ pub use desktop::*;
 #[cfg(desktop)]
 mod desktop {
     use super::SUPPORT_PAGE;
+    use crate::commands::AppState;
     use crate::credit_links::messages;
 
     /// Open [`SUPPORT_PAGE`] in the system browser (About's Support Gospel
     /// Getter link).
     #[tauri::command]
-    pub fn open_support_page() -> Result<(), String> {
-        open::that_detached(SUPPORT_PAGE).map_err(|e| {
+    pub fn open_support_page(state: tauri::State<'_, AppState>) -> Result<(), String> {
+        state.open_in_browser(SUPPORT_PAGE).map_err(|e| {
             tracing::error!("Failed to open {SUPPORT_PAGE}: {e}");
             messages::OPEN_FAILED.to_string()
         })
