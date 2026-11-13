@@ -4,6 +4,30 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.29.3] - 2026-11-13
+
+Fixes for Bookmark clicked twice as the Library reloads, quote checks of
+common words, and AI findings' request labels. Updating keeps your
+bookmarks, highlights, notes, findings, reading position and settings.
+
+### Fixed
+- A quick second click on **Bookmark**, landing just as the Library
+  reloads, now undoes the first click instead of repeating it.
+- AI agents: when `verify_quote` finds a short quote of common words in
+  one place, it now says the quote may be in other places too, and an
+  answer whose search couldn't check every verse has `"complete": false`.
+- AI findings: a request label or an agent's name can no longer hold a
+  line separator or a character that can't be seen, which could make two
+  groups that look the same. A joiner inside a Persian or Indic word or
+  an emoji is still fine.
+- Backups keep the same data formats: 3, or 4 with AI findings or the
+  switch on. One holding an AI request with a character that can't be
+  seen is now refused on import, with the usual message.
+
+Behind the scenes, nothing you'll see changes: new tests for note links to
+Psalm 119:100–176, "III John" and "Third John", thousands separators, and
+links such as "John 3:16-3:18".
+
 ## [2.29.2] - 2026-11-12
 
 Fixes for the KJV's verse numbers in ten chapters, a failed start that
