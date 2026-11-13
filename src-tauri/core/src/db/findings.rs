@@ -34,10 +34,28 @@ pub const MAX_AGENT_CHARS: usize = 60;
 /// CHECK says the same.
 pub const MAX_REQUEST_CHARS: usize = 60;
 
-/// What a request can't hold, besides line breaks and other control
-/// characters: the punctuation that would start a sentence about the verse
-/// ("grief: here Jesus shows…"), not a label.
+/// What a request can't hold, besides line breaks and characters that can't
+/// be seen (`breaks_or_hides`): the punctuation that would start a sentence
+/// about the verse ("grief: here Jesus shows…"), not a label.
 pub const NOT_IN_A_REQUEST: [char; 4] = [':', ';', '\u{2014}', '\u{2013}'];
+
+/// Whether `c` breaks a line or can't be seen, so a request or an agent's
+/// name holding it isn't one visible line: a control character (Cc: a line
+/// break, a tab…), a line or paragraph separator (Zl, Zp: U+2028, U+2029), or
+/// a format character (Cf: U+200B zero width space, U+200C and U+200D zero
+/// width non-joiner and joiner, U+2060 word joiner, U+FEFF, the bidi controls
+/// such as U+202E…), which would make "grief" and "grief\u{200B}" two
+/// requests that look the same.
+fn breaks_or_hides(c: char) -> bool {
+    use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
+    matches!(
+        c.general_category(),
+        GeneralCategory::Control
+            | GeneralCategory::LineSeparator
+            | GeneralCategory::ParagraphSeparator
+            | GeneralCategory::Format
+    )
+}
 
 /// How every refusal of a request starts: what a request is.
 const A_REQUEST_IS: &str =
@@ -115,8 +133,9 @@ pub enum RequestError {
     Empty,
     /// More than [`MAX_REQUEST_CHARS`] characters, after trimming.
     TooLong { chars: usize },
-    /// One of [`NOT_IN_A_REQUEST`], a line break, a tab or another control
-    /// character: more than a label.
+    /// One of [`NOT_IN_A_REQUEST`], a line break, a tab, or another control,
+    /// separator or invisible format character: more than a label, or more
+    /// than can be seen.
     NotALabel,
 }
 
@@ -141,7 +160,7 @@ impl fmt::Display for RequestError {
 impl std::error::Error for RequestError {}
 
 /// A request as it's stored: trimmed, then a short topic label (C3): 1 to
-/// [`MAX_REQUEST_CHARS`] characters on one line, none of them one of
+/// [`MAX_REQUEST_CHARS`] characters on one visible line, none of them one of
 /// [`NOT_IN_A_REQUEST`].
 pub fn normalize_request(raw: &str) -> Result<String, RequestError> {
     let request = raw.trim();
@@ -150,7 +169,7 @@ pub fn normalize_request(raw: &str) -> Result<String, RequestError> {
     }
     if request
         .chars()
-        .any(|c| c.is_control() || NOT_IN_A_REQUEST.contains(&c))
+        .any(|c| breaks_or_hides(c) || NOT_IN_A_REQUEST.contains(&c))
     {
         return Err(RequestError::NotALabel);
     }
@@ -161,13 +180,14 @@ pub fn normalize_request(raw: &str) -> Result<String, RequestError> {
     Ok(request.to_string())
 }
 
-/// An agent's name as it's stored: control characters as spaces, trimmed,
-/// cut short at [`MAX_AGENT_CHARS`] characters, or [`DEFAULT_AGENT`] if
-/// that leaves nothing.
+/// An agent's name as it's stored: control, separator and invisible format
+/// characters (`breaks_or_hides`) as spaces, trimmed, cut short at
+/// [`MAX_AGENT_CHARS`] characters, or [`DEFAULT_AGENT`] if that leaves
+/// nothing.
 pub fn normalize_agent(raw: &str) -> String {
     let spaced: String = raw
         .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| if breaks_or_hides(c) { ' ' } else { c })
         .collect();
     let cut: String = spaced.trim().chars().take(MAX_AGENT_CHARS).collect();
     let agent = cut.trim_end();
@@ -868,6 +888,66 @@ mod tests {
             Err(RequestError::TooLong {
                 chars: MAX_REQUEST_CHARS + 1
             })
+        );
+    }
+
+    /// A request is one line a reader can see all of (H-02): no line or
+    /// paragraph separator, and no invisible format character (zero-width
+    /// spaces and joiners, the word joiner, a byte-order mark, bidi controls),
+    /// which would make "grief" and "grief\u{200B}" two requests that look the
+    /// same.
+    #[test]
+    fn a_request_is_one_visible_line() {
+        for label in [
+            "grief\u{2028}Jesus weeps here",
+            "grief\u{2029}x",
+            "grief\u{200B}",
+            "\u{2060}grief",
+            "\u{FEFF}grief",
+            "gr\u{200C}ief",
+            "grief\u{200D}",
+            "\u{202E}feirg",
+            "grief\u{2066}x\u{2069}",
+            "grief\u{AD}",
+        ] {
+            assert_eq!(
+                normalize_request(label),
+                Err(RequestError::NotALabel),
+                "{label:?}"
+            );
+        }
+        // Labels of any script, with marks, symbols and emoji, are still
+        // labels, as they were given.
+        for label in [
+            "the sun",
+            "caf\u{e9}",
+            "cafe\u{301}",
+            "λύπη",
+            "אבל",
+            "حزن",
+            "悲伤",
+            "दुःख",
+            "🙏 prayer",
+            "❤\u{fe0f} love",
+            "grief 😢",
+        ] {
+            assert_eq!(normalize_request(label), Ok(label.to_string()), "{label:?}");
+        }
+    }
+
+    /// An agent's name is one visible line too: a line or paragraph separator
+    /// or an invisible character becomes a space, as a control character does.
+    #[test]
+    fn an_agent_is_one_visible_line() {
+        assert_eq!(normalize_agent("Claude\u{2028}x"), "Claude x");
+        assert_eq!(normalize_agent("Claude\u{2029}x"), "Claude x");
+        assert_eq!(normalize_agent("Claude\u{200B}Code"), "Claude Code");
+        assert_eq!(normalize_agent("\u{FEFF}Claude\u{2060}"), "Claude");
+        assert_eq!(normalize_agent("\u{202E}Claude"), "Claude");
+        assert_eq!(normalize_agent("\u{200B}\u{2028}"), DEFAULT_AGENT);
+        assert_eq!(
+            normalize_agent("Caf\u{e9} \u{1f916}"),
+            "Caf\u{e9} \u{1f916}"
         );
     }
 

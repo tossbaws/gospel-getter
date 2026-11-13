@@ -1247,6 +1247,8 @@ async fn a_request_that_is_more_than_a_topic_label_is_refused() {
             "grief; and what it means",
             "grief \u{2014} his tears for Lazarus",
             "grief \u{2013} loss",
+            "grief\u{2028}Jesus weeps here",
+            "grief\u{200B}",
             too_long.as_str(),
         ] {
             let message = refusal(

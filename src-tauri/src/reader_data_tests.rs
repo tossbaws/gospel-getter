@@ -2795,6 +2795,16 @@ async fn invalid_findings_reject_the_whole_file_and_change_nothing() {
             "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon",
         ),
         (
+            "a request with an invisible character",
+            finding(r#""agent": "Claude", "request": "grief\u200b""#),
+            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon",
+        ),
+        (
+            "a request with a line separator",
+            finding(r#""agent": "Claude", "request": "grief\u2028Jesus weeps here""#),
+            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon",
+        ),
+        (
             "a body",
             finding(r#""agent": "Claude", "request": "grief", "body": "It means…""#),
             "unknown field `body`",
