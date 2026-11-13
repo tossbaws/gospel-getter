@@ -749,6 +749,7 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
             "character for character",
             "whitespace around the whole quote is trimmed",
             "only look alike",
+            "complete is false when a search was cut short",
             "10,000",
         ] {
             assert!(description.contains(words), "{words}: {description}");
