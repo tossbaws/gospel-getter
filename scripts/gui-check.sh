@@ -116,6 +116,15 @@
 # tests/gui; gui-launch must be beside it), TAURI_DRIVER and NATIVE_DRIVER
 # (paths, if not on PATH).
 #
+# GUI_CHECK_REPEAT=<check>:<times> (by hand, to chase a flaky check; never
+# in CI, and off by default): that check runs <times> times in a row in its
+# session (52:50, check 52 fifty times), its line in results.txt a PASS only
+# if every run passed, else a FAIL counting and saying each failed run, with
+# a line per run in steps.log and screenshots of each failed one. Only the
+# checks the first session runs one after another (tests/gui checks.rs,
+# `checked!`); any other runs once, as steps.log says. Give it the time with
+# GUI_CHECK_BUDGET. See tests/gui src/repeat.rs.
+#
 # GUI_CHECK_RETRY=1 (CI: dist.yml sets it for both GUI jobs; off by
 # default, so a run by hand shows every failure): when the suite fails, the
 # whole suite runs once more, from the start on fresh data (a new data
@@ -732,6 +741,7 @@ fi
     GUI_XVFB_PID="$xvfb_pid" \
     GUI_CHECK_ATTEMPT="${GUI_CHECK_ATTEMPT:-1}" \
     GUI_CHECK_FORCE_FAIL="${GUI_CHECK_FORCE_FAIL:-}" \
+    GUI_CHECK_REPEAT="${GUI_CHECK_REPEAT:-}" \
     "${backstop[@]}" "$runner" \
     2> >(tee -a "$out/steps.log" >&2) &
 status=0
