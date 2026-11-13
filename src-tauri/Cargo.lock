@@ -1615,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "gospel-getter-cli"
-version = "2.29.2"
+version = "2.29.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -1632,7 +1632,7 @@ dependencies = [
 
 [[package]]
 name = "gospel_getter"
-version = "2.29.2"
+version = "2.29.3"
 dependencies = [
  "anyhow",
  "chrono",
