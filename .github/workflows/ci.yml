@@ -167,6 +167,15 @@ jobs:
       - name: Doc tests
         run: cargo test --doc
 
+      # The CLI's long sweeps, #[ignore]d so no pull request waits for them,
+      # run once a change is on main: today the cross-verse verify_quote
+      # sweep (about 70 s, plus about 45 s rebuilding the CLI's dependencies
+      # with its features alone).
+      - name: Ignored tests (CLI, main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        timeout-minutes: 6
+        run: cargo test -p gospel-getter-cli -- --ignored
+
   # Behavior tests for ui/index.html and its Rust pieces (selection, copy,
   # bookmarks, search, compare, the notes export), run in jsdom against the
   # real command logic and database through examples/frontend_bridge.rs.

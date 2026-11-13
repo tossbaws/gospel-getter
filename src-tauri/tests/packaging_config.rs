@@ -1958,7 +1958,10 @@ fn the_msi_is_required_and_installed_and_removed() {
 /// build every installer is, without features, as well as with them all
 /// (D-02). The page's crate is built, linted and tested from its lock file
 /// as committed (D-03): `--locked`, and Trunk's `locked`. The GUI checks'
-/// own crate is linted and unit-tested on both platforms (D-08).
+/// own crate is linted and unit-tested on both platforms (D-08). The CLI's
+/// `#[ignore]`d sweeps (the cross-verse `verify_quote` one, C-3) run in
+/// build-and-test after its tests, on pushes to main only, with a time
+/// limit of their own: no pull request waits for them.
 #[test]
 fn ci_runs_the_doc_tests_both_clippys_and_locked_builds() {
     let ci = workflow_steps(CI_YML);
@@ -1978,6 +1981,34 @@ fn ci_runs_the_doc_tests_both_clippys_and_locked_builds() {
         "build-and-test",
         "run: cargo clippy --all-targets -- -D warnings"
     ));
+
+    let ignored: Vec<(usize, &Step)> = ci
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.text.contains("--ignored"))
+        .collect();
+    let [(at, sweep)] = ignored.as_slice() else {
+        panic!("one step should run the ignored tests: {ignored:#?}");
+    };
+    assert_eq!(sweep.job, "build-and-test", "{sweep:#?}");
+    assert!(
+        sweep
+            .text
+            .contains("        run: cargo test -p gospel-getter-cli -- --ignored\n")
+            && sweep.text.contains(
+                "        if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n"
+            )
+            && sweep
+                .text
+                .lines()
+                .any(|l| l.starts_with("        timeout-minutes: ")),
+        "{sweep:#?}"
+    );
+    let tests = ci
+        .iter()
+        .position(|s| s.job == "build-and-test" && s.name == "Test")
+        .expect("build-and-test's Test step");
+    assert!(tests < *at, "the sweep runs before the other tests");
 
     let mut ui_steps = 0;
     for step in ci
