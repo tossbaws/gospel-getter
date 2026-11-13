@@ -1,6 +1,6 @@
 //! Gospel Getter: an offline Bible reader. The Tauri app itself is
-//! `run`; the modules are public so the frontend test bridge
-//! (`examples/frontend_bridge.rs`) can drive the same command logic.
+//! `run`; the modules and the command handler are public so the frontend
+//! test bridge (`examples/frontend_bridge.rs`) can serve the same commands.
 
 pub mod commands;
 pub mod credit_links;
@@ -102,8 +102,11 @@ pub fn app_context() -> tauri::Context<tauri::Wry> {
     context
 }
 
-/// Every command the frontend can `invoke`.
-fn invoke_handler<R: tauri::Runtime>()
+/// Every command the frontend can `invoke`. Public for the frontend tests'
+/// bridge (`examples/frontend_bridge.rs`), which serves exactly these, on
+/// Tauri's mock runtime, as `ipc_tests` here does.
+#[doc(hidden)]
+pub fn invoke_handler<R: tauri::Runtime>()
 -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         commands::get_app_version,
@@ -409,14 +412,20 @@ mod ipc_tests {
     //! runtime) with exactly the argument objects `ui/index.html` passes
     //! to `invoke` — so a renamed argument on either side fails here.
 
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use chrono::{DateTime, FixedOffset, Utc};
     use serde_json::{Value, json};
     use tauri::Manager;
-    use tauri::ipc::{CallbackFn, InvokeBody};
+    use tauri::ipc::{CallbackFn, InvokeBody, InvokeResponseBody};
     use tauri::test::{INVOKE_KEY, get_ipc_response, mock_builder, mock_context, noop_assets};
     use tauri::webview::InvokeRequest;
 
-    use crate::commands::AppState;
+    use crate::commands::{AppState, BridgeScript, ScriptedCheck, ScriptedInstall};
     use crate::db::test_support::{bundled, fresh_database};
+    use crate::updater::{DownloadEvent, Problem, UpdateInfo};
 
     /// Where the page is served from, so a request from it counts as the
     /// app's own: Windows serves the `tauri://` protocol over http.
@@ -813,5 +822,309 @@ mod ipc_tests {
         assert_eq!(result["added"], 1);
         assert_eq!(result["findingsPermission"], Value::Null);
         assert_eq!(result["position"]["reference"], "Psalms 23 (WEB)");
+    }
+
+    /// What a [`TestScript`] was asked, and the answer its file dialogs give.
+    #[derive(Default)]
+    struct Asked {
+        chosen: Option<PathBuf>,
+        opened: Vec<String>,
+        restarted: bool,
+    }
+
+    /// A [`BridgeScript`] like the frontend tests' bridge's: its file dialogs
+    /// answer `Asked::chosen`, its clock is 2026-02-28 20:00 UTC in UTC+10
+    /// (Mar 1 there), its browser only notes what it's asked to open, a
+    /// check finds 9.9.9, and an install sends two events, then fails as
+    /// not verified.
+    struct TestScript(Arc<Mutex<Asked>>);
+
+    impl TestScript {
+        fn asked(&self) -> std::sync::MutexGuard<'_, Asked> {
+            self.0.lock().unwrap_or_else(|e| e.into_inner())
+        }
+    }
+
+    impl BridgeScript for TestScript {
+        fn choose_file(&self) -> Result<Option<PathBuf>, String> {
+            Ok(self.asked().chosen.clone())
+        }
+
+        fn clock(&self) -> (DateTime<Utc>, FixedOffset) {
+            let now = DateTime::parse_from_rfc3339("2026-02-28T20:00:00Z").expect("time");
+            (
+                now.to_utc(),
+                FixedOffset::east_opt(10 * 3600).expect("offset"),
+            )
+        }
+
+        fn open_in_browser(&self, url: &str) -> std::io::Result<()> {
+            self.asked().opened.push(url.to_string());
+            Ok(())
+        }
+
+        fn check_for_update(&self) -> ScriptedCheck {
+            let update = UpdateInfo::new("9.9.9".into(), Some("Notes.".into()), None, true);
+            ScriptedCheck {
+                limit: Duration::from_secs(5),
+                answer: Some(Ok(Some(update))),
+            }
+        }
+
+        fn install_update(&self) -> ScriptedInstall {
+            ScriptedInstall {
+                events: vec![
+                    DownloadEvent::Started {
+                        content_length: Some(10),
+                    },
+                    DownloadEvent::Finished,
+                ],
+                problem: Some(Problem::NotVerified),
+            }
+        }
+
+        fn restart(&self) {
+            self.asked().restarted = true;
+        }
+    }
+
+    /// A mock app with the app's handler and state, as the frontend tests'
+    /// bridge builds it: `state`, with `script` set, and the updater's
+    /// pending update. Every message a `Channel` sends is kept in
+    /// `heard`, with the channel's id, as the bridge's interceptor reads it.
+    fn scripted_app(
+        state: AppState,
+        script: TestScript,
+        heard: Arc<Mutex<Vec<(u32, Value)>>>,
+    ) -> (
+        tauri::App<tauri::test::MockRuntime>,
+        tauri::WebviewWindow<tauri::test::MockRuntime>,
+    ) {
+        let app = mock_builder()
+            .manage(state.with_bridge_script(script))
+            .manage(crate::updater::PendingUpdate::default())
+            .invoke_handler(super::invoke_handler())
+            .channel_interceptor(move |_, channel, _, body| {
+                if let InvokeResponseBody::Json(json) = body {
+                    let message = serde_json::from_str(json).expect("a JSON message");
+                    heard
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push((channel.0, message));
+                }
+                true
+            })
+            .build(mock_context(noop_assets()))
+            .expect("build mock app");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("build webview");
+        (app, webview)
+    }
+
+    /// With the frontend tests' bridge's script set, the commands that need
+    /// what the mock runtime doesn't have (a file dialog, the browser, the
+    /// clock, the updater) ask it instead, through the same IPC, and go on
+    /// with their own logic: the app's rules for links, its messages, its
+    /// export and import. A progress `Channel` works on the mock runtime,
+    /// its messages reaching the channel interceptor.
+    #[test]
+    fn the_commands_ask_the_bridge_script_for_what_the_mock_runtime_lacks() {
+        let (db, state) = tauri::async_runtime::block_on(async {
+            let (db, pool) = fresh_database("ipc_script").await;
+            let state = AppState::load(pool).await.expect("load state");
+            state.search_index.set_ready();
+            (db, state)
+        });
+        let asked = Arc::new(Mutex::new(Asked::default()));
+        let script = TestScript(asked.clone());
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let (_app, webview) = scripted_app(state, script, heard.clone());
+        let choose = |path: Option<PathBuf>| asked.lock().expect("asked").chosen = path;
+
+        // The clock: it's Mar 1 in the export's time zone.
+        let options = invoke(&webview, "get_notes_export_options", json!({})).unwrap();
+        assert_eq!(options["dates"]["today"], "2026-03-01");
+
+        // The file dialogs: cancelled, then a file chosen.
+        assert_eq!(
+            invoke(&webview, "choose_import_file", json!({})).unwrap()["status"],
+            "cancelled"
+        );
+        let backup = db.path().with_file_name("ipc_script.gospel-getter.json");
+        choose(Some(backup.clone()));
+        let saved = invoke(&webview, "export_reader_data", json!({ "preferences": {} })).unwrap();
+        assert_eq!(saved["status"], "saved");
+        assert!(backup.is_file());
+        assert_eq!(
+            invoke(&webview, "choose_import_file", json!({})).unwrap()["status"],
+            "ready"
+        );
+        invoke(
+            &webview,
+            "add_note",
+            json!({ "bookId": 43, "chapter": 3, "verseStart": 16, "verseEnd": 16, "body": "Loved." }),
+        )
+        .unwrap();
+        let notes = db.path().with_file_name("ipc_script.md");
+        choose(Some(notes.clone()));
+        let exported = invoke(
+            &webview,
+            "export_notes",
+            json!({ "translationCode": "kjv", "filter": {} }),
+        )
+        .unwrap();
+        assert_eq!(
+            (&exported["status"], &exported["notes"]),
+            (&json!("saved"), &json!(1))
+        );
+        let markdown = std::fs::read_to_string(&notes).expect("read notes");
+        assert!(markdown.contains("Exported Mar 1, 2026"), "{markdown}");
+
+        // The browser: each command opens its own page, by the app's rules.
+        for (cmd, args) in [
+            ("open_download_page", json!({})),
+            ("open_release_notes", json!({})),
+            ("open_support_page", json!({})),
+            ("open_credit_link", json!({ "which": "cc-by" })),
+            ("open_web_link", json!({ "url": "https://example.com" })),
+        ] {
+            assert_eq!(invoke(&webview, cmd, args), Ok(Value::Null), "{cmd}");
+        }
+        assert_eq!(
+            invoke(
+                &webview,
+                "open_web_link",
+                json!({ "url": "file:///etc/passwd" })
+            ),
+            Err(json!(crate::web_link::messages::NOT_A_WEB_LINK))
+        );
+        assert_eq!(
+            invoke(
+                &webview,
+                "open_credit_link",
+                json!({ "which": "elsewhere" })
+            ),
+            Err(json!(crate::credit_links::messages::UNKNOWN_LINK))
+        );
+        assert_eq!(
+            asked.lock().expect("asked").opened,
+            [
+                crate::updater::RELEASES_PAGE.to_string(),
+                crate::updater::release_notes_page(env!("CARGO_PKG_VERSION")),
+                crate::support_link::SUPPORT_PAGE.to_string(),
+                "https://creativecommons.org/licenses/by/4.0/".to_string(),
+                "https://example.com/".to_string(),
+            ]
+        );
+
+        // The updater: the check finds what's scripted; the install sends
+        // its progress through the Channel, then fails with the app's words.
+        let found = invoke(&webview, "check_for_update", json!({})).unwrap();
+        assert_eq!(
+            (&found["version"], &found["canSelfUpdate"]),
+            (&json!("9.9.9"), &json!(true))
+        );
+        assert_eq!(
+            invoke(
+                &webview,
+                "install_update",
+                json!({ "onEvent": "__CHANNEL__:7" })
+            ),
+            Err(json!(crate::updater::messages::NOT_VERIFIED))
+        );
+        assert_eq!(
+            *heard.lock().expect("heard"),
+            [
+                (
+                    7,
+                    json!({ "event": "started", "data": { "contentLength": 10 } })
+                ),
+                (7, json!({ "event": "finished" })),
+            ]
+        );
+        assert!(!asked.lock().expect("asked").restarted);
+    }
+
+    /// The commands in [`super::invoke_handler`]'s `generate_handler!`,
+    /// read from this file.
+    fn handler_commands() -> Vec<&'static str> {
+        include_str!("lib.rs")
+            .split_once("tauri::generate_handler![")
+            .and_then(|(_, rest)| rest.split_once(']'))
+            .map(|(list, _)| list)
+            .expect("invoke_handler's generate_handler! list")
+            .split(',')
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(|path| path.rsplit("::").next().unwrap_or(path))
+            .collect()
+    }
+
+    /// Every string literal in `source`'s code (not its comments).
+    fn string_literals(source: &str) -> Vec<&str> {
+        let mut literals = Vec::new();
+        for line in source.lines().filter(|l| !l.trim_start().starts_with("//")) {
+            let mut start = None;
+            let mut escaped = false;
+            for (i, c) in line.char_indices() {
+                match (start, c) {
+                    (Some(_), '\\') if !escaped => escaped = true,
+                    (Some(from), '"') if !escaped => {
+                        literals.push(&line[from..i]);
+                        start = None;
+                    }
+                    (None, '"') => start = Some(i + 1),
+                    _ => escaped = false,
+                }
+            }
+        }
+        literals
+    }
+
+    /// The frontend tests' bridge answers every command through the app's
+    /// own handler, as this module calls it, and nothing itself but its
+    /// `__` test hooks: it names no command (no copied arm, no special
+    /// case), hands every other request to `invoke_handler()`, and no
+    /// command's name starts with `__`. The handler list read here is the
+    /// real one: the mock app knows each name, and only those.
+    #[test]
+    fn the_frontend_bridge_answers_no_command_itself() {
+        let bridge = include_str!("../examples/frontend_bridge.rs");
+        let commands = handler_commands();
+        for name in [
+            "get_app_version",
+            "get_reading",
+            "install_update",
+            "open_web_link",
+        ] {
+            assert!(commands.contains(&name), "{name} in {commands:?}");
+        }
+        let literals = string_literals(bridge);
+        assert!(literals.contains(&"__reset"), "{literals:?}");
+        for name in &commands {
+            assert!(!name.starts_with("__"), "{name}");
+            assert!(
+                !literals.contains(name),
+                "the bridge names the command {name}: it must reach the app's handler"
+            );
+        }
+        assert!(bridge.contains(".invoke_handler(gospel_getter_lib::invoke_handler())"));
+        assert!(bridge.contains("cmd.starts_with(\"__\")"));
+
+        let (_db, state) = tauri::async_runtime::block_on(async {
+            let (db, pool) = fresh_database("ipc_bridge").await;
+            (db, AppState::load(pool).await.expect("load state"))
+        });
+        let script = TestScript(Arc::default());
+        let (_app, webview) = scripted_app(state, script, Arc::default());
+        let not_found = |name: &str| Err(json!(format!("Command {name} not found")));
+        for name in &commands {
+            assert_ne!(invoke(&webview, name, json!({})), not_found(name), "{name}");
+        }
+        assert_eq!(
+            invoke(&webview, "get_everything", json!({})),
+            not_found("get_everything")
+        );
     }
 }

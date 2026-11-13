@@ -623,6 +623,12 @@ pub async fn export_reader_data<R: tauri::Runtime>(
     state: tauri::State<'_, AppState>,
     preferences: Preferences,
 ) -> Result<ExportOutcome, String> {
+    if let Some(script) = state.bridge_script() {
+        return export_reader_data_with(&state, preferences, |_| {
+            std::future::ready(script.choose_file())
+        })
+        .await;
+    }
     export_reader_data_with(&state, preferences, |suggested| {
         let dialog = reader_data_dialog(&app)
             .set_title("Export bookmarks, highlights, notes and settings")
@@ -639,9 +645,15 @@ pub async fn choose_import_file<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
 ) -> Result<ImportChoice, String> {
-    let dialog =
-        reader_data_dialog(&app).set_title("Import bookmarks, highlights, notes and settings");
-    let Some(path) = run_dialog(move || dialog.blocking_pick_file()).await? else {
+    let chosen = match state.bridge_script() {
+        Some(script) => script.choose_file(),
+        None => {
+            let dialog = reader_data_dialog(&app)
+                .set_title("Import bookmarks, highlights, notes and settings");
+            run_dialog(move || dialog.blocking_pick_file()).await
+        }
+    };
+    let Some(path) = chosen? else {
         return Ok(ImportChoice::Cancelled);
     };
     prepare_import(&state, &path)

@@ -24,7 +24,7 @@
 use std::future::Future;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::release_notes;
 
@@ -137,8 +137,9 @@ impl UpdateInfo {
     }
 }
 
-/// Download progress, sent to the banner while an update downloads.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// Download progress, sent to the banner while an update downloads. (The
+/// frontend tests' bridge reads the progress it scripts as these too.)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "event", content = "data")]
 pub enum DownloadEvent {
     #[serde(rename_all = "camelCase")]
@@ -472,8 +473,19 @@ mod desktop {
     #[tauri::command]
     pub async fn check_for_update<R: Runtime>(
         app: AppHandle<R>,
+        state: State<'_, AppState>,
         pending: State<'_, PendingUpdate>,
     ) -> Result<Option<UpdateInfo>, String> {
+        if let Some(script) = state.bridge_script() {
+            let check = script.check_for_update();
+            return within_check_time(check.limit, async move {
+                match check.answer {
+                    Some(answer) => answer.map_err(|problem| check_message(problem).to_string()),
+                    None => std::future::pending().await,
+                }
+            })
+            .await;
+        }
         let settings = settings()?;
         let mode = settings.mode;
         let found = within_check_time(settings.timeout, async {
@@ -499,9 +511,21 @@ mod desktop {
     #[tauri::command]
     pub async fn install_update<R: Runtime>(
         app: AppHandle<R>,
+        state: State<'_, AppState>,
         pending: State<'_, PendingUpdate>,
         on_event: Channel<DownloadEvent>,
     ) -> Result<(), String> {
+        if let Some(script) = state.bridge_script() {
+            let install = script.install_update();
+            for event in install.events {
+                let _ = on_event.send(event);
+            }
+            if let Some(problem) = install.problem {
+                return Err(install_message(problem).to_string());
+            }
+            script.restart();
+            return std::future::pending().await;
+        }
         let settings = settings()?;
         if settings.mode != UpdateMode::SelfUpdate {
             return Err(messages::LINK_ONLY.to_string());
@@ -594,8 +618,8 @@ mod desktop {
     /// Open the releases page in the system browser (for builds that can't
     /// update themselves).
     #[tauri::command]
-    pub fn open_download_page() -> Result<(), String> {
-        open::that_detached(RELEASES_PAGE).map_err(|e| {
+    pub fn open_download_page(state: State<'_, AppState>) -> Result<(), String> {
+        state.open_in_browser(RELEASES_PAGE).map_err(|e| {
             tracing::error!("Failed to open {RELEASES_PAGE}: {e}");
             messages::OPEN_FAILED.to_string()
         })
@@ -604,9 +628,9 @@ mod desktop {
     /// Open this version's release page in the system browser (About's
     /// Release notes link). The version is the app's own, never the page's.
     #[tauri::command]
-    pub fn open_release_notes() -> Result<(), String> {
+    pub fn open_release_notes(state: State<'_, AppState>) -> Result<(), String> {
         let url = release_notes_page(crate::commands::app_version());
-        open::that_detached(&url).map_err(|e| {
+        state.open_in_browser(&url).map_err(|e| {
             tracing::error!("Failed to open {url}: {e}");
             messages::NOTES_OPEN_FAILED.to_string()
         })

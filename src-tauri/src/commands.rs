@@ -1,12 +1,13 @@
 //! The commands the page calls with `invoke`, and the state they share
 //! (`AppState`). Each `#[tauri::command]` is a thin wrapper over a function
-//! taking `&AppState` (`get_reading` over `reading`), which the frontend
-//! tests' bridge (`examples/frontend_bridge.rs`) calls directly. A failure
+//! taking `&AppState` (`get_reading` over `reading`), which the tests call
+//! directly. The frontend tests' bridge (`examples/frontend_bridge.rs`)
+//! calls the commands themselves, through `lib.rs`'s handler. A failure
 //! reaches the page as a sentence for the reader; its cause is logged.
 //!
 //! One module per area of the app, each with its own tests; everything they
 //! make public is re-exported here, so a command is `commands::get_reading`
-//! wherever it's named (`lib.rs`'s handler list, the bridge, the tests):
+//! wherever it's named (`lib.rs`'s handler list, the tests):
 //!
 //! - `state`: `AppState` and the search index's progress.
 //! - `lookup`: a book's name, a translation's id or code, and `failed`.
@@ -20,9 +21,13 @@
 //! - `backup`: exporting and importing the reader's data.
 //! - `export_notes`: the notes as Markdown.
 //! - `files`: saving a file completely or not at all, and the file dialog.
+//! - `bridge_script`: what the frontend tests' bridge answers in place of
+//!   the file dialogs, the browser, the clock and the updater (never set in
+//!   the app).
 
 mod backup;
 mod bookmarks;
+mod bridge_script;
 mod compare;
 mod export_notes;
 mod files;
@@ -37,6 +42,7 @@ mod state;
 
 pub use backup::*;
 pub use bookmarks::*;
+pub use bridge_script::*;
 pub use compare::*;
 pub use export_notes::*;
 pub(crate) use files::*;
