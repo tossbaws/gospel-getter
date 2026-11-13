@@ -116,6 +116,16 @@ pub struct VerifyQuoteOut {
     /// ends with this.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<String>,
+    /// False when the search was cut short: the quote's words are in more
+    /// verses than were read, so it may be in places not given, and the
+    /// message says so. Left out (true) otherwise.
+    #[serde(skip_serializing_if = "is_true")]
+    pub complete: bool,
+}
+
+/// Whether a flag is set: [`VerifyQuoteOut::complete`] is only given when it isn't.
+fn is_true(flag: &bool) -> bool {
+    *flag
 }
 
 /// What a search for a quote came to.
@@ -200,6 +210,7 @@ impl Library {
             difference: Some(difference),
             found_at: search.places,
             notice: None,
+            complete: !search.cut_short,
         };
         Ok(with_notice(answer, notice))
     }
@@ -261,6 +272,7 @@ impl Library {
                     difference: Some(difference),
                     found_at: Vec::new(),
                     notice: None,
+                    complete: !search.cut_short,
                 });
             }
         }
@@ -281,6 +293,7 @@ impl Library {
             difference: None,
             found_at: Vec::new(),
             notice: None,
+            complete: !search.cut_short,
         })
     }
 
@@ -479,6 +492,7 @@ fn held(
         difference: None,
         found_at,
         notice: None,
+        complete: !cut_short,
     }
 }
 
@@ -497,11 +511,16 @@ fn label_of(translation: &Translation) -> String {
     translation.code.to_uppercase()
 }
 
-/// What a message adds when a quote is in several places.
+/// What a message adds when a quote is in several places, or may be: when
+/// not every verse with its words was read, one place found (or none listed)
+/// isn't said to be the only one.
 fn more_places(places: &[QuotePlace], cut_short: bool) -> String {
     let count = places.len();
     match (count, cut_short) {
-        (0 | 1, _) => String::new(),
+        (0 | 1, false) => String::new(),
+        (0 | 1, true) => " Its words are too common to check every verse, so it may be in other \
+                          places too. Give a reference to check it at one place."
+            .to_string(),
         (_, false) => format!(" It's in {count} places; found_at lists them."),
         (_, true) => format!(" It's in at least {count} places; found_at lists those."),
     }

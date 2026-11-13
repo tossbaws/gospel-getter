@@ -4,7 +4,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, storedVerse } from './harness.mjs';
+import { closeBridge, openApp, settle, storedVerse } from './harness.mjs';
 
 after(closeBridge);
 
@@ -297,4 +297,59 @@ test('C-03: Bookmark pressed twice at once changes the bookmark once; pressed ag
         await app.idle(before, 'list_bookmarks');
         assert.equal(sent(before, 'add_bookmark'), 1);
         assert.equal(app.bookmarkButton().textContent, '★ Remove bookmark');
+    }));
+
+// C-03, when another reload of the bookmarks overtakes the one the card's
+// change waits for (here the Library's own, after a bookmark removed there):
+// the card's reload is dropped, as out of date, and the card waits on for
+// the newer one. Pressed again before that one is in, Bookmark does nothing,
+// rather than send the change it just made again; once it's in, the press
+// changes the bookmark back.
+test('C-03: Bookmark pressed while a newer reload of the bookmarks is on its way waits for it, then toggles back', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        const sent = (before, cmd) => app.calls.slice(before).filter((c) => c.cmd === cmd).length;
+        const reloads = (before) => app.calls.slice(before).filter((c) => c.cmd === 'list_bookmarks');
+        // A bookmark to remove from the Library while the card's change is
+        // on its way.
+        app.click(app.verse(1));
+        await bookmarkSelection(app);
+        let before = app.calls.length;
+        app.openLibrary('bookmarks');
+        await app.idle(before);
+        assert.deepEqual(app.bookmarkItems().map((b) => b.reference), ['John 3:1']);
+
+        app.click(app.verse(16));
+        assert.equal(app.bookmarkButton().textContent, '★ Bookmark');
+        const cardsReload = app.holdAnswer('list_bookmarks');
+        const librarysReload = app.holdAnswer('list_bookmarks');
+        before = app.calls.length;
+        app.click(app.bookmarkButton());
+        await app.until(() => reloads(before).length === 1, 'the card’s reload');
+        app.click(app.bookmarkItems()[0].remove);
+        await app.until(() => reloads(before).length === 2, 'the Library’s reload');
+        // The card's reload answers, overtaken.
+        cardsReload();
+        await app.until(() => reloads(before)[0].done, 'the card’s reload’s answer');
+        await settle();
+
+        const pressed = app.calls.length;
+        app.click(app.bookmarkButton());
+        await settle();
+        assert.equal(sent(pressed, 'add_bookmark'), 0, 'the change isn’t sent again');
+        assert.equal(sent(pressed, 'remove_bookmark'), 0);
+
+        librarysReload();
+        await app.idle(before, 'list_bookmarks');
+        assert.equal(sent(before, 'add_bookmark'), 1, 'added once');
+        assert.deepEqual(app.bookmarkItems().map((b) => b.reference), ['John 3:16']);
+        assert.deepEqual(app.bookmarkedVerseNumbers(), [16]);
+        assert.equal(app.bookmarkButton().textContent, '★ Remove bookmark');
+
+        before = app.calls.length;
+        app.click(app.bookmarkButton());
+        await app.idle(before, 'list_bookmarks');
+        assert.equal(sent(before, 'remove_bookmark'), 1, 'removed');
+        assert.equal(sent(before, 'add_bookmark'), 0);
+        assert.equal(app.bookmarkButton().textContent, '★ Bookmark');
+        assert.deepEqual(app.bookmarkItems(), []);
     }));

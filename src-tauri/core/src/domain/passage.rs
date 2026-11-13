@@ -104,3 +104,37 @@ pub fn verse_list(runs: &[(i64, i64)]) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The verses a translation doesn't number, as runs, and as a list: two
+    /// runs merge only where they meet.
+    #[test]
+    fn missing_verses_are_listed_in_runs() {
+        assert_eq!(
+            verse_list(&missing_runs(&[5, 9, 10], 4, 11, 20)),
+            "4, 6\u{2013}8, 11"
+        );
+        // The BSB leaves Mark 9:44 and 9:46 unnumbered, the only chapter of
+        // it with two: verses 44 and 46, never 44–46.
+        let numbered = [43, 45, 47, 48];
+        assert_eq!(missing_runs(&numbered, 43, 48, 50), [(44, 44), (46, 46)]);
+        assert_eq!(
+            numbering_notice(
+                "Mark",
+                "Berean Standard Bible",
+                9,
+                (43, 48),
+                &numbered,
+                50,
+                50
+            )
+            .as_deref(),
+            Some(
+                "In Mark 9:43\u{2013}48, verses 44, 46 aren't numbered in the Berean Standard Bible."
+            )
+        );
+    }
+}

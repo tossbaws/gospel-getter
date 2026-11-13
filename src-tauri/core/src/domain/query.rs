@@ -644,6 +644,7 @@ fn spec_length(s: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::passage_reference::passage_reference;
     use serde::Deserialize;
 
     /// The real book list, straight from the bundled KJV file the seed step
@@ -665,6 +666,20 @@ mod tests {
                 testament: b.testament,
                 chapter_count: b.chapters.len() as i64,
             })
+            .collect()
+    }
+
+    /// Each book's chapters' verse counts, in the bundled KJV, in the order
+    /// of [`books`].
+    fn verse_counts() -> Vec<Vec<i64>> {
+        #[derive(Deserialize)]
+        struct RawBook {
+            chapters: Vec<Vec<serde::de::IgnoredAny>>,
+        }
+        let raw: Vec<RawBook> =
+            serde_json::from_str(include_str!("../../../data/kjv.json")).expect("bundled kjv.json");
+        raw.into_iter()
+            .map(|b| b.chapters.iter().map(|c| c.len() as i64).collect())
             .collect()
     }
 
@@ -1205,6 +1220,20 @@ mod tests {
         }
     }
 
+    /// "Third" written as a Roman numeral or an ordinal names 3 John, as "I"
+    /// and "First" name 1 John (G-03).
+    #[test]
+    fn third_as_a_numeral_or_an_ordinal_is_3_john() {
+        let books = books();
+        for typed in ["III John 1:4", "Third John 4", "3rd John 4"] {
+            assert_eq!(
+                interpret(typed, &books),
+                at(64, 1, Some((4, 4))),
+                "{typed:?}"
+            );
+        }
+    }
+
     /// The references `references_in` finds in `text`: each as typed, and
     /// the passage it names.
     fn found(text: &str) -> Vec<(&str, Interpretation)> {
@@ -1356,6 +1385,83 @@ mod tests {
             "Jud 5-7",
         ] {
             assert_eq!(found(text), [], "{text:?}");
+        }
+    }
+
+    /// Psalm 119:100–176 are the Bible's only three-digit verses: in a
+    /// note, a reference to one, a range ending at one and a range naming the
+    /// chapter again are each one link (G-01).
+    #[test]
+    fn three_digit_verses_are_one_link_in_a_note() {
+        for (text, typed, expected) in [
+            (
+                "see Ps 119:105",
+                "Ps 119:105",
+                at(19, 119, Some((105, 105))),
+            ),
+            (
+                "Ps 119:97\u{2013}104",
+                "Ps 119:97\u{2013}104",
+                at(19, 119, Some((97, 104))),
+            ),
+            (
+                "Ps 119:1-119:176",
+                "Ps 119:1-119:176",
+                at(19, 119, Some((1, 176))),
+            ),
+        ] {
+            assert_eq!(found(text), [(typed, expected)], "{text:?}");
+        }
+    }
+
+    /// A range naming its chapter again ends right after its last verse, so
+    /// the words after it are no part of the link (G-04).
+    #[test]
+    fn a_range_naming_its_chapter_again_ends_after_its_last_verse() {
+        let text = "see John 3:16-3:18 today";
+        let r = references_in(text, &books());
+        assert_eq!(r.len(), 1, "{r:?}");
+        assert_eq!(&text[r[0].start..r[0].end], "John 3:16-3:18");
+        assert_eq!(r[0].end, text.find(" today").expect("today"));
+        assert_eq!(
+            Interpretation::Passage(r[0].passage),
+            at(43, 3, Some((16, 18)))
+        );
+    }
+
+    /// Every chapter of the Bible, as the app names it, is read by Go to and
+    /// is one link in a note, for the passage it names: the whole chapter,
+    /// all its verses ("Psalms 119:1–176", and "Psalms 119:1-119:176"),
+    /// and each verse on its own (the survey's property 2).
+    #[test]
+    fn every_chapter_and_verse_is_read_and_linked_whole() {
+        let books = books();
+        let counts = verse_counts();
+        assert_eq!(books.len(), counts.len());
+        for (book, chapters) in books.iter().zip(counts) {
+            for (chapter, last) in (1..).zip(chapters) {
+                let name = &book.name;
+                let whole = Some((1, last));
+                let mut references = vec![
+                    (passage_reference(name, chapter, None), None),
+                    (passage_reference(name, chapter, whole), whole),
+                    (format!("{name} {chapter}:1-{chapter}:{last}"), whole),
+                ];
+                references.extend((1..=last).map(|verse| {
+                    let verses = Some((verse, verse));
+                    (passage_reference(name, chapter, verses), verses)
+                }));
+                for (reference, verses) in references {
+                    let expected = at(book.id, chapter, verses);
+                    assert_eq!(interpret(&reference, &books), expected, "{reference}");
+                    let note = format!("see {reference} today");
+                    let found: Vec<(&str, Interpretation)> = references_in(&note, &books)
+                        .into_iter()
+                        .map(|r| (&note[r.start..r.end], Interpretation::Passage(r.passage)))
+                        .collect();
+                    assert_eq!(found, [(reference.as_str(), expected)], "{note:?}");
+                }
+            }
         }
     }
 

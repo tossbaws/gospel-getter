@@ -447,6 +447,7 @@ async fn a_common_phrase_says_it_was_not_all_checked() {
     assert_eq!(answer["status"], "differs", "{answer}");
     let message = answer["message"].as_str().expect("a message");
     assert!(message.ends_with("not all were checked."), "{message}");
+    assert_eq!(answer["complete"], false, "{answer}");
 
     let answer = install.check("of the LORD", None, "kjv").await;
     assert_eq!(answer["status"], "exact_part", "{answer}");
@@ -454,6 +455,7 @@ async fn a_common_phrase_says_it_was_not_all_checked() {
     assert_eq!(places.len(), MAX_CANDIDATES as usize);
     let message = answer["message"].as_str().expect("a message");
     assert!(message.contains("at least 200 places"), "{message}");
+    assert_eq!(answer["complete"], false, "{answer}");
 
     // In no one verse, with both halves too common to read every verse of: a
     // verse could end between them, so it can't plainly say it isn't there.
@@ -465,6 +467,7 @@ async fn a_common_phrase_says_it_was_not_all_checked() {
             "translation": "kjv",
             "message": "This wasn't found in the KJV as quoted, but its words are too common \
                         to check every verse. Give a reference to check it there.",
+            "complete": false,
         })
     );
     install.close().await;
@@ -610,6 +613,220 @@ async fn too_many_places_are_cut_off_and_said_to_be() {
     assert!(
         order.windows(2).all(|pair| pair[0] < pair[1]),
         "in Bible order, each once: {references:?}"
+    );
+    install.close().await;
+}
+
+/// What a message ends with when a quote was found in one place, or none, but
+/// not every verse with its words was read.
+const MAY_BE_ELSEWHERE: &str = " Its words are too common to check every verse, so it may be in \
+                                other places too. Give a reference to check it at one place.";
+
+/// A short quote of common words across a verse end, found in one place,
+/// though its words are in more verses than are read (H-01). It was taken from
+/// Nehemiah 7:61–62 and is in another place as well, so the answer names one
+/// place and says it may be in others too, and `complete` is false.
+#[tokio::test]
+async fn a_quote_seen_in_one_place_of_several_says_it_may_be_elsewhere() {
+    let install = Install::indexed("one-of-several").await;
+    // Nehemiah 7:61's last word and 7:62's first: also Numbers 26:62–63, and more.
+    let quote = "Israel. The";
+    let answer = install.check(quote, None, "kjv").await;
+    assert!(
+        matches!(answer["status"].as_str(), Some("exact" | "exact_part")),
+        "{answer}"
+    );
+    let message = answer["message"].as_str().expect("a message");
+    assert!(
+        answer["found_at"].as_array().is_some_and(|p| p.len() > 1)
+            || message.contains("other places"),
+        "names one place and says nothing of the others: {answer}"
+    );
+    let reference = answer["reference"].as_str().expect("a reference");
+    assert_eq!(
+        message,
+        format!("This is an exact part of {reference} in the KJV.{MAY_BE_ELSEWHERE}")
+    );
+    assert_eq!(answer["complete"], false, "{answer}");
+    install.assert_it_keeps_its_promise(quote, &answer).await;
+
+    // Where it was taken from has it too, and a reference checks just there:
+    // no search, so nothing was cut short.
+    let there = install.check(quote, Some("Nehemiah 7:61-62"), "kjv").await;
+    assert_eq!(there["status"], "exact_part", "{there}");
+    assert!(there.get("complete").is_none(), "{there}");
+    install.close().await;
+}
+
+/// The same quote, given a reference that hasn't it: the one place found is
+/// named, and the message says it may be in others too.
+#[tokio::test]
+async fn a_quote_elsewhere_in_one_place_of_several_says_it_may_be_in_others() {
+    let install = Install::indexed("elsewhere-one-of-several").await;
+    let quote = "Israel. The";
+    let answer = install.check(quote, Some("John 3:16"), "kjv").await;
+    assert_eq!(answer["status"], "elsewhere", "{answer}");
+    let places = found_at(&answer);
+    assert_eq!(places.len(), 1, "{answer}");
+    assert_eq!(
+        answer["message"],
+        format!(
+            "This isn't in John 3:16 in the KJV as quoted, but it is in {}.{MAY_BE_ELSEWHERE}",
+            places[0]
+        )
+    );
+    assert_eq!(answer["complete"], false, "{answer}");
+    install.assert_it_keeps_its_promise(quote, &answer).await;
+    install.close().await;
+}
+
+/// A quote whose words lead to every place it could be: no caveat and no
+/// `complete`, the answer byte for byte what it always was. With no
+/// reference, with one that has it, and with one that hasn't.
+#[tokio::test]
+async fn a_quote_of_uncommon_words_has_no_caveat() {
+    let install = Install::indexed("uncommon").await;
+    let serialized = async |quote: &str, reference: Option<&str>| {
+        let args = VerifyQuoteArgs {
+            text: quote.to_string(),
+            reference: reference.map(str::to_string),
+            translation: Some("kjv".to_string()),
+        };
+        let out = install.library.verify_quote(args).await.expect("an answer");
+        serde_json::to_string(&out).expect("JSON")
+    };
+    let text = async |reference: &str| {
+        let text = install.real_text(reference, "kjv").await;
+        serde_json::to_string(&text).expect("JSON")
+    };
+
+    let quote = "For God so loved the world, that he gave his only begotten Son";
+    let john_3_16 = text("John 3:16").await;
+    let exact_part = format!(
+        "{{\"status\":\"exact_part\",\"translation\":\"kjv\",\"reference\":\"John 3:16\",\
+         \"text\":{john_3_16},\"message\":\"This is an exact part of John 3:16 in the KJV.\"}}"
+    );
+    assert_eq!(serialized(quote, None).await, exact_part);
+    assert_eq!(serialized(quote, Some("John 3:16")).await, exact_part);
+
+    // Across a verse end, long enough to lead to its verses.
+    let quote = "everlasting life. For God sent not his Son into the world";
+    let both = text("John 3:16-17").await;
+    assert_eq!(
+        serialized(quote, None).await,
+        format!(
+            "{{\"status\":\"exact_part\",\"translation\":\"kjv\",\
+             \"reference\":\"John 3:16\u{2013}17\",\"text\":{both},\
+             \"message\":\"This is an exact part of John 3:16\u{2013}17 in the KJV.\"}}"
+        )
+    );
+
+    // Not in the passage given, and in one other place.
+    let quote = "Jesus wept.";
+    let real = install.real_text("John 3:16", "kjv").await;
+    let difference = serde_json::to_string(&first_difference(quote, &real)).expect("JSON");
+    assert_eq!(
+        serialized(quote, Some("John 3:16")).await,
+        format!(
+            "{{\"status\":\"elsewhere\",\"translation\":\"kjv\",\"reference\":\"John 3:16\",\
+             \"text\":{john_3_16},\"message\":\"This isn't in John 3:16 in the KJV as quoted, \
+             but it is in John 11:35.\",\"difference\":{difference},\
+             \"found_at\":[{{\"reference\":\"John 11:35\",\"text\":\"Jesus wept.\"}}]}}"
+        )
+    );
+    install.close().await;
+}
+
+/// The survey's sweep that found H-01: in every 5th chapter of each
+/// translation, the last 1 to 3 words of a verse and the first 1 to 4 of the
+/// next, quoted with no reference. Each is found at those two verses, or the
+/// answer says the search was cut short (`complete` is false, and the message
+/// says it may be elsewhere).
+///
+/// It reads about 700 quotes and takes about 95 s, so it's ignored. Run it
+/// with `cargo test -p gospel-getter-cli -- --include-ignored
+/// a_short_quote_across_a_verse_end_is_found_there_or_said_to_be_cut_short`.
+#[tokio::test]
+#[ignore = "about 95 s: run it with --include-ignored"]
+async fn a_short_quote_across_a_verse_end_is_found_there_or_said_to_be_cut_short() {
+    let install = Install::indexed("verify_sweep").await;
+    // A fixed pseudo-random sequence (splitmix64), so every run reads the same
+    // quotes.
+    let mut seed: u64 = 0x2293;
+    let mut next = move |below: usize| {
+        seed = seed.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = seed;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        usize::try_from((z ^ (z >> 31)) % below as u64).expect("below a usize")
+    };
+    let mut checked = 0;
+    let mut failures = Vec::new();
+    for code in ["kjv", "bsb", "web"] {
+        let translation = install.library.translation(Some(code)).await;
+        let translation = translation.expect("a translation");
+        let mut chapters = 0;
+        for book in &install.library.books {
+            for chapter in 1..=book.chapter_count {
+                chapters += 1;
+                if chapters % 5 != 0 {
+                    continue;
+                }
+                let joined = install
+                    .library
+                    .joined_chapter(translation, book.id, chapter)
+                    .await
+                    .expect("a chapter");
+                let pairs: Vec<(&JoinedVerse, &JoinedVerse)> = joined
+                    .verses
+                    .windows(2)
+                    .filter(|pair| pair[1].number == pair[0].number + 1)
+                    .map(|pair| (&pair[0], &pair[1]))
+                    .collect();
+                if pairs.is_empty() {
+                    continue;
+                }
+                let (first, second) = pairs[next(pairs.len())];
+                let ending: Vec<&str> = joined.text[first.start..first.end].split(' ').collect();
+                let starting: Vec<&str> =
+                    joined.text[second.start..second.end].split(' ').collect();
+                let before = ending[ending.len().saturating_sub(1 + next(3))..].join(" ");
+                let after = starting[..starting.len().min(1 + next(4))].join(" ");
+                let quote = format!("{before} {after}");
+                if !quote.chars().any(char::is_alphanumeric) {
+                    continue;
+                }
+                let place =
+                    passage_reference(&book.name, chapter, Some((first.number, second.number)));
+                checked += 1;
+                let answer = match install.answer(&quote, None, code).await {
+                    Ok(answer) => answer,
+                    Err(e) => {
+                        failures.push(format!("{code} {quote:?} ({place}): {e:#}"));
+                        continue;
+                    }
+                };
+                let held = matches!(answer["status"].as_str(), Some("exact" | "exact_part"));
+                let found_there =
+                    answer["reference"] == place.as_str() || found_at(&answer).contains(&&*place);
+                let says_so = answer["message"].as_str().is_some_and(|m| {
+                    ["too common", "not all were checked", "at least"]
+                        .iter()
+                        .any(|words| m.contains(words))
+                });
+                let cut_short = answer["complete"] == false;
+                if says_so != cut_short || !((held && found_there) || cut_short) {
+                    failures.push(format!("{code} {quote:?} ({place}): {answer}"));
+                }
+            }
+        }
+    }
+    assert!(checked > 0);
+    assert!(
+        failures.is_empty(),
+        "{} of {checked}:\n{}",
+        failures.len(),
+        failures.join("\n")
     );
     install.close().await;
 }

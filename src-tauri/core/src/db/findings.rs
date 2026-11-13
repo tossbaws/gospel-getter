@@ -34,10 +34,54 @@ pub const MAX_AGENT_CHARS: usize = 60;
 /// CHECK says the same.
 pub const MAX_REQUEST_CHARS: usize = 60;
 
-/// What a request can't hold, besides line breaks and other control
-/// characters: the punctuation that would start a sentence about the verse
-/// ("grief: here Jesus shows…"), not a label.
+/// What a request can't hold, besides line breaks and characters that can't
+/// be seen (`breaks_or_hides`): the punctuation that would start a sentence
+/// about the verse ("grief: here Jesus shows…"), not a label.
 pub const NOT_IN_A_REQUEST: [char; 4] = [':', ';', '\u{2014}', '\u{2013}'];
+
+/// Whether `c` breaks a line or can't be seen, so a request or an agent's
+/// name holding it isn't one visible line: a control character (Cc: a line
+/// break, a tab…), a line or paragraph separator (Zl, Zp: U+2028, U+2029), or
+/// a format character (Cf: U+200B zero width space, U+200C and U+200D zero
+/// width non-joiner and joiner, U+2060 word joiner, U+FEFF, the bidi controls
+/// such as U+202E…), which would make "grief" and "grief\u{200B}" two
+/// requests that look the same. Only a joiner inside a word or an emoji is
+/// let be ([`hidden_chars`]).
+fn breaks_or_hides(c: char) -> bool {
+    use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
+    matches!(
+        c.general_category(),
+        GeneralCategory::Control
+            | GeneralCategory::LineSeparator
+            | GeneralCategory::ParagraphSeparator
+            | GeneralCategory::Format
+    )
+}
+
+/// The zero width non-joiner and joiner (U+200C, U+200D).
+const JOINERS: [char; 2] = ['\u{200C}', '\u{200D}'];
+
+/// Each character of `text`, and whether it breaks a line or can't be seen
+/// there ([`breaks_or_hides`]). A zero width non-joiner or joiner
+/// ([`JOINERS`]) with a visible non-ASCII character on each side is part of
+/// how that's written, so it doesn't hide: in a Persian word
+/// ("می\u{200C}خواهم"), an Indic conjunct, or an emoji joined from several
+/// ("👨\u{200D}👩\u{200D}👧"). Anywhere else (at either end, beside an ASCII
+/// character or a space, or beside another invisible character, as when
+/// doubled) it hides, as any format character does.
+fn hidden_chars(text: &str) -> impl Iterator<Item = (char, bool)> {
+    let chars: Vec<char> = text.chars().collect();
+    let visible_non_ascii = |c: Option<&char>| {
+        c.is_some_and(|&c| !c.is_ascii() && !c.is_whitespace() && !breaks_or_hides(c))
+    };
+    (0..chars.len()).map(move |i| {
+        let c = chars[i];
+        let joins = JOINERS.contains(&c)
+            && visible_non_ascii(i.checked_sub(1).and_then(|before| chars.get(before)))
+            && visible_non_ascii(chars.get(i + 1));
+        (c, breaks_or_hides(c) && !joins)
+    })
+}
 
 /// How every refusal of a request starts: what a request is.
 const A_REQUEST_IS: &str =
@@ -115,8 +159,10 @@ pub enum RequestError {
     Empty,
     /// More than [`MAX_REQUEST_CHARS`] characters, after trimming.
     TooLong { chars: usize },
-    /// One of [`NOT_IN_A_REQUEST`], a line break, a tab or another control
-    /// character: more than a label.
+    /// One of [`NOT_IN_A_REQUEST`], a line break, a tab, or another control,
+    /// separator or invisible format character (a zero width non-joiner or
+    /// joiner outside a word or an emoji): more than a label, or more than can
+    /// be seen.
     NotALabel,
 }
 
@@ -132,7 +178,7 @@ impl fmt::Display for RequestError {
             Self::NotALabel => write!(
                 f,
                 "{A_REQUEST_IS}, so it can't have a colon, a semicolon, a dash (\u{2014} or \
-                 \u{2013}) or a line break."
+                 \u{2013}), a line break or a character that can't be seen."
             ),
         }
     }
@@ -141,17 +187,14 @@ impl fmt::Display for RequestError {
 impl std::error::Error for RequestError {}
 
 /// A request as it's stored: trimmed, then a short topic label (C3): 1 to
-/// [`MAX_REQUEST_CHARS`] characters on one line, none of them one of
+/// [`MAX_REQUEST_CHARS`] characters on one visible line, none of them one of
 /// [`NOT_IN_A_REQUEST`].
 pub fn normalize_request(raw: &str) -> Result<String, RequestError> {
     let request = raw.trim();
     if request.is_empty() {
         return Err(RequestError::Empty);
     }
-    if request
-        .chars()
-        .any(|c| c.is_control() || NOT_IN_A_REQUEST.contains(&c))
-    {
+    if hidden_chars(request).any(|(c, hidden)| hidden || NOT_IN_A_REQUEST.contains(&c)) {
         return Err(RequestError::NotALabel);
     }
     let chars = request.chars().count();
@@ -161,16 +204,16 @@ pub fn normalize_request(raw: &str) -> Result<String, RequestError> {
     Ok(request.to_string())
 }
 
-/// An agent's name as it's stored: control characters as spaces, trimmed,
-/// cut short at [`MAX_AGENT_CHARS`] characters, or [`DEFAULT_AGENT`] if
-/// that leaves nothing.
+/// An agent's name as it's stored: control, separator and invisible format
+/// characters (`hidden_chars`: a joiner inside a word or an emoji is kept) as
+/// spaces, trimmed, cut short at [`MAX_AGENT_CHARS`] characters, never ending
+/// in a space or a joiner, or [`DEFAULT_AGENT`] if that leaves nothing.
 pub fn normalize_agent(raw: &str) -> String {
-    let spaced: String = raw
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
+    let spaced: String = hidden_chars(raw)
+        .map(|(c, hidden)| if hidden { ' ' } else { c })
         .collect();
     let cut: String = spaced.trim().chars().take(MAX_AGENT_CHARS).collect();
-    let agent = cut.trim_end();
+    let agent = cut.trim_end_matches(|c: char| c.is_whitespace() || JOINERS.contains(&c));
     if agent.is_empty() {
         DEFAULT_AGENT.to_string()
     } else {
@@ -871,6 +914,108 @@ mod tests {
         );
     }
 
+    /// A request is one line a reader can see all of (H-02): no line or
+    /// paragraph separator, and no invisible format character (a zero-width
+    /// space, a joiner outside a word, the word joiner, a byte-order mark,
+    /// bidi controls), which would make "grief" and "grief\u{200B}" two
+    /// requests that look the same.
+    #[test]
+    fn a_request_is_one_visible_line() {
+        for label in [
+            "grief\u{2028}Jesus weeps here",
+            "grief\u{2029}x",
+            "grief\u{200B}",
+            "\u{2060}grief",
+            "\u{FEFF}grief",
+            "gr\u{200C}ief",
+            "grief\u{200D}",
+            "\u{202E}feirg",
+            "grief\u{2066}x\u{2069}",
+            "grief\u{AD}",
+        ] {
+            assert_eq!(
+                normalize_request(label),
+                Err(RequestError::NotALabel),
+                "{label:?}"
+            );
+        }
+        // Labels of any script, with marks, symbols and emoji, are still
+        // labels, as they were given.
+        for label in [
+            "the sun",
+            "caf\u{e9}",
+            "cafe\u{301}",
+            "λύπη",
+            "אבל",
+            "حزن",
+            "悲伤",
+            "दुःख",
+            "🙏 prayer",
+            "❤\u{fe0f} love",
+            "grief 😢",
+        ] {
+            assert_eq!(normalize_request(label), Ok(label.to_string()), "{label:?}");
+        }
+    }
+
+    /// An agent's name is one visible line too: a line or paragraph separator
+    /// or an invisible character becomes a space, as a control character does.
+    #[test]
+    fn an_agent_is_one_visible_line() {
+        assert_eq!(normalize_agent("Claude\u{2028}x"), "Claude x");
+        assert_eq!(normalize_agent("Claude\u{2029}x"), "Claude x");
+        assert_eq!(normalize_agent("Claude\u{200B}Code"), "Claude Code");
+        assert_eq!(normalize_agent("\u{FEFF}Claude\u{2060}"), "Claude");
+        assert_eq!(normalize_agent("\u{202E}Claude"), "Claude");
+        assert_eq!(normalize_agent("\u{200B}\u{2028}"), DEFAULT_AGENT);
+        assert_eq!(
+            normalize_agent("Caf\u{e9} \u{1f916}"),
+            "Caf\u{e9} \u{1f916}"
+        );
+    }
+
+    /// A zero width non-joiner or joiner between two visible non-ASCII
+    /// characters is part of how a word or an emoji is written: a request or
+    /// an agent's name keeps it as it was given. Anywhere else it's refused in
+    /// a request, and a space in a name, as other invisible characters are.
+    #[test]
+    fn a_joiner_is_kept_only_inside_a_word_or_an_emoji() {
+        let persian = "می\u{200C}خواهم";
+        let family = "👨\u{200D}👩\u{200D}👧 family";
+        let conjunct = "क्\u{200D}ष";
+        for label in [persian, family, conjunct] {
+            assert_eq!(normalize_request(label), Ok(label.to_string()), "{label:?}");
+            assert_eq!(normalize_agent(label), label, "{label:?}");
+        }
+        for label in [
+            "gr\u{200C}ief",
+            "grief\u{200D}",
+            "\u{200D}grief",
+            "می\u{200C}\u{200C}خواهم",
+            "\u{200C}می",
+            "می\u{200D}",
+            "می \u{200C}خواهم",
+            "👨\u{200D}\u{200B}👩",
+        ] {
+            assert_eq!(
+                normalize_request(label),
+                Err(RequestError::NotALabel),
+                "{label:?}"
+            );
+        }
+        assert_eq!(normalize_agent("gr\u{200C}ief"), "gr ief");
+        assert_eq!(normalize_agent("Claude\u{200D}Code"), "Claude Code");
+        assert_eq!(normalize_agent("grief\u{200D}"), "grief");
+        assert_eq!(normalize_agent("\u{200D}grief"), "grief");
+        assert_eq!(normalize_agent("می\u{200C}\u{200C}خواهم"), "می  خواهم");
+        // Cut short just after a joiner, a name doesn't end in one.
+        let long = format!("{}👨\u{200D}👩", "a".repeat(MAX_AGENT_CHARS - 2));
+        assert_eq!(
+            normalize_agent(&long),
+            format!("{}👨", "a".repeat(MAX_AGENT_CHARS - 2))
+        );
+    }
+
     #[test]
     fn an_agent_is_trimmed_and_cut_short_or_named_for_it() {
         assert_eq!(normalize_agent("  Claude Code "), "Claude Code");
@@ -899,8 +1044,8 @@ mod tests {
         assert_eq!(
             RequestError::NotALabel.to_string(),
             format!(
-                "{a_label}, so it can't have a colon, a semicolon, a dash (\u{2014} or \u{2013}) \
-                 or a line break."
+                "{a_label}, so it can't have a colon, a semicolon, a dash (\u{2014} or \u{2013}), \
+                 a line break or a character that can't be seen."
             )
         );
     }
