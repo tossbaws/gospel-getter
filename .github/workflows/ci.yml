@@ -3,8 +3,9 @@ name: CI
 # Three jobs, in parallel: build-and-test (the Rust checks: formatting,
 # Clippy, the backend's build and tests, the page's Rust pieces),
 # frontend-tests (the frontend behavior tests, split across two runners)
-# and test-windows (the backend's tests on Windows). build-and-test and
-# test-windows are required checks on main; keep their names.
+# and test-windows (the backend's tests on Windows). All three are
+# required checks on main, frontend-tests as its two shards,
+# "frontend-tests (1/2)" and "frontend-tests (2/2)"; keep their names.
 #
 # Only main's runs save the Rust caches (save-if); pull requests and other
 # branches restore main's (a run can restore caches saved on its own ref,
