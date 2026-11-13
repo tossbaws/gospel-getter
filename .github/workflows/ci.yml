@@ -16,8 +16,8 @@ name: CI
 # main's caches too.
 #
 # Every action is pinned to a commit (Dependabot proposes updates:
-# .github/dependabot.yml). CI builds with the current stable Rust; release
-# builds pin theirs (RUST_TOOLCHAIN in dist.yml). Every job has a time
+# .github/dependabot.yml), and every job builds with the Rust release the
+# installers are built with (RUST_TOOLCHAIN below). Every job has a time
 # limit, and apt-get retries, as in dist.yml.
 
 on:
@@ -27,6 +27,14 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # dist.yml's RUST_TOOLCHAIN, exactly: CI tests the compiler the
+  # installers are built with, and a new stable release no longer makes
+  # every Rust cache cold (each cache's key hashes the rustc version and
+  # every RUST* variable, this one too, so a bump starts fresh caches
+  # rather than mixing two). Move both together, in one pull request,
+  # which is where a new release's lints first show up.
+  # src-tauri/tests/packaging_config.rs fails if they differ.
+  RUST_TOOLCHAIN: "1.99.1"
 
 jobs:
   build-and-test:
@@ -64,7 +72,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
           # The page's Rust pieces (ui-leptos/) compile to WebAssembly.
           targets: wasm32-unknown-unknown
@@ -178,7 +186,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: wasm32-unknown-unknown
 
       - name: Install Trunk
@@ -253,7 +261,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           # Clippy for the GUI checks' crate (tests/gui) below.
           components: clippy
           targets: wasm32-unknown-unknown

@@ -1337,6 +1337,150 @@ fn release_builds_use_one_pinned_rust() {
     }
 }
 
+/// A workflow's own `env:` value for `key` (the block at the top, not a
+/// job's or a step's), without its quotes.
+fn workflow_env<'a>(workflow: &'a str, key: &str) -> Option<&'a str> {
+    let prefix = format!("  {key}: ");
+    workflow
+        .lines()
+        .skip_while(|l| *l != "env:")
+        .skip(1)
+        .take_while(|l| l.is_empty() || l.starts_with(' '))
+        .find_map(|l| l.strip_prefix(prefix.as_str()))
+        .map(|value| value.trim().trim_matches('"'))
+}
+
+/// CI tests the compiler the installers are built with (C-1): ci.yml's
+/// `RUST_TOOLCHAIN` is dist.yml's, and every Rust a workflow installs is
+/// that one, as `${{ env.RUST_TOOLCHAIN }}` from the workflow's own `env:`
+/// (no job or step sets it again), never `stable` or a version of its own.
+/// The one exception is the weekly audit, on the stable of the day: cargo
+/// there only installs cargo-audit and runs it, so it builds none of the
+/// app. Nothing picks a Rust another way (rustup, `cargo +…`,
+/// `RUSTUP_TOOLCHAIN`, another action, or a rust-toolchain file, which
+/// rustup would follow over the one installed), and no Rust cache drops the
+/// rustc version and the `RUST*` variables from its key, so a bump starts
+/// fresh caches.
+#[test]
+fn every_workflow_builds_with_the_release_rust() {
+    const PIN: &str = "${{ env.RUST_TOOLCHAIN }}";
+    const AUDIT: &str = "workflows/audit.yml";
+    let release = workflow_env(DIST_YML, "RUST_TOOLCHAIN").expect("dist.yml sets RUST_TOOLCHAIN");
+    assert_eq!(
+        workflow_env(CI_YML, "RUST_TOOLCHAIN"),
+        Some(release),
+        "ci.yml's RUST_TOOLCHAIN isn't dist.yml's"
+    );
+
+    let mut pinned = 0;
+    let mut audit = None;
+    for (file, text) in github_files() {
+        let code: Vec<&str> = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .collect();
+        for line in &code {
+            for other in [
+                "rustup toolchain install",
+                "rustup install",
+                "rustup default",
+                "rustup update",
+                "rustup override",
+                "RUSTUP_TOOLCHAIN",
+                "cargo +",
+                "actions-rs/toolchain",
+                "actions-rust-lang/setup-rust-toolchain",
+            ] {
+                assert!(
+                    !line.contains(other),
+                    "{file}: picks a Rust of its own: {}",
+                    line.trim()
+                );
+            }
+            assert!(
+                !line.contains("add-rust-environment-hash-key"),
+                "{file}: a Rust cache's key may leave out the toolchain: {}",
+                line.trim()
+            );
+        }
+        let sets = code
+            .iter()
+            .filter(|l| l.trim_start().starts_with("RUST_TOOLCHAIN:"))
+            .count();
+        assert!(sets <= 1, "{file}: a job or step sets RUST_TOOLCHAIN again");
+
+        let installs: Vec<Step> = workflow_steps(&text)
+            .into_iter()
+            .filter(|s| s.text.contains("uses: dtolnay/rust-toolchain@"))
+            .collect();
+        assert_eq!(
+            installs.len(),
+            code.iter()
+                .filter(|l| l.contains("uses: dtolnay/rust-toolchain@"))
+                .count(),
+            "{file}: a Rust installed outside a job's steps"
+        );
+        for install in &installs {
+            let toolchain = with_value(install, "toolchain");
+            if file == AUDIT {
+                assert_eq!(toolchain, Some("stable"), "{install:#?}");
+                continue;
+            }
+            assert_eq!(
+                toolchain,
+                Some(PIN),
+                "{file}: job {} installs another Rust: {install:#?}",
+                install.job
+            );
+            assert_eq!(
+                workflow_env(&text, "RUST_TOOLCHAIN"),
+                Some(release),
+                "{file}: job {} installs a Rust its workflow doesn't pin",
+                install.job
+            );
+            pinned += 1;
+        }
+        if file == AUDIT {
+            audit = Some(text);
+        }
+    }
+    assert!(pinned > 0, "no Rust installs found");
+
+    let audit = audit.unwrap_or_else(|| panic!("{AUDIT}"));
+    let cargo: Vec<&str> = audit
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#') && l.contains("cargo "))
+        .map(|l| l.strip_prefix("run: ").unwrap_or(l))
+        .collect();
+    assert!(!cargo.is_empty(), "{AUDIT} runs no cargo");
+    for line in cargo {
+        assert!(
+            line == "cargo install cargo-audit --locked" || line.starts_with("cargo audit "),
+            "{AUDIT} builds with the stable Rust, so only cargo-audit: {line}"
+        );
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    for dir in [
+        ".",
+        "src-tauri",
+        "ui-leptos",
+        "tests",
+        "tests/gui",
+        "tests/frontend",
+    ] {
+        for name in ["rust-toolchain", "rust-toolchain.toml"] {
+            let path = root.join(dir).join(name);
+            assert!(
+                !path.exists(),
+                "{}: rustup would build with its Rust in CI, not RUST_TOOLCHAIN",
+                path.display()
+            );
+        }
+    }
+}
+
 /// The updater's signing key (D-01). Its secrets are named by one job
 /// alone, dist.yml's sign job: in the release environment (which deploys
 /// from main only), on a run dispatched on main. Nothing hands every secret

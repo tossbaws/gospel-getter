@@ -114,9 +114,10 @@ env:
   # stops the build.
   TAURI_CLI_VERSION: "2.12.4"
   # The Rust every job here builds with, so a release is built by a known
-  # compiler rather than whatever is stable that day (ci.yml follows
-  # stable). It was CI's stable when it was set; move it on deliberately,
-  # once CI is green on the new one.
+  # compiler rather than whatever is stable that day. ci.yml builds with
+  # the same one (its RUST_TOOLCHAIN; src-tauri/tests/packaging_config.rs
+  # fails if they differ): move both on together, in one pull request, so
+  # CI is green on the new one before a release is built with it.
   RUST_TOOLCHAIN: "1.99.1"
 
 jobs:
