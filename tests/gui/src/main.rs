@@ -22,6 +22,7 @@
 mod checks;
 mod config;
 mod native;
+mod repeat;
 mod report;
 mod retried;
 mod ui;

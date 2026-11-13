@@ -1197,6 +1197,8 @@ fn every_job_has_a_time_limit_and_apt_retries() {
 /// the uploaded artifact (attempt 1's under the run's out-dir). Nothing in
 /// CI builds the checks with their `force-fail` feature, or names the
 /// variable it reads: a check is only ever failed by hand, to try the retry.
+/// Nor does CI repeat a check (`GUI_CHECK_REPEAT`, for chasing a flake by
+/// hand).
 #[test]
 fn the_gui_checks_retry_once_in_ci_and_never_force_a_failure() {
     let steps = dist_steps();
@@ -1237,7 +1239,7 @@ fn the_gui_checks_retry_once_in_ci_and_never_force_a_failure() {
         );
     }
     for (file, text) in github_files() {
-        for name in ["force-fail", "GUI_CHECK_FORCE_FAIL"] {
+        for name in ["force-fail", "GUI_CHECK_FORCE_FAIL", "GUI_CHECK_REPEAT"] {
             assert!(!text.contains(name), "{file} names {name}");
         }
     }

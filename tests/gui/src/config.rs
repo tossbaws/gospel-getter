@@ -6,6 +6,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use crate::native::Xvfb;
+use crate::repeat::Repeat;
 
 #[derive(Debug)]
 pub struct Config {
@@ -46,6 +47,9 @@ pub struct Config {
     /// (`GUI_LAUNCH_PIDS`, see `gui_check::launched`), each to have exited
     /// before the next session starts.
     pub launched: Option<PathBuf>,
+    /// By hand only, never in CI: one check run many times in a row in its
+    /// session, to chase a flaky one (GUI_CHECK_REPEAT, `crate::repeat`).
+    pub repeat: Option<Repeat>,
 }
 
 /// Starting the app (a cold start seeds its database) may take longer than
@@ -103,6 +107,7 @@ impl Config {
             } else {
                 None
             },
+            repeat: Repeat::parse(&std::env::var("GUI_CHECK_REPEAT").unwrap_or_default())?,
         })
     }
 }

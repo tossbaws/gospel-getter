@@ -73,6 +73,7 @@ use thirtyfour::prelude::*;
 
 use crate::config::Config;
 use crate::native;
+use crate::repeat::{Repeat, Runs};
 use crate::report::{Check, Report, is_skip};
 use crate::ui::{Ui, log_line};
 use crate::update_server::UpdateServer;
@@ -369,54 +370,72 @@ async fn shipped(
         }
         report.record(Check::ImportPreview, import).await;
 
-        for (check, result) in [
-            (Check::LibraryBookmarks, run.library_bookmarks().await),
-            (Check::LibraryHighlights, run.library_highlights().await),
-            (Check::LibraryNotes, run.library_notes().await),
-            (Check::Search, run.search_word().await),
-            (Check::SearchGoTo, run.search_go_to().await),
-            (Check::PaletteCommand, run.palette_command().await),
-            (Check::PickerPopover, run.picker_popover().await),
-            (Check::PickerSidebar, run.picker_sidebar().await),
-            (Check::RandomChapter, run.random_chapter().await),
-            (Check::PickerKeyboard, run.picker_keyboard().await),
-            (Check::SidebarPlace, run.sidebar_reading_place().await),
-            (Check::TranslationSwitch, run.translation_switch().await),
-            (Check::Compare, run.compare().await),
-            (Check::ReadingMode, run.reading_mode().await),
-            (Check::OnePanel, run.one_panel().await),
-            (Check::EscapeChain, run.escape_chain().await),
-            (Check::OutsideClick, run.outside_click().await),
-            (Check::MenuKeyboard, run.menu_keyboard().await),
-            (Check::AboutTrap, run.about_trap().await),
-            (Check::GSidebar, run.g_and_sidebar().await),
-            (Check::ResizePlace, run.resize_reading_place().await),
-            (Check::ScrollThenResize, run.scroll_then_resize().await),
-            (Check::ChapterSteps, run.chapter_steps().await),
-            (Check::CompareGrid, run.compare_grid().await),
-            (Check::Disclosures, run.disclosures().await),
-            (Check::BackForward, run.back_forward().await),
-            (Check::BarHistory, run.bar_history().await),
-            (Check::BarChapters, run.bar_chapters().await),
-            (Check::LongChapter, run.long_chapter().await),
-            (Check::TryAgain, run.try_again().await),
-            (Check::SelectVerses, run.select_verses().await),
-            (Check::CopyFormats, run.copy_formats().await),
-            (Check::CardBookmark, run.card_bookmark().await),
-            (Check::CardHighlight, run.card_highlight().await),
-            (Check::CardNote, run.card_note().await),
-            (Check::XrefPreview, run.xref_preview().await),
-            (Check::ShiftGhost, run.shift_ghost().await),
-            (Check::KeyTurns, run.key_turns().await),
-            (Check::KeySelection, run.key_selection().await),
-            (Check::KeyCopy, run.key_copy().await),
-            (Check::KeyHistoryNote, run.key_history_note().await),
-            (
-                Check::PalettePageCommands,
-                run.palette_page_commands().await,
-            ),
-            (Check::SingleKeys, run.single_key_switch().await),
-        ] {
+        // Each check once, or as many times in a row as GUI_CHECK_REPEAT
+        // asks (`Run::repeated`).
+        macro_rules! checked {
+            ($check:ident, $method:ident) => {
+                (
+                    Check::$check,
+                    run.repeated(Check::$check, async |r| r.$method().await)
+                        .await,
+                )
+            };
+        }
+        let ran = [
+            checked!(LibraryBookmarks, library_bookmarks),
+            checked!(LibraryHighlights, library_highlights),
+            checked!(LibraryNotes, library_notes),
+            checked!(Search, search_word),
+            checked!(SearchGoTo, search_go_to),
+            checked!(PaletteCommand, palette_command),
+            checked!(PickerPopover, picker_popover),
+            checked!(PickerSidebar, picker_sidebar),
+            checked!(RandomChapter, random_chapter),
+            checked!(PickerKeyboard, picker_keyboard),
+            checked!(SidebarPlace, sidebar_reading_place),
+            checked!(TranslationSwitch, translation_switch),
+            checked!(Compare, compare),
+            checked!(ReadingMode, reading_mode),
+            checked!(OnePanel, one_panel),
+            checked!(EscapeChain, escape_chain),
+            checked!(OutsideClick, outside_click),
+            checked!(MenuKeyboard, menu_keyboard),
+            checked!(AboutTrap, about_trap),
+            checked!(GSidebar, g_and_sidebar),
+            checked!(ResizePlace, resize_reading_place),
+            checked!(ScrollThenResize, scroll_then_resize),
+            checked!(ChapterSteps, chapter_steps),
+            checked!(CompareGrid, compare_grid),
+            checked!(Disclosures, disclosures),
+            checked!(BackForward, back_forward),
+            checked!(BarHistory, bar_history),
+            checked!(BarChapters, bar_chapters),
+            checked!(LongChapter, long_chapter),
+            checked!(TryAgain, try_again),
+            checked!(SelectVerses, select_verses),
+            checked!(CopyFormats, copy_formats),
+            checked!(CardBookmark, card_bookmark),
+            checked!(CardHighlight, card_highlight),
+            checked!(CardNote, card_note),
+            checked!(XrefPreview, xref_preview),
+            checked!(ShiftGhost, shift_ghost),
+            checked!(KeyTurns, key_turns),
+            checked!(KeySelection, key_selection),
+            checked!(KeyCopy, key_copy),
+            checked!(KeyHistoryNote, key_history_note),
+            checked!(PalettePageCommands, palette_page_commands),
+            checked!(SingleKeys, single_key_switch),
+        ];
+        if let Some(check) = config.repeat.map(Repeat::check)
+            && !ran.iter().any(|(c, _)| *c == check)
+        {
+            run.ui.log(&format!(
+                "GUI_CHECK_REPEAT: check {} {} isn't one of this session's repeatable checks, so it ran once",
+                check.number(),
+                check.name()
+            ));
+        }
+        for (check, result) in ran {
             // A skip (the sidebar's checks, on a window that can't be made
             // wide enough on Windows) is no failure: no screenshot.
             if result.as_ref().is_err_and(|e| !is_skip(e)) {
@@ -660,10 +679,52 @@ impl Run<'_> {
         self.config.out_dir.join("screenshots").join(name)
     }
 
+    /// `check`, as `once` runs it: once, or as many times in a row as
+    /// GUI_CHECK_REPEAT asks, each run's result in steps.log and a failed
+    /// run's screenshots taken as it fails (`fail-52-shift-ghost-run-7.png`);
+    /// its result counts the runs (`repeat::Runs`).
+    async fn repeated(
+        &mut self,
+        check: Check,
+        mut once: impl AsyncFnMut(&mut Self) -> Result<String>,
+    ) -> Result<String> {
+        let times = Repeat::times_for(self.config.repeat, check);
+        if times == 1 {
+            return once(self).await;
+        }
+        let mut runs = Runs::default();
+        for n in 1..=times {
+            let result = once(self).await;
+            let failed = result.as_ref().is_err_and(|e| !is_skip(e));
+            let line = runs.add(n, times, result);
+            self.ui.log(&format!(
+                "check {} {}, {line}",
+                check.number(),
+                check.name()
+            ));
+            if failed {
+                self.failure_screenshots(&format!(
+                    "fail-{}-{}-run-{n}",
+                    check.number(),
+                    check.name()
+                ))
+                .await;
+            }
+        }
+        runs.verdict()
+    }
+
     /// A screenshot of how things looked when `check` failed, if one can
     /// still be taken.
     async fn failure_screenshot(&self, check: Check) {
-        let name = format!("fail-{}-{}.png", check.number(), check.name());
+        self.failure_screenshots(&format!("fail-{}-{}", check.number(), check.name()))
+            .await;
+    }
+
+    /// The failure screenshots, named from `stem`: the page's, and on
+    /// Linux the whole private display's.
+    async fn failure_screenshots(&self, stem: &str) {
+        let name = format!("{stem}.png");
         if let Err(e) = self
             .ui
             .screenshot(
@@ -676,7 +737,7 @@ impl Run<'_> {
         }
         // Linux: the whole private display too, native dialogs and all.
         if let Some(xvfb) = &self.config.xvfb {
-            let name = format!("fail-{}-{}-display.png", check.number(), check.name());
+            let name = format!("{stem}-display.png");
             let path = self.shot_path(&name);
             match tokio::time::timeout(Duration::from_secs(10), xvfb.screenshot_root(&path)).await {
                 Ok(Ok(())) => self.ui.log(&format!("display screenshot {name}")),
