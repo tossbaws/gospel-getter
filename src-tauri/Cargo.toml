@@ -5,9 +5,13 @@ description = "Read the Bible, book by book, chapter by chapter"
 license = "MIT"
 repository = "https://github.com/tossbaws/gospel-getter"
 edition = "2024"
-# The oldest Rust that builds it: sqlx 0.9 needs 1.94 (and Tauri 2.12
-# 1.90), more than the code's own let chains (1.88).
-rust-version = "1.94"
+# The Rust CI and the releases build with (RUST_TOOLCHAIN in
+# .github/workflows), as major.minor: nothing older is tested. Edition 2024's
+# resolver picks dependency versions that fit it, so a lower one would hold
+# back `cargo update` for a compiler no job runs. Move it with
+# RUST_TOOLCHAIN, here and in core/ and cli/: tests/packaging_config.rs
+# fails if any differs.
+rust-version = "1.99"
 # `cargo tauri dev` is `cargo run`, and the workspace has a second program.
 default-run = "gospel_getter"
 
