@@ -1604,6 +1604,16 @@ const INSTALLER_ARTIFACTS: [(&str, &str); 4] = [
 /// uploads, signed (tools/release/sign_installers.py's `SIGNED_SUFFIX`).
 const SIGNED: &str = "-signed";
 
+/// What every artifact of the signing rehearsal's starts with, so none can
+/// pass for a release's.
+const REHEARSAL: &str = "rehearsal-";
+
+/// The CLI artifacts the build jobs upload, which a release attaches.
+const CLI_ARTIFACTS: [&str; 2] = [
+    "gospel-getter-cli-linux-x86_64",
+    "gospel-getter-cli-windows-x86_64",
+];
+
 const RELEASE_README: &str = include_str!("../../tools/release/README.md");
 
 /// The value of a step's `with:` key (`name`, `path`, `pattern`), if it
@@ -1627,7 +1637,10 @@ fn with_value<'a>(step: &'a Step, key: &str) -> Option<&'a str> {
 /// by (N-S-01: never the build artifact's own name, so a failed sign job
 /// can be re-run on the build's artifacts as built). On a run dispatched
 /// on another branch, or a release/ branch's pull request, the rehearsal
-/// does the same with a throwaway key, uploading nothing.
+/// does the same with a throwaway key, and uploads its signed files and the
+/// throwaway public key only under [`REHEARSAL`] names, for the bundle job's
+/// rehearsal (`the_bundle_job_assembles_the_release_files_without_the_key`):
+/// never a name a release takes, and never the private key.
 #[test]
 fn only_a_release_run_signs_and_it_signs_what_was_checked() {
     let steps = dist_steps();
@@ -1757,12 +1770,50 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
                 .contains("--pubkey-file \"$RUNNER_TEMP/rehearsal.key.pub\"")),
         "{rehearsal:#?}"
     );
-    assert!(
-        !rehearsal
-            .iter()
-            .any(|s| s.text.contains("actions/upload-artifact@")),
-        "the rehearsal's signatures are worthless: it uploads nothing"
+    // The rehearsal's signatures are worthless (a throwaway key the app
+    // doesn't trust), so nothing it uploads can pass for a release's: each
+    // of its four signed artifacts is a release's -signed name under
+    // REHEARSAL, plus its public key, and never the private key.
+    let rehearsal_uploads: Vec<&&Step> = rehearsal
+        .iter()
+        .filter(|s| s.text.contains("actions/upload-artifact@"))
+        .collect();
+    let mut uploaded: Vec<(String, String)> = rehearsal_uploads
+        .iter()
+        .map(|s| {
+            (
+                with_value(s, "name").unwrap_or_default().to_owned(),
+                with_value(s, "path").unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    uploaded.sort();
+    let mut expected: Vec<(String, String)> = INSTALLER_ARTIFACTS
+        .iter()
+        .map(|(_, a)| {
+            (
+                format!("{REHEARSAL}{a}{SIGNED}"),
+                format!("installers/{a}/"),
+            )
+        })
+        .chain([(
+            format!("{REHEARSAL}signing-pubkey"),
+            "${{ runner.temp }}/rehearsal.key.pub".to_owned(),
+        )])
+        .collect();
+    expected.sort();
+    assert_eq!(
+        uploaded, expected,
+        "the rehearsal uploads only under rehearsal- names"
     );
+    for upload in &rehearsal_uploads {
+        assert!(
+            !upload.text.contains("overwrite:")
+                && !upload.text.contains("rehearsal.key\n")
+                && upload.text.contains("          retention-days: 7\n"),
+            "{upload:#?}"
+        );
+    }
     // Both take the build's four artifacts by their exact names, each into
     // its own folder, and nothing else: never a -signed one (a pattern such
     // as gospel-getter-linux-* would take gospel-getter-linux-appimage-signed
@@ -1927,6 +1978,166 @@ fn signer_version() -> String {
         "the signer isn't pinned by a SHA-256: {row:?}"
     );
     version.to_owned()
+}
+
+/// The release's files are assembled by the bundle job (CI-05,
+/// tools/release/bundle_release.py), which needs no key: it names no secret,
+/// has no environment and reads only (`contents: read`). A release's bundle
+/// follows the sign job, on the sign job's own condition, from its four
+/// -signed artifacts, the four build artifacts they were signed from, and
+/// the two CLI artifacts, each by its exact name, into one artifact,
+/// `gospel-getter-release-bundle`, which the publish takes. After the
+/// signing rehearsal the same job runs on its [`REHEARSAL`] artifacts,
+/// against its throwaway public key, into `rehearsal-release-bundle`.
+#[test]
+fn the_bundle_job_assembles_the_release_files_without_the_key() {
+    const FROM: &str = "${{ env.FROM }}";
+    let keys = dist_job_keys("bundle");
+    assert!(keys.contains(&"needs: [sign, sign-rehearsal]"), "{keys:#?}");
+    assert!(
+        keys.contains(
+            &"if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && \
+               github.ref == 'refs/heads/main' && needs.sign.result == 'success') || \
+               needs.sign-rehearsal.result == 'success') }}"
+        ),
+        "the bundle follows the sign job on its condition, or the rehearsal: {keys:#?}"
+    );
+    assert!(
+        !keys.iter().any(|k| k.starts_with("environment")),
+        "{keys:#?}"
+    );
+    let body = workflow_jobs(DIST_YML)
+        .into_iter()
+        .find(|(id, _)| id == "bundle")
+        .map(|(_, body)| body)
+        .expect("dist.yml has a bundle job");
+    let permissions: Vec<&str> = body
+        .lines()
+        .skip_while(|l| *l != "    permissions:")
+        .skip(1)
+        .take_while(|l| l.starts_with("      "))
+        .map(str::trim)
+        .collect();
+    assert_eq!(permissions, ["contents: read"], "the bundle job reads only");
+    for line in body.lines().filter(|l| !l.trim_start().starts_with('#')) {
+        assert!(
+            !line.contains("secrets.") && !line.contains("TAURI_SIGNING"),
+            "the bundle job names a secret: {line}"
+        );
+    }
+    for (name, value) in [
+        (
+            "FROM",
+            "${{ needs.sign.result == 'success' && '' || 'rehearsal-' }}",
+        ),
+        (
+            "BUNDLE",
+            "${{ needs.sign.result == 'success' && 'gospel-getter-release-bundle' || \
+             'rehearsal-release-bundle' }}",
+        ),
+    ] {
+        assert!(
+            body.contains(&format!("\n      {name}: {value}\n")),
+            "the bundle job's {name}"
+        );
+    }
+
+    let steps: Vec<Step> = dist_steps()
+        .into_iter()
+        .filter(|s| s.job == "bundle")
+        .collect();
+    let mut downloads: Vec<(String, String)> = steps
+        .iter()
+        .filter(|s| s.text.contains("actions/download-artifact@"))
+        .map(|s| {
+            assert!(with_value(s, "pattern").is_none(), "{s:#?}");
+            (
+                with_value(s, "name").unwrap_or_default().to_owned(),
+                with_value(s, "path").unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    downloads.sort();
+    let mut expected: Vec<(String, String)> = Vec::new();
+    for (_, artifact) in INSTALLER_ARTIFACTS {
+        expected.push((
+            format!("{FROM}{artifact}{SIGNED}"),
+            format!("bundle-in/signed/{artifact}"),
+        ));
+        expected.push((artifact.to_owned(), format!("bundle-in/built/{artifact}")));
+    }
+    for artifact in CLI_ARTIFACTS {
+        expected.push((artifact.to_owned(), format!("bundle-in/cli/{artifact}")));
+    }
+    expected.push((
+        format!("{REHEARSAL}signing-pubkey"),
+        "${{ runner.temp }}/rehearsal-key".to_owned(),
+    ));
+    expected.sort();
+    assert_eq!(downloads, expected, "the bundle job's downloads");
+    let pubkey = steps
+        .iter()
+        .find(|s| with_value(s, "name") == Some("rehearsal-signing-pubkey"))
+        .expect("the rehearsal's public key");
+    assert!(
+        pubkey
+            .text
+            .contains("        if: env.FROM == 'rehearsal-'\n"),
+        "only a rehearsal's bundle takes another key: {pubkey:#?}"
+    );
+
+    let assemble = steps
+        .iter()
+        .find(|s| s.text.contains("tools/release/bundle_release.py"))
+        .expect("the bundle job runs bundle_release.py");
+    assert!(
+        assemble.text.contains(
+            "python3 tools/release/bundle_release.py bundle-in release-bundle \"${key[@]}\""
+        ) && assemble.text.contains("sha256sum -c SHA256SUMS")
+            && assemble
+                .text
+                .contains("if [ \"$FROM\" = rehearsal- ]; then"),
+        "{assemble:#?}"
+    );
+    let uploads: Vec<&Step> = steps
+        .iter()
+        .filter(|s| s.text.contains("actions/upload-artifact@"))
+        .collect();
+    assert_eq!(uploads.len(), 1, "one artifact: {uploads:#?}");
+    let upload = &uploads[0].text;
+    assert!(
+        upload.contains("          name: ${{ env.BUNDLE }}\n")
+            && upload.contains("          path: release-bundle/\n")
+            && upload.contains("          if-no-files-found: error\n")
+            && upload.contains("          retention-days: 14\n"),
+        "{upload}"
+    );
+    // The publish takes the bundle, and checks it once more.
+    for words in [
+        "`gospel-getter-release-bundle`",
+        "gh run download RUN_ID -n gospel-getter-release-bundle -D bundle",
+        "(cd bundle && sha256sum -c SHA256SUMS)",
+        "--notes-file NOTES.md --assets bundle",
+    ] {
+        assert!(
+            RELEASE_README.contains(words),
+            "tools/release/README.md doesn't say {words}"
+        );
+    }
+    // Nothing but the rehearsal and the bundle job's FROM names a rehearsal
+    // artifact: never the sign job.
+    for step in dist_steps() {
+        // A step's own lines: what follows the last of a job's steps
+        // (comments, the next job's keys) reads into it.
+        let names_one = step
+            .text
+            .lines()
+            .filter(|l| l.starts_with("      ") && !l.trim_start().starts_with('#'))
+            .any(|l| l.contains(REHEARSAL));
+        if names_one && step.job != "sign-rehearsal" {
+            assert_eq!(step.job, "bundle", "{step:#?}");
+        }
+    }
 }
 
 /// A push to main never cancels a dispatched run, a release's build (D-05):
@@ -2173,9 +2384,21 @@ fn the_ci_full_run_deletes_only_the_run_it_superseded() {
         .map(str::trim)
         .collect();
     assert_eq!(workflow_permissions, ["contents: read"]);
-    for (job, _) in workflow_jobs(DIST_YML) {
+    for (job, body) in workflow_jobs(DIST_YML) {
         let keys = dist_job_keys(&job);
-        if job != "supersede" {
+        // The bundle job says contents: read itself, and nothing more, so a
+        // wider workflow default never reaches the job that assembles the
+        // release (the_bundle_job_assembles_the_release_files_without_the_key).
+        if job == "bundle" {
+            let own: Vec<&str> = body
+                .lines()
+                .skip_while(|l| *l != "    permissions:")
+                .skip(1)
+                .take_while(|l| l.starts_with("      "))
+                .map(str::trim)
+                .collect();
+            assert_eq!(own, ["contents: read"], "job {job}");
+        } else if job != "supersede" {
             assert!(
                 !keys.contains(&"permissions:"),
                 "job {job} asks for more than the workflow's: {keys:#?}"
