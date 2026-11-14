@@ -101,6 +101,7 @@ class TheRepositorysPins(unittest.TestCase):
             ("trunk", "Windows", ["trunk", "wasm-bindgen", "wasm-opt"]),
             ("bundler", "Linux", ["apprun", "linuxdeploy", "linuxdeploy-plugin-appimage"]),
             ("bundler", "Windows", ["nsis", "nsis-tauri-utils", "wix"]),
+            ("signer", "Linux", ["cargo-tauri"]),
         ]:
             with self.subTest(tool_set=tool_set, runner_os=runner_os):
                 self.assertEqual([t.name for t in repo_wanted(tool_set, runner_os)], names)
@@ -114,6 +115,21 @@ class TheRepositorysPins(unittest.TestCase):
         self.assertIn(f'wasm_opt = "{tools["wasm-opt"].version}"', read("Trunk.toml"))
         for tool in repo_wanted("bundler", "Linux") + repo_wanted("bundler", "Windows"):
             self.assertEqual(tool.version, tauri_cli_version())
+        [signer] = repo_wanted("signer", "Linux")
+        self.assertEqual(signer.version, tauri_cli_version())
+
+    def test_the_signer_is_tauri_apps_own_release_of_that_version(self):
+        # The prebuilt binary is trusted because it's tauri-apps' own release
+        # asset for exactly TAURI_CLI_VERSION, pinned by its SHA-256.
+        [signer] = repo_wanted("signer", "Linux")
+        version = tauri_cli_version()
+        self.assertEqual(
+            (signer.name, signer.repository, signer.tag, signer.asset, signer.install),
+            ("cargo-tauri", "tauri-apps/tauri", f"tauri-cli-v{version}",
+             "cargo-tauri-x86_64-unknown-linux-gnu.tgz", "bin=cargo-tauri"),
+        )
+        signers = [t for t in b.read_manifest(read("tools/ci/build-tools.txt")) if t.set == "signer"]
+        self.assertEqual(signers, [signer], "one signer, and only for TAURI_CLI_VERSION")
 
     def test_tauri_cli_is_installed_at_exactly_that_version(self):
         dist = read(".github/workflows/dist.yml")
@@ -170,6 +186,32 @@ class Manifest(unittest.TestCase):
             b.wanted(tools, "bundler", "Linux", cargo_lock="", trunk_toml="", tauri_cli="9.9.9")
         with self.assertRaisesRegex(b.Refused, "exact version"):
             b.wanted(tools, "bundler", "Linux", cargo_lock="", trunk_toml="", tauri_cli="^2.0.0")
+        with self.assertRaisesRegex(
+            b.Refused, r"one signer row for tauri-cli 9\.9\.9 on Linux, not 0: add cargo-tauri "
+            r"9\.9\.9 from tauri-apps/tauri's tauri-cli-v9\.9\.9 release.*SHA-256",
+        ):
+            b.wanted(tools, "signer", "Linux", cargo_lock="", trunk_toml="", tauri_cli="9.9.9")
+        with self.assertRaisesRegex(b.Refused, "exact version"):
+            b.wanted(tools, "signer", "Linux", cargo_lock="", trunk_toml="", tauri_cli="")
+        with self.assertRaisesRegex(b.Refused, "on Windows, not 0"):
+            b.wanted(tools, "signer", "Windows", cargo_lock="", trunk_toml="",
+                     tauri_cli=tauri_cli_version())
+
+    def test_the_signer_set_is_its_one_cargo_tauri_on_path(self):
+        good = row(set="signer", name="cargo-tauri", version="2.0.0", install="bin=cargo-tauri")
+        for bad in [
+            [good, b.Tool(**{**vars(good), "asset": "other.tgz"})],
+            [b.Tool(**{**vars(good), "name": "tauri"})],
+            [b.Tool(**{**vars(good), "install": "file=cargo-tauri"})],
+        ]:
+            with self.subTest(bad=bad), self.assertRaisesRegex(b.Refused, "one signer row"):
+                b.wanted(bad, "signer", "Linux", cargo_lock="", trunk_toml="", tauri_cli="2.0.0")
+        self.assertEqual(
+            b.wanted([good], "signer", "Linux", cargo_lock="", trunk_toml="", tauri_cli="2.0.0"),
+            [good],
+        )
+        self.assertIn("tauri-cli-2.0.0", b.cache_key("signer", "Linux", [good]))
+        self.assertTrue(b.cache_key("signer", "Linux", [good]).startswith("build-tools-signer-"))
 
     def test_wasm_opt_must_be_pinned_in_trunk_toml(self):
         with self.assertRaisesRegex(b.Refused, r"\[tools\] wasm_opt"):
@@ -359,6 +401,31 @@ class InstallAndCheck(unittest.TestCase):
             with self.assertRaisesRegex(b.Refused, "downloaded tools of its own"):
                 b.check(["trunk"], self.runner)
         self.assertIn("wasm-opt-version_123/bin/wasm-opt", out.getvalue())
+
+    def signer_rows(self, printed="tauri-cli 2.12.4"):
+        archive = tar_gz({"cargo-tauri": self.script(printed), "README.md": b"readme"})
+        rows = [pinned(row(set="signer", name="cargo-tauri", version="2.12.4",
+                           asset="cargo-tauri.tgz", install="bin=cargo-tauri"), archive)]
+        return rows, {"cargo-tauri.tgz": archive}
+
+    def test_the_signer_goes_on_path_after_its_version_is_checked(self):
+        rows, archives = self.signer_rows()
+        out = self.quietly(b.install, "signer", self.runner, rows, Downloads(archives))
+        self.assertIn("tauri-cli 2.12.4", out)
+        self.assertEqual((self.runner.bin / "cargo-tauri").read_bytes(), self.script("tauri-cli 2.12.4"))
+        self.assertEqual((self.dir / "path").read_text(), f"{self.runner.bin}\n")
+        self.assertEqual((self.dir / "env").read_text(), "")
+        out = self.quietly(b.install, "signer", self.runner, rows, Downloads({}))
+        self.assertIn("1 from the cache, 0 downloaded", out)
+        # Nothing downloads a signer itself: there's no folder to watch.
+        with self.assertRaisesRegex(b.Refused, "nothing downloads signer tools itself"):
+            b.check(["signer"], self.runner)
+
+    def test_a_signer_of_the_wrong_version_is_refused_before_it_is_on_path(self):
+        rows, archives = self.signer_rows(printed="tauri-cli 2.12.5")
+        with self.assertRaisesRegex(b.Refused, "not tauri-cli 2.12.4"):
+            self.quietly(b.install, "signer", self.runner, rows, Downloads(archives))
+        self.assertEqual((self.dir / "path").read_text(), "")
 
     def test_plan_names_the_cache(self):
         rows, _ = self.trunk_rows()

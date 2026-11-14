@@ -7,13 +7,17 @@ The tools are release assets on GitHub, which Trunk, its wasm-bindgen and
 wasm-opt, and the Tauri bundler's AppImage, NSIS and WiX tools otherwise
 download anonymously at build time; on 2026-11-09 those anonymous downloads
 failed for hours while authenticated ones still worked. Each tool is a row of
-tools/ci/build-tools.txt (which says where each version is set). Two sets:
+tools/ci/build-tools.txt (which says where each version is set). Three sets:
 
     trunk    Trunk, wasm-bindgen and wasm-opt, into a bin folder put on PATH
              (Trunk uses a tool on PATH when its version is the one it wants)
     bundler  the tauri-bundler's tools for TAURI_CLI_VERSION, into its tools
              folder (~/.cache/tauri, %LOCALAPPDATA%\\tauri), where it looks
              before downloading
+    signer   Tauri's own prebuilt cargo-tauri for TAURI_CLI_VERSION, into the
+             same bin folder on PATH, for dist.yml's signing jobs: a pinned
+             download in place of compiling tauri-cli in a job with no build
+             cache (5-6 minutes, on every release)
 
 .github/actions/build-tools runs it: `plan` names the cache (key and path),
 actions/cache restores it, `install` checks every cached file against its
@@ -27,6 +31,9 @@ Usage (in CI; the paths come from RUNNER_OS, RUNNER_TEMP and the home folder):
     python3 tools/ci/build_tools.py plan trunk
     python3 tools/ci/build_tools.py install trunk
     python3 tools/ci/build_tools.py check trunk [bundler]
+
+Every tool a `bin=` row lays out is run once with --version, which has to
+print its pinned version, before anything uses it.
 """
 
 import argparse
@@ -46,7 +53,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "tools" / "ci" / "build-tools.txt"
-SETS = ("trunk", "bundler")
+SETS = ("trunk", "bundler", "signer")
+# The sets with a folder their user would download into, which `check` watches.
+# Nothing downloads a signer: its user is the signing job itself.
+WATCHED_SETS = ("trunk", "bundler")
+# The signer set's one tool: the prebuilt Tauri CLI, run as `cargo tauri`.
+SIGNER = "cargo-tauri"
 OSES = ("Linux", "Windows")
 INSTALL_KINDS = ("bin", "file", "unzip", "unzip-top")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -60,6 +72,7 @@ VERSION_OUTPUT = {
     "trunk": lambda v: ["trunk", v],
     "wasm-bindgen": lambda v: ["wasm-bindgen", v],
     "wasm-opt": lambda v: ["wasm-opt", "version", v.removeprefix("version_")],
+    SIGNER: lambda v: ["tauri-cli", v],
 }
 
 
@@ -166,6 +179,15 @@ def wanted(tools, tool_set, runner_os, *, cargo_lock, trunk_toml, tauri_cli):
     if not tauri_cli or not EXACT_VERSION.fullmatch(tauri_cli):
         raise Refused(f"TAURI_CLI_VERSION should be an exact version (X.Y.Z), not {tauri_cli!r}")
     picked = [t for t in rows if t.version == tauri_cli]
+    if tool_set == "signer":
+        if [t.name for t in picked] != [SIGNER] or picked[0].kind != "bin":
+            raise Refused(
+                f"build-tools.txt should have one signer row for tauri-cli {tauri_cli} on "
+                f"{runner_os}, not {len(picked)}: add {SIGNER} {tauri_cli} from tauri-apps/tauri's "
+                f"tauri-cli-v{tauri_cli} release (its {SIGNER}-<target> archive), with its SHA-256 "
+                f"and install bin={SIGNER}"
+            )
+        return picked
     if not picked:
         raise Refused(
             f"build-tools.txt has no bundler tools for tauri-cli {tauri_cli} on {runner_os}: add "
@@ -388,7 +410,7 @@ def install(tool_set, runner, rows, download=gh_download):
         where = lay_out(tool, cache_dir / tool.asset, runner.bin, runner.tauri)
         print(f"{tool.name} {tool.version}: {how}, SHA-256 matches; at {where}")
     runner.state.mkdir(parents=True, exist_ok=True)
-    if tool_set == "trunk":
+    if tool_set in ("trunk", "signer"):
         for tool in rows:
             program = runner.bin / Path(tool.target).name
             printed = subprocess.run([str(program), "--version"], capture_output=True, text=True)
@@ -399,11 +421,13 @@ def install(tool_set, runner, rows, download=gh_download):
                 )
             print(printed.stdout.strip())
         runner.append("GITHUB_PATH", str(runner.bin))
+    if tool_set == "trunk":
         # Trunk asks crates.io for a newer Trunk otherwise.
         runner.append("GITHUB_ENV", "TRUNK_SKIP_VERSION_CHECK=true")
-    runner.snapshot_file(tool_set).write_text(
-        json.dumps(snapshot(runner.watched(tool_set))), encoding="utf-8"
-    )
+    if tool_set in WATCHED_SETS:
+        runner.snapshot_file(tool_set).write_text(
+            json.dumps(snapshot(runner.watched(tool_set))), encoding="utf-8"
+        )
     summary = ", ".join(f"{count} {how}" for how, count in came.items())
     print(f"::notice title=Build tools ({tool_set}, {runner.os})::{summary}")
 
@@ -411,6 +435,8 @@ def install(tool_set, runner, rows, download=gh_download):
 def check(tool_sets, runner):
     failed = False
     for tool_set in tool_sets:
+        if tool_set not in WATCHED_SETS:
+            raise Refused(f"nothing downloads {tool_set} tools itself, so there's nothing to check")
         try:
             before = json.loads(runner.snapshot_file(tool_set).read_text(encoding="utf-8"))
         except FileNotFoundError:
