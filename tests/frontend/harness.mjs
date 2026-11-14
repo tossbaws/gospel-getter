@@ -3,12 +3,13 @@
 // and answers its Tauri `invoke` calls with the app's real command logic
 // and a real SQLite database, through `src-tauri/examples/frontend_bridge.rs`
 // (both built by `npm test` before the tests run). Each test file gets one bridge
-// process and its own disposable database; each test resets the bookmarks
-// and reading position first. The clipboard is a stub that can succeed,
-// fail, or be missing; get_reading can be made to fail, or (for escaping
-// tests only) it and other commands can have a clearly synthetic answer
-// swapped in; or it can take writes only within a click or key press, as
-// WebKitGTK's does. Update checks and
+// process and its own disposable database, a copy of the database the
+// bridge prepared once for its build (see `useFreshDatabase`); each test
+// resets the bookmarks and reading position first. The clipboard is a stub
+// that can succeed, fail, or be missing; get_reading can be made to fail,
+// or (for escaping tests only) it and other commands can have a clearly
+// synthetic answer swapped in; or it can take writes only within a click
+// or key press, as WebKitGTK's does. Update checks and
 // installs are scripted in the bridge (`setUpdate`), and progress reaches
 // the page through a minimal Tauri `Channel`, as in the app. jsdom has no
 // layout, so the window's width is a number the page's width media
@@ -90,10 +91,34 @@ const BRIDGE = process.env.GOSPEL_GETTER_BRIDGE
     || fileURLToPath(new URL(`src-tauri/target/debug/examples/frontend_bridge${process.platform === 'win32' ? '.exe' : ''}`, root));
 
 let bridge = null;
+let freshDatabase = false;
+
+/**
+ * Gives this test file a database prepared from an empty file, as a new
+ * install's is: three Bibles and the cross-references seeded and the search
+ * index built then and there, seconds of work. Without it, the file's
+ * database is a copy of one the bridge prepared that way once for its build
+ * (its `template`), the same database, ready in milliseconds. For a test of
+ * the seeding itself; call it before the file's first call on the backend.
+ */
+export function useFreshDatabase() {
+    if (bridge) throw new Error('useFreshDatabase() comes before the first call on the backend');
+    freshDatabase = true;
+}
 
 function startBridge() {
     const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-frontend-'));
-    const child = spawn(BRIDGE, [join(dir, 'gospel_getter.db')], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const removeDir = () => rmSync(dir, { recursive: true, force: true });
+    // A file that ends without closing its bridge leaves no database behind
+    // either, where it can: on Windows, the bridge may still have it open.
+    const removeAtExit = () => {
+        try {
+            removeDir();
+        } catch {}
+    };
+    process.once('exit', removeAtExit);
+    const args = [join(dir, 'gospel_getter.db'), ...(freshDatabase ? ['--fresh'] : [])];
+    const child = spawn(BRIDGE, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     const pending = new Map();
     let stderr = '';
     let nextId = 1;
@@ -148,7 +173,8 @@ function startBridge() {
         async close() {
             child.stdin.end();
             await exited;
-            rmSync(dir, { recursive: true, force: true });
+            process.removeListener('exit', removeAtExit);
+            removeDir();
         },
     };
 }

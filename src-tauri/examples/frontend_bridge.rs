@@ -1,11 +1,13 @@
 //! Test-only bridge between the jsdom frontend tests (`tests/frontend/`)
-//! and the app's own commands: it opens a disposable database at the path
-//! given, prepares it exactly as the app does at startup (migrate, seed,
-//! build the search index), then answers one JSON request per line on
-//! stdin — `{"id": 1, "cmd": "get_reading", "args": {...}}`, with the same
-//! camelCase arguments the frontend passes to Tauri's `invoke` — with one
-//! JSON line on stdout: `{"id": 1, "ok": ...}` or `{"id": 1, "err":
-//! "..."}`. Never shipped; never pointed at a real install's database.
+//! and the app's own commands: it makes a disposable database at the path
+//! given, a copy of this build's template database (see [`template`]),
+//! runs the app's startup steps on it (migrate, seed, build the search
+//! index; on a copy they find nothing left to do), then answers one JSON
+//! request per line on stdin — `{"id": 1, "cmd": "get_reading", "args":
+//! {...}}`, with the same camelCase arguments the frontend passes to
+//! Tauri's `invoke` — with one JSON line on stdout: `{"id": 1, "ok": ...}`
+//! or `{"id": 1, "err": "..."}`. Never shipped; never pointed at a real
+//! install's database.
 //!
 //! Every command is answered by the app itself: the request goes through
 //! Tauri's IPC to the app's own handler (`gospel_getter_lib::invoke_handler`,
@@ -48,11 +50,18 @@
 //! Requests are answered one at a time, in order, as they always were here:
 //! the next is read once the last has answered, or, for an install that
 //! restarts, once it has restarted (it never answers).
+//!
+//! `frontend_bridge <database path> --fresh` prepares the database from
+//! an empty file instead, seeding it then and there as a new install's is:
+//! seconds of work, for a test of the seeding itself (`harness.mjs`'s
+//! `useFreshDatabase`).
 
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, mpsc};
+use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, bail};
 use chrono::{DateTime, FixedOffset, Local, Offset, Utc};
@@ -437,6 +446,153 @@ async fn hook(
     })
 }
 
+// ---- The template database
+
+/// This bridge build's template database: a database prepared and indexed
+/// as the app does at startup, written whole with `VACUUM INTO`, which each
+/// bridge copies for its own. Preparing one (seeding three Bibles and the
+/// cross-references, then building the search index) takes seconds, where
+/// a copy takes milliseconds, and every test file starts a bridge.
+///
+/// It's built once per bridge build, by the first bridge to start, and kept
+/// beside the executable (in cargo's target folder, which `cargo clean`
+/// clears, rather than the OS temp folder, often a small one in memory),
+/// named for the executable's size and modification time. The seed data
+/// and every migration are compiled into the executable, so a rebuild that
+/// could change what `prepare` makes is a new executable, whose template
+/// has a new name: a stale one is never found, and the new build's first
+/// bridge sweeps it away.
+///
+/// Test files start at once, each with its own bridge. One builds while
+/// the others wait on `build.lock` (the OS releases it however the
+/// builder ends), then finds the template there. The build writes to a
+/// file of its own, and a rename publishes it: nothing at the template's
+/// name is ever a part-written file. The rename is onto no file (the
+/// builder found none, holding the lock), so it behaves the same on
+/// Windows, where a rename onto a file someone has open fails.
+async fn template() -> anyhow::Result<PathBuf> {
+    let exe = std::env::current_exe().context("Failed to find the bridge's own executable")?;
+    let built = std::fs::metadata(&exe)
+        .with_context(|| format!("Failed to read {}'s metadata", exe.display()))?;
+    let modified = built
+        .modified()
+        .context("Failed to read the bridge executable's modification time")?
+        .duration_since(UNIX_EPOCH)
+        .context("The bridge executable's modification time is before 1970")?
+        .as_nanos();
+    let name = format!("{}-{modified}.db", built.len());
+    let dir = exe.with_file_name("frontend_bridge_templates");
+    let template = dir.join(&name);
+    // Published whole and never changed, so it can be copied without the
+    // lock.
+    if template.is_file() {
+        return Ok(template);
+    }
+
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("Failed to create the templates folder {}", dir.display()))?;
+    // Opened, never written: not truncated, which on Windows fails while
+    // another bridge holds the lock.
+    let lock_path = dir.join("build.lock");
+    let build_lock = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("Failed to open {}", lock_path.display()))?;
+    build_lock
+        .lock()
+        .with_context(|| format!("Failed to lock {}", lock_path.display()))?;
+    // Another bridge built it while this one waited.
+    if template.is_file() {
+        return Ok(template);
+    }
+    sweep(&dir, &name);
+    // On stderr, which the harness shows when a bridge fails.
+    eprintln!("frontend_bridge: building {}", template.display());
+    build_template(&dir, &template)
+        .await
+        .context("Failed to build the template database")?;
+    Ok(template)
+}
+
+/// Prepare and index a database in `dir` as the app does at startup, and
+/// publish a whole copy of it at `template`. Called holding `build.lock`,
+/// with nothing at `template`.
+async fn build_template(dir: &Path, template: &Path) -> anyhow::Result<()> {
+    let pid = std::process::id();
+    let work = dir.join(format!("{pid}.work.db"));
+    let whole = dir.join(format!("{pid}.whole.db"));
+    let pool = db::create_pool(&work).await?;
+    db::prepare(pool.write()).await?;
+    db::ensure_search_index(&pool).await?;
+    // The work database's last writes are still in its write-ahead log, so
+    // a copy of its file alone would be part of a database.
+    db::test_support::write_whole_copy(&pool, &whole).await?;
+    pool.close().await;
+    remove_database(&work);
+    match std::fs::rename(&whole, template) {
+        Ok(()) => Ok(()),
+        // Published by another bridge after all, which only a file system
+        // without working locks allows: the same database, so it's used.
+        Err(_) if template.is_file() => {
+            let _ = std::fs::remove_file(&whole);
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&whole);
+            Err(e).with_context(|| format!("Failed to publish {}", template.display()))
+        }
+    }
+}
+
+/// Remove everything in the templates folder `dir` but the lock and the
+/// template `keep`: earlier builds' templates, and what a build that ended
+/// part-way left. Called holding `build.lock`, so no build is under way. A
+/// file that can't be removed (on Windows, one a bridge of an earlier build
+/// is still copying) is left for the next sweep.
+fn sweep(dir: &Path, keep: &str) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name != "build.lock" && name != keep {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Remove a database file and the files SQLite keeps beside it.
+fn remove_database(path: &Path) {
+    for suffix in ["", "-wal", "-shm", "-journal"] {
+        let mut file = path.as_os_str().to_owned();
+        file.push(suffix);
+        let _ = std::fs::remove_file(file);
+    }
+}
+
+/// Copy `template` to `path`, which must not exist yet: the bridge makes
+/// its database only where there's none to overwrite.
+fn copy_new(template: &Path, path: &Path) -> anyhow::Result<()> {
+    let mut from =
+        File::open(template).with_context(|| format!("Failed to open {}", template.display()))?;
+    let mut to = File::options()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .with_context(|| format!("Failed to create a new database at {}", path.display()))?;
+    std::io::copy(&mut from, &mut to).with_context(|| {
+        format!(
+            "Failed to copy {} to {}",
+            template.display(),
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     // A panic anywhere, a command's on Tauri's runtime too, ends the bridge
     // (as it did when the bridge ran the commands itself), so the tests see
@@ -448,12 +604,25 @@ fn main() -> anyhow::Result<()> {
         std::process::exit(101);
     }));
 
-    let path = PathBuf::from(
-        std::env::args_os()
-            .nth(1)
-            .context("usage: frontend_bridge <database path>")?,
-    );
+    const USAGE: &str = "usage: frontend_bridge <database path> [--fresh]";
+    let mut args = std::env::args_os().skip(1);
+    let path = PathBuf::from(args.next().context(USAGE)?);
+    let fresh = match args.next() {
+        None => false,
+        Some(flag) if flag == "--fresh" => true,
+        Some(other) => bail!("{USAGE}, not {}", other.display()),
+    };
+    if let Some(extra) = args.next() {
+        bail!("{USAGE}, with nothing after it: {}", extra.display());
+    }
     let (pool, state) = tauri::async_runtime::block_on(async {
+        if !fresh {
+            let template = template().await?;
+            copy_new(&template, &path)?;
+        }
+        // The app's own startup steps, as at every launch. On a copy of the
+        // template they find everything made, seeded and indexed, and take
+        // a fraction of a second.
         let pool = db::create_pool(&path).await?;
         db::prepare(pool.write()).await?;
         db::ensure_search_index(&pool).await?;

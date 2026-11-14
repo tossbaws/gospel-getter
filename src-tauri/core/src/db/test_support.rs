@@ -166,24 +166,40 @@ fn build_templates() -> Templates {
     }
 }
 
-/// Write a copy of the database to `path` with `VACUUM INTO`: one
-/// self-contained file, everything committed in it, no write-ahead log or
-/// shared memory file beside it, so a plain file copy of it is a whole
-/// database.
+/// Write a template database to `path`, panicking if it can't (see
+/// [`write_whole_copy`]).
 async fn vacuum_into(db: &Db, path: &Path) {
-    sqlx::query("VACUUM INTO $1")
-        .bind(path.to_str().expect("a UTF-8 template path"))
-        .execute(db.write().pool())
+    write_whole_copy(db, path)
         .await
         .expect("write a template database");
+}
+
+/// Write a copy of the database to `path`, which must not exist yet, with
+/// `VACUUM INTO`: one self-contained file, everything committed in it, no
+/// write-ahead log or shared memory file beside it, so a plain file copy of
+/// it is a whole database. A copy of the database file itself isn't: what
+/// the last writes left in the write-ahead log isn't in it. The templates
+/// here and the frontend tests' bridge (`examples/frontend_bridge.rs`) both
+/// write theirs with this.
+pub async fn write_whole_copy(db: &Db, path: &Path) -> anyhow::Result<()> {
+    use anyhow::Context;
+    let target = path
+        .to_str()
+        .with_context(|| format!("{} isn't valid UTF-8, which SQLite needs", path.display()))?;
+    sqlx::query("VACUUM INTO $1")
+        .bind(target)
+        .execute(db.write().pool())
+        .await
+        .with_context(|| format!("Failed to write a copy of the database to {target}"))?;
     for suffix in ["-wal", "-shm", "-journal"] {
         let mut beside = path.as_os_str().to_owned();
         beside.push(suffix);
-        assert!(
+        anyhow::ensure!(
             !Path::new(&beside).exists(),
-            "a template has a {suffix} file beside it"
+            "the copy at {target} has a {suffix} file beside it"
         );
     }
+    Ok(())
 }
 
 /// Where every run's templates directory goes: cargo's `target/tmp` when
