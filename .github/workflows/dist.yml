@@ -1213,7 +1213,7 @@ jobs:
   # signing job ran (never both: one is for a run dispatched on main, the
   # other for every run that isn't).
   bundle:
-    name: ${{ needs.sign.result == 'success' && 'Assemble the release files' || 'Assemble the release files (rehearsal)' }}
+    name: Assemble the release files
     needs: [sign, sign-rehearsal]
     if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.sign.result == 'success') || needs.sign-rehearsal.result == 'success') }}
     permissions:

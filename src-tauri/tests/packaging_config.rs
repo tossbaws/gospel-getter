@@ -1993,6 +1993,14 @@ fn signer_version() -> String {
 fn the_bundle_job_assembles_the_release_files_without_the_key() {
     const FROM: &str = "${{ env.FROM }}";
     let keys = dist_job_keys("bundle");
+    // A plain name: a job cancelled before it starts keeps an expression
+    // unevaluated on the commit, a check that never clears (see #233).
+    let name = keys
+        .iter()
+        .find_map(|k| k.strip_prefix("name: "))
+        .expect("the bundle job has a name");
+    assert!(!name.contains("${{"), "the bundle job's name: {name}");
+    assert_eq!(name, "Assemble the release files");
     assert!(keys.contains(&"needs: [sign, sign-rehearsal]"), "{keys:#?}");
     assert!(
         keys.contains(
