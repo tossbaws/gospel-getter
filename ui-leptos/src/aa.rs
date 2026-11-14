@@ -42,7 +42,7 @@ use web_sys::{
 
 use crate::aa_text::{self as text, Beside, Press};
 use crate::bridge;
-use crate::dom;
+use crate::dom::{self, by_id};
 use crate::preferences::{self, Preference, Values};
 use crate::prefs::{self, Raw};
 use crate::surfaces::{self, Surface};
@@ -77,13 +77,6 @@ thread_local! {
 }
 
 // ---- The page's elements.
-
-fn by_id(id: &str) -> Option<HtmlElement> {
-    bridge::document()?
-        .get_element_by_id(id)?
-        .dyn_into::<HtmlElement>()
-        .ok()
-}
 
 fn select(id: &str) -> Option<HtmlSelectElement> {
     bridge::document()?

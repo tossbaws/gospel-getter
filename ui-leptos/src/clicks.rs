@@ -25,7 +25,7 @@ use web_sys::{Element, HtmlElement, MouseEvent};
 use crate::bridge;
 use crate::card::{self, Ask};
 use crate::card_text::Slot;
-use crate::dom;
+use crate::dom::{self, closest};
 use crate::keyboard::SELECTABLE;
 use crate::page;
 use crate::reader::{self, Request};
@@ -41,10 +41,6 @@ const NOT_THE_READERS: &str = "#top-bar, #picker, #library-panel, #about-overlay
 /// answers after this: none is a click away from the selection.
 const THE_READERS: &str =
     ".xref-summary-chip, .chapter-step, .disclosure-toggle, .chapter-heading-link";
-
-fn closest(el: &Element, selector: &str) -> Option<Element> {
-    el.closest(selector).ok().flatten()
-}
 
 fn closest_html(el: &Element, selector: &str) -> Option<HtmlElement> {
     closest(el, selector)?.dyn_into::<HtmlElement>().ok()

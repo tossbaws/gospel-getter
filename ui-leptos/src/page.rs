@@ -35,7 +35,7 @@ use crate::bridge;
 use crate::bridge::ExportFacts;
 use crate::card::{self, Ask};
 use crate::card_text::Slot;
-use crate::dom;
+use crate::dom::{self, by_id};
 use crate::dto::PositionPreview;
 use crate::intent::{Claim, Generation};
 use crate::ipc;
@@ -84,13 +84,6 @@ thread_local! {
 /// The glue's state, never held while anything else runs.
 fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with_borrow_mut(f)
-}
-
-fn by_id(id: &str) -> Option<HtmlElement> {
-    bridge::document()?
-        .get_element_by_id(id)?
-        .dyn_into::<HtmlElement>()
-        .ok()
 }
 
 fn button(id: &str) -> Option<HtmlButtonElement> {

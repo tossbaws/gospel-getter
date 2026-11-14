@@ -8,6 +8,8 @@ use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::Closure;
 use web_sys::{CustomEvent, Element, FocusOptions, HtmlElement, KeyboardEvent, NodeList};
 
+use crate::bridge;
+
 /// `el.focus({ preventScroll: true })`: focus never scrolls the page.
 pub fn focus(el: &HtmlElement) {
     let options = FocusOptions::new();
@@ -47,6 +49,37 @@ pub fn query(selector: &str) -> Option<HtmlElement> {
         .ok()??
         .dyn_into::<HtmlElement>()
         .ok()
+}
+
+/// The page's element `id`.
+pub(crate) fn by_id(id: &str) -> Option<HtmlElement> {
+    bridge::document()?
+        .get_element_by_id(id)?
+        .dyn_into::<HtmlElement>()
+        .ok()
+}
+
+/// `el.closest(selector)`, if any.
+pub(crate) fn closest(el: &Element, selector: &str) -> Option<Element> {
+    el.closest(selector).ok().flatten()
+}
+
+/// A `data-*` number of `el`.
+pub(crate) fn data_number(el: &Element, name: &str) -> Option<i64> {
+    el.get_attribute(name)?.parse().ok()
+}
+
+/// The page's `localStorage`, if it has one.
+pub(crate) fn storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok()?
+}
+
+/// `window.innerHeight`, or 0 without a window.
+pub(crate) fn window_height() -> f64 {
+    web_sys::window()
+        .and_then(|w| w.inner_height().ok())
+        .and_then(|h| h.as_f64())
+        .unwrap_or(0.0)
 }
 
 /// The HTML elements of a `NodeList`, in order.

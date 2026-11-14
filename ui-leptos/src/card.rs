@@ -57,7 +57,7 @@ use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent};
 
 use crate::bridge;
 use crate::card_text::{self as text, Change, Room, Selection, Side, Slot};
-use crate::dom;
+use crate::dom::{self, by_id, closest, data_number, window_height};
 use crate::dto::{
     Bookmark, Compare, CopyText, CopyTextArgs, Finding, Highlight, PassageArgs, PassageText,
     PassageTextArgs, Reading, RemoveBookmarkArgs, SelectionNote, SetHighlightArgs, Verse,
@@ -321,13 +321,6 @@ impl State {
 
 // ---- The page's elements.
 
-fn by_id(id: &str) -> Option<HtmlElement> {
-    bridge::document()?
-        .get_element_by_id(id)?
-        .dyn_into::<HtmlElement>()
-        .ok()
-}
-
 fn query_all(root: &Element, selector: &str) -> Vec<HtmlElement> {
     root.query_selector_all(selector)
         .map(|found| dom::elements(&found))
@@ -339,14 +332,6 @@ fn selectable() -> Vec<HtmlElement> {
         .and_then(|d| d.document_element())
         .map(|root| query_all(&root, SELECTABLE))
         .unwrap_or_default()
-}
-
-fn closest(el: &Element, selector: &str) -> Option<Element> {
-    el.closest(selector).ok().flatten()
-}
-
-fn data_number(el: &Element, name: &str) -> Option<i64> {
-    el.get_attribute(name)?.parse().ok()
 }
 
 fn toggle_class(el: &Element, name: &str, on: bool) {
@@ -455,13 +440,6 @@ fn computed_length(el: &Element, property: &str) -> f64 {
 
 fn set_style(el: &HtmlElement, property: &str, value: &str) {
     let _ = el.style().set_property(property, value);
-}
-
-fn window_height() -> f64 {
-    web_sys::window()
-        .and_then(|w| w.inner_height().ok())
-        .and_then(|h| h.as_f64())
-        .unwrap_or(0.0)
 }
 
 /// Runs `f` in `ms`, once. It's never cancelled (it gives no handle to

@@ -57,7 +57,7 @@ use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge;
 use crate::card;
-use crate::dom;
+use crate::dom::{self, closest};
 use crate::dto::{
     Bookmark, FindingRequest, HighlightPassage, Note, PassageArgs, RemoveBookmarkArgs,
     TranslationArgs,
@@ -170,11 +170,6 @@ fn translation_args(code: &str) -> Result<JsValue, JsValue> {
 /// The element an event happened on.
 fn target_of(event: &web_sys::Event) -> Option<Element> {
     event.target()?.dyn_into::<Element>().ok()
-}
-
-/// `el.closest(selector)`, if any.
-fn closest(el: &Element, selector: &str) -> Option<Element> {
-    el.closest(selector).ok().flatten()
 }
 
 /// A plain `focus()`, as the page's list handlers did.

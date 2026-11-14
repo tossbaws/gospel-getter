@@ -30,7 +30,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Element, HtmlElement, KeyboardEvent};
 
 use crate::bridge;
-use crate::dom;
+use crate::dom::{self, by_id, closest, data_number};
 use crate::ipc;
 use crate::picker_text::{self as text, Book, FromChapter, FromItem, Key};
 use crate::surfaces::{self, Surface};
@@ -54,25 +54,8 @@ struct Picker {
     state: StoredValue<State, LocalStorage>,
 }
 
-/// The page's element `id`.
-fn by_id(id: &str) -> Option<HtmlElement> {
-    bridge::document()?
-        .get_element_by_id(id)?
-        .dyn_into::<HtmlElement>()
-        .ok()
-}
-
 fn picker() -> Option<HtmlElement> {
     by_id("picker")
-}
-
-fn closest(el: &Element, selector: &str) -> Option<Element> {
-    el.closest(selector).ok().flatten()
-}
-
-/// A `data-*` number of `el`.
-fn data_number(el: &Element, name: &str) -> Option<i64> {
-    el.get_attribute(name)?.parse().ok()
 }
 
 /// The elements `selector` finds in `root`, in order.

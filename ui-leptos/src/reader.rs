@@ -51,7 +51,7 @@ use crate::aa;
 use crate::aa_text::Beside;
 use crate::bridge;
 use crate::card;
-use crate::dom;
+use crate::dom::{self, by_id, closest, data_number};
 use crate::dto::{Compare, CompareArgs, Home, Position, Reading, ReadingArgs, Verse};
 use crate::intent::Generation;
 use crate::ipc;
@@ -135,21 +135,6 @@ fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
 }
 
 // ---- The page's elements and settings.
-
-fn by_id(id: &str) -> Option<HtmlElement> {
-    bridge::document()?
-        .get_element_by_id(id)?
-        .dyn_into::<HtmlElement>()
-        .ok()
-}
-
-fn closest(el: &Element, selector: &str) -> Option<Element> {
-    el.closest(selector).ok().flatten()
-}
-
-fn data_number(el: &Element, name: &str) -> Option<i64> {
-    el.get_attribute(name)?.parse().ok()
-}
 
 /// The pane's `#reading-pane-inner`, which says which chapter is on screen
 /// and which are around it (`data-current-*`, `data-prev-*`,
