@@ -41,8 +41,9 @@ use report::Report;
 const CHECKS_STACK: usize = 32 * 1024 * 1024;
 
 fn main() -> ExitCode {
-    // `--list`: every check, as results.txt names them, for
-    // `scripts/gui-check.sh` (and anyone wanting to know what a run does).
+    // `--list`: every check, as results.txt names them, with its group and
+    // where it's a SKIP, for `scripts/gui-check.sh` (and anyone wanting to
+    // know what a run does).
     // `--retried`: both attempts of a suite run twice, judged (`retried`).
     // Nothing else is an argument: the checks' settings are the
     // environment's (`config.rs`).

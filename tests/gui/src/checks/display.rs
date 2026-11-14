@@ -532,6 +532,11 @@ const NOT_ON_WINDOWS: &str = "not run on Windows: Edge WebDriver gives each sess
     user data folder (WEBVIEW2_USER_DATA_FOLDER, a new scoped_dir per session), so the app started again \
     in a new session can't see the first session's local storage (the app as shipped keeps one folder)";
 
+/// The checks the app started again doesn't run on Windows, each a SKIP
+/// there ([`NOT_ON_WINDOWS`]): the relaunch checks the checks' table says
+/// never run on Windows (a unit test holds them to it).
+const NOT_RUN_ON_WINDOWS: [Check; 3] = [Check::AaRestart, Check::DisclosuresKept, Check::NoteDraft];
+
 /// Ends `run`'s WebDriver session, which closes the app.
 async fn end_session(run: Run<'_>, started: std::time::Instant, which: &str) {
     log_line(
@@ -564,7 +569,7 @@ pub(super) async fn restart(
     // database, in the account's own folder), so check 58 is.
     let windows = config.xvfb.is_none();
     if windows {
-        for check in kept_here.into_iter().chain([Check::NoteDraft]) {
+        for check in NOT_RUN_ON_WINDOWS {
             report.record(check, Err(skipped(NOT_ON_WINDOWS))).await;
         }
     }
@@ -775,5 +780,25 @@ impl Run<'_> {
             shot / 1024,
             back["settings"]
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NOT_RUN_ON_WINDOWS;
+    use crate::report::{Check, Platform};
+
+    /// On Windows the app started again skips exactly the relaunch checks
+    /// the checks' table lets skip there, and they never run there.
+    #[test]
+    fn the_restart_skips_on_windows_what_the_table_says() {
+        let may_skip: Vec<Check> = Check::RELAUNCH
+            .into_iter()
+            .filter(|check| check.skip().allowed_on(Platform::Windows))
+            .collect();
+        assert_eq!(NOT_RUN_ON_WINDOWS.to_vec(), may_skip);
+        for check in NOT_RUN_ON_WINDOWS {
+            assert!(check.skip().always_on(Platform::Windows), "{check:?}");
+        }
     }
 }
