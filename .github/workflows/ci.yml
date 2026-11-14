@@ -283,10 +283,20 @@ jobs:
         with:
           set: trunk
 
+      # The same optimized dependencies as on Linux: without them the tests
+      # themselves took 347 s here, against 105 s on Linux. In bash, as on
+      # Linux (the job's default shell is PowerShell): rustup sets CARGO_HOME
+      # on the runner, and cargo reads its config.toml from there.
+      - name: Configure cargo
+        working-directory: .
+        shell: bash
+        run: cat .github/ci/cargo-config.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          key: ${{ hashFiles('.github/ci/cargo-config.toml') }}
           workspaces: |
             src-tauri
             ui-leptos
