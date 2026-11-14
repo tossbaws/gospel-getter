@@ -5,18 +5,9 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp } from './harness.mjs';
+import { closeBridge, openApp, withApp } from './harness.mjs';
 
 after(closeBridge);
-
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
 
 const credits = (app) => [...app.document.querySelectorAll('.xref-credit a')];
 

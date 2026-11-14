@@ -36,7 +36,7 @@ use web_sys::{Element, HtmlElement, HtmlInputElement, KeyboardEvent};
 
 use crate::bridge;
 use crate::card;
-use crate::dom;
+use crate::dom::{self, closest};
 use crate::dto::Finding;
 use crate::findings_text as text;
 use crate::intent::{Claim, Generation};
@@ -217,10 +217,6 @@ fn finding(id: i64) -> Option<Finding> {
 
 fn target(event: &web_sys::Event) -> Option<Element> {
     event.target()?.dyn_into::<Element>().ok()
-}
-
-fn closest(el: &Element, selector: &str) -> Option<Element> {
-    el.closest(selector).ok().flatten()
 }
 
 fn id_of(el: &Element) -> Option<i64> {

@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, closeBridge, openApp, storedVerse } from './harness.mjs';
+import { backend, closeBridge, el, exportData, openApp, overlayOpen, storedVerse, withApp } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-reader-data-'));
 after(async () => {
@@ -21,19 +21,8 @@ after(async () => {
 let fileCount = 0;
 const newPath = (label) => join(dir, `${label}-${++fileCount}.gospel-getter.json`);
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const el = (app, id) => app.document.getElementById(id);
 const dataStatus = (app) => el(app, 'data-status').textContent;
 const toastShown = (app) => !el(app, 'data-status').classList.contains('is-hidden');
-const overlayOpen = (app) => !el(app, 'import-overlay').hidden;
 
 async function bookmarkVerse(app, n) {
     app.click(app.verse(n));
@@ -55,12 +44,6 @@ async function clickData(app, id, path) {
     const before = app.calls.length;
     app.click(el(app, id));
     await app.idle(before);
-}
-
-/** ☰ → Export data… → Everything (backup), with the save dialog answering `path` (null: cancelled). */
-async function exportData(app, path) {
-    await app.pick(path);
-    await app.exportEverything();
 }
 
 async function bookmarksIn(code = 'kjv') {

@@ -13,11 +13,8 @@
 use wasm_bindgen::JsCast;
 use web_sys::HtmlElement;
 
+use crate::dom::storage;
 use crate::preferences::{self, Preference};
-
-fn storage() -> Option<web_sys::Storage> {
-    web_sys::window()?.local_storage().ok()?
-}
 
 fn root() -> Option<HtmlElement> {
     web_sys::window()?

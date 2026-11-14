@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, closeBridge, exportData, openApp, settle, statusText, swatch, v2File, withApp } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-highlights-'));
 after(async () => {
@@ -21,19 +21,8 @@ const newPath = (label) => join(dir, `${label}-${++fileCount}.gospel-getter.json
 
 const COLORS = ['yellow', 'green', 'blue', 'pink'];
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const swatch = (app, color) => app.actions().querySelector(`.highlight-swatch[data-color="${color}"]`);
 const removeButton = (app) => app.actions().querySelector('.highlight-remove');
 const pressed = (app) => COLORS.filter((c) => swatch(app, c).getAttribute('aria-pressed') === 'true');
-const statusText = (app) => app.status().textContent;
 
 /** The highlight color shown on verses `from`..`to` (in column `code`). */
 const shown = (app, from, to, code) => {
@@ -208,12 +197,6 @@ async function clickData(app, id, path) {
     await app.idle(before);
 }
 
-/** ☰ → Export data… → Everything (backup), with the save dialog answering `path`. */
-async function exportData(app, path) {
-    await app.pick(path);
-    await app.exportEverything();
-}
-
 const dataStatus = (app) => app.document.getElementById('data-status').textContent;
 
 test('export saves highlights, and says so', () =>
@@ -231,16 +214,6 @@ test('export saves highlights, and says so', () =>
             [[43, 'John', 3, 16, 'yellow'], [43, 'John', 3, 17, 'yellow']],
         );
     }));
-
-const v2File = (highlights) => ({
-    format: 'gospel-getter-reader-data',
-    format_version: 2,
-    exported_at: '2026-10-08T12:00:00.000Z',
-    app_version: '2.5.0',
-    reading_position: null,
-    bookmarks: [],
-    highlights,
-});
 
 test('the import preview counts a format 2 file\'s highlights, and merging keeps the reader\'s colors', () =>
     withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {

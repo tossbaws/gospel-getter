@@ -9,31 +9,13 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, openApp, setUpdate, storedVerse } from './harness.mjs';
+import { backend, bookId, clickAndWaitForCalls as clickAndWait, closeBridge, el as $, isOpen, openApp, setUpdate, shownOnScreen, storedVerse, withApp } from './harness.mjs';
 
 after(closeBridge);
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const $ = (app, id) => app.document.getElementById(id);
 const TOGGLES = { translation: 'translation-toggle', aa: 'aa-toggle', library: 'library-toggle', menu: 'menu-toggle' };
 const toggle = (app, name) => $(app, TOGGLES[name]);
-const isOpen = (app, name) => !app.surface(name).hidden;
 const focusIn = (app, el) => el.contains(app.document.activeElement);
-const shownOnScreen = (app, el) => app.window.getComputedStyle(el).display !== 'none';
-
-async function clickAndWait(app, el, cmd) {
-    const before = app.calls.length;
-    app.click(el);
-    await app.idle(before, cmd);
-}
 
 const segments = (app, id) => [...$(app, id).querySelectorAll('button')];
 const pressed = (app, id) => segments(app, id).filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.value);

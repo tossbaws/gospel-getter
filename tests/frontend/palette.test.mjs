@@ -5,20 +5,11 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, closeBridge, openApp, settle, withApp } from './harness.mjs';
 
 after(closeBridge);
 
 const EM = '—';
-
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
 
 const input = (app) => app.searchInput();
 const groups = (app) => [...app.document.querySelectorAll('#search-results [role="group"]')].map((g) => ({

@@ -9,21 +9,11 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, openApp, settle, shownVerse } from './harness.mjs';
+import { backend, bookId, checks, closeBridge, el as $, openApp, settle, shownVerse, withApp } from './harness.mjs';
 import { readFileSync } from 'node:fs';
 
 after(closeBridge);
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const $ = (app, id) => app.document.getElementById(id);
 const toast = (app) => ({ text: app.toast().textContent, error: app.toast().classList.contains('is-error') });
 // What the toast says when nothing answers a control (step 7c: the page's
 // main script, which said "… isn't available.", is gone with the rest).
@@ -144,7 +134,6 @@ const VERSION = JSON.parse(
     readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
 ).version;
 const UPDATE = { version: '2.6.0', notes: 'Notes.', date: '2026-10-20', canSelfUpdate: true };
-const checks = (app) => app.calls.filter((c) => c.cmd === 'check_for_update').length;
 
 test('pieces that load after boot run the launch check then, and fill About', () =>
     withApp({ leptos: 'late', update: { check: UPDATE } }, async (app) => {

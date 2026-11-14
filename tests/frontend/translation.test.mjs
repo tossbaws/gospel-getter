@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { closeBridge, openApp } from './harness.mjs';
+import { clickAndWaitForCalls as clickAndWait, closeBridge, el as $, isOpen, openApp, shownOnScreen, withApp } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-translation-'));
 after(async () => {
@@ -18,26 +18,8 @@ after(async () => {
     rmSync(dir, { recursive: true, force: true });
 });
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const $ = (app, id) => app.document.getElementById(id);
 const button = (app) => $(app, 'translation-toggle');
-const isOpen = (app, name) => !app.surface(name).hidden;
 const radio = (app, code) => app.document.querySelector(`#translation-choices [data-value="${code}"]`);
-const shownOnScreen = (app, el) => app.window.getComputedStyle(el).display !== 'none';
-
-async function clickAndWait(app, el, cmd) {
-    const before = app.calls.length;
-    app.click(el);
-    await app.idle(before, cmd);
-}
 
 test('the translation button shows the code being read and its name, just before Aa, and follows a switch', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {

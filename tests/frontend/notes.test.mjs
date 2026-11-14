@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, settle, storedVerse } from './harness.mjs';
+import { backend, bookId, clickAndWaitForCalls as clickAndWait, closeBridge, el, notePanelOpen as panelOpen, openApp, settle, shownText, statusText, storedVerse } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-notes-'));
 after(async () => {
@@ -38,15 +38,6 @@ async function withNotes(notes, options, body) {
     }
 }
 
-/** A note's text as shown, its line breaks (`<br>`, the note as Markdown) as new lines. */
-function shownText(el) {
-    const copy = el.cloneNode(true);
-    for (const br of copy.querySelectorAll('br')) br.replaceWith('\n');
-    return copy.textContent;
-}
-
-const el = (app, id) => app.document.getElementById(id);
-const panelOpen = (app) => !el(app, 'note-overlay').hidden;
 const section = (app) => app.document.querySelector('.verse-notes');
 const cards = (app) => [...app.document.querySelectorAll('.verse-notes .note-card')].map((card) => ({
     reference: card.querySelector('.note-card-ref').textContent,
@@ -56,7 +47,6 @@ const notedVerses = (app, code) => [...app.document.querySelectorAll('.chapter-m
     .filter((v) => !code || v.dataset.translation === code)
     .map((v) => Number(v.dataset.verse));
 const addNoteButton = (app) => app.actions().querySelector('.verse-note-btn');
-const statusText = (app) => app.status().textContent;
 const allNotes = () => backend('list_all_notes');
 
 async function select(app, start, end = start, code) {
@@ -64,12 +54,6 @@ async function select(app, start, end = start, code) {
     app.click(app.verse(start, code));
     if (end !== start) app.click(app.verse(end, code), { shiftKey: true });
     await app.idle(before, 'list_notes');
-}
-
-async function clickAndWait(app, target, cmd) {
-    const before = app.calls.length;
-    app.click(target);
-    await app.idle(before, cmd);
 }
 
 async function typeNote(app, text) {

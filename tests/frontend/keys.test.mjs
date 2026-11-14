@@ -3,18 +3,9 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp } from './harness.mjs';
+import { card, closeBridge, openApp, withApp } from './harness.mjs';
 
 after(closeBridge);
-
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
 
 async function press(app, key, opts = {}, target) {
     const before = app.calls.length;
@@ -22,8 +13,6 @@ async function press(app, key, opts = {}, target) {
     await app.idle(before);
     return event;
 }
-
-const card = (app) => app.document.getElementById('selection-card');
 
 // jsdom has no layout: lays out the column's verses 100px apart, from
 // `first` at the top of the window (the top bar's bottom is 0 here), so

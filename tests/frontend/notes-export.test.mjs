@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, settle, storedVerse } from './harness.mjs';
+import { backend, bookId, chooserOpen, clickAndWaitForCalls as clickAndWait, closeBridge, el, myNotes, notesDialogOpen as dialogOpen, openApp, settle, storedVerse } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-notes-export-'));
 after(async () => {
@@ -45,11 +45,6 @@ const SAMPLE = [
     [JOHN, 3, 16, 18, 'Believe.'],
 ];
 
-const el = (app, id) => app.document.getElementById(id);
-/** ☰ → Export data…'s My notes. */
-const myNotes = (app) => el(app, 'export-choice-notes');
-const chooserOpen = (app) => !el(app, 'export-choice-overlay').hidden;
-const dialogOpen = (app) => !el(app, 'export-notes-overlay').hidden;
 const boxes = (app) => [...el(app, 'export-notes-books').querySelectorAll('input[type="checkbox"]')];
 const box = (app, id) => boxes(app).find((b) => Number(b.value) === id);
 /** The checklist: [book id, its row's text, ticked]. */
@@ -65,12 +60,6 @@ const argsOf = (app, cmd) => app.calls.filter((c) => c.cmd === cmd).map((c) => J
 const exportCalls = (app) => argsOf(app, 'export_notes');
 const lastFilter = (app) => argsOf(app, 'count_notes_export').at(-1).filter;
 const EVERY = { books: [], chapters: null, writtenFrom: null, writtenTo: null };
-
-async function clickAndWait(app, target, cmd) {
-    const before = app.calls.length;
-    app.click(target);
-    await app.idle(before, cmd);
-}
 
 /** ☰ → Export data… → My notes, and waits for `cmd` (the dialog's first count). */
 async function openNotes(app, cmd = 'count_notes_export') {

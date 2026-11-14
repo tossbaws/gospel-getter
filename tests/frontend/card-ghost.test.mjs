@@ -7,20 +7,10 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp } from './harness.mjs';
+import { card, closeBridge, openApp, withApp } from './harness.mjs';
 
 after(closeBridge);
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const card = (app) => app.document.getElementById('selection-card');
 const ghost = (app) => card(app).classList.contains('is-ghost');
 
 function shiftDown(app, target = app.document.body) {

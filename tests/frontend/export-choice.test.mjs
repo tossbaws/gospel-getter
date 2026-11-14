@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, callsOf, chooserOpen, closeBridge, el, myNotes, notePanelOpen, notesDialogOpen, openApp, settle } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-export-choice-'));
 after(async () => {
@@ -40,14 +40,9 @@ async function withApp({ notes = NOTES, ...options }, body) {
     }
 }
 
-const el = (app, id) => app.document.getElementById(id);
-const chooserOpen = (app) => !el(app, 'export-choice-overlay').hidden;
-const notesDialogOpen = (app) => !el(app, 'export-notes-overlay').hidden;
 const everything = (app) => el(app, 'export-choice-everything');
-const myNotes = (app) => el(app, 'export-choice-notes');
 /** A choice's name and its second line (its hint, or why it can't be chosen). */
 const said = (app, choice) => [el(app, `${choice.id}-name`).textContent, el(app, `${choice.id}-line`).textContent];
-const callsOf = (app, cmd) => app.calls.filter((c) => c.cmd === cmd);
 
 const EVERYTHING_HINT = 'Bookmarks, highlights, notes, findings and settings, to restore later';
 const NOTES_HINT = 'Choose notes and a layout, then save or print';
@@ -336,7 +331,6 @@ test('the palette’s Export notes… and Export data… are as they were, and s
 // were on their way keeps the keyboard and focus, and Export notes neither
 // opens nor says anything, whether its choices came or failed. Nothing
 // typed is touched.
-const notePanelOpen = (app) => !el(app, 'note-overlay').hidden;
 
 /** My notes, its choices held (to `succeed` or fail), then a note editor opened and typed in. */
 async function editorOpenedWhileMyNotesWaits(app, succeed) {

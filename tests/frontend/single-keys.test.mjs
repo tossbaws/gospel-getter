@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { closeBridge, openApp } from './harness.mjs';
+import { closeBridge, el, openApp, withApp } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-single-keys-'));
 after(async () => {
@@ -18,19 +18,9 @@ after(async () => {
     rmSync(dir, { recursive: true, force: true });
 });
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
 const KEY = 'gospel-getter-single-key-shortcuts';
 const OFF_TEXT = 'Single-key shortcuts are off, so the keys here that are pressed on their own, such as G, J, / and ?, do nothing. The ones with Ctrl or Alt, the arrow keys and Esc still work. To turn them back on, open Aa and switch on Single-key shortcuts.';
 
-const el = (app, id) => app.document.getElementById(id);
 const toggle = (app) => el(app, 'single-keys-toggle');
 const sheetOpen = (app) => !el(app, 'shortcuts-overlay').hidden;
 

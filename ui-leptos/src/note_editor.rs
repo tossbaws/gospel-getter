@@ -58,16 +58,12 @@ use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge::{self, NoteRequest, OtherNote};
 use crate::card;
-use crate::dom::{self, focus};
+use crate::dom::{self, focus, storage};
 use crate::dto::{AddNoteArgs, DeleteNoteArgs, KeepFindingArgs, UpdateNoteArgs};
 use crate::ipc;
 use crate::note_text::{self, DRAFTS_KEY, Draft, DraftPassage, Drafts};
 
 // ---- The drafts, as local storage keeps them.
-
-fn storage() -> Option<web_sys::Storage> {
-    web_sys::window()?.local_storage().ok()?
-}
 
 fn now() -> f64 {
     js_sys::Date::now()

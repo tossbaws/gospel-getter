@@ -24,6 +24,7 @@ use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge::{self, ExportFacts};
 use crate::dom::{self, focus};
+use crate::page;
 
 /// The chooser's title.
 pub const TITLE: &str = "Export";
@@ -131,7 +132,7 @@ impl Chooser {
             return;
         }
         self.close();
-        bridge::export_everything();
+        page::export_data();
     }
 
     /// My notes: the chooser closes, and the Export notes dialog opens,
@@ -141,7 +142,7 @@ impl Chooser {
             return;
         }
         let back = self.close();
-        bridge::export_notes(back);
+        page::open_export_notes(back);
     }
 
     /// The choices that can be chosen now, in order.

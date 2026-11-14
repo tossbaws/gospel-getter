@@ -3,7 +3,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, settle, shownVerse, storedVerse } from './harness.mjs';
+import { closeBridge, openApp, settle, shownVerse, storedVerse, withApp } from './harness.mjs';
 
 after(closeBridge);
 
@@ -14,15 +14,6 @@ const EN = '–';
 // dash (or any other code point change) can't slip through.
 function assertSameBytes(actual, expected) {
     assert.deepEqual(Buffer.from(actual, 'utf8'), Buffer.from(expected, 'utf8'), `\n${actual}\n!==\n${expected}`);
-}
-
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
 }
 
 test('copying a single KJV verse gives its stored text and reference', () =>

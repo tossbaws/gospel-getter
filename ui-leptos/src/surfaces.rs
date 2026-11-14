@@ -53,7 +53,7 @@ use web_sys::{
 
 use crate::aa;
 use crate::bridge;
-use crate::dom;
+use crate::dom::{self, by_id};
 use crate::nav;
 use crate::preferences;
 use crate::prefs;
@@ -91,13 +91,6 @@ thread_local! {
 }
 
 // ---- The page's elements.
-
-fn by_id(id: &str) -> Option<HtmlElement> {
-    bridge::document()?
-        .get_element_by_id(id)?
-        .dyn_into::<HtmlElement>()
-        .ok()
-}
 
 /// The surface's element. About's is looked up whenever it's needed.
 fn element(surface: Surface) -> Option<HtmlElement> {

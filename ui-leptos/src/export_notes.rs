@@ -18,7 +18,7 @@
 //! its choices are in, if nothing newer has been done since: another modal
 //! opened meanwhile (a note editor, say) has the keyboard, and this one
 //! then opens not at all, says nothing and takes no focus (AUD-05,
-//! `bridge::modal_claim`).
+//! `page::modal_claim`).
 //!
 //! A small modal, as the page's note panel: it has the keyboard while open
 //! (a capturing `keydown` on `window`, stopping every other handler), Escape
@@ -48,6 +48,7 @@ use crate::dto::{
 };
 use crate::intent::Claim;
 use crate::ipc;
+use crate::page;
 use crate::text::{
     Fields, build_filter, chapter_value, commentary_markup, count_line, plural, replace_question,
     saved_files, thousands,
@@ -292,11 +293,11 @@ impl Dialog {
         let busy = self.busy.get_value();
         // One opening at a time, unless something newer has let the one
         // under way go.
-        let opening = busy.opening.is_some_and(bridge::modal_holds);
+        let opening = busy.opening.is_some_and(page::modal_holds);
         if busy.exporting || opening || request.note_count == 0 {
             return;
         }
-        let claim = bridge::modal_claim();
+        let claim = page::modal_claim();
         self.return_to.set_value(return_to);
         self.busy.update_value(|b| b.opening = Some(claim));
         spawn_local(async move {
@@ -309,7 +310,7 @@ impl Dialog {
             });
             // Another modal opened meanwhile, or this was asked for again:
             // this opening is no longer what the reader is doing.
-            if !bridge::modal_holds(claim) {
+            if !page::modal_holds(claim) {
                 if let Err(e) = &result {
                     ipc::log_error("Failed to prepare a notes export since left", e);
                 }
@@ -356,7 +357,7 @@ impl Dialog {
             }
             // A modal that opened as this one did has the keyboard: this
             // one goes again, leaving focus to it.
-            if !bridge::modal_holds(claim) {
+            if !page::modal_holds(claim) {
                 self.open.set(false);
                 self.busy.update_value(|b| b.count_token += 1);
                 return;

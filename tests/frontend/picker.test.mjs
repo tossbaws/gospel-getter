@@ -9,37 +9,20 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { closeBridge, openApp, settle } from './harness.mjs';
+import { clickAndWaitForCalls as clickAndWait, closeBridge, el as $, openApp, settle, shownOnScreen, withApp } from './harness.mjs';
 
 after(closeBridge);
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const $ = (app, id) => app.document.getElementById(id);
 const picker = (app) => $(app, 'picker');
 const refBtn = (app) => $(app, 'ref-btn');
 const refText = (app) => $(app, 'ref-text').textContent;
 const book = (app, name) => [...picker(app).querySelectorAll('.book-item')].find((b) => b.textContent === name);
 const chapters = (app) => [...picker(app).querySelectorAll('.chapter-btn')];
 const chapter = (app, n) => chapters(app).find((b) => b.textContent === String(n));
-const shownOnScreen = (app, el) => app.window.getComputedStyle(el).display !== 'none';
 const marked = (app) => ({
     book: [...picker(app).querySelectorAll('.book-item[aria-current="true"]')].map((b) => b.textContent),
     chapter: [...picker(app).querySelectorAll('.chapter-btn[aria-current="page"]')].map((b) => b.textContent),
 });
-
-async function clickAndWait(app, el, cmd = null) {
-    const before = app.calls.length;
-    app.click(el);
-    await app.idle(before, cmd);
-}
 
 async function keyAndWait(app, key, target) {
     const before = app.calls.length;

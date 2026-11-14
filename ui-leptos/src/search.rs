@@ -42,7 +42,7 @@ use web_sys::{Element, HtmlElement, KeyboardEvent};
 
 use crate::aa;
 use crate::bridge;
-use crate::dom;
+use crate::dom::{self, by_id, closest, data_number};
 use crate::dto::{GoTo, SearchAnswer, SearchArgs, SearchVerse};
 use crate::intent::{Claim, Generation};
 use crate::ipc;
@@ -140,14 +140,6 @@ struct Search {
     more: NodeRef<html::Button>,
 }
 
-/// The page's element `id`.
-fn by_id(id: &str) -> Option<HtmlElement> {
-    bridge::document()?
-        .get_element_by_id(id)?
-        .dyn_into::<HtmlElement>()
-        .ok()
-}
-
 fn panel() -> Option<HtmlElement> {
     by_id("search-panel")
 }
@@ -158,15 +150,6 @@ fn toggle() -> Option<HtmlElement> {
 
 fn target_of(event: &web_sys::Event) -> Option<Element> {
     event.target()?.dyn_into::<Element>().ok()
-}
-
-fn closest(el: &Element, selector: &str) -> Option<Element> {
-    el.closest(selector).ok().flatten()
-}
-
-/// A `data-*` number of `el`.
-fn data_number(el: &Element, name: &str) -> Option<i64> {
-    el.get_attribute(name)?.parse().ok()
 }
 
 /// `el.scrollIntoView({ block: 'nearest' })`, where there is one (jsdom has

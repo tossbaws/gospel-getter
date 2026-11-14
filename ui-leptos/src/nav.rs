@@ -24,7 +24,7 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::{Element, HtmlElement, HtmlOptionElement, HtmlSelectElement};
 
 use crate::bridge;
-use crate::dom;
+use crate::dom::{self, by_id, storage};
 use crate::ipc;
 use crate::keyboard;
 use crate::nav_text::{self as text, RecentPlace, RecentPlaces, Stored};
@@ -63,17 +63,6 @@ thread_local! {
 
 fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with_borrow_mut(f)
-}
-
-fn by_id(id: &str) -> Option<HtmlElement> {
-    bridge::document()?
-        .get_element_by_id(id)?
-        .dyn_into::<HtmlElement>()
-        .ok()
-}
-
-fn storage() -> Option<web_sys::Storage> {
-    web_sys::window()?.local_storage().ok()?
 }
 
 /// The bundled translations' codes, from the translation button's record.

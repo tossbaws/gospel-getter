@@ -3,18 +3,9 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, closeBridge, openApp, settle, shownVerse, storedVerse } from './harness.mjs';
+import { backend, closeBridge, openApp, settle, shownVerse, storedVerse, withApp } from './harness.mjs';
 
 after(closeBridge);
-
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
 
 async function pressEnter(app) {
     const before = app.calls.length;

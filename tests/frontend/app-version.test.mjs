@@ -8,7 +8,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { closeBridge, openApp } from './harness.mjs';
+import { closeBridge, el as $, openApp, withApp } from './harness.mjs';
 
 after(closeBridge);
 
@@ -16,16 +16,6 @@ const VERSION = JSON.parse(
     readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
 ).version;
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const $ = (app, id) => app.document.getElementById(id);
 const versionLine = (app) => $(app, 'app-version');
 const link = (app) => $(app, 'release-notes-link');
 const supportLink = (app) => $(app, 'support-link');

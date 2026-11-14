@@ -32,7 +32,7 @@ use web_sys::{Element, HtmlElement, KeyboardEvent};
 use crate::bridge;
 use crate::card::{self, Ask, SelectionFacts};
 use crate::card_text::Slot;
-use crate::dom;
+use crate::dom::{self, window_height};
 use crate::keyboard_text::{self as text, Press, Rect, Route, Selected};
 use crate::page;
 use crate::preferences;
@@ -99,13 +99,6 @@ fn view_top() -> f64 {
     bridge::document()
         .and_then(|d| d.get_element_by_id("top-bar"))
         .map_or(0.0, |bar| bar.get_bounding_client_rect().bottom())
-}
-
-fn window_height() -> f64 {
-    web_sys::window()
-        .and_then(|w| w.inner_height().ok())
-        .and_then(|h| h.as_f64())
-        .unwrap_or(0.0)
 }
 
 fn rect_of(el: &Element) -> Rect {
