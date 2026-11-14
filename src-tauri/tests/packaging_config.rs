@@ -1806,19 +1806,127 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
             );
         }
     }
-    // Both get their signer the same way, from crates.io, in the job.
+    // Both get their signer the same way (CI-02): tauri-apps' own prebuilt
+    // cargo-tauri at TAURI_CLI_VERSION, from the build-tools action's
+    // `signer` set, which checks it against its pinned SHA-256 on every run
+    // (a cache hit too), and check that `cargo tauri` is that binary at that
+    // version before it signs anything. Nothing else is installed or built:
+    // no `cargo install` of any kind, no Rust, no Rust cache, no other set.
+    let signer = signer_version();
     for name in ["sign", "sign-rehearsal"] {
-        assert!(
-            job(name).iter().any(|s| s.text.contains(
-                "cargo install tauri-cli --version \"${{ env.TAURI_CLI_VERSION }}\" --locked"
-            )),
-            "job {name}"
+        let steps = job(name);
+        let code = |step: &Step| -> String {
+            step.text
+                .lines()
+                .filter(|l| !l.trim_start().starts_with('#'))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let tools: Vec<usize> = (0..steps.len())
+            .filter(|&i| {
+                steps[i]
+                    .text
+                    .contains("uses: ./.github/actions/build-tools")
+            })
+            .collect();
+        assert_eq!(
+            tools.len(),
+            1,
+            "job {name} gets one set of build tools: {steps:#?}"
         );
+        assert_eq!(
+            with_value(steps[tools[0]], "set"),
+            Some("signer"),
+            "job {name}: {:#?}",
+            steps[tools[0]]
+        );
+        for step in &steps {
+            let code = code(step);
+            for banned in [
+                "cargo install",
+                "rust-cache",
+                "dtolnay/rust-toolchain@",
+                "cargo build",
+            ] {
+                assert!(
+                    !code.contains(banned),
+                    "job {name} runs {banned}: {step:#?}"
+                );
+            }
+        }
+        let check = (0..steps.len())
+            .find(|&i| code(steps[i]).contains("version=\"$(cargo tauri --version)\""))
+            .unwrap_or_else(|| panic!("job {name} doesn't print `cargo tauri --version`"));
+        let checked = code(steps[check]);
         assert!(
-            !job(name).iter().any(|s| s.text.contains("rust-cache")),
-            "job {name} restores a cache"
+            checked.contains("[ \"$version\" != \"tauri-cli $TAURI_CLI_VERSION\" ]")
+                && checked.contains("want=\"$RUNNER_TEMP/build-tools/bin/cargo-tauri\"")
+                && checked.contains("[ \"$found\" != \"$want\" ]")
+                && checked.matches("exit 1").count() == 2,
+            "job {name} doesn't fail unless `cargo tauri` is the pinned signer: {:#?}",
+            steps[check]
+        );
+        let first_use = (0..steps.len())
+            .find(|&i| {
+                i != check
+                    && (code(steps[i]).contains("cargo tauri")
+                        || code(steps[i]).contains("sign_installers.py"))
+            })
+            .unwrap_or_else(|| panic!("job {name} never signs"));
+        assert!(
+            tools[0] < check && check < first_use,
+            "job {name}: the signer is got, then checked, then used"
         );
     }
+    assert_eq!(
+        Some(signer.as_str()),
+        workflow_env(DIST_YML, "TAURI_CLI_VERSION"),
+        "the signer row's version is TAURI_CLI_VERSION"
+    );
+}
+
+/// tools/ci/build-tools.txt, the build tools' pins (columns as its header).
+const BUILD_TOOLS: &str = include_str!("../../tools/ci/build-tools.txt");
+
+/// The version of the signer set's one row, checked to be tauri-apps' own release of the
+/// prebuilt Tauri CLI for its version, for Linux (where both signing jobs
+/// run), pinned by a SHA-256 and laid out as `cargo-tauri` on PATH.
+fn signer_version() -> String {
+    let rows: Vec<Vec<&str>> = BUILD_TOOLS
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l.split_whitespace().collect())
+        .filter(|fields: &Vec<&str>| fields.first() == Some(&"signer"))
+        .collect();
+    assert_eq!(
+        rows.len(),
+        1,
+        "build-tools.txt has one signer row: {rows:#?}"
+    );
+    let row = &rows[0];
+    assert_eq!(row.len(), 9, "{row:?}");
+    let version = row[3];
+    assert_eq!(
+        (row[1], row[2], row[4], row[6], row[8]),
+        (
+            "Linux",
+            "cargo-tauri",
+            "tauri-apps/tauri",
+            "cargo-tauri-x86_64-unknown-linux-gnu.tgz",
+            "bin=cargo-tauri"
+        ),
+        "{row:?}"
+    );
+    assert_eq!(row[5], format!("tauri-cli-v{version}"), "{row:?}");
+    assert!(
+        row[7].len() == 64
+            && row[7]
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "the signer isn't pinned by a SHA-256: {row:?}"
+    );
+    version.to_owned()
 }
 
 /// A push to main never cancels a dispatched run, a release's build (D-05):

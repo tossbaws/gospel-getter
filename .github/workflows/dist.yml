@@ -959,15 +959,39 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
+      # The signer is tauri-apps' own prebuilt cargo-tauri for
+      # TAURI_CLI_VERSION, from its tauri-cli-vX.Y.Z release, pinned by
+      # SHA-256 (tools/ci/build-tools.txt, set signer), not tauri-cli
+      # compiled from crates.io here, which took 5-6 minutes on every
+      # release in a job with no build cache. A cached copy is acceptable
+      # in this job, which holds the key, because the action checks every
+      # file against its pinned SHA-256 on every run, a cache hit too, and
+      # a file that doesn't match stops the job before anything runs it.
+      # No Rust is installed: nothing here compiles, and the runner's own
+      # cargo only hands `cargo tauri` to the cargo-tauri on PATH, which
+      # the next step checks is the pinned one, at TAURI_CLI_VERSION.
+      - name: Get the signer (Tauri's prebuilt CLI, pinned by SHA-256)
+        uses: ./.github/actions/build-tools
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          set: signer
 
-      # From crates.io, exactly, in this job: no cache, nothing another job
-      # built.
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+      - name: Check the signer is the pinned one
+        run: |
+          set -euo pipefail
+          want="$RUNNER_TEMP/build-tools/bin/cargo-tauri"
+          found="$(command -v cargo-tauri || true)"
+          # cargo runs a cargo-tauri in its own bin folder before one on PATH.
+          shadow="${CARGO_HOME:-$HOME/.cargo}/bin/cargo-tauri"
+          version="$(cargo tauri --version)"
+          echo "signer: cargo tauri --version: $version, at ${found:-nowhere} ($(cargo --version))"
+          if [ "$found" != "$want" ] || [ -e "$shadow" ]; then
+            echo "::error::cargo tauri isn't the pinned signer at $want: cargo-tauri on PATH is ${found:-none}, $shadow $([ -e "$shadow" ] && echo exists || echo 'is absent')"
+            exit 1
+          fi
+          if [ "$version" != "tauri-cli $TAURI_CLI_VERSION" ]; then
+            echo "::error::cargo tauri --version printed '$version', not 'tauri-cli $TAURI_CLI_VERSION'"
+            exit 1
+          fi
 
       # The build's four artifacts by name, each into a folder of that
       # name (sign_installers.py's layout).
@@ -1058,13 +1082,30 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
+      # The sign job's signer, got and checked the same way (see its
+      # comment there).
+      - name: Get the signer (Tauri's prebuilt CLI, pinned by SHA-256)
+        uses: ./.github/actions/build-tools
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          set: signer
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+      - name: Check the signer is the pinned one
+        run: |
+          set -euo pipefail
+          want="$RUNNER_TEMP/build-tools/bin/cargo-tauri"
+          found="$(command -v cargo-tauri || true)"
+          # cargo runs a cargo-tauri in its own bin folder before one on PATH.
+          shadow="${CARGO_HOME:-$HOME/.cargo}/bin/cargo-tauri"
+          version="$(cargo tauri --version)"
+          echo "signer: cargo tauri --version: $version, at ${found:-nowhere} ($(cargo --version))"
+          if [ "$found" != "$want" ] || [ -e "$shadow" ]; then
+            echo "::error::cargo tauri isn't the pinned signer at $want: cargo-tauri on PATH is ${found:-none}, $shadow $([ -e "$shadow" ] && echo exists || echo 'is absent')"
+            exit 1
+          fi
+          if [ "$version" != "tauri-cli $TAURI_CLI_VERSION" ]; then
+            echo "::error::cargo tauri --version printed '$version', not 'tauri-cli $TAURI_CLI_VERSION'"
+            exit 1
+          fi
 
       # The build's four artifacts by name, each into a folder of that
       # name (sign_installers.py's layout).
