@@ -1,16 +1,17 @@
 name: Build tools
 description: >-
-  Trunk with its wasm-bindgen and wasm-opt on PATH (set trunk), or the Tauri
+  Trunk with its wasm-bindgen and wasm-opt on PATH (set trunk), the Tauri
   bundler's AppImage or NSIS and WiX tools in its tools folder (set bundler),
-  as pinned in tools/ci/build-tools.txt: restored from a cache keyed by their
-  exact versions and SHA-256s, else fetched with the workflow's token (gh
-  release download), never anonymously, and every file checked against its
-  SHA-256 before use, a cached one too. See tools/ci/build_tools.py. The job
-  checks out the repository first; set bundler needs TAURI_CLI_VERSION in the
-  environment.
+  or Tauri's prebuilt cargo-tauri on PATH (set signer), as pinned in
+  tools/ci/build-tools.txt: restored from a cache keyed by their exact
+  versions and SHA-256s, else fetched with the workflow's token (gh release
+  download), never anonymously, and every file checked against its SHA-256
+  before use, a cached one too. See tools/ci/build_tools.py. The job checks
+  out the repository first; sets bundler and signer need TAURI_CLI_VERSION
+  in the environment.
 inputs:
   set:
-    description: trunk or bundler
+    description: trunk, bundler or signer
     required: true
 runs:
   using: composite

@@ -52,8 +52,8 @@ name: Distribution Artifacts
 # anything — it only produces downloadable workflow-run artifacts, so a
 # human can review real installers before anything goes out the door.
 # They're kept 14 days (retention-days), not GitHub's default 90: a release
-# publishes within hours of its dispatched run. The GUI-check test apps,
-# never released, are kept 7.
+# publishes within hours of its dispatched run. The GUI-check test apps
+# and the signing rehearsal's signed files, never released, are kept 7.
 #
 # These are the installers that update themselves: they're built with
 # GOSPEL_GETTER_SELF_UPDATE=1 (read at compile time, see src-tauri/src/
@@ -73,13 +73,17 @@ name: Distribution Artifacts
 #     SHA-256, recorded before signing), makes the update manifest from
 #     them as a dry run, and uploads each installer with its .sig and its
 #     SHA-256 (INSTALLER-SHA256SUMS) as an artifact of its own, the build
-#     artifact's name with -signed after it, for tools/release/README.md's
-#     publishing. The build's own artifacts are never replaced, so a sign
-#     job that fails can be re-run (Re-run failed jobs) on them as built.
+#     artifact's name with -signed after it. The build's own artifacts are
+#     never replaced, so a sign job that fails can be re-run (Re-run failed
+#     jobs) on them as built. Then the bundle job, which names no secret,
+#     checks them and assembles the release's files into one artifact,
+#     gospel-getter-release-bundle, for tools/release/README.md's
+#     publishing.
 #   - dispatched on another branch, or a pull request from a release/
 #     branch or with the ci:full label: unsigned, and sign-rehearsal does
-#     all of that with a throwaway key made for the run instead, uploading
-#     nothing, so a change to the signing is tried before it reaches a
+#     all of that with a throwaway key made for the run instead, and the
+#     bundle job after it, every artifact under a rehearsal- name, so a
+#     change to the signing or the bundle is tried before it reaches a
 #     release. ci:full never reaches the sign job.
 #
 # Every action is pinned to a commit (Dependabot proposes updates:
@@ -959,15 +963,39 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
+      # The signer is tauri-apps' own prebuilt cargo-tauri for
+      # TAURI_CLI_VERSION, from its tauri-cli-vX.Y.Z release, pinned by
+      # SHA-256 (tools/ci/build-tools.txt, set signer), not tauri-cli
+      # compiled from crates.io here, which took 5-6 minutes on every
+      # release in a job with no build cache. A cached copy is acceptable
+      # in this job, which holds the key, because the action checks every
+      # file against its pinned SHA-256 on every run, a cache hit too, and
+      # a file that doesn't match stops the job before anything runs it.
+      # No Rust is installed: nothing here compiles, and the runner's own
+      # cargo only hands `cargo tauri` to the cargo-tauri on PATH, which
+      # the next step checks is the pinned one, at TAURI_CLI_VERSION.
+      - name: Get the signer (Tauri's prebuilt CLI, pinned by SHA-256)
+        uses: ./.github/actions/build-tools
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          set: signer
 
-      # From crates.io, exactly, in this job: no cache, nothing another job
-      # built.
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+      - name: Check the signer is the pinned one
+        run: |
+          set -euo pipefail
+          want="$RUNNER_TEMP/build-tools/bin/cargo-tauri"
+          found="$(command -v cargo-tauri || true)"
+          # cargo runs a cargo-tauri in its own bin folder before one on PATH.
+          shadow="${CARGO_HOME:-$HOME/.cargo}/bin/cargo-tauri"
+          version="$(cargo tauri --version)"
+          echo "signer: cargo tauri --version: $version, at ${found:-nowhere} ($(cargo --version))"
+          if [ "$found" != "$want" ] || [ -e "$shadow" ]; then
+            echo "::error::cargo tauri isn't the pinned signer at $want: cargo-tauri on PATH is ${found:-none}, $shadow $([ -e "$shadow" ] && echo exists || echo 'is absent')"
+            exit 1
+          fi
+          if [ "$version" != "tauri-cli $TAURI_CLI_VERSION" ]; then
+            echo "::error::cargo tauri --version printed '$version', not 'tauri-cli $TAURI_CLI_VERSION'"
+            exit 1
+          fi
 
       # The build's four artifacts by name, each into a folder of that
       # name (sign_installers.py's layout).
@@ -1048,7 +1076,9 @@ jobs:
   # public key): a run dispatched on another branch, or a pull request from
   # a release/ branch or with the ci:full label. The same downloads and the
   # same sign_installers.py (each installer's SHA-256 recorded, signed, and
-  # checked unchanged). It uploads nothing, and names no secret.
+  # checked unchanged). It names no secret, and uploads only under
+  # rehearsal- names, which nothing a release takes has: the signed files
+  # and the throwaway public key, for the bundle job's rehearsal.
   sign-rehearsal:
     name: Signing rehearsal (throwaway key)
     needs: [linux, windows]
@@ -1058,13 +1088,30 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
+      # The sign job's signer, got and checked the same way (see its
+      # comment there).
+      - name: Get the signer (Tauri's prebuilt CLI, pinned by SHA-256)
+        uses: ./.github/actions/build-tools
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          set: signer
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+      - name: Check the signer is the pinned one
+        run: |
+          set -euo pipefail
+          want="$RUNNER_TEMP/build-tools/bin/cargo-tauri"
+          found="$(command -v cargo-tauri || true)"
+          # cargo runs a cargo-tauri in its own bin folder before one on PATH.
+          shadow="${CARGO_HOME:-$HOME/.cargo}/bin/cargo-tauri"
+          version="$(cargo tauri --version)"
+          echo "signer: cargo tauri --version: $version, at ${found:-nowhere} ($(cargo --version))"
+          if [ "$found" != "$want" ] || [ -e "$shadow" ]; then
+            echo "::error::cargo tauri isn't the pinned signer at $want: cargo-tauri on PATH is ${found:-none}, $shadow $([ -e "$shadow" ] && echo exists || echo 'is absent')"
+            exit 1
+          fi
+          if [ "$version" != "tauri-cli $TAURI_CLI_VERSION" ]; then
+            echo "::error::cargo tauri --version printed '$version', not 'tauri-cli $TAURI_CLI_VERSION'"
+            exit 1
+          fi
 
       # The build's four artifacts by name, each into a folder of that
       # name (sign_installers.py's layout).
@@ -1103,3 +1150,172 @@ jobs:
           python3 tools/release/sign_installers.py installers \
             --private-key-path "$RUNNER_TEMP/rehearsal.key" \
             --pubkey-file "$RUNNER_TEMP/rehearsal.key.pub"
+
+      # What the sign job uploads, under rehearsal- names, for the bundle
+      # job: never the release's -signed names, and never the private key
+      # (in RUNNER_TEMP, beside the public one, not under installers/).
+      - name: Upload the rehearsal's signed AppImage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rehearsal-gospel-getter-linux-appimage-signed
+          path: installers/gospel-getter-linux-appimage/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the rehearsal's signed deb
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rehearsal-gospel-getter-linux-deb-signed
+          path: installers/gospel-getter-linux-deb/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the rehearsal's signed NSIS installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rehearsal-gospel-getter-windows-nsis-installer-signed
+          path: installers/gospel-getter-windows-nsis-installer/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the rehearsal's signed MSI installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rehearsal-gospel-getter-windows-msi-installer-signed
+          path: installers/gospel-getter-windows-msi-installer/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the rehearsal's public key
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rehearsal-signing-pubkey
+          path: ${{ runner.temp }}/rehearsal.key.pub
+          if-no-files-found: error
+          retention-days: 7
+
+  # The release's files, checked and assembled (tools/release/
+  # bundle_release.py) into one artifact the publish takes whole,
+  # gospel-getter-release-bundle (tools/release/README.md): the four
+  # signed installers under their stable names with their .sig files, the
+  # two CLI binaries and SHA256SUMS. Each installer must be the SHA-256 its
+  # INSTALLER-SHA256SUMS recorded and the very file the build uploaded (and
+  # the GUI checks ran on), its .sig for the app's version and by the key
+  # the app trusts; a missing file refuses the bundle. latest.json isn't
+  # made here: it needs the release notes, so the publish writes it. Its
+  # files come only from the run's artifacts, so it names no secret and
+  # has no environment, and it reads nothing else (contents: read). A
+  # release's bundle follows the sign job alone, on the sign job's
+  # condition. After the signing rehearsal it does the same on the
+  # rehearsal's rehearsal- artifacts, against the throwaway key, into
+  # rehearsal-release-bundle, so every ci:full pull request tries it
+  # before a release does: FROM and BUNDLE pick the names, from which
+  # signing job ran (never both: one is for a run dispatched on main, the
+  # other for every run that isn't).
+  bundle:
+    name: Assemble the release files
+    needs: [sign, sign-rehearsal]
+    if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.sign.result == 'success') || needs.sign-rehearsal.result == 'success') }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      FROM: ${{ needs.sign.result == 'success' && '' || 'rehearsal-' }}
+      BUNDLE: ${{ needs.sign.result == 'success' && 'gospel-getter-release-bundle' || 'rehearsal-release-bundle' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Each artifact by its exact name, into a folder of that name
+      # (bundle_release.py's layout).
+      - name: Download the signed AppImage
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ env.FROM }}gospel-getter-linux-appimage-signed
+          path: bundle-in/signed/gospel-getter-linux-appimage
+
+      - name: Download the signed deb
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ env.FROM }}gospel-getter-linux-deb-signed
+          path: bundle-in/signed/gospel-getter-linux-deb
+
+      - name: Download the signed NSIS installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ env.FROM }}gospel-getter-windows-nsis-installer-signed
+          path: bundle-in/signed/gospel-getter-windows-nsis-installer
+
+      - name: Download the signed MSI installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ env.FROM }}gospel-getter-windows-msi-installer-signed
+          path: bundle-in/signed/gospel-getter-windows-msi-installer
+
+      - name: Download the AppImage as built
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gospel-getter-linux-appimage
+          path: bundle-in/built/gospel-getter-linux-appimage
+
+      - name: Download the deb as built
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gospel-getter-linux-deb
+          path: bundle-in/built/gospel-getter-linux-deb
+
+      - name: Download the NSIS installer as built
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gospel-getter-windows-nsis-installer
+          path: bundle-in/built/gospel-getter-windows-nsis-installer
+
+      - name: Download the MSI installer as built
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gospel-getter-windows-msi-installer
+          path: bundle-in/built/gospel-getter-windows-msi-installer
+
+      - name: Download the Linux CLI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gospel-getter-cli-linux-x86_64
+          path: bundle-in/cli/gospel-getter-cli-linux-x86_64
+
+      - name: Download the Windows CLI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gospel-getter-cli-windows-x86_64
+          path: bundle-in/cli/gospel-getter-cli-windows-x86_64
+
+      - name: Download the rehearsal's public key
+        if: env.FROM == 'rehearsal-'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rehearsal-signing-pubkey
+          path: ${{ runner.temp }}/rehearsal-key
+
+      # The release's own key is the app's (tauri.conf.json); the
+      # rehearsal's is the throwaway one it signed with. Then SHA256SUMS
+      # is checked once more, as the publish will.
+      - name: Check and assemble the release files
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          key=()
+          if [ "$FROM" = rehearsal- ]; then
+            key=(--pubkey-file "$RUNNER_TEMP/rehearsal-key/rehearsal.key.pub")
+          fi
+          python3 tools/release/bundle_release.py bundle-in release-bundle "${key[@]}"
+          cd release-bundle
+          sha256sum -c SHA256SUMS | sed 's/^/bundle: sha256sum -c: /'
+          echo "bundle: $BUNDLE ready: $(ls | wc -l) files"
+
+      - name: Upload the release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.BUNDLE }}
+          path: release-bundle/
+          if-no-files-found: error
+          retention-days: 14

@@ -14,6 +14,10 @@
 #                 tauri-bundler looks for (tauri-bundler's linuxdeploy.rs,
 #                 nsis/mod.rs and msi/mod.rs) under its tools folder
 #                 (~/.cache/tauri, %LOCALAPPDATA%\tauri)
+#   signer set    TAURI_CLI_VERSION in .github/workflows/dist.yml too: its one
+#                 row is tauri-apps' own prebuilt cargo-tauri for that version
+#                 (release tauri-cli-vX.Y.Z), which dist.yml's sign and
+#                 sign-rehearsal jobs sign with (see the sign job's comment)
 # A version with no rows here stops the build, saying what to add.
 #
 # Each SHA-256 here is the one the release publishes (its .sha256 file or
@@ -42,3 +46,4 @@ bundler   Linux    linuxdeploy-plugin-appimage  2.12.4       linuxdeploy/linuxde
 bundler   Windows  nsis                         2.12.4       tauri-apps/binary-releases               nsis-3.13                nsis-3.13.zip                                            ba63dffc4410ee89193e1cb5a41989991bd77c61068da17e3156d136b7b0b3d8  unzip-top=NSIS
 bundler   Windows  nsis-tauri-utils             2.12.4       tauri-apps/nsis-tauri-utils              nsis_tauri_utils-v0.5.3  nsis_tauri_utils.dll                                     5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709  file=NSIS/Plugins/x86-unicode/additional/nsis_tauri_utils.dll
 bundler   Windows  wix                          2.12.4       wixtoolset/wix3                          wix3141rtm               wix314-binaries.zip                                      6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31  unzip=WixTools314
+signer    Linux    cargo-tauri                  2.12.4       tauri-apps/tauri                         tauri-cli-v2.12.4        cargo-tauri-x86_64-unknown-linux-gnu.tgz                 820ae3c7580ca637cad15f65638960ee2a96e5a491e224691c86d6f25e6c9e8a  bin=cargo-tauri
