@@ -1170,6 +1170,97 @@ fn github_files() -> Vec<(String, String)> {
     files
 }
 
+/// GitHub expressions treat '' as false, so `a && '' || b` always gives b:
+/// the bundle job's FROM did, and failed release run 43641319812 with it.
+#[test]
+fn no_workflow_expression_has_an_empty_and_branch() {
+    for (expression, empty) in [
+        ("a && '' || b", true),
+        ("a && \"\" || b", true),
+        ("a != 'x' && 'y' || ''", false),
+        ("a && '''s' || b", false),
+        ("a == 'x && ''' || b", false),
+    ] {
+        assert_eq!(has_empty_and_branch(expression), empty, "{expression}");
+    }
+    let mut seen = Vec::new();
+    for (file, text) in github_files() {
+        for expression in workflow_expressions(&text) {
+            seen.push((file.clone(), expression));
+        }
+    }
+    assert!(
+        seen.iter()
+            .any(|(_, e)| e.contains("&& 'gospel-getter-release-bundle' ||")),
+        "the scan reads the bundle job's env: {seen:#?}"
+    );
+    let empty: Vec<_> = seen
+        .iter()
+        .filter(|(_, e)| has_empty_and_branch(e))
+        .collect();
+    assert!(
+        empty.is_empty(),
+        "put the empty branch after ||, not after &&: {empty:#?}"
+    );
+}
+
+/// Every expression in a workflow or action: each `${{ … }}`, across lines,
+/// and each bare `if:` value.
+fn workflow_expressions(text: &str) -> Vec<String> {
+    let mut expressions = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("${{") {
+        let after = &rest[start + 3..];
+        let Some(end) = after.find("}}") else { break };
+        expressions.push(after[..end].trim().to_owned());
+        rest = &after[end + 2..];
+    }
+    for line in text.lines() {
+        if let Some(value) = line.trim_start().strip_prefix("if: ")
+            && !value.contains("${{")
+        {
+            expressions.push(value.trim().to_owned());
+        }
+    }
+    expressions
+}
+
+/// Whether an `&&` outside a string literal is followed by an empty one
+/// (`''` that isn't the start of an escaped quote, or `""`).
+fn has_empty_and_branch(expression: &str) -> bool {
+    let bytes = expression.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            // Past a literal, in which '' is an escaped quote.
+            b'\'' => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\'' {
+                        if bytes.get(i + 1) == Some(&b'\'') {
+                            i += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    i += 1;
+                }
+                i += 1;
+            }
+            b'&' if bytes.get(i + 1) == Some(&b'&') => {
+                match expression[i + 2..].trim_start().as_bytes() {
+                    [b'\'', b'\'', b'\'', ..] => {}
+                    [b'\'', b'\'', ..] | [b'"', b'"', ..] => return true,
+                    _ => {}
+                }
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+    false
+}
+
 fn file_name(path: &std::path::Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -2173,7 +2264,7 @@ fn the_bundle_job_assembles_the_release_files_without_the_key() {
     for (name, value) in [
         (
             "FROM",
-            "${{ needs.sign.result == 'success' && '' || 'rehearsal-' }}",
+            "${{ needs.sign.result != 'success' && 'rehearsal-' || '' }}",
         ),
         (
             "BUNDLE",
@@ -2241,7 +2332,7 @@ fn the_bundle_job_assembles_the_release_files_without_the_key() {
         ) && assemble.text.contains("sha256sum -c SHA256SUMS")
             && assemble
                 .text
-                .contains("if [ \"$FROM\" = rehearsal- ]; then"),
+                .contains("if [ \"${FROM:-}\" = rehearsal- ]; then"),
         "{assemble:#?}"
     );
     let uploads: Vec<&Step> = steps
