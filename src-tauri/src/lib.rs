@@ -15,6 +15,8 @@ pub mod preferences;
 pub mod reader_data;
 #[cfg(test)]
 mod reader_data_tests;
+#[cfg(test)]
+mod reader_data_validate_tests;
 pub mod release_notes;
 pub mod retry;
 pub mod start_here;

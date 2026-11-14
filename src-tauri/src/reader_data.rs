@@ -657,21 +657,16 @@ pub fn new_findings(findings: &[NewFinding], stored: &[Finding]) -> usize {
         .count()
 }
 
-/// Check one passage in a file (a bookmark's or a note's, labelled
-/// `label`) against this install's books and verse numbering. Returns the
-/// book and the passage's reference, e.g. "John 3:16–18", or the problem.
-fn check_passage_record<'a>(
+/// Check a record's book (by number, and by name if the file gives one)
+/// and chapter against this install's books. Returns the book, or the
+/// problem, labelled `label` ("Bookmark 2", "Reading position").
+fn check_chapter<'a>(
     label: &str,
-    (book_number, book_name, chapter, verse_start, verse_end): (
-        i64,
-        &Option<String>,
-        i64,
-        i64,
-        i64,
-    ),
+    book_number: i64,
+    book_name: &Option<String>,
+    chapter: i64,
     books: &'a [Book],
-    last_verses: &HashMap<(i64, i64), i64>,
-) -> Result<(&'a Book, String), String> {
+) -> Result<&'a Book, String> {
     let Some(found) = books.iter().find(|b| b.id == book_number) else {
         return Err(format!("{label}: there's no book number {book_number}."));
     };
@@ -688,6 +683,26 @@ fn check_passage_record<'a>(
             found.name, found.name, found.chapter_count
         ));
     }
+    Ok(found)
+}
+
+/// Check one passage in a file (a bookmark's, a note's or an AI
+/// finding's, labelled `label`) against this install's books and verse
+/// numbering. Returns the book and the passage's reference, e.g. "John
+/// 3:16–18", or the problem.
+fn check_passage_record<'a>(
+    label: &str,
+    (book_number, book_name, chapter, verse_start, verse_end): (
+        i64,
+        &Option<String>,
+        i64,
+        i64,
+        i64,
+    ),
+    books: &'a [Book],
+    last_verses: &HashMap<(i64, i64), i64>,
+) -> Result<(&'a Book, String), String> {
+    let found = check_chapter(label, book_number, book_name, chapter, books)?;
     let reference = format!(
         "{} {chapter}:{verse_start}{}",
         found.name,
@@ -702,12 +717,81 @@ fn check_passage_record<'a>(
         return Err(format!("{label}: {reference} isn't a valid verse range."));
     }
     if verse_end > last {
-        return Err(format!(
-            "{label}: there's no {reference}; {} {chapter} ends at verse {last}.",
-            found.name
-        ));
+        return Err(past_chapter_end(label, &reference, found, chapter, last));
     }
     Ok((found, reference))
+}
+
+/// Check one verse in a file (a highlight's, labelled `label`) against
+/// this install's books and verse numbering. Returns the book and the
+/// verse's reference, e.g. "John 3:16", or the problem.
+fn check_verse_record<'a>(
+    label: &str,
+    (book_number, book_name, chapter, verse): (i64, &Option<String>, i64, i64),
+    books: &'a [Book],
+    last_verses: &HashMap<(i64, i64), i64>,
+) -> Result<(&'a Book, String), String> {
+    let found = check_chapter(label, book_number, book_name, chapter, books)?;
+    let reference = format!("{} {chapter}:{verse}", found.name);
+    let last = last_verses.get(&(found.id, chapter)).copied().unwrap_or(0);
+    if verse < 1 {
+        return Err(format!("{label}: {reference} isn't a valid verse."));
+    }
+    if verse > last {
+        return Err(past_chapter_end(label, &reference, found, chapter, last));
+    }
+    Ok((found, reference))
+}
+
+fn past_chapter_end(label: &str, reference: &str, book: &Book, chapter: i64, last: i64) -> String {
+    format!(
+        "{label}: there's no {reference}; {} {chapter} ends at verse {last}.",
+        book.name
+    )
+}
+
+/// A problem with a record whose passage checked out: "Note 2 (John
+/// 3:1): A note can't be empty."
+fn record_problem(label: &str, reference: &str, problem: impl fmt::Display) -> String {
+    format!("{label} ({reference}): {problem}")
+}
+
+/// A record's date as the database keeps it (`normalize_timestamp`),
+/// `None` if the file gives none, or the problem.
+fn checked_date(
+    label: &str,
+    reference: &str,
+    date: Option<&str>,
+) -> Result<Option<String>, String> {
+    date.map(|date| {
+        normalize_timestamp(date).ok_or_else(|| {
+            record_problem(
+                label,
+                reference,
+                "its date isn't a valid UTC time like 2026-10-04T12:30:00Z.",
+            )
+        })
+    })
+    .transpose()
+}
+
+/// The records `check` accepts, in the file's order, each refused one's
+/// problem added to `problems`. `check` is given the record's index, for
+/// its label. What makes a record valid, and what happens to repeats, is
+/// each kind's own (`validate_bookmarks` and the rest).
+fn valid_records<R, T>(
+    records: Vec<R>,
+    problems: &mut Vec<String>,
+    check: impl Fn(usize, R) -> Result<T, String>,
+) -> Vec<T> {
+    let mut valid = Vec::new();
+    for (i, record) in records.into_iter().enumerate() {
+        match check(i, record) {
+            Ok(checked) => valid.push(checked),
+            Err(problem) => problems.push(problem),
+        }
+    }
+    valid
 }
 
 /// Whether a file's optional book name (if any) names `book`.
@@ -721,16 +805,13 @@ fn name_matches(book: &Book, name: &Option<String>) -> bool {
 /// `(book, chapter)` to the highest verse number any installed
 /// translation has, the same rule bookmarking uses). Either everything is
 /// valid, or nothing is imported and every problem (up to a limit) is
-/// listed.
+/// listed, in the order the kinds are checked here.
 pub fn validate(
     data: ReaderData,
     books: &[Book],
     translations: &[Translation],
     last_verses: &HashMap<(i64, i64), i64>,
 ) -> Result<ValidatedImport, ImportError> {
-    let mut problems = Vec::new();
-    let book = |id: i64| books.iter().find(|b| b.id == id);
-
     if data.notes.len() > MAX_NOTES {
         return Err(ImportError::Invalid(vec![format!(
             "It has {} notes; the most one file can hold is {MAX_NOTES}.",
@@ -744,289 +825,15 @@ pub fn validate(
         )]));
     }
 
-    let mut bookmarks: Vec<NewBookmark> = Vec::new();
-    let mut index_of: HashMap<(i64, i64, i64, i64), usize> = HashMap::new();
-    let mut duplicates_in_file = 0;
-    for (i, b) in data.bookmarks.into_iter().enumerate() {
-        let label = format!("Bookmark {}", i + 1);
-        let (found, reference) = match check_passage_record(
-            &label,
-            (b.book, &b.book_name, b.chapter, b.verse_start, b.verse_end),
-            books,
-            last_verses,
-        ) {
-            Ok(checked) => checked,
-            Err(problem) => {
-                problems.push(problem);
-                continue;
-            }
-        };
-        let created_at = match b.created_at.as_deref().map(normalize_timestamp) {
-            None => None,
-            Some(Some(t)) => Some(t),
-            Some(None) => {
-                problems.push(format!(
-                    "{label} ({reference}): its date isn't a valid UTC time like \
-                     2026-10-04T12:30:00Z."
-                ));
-                continue;
-            }
-        };
-        let new = NewBookmark {
-            book_id: found.id,
-            chapter: b.chapter,
-            verse_start: b.verse_start,
-            verse_end: b.verse_end,
-            created_at,
-        };
-        // The same passage twice: keep one, with the earliest date.
-        match index_of.get(&new.coordinates()) {
-            Some(&j) => {
-                duplicates_in_file += 1;
-                let kept = &mut bookmarks[j];
-                if let Some(t) = new.created_at
-                    && kept.created_at.as_ref().is_none_or(|k| &t < k)
-                {
-                    kept.created_at = Some(t);
-                }
-            }
-            None => {
-                index_of.insert(new.coordinates(), bookmarks.len());
-                bookmarks.push(new);
-            }
-        }
-    }
-
-    let mut highlights: Vec<NewHighlight> = Vec::new();
-    let mut highlighted: HashSet<(i64, i64, i64)> = HashSet::new();
-    let mut highlight_duplicates_in_file = 0;
-    for (i, h) in data.highlights.into_iter().enumerate() {
-        let label = format!("Highlight {}", i + 1);
-        let Some(found) = book(h.book) else {
-            problems.push(format!("{label}: there's no book number {}.", h.book));
-            continue;
-        };
-        if !name_matches(found, &h.book_name) {
-            problems.push(format!(
-                "{label}: book {} is {}, not {}.",
-                h.book,
-                found.name,
-                from_file(h.book_name.as_deref().unwrap_or_default())
-            ));
-            continue;
-        }
-        if !(1..=found.chapter_count).contains(&h.chapter) {
-            problems.push(format!(
-                "{label}: there's no {} {} ({} has {} chapters).",
-                found.name, h.chapter, found.name, found.chapter_count
-            ));
-            continue;
-        }
-        let reference = format!("{} {}:{}", found.name, h.chapter, h.verse);
-        let last = last_verses
-            .get(&(found.id, h.chapter))
-            .copied()
-            .unwrap_or(0);
-        if h.verse < 1 {
-            problems.push(format!("{label}: {reference} isn't a valid verse."));
-            continue;
-        }
-        if h.verse > last {
-            problems.push(format!(
-                "{label}: there's no {reference}; {} {} ends at verse {last}.",
-                found.name, h.chapter
-            ));
-            continue;
-        }
-        let created_at = h.created_at.as_deref().map(normalize_timestamp);
-        let updated_at = h.updated_at.as_deref().map(normalize_timestamp);
-        if matches!(created_at, Some(None)) || matches!(updated_at, Some(None)) {
-            problems.push(format!(
-                "{label} ({reference}): its date isn't a valid UTC time like \
-                 2026-10-04T12:30:00Z."
-            ));
-            continue;
-        }
-        let new = NewHighlight {
-            book_id: found.id,
-            chapter: h.chapter,
-            verse: h.verse,
-            color: h.color,
-            created_at: created_at.flatten(),
-            updated_at: updated_at.flatten(),
-        };
-        // The same verse twice: the first one counts.
-        if highlighted.insert(new.coordinates()) {
-            highlights.push(new);
-        } else {
-            highlight_duplicates_in_file += 1;
-        }
-    }
-
-    let mut notes: Vec<NewNote> = Vec::new();
-    for (i, n) in data.notes.into_iter().enumerate() {
-        let label = format!("Note {}", i + 1);
-        let (found, reference) = match check_passage_record(
-            &label,
-            (n.book, &n.book_name, n.chapter, n.verse_start, n.verse_end),
-            books,
-            last_verses,
-        ) {
-            Ok(checked) => checked,
-            Err(problem) => {
-                problems.push(problem);
-                continue;
-            }
-        };
-        let body = match normalize_body(&n.body) {
-            Ok(body) => body,
-            Err(e) => {
-                problems.push(format!("{label} ({reference}): {e}"));
-                continue;
-            }
-        };
-        let created_at = n.created_at.as_deref().map(normalize_timestamp);
-        let updated_at = n.updated_at.as_deref().map(normalize_timestamp);
-        if matches!(created_at, Some(None)) || matches!(updated_at, Some(None)) {
-            problems.push(format!(
-                "{label} ({reference}): its date isn't a valid UTC time like \
-                 2026-10-04T12:30:00Z."
-            ));
-            continue;
-        }
-        let new = NewNote {
-            book_id: found.id,
-            chapter: n.chapter,
-            verse_start: n.verse_start,
-            verse_end: n.verse_end,
-            body,
-            created_at: created_at.flatten(),
-            updated_at: updated_at.flatten(),
-        };
-        notes.push(new);
-    }
-    // Every note with a date is kept, even two alike: each is one of the
-    // reader's. One without a date repeats any other with its passage and
-    // text, so it counts only if it's the first and none has a date.
-    let dated: HashSet<NoteKey> = notes
-        .iter()
-        .filter(|n| n.created_at.is_some())
-        .map(NewNote::key)
-        .collect();
-    let mut undated: HashSet<NoteKey> = HashSet::new();
-    let file_notes = notes.len();
-    notes.retain(|n| {
-        n.created_at.is_some() || (!dated.contains(&n.key()) && undated.insert(n.key()))
-    });
-    let note_duplicates_in_file = file_notes - notes.len();
-
-    let note_chars: usize = notes.iter().map(|n| n.body.chars().count()).sum();
-    if note_chars > MAX_TOTAL_NOTE_CHARS {
-        problems.push(format!(
-            "Its notes hold {note_chars} characters in all; the most one file can hold is \
-             {MAX_TOTAL_NOTE_CHARS}."
-        ));
-    }
-
-    let mut findings: Vec<NewFinding> = Vec::new();
-    for (i, f) in data.findings.into_iter().enumerate() {
-        let label = format!("AI finding {}", i + 1);
-        let (found, reference) = match check_passage_record(
-            &label,
-            (f.book, &f.book_name, f.chapter, f.verse_start, f.verse_end),
-            books,
-            last_verses,
-        ) {
-            Ok(checked) => checked,
-            Err(problem) => {
-                problems.push(problem);
-                continue;
-            }
-        };
-        let request = match normalize_request(&f.request) {
-            Ok(request) => request,
-            Err(e) => {
-                problems.push(format!("{label} ({reference}): {e}"));
-                continue;
-            }
-        };
-        let created_at = match f.created_at.as_deref().map(normalize_timestamp) {
-            None => None,
-            Some(Some(t)) => Some(t),
-            Some(None) => {
-                problems.push(format!(
-                    "{label} ({reference}): its date isn't a valid UTC time like \
-                     2026-10-04T12:30:00Z."
-                ));
-                continue;
-            }
-        };
-        findings.push(NewFinding {
-            passage: Passage {
-                book_id: found.id,
-                chapter: f.chapter,
-                verse_start: f.verse_start,
-                verse_end: f.verse_end,
-            },
-            agent: normalize_agent(&f.agent),
-            request,
-            created_at,
-        });
-    }
-
-    let position = match data.reading_position {
-        None => None,
-        Some(p) => {
-            let translation = translations
-                .iter()
-                .find(|t| t.code.eq_ignore_ascii_case(p.translation.trim()));
-            match (translation, book(p.book)) {
-                (None, _) => {
-                    let codes: Vec<&str> = translations.iter().map(|t| t.code.as_str()).collect();
-                    problems.push(format!(
-                        "Reading position: this install has no \u{201c}{}\u{201d} translation \
-                         (it has {}).",
-                        from_file(&p.translation),
-                        codes.join(", ")
-                    ));
-                    None
-                }
-                (_, None) => {
-                    problems.push(format!(
-                        "Reading position: there's no book number {}.",
-                        p.book
-                    ));
-                    None
-                }
-                (Some(t), Some(found)) => {
-                    if !name_matches(found, &p.book_name) {
-                        problems.push(format!(
-                            "Reading position: book {} is {}, not {}.",
-                            p.book,
-                            found.name,
-                            from_file(p.book_name.as_deref().unwrap_or_default())
-                        ));
-                        None
-                    } else if !(1..=found.chapter_count).contains(&p.chapter) {
-                        problems.push(format!(
-                            "Reading position: there's no {} {} ({} has {} chapters).",
-                            found.name, p.chapter, found.name, found.chapter_count
-                        ));
-                        None
-                    } else {
-                        Some(NewPosition {
-                            translation_id: t.id,
-                            translation_code: t.code.clone(),
-                            translation_name: t.name.clone(),
-                            book_id: found.id,
-                            book_name: found.name.clone(),
-                            chapter: p.chapter,
-                        })
-                    }
-                }
-            }
-        }
-    };
+    let mut problems = Vec::new();
+    let (bookmarks, duplicates_in_file) =
+        validate_bookmarks(data.bookmarks, books, last_verses, &mut problems);
+    let (highlights, highlight_duplicates_in_file) =
+        validate_highlights(data.highlights, books, last_verses, &mut problems);
+    let (notes, note_duplicates_in_file) =
+        validate_notes(data.notes, books, last_verses, &mut problems);
+    let findings = validate_findings(data.findings, books, last_verses, &mut problems);
+    let position = validate_position(data.reading_position, books, translations, &mut problems);
 
     if !problems.is_empty() {
         let extra = problems.len().saturating_sub(MAX_REPORTED_PROBLEMS);
@@ -1052,6 +859,219 @@ pub fn validate(
         preferences: data.preferences,
         skipped_preferences: data.skipped_preferences,
     })
+}
+
+/// A file's bookmarks: each a passage this install has, with a valid date
+/// if it has one. Returns them, less repeats, and how many repeats there
+/// were.
+fn validate_bookmarks(
+    records: Vec<BookmarkRecord>,
+    books: &[Book],
+    last_verses: &HashMap<(i64, i64), i64>,
+    problems: &mut Vec<String>,
+) -> (Vec<NewBookmark>, usize) {
+    let checked = valid_records(records, problems, |i, b: BookmarkRecord| {
+        let label = format!("Bookmark {}", i + 1);
+        let (found, reference) = check_passage_record(
+            &label,
+            (b.book, &b.book_name, b.chapter, b.verse_start, b.verse_end),
+            books,
+            last_verses,
+        )?;
+        Ok(NewBookmark {
+            book_id: found.id,
+            chapter: b.chapter,
+            verse_start: b.verse_start,
+            verse_end: b.verse_end,
+            created_at: checked_date(&label, &reference, b.created_at.as_deref())?,
+        })
+    });
+
+    let mut bookmarks: Vec<NewBookmark> = Vec::new();
+    let mut index_of: HashMap<(i64, i64, i64, i64), usize> = HashMap::new();
+    let mut duplicates_in_file = 0;
+    for new in checked {
+        // The same passage twice: keep one, with the earliest date.
+        match index_of.get(&new.coordinates()) {
+            Some(&j) => {
+                duplicates_in_file += 1;
+                let kept = &mut bookmarks[j];
+                if let Some(t) = new.created_at
+                    && kept.created_at.as_ref().is_none_or(|k| &t < k)
+                {
+                    kept.created_at = Some(t);
+                }
+            }
+            None => {
+                index_of.insert(new.coordinates(), bookmarks.len());
+                bookmarks.push(new);
+            }
+        }
+    }
+    (bookmarks, duplicates_in_file)
+}
+
+/// A file's highlights: each a verse this install has, with valid dates
+/// if it has them. Returns them, less repeats, and how many repeats there
+/// were.
+fn validate_highlights(
+    records: Vec<HighlightRecord>,
+    books: &[Book],
+    last_verses: &HashMap<(i64, i64), i64>,
+    problems: &mut Vec<String>,
+) -> (Vec<NewHighlight>, usize) {
+    let mut highlights = valid_records(records, problems, |i, h: HighlightRecord| {
+        let label = format!("Highlight {}", i + 1);
+        let (found, reference) = check_verse_record(
+            &label,
+            (h.book, &h.book_name, h.chapter, h.verse),
+            books,
+            last_verses,
+        )?;
+        Ok(NewHighlight {
+            book_id: found.id,
+            chapter: h.chapter,
+            verse: h.verse,
+            color: h.color,
+            created_at: checked_date(&label, &reference, h.created_at.as_deref())?,
+            updated_at: checked_date(&label, &reference, h.updated_at.as_deref())?,
+        })
+    });
+
+    // The same verse twice: the first one counts.
+    let mut highlighted: HashSet<(i64, i64, i64)> = HashSet::new();
+    let file_highlights = highlights.len();
+    highlights.retain(|h| highlighted.insert(h.coordinates()));
+    let highlight_duplicates_in_file = file_highlights - highlights.len();
+    (highlights, highlight_duplicates_in_file)
+}
+
+/// A file's notes: each a passage this install has and plain text
+/// (`normalize_body`), with valid dates if it has them, and all of them
+/// within `MAX_TOTAL_NOTE_CHARS`. Returns them, less repeats, and how many
+/// repeats there were.
+fn validate_notes(
+    records: Vec<NoteRecord>,
+    books: &[Book],
+    last_verses: &HashMap<(i64, i64), i64>,
+    problems: &mut Vec<String>,
+) -> (Vec<NewNote>, usize) {
+    let mut notes = valid_records(records, problems, |i, n: NoteRecord| {
+        let label = format!("Note {}", i + 1);
+        let (found, reference) = check_passage_record(
+            &label,
+            (n.book, &n.book_name, n.chapter, n.verse_start, n.verse_end),
+            books,
+            last_verses,
+        )?;
+        let body = normalize_body(&n.body).map_err(|e| record_problem(&label, &reference, e))?;
+        Ok(NewNote {
+            book_id: found.id,
+            chapter: n.chapter,
+            verse_start: n.verse_start,
+            verse_end: n.verse_end,
+            body,
+            created_at: checked_date(&label, &reference, n.created_at.as_deref())?,
+            updated_at: checked_date(&label, &reference, n.updated_at.as_deref())?,
+        })
+    });
+
+    // Every note with a date is kept, even two alike: each is one of the
+    // reader's. One without a date repeats any other with its passage and
+    // text, so it counts only if it's the first and none has a date.
+    let dated: HashSet<NoteKey> = notes
+        .iter()
+        .filter(|n| n.created_at.is_some())
+        .map(NewNote::key)
+        .collect();
+    let mut undated: HashSet<NoteKey> = HashSet::new();
+    let file_notes = notes.len();
+    notes.retain(|n| {
+        n.created_at.is_some() || (!dated.contains(&n.key()) && undated.insert(n.key()))
+    });
+    let note_duplicates_in_file = file_notes - notes.len();
+
+    let note_chars: usize = notes.iter().map(|n| n.body.chars().count()).sum();
+    if note_chars > MAX_TOTAL_NOTE_CHARS {
+        problems.push(format!(
+            "Its notes hold {note_chars} characters in all; the most one file can hold is \
+             {MAX_TOTAL_NOTE_CHARS}."
+        ));
+    }
+    (notes, note_duplicates_in_file)
+}
+
+/// A file's AI findings: each a passage this install has and a request
+/// that's a short topic label (`normalize_request`), with a valid date if
+/// it has one. Repeats are all kept here: merging keeps one per passage
+/// and request (`new_findings`).
+fn validate_findings(
+    records: Vec<FindingRecord>,
+    books: &[Book],
+    last_verses: &HashMap<(i64, i64), i64>,
+    problems: &mut Vec<String>,
+) -> Vec<NewFinding> {
+    valid_records(records, problems, |i, f: FindingRecord| {
+        let label = format!("AI finding {}", i + 1);
+        let (found, reference) = check_passage_record(
+            &label,
+            (f.book, &f.book_name, f.chapter, f.verse_start, f.verse_end),
+            books,
+            last_verses,
+        )?;
+        let request =
+            normalize_request(&f.request).map_err(|e| record_problem(&label, &reference, e))?;
+        Ok(NewFinding {
+            passage: Passage {
+                book_id: found.id,
+                chapter: f.chapter,
+                verse_start: f.verse_start,
+                verse_end: f.verse_end,
+            },
+            agent: normalize_agent(&f.agent),
+            request,
+            created_at: checked_date(&label, &reference, f.created_at.as_deref())?,
+        })
+    })
+}
+
+/// A file's reading position, if it has one: a translation this install
+/// has (its code in any case, spaces around it aside), then a chapter of
+/// a book it has. Only the first problem is reported.
+fn validate_position(
+    record: Option<PositionRecord>,
+    books: &[Book],
+    translations: &[Translation],
+    problems: &mut Vec<String>,
+) -> Option<NewPosition> {
+    let p = record?;
+    let Some(t) = translations
+        .iter()
+        .find(|t| t.code.eq_ignore_ascii_case(p.translation.trim()))
+    else {
+        let codes: Vec<&str> = translations.iter().map(|t| t.code.as_str()).collect();
+        problems.push(format!(
+            "Reading position: this install has no \u{201c}{}\u{201d} translation \
+             (it has {}).",
+            from_file(&p.translation),
+            codes.join(", ")
+        ));
+        return None;
+    };
+    match check_chapter("Reading position", p.book, &p.book_name, p.chapter, books) {
+        Ok(found) => Some(NewPosition {
+            translation_id: t.id,
+            translation_code: t.code.clone(),
+            translation_name: t.name.clone(),
+            book_id: found.id,
+            book_name: found.name.clone(),
+            chapter: p.chapter,
+        }),
+        Err(problem) => {
+            problems.push(problem);
+            None
+        }
+    }
 }
 
 /// A UTC timestamp `YYYY-MM-DDTHH:MM:SS[.fraction]Z`, rewritten in the
