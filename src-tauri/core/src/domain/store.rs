@@ -92,26 +92,6 @@ impl Store {
         db::get_chapter_cross_references(self.db.read(), book_id, chapter).await
     }
 
-    /// The text of a verse or verse range, for expanding a cross-reference.
-    pub async fn verse_range(
-        &self,
-        translation_id: i64,
-        book_id: i64,
-        chapter: i64,
-        start_verse: i64,
-        end_verse: i64,
-    ) -> anyhow::Result<Vec<Verse>> {
-        db::get_verse_range(
-            self.db.read(),
-            translation_id,
-            book_id,
-            chapter,
-            start_verse,
-            end_verse,
-        )
-        .await
-    }
-
     /// Bookmark a passage (see `db::bookmarks::add_bookmark`).
     pub async fn add_bookmark(
         &self,
