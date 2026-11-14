@@ -895,3 +895,395 @@ pub struct SetHighlightArgs<'a> {
     pub verse_end: i64,
     pub color: &'a str,
 }
+
+#[cfg(test)]
+mod tests {
+    //! The JSON the backend sends for the shapes it declares too, as
+    //! literals: each reads here as the value the backend serialized it
+    //! from (`src-tauri/src/wire_pins.rs` pins the same literals).
+
+    use super::*;
+    use crate::bridge::StartRow;
+    use crate::picker_text::Book;
+
+    #[track_caller]
+    fn reads<T: serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(json: &str, value: &T) {
+        assert_eq!(&serde_json::from_str::<T>(json).expect("reads"), value);
+    }
+
+    fn note() -> CommentaryNote {
+        CommentaryNote {
+            verses: "16–18".into(),
+            body: "**Grace**, not works.".into(),
+        }
+    }
+
+    fn chapter() -> CommentaryChapter {
+        CommentaryChapter {
+            heading: "Chapter 3".into(),
+            notes: vec![note()],
+        }
+    }
+
+    fn book() -> CommentaryBook {
+        CommentaryBook {
+            name: "John".into(),
+            chapters: vec![chapter()],
+        }
+    }
+
+    fn plain() -> NoteSpan {
+        NoteSpan {
+            text: "Fixed ".into(),
+            strong: false,
+            code: false,
+        }
+    }
+
+    fn marked() -> NoteSpan {
+        NoteSpan {
+            text: "trunk".into(),
+            strong: true,
+            code: true,
+        }
+    }
+
+    fn result() -> SearchVerse {
+        SearchVerse {
+            book_id: 43,
+            chapter: 3,
+            verse: 16,
+            reference: "John 3:16".into(),
+            text: "the verse's words".into(),
+            marks: vec![(4, 9)],
+        }
+    }
+
+    fn go_to() -> GoTo {
+        GoTo {
+            book_id: 19,
+            chapter: 1,
+            reference: "Psalms 1".into(),
+        }
+    }
+
+    fn finding() -> Finding {
+        Finding {
+            id: 7,
+            book_id: 43,
+            book_name: "John".into(),
+            chapter: 11,
+            verse_start: 35,
+            verse_end: 35,
+            reference: "John 11:35".into(),
+            agent: "Claude".into(),
+            request: "grief".into(),
+            text: "Found by Claude for your request “grief”.".into(),
+            created_at: "2026-11-07 09:30:00".into(),
+            created_at_display: "Nov 7, 2026".into(),
+        }
+    }
+
+    #[test]
+    fn commentary_note() {
+        reads(
+            r#"{"verses":"16–18","body":"**Grace**, not works."}"#,
+            &note(),
+        );
+    }
+
+    #[test]
+    fn commentary_chapter() {
+        reads(
+            r#"{"heading":"Chapter 3","notes":[{"verses":"16–18","body":"**Grace**, not works."}]}"#,
+            &chapter(),
+        );
+    }
+
+    #[test]
+    fn commentary_book() {
+        reads(
+            r#"{"name":"John","chapters":[{"heading":"Chapter 3","notes":[{"verses":"16–18","body":"**Grace**, not works."}]}]}"#,
+            &book(),
+        );
+    }
+
+    #[test]
+    fn commentary() {
+        let commentary = Commentary {
+            title: "My notes".into(),
+            exported: "Nov 14, 2026".into(),
+            written: None,
+            book_headings: true,
+            books: vec![book()],
+        };
+        reads(
+            r#"{"title":"My notes","exported":"Nov 14, 2026","written":null,"bookHeadings":true,"books":[{"name":"John","chapters":[{"heading":"Chapter 3","notes":[{"verses":"16–18","body":"**Grace**, not works."}]}]}]}"#,
+            &commentary,
+        );
+    }
+
+    #[test]
+    fn note_span() {
+        reads(r#"{"text":"Fixed "}"#, &plain());
+        reads(r#"{"text":"trunk","strong":true,"code":true}"#, &marked());
+    }
+
+    #[test]
+    fn note_block() {
+        reads(
+            r#"{"kind":"heading","spans":[{"text":"Fixed "}]}"#,
+            &NoteBlock::Heading {
+                spans: vec![plain()],
+            },
+        );
+        let paragraph = NoteBlock::Paragraph {
+            spans: vec![plain(), marked()],
+        };
+        reads(
+            r#"{"kind":"paragraph","spans":[{"text":"Fixed "},{"text":"trunk","strong":true,"code":true}]}"#,
+            &paragraph,
+        );
+        let item = NoteBlock::Item {
+            depth: 1,
+            spans: vec![marked()],
+        };
+        reads(
+            r#"{"kind":"item","depth":1,"spans":[{"text":"trunk","strong":true,"code":true}]}"#,
+            &item,
+        );
+    }
+
+    #[test]
+    fn note_link() {
+        let link = NoteLink {
+            start: 4,
+            end: 14,
+            book_id: 45,
+            chapter: 5,
+            verse_start: Some(8),
+            verse_end: None,
+            reference: "Romans 5:8".into(),
+        };
+        reads(
+            r#"{"start":4,"end":14,"bookId":45,"chapter":5,"verseStart":8,"verseEnd":null,"reference":"Romans 5:8"}"#,
+            &link,
+        );
+    }
+
+    #[test]
+    fn search_verse() {
+        reads(
+            r#"{"bookId":43,"chapter":3,"verse":16,"reference":"John 3:16","text":"the verse's words","marks":[[4,9]]}"#,
+            &result(),
+        );
+    }
+
+    #[test]
+    fn go_to_chapter() {
+        reads(
+            r#"{"bookId":19,"chapter":1,"reference":"Psalms 1"}"#,
+            &go_to(),
+        );
+    }
+
+    #[test]
+    fn search_answer() {
+        reads(r#"{"kind":"empty"}"#, &SearchAnswer::Empty);
+        let passage = SearchAnswer::Passage {
+            book_id: 43,
+            chapter: 3,
+            verse_start: Some(16),
+            verse_end: None,
+            reference: "John 3:16".into(),
+        };
+        reads(
+            r#"{"kind":"passage","bookId":43,"chapter":3,"verseStart":16,"verseEnd":null,"reference":"John 3:16"}"#,
+            &passage,
+        );
+        let invalid = SearchAnswer::Invalid {
+            message: "John has 21 chapters.".into(),
+        };
+        reads(
+            r#"{"kind":"invalid","message":"John has 21 chapters."}"#,
+            &invalid,
+        );
+        let unavailable = SearchAnswer::Unavailable {
+            message: "Search isn't ready yet.".into(),
+        };
+        reads(
+            r#"{"kind":"unavailable","message":"Search isn't ready yet."}"#,
+            &unavailable,
+        );
+        let text = SearchAnswer::Text {
+            terms: vec!["love".into()],
+            total: 1,
+            offset: 0,
+            page_size: 50,
+            results: vec![result()],
+            go_to: None,
+        };
+        reads(
+            r#"{"kind":"text","terms":["love"],"total":1,"offset":0,"pageSize":50,"results":[{"bookId":43,"chapter":3,"verse":16,"reference":"John 3:16","text":"the verse's words","marks":[[4,9]]}]}"#,
+            &text,
+        );
+        let book = SearchAnswer::Text {
+            terms: vec!["psalms".into()],
+            total: 0,
+            offset: 0,
+            page_size: 50,
+            results: vec![],
+            go_to: Some(go_to()),
+        };
+        reads(
+            r#"{"kind":"text","terms":["psalms"],"total":0,"offset":0,"pageSize":50,"results":[],"goTo":{"bookId":19,"chapter":1,"reference":"Psalms 1"}}"#,
+            &book,
+        );
+    }
+
+    #[test]
+    fn translation() {
+        let dated = Translation {
+            code: "KJV".into(),
+            name: "King James Version".into(),
+            date: Some("1611/1769".into()),
+            licence: "Public domain".into(),
+            credit: "King James Version (1611/1769), public domain.".into(),
+        };
+        reads(
+            r#"{"code":"KJV","name":"King James Version","date":"1611/1769","licence":"Public domain","credit":"King James Version (1611/1769), public domain."}"#,
+            &dated,
+        );
+        let undated = Translation {
+            code: "WEB".into(),
+            name: "World English Bible".into(),
+            date: None,
+            licence: "Public domain".into(),
+            credit: "World English Bible, public domain.".into(),
+        };
+        reads(
+            r#"{"code":"WEB","name":"World English Bible","date":null,"licence":"Public domain","credit":"World English Bible, public domain."}"#,
+            &undated,
+        );
+    }
+
+    #[test]
+    fn xref() {
+        let verse = Xref {
+            book_id: 45,
+            chapter: 5,
+            verse: 8,
+            end_verse: None,
+            citation: "Rom 5:8".into(),
+        };
+        reads(
+            r#"{"bookId":45,"chapter":5,"verse":8,"endVerse":null,"citation":"Rom 5:8"}"#,
+            &verse,
+        );
+        let range = Xref {
+            book_id: 62,
+            chapter: 4,
+            verse: 9,
+            end_verse: Some(10),
+            citation: "1 John 4:9-10".into(),
+        };
+        reads(
+            r#"{"bookId":62,"chapter":4,"verse":9,"endVerse":10,"citation":"1 John 4:9-10"}"#,
+            &range,
+        );
+    }
+
+    #[test]
+    fn edge() {
+        let end = Edge {
+            title: "The end of the Bible".into(),
+            detail: None,
+        };
+        reads(r#"{"title":"The end of the Bible","detail":null}"#, &end);
+        let start = Edge {
+            title: "The Old Testament".into(),
+            detail: Some("Genesis · 50 chapters".into()),
+        };
+        reads(
+            r#"{"title":"The Old Testament","detail":"Genesis · 50 chapters"}"#,
+            &start,
+        );
+    }
+
+    #[test]
+    fn book_start() {
+        let start = BookStart {
+            book_id: 2,
+            chapter: 1,
+            book_name: "Exodus".into(),
+        };
+        reads(r#"{"bookId":2,"chapter":1,"bookName":"Exodus"}"#, &start);
+    }
+
+    #[test]
+    fn copy_formats() {
+        let formats = CopyFormats {
+            reference: "John 3:16 (KJV)".into(),
+            numbered: "16 the verse's words".into(),
+            markdown: "> the verse's words".into(),
+            plain: "the verse's words".into(),
+        };
+        reads(
+            r#"{"reference":"John 3:16 (KJV)","numbered":"16 the verse's words","markdown":"> the verse's words","plain":"the verse's words"}"#,
+            &formats,
+        );
+    }
+
+    #[test]
+    fn finding_reads_and_travels_back() {
+        reads(
+            r#"{"id":7,"bookId":43,"bookName":"John","chapter":11,"verseStart":35,"verseEnd":35,"reference":"John 11:35","agent":"Claude","request":"grief","text":"Found by Claude for your request “grief”.","createdAt":"2026-11-07 09:30:00","createdAtDisplay":"Nov 7, 2026"}"#,
+            &finding(),
+        );
+        // The page sends a finding back as it came (Undo's
+        // `restore_findings`).
+        assert_eq!(
+            serde_json::to_string(&finding()).expect("writes"),
+            r#"{"id":7,"bookId":43,"bookName":"John","chapter":11,"verseStart":35,"verseEnd":35,"reference":"John 11:35","agent":"Claude","request":"grief","text":"Found by Claude for your request “grief”.","createdAt":"2026-11-07 09:30:00","createdAtDisplay":"Nov 7, 2026"}"#
+        );
+    }
+
+    #[test]
+    fn finding_request() {
+        let request = FindingRequest {
+            request: "grief".into(),
+            agents: "Claude".into(),
+            verse_count: 1,
+            latest_display: "Nov 7, 2026".into(),
+            findings: vec![finding()],
+        };
+        reads(
+            r#"{"request":"grief","agents":"Claude","verseCount":1,"latestDisplay":"Nov 7, 2026","findings":[{"id":7,"bookId":43,"bookName":"John","chapter":11,"verseStart":35,"verseEnd":35,"reference":"John 11:35","agent":"Claude","request":"grief","text":"Found by Claude for your request “grief”.","createdAt":"2026-11-07 09:30:00","createdAtDisplay":"Nov 7, 2026"}]}"#,
+            &request,
+        );
+    }
+
+    #[test]
+    fn picker_book() {
+        let genesis = Book {
+            id: 1,
+            name: "Genesis".into(),
+            chapter_count: 50,
+        };
+        reads(r#"{"id":1,"name":"Genesis","chapterCount":50}"#, &genesis);
+    }
+
+    #[test]
+    fn start_row() {
+        let row = StartRow {
+            book_id: 43,
+            chapter: 1,
+            title: "John".into(),
+            line: "Begin with the life of Jesus.".into(),
+        };
+        reads(
+            r#"{"bookId":43,"chapter":1,"title":"John","line":"Begin with the life of Jesus."}"#,
+            &row,
+        );
+    }
+}

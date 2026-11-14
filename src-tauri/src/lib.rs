@@ -22,6 +22,8 @@ pub mod support_link;
 pub mod updater;
 pub mod web_link;
 pub mod window;
+#[cfg(test)]
+mod wire_pins;
 
 // The database and the domain logic, in a crate of their own, free of Tauri,
 // so that `gospel-getter-cli` can use them without linking the webview.
