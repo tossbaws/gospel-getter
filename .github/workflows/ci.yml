@@ -26,6 +26,17 @@ on:
     branches: [main, leptos]
   pull_request:
 
+# A newer push to a pull request cancels that pull request's run in
+# progress: its result no longer counts. Every other run (main's pushes)
+# is a group of its own, its run id, and cancels nothing: one shared group,
+# even without cancel-in-progress, lets a newer pending run replace an
+# older pending one, a red X on main and a cache never saved. Adding a
+# label (ci:full) starts no run here, so it cancels none: pull_request runs
+# on its default types, which leave out labeled.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   # dist.yml's RUST_TOOLCHAIN, exactly: CI tests the compiler the

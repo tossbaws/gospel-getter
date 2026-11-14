@@ -1776,6 +1776,56 @@ fn a_push_never_cancels_a_dispatched_run() {
     );
 }
 
+/// A newer push to a pull request cancels its older CI run (CI-03), and
+/// nothing else cancels or waits on anything: every run that isn't a pull
+/// request's (main's pushes) is a concurrency group of its own, by its run
+/// id. One shared group without cancel-in-progress would still let a newer
+/// pending run replace an older pending one, cancelling a run on main (a red
+/// X, and no cache saved). CI's `pull_request` keeps its default types, so
+/// adding the `ci:full` label starts no CI run and cancels none.
+#[test]
+fn ci_cancels_only_a_pull_requests_superseded_run() {
+    let concurrency: Vec<&str> = CI_YML
+        .lines()
+        .skip_while(|l| *l != "concurrency:")
+        .skip(1)
+        .take_while(|l| l.starts_with("  "))
+        .map(str::trim)
+        .collect();
+    let value = |key: &str| {
+        concurrency
+            .iter()
+            .find_map(|l| l.strip_prefix(key))
+            .unwrap_or_else(|| panic!("ci.yml's concurrency has no {key}: {concurrency:#?}"))
+    };
+    assert_eq!(
+        value("group: "),
+        "ci-${{ github.event_name == 'pull_request' && \
+         format('pr-{0}', github.event.pull_request.number) || github.run_id }}",
+        "a pull request's runs share a group, and every other run is a group of its own"
+    );
+    assert_eq!(
+        value("cancel-in-progress: "),
+        "${{ github.event_name == 'pull_request' }}",
+        "only a pull request's runs cancel"
+    );
+
+    let triggers: Vec<&str> = CI_YML
+        .lines()
+        .skip_while(|l| *l != "on:")
+        .skip(1)
+        .take_while(|l| l.is_empty() || l.starts_with(' '))
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    assert!(triggers.contains(&"pull_request:"), "{triggers:#?}");
+    assert!(
+        !triggers.iter().any(|l| l.starts_with("types:")),
+        "pull_request on its default types (no labeled, so a label cancels nothing): \
+         {triggers:#?}"
+    );
+}
+
 /// The `ci:full` label: a pull request that has it runs gui-windows and
 /// sign-rehearsal (and the windows job's GUI-check test app) in its own
 /// pull_request run, as a release/ branch's does, in place of a run
