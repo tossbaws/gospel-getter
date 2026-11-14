@@ -1295,7 +1295,9 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     env:
-      FROM: ${{ needs.sign.result == 'success' && '' || 'rehearsal-' }}
+      # The empty name last: see packaging_config's
+      # no_workflow_expression_has_an_empty_and_branch.
+      FROM: ${{ needs.sign.result != 'success' && 'rehearsal-' || '' }}
       BUNDLE: ${{ needs.sign.result == 'success' && 'gospel-getter-release-bundle' || 'rehearsal-release-bundle' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1371,14 +1373,16 @@ jobs:
 
       # The release's own key is the app's (tauri.conf.json); the
       # rehearsal's is the throwaway one it signed with. Then SHA256SUMS
-      # is checked once more, as the publish will.
+      # is checked once more, as the publish will. A release's FROM is
+      # empty: read as ${FROM:-}, so set -u holds even if the runner
+      # leaves an empty variable out.
       - name: Check and assemble the release files
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
           key=()
-          if [ "$FROM" = rehearsal- ]; then
+          if [ "${FROM:-}" = rehearsal- ]; then
             key=(--pubkey-file "$RUNNER_TEMP/rehearsal-key/rehearsal.key.pub")
           fi
           python3 tools/release/bundle_release.py bundle-in release-bundle "${key[@]}"
