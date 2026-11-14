@@ -190,8 +190,10 @@ jobs:
   # Behavior tests for ui/index.html and its Rust pieces (selection, copy,
   # bookmarks, search, compare, the notes export), run in jsdom against the
   # real command logic and database through examples/frontend_bridge.rs.
-  # Each test file starts its own bridge, which seeds a fresh database, so
-  # the files are split across two runners.
+  # Each test file starts its own bridge, with its own copy of a database
+  # the first bridge prepares (seeds and indexes) once per bridge build. The
+  # files were split across two runners when each bridge seeded its own;
+  # the two shards stay, with their names, until merging them is decided.
   frontend-tests:
     name: frontend-tests (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
