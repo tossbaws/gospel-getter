@@ -128,10 +128,6 @@
 //! only reads them. The welcome reads the `gospel-getter-*` keys (the
 //! fresh-install rule) and writes [`WELCOME_KEY`]; the reader keeps the
 //! disclosures' (`gospel-getter-footnotes`, `gospel-getter-cross-references`).
-//!
-//! Shared with the backend, not the page: the commands the pieces invoke,
-//! through the same `window.__TAURI__.core.invoke` the page's scripts use
-//! (see `ipc.rs`; their shapes are in `dto.rs`).
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;

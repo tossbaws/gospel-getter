@@ -4,63 +4,8 @@ Gospel Getter's page (`ui/index.html`) has been moved to Rust a piece at a
 time. This crate holds the pieces, written with [Leptos] and compiled to
 WebAssembly; they run inside the same Tauri app. The page keeps only three
 small inline scripts of its own (the pre-paint script, boot's prefetch and
-the plain-text fallback) and the loader. The pieces are the page's
-modal dialogs: Export notes (`src/export_notes.rs`, the first), ☰ →
-Export data…'s chooser (`src/export_choice.rs`: Everything, the backup,
-or My notes, which opens Export notes), the
-keyboard shortcuts sheet (`src/shortcuts.rs`), the welcome
-(`src/welcome.rs`), the import preview (`src/import_preview.rs`) and the
-note editor (`src/note_editor.rs`); and About (`src/about.rs`) with the
-updater (`src/updates.rs`: Check now, the launch check, the banner, the
-update shown in About, and installing with its progress); and the
-Library's tabs and lists (`src/library.rs`: Bookmarks, Highlights with
-its color filter, and Notes, each loaded from the backend here, once per
-reload); and search with the command palette (`src/search.rs`: the box,
-its Go to, Commands and Verses, Show more, and running a command), with
-the table of keyboard shortcuts (`src/shortcut_table.rs`, which the
-shortcuts sheet lists and the palette's key hints come from) and the
-palette's commands (`src/palette.rs`); and the book and chapter picker's
-books and chapters (`src/picker.rs`: the two testaments' lists, a book's
-chapters, the marks for the chapter being read, Random chapter, and the
-picker's clicks and keys, with its rules in `src/picker_text.rs`); and Aa
-with the translation button's popover (`src/aa.rs`: the translations,
-Compare and what it compares with, text size with its stepper and keys,
-line spacing, width, layout, theme, reading mode and the launch check's
-setting, with its rules in `src/aa_text.rs`), which keep the saved settings
-(`src/prefs.rs`); and the header's popovers and panels themselves
-(`src/surfaces.rs`: the translations, Aa, the Library, the ☰ menu, About
-and the picker as the sidebar or the popover; one open at a time, their
-buttons, focus in and back, a click outside, Escape, the menu's keys and
-the window crossing 1200px, with its rules in `src/surfaces_text.rs`),
-and the reader itself (`src/reader.rs`: each chapter read from the backend and
-drawn into the reading pane, with Compare's grid, the chapter's end and its
-Footnotes and Cross references; the reference button, the window title and
-the translation button; the reading position; a chapter that couldn't be
-read, with Try again; and the passage history, Back and Forward, with the
-mouse's buttons; its markup and rules in `src/reader_text.rs`); and the
-selection card (`src/card.rs`: the verse selection, Copy and Copy as…, the
-card's bookmark, highlight and notes, the verses' marks and the Shift
-ghost, with its markup and rules in `src/card_text.rs`); and the notes in
-the margin in reading mode (`src/margin.rs`: placed beside their verses,
-the markers in a narrow window, with their rules and markup in
-`src/margin_text.rs`); the AI-flagged findings an agent saved at the
-reader's request, among the notes there, in Compare's notes column and in
-the Library, with Aa's switch for them (`src/findings.rs`, their rules and
-markup in `src/findings_text.rs`); a note's text as Markdown wherever it shows
-(`src/note_markdown.rs`: the subset, everything else escaped, the
-references the backend found in it as links), the links in it
-(`src/note_links.rs`: a reference goes to its passage, a web link opens
-through the backend) and Copy as Markdown (`src/note_copy.rs`); and what
-was the
-page's main script: the keyboard dispatcher (`src/keyboard.rs`, its rules
-in `src/keyboard_text.rs`), the click dispatcher (`src/clicks.rs`), boot
-(`src/boot.rs`, which takes over the `get_home` and `get_reading` the
-page's prefetch script sent from `<head>`) and the page's glue
-(`src/page.rs`, its words and rules in `src/page_text.rs`: the toast,
-Export and Import data…, the welcome, the shortcuts sheet and search
-opened, the palette's page commands, the launch check). What the page's
-remaining scripts share with this, and the events the pieces send each
-other, are in `src/bridge.rs`.
+the plain-text fallback) and the loader. What crosses between them and the
+pieces, and the events the pieces send each other, are in `src/bridge.rs`.
 
 The saved settings' one table, their keys, values and names (in the page
 and in an export file), is `../shared/preferences.rs`, a file the backend
@@ -74,66 +19,98 @@ keeps the two the same.
 
 ## Layout
 
-- `ui-leptos/` is its own crate (Rust 2024, `cdylib`), separate from
-  `src-tauri/`: one targets `wasm32-unknown-unknown`, the other the desktop.
-  They share files, compiled into both by `#[path]`:
-  `../shared/preferences.rs` (below), `../shared/verse_parts.rs`, a
-  verse's parts and footnotes as the backend shows them, which the reader
-  draws, `../shared/passage_reference.rs`, how a passage is named, and
-  `../shared/book_aliases.rs`, the books' abbreviations, by which the
-  backend reads a typed reference and the Library's notes search finds a
-  note's book. `src/dto.rs` mirrors the other DTOs of the commands the pieces
-  call, with the names the JSON carries, and says what a shared crate would
-  replace later.
-- `src/ipc.rs`: Tauri commands through the same global the page uses,
-  `window.__TAURI__.core.invoke` (a `wasm_bindgen` extern plus
-  `serde-wasm-bindgen`), with the same command names and argument objects.
-- `src/bridge.rs`: what crosses to the page's remaining scripts (boot's
-  prefetch, `gospel-getter:boot`; the loader's
-  `gospel-getter:pieces-failed`, heard by the fallback alone), the globals
-  set for the tests, the custom events the pieces send each other (requests
-  to open with a snapshot in their `detail`, the one request to reload the
-  Library's lists and their answers back), and the page controls they use.
-- `src/dom.rs`: the DOM helpers the pieces share (focus that never
-  scrolls, the modals' Tab trap, listening).
-- `src/text.rs`, `src/import_text.rs`, `src/note_text.rs`,
-  `src/install.rs`, `src/update_text.rs`, `src/library_text.rs`,
-  `src/shortcut_table.rs`, `src/palette.rs`, `src/search_text.rs`,
-  `src/picker_text.rs`, `src/aa_text.rs`, `src/surfaces_text.rs`,
-  `src/reader_text.rs`, `src/card_text.rs`, `src/margin_text.rs`,
-  `src/note_markdown.rs`,
-  `src/keyboard_text.rs`, `src/page_text.rs`, and those at the top of
-  `src/export_choice.rs`: the
-  pieces' words, numbers and rules (Export notes' filter, the export
-  chooser's words, reasons and arrow keys, the import's
-  sentences, the note's length rule and its drafts, the welcome's
-  fresh-install rule, the updater's sentences, `megabytes` and download
-  progress, the Library's rows, color names, filter, notes search and
-  focus arithmetic; the shortcuts; the palette's commands, their reasons and its word matching; the search's
-  sentences, active option and marked words; the picker's compact grid,
-  Random chapter's pick, its keyboard moves and how far it scrolls; the
-  size keys; the surfaces' table, the sidebar's rule and the ☰ menu's
-  keys; the chapter's markup, byte for byte the page's former templates
-  (`fixtures/genesis-1.html` is their output, which a test compares),
-  Compare's rows, the reference, and the passage history's bookkeeping; the
-  card's markup and placement; where a margin note sits and how notes
-  stack, and the margin's markup; a note's Markdown (`note_markdown`); which key does what, j and k's steps and
-  how far a verse is scrolled into view; the toast's words, Export data…'s
-  summary and Compare's partner),
-  free
-  of the DOM,
-  unit-tested natively
-  (`cargo test`). The words a search matched are the backend's to find
-  (`query::term_marks`, beside the search's own terms); the box only draws
-  them. The update check's time limit and its "couldn't reach
-  GitHub" message are the backend's (`check_for_update`).
-- `src/lib.rs`: mounts the pieces when the module loads: the page's own
-  listeners first (`page`, `clicks`, `keyboard`, where the main script's
-  were), then the surfaces, Aa, the card and the reader, then boot (its
-  chapter drawn at once if its answer is in), then the rest in the next task
-  (About and the banner are moved to where the page had them, for focus
-  order, and the Library's tabs and lists into its panel), then tells the
-  pieces every one is listening (`gospel-getter:pieces-ready`).
+`ui-leptos/` is its own crate (Rust 2024, `cdylib`), separate from
+`src-tauri/`: one targets `wasm32-unknown-unknown`, the other the desktop.
+They share the files under `../shared/`, compiled into both by `#[path]`.
+
+## Module map
+
+The one list of the crate's modules: every `mod` in `src/lib.rs`, each
+`src/<name>.rs` unless it's shared. Each module's own `//!` says the rest.
+The `_text` modules, and `text`, `install`, `shortcut_table`, `palette`,
+`note_markdown` and the top of `export_choice`, hold the pieces' words,
+numbers and rules, free of the DOM and unit-tested natively (`cargo test`).
+
+The root and what the pieces share:
+
+- `lib`: the crate root; mounts the pieces when the module loads (below).
+- `bridge`: what crosses to the page's remaining scripts, the globals set for the tests and the GUI checks, the custom events the pieces send each other, and the page controls they use.
+- `ipc`: Tauri commands through the global the page uses, `window.__TAURI__.core.invoke` (a `wasm_bindgen` extern plus `serde-wasm-bindgen`), with the same command names and argument objects.
+- `dto`: the other shapes the commands exchange, mirrored from the backend with the names the JSON carries (see "What a shared crate would replace").
+- `dom`: the DOM helpers the pieces share (focus that never scrolls, the modals' Tab trap, listening, timers).
+- `intent`: whose an answer is once it's back, after the reader has done something newer.
+
+The page's glue:
+
+- `boot`: startup, from the translations to the launch check; it takes over the `get_home` and `get_reading` the page's prefetch script sent from `<head>`.
+- `page`: the toast, Export and Import data…, the welcome, the shortcuts sheet and search opened, the palette's page commands, the launch check.
+- `page_text`: the toast's words, Export data…'s summary and Compare's partner.
+- `keyboard`: the keyboard dispatcher, on `document`.
+- `keyboard_text`: which key does what, j and k's steps, and how far a verse is scrolled into view.
+- `clicks`: the click dispatcher, on the body.
+
+The dialogs:
+
+- `export_choice`: ☰ → Export data…'s chooser: Everything (the backup), or My notes, which opens Export notes.
+- `export_notes`: the Export notes dialog.
+- `text`: Export notes' words, numbers and filter.
+- `import_preview`: Import data…: the file's preview, then confirm or cancel.
+- `import_text`: the import's sentences and its add-or-replace choice.
+- `note_editor`: the note editor.
+- `note_text`: a note's length rule and its drafts.
+- `shortcuts`: the keyboard shortcuts sheet.
+- `welcome`: the welcome.
+- `install`: the welcome's fresh-install rule.
+- `about`: About, with the updater's section.
+- `updates`: the updater: Check now, the launch check, the banner, the update shown in About, and installing with its progress.
+- `update_text`: the updater's sentences, `megabytes` and download progress.
+
+The header, the Library and search:
+
+- `surfaces`: the header's popovers and panels and the picker's two shapes, the sidebar or the popover: one open at a time, their buttons, focus in and back, a click outside, Escape, the menu's keys and the window crossing 1200px.
+- `surfaces_text`: the surfaces' table, the sidebar's rule and the ☰ menu's keys.
+- `aa`: Aa and the translation button's popover: the translations, Compare, text size, line spacing, width, layout, theme, reading mode and the launch check's setting.
+- `aa_text`: the size keys and stepping, and what Compare shows beside the text.
+- `prefs`: the saved settings' store, by the one table in `preferences`.
+- `nav`: the top bar's Back, Forward and Recent places, and the chapter arrows.
+- `nav_text`: their words and rules, and the Recent places list as it's kept.
+- `picker`: the book and chapter picker's books and chapters, the marks for the chapter being read, Random chapter, and its clicks and keys.
+- `picker_text`: the compact grid, Random chapter's pick, the keyboard's moves and how far the picker scrolls.
+- `library`: the Library's tabs and lists: Bookmarks, Highlights with its color filter, and Notes, each loaded from the backend here, once per reload.
+- `library_text`: the lists' rows, color names, filter, notes search and focus arithmetic.
+- `search`: search, Go to and the command palette, in one box.
+- `search_text`: the search's sentences, active option and marked words.
+- `palette`: the palette's commands, their reasons and its word matching.
+- `shortcut_table`: the one table of keyboard shortcuts, which the sheet lists and the palette's key hints come from.
+
+The reader, the selection card and notes:
+
+- `reader`: the chapter on screen, how it gets there, and the passage history.
+- `reader_text`: the chapter's markup, byte for byte the page's former templates (`fixtures/genesis-1.html` is their output, which a test compares), Compare's rows, the reference, and the passage history's bookkeeping.
+- `card`: the selection card: the verse selection, Copy and Copy as…, the card's bookmark, highlight and notes, the verses' marks and the Shift ghost.
+- `card_text`: the card's markup and placement.
+- `margin`: the notes in the margin in reading mode.
+- `margin_text`: where a margin note sits, how notes stack, and the margin's markup.
+- `findings`: the AI-flagged findings an agent saved at the reader's request, in the margin, Compare's notes column and the Library, with Aa's switch for them.
+- `findings_text`: the findings' rules and markup.
+- `note_markdown`: a note's text as Markdown wherever it shows: the subset, everything else escaped, the references the backend found in it as links.
+- `note_links`: the links in a note: a reference goes to its passage, a web link opens through the backend.
+- `note_copy`: a note's Copy as Markdown.
+
+Shared with the backend, from `../shared/`:
+
+- `preferences`: the saved settings' one table (above).
+- `verse_parts`: a verse's parts and footnotes as the backend shows them, which the reader draws.
+- `passage_reference`: how a passage is named.
+- `book_aliases`: the books' abbreviations, by which the backend reads a typed reference and the Library's notes search finds a note's book.
+
+`src/lib.rs` mounts the pieces when the module loads: the page's own
+listeners first (`page`, `clicks`, `keyboard`, where the main script's
+were), then the surfaces, Aa, the card and the reader, then boot (its
+chapter drawn at once if its answer is in), then the rest in the next task
+(About and the banner are moved to where the page had them, for focus
+order, and the Library's tabs and lists into its panel), then tells the
+pieces every one is listening (`gospel-getter:pieces-ready`).
 
 ## Building and running
 
