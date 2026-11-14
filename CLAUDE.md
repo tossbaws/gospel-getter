@@ -15,3 +15,13 @@ Gospel Getter is a Tauri 2 Bible reader. The Rust backend lives in `src-tauri/`,
 
 - Use the `biblical-text-integrity` skill for any work that touches Bible text: seed data, ingestion, translations, verse rendering.
 - Never alter verse wording for any reason, including cleanup or fixing an apparent typo in a source dataset.
+
+## Comments
+
+- Comments explain why: the reason, alternatives that were rejected, the incident behind a rule, invariants, and couplings between files ("move both together; X's test fails if they differ").
+- Don't restate what the code plainly does.
+- Each reason lives once, next to the code it governs. Elsewhere, write a one-line pointer ("see ci.yml's header").
+- No inventories of modules or files inside source comments. Each module's own `//!` says what that module does; `ui-leptos/README.md` holds the UI's module map.
+- No migration narration ("so far", "now", "what X was") once a move is finished. Keep a history sentence only if it guards a rule, and phrase it as the rule.
+- When behavior changes, update the comment at its canonical home in the same commit.
+- Doc comments that compile into user- or agent-facing text (clap help and MCP schemas in `src-tauri/cli/`) are product text, not comments.
