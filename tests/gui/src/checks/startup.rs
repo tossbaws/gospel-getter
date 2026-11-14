@@ -24,7 +24,7 @@ use anyhow::{Context, Result, bail, ensure};
 use tokio::process::Command;
 
 use crate::config::Config;
-use crate::report::skipped;
+use crate::report::{Platform, skipped};
 use crate::ui::log_line;
 
 /// The native message's title (`START_FAILED_TITLE` in the app's lib.rs).
@@ -42,13 +42,18 @@ fn read_log(log: &Path) -> String {
     std::fs::read_to_string(log).unwrap_or_else(|e| format!("({} unread: {e})", log.display()))
 }
 
+/// Why check 74 isn't run on `platform`, if it isn't: a SKIP there.
+fn not_run_on(platform: Platform) -> Option<&'static str> {
+    (platform == Platform::Windows).then_some(
+        "not run on Windows: the app's data folder there is the account's own, which a run \
+         can't give a place of its own to stage a failure in",
+    )
+}
+
 /// Check 74 (see the module's docs).
 pub(super) async fn startup_failure(config: &Config, started: Instant) -> Result<String> {
-    if cfg!(windows) {
-        return Err(skipped(
-            "not run on Windows: the app's data folder there is the account's own, which a run \
-             can't give a place of its own to stage a failure in",
-        ));
+    if let Some(why) = not_run_on(Platform::current()) {
+        return Err(skipped(why));
     }
     let xvfb = config
         .xvfb
@@ -136,4 +141,28 @@ pub(super) async fn startup_failure(config: &Config, started: Instant) -> Result
         "\"{TITLE}\" shown; the log has the root cause ({ROOT_CAUSE}); exit code 1 once it was \
          answered"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::not_run_on;
+    use crate::report::{Check, Platform};
+
+    /// Check 74 is a SKIP exactly where the checks' table says it never
+    /// runs.
+    #[test]
+    fn it_skips_where_the_table_says() {
+        for platform in [Platform::Linux, Platform::Windows] {
+            assert_eq!(
+                not_run_on(platform).is_some(),
+                Check::StartupFailure.skip().always_on(platform),
+                "{platform}"
+            );
+            assert_eq!(
+                not_run_on(platform).is_some(),
+                Check::StartupFailure.skip().allowed_on(platform),
+                "{platform}"
+            );
+        }
+    }
 }

@@ -1,9 +1,9 @@
 //! results.txt: one line per check, PASS, SKIP or FAIL and why, rewritten
 //! as each result comes in so a run that is cut short still says how far
-//! it got. SKIP is a check that can't run on this platform (on Windows,
-//! checks 26, 45 and 65, and the sidebar's checks when the window can't be
-//! made wide enough): not a failure, so it doesn't fail the run, and never
-//! a pass, so it isn't counted as one.
+//! it got. SKIP is a check that can't run on this platform (where the
+//! checks' table below says, as `gui-check --list` prints it): not a
+//! failure, so it doesn't fail the run, and never a pass, so it isn't
+//! counted as one.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -11,256 +11,295 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-/// The checks, numbered as results.txt lists them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Check {
-    Driver = 1,
-    Csp = 2,
-    ExportNotes = 3,
-    Screenshots = 4,
-    Welcome = 5,
-    NoteEditor = 6,
-    Shortcuts = 7,
-    ImportPreview = 8,
-    UpdateBanner = 9,
-    UpdateAbout = 10,
-    UpdateDownload = 11,
-    UpdateLinkOnly = 12,
-    UpdateOffline = 13,
-    LibraryBookmarks = 14,
-    LibraryHighlights = 15,
-    LibraryNotes = 16,
-    Search = 17,
-    SearchGoTo = 18,
-    PaletteCommand = 19,
-    PickerPopover = 20,
-    PickerSidebar = 21,
-    RandomChapter = 22,
-    PickerKeyboard = 23,
-    SidebarPlace = 24,
-    AaControls = 25,
-    AaRestart = 26,
-    TranslationSwitch = 27,
-    Compare = 28,
-    ReadingMode = 29,
-    OnePanel = 30,
-    EscapeChain = 31,
-    OutsideClick = 32,
-    MenuKeyboard = 33,
-    AboutTrap = 34,
-    GSidebar = 35,
-    ResizePlace = 36,
-    ScrollThenResize = 37,
-    ChapterSteps = 38,
-    CompareGrid = 39,
-    Disclosures = 40,
-    BackForward = 41,
-    LongChapter = 42,
-    TryAgain = 43,
-    PlainText = 44,
-    DisclosuresKept = 45,
-    SelectVerses = 46,
-    CopyFormats = 47,
-    CardBookmark = 48,
-    CardHighlight = 49,
-    CardNote = 50,
-    XrefPreview = 51,
-    ShiftGhost = 52,
-    KeyTurns = 53,
-    KeySelection = 54,
-    KeyCopy = 55,
-    KeyHistoryNote = 56,
-    PalettePageCommands = 57,
-    ColdStart = 58,
-    ReopenAtVerse = 59,
-    MarginNotes = 60,
-    MarginSwitch = 61,
-    MarginNarrow = 62,
-    MarginPsalm119 = 63,
-    NotesSearch = 64,
-    NoteDraft = 65,
-    NoteMarkdown = 66,
-    BarHistory = 67,
-    BarChapters = 68,
-    NotesBeside = 69,
-    AiFindings = 70,
-    ExportChoice = 71,
-    SingleKeys = 72,
-    SecondLaunch = 73,
-    StartupFailure = 74,
+/// The checks' table: everything about each check but how it's run, one
+/// row per check, by number. A row is `(number, Variant, "results.txt
+/// name", Group, Skip)`: its number and name in results.txt, the session
+/// it runs in ([`Group`]) and where it's a SKIP ([`Skip`]). The [`Check`]
+/// enum, [`Check::name`], the groups' arrays (their lengths counted from
+/// it, not by hand) and `gui-check --list` are all made from it.
+///
+/// Adding a check: a row here, in number order (the build fails on a gap
+/// or a row out of order), and its run in `checks.rs`, in its group's
+/// session (that module's tests fail on a check with no dispatch arm, or
+/// two). A check still skips itself, at run time (`skipped`); the table
+/// says where it may, and [`Report::record`] fails a SKIP it doesn't list,
+/// or a pass where it says the check never runs.
+macro_rules! checks {
+    ($(($number:literal, $variant:ident, $name:literal, $group:ident, $skip:ident),)+) => {
+        /// The checks, numbered as results.txt lists them.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        pub enum Check {
+            $($variant = $number,)+
+        }
+
+        impl Check {
+            /// Every check, by number: the table's rows, in order.
+            const ALL: &[Check] = &[$(Check::$variant,)+];
+
+            /// Its name in results.txt.
+            pub fn name(self) -> &'static str {
+                match self {
+                    $(Check::$variant => $name,)+
+                }
+            }
+
+            /// The session it runs in.
+            pub const fn group(self) -> Group {
+                match self {
+                    $(Check::$variant => Group::$group,)+
+                }
+            }
+
+            /// Where it's a SKIP.
+            pub const fn skip(self) -> Skip {
+                match self {
+                    $(Check::$variant => Skip::$skip,)+
+                }
+            }
+
+            /// Its variant's name, as the dispatch code names it (the
+            /// dispatch tests in `checks.rs` look for it there).
+            #[cfg(test)]
+            pub fn variant(self) -> &'static str {
+                match self {
+                    $(Check::$variant => stringify!($variant),)+
+                }
+            }
+        }
+    };
+}
+
+checks! {
+    (1,  Driver,              "driver",                 Shipped,  Never),
+    (2,  Csp,                 "csp",                    Shipped,  Never),
+    (3,  ExportNotes,         "export-notes",           Shipped,  Never),
+    (4,  Screenshots,         "screenshots",            Shipped,  Never),
+    (5,  Welcome,             "welcome",                Shipped,  Never),
+    (6,  NoteEditor,          "note-editor",            Shipped,  Never),
+    (7,  Shortcuts,           "shortcuts",              Shipped,  Never),
+    (8,  ImportPreview,       "import-preview",         Shipped,  Never),
+    (9,  UpdateBanner,        "update-banner",          Updater,  Never),
+    (10, UpdateAbout,         "update-about",           Updater,  Never),
+    (11, UpdateDownload,      "update-download",        Updater,  Never),
+    (12, UpdateLinkOnly,      "update-link-only",       Updater,  Never),
+    (13, UpdateOffline,       "update-offline",         Updater,  Never),
+    (14, LibraryBookmarks,    "library-bookmarks",      Shipped,  Never),
+    (15, LibraryHighlights,   "library-highlights",     Shipped,  Never),
+    (16, LibraryNotes,        "library-notes",          Shipped,  Never),
+    (17, Search,              "search",                 Shipped,  Never),
+    (18, SearchGoTo,          "search-go-to",           Shipped,  Never),
+    (19, PaletteCommand,      "palette-command",        Shipped,  Never),
+    (20, PickerPopover,       "picker-popover",         Shipped,  Never),
+    (21, PickerSidebar,       "picker-sidebar",         Shipped,  OnNarrowWindows),
+    (22, RandomChapter,       "random-chapter",         Shipped,  Never),
+    (23, PickerKeyboard,      "picker-keyboard",        Shipped,  Never),
+    (24, SidebarPlace,        "sidebar-reading-place",  Shipped,  OnNarrowWindows),
+    (25, AaControls,          "aa-controls",            Shipped,  Never),
+    (26, AaRestart,           "aa-restart",             Relaunch, OnWindows),
+    (27, TranslationSwitch,   "translation-switch",     Shipped,  Never),
+    (28, Compare,             "compare",                Shipped,  Never),
+    (29, ReadingMode,         "reading-mode",           Shipped,  Never),
+    (30, OnePanel,            "one-panel",              Shipped,  Never),
+    (31, EscapeChain,         "escape-chain",           Shipped,  Never),
+    (32, OutsideClick,        "outside-click",          Shipped,  Never),
+    (33, MenuKeyboard,        "menu-keyboard",          Shipped,  Never),
+    (34, AboutTrap,           "about-trap",             Shipped,  Never),
+    (35, GSidebar,            "g-and-sidebar",          Shipped,  OnNarrowWindows),
+    (36, ResizePlace,         "resize-reading-place",   Shipped,  OnNarrowWindows),
+    (37, ScrollThenResize,    "scroll-then-resize",     Shipped,  OnNarrowWindows),
+    (38, ChapterSteps,        "chapter-steps",          Shipped,  Never),
+    (39, CompareGrid,         "compare-grid",           Shipped,  Never),
+    (40, Disclosures,         "disclosures",            Shipped,  Never),
+    (41, BackForward,         "back-forward",           Shipped,  Never),
+    (42, LongChapter,         "long-chapter",           Shipped,  Never),
+    (43, TryAgain,            "try-again",              Shipped,  Never),
+    (44, PlainText,           "plain-text-fallback",    Shipped,  Never),
+    (45, DisclosuresKept,     "disclosures-kept",       Relaunch, OnWindows),
+    (46, SelectVerses,        "select-verses",          Shipped,  Never),
+    (47, CopyFormats,         "copy-and-copy-as",       Shipped,  Never),
+    (48, CardBookmark,        "card-bookmark",          Shipped,  Never),
+    (49, CardHighlight,       "card-highlight",         Shipped,  Never),
+    (50, CardNote,            "card-note",              Shipped,  Never),
+    (51, XrefPreview,         "xref-preview",           Shipped,  Never),
+    (52, ShiftGhost,          "shift-ghost",            Shipped,  Never),
+    (53, KeyTurns,            "key-turns",              Shipped,  Never),
+    (54, KeySelection,        "key-selection",          Shipped,  Never),
+    (55, KeyCopy,             "key-copy",               Shipped,  Never),
+    (56, KeyHistoryNote,      "key-history-and-note",   Shipped,  Never),
+    (57, PalettePageCommands, "palette-page-commands",  Shipped,  Never),
+    (58, ColdStart,           "cold-start",             Relaunch, Never),
+    (59, ReopenAtVerse,       "reopen-at-verse",        Relaunch, Never),
+    (60, MarginNotes,         "margin-notes",           Shipped,  Never),
+    (61, MarginSwitch,        "margin-switch",          Shipped,  Never),
+    (62, MarginNarrow,        "margin-narrow",          Shipped,  Never),
+    (63, MarginPsalm119,      "margin-psalm-119",       Shipped,  Never),
+    (64, NotesSearch,         "notes-search",           Shipped,  Never),
+    (65, NoteDraft,           "note-draft",             Relaunch, OnWindows),
+    (66, NoteMarkdown,        "note-markdown",          Shipped,  Never),
+    (67, BarHistory,          "bar-back-forward-recent",Shipped,  Never),
+    (68, BarChapters,         "bar-chapter-arrows",     Shipped,  Never),
+    (69, NotesBeside,         "notes-beside",           Shipped,  Never),
+    (70, AiFindings,          "ai-findings",            Shipped,  Never),
+    (71, ExportChoice,        "export-choice",          Shipped,  Never),
+    (72, SingleKeys,          "single-key-switch",      Shipped,  Never),
+    (73, SecondLaunch,        "second-launch",          Shipped,  Never),
+    (74, StartupFailure,      "startup-failure",        Startup,  OnWindows),
+}
+
+// The table is numbered 1, 2, 3… in order, with no gap: results.txt and
+// `--list` go by number, and `Check::all` by the table's order.
+const _: () = {
+    let mut i = 0;
+    while i < Check::ALL.len() {
+        assert!(
+            Check::ALL[i] as usize == i + 1,
+            "the checks' table must be numbered 1, 2, 3… in order, with no gap"
+        );
+        i += 1;
+    }
+};
+
+/// The session a check runs in, in this order: [`Group::Startup`] with no
+/// session first, then [`Group::Shipped`], [`Group::Relaunch`] and
+/// [`Group::Updater`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Group {
+    /// The app as shipped started on a data folder it can't open, before
+    /// the first session: no WebDriver session, since it never has a
+    /// window.
+    Startup,
+    /// The checks on the app as shipped (the first session).
+    Shipped,
+    /// The checks on the app as shipped started again, on the first
+    /// session's data (the second session, and for check 65 a third,
+    /// after the second quits with a draft typed).
+    Relaunch,
+    /// The updater's checks, on the GUI checks' test build against the
+    /// run's own update server (the last session).
+    Updater,
+}
+
+impl Group {
+    /// How many checks the table puts in it.
+    const fn len(self) -> usize {
+        let mut count = 0;
+        let mut i = 0;
+        while i < Check::ALL.len() {
+            if Check::ALL[i].group() as u8 == self as u8 {
+                count += 1;
+            }
+            i += 1;
+        }
+        count
+    }
+
+    /// Its checks, by number; `N` is [`Group::len`].
+    const fn checks<const N: usize>(self) -> [Check; N] {
+        let mut checks = [Check::ALL[0]; N];
+        let mut found = 0;
+        let mut i = 0;
+        while i < Check::ALL.len() {
+            if Check::ALL[i].group() as u8 == self as u8 {
+                checks[found] = Check::ALL[i];
+                found += 1;
+            }
+            i += 1;
+        }
+        assert!(found == N, "a group's length is its count in the table");
+        checks
+    }
+}
+
+impl fmt::Display for Group {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Group::Startup => "startup",
+            Group::Shipped => "shipped",
+            Group::Relaunch => "relaunch",
+            Group::Updater => "updater",
+        })
+    }
+}
+
+/// A platform the checks run on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    Linux,
+    Windows,
+}
+
+impl Platform {
+    /// The one this is running on (`scripts/gui-check.sh` runs on no
+    /// other).
+    pub fn current() -> Self {
+        if cfg!(windows) {
+            Platform::Windows
+        } else {
+            Platform::Linux
+        }
+    }
+}
+
+impl fmt::Display for Platform {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Platform::Linux => "Linux",
+            Platform::Windows => "Windows",
+        })
+    }
+}
+
+/// Where a check is a SKIP. The check decides, as it runs (`skipped`);
+/// this is what the table says it may decide, for `--list` and
+/// [`Report::record`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Skip {
+    /// Run everywhere: never a SKIP.
+    Never,
+    /// Never run on Windows: a SKIP there, every time.
+    OnWindows,
+    /// A SKIP on Windows when the window can't be made wide enough for the
+    /// sidebar (1200 px; the CI runner's screen can be), run otherwise.
+    OnNarrowWindows,
+}
+
+impl Skip {
+    /// Whether the check may be a SKIP on `platform`.
+    pub fn allowed_on(self, platform: Platform) -> bool {
+        match self {
+            Skip::Never => false,
+            Skip::OnWindows | Skip::OnNarrowWindows => platform == Platform::Windows,
+        }
+    }
+
+    /// Whether the check is a SKIP on `platform` every time: never run
+    /// there.
+    pub fn always_on(self, platform: Platform) -> bool {
+        self == Skip::OnWindows && platform == Platform::Windows
+    }
+}
+
+impl fmt::Display for Skip {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Skip::Never => "-",
+            Skip::OnWindows => "windows",
+            Skip::OnNarrowWindows => "windows-when-narrow",
+        })
+    }
 }
 
 impl Check {
     /// The checks on the app as shipped (the first session).
-    pub const SHIPPED: [Check; 63] = [
-        Check::Driver,
-        Check::Csp,
-        Check::ExportNotes,
-        Check::ExportChoice,
-        Check::Screenshots,
-        Check::Welcome,
-        Check::NoteEditor,
-        Check::Shortcuts,
-        Check::ImportPreview,
-        Check::LibraryBookmarks,
-        Check::LibraryHighlights,
-        Check::LibraryNotes,
-        Check::Search,
-        Check::SearchGoTo,
-        Check::PaletteCommand,
-        Check::PickerPopover,
-        Check::PickerSidebar,
-        Check::RandomChapter,
-        Check::PickerKeyboard,
-        Check::SidebarPlace,
-        Check::AaControls,
-        Check::TranslationSwitch,
-        Check::Compare,
-        Check::ReadingMode,
-        Check::OnePanel,
-        Check::EscapeChain,
-        Check::OutsideClick,
-        Check::MenuKeyboard,
-        Check::AboutTrap,
-        Check::GSidebar,
-        Check::ResizePlace,
-        Check::ScrollThenResize,
-        Check::ChapterSteps,
-        Check::CompareGrid,
-        Check::Disclosures,
-        Check::BackForward,
-        Check::BarHistory,
-        Check::BarChapters,
-        Check::LongChapter,
-        Check::TryAgain,
-        Check::SelectVerses,
-        Check::CopyFormats,
-        Check::CardBookmark,
-        Check::CardHighlight,
-        Check::CardNote,
-        Check::XrefPreview,
-        Check::ShiftGhost,
-        Check::KeyTurns,
-        Check::KeySelection,
-        Check::KeyCopy,
-        Check::KeyHistoryNote,
-        Check::PalettePageCommands,
-        Check::SingleKeys,
-        Check::MarginNotes,
-        Check::MarginSwitch,
-        Check::MarginNarrow,
-        Check::MarginPsalm119,
-        Check::NotesBeside,
-        Check::NotesSearch,
-        Check::NoteMarkdown,
-        Check::AiFindings,
-        Check::SecondLaunch,
-        Check::PlainText,
-    ];
+    pub const SHIPPED: [Check; Group::Shipped.len()] = Group::Shipped.checks();
 
     /// The checks on the app as shipped started again, on the first
-    /// session's data (the second session, and for check 65 a third,
-    /// after the second quits with a draft typed).
-    pub const RELAUNCH: [Check; 5] = [
-        Check::ColdStart,
-        Check::ReopenAtVerse,
-        Check::AaRestart,
-        Check::DisclosuresKept,
-        Check::NoteDraft,
-    ];
+    /// session's data (the second session, and for check 65 a third).
+    pub const RELAUNCH: [Check; Group::Relaunch.len()] = Group::Relaunch.checks();
 
-    /// The app as shipped started on a data folder it can't open, before
-    /// the first session: no WebDriver session, since it never has a window.
-    pub const STARTUP: [Check; 1] = [Check::StartupFailure];
-
-    /// The updater's checks, on the GUI checks' test build against the
-    /// run's own update server (the third session).
-    pub const UPDATER: [Check; 5] = [
-        Check::UpdateBanner,
-        Check::UpdateAbout,
-        Check::UpdateDownload,
-        Check::UpdateLinkOnly,
-        Check::UpdateOffline,
-    ];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Check::Driver => "driver",
-            Check::Csp => "csp",
-            Check::ExportNotes => "export-notes",
-            Check::Screenshots => "screenshots",
-            Check::Welcome => "welcome",
-            Check::NoteEditor => "note-editor",
-            Check::Shortcuts => "shortcuts",
-            Check::ImportPreview => "import-preview",
-            Check::UpdateBanner => "update-banner",
-            Check::UpdateAbout => "update-about",
-            Check::UpdateDownload => "update-download",
-            Check::UpdateLinkOnly => "update-link-only",
-            Check::UpdateOffline => "update-offline",
-            Check::LibraryBookmarks => "library-bookmarks",
-            Check::LibraryHighlights => "library-highlights",
-            Check::LibraryNotes => "library-notes",
-            Check::Search => "search",
-            Check::SearchGoTo => "search-go-to",
-            Check::PaletteCommand => "palette-command",
-            Check::PickerPopover => "picker-popover",
-            Check::PickerSidebar => "picker-sidebar",
-            Check::RandomChapter => "random-chapter",
-            Check::PickerKeyboard => "picker-keyboard",
-            Check::SidebarPlace => "sidebar-reading-place",
-            Check::AaControls => "aa-controls",
-            Check::AaRestart => "aa-restart",
-            Check::TranslationSwitch => "translation-switch",
-            Check::Compare => "compare",
-            Check::ReadingMode => "reading-mode",
-            Check::OnePanel => "one-panel",
-            Check::EscapeChain => "escape-chain",
-            Check::OutsideClick => "outside-click",
-            Check::MenuKeyboard => "menu-keyboard",
-            Check::AboutTrap => "about-trap",
-            Check::GSidebar => "g-and-sidebar",
-            Check::ResizePlace => "resize-reading-place",
-            Check::ScrollThenResize => "scroll-then-resize",
-            Check::ChapterSteps => "chapter-steps",
-            Check::CompareGrid => "compare-grid",
-            Check::Disclosures => "disclosures",
-            Check::BackForward => "back-forward",
-            Check::LongChapter => "long-chapter",
-            Check::TryAgain => "try-again",
-            Check::PlainText => "plain-text-fallback",
-            Check::DisclosuresKept => "disclosures-kept",
-            Check::SelectVerses => "select-verses",
-            Check::CopyFormats => "copy-and-copy-as",
-            Check::CardBookmark => "card-bookmark",
-            Check::CardHighlight => "card-highlight",
-            Check::CardNote => "card-note",
-            Check::XrefPreview => "xref-preview",
-            Check::ShiftGhost => "shift-ghost",
-            Check::KeyTurns => "key-turns",
-            Check::KeySelection => "key-selection",
-            Check::KeyCopy => "key-copy",
-            Check::KeyHistoryNote => "key-history-and-note",
-            Check::PalettePageCommands => "palette-page-commands",
-            Check::ColdStart => "cold-start",
-            Check::ReopenAtVerse => "reopen-at-verse",
-            Check::MarginNotes => "margin-notes",
-            Check::MarginSwitch => "margin-switch",
-            Check::MarginNarrow => "margin-narrow",
-            Check::MarginPsalm119 => "margin-psalm-119",
-            Check::NotesSearch => "notes-search",
-            Check::NoteDraft => "note-draft",
-            Check::NoteMarkdown => "note-markdown",
-            Check::BarHistory => "bar-back-forward-recent",
-            Check::BarChapters => "bar-chapter-arrows",
-            Check::NotesBeside => "notes-beside",
-            Check::AiFindings => "ai-findings",
-            Check::ExportChoice => "export-choice",
-            Check::SingleKeys => "single-key-switch",
-            Check::SecondLaunch => "second-launch",
-            Check::StartupFailure => "startup-failure",
-        }
-    }
+    /// The updater's checks, on the GUI checks' test build (the last
+    /// session).
+    pub const UPDATER: [Check; Group::Updater.len()] = Group::Updater.checks();
 
     /// Its number in results.txt.
     pub fn number(self) -> u8 {
@@ -270,26 +309,28 @@ impl Check {
     /// Every check, by number: the app's as shipped, started again, and
     /// failing to start, and the updater's.
     pub fn all() -> Vec<Check> {
-        let mut all: Vec<Check> = Check::SHIPPED
-            .iter()
-            .chain(&Check::RELAUNCH)
-            .chain(&Check::STARTUP)
-            .chain(&Check::UPDATER)
-            .copied()
-            .collect();
-        all.sort_unstable();
-        all
+        Check::ALL.to_vec()
     }
 }
 
-/// Every check, one to a line as results.txt names it (`3 export-notes`),
-/// by number: what `gui-check --list` prints, and `scripts/gui-check.sh`
-/// reads, so its results.txt names every check even when the run is cut
-/// short.
+/// Every check, one to a line, by number: its number and name as
+/// results.txt names it (`3 export-notes`), then its group and where it's
+/// a SKIP (`26 aa-restart relaunch windows`; `-` for nowhere). What
+/// `gui-check --list` prints, and `scripts/gui-check.sh` reads (the first
+/// two columns), so its results.txt names every check even when the run is
+/// cut short.
 pub fn list() -> String {
     Check::all()
         .into_iter()
-        .map(|check| format!("{} {}\n", check.number(), check.name()))
+        .map(|check| {
+            format!(
+                "{} {} {} {}\n",
+                check.number(),
+                check.name(),
+                check.group(),
+                check.skip()
+            )
+        })
         .collect()
 }
 
@@ -318,6 +359,26 @@ pub fn skipped(why: impl Into<String>) -> anyhow::Error {
 /// failure screenshot for it.
 pub fn is_skip(error: &anyhow::Error) -> bool {
     error.downcast_ref::<Skipped>().is_some()
+}
+
+/// `check`'s outcome on `platform`, held to the checks' table: a SKIP on a
+/// platform its row doesn't list, or a pass where its row says it's never
+/// run, is a FAIL saying so (the check or its row is wrong). Any other
+/// outcome is as it was. A unit test can't see a check skip (it decides
+/// as it runs, on the real app), so every verdict is checked here, where
+/// each one passes.
+fn as_listed(check: Check, platform: Platform, outcome: Result<String>) -> Result<String> {
+    match outcome {
+        Err(e) if is_skip(&e) && !check.skip().allowed_on(platform) => Err(anyhow::anyhow!(
+            "a SKIP on {platform}, which the checks' table (tests/gui src/report.rs) doesn't \
+             list for it: {e:#}"
+        )),
+        Ok(detail) if check.skip().always_on(platform) => Err(anyhow::anyhow!(
+            "it ran on {platform}, where the checks' table (tests/gui src/report.rs) says it's \
+             a SKIP: {detail}"
+        )),
+        outcome => outcome,
+    }
 }
 
 /// A test of `scripts/gui-check.sh`'s retry, by hand: a check that passed
@@ -407,8 +468,10 @@ impl Report {
     }
 
     /// Records `check`'s outcome (the first one only) and rewrites
-    /// results.txt: a pass, a skip ([`skipped`]) or a failure.
+    /// results.txt: a pass, a skip ([`skipped`]) or a failure, held to
+    /// the table first ([`as_listed`]).
     pub async fn record(&mut self, check: Check, outcome: Result<String>) {
+        let outcome = as_listed(check, Platform::current(), outcome);
         let outcome = match (outcome, forced(check)) {
             (Ok(_), Some(why)) => Err(anyhow::anyhow!(why)),
             (outcome, _) => outcome,
@@ -511,14 +574,157 @@ mod tests {
         }
     }
 
+    /// One check to a line, its first two columns as results.txt names it
+    /// (all `scripts/gui-check.sh` reads), then its group and where it's a
+    /// SKIP.
     #[test]
     fn the_list_is_one_check_to_a_line_as_results_txt_names_it() {
         let list = list();
         let lines: Vec<&str> = list.lines().collect();
         assert_eq!(lines.len(), Check::all().len());
-        assert_eq!(lines[0], "1 driver");
-        assert!(lines.contains(&"9 update-banner"), "{list}");
+        assert_eq!(lines[0], "1 driver shipped -");
+        for line in [
+            "9 update-banner updater -",
+            "21 picker-sidebar shipped windows-when-narrow",
+            "26 aa-restart relaunch windows",
+            "74 startup-failure startup windows",
+        ] {
+            assert!(lines.contains(&line), "{line:?} in {list}");
+        }
+        for (line, check) in lines.iter().zip(Check::all()) {
+            let columns: Vec<&str> = line.split(' ').collect();
+            assert_eq!(columns.len(), 4, "{line:?}");
+            assert_eq!(
+                columns[..2].join(" "),
+                format!("{} {}", check.number(), check.name())
+            );
+        }
         assert!(list.ends_with('\n'));
+    }
+
+    /// The groups are the table's, each by number, their lengths counted
+    /// from it: 1 check failing to start (no array: nothing but `all` ever
+    /// needed one), 63 on the app as shipped, 5 started again, 5 on the
+    /// updater.
+    #[test]
+    fn the_groups_are_the_tables() {
+        for (group, checks) in [
+            (Group::Startup, &[Check::StartupFailure][..]),
+            (Group::Shipped, &Check::SHIPPED[..]),
+            (Group::Relaunch, &Check::RELAUNCH[..]),
+            (Group::Updater, &Check::UPDATER[..]),
+        ] {
+            let listed: Vec<Check> = Check::all()
+                .into_iter()
+                .filter(|check| check.group() == group)
+                .collect();
+            assert_eq!(checks, listed, "{group}");
+        }
+        assert_eq!(
+            [
+                Check::SHIPPED.len(),
+                Check::RELAUNCH.len(),
+                Check::UPDATER.len()
+            ],
+            [63, 5, 5]
+        );
+        assert_eq!(
+            Check::UPDATER,
+            [
+                Check::UpdateBanner,
+                Check::UpdateAbout,
+                Check::UpdateDownload,
+                Check::UpdateLinkOnly,
+                Check::UpdateOffline
+            ]
+        );
+    }
+
+    /// Where the checks skip themselves today: 26, 45, 65 and 74 never run
+    /// on Windows (`checks::display::NOT_RUN_ON_WINDOWS` and
+    /// `checks::startup`), and the sidebar's checks (21, 24, 35, 36 and 37,
+    /// through `Run::not_wide`) don't when the window can't be made wide
+    /// enough there. Nothing skips on Linux.
+    #[test]
+    fn the_skips_are_where_the_checks_skip() {
+        let on = |skip: Skip| -> Vec<u8> {
+            Check::all()
+                .into_iter()
+                .filter(|check| check.skip() == skip)
+                .map(Check::number)
+                .collect()
+        };
+        assert_eq!(on(Skip::OnWindows), [26, 45, 65, 74]);
+        assert_eq!(on(Skip::OnNarrowWindows), [21, 24, 35, 36, 37]);
+        for check in Check::all() {
+            assert!(!check.skip().allowed_on(Platform::Linux), "{check:?}");
+        }
+    }
+
+    /// The table holds every verdict to it: a SKIP where the row doesn't
+    /// allow one, or a pass where the row says the check never runs, is a
+    /// FAIL saying so; anything else is as it was.
+    #[test]
+    fn a_skip_or_a_pass_the_table_does_not_expect_fails() {
+        let verdict = |check: Check, platform: Platform, outcome: Result<String>| {
+            let mut report = Report::new(std::path::Path::new("unused"));
+            report.note(check, as_listed(check, platform, outcome));
+            report.lines()
+        };
+        let windows = Platform::Windows;
+        let linux = Platform::Linux;
+
+        // As the table says: unchanged.
+        let why = "not run on Windows: why";
+        assert_eq!(
+            verdict(Check::AaRestart, windows, Err(skipped(why))),
+            format!("SKIP 26 aa-restart: {why}\n")
+        );
+        assert_eq!(
+            verdict(Check::AaRestart, linux, Ok("kept".to_owned())),
+            "PASS 26 aa-restart: kept\n"
+        );
+        assert_eq!(
+            verdict(Check::PickerSidebar, windows, Err(skipped("narrow"))),
+            "SKIP 21 picker-sidebar: narrow\n"
+        );
+        assert_eq!(
+            verdict(Check::PickerSidebar, windows, Ok("wide".to_owned())),
+            "PASS 21 picker-sidebar: wide\n"
+        );
+        assert_eq!(
+            verdict(Check::Csp, windows, Err(anyhow::anyhow!("blocked"))),
+            "FAIL 2 csp: blocked\n"
+        );
+        assert_eq!(
+            verdict(Check::StartupFailure, windows, Err(anyhow::anyhow!("no"))),
+            "FAIL 74 startup-failure: no\n"
+        );
+
+        // A SKIP the table doesn't list: a FAIL, with the skip's reason.
+        assert_eq!(
+            verdict(Check::Csp, windows, Err(skipped("not here"))),
+            "FAIL 2 csp: a SKIP on Windows, which the checks' table (tests/gui src/report.rs) \
+             doesn't list for it: not here\n"
+        );
+        for check in [
+            Check::AaRestart,
+            Check::PickerSidebar,
+            Check::StartupFailure,
+        ] {
+            let lines = verdict(check, linux, Err(skipped("no")));
+            assert!(
+                lines.starts_with(&format!("FAIL {} ", check.number()))
+                    && lines.contains("a SKIP on Linux"),
+                "{lines}"
+            );
+        }
+        // A pass where the table says it never runs: a FAIL too.
+        assert_eq!(
+            verdict(Check::NoteDraft, windows, Ok("offered".to_owned())),
+            "FAIL 65 note-draft: it ran on Windows, where the checks' table (tests/gui \
+             src/report.rs) says it's a SKIP: offered\n"
+        );
     }
 
     /// A run passes only when every listed check passed.

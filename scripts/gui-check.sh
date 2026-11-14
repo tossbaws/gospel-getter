@@ -9,57 +9,37 @@
 #       scripts/gui-check.sh <release binary | AppImage | .exe> [out-dir]
 #   scripts/gui-check.sh --list
 #
-# --list prints every check, by number and name, as results.txt names them:
-# the checks' own list (gui-check --list), which a run's results.txt is
-# made from too.
+# --list prints every check, one to a line: its number and name, as
+# results.txt names it, its group (the session it runs in: startup,
+# shipped, relaunch or updater) and the platforms it's a SKIP on (windows;
+# windows-when-narrow, on Windows only when the window can't be made wide
+# enough for the sidebar; - for none). It's the checks' own list (gui-check
+# --list, made from the table in tests/gui src/report.rs), which a run's
+# results.txt is made from too: which check is which is there, not here.
 #
 # The out-dir (default target/gui-check/<timestamp>/) gets results.txt (one
 # PASS, SKIP or FAIL line per check, or FLAKY after a retry (see
 # GUI_CHECK_RETRY below), with the reason: every check listed, a
 # check with no result as a FAIL saying why; SKIP is a check that can't run
-# on this platform, as 26, 45 and 65 on Windows), steps.log, screenshots/*.png
+# on this platform, where --list says), steps.log, screenshots/*.png
 # (taken by WebKit or WebView2 through WebDriver), app.log, driver.log
 # (tauri-driver with the native driver's own output) and environment.txt;
 # on Windows, launched.txt too (the apps gui-launch started).
 # Exit code 0 only if no check failed: every one passed, or was skipped
 # (SKIP isn't a failure, nor a pass: the totals at the end count it apart).
 #
-# Checks 1 to 8, 14 to 16 (the Library), 17 to 19 (search and the
-# palette), 20 to 24 (the book and chapter picker), 25 to 29 (Aa, the
-# translations, Compare and reading mode), 30 to 37 (the header's
-# popovers and panels, the ☰ menu's keys, About's Tab, G and the sidebar,
-# and the window crossing 1200 px, also right after a scroll) and 38 to 44
-# (the reader: the chapter's end, Compare's grid, the chapter's lists, a
-# cross-reference with the mouse's back and forward buttons, Psalm 119, Try
-# again and the plain-text fallback) and 46 to 52 (the selection card:
-# verses selected with the mouse, Copy and Copy as… read back from the
-# clipboard, a bookmark, highlights and a note from the card, a
-# cross-reference read in it, the Shift ghost) and 53 to 57 (the keyboard:
-# chapters and books turned, verses selected with j and k and Shift, Escape,
-# Ctrl+C read back from the clipboard and Ctrl+Shift+C, Alt+← and Alt+→, N;
-# the palette's page commands) and 60 to 63 (margin notes in reading mode:
-# beside their verses, the switch leaving the text where it was, the
-# markers in a narrow window, Psalm 119 with a note on every verse), 64
-# (the Library's Notes tab searched), 66 (a note's Markdown and
-# references, Copy as Markdown), 67 (the bar's Back, Forward and Recent
-# places), 68 (the bar's chapter arrows), 69 (Compare with Notes: the
-# notes beside a text that never moves), 71 (☰ → Export data…'s chooser,
-# and the Library's Notes tab without a button), 72 (Aa's Single-key
-# shortcuts off: G and / do nothing, Ctrl+K still opens the palette, and the
-# shortcuts sheet says so) and 73 (the app started again while it's open:
-# the second launch hands over and exits) run on the app given, as does 74
-# first, with no session (the app started on a data folder of its own whose
-# database is a folder: its native "couldn't start" message, the root cause
-# in its log, exit code 1; Linux only, a SKIP on Windows); for 58 (a
-# cold start to the saved chapter), 59 (at the verse the reader was at), 26 and 45 it is
-# closed and started again on the same data, and for 65 (a note being typed
-# as the app quits, offered back as a draft) once more. The updater's checks (9 to 13) run on
-# GUI_CHECK_UPDATER_APP: the GUI checks' test build (cargo build --release
-# --features gui-test-updater), against the checks' own local update
-# server, with a signing key made for the run; without it they fail as not
-# run. Both apps are told the test build's settings file
-# (GOSPEL_GETTER_TEST_UPDATER, in the run's own folder); the app as shipped
-# ignores it, and checks that it sent the server nothing.
+# The groups run in this order. Startup first, with no session: the app
+# given, started on a data folder of its own whose database is a folder
+# (its native "couldn't start" message, the root cause in its log, exit
+# code 1). Shipped: the app given, in one session. Relaunch: that app
+# closed and started again on the same data, and once more after it quits
+# with a note being typed. Updater: GUI_CHECK_UPDATER_APP, the GUI checks'
+# test build (cargo build --release --features gui-test-updater), against
+# the checks' own local update server, with a signing key made for the
+# run; without it those checks fail as not run. Both apps are told the test
+# build's settings file (GOSPEL_GETTER_TEST_UPDATER, in the run's own
+# folder); the app as shipped ignores it, and checks that it sent the
+# server nothing.
 #
 # The app as shipped never reaches the real update server: it's started
 # with its HTTPS proxy set to a local port nothing answers on (the
@@ -365,7 +345,13 @@ log "out: $out"
 build_runner || setup_failed "tests/gui did not build"
 [[ -x $runner ]] || setup_failed "no gui-check binary at $runner"
 listed="$("$runner" --list)" || setup_failed "gui-check --list failed"
-mapfile -t checks <<<"${listed//$'\r'/}"
+# Each check as results.txt names it, "N name": the list's first two
+# columns (its group and SKIP platforms follow).
+while read -r number name _; do
+    if [[ -n $number ]]; then
+        checks+=("$number $name")
+    fi
+done <<<"${listed//$'\r'/}"
 [[ ${#checks[@]} -gt 0 && -n ${checks[0]} ]] || setup_failed "gui-check --list listed no checks"
 log "${#checks[@]} checks"
 

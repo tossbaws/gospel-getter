@@ -2,12 +2,12 @@
 # results.txt's verdicts, for scripts/gui-check.sh, which sources this (and
 # tests/gui's report tests, without a display). One line per check, by
 # number and name: PASS (it ran and passed), SKIP (it can't run on this
-# platform, as 26, 45 and 65 on Windows: neither a pass nor a failure),
+# platform, where `gui-check --list` says: neither a pass nor a failure),
 # FAIL, or, after a retry (retry_suite), FLAKY (it failed in attempt 1 and
 # passed in attempt 2: not a failure, and never counted as a pass). The
 # result functions read the caller's $results (the file) and $checks (every
-# check, "N name", as `gui-check --list` prints them); retry_suite reads
-# $out and $runner.
+# check, "N name", the first two columns of `gui-check --list`);
+# retry_suite reads $out and $runner.
 # shellcheck disable=SC2154
 
 # Every check gets a line in results.txt: those with no result (no PASS,

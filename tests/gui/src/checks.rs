@@ -1466,6 +1466,111 @@ impl Run<'_> {
 #[cfg(test)]
 mod tests {
     use super::start_tried_again;
+    use crate::report::{Check, Group};
+
+    /// Each group's session code: the top-level functions that run its
+    /// checks, by their source file.
+    const SESSIONS: [(Group, &str, &[&str]); 4] = [
+        (Group::Startup, include_str!("checks.rs"), &["run"]),
+        (Group::Shipped, include_str!("checks.rs"), &["shipped"]),
+        (
+            Group::Relaunch,
+            include_str!("checks/display.rs"),
+            &["restart", "draft_after_restart"],
+        ),
+        (Group::Updater, include_str!("checks/updates.rs"), &["run"]),
+    ];
+
+    /// The code of the top-level function `name` in `source` (its line
+    /// comments left out), from its signature to its closing brace, the
+    /// first line that is `}` alone.
+    fn body(source: &str, name: &str) -> String {
+        let signature = format!("fn {name}(");
+        let start = source
+            .match_indices(&signature)
+            .map(|(at, _)| at)
+            .find(|&at| {
+                let line = source[..at].rfind('\n').map_or(0, |n| n + 1);
+                source[line..at]
+                    .split_whitespace()
+                    .all(|word| ["pub", "pub(super)", "async"].contains(&word))
+                    && !source[line..at].starts_with(char::is_whitespace)
+            })
+            .unwrap_or_else(|| panic!("no top-level `fn {name}(`"));
+        let end = source[start..]
+            .find("\n}\n")
+            .unwrap_or_else(|| panic!("`fn {name}` doesn't end"));
+        source[start..start + end]
+            .lines()
+            .map(|line| line.split("//").next().unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// How many times `code` names `Check::{variant}` (not a longer
+    /// variant that starts the same).
+    fn named(code: &str, variant: &str) -> usize {
+        let path = format!("Check::{variant}");
+        code.match_indices(&path)
+            .filter(|(at, _)| {
+                !code[at + path.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+            })
+            .count()
+    }
+
+    /// Every check has one dispatch arm, as the checks' table says. It's
+    /// run in exactly one session, its group's (where that group's own
+    /// `fail_the_rest` covers it), named nowhere else among the sessions;
+    /// and one in the first session's `checked!` list is there once, and
+    /// not run by hand as well. The dispatch can't be made from the table
+    /// (each check is its own steps, in a set order, sharing what earlier
+    /// ones left), so this reads the sessions' code.
+    #[test]
+    fn every_check_has_one_dispatch_arm() {
+        let sessions: Vec<(Group, String)> = SESSIONS
+            .iter()
+            .map(|(group, source, names)| {
+                let code: Vec<String> = names.iter().map(|name| body(source, name)).collect();
+                (*group, code.join("\n"))
+            })
+            .collect();
+        for (group, code) in &sessions {
+            assert!(code.contains("report."), "{group}'s session code: {code}");
+        }
+        let mut wrong = Vec::new();
+        for check in Check::all() {
+            let variant = check.variant();
+            let listed: usize = sessions
+                .iter()
+                .map(|(_, code)| code.matches(&format!("checked!({variant},")).count())
+                .sum();
+            let run_by: Vec<Group> = sessions
+                .iter()
+                .filter(|(_, code)| {
+                    named(code, variant) > 0 || code.contains(&format!("checked!({variant},"))
+                })
+                .map(|(group, _)| *group)
+                .collect();
+            let by_hand: usize = sessions.iter().map(|(_, code)| named(code, variant)).sum();
+            if run_by != [check.group()] {
+                wrong.push(format!(
+                    "check {} {} ({variant}) is in the {} group, but run by the sessions of {run_by:?}",
+                    check.number(),
+                    check.name(),
+                    check.group()
+                ));
+            }
+            if listed > 1 || (listed == 1 && by_hand > 0) {
+                wrong.push(format!(
+                    "check {} {} ({variant}) is in `checked!` {listed} time(s) and named by hand \
+                     {by_hand} time(s): one dispatch arm only",
+                    check.number(),
+                    check.name()
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
 
     /// Only Edge WebDriver's "the browser exited" during start-up is tried
     /// again: not a start that timed out, not another refusal, and not
