@@ -1,37 +1,7 @@
 //! Gospel Getter's Leptos pieces: Rust compiled to WebAssembly, loaded by
 //! `ui/index.html` beside its JavaScript (Trunk builds the page; see
-//! `Trunk.toml` and `README.md`). The pieces so far are the page's modal
-//! dialogs: ☰ → Export data…'s chooser (`export_choice`), Export notes
-//! (`export_notes`), the keyboard shortcuts sheet
-//! (`shortcuts`), the welcome (`welcome`), the import preview
-//! (`import_preview`) and the note editor (`note_editor`); About
-//! (`about`) with the updater (`updates`); the Library's tabs and lists
-//! (`library`); and search with the command palette (`search`), with the
-//! table of keyboard shortcuts (`shortcut_table`) and the palette's
-//! commands (`palette`); the book and chapter picker's books and chapters
-//! (`picker`); and Aa with the translation button's popover (`aa`), which
-//! keep the saved settings (`prefs`, by the one table in `preferences`);
-//! and the header's popovers and panels themselves, with the picker's two
-//! shapes (`surfaces`), which open and close all of these; and the reader
-//! (`reader`, with its markup and rules in `reader_text`): the chapter on
-//! screen, how it gets there, and the passage history; and the selection
-//! card (`card`, with its markup and rules in `card_text`): the verse
-//! selection, copying, and the card's bookmark, highlight and notes; and
-//! the notes in the margin in reading mode (`margin`, with its rules and
-//! markup in `margin_text`), and the AI-flagged findings among them and
-//! Aa's switch for them (`findings`, with their rules and markup in
-//! `findings_text`); the top bar's Back, Forward and Recent places
-//! (`nav`, with its rules and markup in `nav_text`); a note's text as Markdown wherever it shows
-//! (`note_markdown`), its links (`note_links`) and Copy as Markdown
-//! (`note_copy`); and
-//! what the page's main script was: the keyboard (`keyboard`, with its
-//! rules in `keyboard_text`), the clicks (`clicks`), boot (`boot`) and the
-//! page's glue (`page`, with its words and rules in `page_text`): the
-//! toast, Export and Import data…, the welcome, the shortcuts sheet and
-//! search opened, the palette's page commands, the launch check. What the
-//! page's few remaining scripts share with this is in `bridge`, and the
-//! rule for whose an answer is once it's back, after the reader has done
-//! something newer, is `intent`'s.
+//! `Trunk.toml`). Each module's role is in the module map, this crate's
+//! `README.md`.
 //!
 //! If this module fails to load, the chapter still shows, as plain text, in
 //! the saved look (the page's small fallback reads it, and its pre-paint
