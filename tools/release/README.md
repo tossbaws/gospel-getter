@@ -25,6 +25,9 @@ can't see the release as an update.
    | `gospel-getter-windows-nsis-installer` | `gospel-getter-windows-nsis-installer-signed` |
    | `gospel-getter-windows-msi-installer` | `gospel-getter-windows-msi-installer-signed` |
 
+   The run keeps its artifacts 14 days (`retention-days` in `dist.yml`);
+   a release published later needs a new dispatched run.
+
    Check each installer against its recorded SHA-256 before anything else:
 
    ```sh
