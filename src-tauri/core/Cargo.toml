@@ -5,7 +5,7 @@ version = "0.0.0"
 description = "Gospel Getter's database and domain logic, free of Tauri"
 license = "MIT"
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.99"
 publish = false
 
 # `test-support`: disposable prepared databases (`db::test_support`), for the

@@ -7,14 +7,13 @@ name: CI
 # required checks on main, frontend-tests as its two shards,
 # "frontend-tests (1/2)" and "frontend-tests (2/2)"; keep their names.
 #
-# Only main's runs save the Rust caches (save-if); pull requests and other
-# branches restore main's (a run can restore caches saved on its own ref,
-# its base branch, or main) and save none of their own. Each pull request
+# Only main's runs save the Rust caches (save-if); pull requests restore
+# main's (a run can restore caches saved on its own ref, its base branch,
+# or main) and save none of their own. Each pull request
 # saving its own copy of main's (about 880 MB each) pushed main's own out
 # of the repository's 10 GB, and a cold build takes twice as long.
 # cache-cleanup.yml deletes what a pull request's runs did save (the small
-# caches) once it closes. It still runs on pushes to leptos, which restore
-# main's caches too.
+# caches) once it closes.
 #
 # Every action is pinned to a commit (Dependabot proposes updates:
 # .github/dependabot.yml), and every job builds with the Rust release the
@@ -23,8 +22,19 @@ name: CI
 
 on:
   push:
-    branches: [main, leptos]
+    branches: [main]
   pull_request:
+
+# A newer push to a pull request cancels that pull request's run in
+# progress: its result no longer counts. Every other run (main's pushes)
+# is a group of its own, its run id, and cancels nothing: one shared group,
+# even without cancel-in-progress, lets a newer pending run replace an
+# older pending one, a red X on main and a cache never saved. Adding a
+# label (ci:full) starts no run here, so it cancels none: pull_request runs
+# on its default types, which leave out labeled.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -283,10 +293,20 @@ jobs:
         with:
           set: trunk
 
+      # The same optimized dependencies as on Linux: without them the tests
+      # themselves took 347 s here, against 105 s on Linux. In bash, as on
+      # Linux (the job's default shell is PowerShell): rustup sets CARGO_HOME
+      # on the runner, and cargo reads its config.toml from there.
+      - name: Configure cargo
+        working-directory: .
+        shell: bash
+        run: cat .github/ci/cargo-config.toml >> "${CARGO_HOME:-$HOME/.cargo}/config.toml"
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          key: ${{ hashFiles('.github/ci/cargo-config.toml') }}
           workspaces: |
             src-tauri
             ui-leptos

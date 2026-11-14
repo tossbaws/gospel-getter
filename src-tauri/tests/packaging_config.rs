@@ -1481,6 +1481,69 @@ fn every_workflow_builds_with_the_release_rust() {
     }
 }
 
+/// Every crate's `rust-version` is the pinned Rust's major.minor
+/// (`RUST_TOOLCHAIN` in ci.yml and dist.yml): the only Rust CI and the
+/// releases build with, so the only one tested. Edition 2024's resolver
+/// picks dependency versions that fit `rust-version`, so one left behind
+/// (1.94, while every job built with 1.99) quietly held back `cargo update`.
+/// The app's workspace members (read from its `[workspace]`) each set one;
+/// the page's crate and the GUI checks' set none, or the same.
+#[test]
+fn every_crates_rust_version_is_the_pinned_rusts() {
+    let mut pinned = None;
+    for (file, workflow) in [("ci.yml", CI_YML), ("dist.yml", DIST_YML)] {
+        let toolchain = workflow_env(workflow, "RUST_TOOLCHAIN")
+            .unwrap_or_else(|| panic!("{file} sets no RUST_TOOLCHAIN"));
+        let major_minor = toolchain
+            .rsplit_once('.')
+            .map(|(major_minor, _)| major_minor)
+            .unwrap_or_else(|| panic!("{file}'s RUST_TOOLCHAIN isn't X.Y.Z: {toolchain}"));
+        assert_eq!(
+            *pinned.get_or_insert(major_minor),
+            major_minor,
+            "ci.yml's and dist.yml's RUST_TOOLCHAIN differ"
+        );
+    }
+    let pinned = pinned.expect("a pinned Rust");
+
+    let rust_version = |manifest: &str| {
+        manifest.lines().find_map(|l| {
+            l.strip_prefix("rust-version = \"")
+                .and_then(|rest| rest.strip_suffix('"'))
+                .map(str::to_owned)
+        })
+    };
+    let members = CARGO_TOML
+        .lines()
+        .find_map(|l| l.strip_prefix("members = ["))
+        .and_then(|rest| rest.strip_suffix(']'))
+        .expect("Cargo.toml's [workspace] lists its members on one line");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut crates = vec![("src-tauri/Cargo.toml".to_owned(), CARGO_TOML.to_owned())];
+    for member in members.split(',').map(|m| m.trim().trim_matches('"')) {
+        let path = root.join(member).join("Cargo.toml");
+        let manifest =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        crates.push((format!("src-tauri/{member}/Cargo.toml"), manifest));
+    }
+    assert!(crates.len() >= 3, "the app, core and cli: {members}");
+    for (file, manifest) in &crates {
+        assert_eq!(
+            rust_version(manifest).as_deref(),
+            Some(pinned),
+            "{file}'s rust-version isn't the pinned Rust's {pinned}"
+        );
+    }
+    for dir in ["../ui-leptos", "../tests/gui"] {
+        let path = root.join(dir).join("Cargo.toml");
+        let manifest =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        if let Some(version) = rust_version(&manifest) {
+            assert_eq!(version, pinned, "{}'s rust-version", path.display());
+        }
+    }
+}
+
 /// The updater's signing key (D-01). Its secrets are named by one job
 /// alone, dist.yml's sign job: in the release environment (which deploys
 /// from main only), on a run dispatched on main. Nothing hands every secret
@@ -1773,6 +1836,56 @@ fn a_push_never_cancels_a_dispatched_run() {
         "dist-${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || \
          (github.event.action == 'labeled' && github.event.label.name != 'ci:full')) && \
          github.run_id || github.ref }}"
+    );
+}
+
+/// A newer push to a pull request cancels its older CI run (CI-03), and
+/// nothing else cancels or waits on anything: every run that isn't a pull
+/// request's (main's pushes) is a concurrency group of its own, by its run
+/// id. One shared group without cancel-in-progress would still let a newer
+/// pending run replace an older pending one, cancelling a run on main (a red
+/// X, and no cache saved). CI's `pull_request` keeps its default types, so
+/// adding the `ci:full` label starts no CI run and cancels none.
+#[test]
+fn ci_cancels_only_a_pull_requests_superseded_run() {
+    let concurrency: Vec<&str> = CI_YML
+        .lines()
+        .skip_while(|l| *l != "concurrency:")
+        .skip(1)
+        .take_while(|l| l.starts_with("  "))
+        .map(str::trim)
+        .collect();
+    let value = |key: &str| {
+        concurrency
+            .iter()
+            .find_map(|l| l.strip_prefix(key))
+            .unwrap_or_else(|| panic!("ci.yml's concurrency has no {key}: {concurrency:#?}"))
+    };
+    assert_eq!(
+        value("group: "),
+        "ci-${{ github.event_name == 'pull_request' && \
+         format('pr-{0}', github.event.pull_request.number) || github.run_id }}",
+        "a pull request's runs share a group, and every other run is a group of its own"
+    );
+    assert_eq!(
+        value("cancel-in-progress: "),
+        "${{ github.event_name == 'pull_request' }}",
+        "only a pull request's runs cancel"
+    );
+
+    let triggers: Vec<&str> = CI_YML
+        .lines()
+        .skip_while(|l| *l != "on:")
+        .skip(1)
+        .take_while(|l| l.is_empty() || l.starts_with(' '))
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    assert!(triggers.contains(&"pull_request:"), "{triggers:#?}");
+    assert!(
+        !triggers.iter().any(|l| l.starts_with("types:")),
+        "pull_request on its default types (no labeled, so a label cancels nothing): \
+         {triggers:#?}"
     );
 }
 
