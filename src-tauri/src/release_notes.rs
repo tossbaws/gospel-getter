@@ -3,36 +3,8 @@
 //! blocks of plain text the page puts on screen with `textContent`. Nothing
 //! here is ever HTML: a tag in the notes is text, shown as written.
 
-use serde::Serialize;
-
-/// A run of text, maybe bold or code.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Span {
-    pub text: String,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub strong: bool,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub code: bool,
-}
-
-/// A block of the notes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum Block {
-    /// Any level of heading.
-    Heading {
-        spans: Vec<Span>,
-    },
-    Paragraph {
-        spans: Vec<Span>,
-    },
-    /// A list item, `depth` lists deep (0 for a top-level item). Items in
-    /// a row make one list.
-    Item {
-        depth: u8,
-        spans: Vec<Span>,
-    },
-}
+// Shared with the page, which reads them whole (see shared/wire.rs).
+pub use crate::wire::{Block, Span};
 
 /// The deepest list nesting kept; deeper items are shown at this depth.
 const MAX_DEPTH: u8 = 3;

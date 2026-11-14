@@ -22,6 +22,10 @@ pub mod support_link;
 pub mod updater;
 pub mod web_link;
 pub mod window;
+// The commands' answers the page reads whole, shared with the page's Rust
+// pieces (ui-leptos), which compile the same file.
+#[path = "../../shared/wire.rs"]
+pub mod wire;
 
 // The database and the domain logic, in a crate of their own, free of Tauri,
 // so that `gospel-getter-cli` can use them without linking the webview.

@@ -11,14 +11,8 @@ use crate::db::{self, Book, TopVerse, Translation};
 use crate::domain::bible::{self, ChapterRef};
 use crate::domain::kjv_markup::{PartKind, VerseText};
 use crate::start_here::{StartHereDto, start_here};
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BookDto {
-    pub id: i64,
-    pub name: String,
-    pub chapter_count: i64,
-}
+// Shared with the page, which reads them whole (see shared/wire.rs).
+pub use crate::wire::{BibleEdgeDto, BookDto, BookStartDto, TranslationDto, XrefDto};
 
 impl From<&Book> for BookDto {
     fn from(b: &Book) -> Self {
@@ -28,20 +22,6 @@ impl From<&Book> for BookDto {
             chapter_count: b.chapter_count,
         }
     }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TranslationDto {
-    pub code: String,
-    pub name: String,
-    /// When it was made, as Aa's chooser shows it ("1611/1769"); `None`
-    /// when there's no one date (see `seed::TRANSLATIONS`).
-    pub date: Option<String>,
-    /// "public domain".
-    pub licence: String,
-    /// Its line in About's credits.
-    pub credit: String,
 }
 
 impl From<&Translation> for TranslationDto {
@@ -94,16 +74,6 @@ pub struct ChaptersDto {
     pub book_id: i64,
     pub book_name: String,
     pub chapters: Vec<ChapterEntryDto>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct XrefDto {
-    pub book_id: i64,
-    pub chapter: i64,
-    pub verse: i64,
-    pub end_verse: Option<i64>,
-    pub citation: String,
 }
 
 /// A verse of the chapter being read: as shown (see `VerseText`), with its
@@ -159,17 +129,6 @@ pub struct ChapterSideDto {
     pub verses: Vec<SimpleVerseDto>,
 }
 
-/// A quiet card in a neighbor's place, where there's no neighboring
-/// chapter: before Genesis 1 ("The Old Testament", "Genesis · 50
-/// chapters") and after Revelation 22 ("The end of the Bible"). Words
-/// about the Bible's shape, never scripture text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BibleEdgeDto {
-    pub title: String,
-    pub detail: Option<String>,
-}
-
 impl BibleEdgeDto {
     /// Before the first chapter of `book`: its testament, and the book with
     /// its chapter count.
@@ -217,15 +176,6 @@ pub struct ReadingPaneDto {
     pub prev_book: Option<BookStartDto>,
     pub next_book: Option<BookStartDto>,
     pub has_chapter_xrefs: bool,
-}
-
-/// A book's first chapter, named.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BookStartDto {
-    pub book_id: i64,
-    pub chapter: i64,
-    pub book_name: String,
 }
 
 /// Render a cross-reference's target passage as a human-readable citation,

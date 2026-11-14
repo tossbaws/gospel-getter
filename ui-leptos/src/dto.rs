@@ -1,35 +1,45 @@
-//! The shapes the commands the pieces call exchange, mirrored from
-//! `src-tauri/src/commands/`, `src-tauri/src/notes_export.rs` and
-//! `src-tauri/src/reader_data.rs` with the same names the JSON carries
-//! (camelCase, except the display preferences' file names).
+//! The shapes the commands exchange that the page declares for itself,
+//! with the names the JSON carries (camelCase, except the display
+//! preferences' file names). The answers both sides read whole are in
+//! `shared/wire.rs`, used here under the page's names. These stay here
+//! because the page reads them differently from how the backend writes
+//! them:
 //!
-//! This is the one place the pieces repeat Rust types. A later shared
-//! crate (native and wasm32, serde only) would replace: `NotedBook` and
-//! `DatePresets`/`DaySpan` (`notes_export.rs`), `NotesExportOptions` and
-//! `NotesExportOutcome` (`commands/export_notes.rs`), `Commentary` and its
-//! parts (`notes_export.rs`), and `NotesFilter`
-//! (`notes_export.rs`, which also carries `deny_unknown_fields` and
-//! `NaiveDate`s where this side keeps `YYYY-MM-DD` strings, as the page
-//! did); for the import, `ImportChoice`, `ImportPreviewDto`,
-//! `PositionPreviewDto` and `ImportResultDto` (`commands/backup.rs`) and
-//! `Preferences` (`reader_data.rs`, whose enums travel as their kebab-case
-//! names, strings here); for the updater, `UpdateInfo` and `DownloadEvent`
-//! (`updater.rs`) and `Block` and `Span` (`release_notes.rs`); for the
-//! Library, `BookmarkDto` (`commands/bookmarks.rs`), `HighlightPassageDto`
-//! (`commands/highlights.rs`) and `NoteDto` (`commands/notes.rs`), of which
-//! these read only what the lists show; for search, `SearchDto`,
-//! `SearchResultDto` and `GoToDto` (`commands/search.rs`); for the reader,
-//! `HomeDto`'s translations and position, `TranslationDto`,
-//! `ReadingPaneDto`, `VerseDto` and `SimpleVerseDto`, `XrefDto`,
-//! `ChapterSideDto`, `BibleEdgeDto` and `BookStartDto`
-//! (`commands/reading.rs`), and `CompareDto` and `CompareColumnDto`
-//! (`commands/compare.rs`); for the selection card, `NoteDto` (what the
-//! card shows of it), `PassageDto`, `CopyTextDto` and `CopyFormatsDto`
-//! (`commands/passages.rs`), and `HighlightDto` (`commands/highlights.rs`).
-//! A verse's parts and footnotes are already shared with the backend
-//! (`verse_parts`), and so is how a passage is named (`passage_reference`).
+//! - Only part of the backend's shape, what the page shows: `Bookmark`,
+//!   `HighlightPassage` (whose color is a string here), `Note`,
+//!   `SelectionNote`, `Home`, `UpdateInfo`, `PositionPreview`,
+//!   `PassageText` and `CopyText`.
+//! - Counts as `u64` where the backend's are `usize`: `NotedBook` (so
+//!   `ExportOptions`), `ExportOutcome`, `FolderOutcome`, `ImportResult`,
+//!   `DownloadEvent`, and `ImportPreview` (so `ImportChoice`), which also
+//!   leaves out `skippedPreferences`.
+//! - Dates as `YYYY-MM-DD` strings where the backend has `NaiveDate`s:
+//!   `DaySpan`, `DatePresets` and `Filter` (which also has no
+//!   `deny_unknown_fields` and no defaults here).
+//! - `Preferences`, whose enums are their kebab-case names here, and
+//!   `Highlight`, whose color is a string.
+//! - One `Verse` for both of the backend's (`VerseDto`, and
+//!   `SimpleVerseDto` without cross-references, each a flattened
+//!   `VerseText`), and so what holds verses: `Reading`, `ChapterSide`,
+//!   `Compare` and `CompareColumn`.
+//! - The commands' arguments (`*Args`, `Position`), which the backend takes
+//!   as each command's parameters, not as one type.
+//!
+//! A verse's parts and footnotes are shared too (`verse_parts`), and so is
+//! how a passage is named (`passage_reference`).
 
 use serde::{Deserialize, Serialize};
+
+pub use crate::wire::{
+    BibleEdgeDto as Edge, Block as NoteBlock, BookStartDto as BookStart, Commentary,
+    CopyFormatsDto as CopyFormats, FindingDto as Finding, FindingRequestDto as FindingRequest,
+    GoToDto as GoTo, NoteLinkDto as NoteLink, SearchDto as SearchAnswer,
+    SearchResultDto as SearchVerse, Span as NoteSpan, TranslationDto as Translation,
+    XrefDto as Xref,
+};
+// A commentary's parts, which only `text`'s tests build.
+#[cfg(test)]
+pub use crate::wire::{CommentaryBook, CommentaryChapter, CommentaryNote};
 
 /// A book with notes, for the checklist (`notes_export::NotedBook`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -111,39 +121,6 @@ pub struct ExportArgs<'a> {
     pub translation_code: &'a str,
     pub filter: &'a Filter,
     pub layout: &'a str,
-}
-
-/// The notes as a commentary, to print (`notes_export::Commentary`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Commentary {
-    pub title: String,
-    pub exported: String,
-    #[serde(default)]
-    pub written: Option<String>,
-    pub book_headings: bool,
-    pub books: Vec<CommentaryBook>,
-}
-
-/// One book of a [`Commentary`] (`notes_export::CommentaryBook`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct CommentaryBook {
-    pub name: String,
-    pub chapters: Vec<CommentaryChapter>,
-}
-
-/// One chapter of a [`Commentary`] (`notes_export::CommentaryChapter`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct CommentaryChapter {
-    pub heading: String,
-    pub notes: Vec<CommentaryNote>,
-}
-
-/// One note's line (`notes_export::CommentaryNote`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct CommentaryNote {
-    pub verses: String,
-    pub body: String,
 }
 
 /// `get_notes_commentary`'s arguments.
@@ -369,26 +346,6 @@ pub struct UpdateInfo {
     pub can_self_update: bool,
 }
 
-/// A block of release notes (`release_notes::Block`): any heading, a
-/// paragraph, or a list item `depth` lists deep (0 at the top).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum NoteBlock {
-    Heading { spans: Vec<NoteSpan> },
-    Paragraph { spans: Vec<NoteSpan> },
-    Item { depth: u8, spans: Vec<NoteSpan> },
-}
-
-/// A run of text in the notes, maybe bold or code (`release_notes::Span`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct NoteSpan {
-    pub text: String,
-    #[serde(default)]
-    pub strong: bool,
-    #[serde(default)]
-    pub code: bool,
-}
-
 /// What `install_update` reports on its channel as the update downloads
 /// (`updater::DownloadEvent`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -460,23 +417,6 @@ pub struct Note {
     pub links: Vec<NoteLink>,
 }
 
-/// A reference typed in a note ("see Rom 5:8"), as the backend found it
-/// (`commands::NoteLinkDto`): where it is in the note's text (byte
-/// offsets, `start..end`) and the passage it names, its verses or none
-/// for the whole chapter.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NoteLink {
-    pub start: usize,
-    pub end: usize,
-    pub book_id: i64,
-    pub chapter: i64,
-    pub verse_start: Option<i64>,
-    pub verse_end: Option<i64>,
-    /// "Romans 5:8".
-    pub reference: String,
-}
-
 /// The arguments of `list_bookmarks` and `list_highlight_passages`: the
 /// translation the previews are in.
 #[derive(Debug, Serialize)]
@@ -512,69 +452,6 @@ pub struct SearchArgs<'a> {
     pub offset: i64,
 }
 
-/// What the search box should do with what's typed (`commands::SearchDto`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum SearchAnswer {
-    /// Nothing to search for.
-    Empty,
-    /// Go to this passage (its verses, or the whole chapter).
-    Passage {
-        book_id: i64,
-        chapter: i64,
-        verse_start: Option<i64>,
-        verse_end: Option<i64>,
-        reference: String,
-    },
-    /// A reference that doesn't exist; why.
-    Invalid { message: String },
-    /// Search isn't ready, or failed; why.
-    Unavailable { message: String },
-    /// One page of matching verses, in Bible order.
-    Text {
-        terms: Vec<String>,
-        total: i64,
-        offset: i64,
-        /// How many verses a page holds (`commands::SEARCH_PAGE_SIZE`).
-        page_size: i64,
-        results: Vec<SearchVerse>,
-        /// A book typed by name alone: its first chapter, offered first.
-        /// Left out of the JSON otherwise.
-        #[serde(default)]
-        go_to: Option<GoTo>,
-    },
-}
-
-/// A book typed by name alone: its first chapter, to go to
-/// (`commands::GoToDto`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GoTo {
-    pub book_id: i64,
-    /// Always 1.
-    pub chapter: i64,
-    /// e.g. "Psalms 1".
-    pub reference: String,
-}
-
-/// A matching verse (`commands::SearchResultDto`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchVerse {
-    pub book_id: i64,
-    pub chapter: i64,
-    pub verse: i64,
-    pub reference: String,
-    pub text: String,
-    /// The words the search matched: byte ranges of `text`.
-    #[serde(default)]
-    pub marks: Vec<(usize, usize)>,
-}
-
 // ---- The reader.
 
 /// What the reader takes from `get_home`'s answer (`commands::HomeDto`):
@@ -592,31 +469,6 @@ pub struct Home {
     pub current_verse: Option<i64>,
     #[serde(default)]
     pub current_verse_offset: Option<f64>,
-}
-
-/// A bundled translation (`commands::TranslationDto`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct Translation {
-    pub code: String,
-    pub name: String,
-    /// When it was made ("1611/1769"), if there's one date.
-    #[serde(default)]
-    pub date: Option<String>,
-    pub licence: String,
-    /// Its line in About's credits.
-    pub credit: String,
-}
-
-/// A cross-reference (`commands::XrefDto`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Xref {
-    pub book_id: i64,
-    pub chapter: i64,
-    pub verse: i64,
-    #[serde(default)]
-    pub end_verse: Option<i64>,
-    pub citation: String,
 }
 
 /// A verse as shown (`commands::VerseDto`, or `SimpleVerseDto`, which has
@@ -643,24 +495,6 @@ pub struct ChapterSide {
     pub chapter: i64,
     pub book_name: String,
     pub verses: Vec<Verse>,
-}
-
-/// The quiet card in a neighbor's place at the Bible's edges
-/// (`commands::BibleEdgeDto`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct Edge {
-    pub title: String,
-    #[serde(default)]
-    pub detail: Option<String>,
-}
-
-/// A book's first chapter, named (`commands::BookStartDto`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BookStart {
-    pub book_id: i64,
-    pub chapter: i64,
-    pub book_name: String,
 }
 
 /// `get_reading`'s answer (`commands::ReadingPaneDto`).
@@ -767,45 +601,6 @@ pub struct KeepFindingArgs<'a> {
     pub body: &'a str,
 }
 
-/// An AI-flagged finding, as `list_findings` answers: where an AI agent, at
-/// the reader's request, marked a verse. A marker only: who found it, for
-/// which request, and nothing about the verse (C3).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Finding {
-    pub id: i64,
-    pub book_id: i64,
-    pub book_name: String,
-    pub chapter: i64,
-    pub verse_start: i64,
-    pub verse_end: i64,
-    /// "John 11:35".
-    pub reference: String,
-    /// "Claude".
-    pub agent: String,
-    /// "grief".
-    pub request: String,
-    /// "Found by Claude for your request “grief”.", the backend's.
-    pub text: String,
-    pub created_at: String,
-    /// "Nov 7, 2026".
-    pub created_at_display: String,
-}
-
-/// One request's findings, as `list_finding_requests` answers.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FindingRequest {
-    pub request: String,
-    /// "Claude", or "Claude and Codex".
-    pub agents: String,
-    pub verse_count: i64,
-    /// "Nov 7, 2026": when the latest was found.
-    pub latest_display: String,
-    /// In Bible order.
-    pub findings: Vec<Finding>,
-}
-
 /// A cross-reference's passage, as `get_passage` answers
 /// (`commands::PassageDto`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -836,15 +631,6 @@ pub struct PassageTextArgs<'a> {
 pub struct CopyText {
     pub reference: String,
     pub formats: CopyFormats,
-}
-
-/// The passage in each of Copy as…'s formats (`commands::CopyFormatsDto`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct CopyFormats {
-    pub reference: String,
-    pub numbered: String,
-    pub markdown: String,
-    pub plain: String,
 }
 
 impl CopyFormats {

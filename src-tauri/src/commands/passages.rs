@@ -8,6 +8,8 @@ use crate::db;
 use crate::domain::passage::numbering_notice;
 use crate::passage_copy::{self, CopyFormat};
 use crate::passage_reference::passage_reference;
+// Shared with the page, which reads it whole (see shared/wire.rs).
+pub use crate::wire::CopyFormatsDto;
 
 /// A passage to read in place: a cross-reference previewed in the
 /// selection card. Its verses are the ones `translation_code` numbers in
@@ -128,16 +130,6 @@ pub struct CopyTextDto {
     pub reference: String,
     pub translation_code: String,
     pub formats: CopyFormatsDto,
-}
-
-/// The passage as each format of `passage_copy::CopyFormat` has it.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CopyFormatsDto {
-    pub reference: String,
-    pub numbered: String,
-    pub markdown: String,
-    pub plain: String,
 }
 
 /// A passage to copy: verses `start..=end` of a chapter, or, without them,
