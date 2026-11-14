@@ -37,6 +37,7 @@ use crate::dom;
 use crate::dto::{ApplyImportArgs, CancelImportArgs, ImportChoice, ImportPreview, ImportResult};
 use crate::import_text;
 use crate::ipc;
+use crate::page;
 
 /// What the dialog shows: a preview to confirm, or why a file can't be
 /// imported.
@@ -103,7 +104,7 @@ impl Import {
             return;
         }
         self.choosing.set_value(true);
-        bridge::data_busy(true);
+        page::set_data_busy(true);
         bridge::toast("Choose a file to import…", false);
         spawn_local(async move {
             let answer = ipc::invoke_value("choose_import_file", JsValue::UNDEFINED).await;
@@ -148,7 +149,7 @@ impl Import {
                 }
             }
             self.choosing.set_value(false);
-            bridge::data_busy(false);
+            page::set_data_busy(false);
         });
     }
 

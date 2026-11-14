@@ -90,9 +90,12 @@
 //!
 //! Direct calls, where the page's script used to be in between: the toast
 //! ([`toast`], `page`), a modal opening ([`modal_opening`]) or getting
-//! ready to ([`modal_claim`], [`modal_holds`]), an export or
-//! import running ([`data_busy`]), an import's reloads ([`imported`]), the
-//! chooser's two choices ([`export_everything`], [`export_notes`]), what
+//! ready to ([`page::modal_claim`](crate::page::modal_claim),
+//! [`page::modal_holds`](crate::page::modal_holds)), an export or import
+//! running ([`page::set_data_busy`](crate::page::set_data_busy)), an
+//! import's reloads ([`imported`]), the chooser's two choices
+//! ([`page::export_data`](crate::page::export_data),
+//! [`page::open_export_notes`](crate::page::open_export_notes)), what
 //! the palette's commands need ([`palette_state`]) and the commands whose
 //! code was the page's ([`page_command`]); and the reader's and the card's
 //! own `reader::ask` and `card::ask`.
@@ -153,18 +156,6 @@ pub const EXPORT_FACTS_EVENT: &str = "gospel-getter:export-facts";
 pub struct ExportFacts {
     pub notes: bool,
     pub busy: bool,
-}
-
-/// The chooser's Everything (backup): ☰ → Export data…'s backup, as it has
-/// always run (`page`).
-pub fn export_everything() {
-    crate::page::export_data();
-}
-
-/// The chooser's My notes: the Export notes dialog, asked to open with what
-/// it needs (`page`); closing it gives focus back to `return_focus`.
-pub fn export_notes(return_focus: Option<HtmlElement>) {
-    crate::page::open_export_notes(return_focus);
 }
 
 /// The Export notes dialog is asked to open (the chooser's My notes, the
@@ -301,19 +292,6 @@ pub fn modal_opening(close_search: bool) {
     crate::page::modal_opening(close_search);
 }
 
-/// A modal of this crate is getting ready to open, and will once an answer
-/// is in (Export notes, its choices): its claim. Any modal opening before
-/// then ([`modal_opening`]), or another claiming, supersedes it (`page`).
-pub fn modal_claim() -> crate::intent::Claim {
-    crate::page::modal_claim()
-}
-
-/// Whether the modal that claimed `claim` ([`modal_claim`]) may still open
-/// and take focus: nothing newer has opened or claimed since.
-pub fn modal_holds(claim: crate::intent::Claim) -> bool {
-    crate::page::modal_holds(claim)
-}
-
 /// The welcome is asked to open (`page`): a cancelable `CustomEvent` whose
 /// `detail` is a [`WelcomeRequest`] plus `returnFocus`. At the end of boot
 /// it is a question (`startup`, with the facts the fresh-install rule needs;
@@ -408,12 +386,6 @@ pub fn welcome_seen() {
 /// The import is asked to begin (☰ → Import data…, `page`): a cancelable
 /// `CustomEvent`, no `detail`. The import cancels it to say it has it.
 pub const IMPORT_EVENT: &str = "gospel-getter:import";
-
-/// Import is under way, or done: ☰'s Import data… and the chooser's
-/// Everything are disabled (or enabled) for it, as for an export (`page`).
-pub fn data_busy(busy: bool) {
-    crate::page::set_data_busy(busy);
-}
 
 /// An import has changed the reader's data: what's shown of it is reloaded,
 /// in order: the chapter at `position` (or none, to stay put), then the
