@@ -5,6 +5,16 @@
 # and writing it out is most of the run. Only these crates' code generation
 # changes; gospel_getter itself still builds as a plain debug build, with
 # its debug assertions and overflow checks. Release builds are unaffected.
+#
+# And debug and test builds carry line tables, not full debug info. The
+# repository's caches came to about 14 GB against GitHub's 10 GB quota, so
+# GitHub evicted main's and builds went cold. Line tables keep each
+# backtrace frame's file and line (a panic's own location needs no debug
+# info), which is all CI reads; locally the build folder came out about 25%
+# smaller, the frontend tests' bridge 62%.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.dev.package.serde_json]
 opt-level = 3
 
