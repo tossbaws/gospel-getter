@@ -77,6 +77,10 @@ mod updates;
 #[path = "../../shared/verse_parts.rs"]
 pub mod verse_parts;
 mod welcome;
+// The commands' answers both sides read whole, shared with the backend,
+// which compiles the same file.
+#[path = "../../shared/wire.rs"]
+pub mod wire;
 
 use wasm_bindgen::prelude::*;
 

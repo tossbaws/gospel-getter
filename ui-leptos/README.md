@@ -36,7 +36,7 @@ The root and what the pieces share:
 - `lib`: the crate root; mounts the pieces when the module loads (below).
 - `bridge`: what crosses to the page's remaining scripts, the globals set for the tests and the GUI checks, the custom events the pieces send each other, and the page controls they use.
 - `ipc`: Tauri commands through the global the page uses, `window.__TAURI__.core.invoke` (a `wasm_bindgen` extern plus `serde-wasm-bindgen`), with the same command names and argument objects.
-- `dto`: the other shapes the commands exchange, mirrored from the backend with the names the JSON carries (see "What a shared crate would replace").
+- `dto`: the shapes the commands exchange that the page declares for itself, with the names the JSON carries, and the shared ones (`wire`) under the page's names (see "What stays mirrored").
 - `dom`: the DOM helpers the pieces share (focus that never scrolls, the modals' Tab trap, listening, timers).
 - `intent`: whose an answer is once it's back, after the reader has done something newer.
 
@@ -103,6 +103,7 @@ Shared with the backend, from `../shared/`:
 - `verse_parts`: a verse's parts and footnotes as the backend shows them, which the reader draws.
 - `passage_reference`: how a passage is named.
 - `book_aliases`: the books' abbreviations, by which the backend reads a typed reference and the Library's notes search finds a note's book.
+- `wire`: the commands' answers both sides read whole, one definition each, with their JSON pinned by its tests.
 
 `src/lib.rs` mounts the pieces when the module loads: the page's own
 listeners first (`page`, `clicks`, `keyboard`, where the main script's
@@ -206,23 +207,9 @@ runs either way, as it does in the app, and the harness waits for the
 chapter and the Library's bookmark list only when the pieces load with the
 page.
 
-## What a shared crate would replace
+## What stays mirrored
 
-`src/dto.rs` in full: `NotedBook`, `DaySpan`, `DatePresets`,
-`ExportOptions` (`commands::NotesExportOptions`), `Filter`
-(`notes_export::NotesFilter`) and `ExportOutcome`
-(`commands::NotesExportOutcome`); for the import, `ImportChoice`,
-`ImportPreview` (`commands::ImportPreviewDto`), `PositionPreview`
-(`commands::PositionPreviewDto`), `ImportResult`
-(`commands::ImportResultDto`) and `Preferences` (`reader_data::Preferences`,
-whose enums travel as their kebab-case names); for the updater,
-`UpdateInfo` and `DownloadEvent` (`updater.rs`) and `NoteBlock` and
-`NoteSpan` (`release_notes::Block` and `Span`); for the Library,
-`Bookmark`, `HighlightPassage` and `Note` (`commands::BookmarkDto`,
-`HighlightPassageDto` and `NoteDto`, of which they read only what the lists
-show) and `library_text::COLORS` (`HighlightColor`); for search,
-`SearchAnswer` and `SearchVerse` (`commands::SearchDto` and
-`SearchResultDto`); for the picker, `picker_text::Book` (`commands::BookDto`);
-and the commands' argument objects. The backend's types carry `chrono` dates
-and `deny_unknown_fields`; the shared crate would keep them serde-only with
-the dates as `YYYY-MM-DD` strings, as the page always sent and received them.
+The page still declares some of the backend's shapes itself: the ones in
+`src/dto.rs`, whose header says why each isn't in `../shared/wire.rs`
+(the page reads only part of it, or reads it as another type), and
+`library_text::COLORS`, the backend's `HighlightColor` as strings.

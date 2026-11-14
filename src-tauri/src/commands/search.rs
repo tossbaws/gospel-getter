@@ -2,12 +2,13 @@
 //! (GH-12): `search`.
 
 use anyhow::Context;
-use serde::Serialize;
 
 use super::{AppState, book_name, code_of, failed, resolve_translation};
 use crate::domain::kjv_markup::VerseText;
 use crate::domain::query::{self, Interpretation, SearchQuery};
 use crate::passage_reference::passage_reference;
+// Shared with the page, which reads them whole (see shared/wire.rs).
+pub use crate::wire::{GoToDto, SearchDto, SearchResultDto};
 
 /// How many text-search results one `search` call returns.
 pub const SEARCH_PAGE_SIZE: i64 = 50;
@@ -21,70 +22,6 @@ fn translation_name(state: &AppState, translation_id: i64) -> &str {
 }
 
 // ---- Search and go-to-reference (GH-12)
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchResultDto {
-    pub book_id: i64,
-    pub chapter: i64,
-    pub verse: i64,
-    /// e.g. "John 3:16".
-    pub reference: String,
-    /// The verse's plain text (see `VerseText`), the text search covers.
-    pub text: String,
-    /// The words of `text` the search matched, to be marked: byte ranges
-    /// `[start, end)` into its UTF-8, in order (`query::term_marks`).
-    pub marks: Vec<(usize, usize)>,
-}
-
-/// A book typed by name alone: its first chapter, to go to.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GoToDto {
-    pub book_id: i64,
-    /// Always 1.
-    pub chapter: i64,
-    /// e.g. "Psalms 1".
-    pub reference: String,
-}
-
-/// What the search box should do with the input.
-#[derive(Serialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum SearchDto {
-    /// Nothing to search for.
-    Empty,
-    /// Go to this passage.
-    Passage {
-        book_id: i64,
-        chapter: i64,
-        verse_start: Option<i64>,
-        verse_end: Option<i64>,
-        reference: String,
-    },
-    /// A reference that doesn't exist (or can't be read); say why.
-    Invalid { message: String },
-    /// Search isn't ready or failed; say why.
-    Unavailable { message: String },
-    /// One page of matching verses, in Bible order.
-    Text {
-        /// What was searched for, as the status line says it: each phrase
-        /// in curly quotes, then each word (`SearchQuery::labels`).
-        terms: Vec<String>,
-        total: i64,
-        offset: i64,
-        page_size: i64,
-        results: Vec<SearchResultDto>,
-        /// When what was typed is a book's name alone, that book's first
-        /// chapter, offered before the verses; left out otherwise.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        go_to: Option<GoToDto>,
-    },
-}
 
 /// Interpret the search box input against one translation: a passage to
 /// go to (checking its verses exist in that translation), or a page of

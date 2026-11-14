@@ -11,52 +11,15 @@
 //! to it while it's open.
 
 use anyhow::Context;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use super::notes::{NoteDto, note_dto, note_error_message};
 use super::{AppState, book_name, failed};
 use crate::db::{Finding, FindingRequest, FindingsError, KeepError, NewFinding, Passage};
 use crate::passage_reference::passage_reference;
 use crate::reader_data;
-
-/// One finding.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FindingDto {
-    pub id: i64,
-    pub book_id: i64,
-    pub book_name: String,
-    pub chapter: i64,
-    pub verse_start: i64,
-    pub verse_end: i64,
-    /// "John 11:35".
-    pub reference: String,
-    /// Who found it: "Claude".
-    pub agent: String,
-    /// What the reader asked for: "grief".
-    pub request: String,
-    /// What the app shows for it, built from `agent` and `request` alone:
-    /// "Found by Claude for your request “grief”." (C3).
-    pub text: String,
-    pub created_at: String,
-    /// The day it was found, as the app shows dates ("Nov 7, 2026").
-    pub created_at_display: String,
-}
-
-/// One request's findings, as the Library groups them.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FindingRequestDto {
-    pub request: String,
-    /// Who found them: "Claude", or "Claude and Codex".
-    pub agents: String,
-    /// How many verses they mark.
-    pub verse_count: i64,
-    /// The day the latest was found ("Nov 7, 2026").
-    pub latest_display: String,
-    /// In Bible order.
-    pub findings: Vec<FindingDto>,
-}
+// Shared with the page, which reads them whole (see shared/wire.rs).
+pub use crate::wire::{FindingDto, FindingRequestDto};
 
 /// A removed finding to bring back (Undo): as it was, but for its id.
 #[derive(Debug, Deserialize)]

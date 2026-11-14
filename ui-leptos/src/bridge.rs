@@ -308,14 +308,7 @@ pub struct WelcomeRequest {
 }
 
 /// One place to start: a book (or a chapter) and a line about it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartRow {
-    pub book_id: i64,
-    pub chapter: i64,
-    pub title: String,
-    pub line: String,
-}
+pub use crate::wire::StartHereDto as StartRow;
 
 pub fn welcome_request(event: &CustomEvent) -> Result<WelcomeRequest, JsValue> {
     detail(event)

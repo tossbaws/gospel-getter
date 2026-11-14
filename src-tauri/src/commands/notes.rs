@@ -10,6 +10,8 @@ use crate::db::{Note, NoteError, Passage};
 use crate::domain::query::references_in;
 use crate::passage_reference::passage_reference;
 use crate::reader_data;
+// Shared with the page, which reads it whole (see shared/wire.rs).
+pub use crate::wire::NoteLinkDto;
 
 // ---- Notes
 
@@ -35,23 +37,6 @@ pub struct NoteDto {
     /// reader's time zone; see `notes_export::stored_date`).
     pub created_at_display: String,
     pub updated_at: String,
-}
-
-/// A reference typed in a note: where it is in the note's `body` (byte
-/// offsets, `start..end`) and the passage it names (see
-/// `domain::query::references_in`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NoteLinkDto {
-    pub start: usize,
-    pub end: usize,
-    pub book_id: i64,
-    pub chapter: i64,
-    /// Its verses, or none for the whole chapter.
-    pub verse_start: Option<i64>,
-    pub verse_end: Option<i64>,
-    /// "Romans 5:8": the passage, as the app names it.
-    pub reference: String,
 }
 
 /// The references typed in `body`, as the page links them.

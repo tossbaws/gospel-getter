@@ -46,6 +46,8 @@ use crate::passage_copy::{self, CopyFormat};
 // The escapes live in `markdown`, which Copy as… shares; named here too, as
 // they always have been.
 pub use crate::markdown::{escape_block, escape_inline};
+// Shared with the page, which reads them whole (see shared/wire.rs).
+pub use crate::wire::{Commentary, CommentaryBook, CommentaryChapter, CommentaryNote};
 
 /// Which notes an export holds. Each part narrows it; the default (no
 /// part set) is every note.
@@ -138,49 +140,6 @@ pub enum NotesLayout {
     /// A commentary: book and chapter headings, then one line per note,
     /// "3:16  note", no Bible text.
     Commentary,
-}
-
-/// The notes as a commentary (see [`NotesExport::commentary`]): what the
-/// file says, and what the page prints.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Commentary {
-    /// "Commentary on John", or "Gospel Getter commentary".
-    pub title: String,
-    /// "Exported Oct 10, 2026 · 3 notes".
-    pub exported: String,
-    /// "Written Oct 1 – Oct 12, 2026", when the filter limits the dates.
-    pub written: Option<String>,
-    /// Whether each book has its own heading: not when the export is of
-    /// one book, which the title names.
-    pub book_headings: bool,
-    pub books: Vec<CommentaryBook>,
-}
-
-/// One book's part of a commentary.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommentaryBook {
-    pub name: String,
-    pub chapters: Vec<CommentaryChapter>,
-}
-
-/// One chapter's part: its heading ("John 3") and its notes, in Bible
-/// order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommentaryChapter {
-    pub heading: String,
-    pub notes: Vec<CommentaryNote>,
-}
-
-/// One note's line: its verses ("3:16", "3:16–18") and its text, as the
-/// reader wrote it (plain text).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommentaryNote {
-    pub verses: String,
-    pub body: String,
 }
 
 /// A note's verses as a commentary labels them: "3:16", "3:16–18", or,

@@ -7,17 +7,8 @@
 //! `showPickerChapters`, `revealInPicker`, `revealCurrentInPicker` and the
 //! picker's keydown), rule for rule.
 
-use serde::Deserialize;
-
-/// A book, as the backend lists it (`get_home`'s `otBooks` and `ntBooks`,
-/// `commands::BookDto`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Book {
-    pub id: i64,
-    pub name: String,
-    pub chapter_count: i64,
-}
+/// A book, as the backend lists it (`get_home`'s `otBooks` and `ntBooks`).
+pub use crate::wire::BookDto as Book;
 
 /// A book with more chapters than this (Psalms, Isaiah, Jeremiah) gets the
 /// compact grid, ten to a row; the rest get pills, six to a row (see

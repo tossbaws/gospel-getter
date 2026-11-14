@@ -8,9 +8,11 @@
 
 use std::sync::LazyLock;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::db::models::Book;
+// Shared with the page, which reads it whole (see shared/wire.rs).
+pub use crate::wire::StartHereDto;
 
 /// The bundled list, as written.
 const DATA: &str = include_str!("../data/start_here.json");
@@ -43,17 +45,6 @@ static ENTRIES: LazyLock<Vec<Entry>> = LazyLock::new(|| {
         Vec::new()
     })
 });
-
-/// A place to start, for the welcome card: opening it reads `chapter` of
-/// book `book_id`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartHereDto {
-    pub book_id: i64,
-    pub chapter: i64,
-    pub title: String,
-    pub line: String,
-}
 
 /// The places to start, in order, named from `books`. An entry whose book
 /// or chapter isn't in `books` is left out.
