@@ -5,26 +5,10 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, shownVerse } from './harness.mjs';
+import { card, clickAndWaitForCalls as clickAndWait, closeBridge, openApp, shownVerse, where, withApp } from './harness.mjs';
 
 after(closeBridge);
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-async function clickAndWait(app, el, cmd = null) {
-    const before = app.calls.length;
-    app.click(el);
-    await app.idle(before, cmd);
-}
-
-const card = (app) => app.document.getElementById('selection-card');
 const preview = (app) => app.document.getElementById('xref-preview');
 const chips = (app) => [...card(app).querySelectorAll('.xref-citation')];
 const chip = (app, citation, row = 0) => {
@@ -41,7 +25,6 @@ const shown = (app) => (preview(app).hidden ? null : {
     go: preview(app).querySelector('.xref-preview-go').textContent,
 });
 const pressed = (app) => chips(app).filter((c) => c.getAttribute('aria-expanded') === 'true').map((c) => c.textContent);
-const where = (app) => [app.heading(), app.selectedVerseNumbers()];
 
 test('a chip shows its passage in the card, under its row, and stays in the chapter', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {

@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, cardNotes, clickAndWaitForFrames as clickAndWait, closeBridge, frame, openApp, settle, shown, shownText } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gg-notes-beside-'));
 after(() => {
@@ -76,27 +76,6 @@ async function withNotes(notes, options, body) {
     }
 }
 
-/** The page's next animation frames have run (the notes are placed in one). */
-async function frame(app) {
-    for (let i = 0; i < 2; i++) await new Promise((resolve) => app.window.requestAnimationFrame(resolve));
-    await settle();
-}
-
-async function clickAndWait(app, target, cmd) {
-    const before = app.calls.length;
-    app.click(target);
-    await app.idle(before, cmd);
-    await frame(app);
-}
-
-/** A note's text as shown, its line breaks as new lines. */
-function shownText(el) {
-    const copy = el.cloneNode(true);
-    for (const br of copy.querySelectorAll('br')) br.replaceWith('\n');
-    return copy.textContent;
-}
-
-const shown = (app) => app.window.gospelGetterMargin.shown();
 const column = (app) => app.document.querySelector('.chapter-main .notes-column');
 const notesOf = (root) => [...root.querySelectorAll('.margin-note')].map((note) => ({
     label: note.querySelector('.margin-note-ref').textContent,
@@ -108,7 +87,6 @@ const columnNotes = (app) => notesOf(column(app));
 const withButtons = (app) => [...app.document.querySelectorAll('#compare-with-choices button')];
 const notesChoice = (app) => app.document.querySelector('#compare-with-choices [data-beside="notes"]');
 const pressed = (app) => withButtons(app).filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent);
-const cardNotes = (app) => [...app.document.querySelectorAll('.verse-notes .note-card .note-card-body')].map((b) => b.textContent);
 const chapterText = (app) => app.document.querySelector('.chapter-main .chapter-text');
 /** The chapter's verses as drawn: each one's number and words, in order. */
 const verses = (app) => [...chapterText(app).querySelectorAll(':scope > .verse')]

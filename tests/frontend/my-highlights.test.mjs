@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, shownVerse, storedVerse } from './harness.mjs';
+import { backend, bookId, clickAndWaitForCalls as clickAndWait, closeBridge, openApp, shownVerse, storedVerse, swatch, v2File, withApp } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-my-highlights-'));
 after(async () => {
@@ -21,15 +21,6 @@ const newPath = (label) => join(dir, `${label}-${++fileCount}.gospel-getter.json
 
 const EN = '–';
 const EMPTY = 'No highlights yet. Click a verse, then pick a color.';
-
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
 
 /** Starts from exactly these highlights: [book, chapter, start, end, color]. */
 async function seed(passages) {
@@ -58,18 +49,10 @@ function items(app) {
 }
 const summary = (app) => items(app).map((i) => `${i.reference} ${i.color}`);
 
-async function clickAndWait(app, el, cmd) {
-    const before = app.calls.length;
-    app.click(el);
-    await app.idle(before, cmd);
-}
-
 function select(app, start, end = start) {
     app.click(app.verse(start));
     if (end !== start) app.click(app.verse(end), { shiftKey: true });
 }
-
-const swatch = (app, color) => app.actions().querySelector(`.highlight-swatch[data-color="${color}"]`);
 
 async function switchTranslation(app, code) {
     const select = app.document.getElementById('translation-select');
@@ -273,16 +256,6 @@ test('previews follow the translation, and a verse it does not number says so', 
         assert.deepEqual(app.selectedVerseNumbers(), []);
         assert.match(app.notice(), /^Romans 14:24 isn't numbered in the King James Version/);
     });
-});
-
-const v2File = (highlights) => ({
-    format: 'gospel-getter-reader-data',
-    format_version: 2,
-    exported_at: '2026-10-08T12:00:00.000Z',
-    app_version: '2.5.0',
-    reading_position: null,
-    bookmarks: [],
-    highlights,
 });
 
 async function importFile(app, path, mode) {

@@ -699,3 +699,101 @@ export async function until(check, what = 'condition') {
     }
     throw new Error(`timed out waiting for ${what}`);
 }
+
+// Helpers several test files share, one copy each. A file that called one
+// by another name imports it under that name (`el as $`).
+
+/** Opens the app with `options`, runs `body` on it, and closes it even if `body` throws. */
+export async function withApp(options, body) {
+    const app = await openApp(options);
+    try {
+        await body(app);
+    } finally {
+        app.close();
+    }
+}
+
+export const el = (app, id) => app.document.getElementById(id);
+
+/** The page's next animation frames have run (the margin is placed in one). */
+export async function frame(app) {
+    for (let i = 0; i < 2; i++) await new Promise((resolve) => app.window.requestAnimationFrame(resolve));
+    await settle();
+}
+
+/** Clicks `target` and waits for the calls it makes (`cmd` among them, if given) to finish. */
+export async function clickAndWaitForCalls(app, target, cmd) {
+    const before = app.calls.length;
+    app.click(target);
+    await app.idle(before, cmd);
+}
+
+/** Clicks `target`, waits for the calls it makes (`cmd` among them) to finish, then for the next frames. */
+export async function clickAndWaitForFrames(app, target, cmd) {
+    const before = app.calls.length;
+    app.click(target);
+    await app.idle(before, cmd);
+    await frame(app);
+}
+
+export async function waitFor(app, fn, cmd = 'get_reading') {
+    const before = app.calls.length;
+    fn();
+    await app.idle(before, cmd);
+}
+
+export async function select(app, start, end = start) {
+    const before = app.calls.length;
+    app.click(app.verse(start));
+    if (end !== start) app.click(app.verse(end), { shiftKey: true });
+    await app.idle(before, 'list_notes');
+}
+
+/** ☰ → Export data… → Everything (backup), with the save dialog answering `path` (null: cancelled). */
+export async function exportData(app, path) {
+    await app.pick(path);
+    await app.exportEverything();
+}
+
+/** A note's text as shown, its line breaks (`<br>`, the note as Markdown) as new lines. */
+export function shownText(el) {
+    const copy = el.cloneNode(true);
+    for (const br of copy.querySelectorAll('br')) br.replaceWith('\n');
+    return copy.textContent;
+}
+
+export const pickerChapter = (app, bookName, chapter) => {
+    const book = [...app.document.querySelectorAll('#picker .book-item')].find((b) => b.textContent.trim().startsWith(bookName));
+    if (book.getAttribute('aria-expanded') !== 'true') app.click(book);
+    return app.document.querySelector(`#picker .chapter-grid[data-book-id="${book.dataset.bookId}"] .chapter-btn[data-chapter="${chapter}"]`);
+};
+
+export const v2File = (highlights) => ({
+    format: 'gospel-getter-reader-data',
+    format_version: 2,
+    exported_at: '2026-10-08T12:00:00.000Z',
+    app_version: '2.5.0',
+    reading_position: null,
+    bookmarks: [],
+    highlights,
+});
+
+export const main = (app) => app.document.querySelector('.chapter-main');
+export const card = (app) => app.document.getElementById('selection-card');
+export const isOpen = (app, name) => !app.surface(name).hidden;
+export const shownOnScreen = (app, el) => app.window.getComputedStyle(el).display !== 'none';
+export const where = (app) => [app.heading(), app.selectedVerseNumbers()];
+export const markers = (el) => [...el.querySelectorAll('.fn-marker')].map((m) => m.textContent);
+export const swatch = (app, color) => app.actions().querySelector(`.highlight-swatch[data-color="${color}"]`);
+export const statusText = (app) => app.status().textContent;
+export const shown = (app) => app.window.gospelGetterMargin.shown();
+export const cardNotes = (app) => [...app.document.querySelectorAll('.verse-notes .note-card .note-card-body')].map((b) => b.textContent);
+export const callsOf = (app, cmd) => app.calls.filter((c) => c.cmd === cmd);
+export const checks = (app) => app.calls.filter((c) => c.cmd === 'check_for_update').length;
+export const savingOn = () => backend('get_ai_findings_enabled');
+/** ☰ → Export data…'s My notes. */
+export const myNotes = (app) => el(app, 'export-choice-notes');
+export const chooserOpen = (app) => !el(app, 'export-choice-overlay').hidden;
+export const notesDialogOpen = (app) => !el(app, 'export-notes-overlay').hidden;
+export const notePanelOpen = (app) => !el(app, 'note-overlay').hidden;
+export const overlayOpen = (app) => !el(app, 'import-overlay').hidden;

@@ -4,20 +4,11 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, shownVerse, storedVerse, verseCount } from './harness.mjs';
+import { closeBridge, markers, openApp, shownVerse, storedVerse, verseCount, withApp } from './harness.mjs';
 
 after(closeBridge);
 
 const EN = '–';
-
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
 
 async function toggleCompare(app, how = 'button') {
     const before = app.calls.length;
@@ -38,8 +29,6 @@ function shownText(el) {
     clone.querySelectorAll('.verse-num, .xref-popup, .verse-actions, .fn-marker, .footnote-cue, .note-cue').forEach((n) => n.remove());
     return clone.textContent.trim();
 }
-
-const markers = (el) => [...el.querySelectorAll('.fn-marker')].map((m) => m.textContent);
 
 test('the Compare toggle swaps the faded neighbors for labeled side-by-side columns and back', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {

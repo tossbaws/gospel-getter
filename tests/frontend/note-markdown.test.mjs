@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, settle, storedVerse } from './harness.mjs';
+import { backend, bookId, clickAndWaitForCalls as clickAndWait, closeBridge, el, openApp, select, settle, storedVerse } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-markdown-'));
 after(async () => {
@@ -40,21 +40,7 @@ async function withApp(options, body) {
     }
 }
 
-const el = (app, id) => app.document.getElementById(id);
 const cardBody = (app) => app.document.querySelector('.verse-notes .note-card-body');
-
-async function select(app, start, end = start) {
-    const before = app.calls.length;
-    app.click(app.verse(start));
-    if (end !== start) app.click(app.verse(end), { shiftKey: true });
-    await app.idle(before, 'list_notes');
-}
-
-async function clickAndWait(app, target, cmd) {
-    const before = app.calls.length;
-    app.click(target);
-    await app.idle(before, cmd);
-}
 
 const MARKDOWN = '**Loved**, *all* of it:\n- the world\n- `whosoever`\n\nSee https://example.com/a and [Gateway](https://www.biblegateway.com/).';
 

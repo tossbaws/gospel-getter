@@ -5,22 +5,12 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, openApp, shownVerse, storedVerse } from './harness.mjs';
+import { backend, bookId, closeBridge, markers, openApp, shownVerse, storedVerse, withApp } from './harness.mjs';
 
 after(closeBridge);
 
 const EM = '—';
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const markers = (el) => [...el.querySelectorAll('.fn-marker')].map((m) => m.textContent);
 const supplied = (el) => [...el.querySelectorAll('.supplied')].map((m) => m.textContent);
 const summary = (app) => app.document.querySelector('.footnote-summary');
 const summaryRows = (app) => [...app.document.querySelectorAll('.footnote-summary .footnote-row')]

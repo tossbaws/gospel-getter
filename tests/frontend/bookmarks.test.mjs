@@ -4,20 +4,11 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, settle, storedVerse } from './harness.mjs';
+import { closeBridge, openApp, settle, storedVerse, withApp } from './harness.mjs';
 
 after(closeBridge);
 
 const EN = '–';
-
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
 
 async function bookmarkSelection(app) {
     const before = app.calls.length;

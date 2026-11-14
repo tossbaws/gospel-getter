@@ -5,28 +5,11 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, shownVerse } from './harness.mjs';
+import { clickAndWaitForCalls as clickAndWait, closeBridge, el as $, main, openApp, shownVerse, withApp } from './harness.mjs';
 
 after(closeBridge);
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-async function clickAndWait(app, el, cmd = null) {
-    const before = app.calls.length;
-    app.click(el);
-    await app.idle(before, cmd);
-}
-
 const FLOWING = { 'gospel-getter-layout': 'flowing' };
-const $ = (app, id) => app.document.getElementById(id);
-const main = (app) => app.document.querySelector('.chapter-main');
 const card = (app) => $(app, 'selection-card');
 const segments = (app) => [...$(app, 'layout-choices').querySelectorAll('button')];
 const pressed = (app) => segments(app).filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.value);

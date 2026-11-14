@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, closeBridge, el, openApp, overlayOpen, savingOn, settle } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-import-truth-'));
 after(async () => {
@@ -33,8 +33,6 @@ async function withApp(options, body) {
     }
 }
 
-const el = (app, id) => app.document.getElementById(id);
-const overlayOpen = (app) => !el(app, 'import-overlay').hidden;
 const summary = (app) => [...el(app, 'import-summary').children].map((li) => li.textContent);
 const permissionShown = (app) => !el(app, 'import-permission-option').hidden;
 const permission = (app) => el(app, 'import-permission');
@@ -50,7 +48,6 @@ function saveFindings(request, verses, chapter = 3) {
 
 const findingsHere = async (chapter = 3) =>
     (await backend('list_findings', { bookId: JOHN, chapter })).map((f) => `${f.request} ${f.verseStart}`).sort();
-const savingOn = () => backend('get_ai_findings_enabled');
 const bookmarksHere = async () =>
     (await backend('list_bookmarks', { translationCode: 'kjv' })).map((b) => b.reference).sort();
 

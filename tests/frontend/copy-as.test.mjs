@@ -5,21 +5,12 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, openApp, settle, storedVerse } from './harness.mjs';
+import { backend, bookId, closeBridge, openApp, settle, storedVerse, withApp } from './harness.mjs';
 
 after(closeBridge);
 
 const EM = '—';
 const EN = '–';
-
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
 
 const FORMATS = [
     ['Text with reference', 'reference', ''],

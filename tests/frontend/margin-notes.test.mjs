@@ -10,7 +10,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, cardNotes, clickAndWaitForFrames as clickAndWait, closeBridge, frame, openApp, settle, shown, shownText } from './harness.mjs';
 
 after(closeBridge);
 
@@ -71,21 +71,7 @@ async function withMargin(notes, options, body) {
     }
 }
 
-/** The page's next animation frames have run (the margin is placed in one). */
-async function frame(app) {
-    for (let i = 0; i < 2; i++) await new Promise((resolve) => app.window.requestAnimationFrame(resolve));
-    await settle();
-}
-
-/** A note's text as shown, its line breaks (`<br>`, the note as Markdown) as new lines. */
-function shownText(el) {
-    const copy = el.cloneNode(true);
-    for (const br of copy.querySelectorAll('br')) br.replaceWith('\n');
-    return copy.textContent;
-}
-
 const margin = (app) => app.document.querySelector('.chapter-main .margin-notes');
-const shown = (app) => app.window.gospelGetterMargin.shown();
 const marginNotes = (app) => [...app.document.querySelectorAll('.margin-notes .margin-note')].map((note) => ({
     label: note.getAttribute('aria-label'),
     reference: note.querySelector('.margin-note-ref').textContent,
@@ -96,14 +82,6 @@ const markers = (app) => [...app.document.querySelectorAll('.chapter-main .verse
     verse: Number(m.closest('.verse').dataset.verse),
     label: m.getAttribute('aria-label'),
 }));
-const cardNotes = (app) => [...app.document.querySelectorAll('.verse-notes .note-card .note-card-body')].map((b) => b.textContent);
-
-async function clickAndWait(app, target, cmd) {
-    const before = app.calls.length;
-    app.click(target);
-    await app.idle(before, cmd);
-    await frame(app);
-}
 
 test('in reading mode the notes sit in the margin beside their verses, in verse order, as a labelled landmark', () =>
     withMargin([[21, 21, 'Light.'], [16, 18, 'For God so loved.\nThe world.'], [16, 16, 'Again on 16.']], {}, async (app) => {

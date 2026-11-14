@@ -6,7 +6,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, closeBridge, el, openApp, settle } from './harness.mjs';
 
 after(closeBridge);
 
@@ -36,7 +36,6 @@ async function withNotes(body, { notes = NOTES, book = 'Psalms', chapter = 1 } =
     }
 }
 
-const el = (app, id) => app.document.getElementById(id);
 const box = (app) => el(app, 'note-search');
 const countLine = (app) => el(app, 'note-search-count').textContent;
 const references = (app) => [...app.document.querySelectorAll('#note-list .bookmark-item .bookmark-ref')].map((r) => r.textContent);

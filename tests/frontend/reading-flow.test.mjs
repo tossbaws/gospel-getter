@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { closeBridge, openApp } from './harness.mjs';
+import { card, clickAndWaitForCalls as clickAndWait, closeBridge, el as $, main, openApp, withApp } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-reading-flow-'));
 after(async () => {
@@ -16,22 +16,6 @@ after(async () => {
     rmSync(dir, { recursive: true, force: true });
 });
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-async function clickAndWait(app, el, cmd = null) {
-    const before = app.calls.length;
-    app.click(el);
-    await app.idle(before, cmd);
-}
-
-const main = (app) => app.document.querySelector('.chapter-main');
 const steps = (app) => [...main(app).querySelectorAll('.chapter-end .chapter-step')].map((b) => ({
     which: b.classList.contains('chapter-step-prev') ? 'prev' : 'next',
     text: b.textContent.replace(/\s+/g, ' ').trim(),
@@ -182,8 +166,6 @@ test('printing opens both lists', () =>
 
 // ---- The selection card floats over the text
 
-const card = (app) => app.document.getElementById('selection-card');
-
 // Lays the page out for placeCard, which jsdom can't: the window, the top
 // bar, the reading column, the selected verses and the card's height.
 function layout(app, { innerHeight = 800, bar = 56, verses, cardHeight }) {
@@ -311,7 +293,6 @@ test('the card works in reading mode', () =>
 
 // ---- Width, and the text size keys
 
-const $ = (app, id) => app.document.getElementById(id);
 const widthButton = (app, label) => [...$(app, 'width-choices').querySelectorAll('button')].find((b) => b.textContent === label);
 
 test('Width is a row in Aa: Narrow, Normal and Wide, Normal by default', () =>

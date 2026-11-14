@@ -6,18 +6,9 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, openApp } from './harness.mjs';
+import { backend, bookId, closeBridge, openApp, withApp } from './harness.mjs';
 
 after(closeBridge);
-
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
 
 /** Where the next launch opens: [translation, book, chapter]. */
 async function saved() {

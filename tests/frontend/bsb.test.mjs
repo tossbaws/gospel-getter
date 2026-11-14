@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BIBLES, backend, bookId, closeBridge, openApp, shownVerse, storedVerse } from './harness.mjs';
+import { BIBLES, backend, bookId, clickAndWaitForCalls as clickAndWait, closeBridge, el, openApp, shownVerse, storedVerse, withApp } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-bsb-'));
 after(async () => {
@@ -21,22 +21,6 @@ after(async () => {
 
 const EM = '—';
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-async function clickAndWait(app, target, cmd) {
-    const before = app.calls.length;
-    app.click(target);
-    await app.idle(before, cmd);
-}
-
-const el = (app, id) => app.document.getElementById(id);
 const radios = (app) => [...el(app, 'translation-choices').querySelectorAll('[role="radio"]')];
 // The translations among Compare's "with" choices (Notes, after them, is
 // not one: notes-beside.test.mjs).

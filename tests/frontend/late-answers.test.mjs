@@ -8,15 +8,13 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, callsOf as switchCalls, closeBridge, el, notePanelOpen as editorOpen, openApp, savingOn, settle } from './harness.mjs';
 
 after(closeBridge);
 
 const JOHN = bookId('John');
 const ROMANS = bookId('Romans');
 const GENESIS = bookId('Genesis');
-
-const el = (app, id) => app.document.getElementById(id);
 
 /**
  * Resets the reader's data, adds `notes` ([book, chapter, verse, body]) and
@@ -39,7 +37,6 @@ async function withNotes(notes, body, { seed = async () => {}, ...options } = {}
 
 // ---- GG-01: a note's Edit from the Library, waiting for its jump.
 
-const editorOpen = (app) => !el(app, 'note-overlay').hidden;
 const editorTitle = (app) => el(app, 'note-title').textContent;
 const toastText = (app) => (app.toast().classList.contains('is-hidden') ? '' : app.toast().textContent);
 const STILL_WRITING = 'You’re still writing a note: save it or close it before opening another.';
@@ -193,8 +190,6 @@ test('GG-01: an open editor’s unsaved text survives another note being asked t
 
 const SWITCH_FAILED = 'The AI agents setting couldn’t be saved.';
 const aiSwitch = (app) => el(app, 'ai-findings-toggle');
-const switchCalls = (app, cmd) => app.calls.filter((c) => c.cmd === cmd);
-const savingOn = () => backend('get_ai_findings_enabled');
 
 test('GG-07: a read of the switch that began before a change never overwrites it', () =>
     withNotes([], async (app) => {

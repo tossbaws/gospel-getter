@@ -7,20 +7,10 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, closeBridge, el as $, openApp, settle, withApp } from './harness.mjs';
 
 after(closeBridge);
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const $ = (app, id) => app.document.getElementById(id);
 const overlay = (app) => $(app, 'welcome-overlay');
 const panel = (app) => $(app, 'welcome-panel');
 const isOpen = (app) => !overlay(app).hidden;

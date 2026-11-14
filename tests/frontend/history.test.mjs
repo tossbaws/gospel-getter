@@ -5,18 +5,9 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, closeBridge, openApp, pickerChapter, settle, waitFor, where, withApp } from './harness.mjs';
 
 after(closeBridge);
-
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
 
 // jsdom has no layout: the page's scroll position is a number the test
 // keeps, which scrollTo and scrollBy set as a browser would.
@@ -29,18 +20,10 @@ function fakeScroll(app) {
     return { get: () => y, set: (v) => { y = v; } };
 }
 
-const where = (app) => [app.heading(), app.selectedVerseNumbers()];
-
 async function typeCommand(app, text) {
     if (app.searchPanel().hidden) app.key('/');
     app.type(app.searchInput(), text);
     await app.idle(0);
-}
-
-async function waitFor(app, fn, cmd = 'get_reading') {
-    const before = app.calls.length;
-    fn();
-    await app.idle(before, cmd);
 }
 
 const back = (app) => waitFor(app, () => app.key('ArrowLeft', { altKey: true }));
@@ -55,12 +38,6 @@ async function nothingThere(app, key, message) {
     assert.equal(app.calls.slice(before).filter((c) => c.cmd === 'get_reading').length, 0);
     assert.equal(app.toast().textContent, message);
 }
-
-const pickerChapter = (app, bookName, chapter) => {
-    const book = [...app.document.querySelectorAll('#picker .book-item')].find((b) => b.textContent.trim().startsWith(bookName));
-    if (book.getAttribute('aria-expanded') !== 'true') app.click(book);
-    return app.document.querySelector(`#picker .chapter-grid[data-book-id="${book.dataset.bookId}"] .chapter-btn[data-chapter="${chapter}"]`);
-};
 
 test('a picker jump records; Back and Forward return, and the webview’s own history is never touched', () =>
     withApp({ book: 'John', chapter: 3 }, async (app) => {

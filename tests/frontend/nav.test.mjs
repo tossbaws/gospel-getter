@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { closeBridge, openApp, settle } from './harness.mjs';
+import { closeBridge, el, openApp, pickerChapter, settle, waitFor, withApp } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-nav-'));
 after(async () => {
@@ -20,16 +20,6 @@ after(async () => {
 
 const KEY = 'gospel-getter-recent-places';
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const el = (app, id) => app.document.getElementById(id);
 const back = (app) => el(app, 'history-back');
 const forward = (app) => el(app, 'history-forward');
 const prev = (app) => el(app, 'chapter-prev');
@@ -40,18 +30,6 @@ const items = (app) => [...menu(app).querySelectorAll('[role="menuitem"]')];
 const rows = (app) => [...menu(app).querySelectorAll('.recent-item')].map((r) => r.textContent);
 const disabled = (button) => button.getAttribute('aria-disabled') === 'true';
 const readings = (app, since) => app.calls.slice(since).filter((c) => c.cmd === 'get_reading').map((c) => [c.args.bookId, c.args.chapter]);
-
-async function waitFor(app, fn, cmd = 'get_reading') {
-    const before = app.calls.length;
-    fn();
-    await app.idle(before, cmd);
-}
-
-const pickerChapter = (app, bookName, chapter) => {
-    const book = [...app.document.querySelectorAll('#picker .book-item')].find((b) => b.textContent.trim().startsWith(bookName));
-    if (book.getAttribute('aria-expanded') !== 'true') app.click(book);
-    return app.document.querySelector(`#picker .chapter-grid[data-book-id="${book.dataset.bookId}"] .chapter-btn[data-chapter="${chapter}"]`);
-};
 
 // A jump by the picker (the sidebar, at 1280).
 const jump = (app, book, chapter) => waitFor(app, () => app.click(pickerChapter(app, book, chapter)));

@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, clickAndWaitForFrames as clickAndWait, closeBridge, frame, openApp, settle } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-findings-'));
 after(async () => {
@@ -78,18 +78,6 @@ async function withFindings({ chapter = 11, width = 1600, readerMode = true, see
     } finally {
         app.close();
     }
-}
-
-async function frame(app) {
-    for (let i = 0; i < 2; i++) await new Promise((resolve) => app.window.requestAnimationFrame(resolve));
-    await settle();
-}
-
-async function clickAndWait(app, target, cmd) {
-    const before = app.calls.length;
-    app.click(target);
-    await app.idle(before, cmd);
-    await frame(app);
 }
 
 const $ = (app, selector) => app.document.querySelector(selector);

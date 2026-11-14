@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, bookId, closeBridge, openApp, settle } from './harness.mjs';
+import { backend, bookId, closeBridge, el, notePanelOpen as panelOpen, openApp, select, settle } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-drafts-'));
 after(async () => {
@@ -47,21 +47,12 @@ async function withApp(options, body) {
     }
 }
 
-const el = (app, id) => app.document.getElementById(id);
-const panelOpen = (app) => !el(app, 'note-overlay').hidden;
 const offerShown = (app) => !el(app, 'note-draft').hidden;
 const offerText = (app) => el(app, 'note-draft-text').textContent;
 const input = (app) => el(app, 'note-input');
 /** The drafts local storage keeps, as the page wrote them. */
 const kept = (app) => JSON.parse(app.window.localStorage.getItem(DRAFTS_KEY) || '{"drafts":[]}').drafts;
 const keptTexts = (app) => kept(app).map((d) => [d.key, d.text]);
-
-async function select(app, start, end = start) {
-    const before = app.calls.length;
-    app.click(app.verse(start));
-    if (end !== start) app.click(app.verse(end), { shiftKey: true });
-    await app.idle(before, 'list_notes');
-}
 
 /** Opens the editor on the selection's first note (Edit), or + Add note. */
 async function openEditor(app, how) {

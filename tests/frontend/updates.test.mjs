@@ -9,7 +9,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { closeBridge, openApp, setUpdate } from './harness.mjs';
+import { checks, clickAndWaitForCalls as click, closeBridge, el as $, openApp, setUpdate, withApp } from './harness.mjs';
 
 after(closeBridge);
 
@@ -28,25 +28,8 @@ const UPDATE = {
     canSelfUpdate: true,
 };
 
-async function withApp(options, body) {
-    const app = await openApp(options);
-    try {
-        await body(app);
-    } finally {
-        app.close();
-    }
-}
-
-const $ = (app, id) => app.document.getElementById(id);
 const banner = (app) => $(app, 'update-banner');
-const checks = (app) => app.calls.filter((c) => c.cmd === 'check_for_update').length;
 const checkStatus = (app) => $(app, 'update-check-status');
-
-async function click(app, el, cmd) {
-    const before = app.calls.length;
-    app.click(el);
-    await app.idle(before, cmd);
-}
 
 test('About has an Updates section: a launch check that is on, Check now, and what it sends', () =>
     withApp({}, async (app) => {
