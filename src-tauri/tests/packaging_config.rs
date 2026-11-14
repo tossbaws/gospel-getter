@@ -1908,6 +1908,89 @@ fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
     );
 }
 
+/// Adding `ci:full` cancels the run in progress on the pull request, whose
+/// gui-linux, cancelled before it started, would stay on the pull request
+/// as a failed check under its name's expression. The label's run deletes
+/// that run (the `supersede` job): in that run alone, with a token that can
+/// manage runs and do nothing else, nothing waiting for it, never failing
+/// the run, and deleting only a Distribution run for the pull request's
+/// head commit, older than itself, that ended cancelled.
+#[test]
+fn the_ci_full_run_deletes_only_the_run_it_superseded() {
+    let keys = dist_job_keys("supersede");
+    assert!(
+        keys.contains(
+            &"if: github.event_name == 'pull_request' && github.event.action == 'labeled' \
+              && github.event.label.name == 'ci:full'"
+        ),
+        "{keys:#?}"
+    );
+    assert!(keys.contains(&"continue-on-error: true"), "{keys:#?}");
+    assert!(
+        keys.iter().any(|k| k.starts_with("timeout-minutes: ")),
+        "{keys:#?}"
+    );
+    assert!(!keys.iter().any(|k| k.starts_with("needs:")), "{keys:#?}");
+
+    // actions: write, for this job alone; the workflow's stays contents: read.
+    let job_permissions: Vec<&str> = DIST_YML
+        .lines()
+        .skip_while(|l| *l != "  supersede:")
+        .skip(1)
+        .take_while(|l| *l != "    steps:")
+        .skip_while(|l| *l != "    permissions:")
+        .skip(1)
+        .take_while(|l| l.starts_with("      "))
+        .map(str::trim)
+        .collect();
+    assert_eq!(job_permissions, ["actions: write"]);
+    let workflow_permissions: Vec<&str> = DIST_YML
+        .lines()
+        .skip_while(|l| *l != "permissions:")
+        .skip(1)
+        .take_while(|l| l.starts_with("  "))
+        .map(str::trim)
+        .collect();
+    assert_eq!(workflow_permissions, ["contents: read"]);
+    for (job, _) in workflow_jobs(DIST_YML) {
+        let keys = dist_job_keys(&job);
+        if job != "supersede" {
+            assert!(
+                !keys.contains(&"permissions:"),
+                "job {job} asks for more than the workflow's: {keys:#?}"
+            );
+        }
+        let needs = keys
+            .iter()
+            .find_map(|k| k.strip_prefix("needs: "))
+            .unwrap_or_default();
+        assert!(!needs.contains("supersede"), "job {job} waits for it");
+    }
+
+    // What it deletes, and that it never fails.
+    let steps: Vec<Step> = dist_steps()
+        .into_iter()
+        .filter(|s| s.job == "supersede")
+        .collect();
+    assert_eq!(steps.len(), 1, "{steps:#?}");
+    let text = &steps[0].text;
+    for must in [
+        "HEAD_SHA: ${{ github.event.pull_request.head.sha }}",
+        "RUN_NUMBER: ${{ github.run_number }}",
+        "actions/workflows/dist.yml/runs?event=pull_request&head_sha=$HEAD_SHA",
+        "select(.path == \".github/workflows/dist.yml\" and .event == \"pull_request\"",
+        "and .head_sha == env.HEAD_SHA and .run_number < (env.RUN_NUMBER | tonumber))",
+        "for id in $(awk '$2 == \"completed\" && $3 == \"cancelled\" { print $1 }' <<<\"$runs\"); do",
+        "if gh run delete \"$id\" --repo \"$GITHUB_REPOSITORY\"; then",
+    ] {
+        assert!(text.contains(must), "the job lacks {must:?}: {text}");
+    }
+    assert_eq!(text.matches("gh run delete").count(), 1, "{text}");
+    for never in ["actions/checkout", "exit 1", "set -e"] {
+        assert!(!text.contains(never), "the job has {never:?}: {text}");
+    }
+}
+
 /// The MSI is released and offered by the updater as much as the
 /// setup.exe, so a build without one fails (D-04), and it's installed,
 /// checked and removed again (msiexec /i, /x) as the setup.exe is.
