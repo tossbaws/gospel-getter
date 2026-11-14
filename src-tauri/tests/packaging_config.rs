@@ -427,6 +427,8 @@ const TEST_FEATURE: &str = "gui-test-updater";
 /// What builds the test app in dist.yml, and the artifacts it goes into.
 const TEST_BUILD_STEP: &str = "Build the GUI-check test app";
 const TEST_ARTIFACT: &str = "gui-check-test-app-";
+/// The job that builds the Linux test app, beside the linux job.
+const LINUX_TEST_APP_JOB: &str = "gui-test-app-linux";
 
 /// One step of a workflow's job: its job, its name (if it has one) and its
 /// text. Crude, as `cargo_package_version` is, but enough for the shape
@@ -493,9 +495,11 @@ fn workflow_steps(workflow: &str) -> Vec<Step> {
 /// packager builds: the feature is off by default; the AUR recipe, the
 /// install script and the Windows packaging notes never name it (or turn
 /// on every feature); and in dist.yml the installers' builds take no
-/// features, while the test app is built only in its own steps, after its
-/// job's installers are uploaded, into its own artifacts, which the release
-/// procedure never takes (it takes the four installers by name).
+/// features, while the test app is built only in its own steps, into its
+/// own artifacts, which the release procedure never takes (it takes the
+/// four installers by name): on Linux by a job of its own that builds and
+/// uploads nothing else, and on Windows after the job's installers are
+/// uploaded.
 #[test]
 fn no_release_or_packaging_build_enables_the_gui_test_updater() {
     // The crate: declared, and not a default.
@@ -576,8 +580,36 @@ fn no_release_or_packaging_build_enables_the_gui_test_updater() {
     let builds: Vec<&Step> = steps.iter().filter(|s| s.name == TEST_BUILD_STEP).collect();
     assert_eq!(
         builds.iter().map(|s| s.job.as_str()).collect::<Vec<_>>(),
-        ["linux", "windows"],
-        "the test app is built by the Linux and Windows jobs, once each"
+        [LINUX_TEST_APP_JOB, "windows"],
+        "the test app is built by its Linux job and the Windows job, once each"
+    );
+    // The linux job builds the installers and nothing with features.
+    for step in steps.iter().filter(|s| s.job == "linux") {
+        assert!(
+            !step.text.contains(TEST_FEATURE)
+                && !step.text.contains(TEST_ARTIFACT)
+                && !step.text.contains("--features"),
+            "the linux job builds or uploads the test app again: {step:#?}"
+        );
+    }
+    // Its own job: no installer, no release artifact, only the test app's.
+    let own: Vec<&Step> = steps
+        .iter()
+        .filter(|s| s.job == LINUX_TEST_APP_JOB)
+        .collect();
+    assert!(
+        !own.iter().any(|s| s.text.contains("cargo tauri")),
+        "{LINUX_TEST_APP_JOB} builds an installer: {own:#?}"
+    );
+    let uploads: Vec<Option<&str>> = own
+        .iter()
+        .filter(|s| s.text.contains("actions/upload-artifact@"))
+        .map(|s| with_value(s, "name"))
+        .collect();
+    assert_eq!(
+        uploads,
+        [Some("gui-check-test-app-linux")],
+        "{LINUX_TEST_APP_JOB} uploads something other than the test app"
     );
     for build in builds {
         assert!(
@@ -603,6 +635,107 @@ fn no_release_or_packaging_build_enables_the_gui_test_updater() {
             }
         }
     }
+}
+
+/// The Linux test app is built by a job of its own beside the linux job, so
+/// gui-linux waits for the longer of the two builds rather than for both in
+/// turn, and waits for both: the AppImage from one and the test app from
+/// the other, from the same commit. That job runs on the linux job's
+/// Ubuntu (gui-linux runs the binary on that WebKitGTK), under a name no
+/// required check has, and adds no Rust cache: it restores the linux job's
+/// and never saves, which hits only while both jobs name the same
+/// `shared-key` (the linux job's id, which keeps that job's key as it was),
+/// install the same Rust and cache the same workspaces (see the job's cache
+/// step in dist.yml for rust-cache's key).
+#[test]
+fn the_linux_test_app_is_built_beside_the_installers_from_their_cache() {
+    let keys = dist_job_keys("gui-linux");
+    assert!(
+        keys.contains(&format!("needs: [linux, {LINUX_TEST_APP_JOB}]").as_str()),
+        "gui-linux should wait for the AppImage and the test app: {keys:#?}"
+    );
+
+    let own = dist_job_keys(LINUX_TEST_APP_JOB);
+    let linux = dist_job_keys("linux");
+    let key = |keys: &[&'static str], key: &str| -> Option<&'static str> {
+        let prefix = format!("{key}: ");
+        keys.iter().find_map(|k| k.strip_prefix(prefix.as_str()))
+    };
+    assert_eq!(key(&own, "runs-on"), Some("ubuntu-22.04"), "{own:#?}");
+    assert_eq!(key(&own, "runs-on"), key(&linux, "runs-on"));
+    assert_eq!(key(&own, "needs"), None, "it runs beside the linux job");
+    let name = key(&own, "name").unwrap_or_else(|| panic!("no name: {own:#?}"));
+    assert!(!name.contains("${{"), "{name}");
+    for required in [
+        "Linux (AppImage + deb)",
+        "Windows (NSIS installer)",
+        "GUI checks (Linux)",
+    ] {
+        assert!(
+            !name.contains(required),
+            "{LINUX_TEST_APP_JOB}'s name could pass for {required}: {name}"
+        );
+    }
+
+    let steps = dist_steps();
+    let step = |job: &str, uses: &str| -> &Step {
+        let found: Vec<&Step> = steps
+            .iter()
+            .filter(|s| s.job == job && s.text.contains(uses))
+            .collect();
+        assert_eq!(found.len(), 1, "job {job}: {uses}: {found:#?}");
+        found[0]
+    };
+    // The step's own lines: the comments after it are the next step's.
+    let code = |step: &Step| -> Vec<String> {
+        step.text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .map(str::to_owned)
+            .collect()
+    };
+    let rust = "uses: dtolnay/rust-toolchain@";
+    assert_eq!(
+        code(step(LINUX_TEST_APP_JOB, rust)),
+        code(step("linux", rust)),
+        "another Rust install misses the linux job's cache"
+    );
+    let cache = "uses: Swatinem/rust-cache@";
+    let (own_cache, linux_cache) = (step(LINUX_TEST_APP_JOB, cache), step("linux", cache));
+    assert_eq!(with_value(own_cache, "shared-key"), Some("linux"));
+    assert_eq!(
+        with_value(linux_cache, "shared-key"),
+        Some("linux"),
+        "the linux job's key would change"
+    );
+    assert_eq!(
+        with_value(own_cache, "save-if"),
+        Some("false"),
+        "{LINUX_TEST_APP_JOB} saves a cache entry of its own"
+    );
+    assert_eq!(
+        with_value(linux_cache, "save-if"),
+        Some("${{ github.ref == 'refs/heads/main' }}")
+    );
+    for cache in [own_cache, linux_cache] {
+        assert_eq!(with_value(cache, "key"), None, "{cache:#?}");
+    }
+    // The block under `workspaces: |`, a line each.
+    let workspaces = |step: &Step| -> Vec<String> {
+        step.text
+            .lines()
+            .skip_while(|l| *l != "          workspaces: |")
+            .skip(1)
+            .take_while(|l| l.starts_with("            "))
+            .map(|l| l.trim().to_owned())
+            .collect()
+    };
+    assert_eq!(workspaces(linux_cache), ["src-tauri", "ui-leptos"]);
+    assert_eq!(
+        workspaces(own_cache),
+        workspaces(linux_cache),
+        "other workspaces miss the linux job's cache"
+    );
 }
 
 /// A dist.yml job's own keys (`name:`, `if:`, `needs:` and so on), up to its
@@ -640,7 +773,7 @@ const LABEL_GATE: &str = "github.event.action != 'labeled' || github.event.label
 /// pull request label other than `ci:full` ([`LABEL_GATE`]).
 #[test]
 fn a_release_merge_never_cancels_its_own_build() {
-    for job in ["linux", "windows"] {
+    for job in ["linux", LINUX_TEST_APP_JOB, "windows"] {
         let keys = dist_job_keys(job);
         let condition = keys
             .iter()
@@ -1247,8 +1380,9 @@ fn the_gui_checks_retry_once_in_ci_and_never_force_a_failure() {
 
 /// Only main saves the Rust caches: every Swatinem/rust-cache step in every
 /// workflow saves only on main (`save-if`, which may also ask more, as the
-/// frontend shards do), so pull requests and other branches restore main's
-/// and don't save copies of it, which pushed main's own out of the
+/// frontend shards do) or never (`false`, as gui-test-app-linux, which
+/// restores the linux job's), so pull requests and other branches restore
+/// main's and don't save copies of it, which pushed main's own out of the
 /// repository's 10 GB. cache-cleanup.yml deletes a pull request's caches when
 /// it closes, with a token that can manage caches and nothing else.
 #[test]
@@ -1263,6 +1397,9 @@ fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
             caches += 1;
             let save = with_value(&step, "save-if")
                 .unwrap_or_else(|| panic!("{file}: job {}: no save-if: {step:#?}", step.job));
+            if save == "false" {
+                continue;
+            }
             assert!(
                 save.starts_with("${{ ") && save.ends_with(" }}") && save.contains(ON_MAIN),
                 "{file}: job {}: saves off main: {save}",

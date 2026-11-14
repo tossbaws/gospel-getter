@@ -43,10 +43,13 @@ name: Distribution Artifacts
 # that fails both times fails the job. Their updater checks run on the GUI
 # checks' test build of the app (feature gui-test-updater: its updater
 # reads a test settings file, talks to the checks' own local server, and
-# never installs), which each job builds after its installers are uploaded,
-# into an artifact of its own (gui-check-test-app-*). It is never an
-# installer and never released; tests/packaging_config.rs fails if any
-# installer or packaging build enables the feature.
+# never installs), built into an artifact of its own (gui-check-test-app-*)
+# from the same commit: on Linux by its own job, gui-test-app-linux, beside
+# the linux job (gui-linux waits for both), which uploads nothing else and
+# restores the linux job's Rust cache without saving one; on Windows by the
+# windows job, after its installers are uploaded. It is never an installer
+# and never released; tests/packaging_config.rs fails if any installer or
+# packaging build enables the feature.
 #
 # This workflow never creates a GitHub release, tag, or otherwise publishes
 # anything — it only produces downloadable workflow-run artifacts, so a
@@ -89,7 +92,8 @@ name: Distribution Artifacts
 # Every action is pinned to a commit (Dependabot proposes updates:
 # .github/dependabot.yml), and every job builds with one Rust release,
 # RUST_TOOLCHAIN below. Only main's runs save the Rust caches (save-if, as
-# in ci.yml); every other run restores main's. Every job has a time limit
+# in ci.yml); every other run restores main's, and gui-test-app-linux
+# never saves (see its cache step). Every job has a time limit
 # (timeout-minutes, about three times its slowest green run, more where a
 # cold cache needs it), so a hung runner fails in minutes, not after
 # GitHub's six hours; apt-get retries a failed download and gives up on a
@@ -245,9 +249,12 @@ jobs:
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
             patchelf build-essential libssl-dev libfuse2 xvfb file
 
+      # shared-key is this job's id, which rust-cache would put in the key
+      # anyway, so the key is unchanged; gui-test-app-linux restores it.
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          shared-key: linux
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             src-tauri
@@ -416,8 +423,74 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # Last, after the installers above are uploaded: the GUI checks' test
-      # build (see the top of this file), for gui-linux's updater checks.
+  gui-test-app-linux:
+    # The GUI checks' test build for gui-linux (see the top of this file),
+    # beside the linux job rather than after it, so gui-linux needn't wait
+    # for its build on top of the installers'. A name no required check has,
+    # and no expression in it, so neither a skip (another label's run) nor a
+    # cancel before it starts can stand in for one.
+    name: GUI-check test app (Linux)
+    # The linux job's condition, so the two always run together.
+    if: (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(release):')) && (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
+    # The linux job's Ubuntu: gui-linux runs this binary on the WebKitGTK
+    # its AppImage was built against.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # As the linux job installs it, wasm target and all, or this misses
+      # that job's cache (see the cache step below).
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          # The page's Rust pieces (ui-leptos/) compile to WebAssembly.
+          targets: wasm32-unknown-unknown
+
+      # The app embeds dist/, which nothing else builds here: `cargo build`
+      # doesn't run Tauri's beforeBuildCommand.
+      - name: Install Trunk
+        uses: ./.github/actions/build-tools
+        with:
+          set: trunk
+
+      # The headers to build against; none of the linux job's bundling tools.
+      - name: Install Tauri Linux build dependencies
+        timeout-minutes: 15
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev build-essential libssl-dev
+
+      # The linux job's cache, restored and never saved: the repository's
+      # caches are near GitHub's 10 GB, and an entry of this job's own would
+      # push main's out. rust-cache's key is the shared-key in place of the
+      # job id, then a hash of the installed toolchains and the CARGO*/RUST*
+      # variables, then one of the workspaces' manifests and lockfiles, so
+      # this hits the linux job's entry only while the two jobs' shared-key,
+      # Rust install and workspaces match: tests/packaging_config.rs fails
+      # if they differ.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux
+          save-if: false
+          workspaces: |
+            src-tauri
+            ui-leptos
+
+      - name: Build the page (Trunk)
+        working-directory: .
+        run: trunk build --release
+
+      - name: Check Trunk fetched no tools itself
+        working-directory: .
+        run: python3 tools/ci/build_tools.py check trunk
+
       - name: Build the GUI-check test app
         run: |
           set -euo pipefail
@@ -709,8 +782,9 @@ jobs:
     # check (see the top of this file for how a flake is kept from blocking
     # a merge). The AppImage is tested as shipped: the script has its own
     # runtime extract it (--appimage-extract, so no FUSE) and starts its
-    # AppRun.
-    needs: linux
+    # AppRun. The updater's checks run on the test app, which
+    # gui-test-app-linux builds from the same commit.
+    needs: [linux, gui-test-app-linux]
     # The same Ubuntu as the build: the AppImage was built against its
     # WebKitGTK, and webkit2gtk-driver comes from it.
     runs-on: ubuntu-22.04
