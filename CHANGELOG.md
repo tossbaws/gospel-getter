@@ -4,6 +4,14 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.29.4] - 2026-11-14
+
+Nothing you'll see changes from 2.29.3. Behind the scenes, the checks run
+faster; the release files are signed by Tauri's own signer, pinned to its
+checksum, and every file is checked before it's uploaded; and the code is
+tidier, with no change in what the app does. Updating keeps your
+bookmarks, highlights, notes, findings, reading position and settings.
+
 ## [2.29.3] - 2026-11-13
 
 Fixes for Bookmark clicked twice as the Library reloads, quote checks of
