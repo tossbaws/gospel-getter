@@ -126,9 +126,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Exactly: the bundler's tools are pinned for this version
-  # (tools/ci/build-tools.txt, set bundler), and a version with none pinned
-  # stops the build.
+  # Exactly: the bundler's tools and the prebuilt CLI are pinned for this
+  # version (tools/ci/build-tools.txt, sets bundler and signer), and a
+  # version with none pinned stops the build.
   TAURI_CLI_VERSION: "2.12.4"
   # The Rust every job here builds with, so a release is built by a known
   # compiler rather than whatever is stable that day. ci.yml builds with
@@ -261,8 +261,38 @@ jobs:
             src-tauri
             ui-leptos
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+      # tauri-apps' own prebuilt cargo-tauri for TAURI_CLI_VERSION, as the
+      # sign job gets it (see its comment), not tauri-cli compiled from
+      # crates.io here, which takes about five minutes whenever main's Rust
+      # cache is cold.
+      - name: Get the Tauri CLI (Tauri's prebuilt, pinned by SHA-256)
+        uses: ./.github/actions/build-tools
+        with:
+          set: signer
+
+      # The sign job's check. The Rust cache above restores the cargo bin
+      # folder, which may hold the tauri-cli an earlier run compiled there,
+      # and cargo would run that one first: it goes.
+      - name: Check the Tauri CLI is the pinned one
+        run: |
+          set -euo pipefail
+          want="$RUNNER_TEMP/build-tools/bin/cargo-tauri"
+          shadow="${CARGO_HOME:-$HOME/.cargo}/bin/cargo-tauri"
+          if [ -e "$shadow" ]; then
+            echo "Removing $shadow, a cargo-installed tauri-cli the Rust cache restored"
+            rm -f "$shadow"
+          fi
+          found="$(command -v cargo-tauri || true)"
+          version="$(cargo tauri --version)"
+          echo "tauri-cli: cargo tauri --version: $version, at ${found:-nowhere} ($(cargo --version))"
+          if [ "$found" != "$want" ] || [ -e "$shadow" ]; then
+            echo "::error::cargo tauri isn't the pinned CLI at $want: cargo-tauri on PATH is ${found:-none}, $shadow $([ -e "$shadow" ] && echo exists || echo 'is absent')"
+            exit 1
+          fi
+          if [ "$version" != "tauri-cli $TAURI_CLI_VERSION" ]; then
+            echo "::error::cargo tauri --version printed '$version', not 'tauri-cli $TAURI_CLI_VERSION'"
+            exit 1
+          fi
 
       # What the bundler would download for the AppImage (linuxdeploy, its
       # AppImage plugin, AppRun), the same way as Trunk above.
@@ -548,8 +578,34 @@ jobs:
             src-tauri
             ui-leptos
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+      # As for the linux job: tauri-apps' prebuilt cargo-tauri.
+      - name: Get the Tauri CLI (Tauri's prebuilt, pinned by SHA-256)
+        uses: ./.github/actions/build-tools
+        with:
+          set: signer
+
+      # The linux job's check, in PowerShell for Windows' paths.
+      - name: Check the Tauri CLI is the pinned one
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $want = Join-Path $env:RUNNER_TEMP "build-tools\bin\cargo-tauri.exe"
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME ".cargo" }
+          $shadow = Join-Path $cargoHome "bin\cargo-tauri.exe"
+          if (Test-Path -LiteralPath $shadow) {
+            Write-Host "Removing $shadow, a cargo-installed tauri-cli the Rust cache restored"
+            Remove-Item -LiteralPath $shadow -Force
+          }
+          $found = (Get-Command cargo-tauri -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+          $version = "$(cargo tauri --version)".Trim()
+          if ($LASTEXITCODE -ne 0) { Write-Error "cargo tauri --version failed: $version" }
+          Write-Host "tauri-cli: cargo tauri --version: $version, at $(if ($found) { $found } else { 'nowhere' }) ($(cargo --version))"
+          if (-not $found -or [IO.Path]::GetFullPath($found) -ne [IO.Path]::GetFullPath($want) -or (Test-Path -LiteralPath $shadow)) {
+            Write-Error "cargo tauri isn't the pinned CLI at ${want}: cargo-tauri on PATH is $(if ($found) { $found } else { 'none' })"
+          }
+          if ($version -ne "tauri-cli $env:TAURI_CLI_VERSION") {
+            Write-Error "cargo tauri --version printed '$version', not 'tauri-cli $env:TAURI_CLI_VERSION'"
+          }
 
       # What the bundler would download for the installers (NSIS with its
       # nsis_tauri_utils plugin, and WiX), the same way as Trunk above.

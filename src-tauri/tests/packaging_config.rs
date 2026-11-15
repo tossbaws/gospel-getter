@@ -2247,9 +2247,11 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
 /// tools/ci/build-tools.txt, the build tools' pins (columns as its header).
 const BUILD_TOOLS: &str = include_str!("../../tools/ci/build-tools.txt");
 
-/// The version of the signer set's one row, checked to be tauri-apps' own release of the
-/// prebuilt Tauri CLI for its version, for Linux (where both signing jobs
-/// run), pinned by a SHA-256 and laid out as `cargo-tauri` on PATH.
+/// The version of the signer set's rows, one per OS, checked to be
+/// tauri-apps' own release of the prebuilt Tauri CLI for that version (the
+/// Linux one for both signing jobs, which run there, and each for its
+/// platform's installer job), pinned by a SHA-256 and laid out as
+/// `cargo-tauri` on PATH.
 fn signer_version() -> String {
     let rows: Vec<Vec<&str>> = BUILD_TOOLS
         .lines()
@@ -2260,32 +2262,110 @@ fn signer_version() -> String {
         .collect();
     assert_eq!(
         rows.len(),
-        1,
-        "build-tools.txt has one signer row: {rows:#?}"
+        2,
+        "build-tools.txt has a signer row for Linux and one for Windows: {rows:#?}"
     );
-    let row = &rows[0];
-    assert_eq!(row.len(), 9, "{row:?}");
-    let version = row[3];
-    assert_eq!(
-        (row[1], row[2], row[4], row[6], row[8]),
+    let version = rows[0][3];
+    for (row, (os, asset, install)) in rows.iter().zip([
         (
             "Linux",
-            "cargo-tauri",
-            "tauri-apps/tauri",
             "cargo-tauri-x86_64-unknown-linux-gnu.tgz",
-            "bin=cargo-tauri"
+            "bin=cargo-tauri",
         ),
-        "{row:?}"
-    );
-    assert_eq!(row[5], format!("tauri-cli-v{version}"), "{row:?}");
-    assert!(
-        row[7].len() == 64
-            && row[7]
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
-        "the signer isn't pinned by a SHA-256: {row:?}"
-    );
+        (
+            "Windows",
+            "cargo-tauri-x86_64-pc-windows-msvc.zip",
+            "bin=cargo-tauri.exe",
+        ),
+    ]) {
+        assert_eq!(row.len(), 9, "{row:?}");
+        assert_eq!(
+            (row[1], row[2], row[3], row[4], row[6], row[8]),
+            (
+                os,
+                "cargo-tauri",
+                version,
+                "tauri-apps/tauri",
+                asset,
+                install
+            ),
+            "{row:?}"
+        );
+        assert_eq!(row[5], format!("tauri-cli-v{version}"), "{row:?}");
+        assert!(
+            row[7].len() == 64
+                && row[7]
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "the signer isn't pinned by a SHA-256: {row:?}"
+        );
+    }
     version.to_owned()
+}
+
+/// The installer jobs build with the prebuilt Tauri CLI the signing jobs
+/// sign with (the `signer` set, at TAURI_CLI_VERSION), never tauri-cli
+/// compiled by `cargo install`, which took about five minutes on a cold
+/// cache. Each checks `cargo tauri` is that binary at that version, as the
+/// signing jobs do, before its installers are built; the Rust cache may
+/// have restored a cargo-installed one, which cargo would run first, so
+/// the check removes it.
+#[test]
+fn the_installer_jobs_build_with_the_pinned_prebuilt_tauri_cli() {
+    let signer = signer_version();
+    assert_eq!(
+        workflow_env(DIST_YML, "TAURI_CLI_VERSION"),
+        Some(signer.as_str())
+    );
+    let steps = dist_steps();
+    for job in ["linux", "windows"] {
+        let own: Vec<&Step> = steps.iter().filter(|s| s.job == job).collect();
+        assert!(
+            !own.iter().any(|s| s.text.contains("cargo install")),
+            "job {job} compiles a tool: {own:#?}"
+        );
+        let got = own
+            .iter()
+            .position(|s| {
+                s.text.contains("uses: ./.github/actions/build-tools")
+                    && with_value(s, "set") == Some("signer")
+            })
+            .unwrap_or_else(|| panic!("job {job} doesn't get the prebuilt CLI"));
+        let check = own
+            .iter()
+            .position(|s| s.name == "Check the Tauri CLI is the pinned one")
+            .unwrap_or_else(|| panic!("job {job} doesn't check the CLI"));
+        let build = own
+            .iter()
+            .position(|s| {
+                s.text
+                    .lines()
+                    .any(|l| l.trim_start().starts_with("cargo tauri build"))
+            })
+            .unwrap_or_else(|| panic!("job {job} builds no installers"));
+        assert!(
+            got < check && check < build,
+            "job {job}: the CLI is got, then checked, then used"
+        );
+        let text = &own[check].text;
+        for must in [
+            "cargo tauri --version",
+            "TAURI_CLI_VERSION",
+            "build-tools",
+            "cargo-tauri",
+        ] {
+            assert!(
+                text.contains(must),
+                "job {job}'s check lacks {must}: {text}"
+            );
+        }
+        let removes = if job == "windows" {
+            "Remove-Item -LiteralPath $shadow"
+        } else {
+            "rm -f \"$shadow\""
+        };
+        assert!(text.contains(removes), "job {job}: {text}");
+    }
 }
 
 /// The release's files are assembled by the bundle job (CI-05,

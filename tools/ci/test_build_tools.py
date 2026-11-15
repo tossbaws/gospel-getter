@@ -102,6 +102,7 @@ class TheRepositorysPins(unittest.TestCase):
             ("bundler", "Linux", ["apprun", "linuxdeploy", "linuxdeploy-plugin-appimage"]),
             ("bundler", "Windows", ["nsis", "nsis-tauri-utils", "wix"]),
             ("signer", "Linux", ["cargo-tauri"]),
+            ("signer", "Windows", ["cargo-tauri"]),
         ]:
             with self.subTest(tool_set=tool_set, runner_os=runner_os):
                 self.assertEqual([t.name for t in repo_wanted(tool_set, runner_os)], names)
@@ -115,26 +116,34 @@ class TheRepositorysPins(unittest.TestCase):
         self.assertIn(f'wasm_opt = "{tools["wasm-opt"].version}"', read("Trunk.toml"))
         for tool in repo_wanted("bundler", "Linux") + repo_wanted("bundler", "Windows"):
             self.assertEqual(tool.version, tauri_cli_version())
-        [signer] = repo_wanted("signer", "Linux")
-        self.assertEqual(signer.version, tauri_cli_version())
+        for runner_os in ("Linux", "Windows"):
+            [signer] = repo_wanted("signer", runner_os)
+            self.assertEqual(signer.version, tauri_cli_version())
 
     def test_the_signer_is_tauri_apps_own_release_of_that_version(self):
         # The prebuilt binary is trusted because it's tauri-apps' own release
         # asset for exactly TAURI_CLI_VERSION, pinned by its SHA-256.
-        [signer] = repo_wanted("signer", "Linux")
         version = tauri_cli_version()
-        self.assertEqual(
-            (signer.name, signer.repository, signer.tag, signer.asset, signer.install),
-            ("cargo-tauri", "tauri-apps/tauri", f"tauri-cli-v{version}",
-             "cargo-tauri-x86_64-unknown-linux-gnu.tgz", "bin=cargo-tauri"),
-        )
+        [linux] = repo_wanted("signer", "Linux")
+        [windows] = repo_wanted("signer", "Windows")
+        for signer, asset, install in [
+            (linux, "cargo-tauri-x86_64-unknown-linux-gnu.tgz", "bin=cargo-tauri"),
+            (windows, "cargo-tauri-x86_64-pc-windows-msvc.zip", "bin=cargo-tauri.exe"),
+        ]:
+            self.assertEqual(
+                (signer.name, signer.repository, signer.tag, signer.asset, signer.install),
+                ("cargo-tauri", "tauri-apps/tauri", f"tauri-cli-v{version}", asset, install),
+            )
         signers = [t for t in b.read_manifest(read("tools/ci/build-tools.txt")) if t.set == "signer"]
-        self.assertEqual(signers, [signer], "one signer, and only for TAURI_CLI_VERSION")
+        self.assertEqual(signers, [linux, windows], "one signer per OS, only for TAURI_CLI_VERSION")
 
-    def test_tauri_cli_is_installed_at_exactly_that_version(self):
+    def test_tauri_cli_is_tauri_apps_prebuilt_at_exactly_that_version(self):
+        # No job compiles tauri-cli: the installer jobs take the signer set
+        # too, as the signing jobs do.
         dist = read(".github/workflows/dist.yml")
         self.assertRegex(tauri_cli_version(), r"^\d+\.\d+\.\d+$")
-        self.assertIn('cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}"', dist)
+        self.assertNotIn("cargo install tauri-cli", dist)
+        self.assertEqual(dist.count("          set: signer\n"), 4, "linux, windows, sign, sign-rehearsal")
 
     def test_the_workflows_no_longer_download_trunk_anonymously(self):
         for workflow in ["ci.yml", "dist.yml"]:
@@ -193,9 +202,8 @@ class Manifest(unittest.TestCase):
             b.wanted(tools, "signer", "Linux", cargo_lock="", trunk_toml="", tauri_cli="9.9.9")
         with self.assertRaisesRegex(b.Refused, "exact version"):
             b.wanted(tools, "signer", "Linux", cargo_lock="", trunk_toml="", tauri_cli="")
-        with self.assertRaisesRegex(b.Refused, "on Windows, not 0"):
-            b.wanted(tools, "signer", "Windows", cargo_lock="", trunk_toml="",
-                     tauri_cli=tauri_cli_version())
+        with self.assertRaisesRegex(b.Refused, "one signer row for tauri-cli 9\.9\.9 on Windows, not 0"):
+            b.wanted(tools, "signer", "Windows", cargo_lock="", trunk_toml="", tauri_cli="9.9.9")
 
     def test_the_signer_set_is_its_one_cargo_tauri_on_path(self):
         good = row(set="signer", name="cargo-tauri", version="2.0.0", install="bin=cargo-tauri")
