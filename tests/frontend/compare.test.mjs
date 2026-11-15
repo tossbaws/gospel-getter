@@ -4,7 +4,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, markers, openApp, shownVerse, storedVerse, verseCount, withApp } from './harness.mjs';
+import { backend, closeBridge, markers, openApp, shownVerse, storedVerse, verseCount, withApp } from './harness.mjs';
 
 after(closeBridge);
 
@@ -49,6 +49,35 @@ test('the Compare toggle swaps the faded neighbors for labeled side-by-side colu
         assert.equal(app.document.querySelectorAll('.chapter-side').length, 2, 'normal layout restored');
         assert.equal(app.sideVerse('prev', 1).textContent.includes(storedVerse('kjv', 'John', 2, 1)), true);
         assert.equal(app.window.localStorage.getItem('gospel-getter-compare'), 'off');
+    }));
+
+test('Compare on and off on a chapter in hand reads only its findings again; loading the chapter reads its notes', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        await toggleCompare(app);
+        assert.ok(app.isComparing());
+        const sent = async () => {
+            const before = app.calls.length;
+            await toggleCompare(app);
+            return app.calls.slice(before).map((c) => c.cmd);
+        };
+        assert.deepEqual(await sent(), ['list_findings'], 'off');
+        assert.ok(!app.isComparing());
+        assert.deepEqual(await sent(), ['list_findings'], 'on, the comparison in hand');
+        assert.ok(app.isComparing());
+
+        // A note saved outside the app's own note editor: the chapter loaded
+        // again, the one on screen, reads its notes afresh.
+        const noted = () => app.document.querySelector('.chapter-main .verse[data-translation="kjv"][data-verse="16"]').classList.contains('has-notes');
+        const note = await backend('add_note', { bookId: 43, chapter: 3, verseStart: 16, verseEnd: 16, body: 'Read again.' });
+        assert.ok(!noted());
+        await app.search('John 3');
+        const before = app.calls.length;
+        app.key('Enter', {}, app.searchInput());
+        await app.idle(before, 'get_reading');
+        assert.equal(app.heading(), 'John 3');
+        assert.ok(app.calls.slice(before).some((c) => c.cmd === 'list_notes'));
+        assert.ok(noted());
+        await backend('delete_note', { id: note.id });
     }));
 
 test('C toggles compare, and the mode is remembered across restarts', () =>
