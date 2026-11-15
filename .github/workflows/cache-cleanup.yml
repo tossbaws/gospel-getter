@@ -18,9 +18,12 @@ name: Cache cleanup
 # without its hashes) all but the newest, never one saved with it. It
 # prints the keys first; a run by hand with dry-run deletes nothing.
 #
-# The token can only manage the repository's caches (actions: write).
-# delete-superseded checks out tools/ci alone, for the script, without
-# keeping the token; delete-caches checks out nothing. A pull request from
+# The token can manage the repository's caches (actions: write) and read
+# its files (contents: read), nothing else. The read is for
+# delete-superseded's checkout of tools/ci: once a workflow names any
+# permission, every one it doesn't name is none, and a checkout shouldn't
+# depend on the repository staying public. It keeps no token after;
+# delete-caches checks out nothing. A pull request from
 # a fork gets a read-only token, so its caches are left to expire (seven
 # days unused).
 
@@ -40,6 +43,7 @@ on:
 
 permissions:
   actions: write
+  contents: read
 
 jobs:
   delete-caches:

@@ -1501,8 +1501,8 @@ fn the_gui_checks_retry_once_in_ci_and_never_force_a_failure() {
 /// main's and don't save copies of it, which pushed main's own out of the
 /// repository's 10 GB. cache-cleanup.yml deletes a pull request's caches when
 /// it closes, and main's superseded ones after main's CI and Distribution
-/// runs (or by hand), with a token that can manage caches and nothing else:
-/// the job for main's checks out tools/ci alone, for the script that says
+/// runs (or by hand), with a token that can manage caches and read the
+/// repository, nothing else: the job for main's checks out tools/ci alone, for the script that says
 /// which, without keeping the token, and the pull request's job checks out
 /// nothing.
 #[test]
@@ -1565,7 +1565,7 @@ fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
         .take_while(|l| l.starts_with(' '))
         .map(str::trim)
         .collect();
-    assert_eq!(permissions, ["actions: write"]);
+    assert_eq!(permissions, ["actions: write", "contents: read"]);
     assert!(
         cleanup.contains("refs/pull/${{ github.event.pull_request.number }}/merge")
             && cleanup.contains("gh cache delete"),
