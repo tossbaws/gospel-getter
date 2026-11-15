@@ -2731,20 +2731,27 @@ fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
     );
 }
 
-/// Adding `ci:full` cancels the run in progress on the pull request, whose
-/// gui-linux, cancelled before it started, would stay on the pull request
-/// as a failed check under its name's expression. The label's run deletes
-/// that run (the `supersede` job): in that run alone, with a token that can
-/// manage runs and do nothing else, nothing waiting for it, never failing
-/// the run, and deleting only a Distribution run for the pull request's
-/// head commit, older than itself, that ended cancelled.
+/// Adding `ci:full` makes two runs for the pull request's head commit, and
+/// the one that starts second cancels the other, whose gui-linux, cancelled
+/// before it started, would stay on the pull request as a failed check
+/// under its name's expression. Which survives isn't the label's to say:
+/// on #246 the label came a second after the pull request opened, and the
+/// opened run cancelled the labeled one. So the run that survives deletes
+/// the other (the `supersede` job): in every run of a pull request with
+/// the label, but not another label's run ([`LABEL_GATE`]), with a token
+/// that can manage runs and do nothing else, nothing waiting for it, never
+/// failing the run, and deleting only a Distribution run for the pull
+/// request's head commit, older than itself, that ended cancelled.
 #[test]
 fn the_ci_full_run_deletes_only_the_run_it_superseded() {
     let keys = dist_job_keys("supersede");
     assert!(
         keys.contains(
-            &"if: github.event_name == 'pull_request' && github.event.action == 'labeled' \
-              && github.event.label.name == 'ci:full'"
+            &format!(
+                "if: github.event_name == 'pull_request' && \
+                 contains(github.event.pull_request.labels.*.name, 'ci:full') && ({LABEL_GATE})"
+            )
+            .as_str()
         ),
         "{keys:#?}"
     );

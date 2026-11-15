@@ -16,10 +16,15 @@ name: Distribution Artifacts
 # sign-rehearsal too, in its own pull_request run, as a release/ branch's
 # does, so a branch needs no run dispatched by hand for them (which built
 # everything twice). Adding the label starts that run (pull_request
-# "labeled"), which cancels the one in progress on the pull request as a
-# push does, and then deletes the run it cancelled (the supersede job, the
-# only one here whose token does more than read: actions: write). In that
-# run gui-linux was still waiting for linux, so it was cancelled before it
+# "labeled"), which shares the pull request's concurrency group, so one of
+# the two runs for the head commit cancels the other: the labeled run
+# cancels the one in progress, as a push does, or, when the label comes
+# with the pull request (opened, then labeled a second later, as on #246),
+# whichever run started second cancels the first. The run that survives
+# deletes the one cancelled (the supersede job, which runs in every run of
+# a pull request with the label for that reason, and the only one here
+# whose token does more than read: actions: write). In the cancelled run
+# gui-linux was still waiting for linux, so it was cancelled before it
 # started, and would stay on the pull request as a failed check under its
 # name's expression (see below), which the new run's "GUI checks (Linux)"
 # never replaces. Adding any other label (Dependabot labels its pull requests)
@@ -139,17 +144,21 @@ env:
 
 jobs:
   supersede:
-    # The ci:full label's run only (see the top of this file): deletes the
-    # run it cancelled, with that run's checks. Only a Distribution run
-    # (this workflow) for this pull request's head commit, older than this
-    # one, that ended cancelled: never one that passed or failed, another
-    # commit's, or another workflow's (CI's). One still being cancelled is
-    # waited for, two minutes at most. Its token can manage the
+    # Every pull_request run of a pull request with the ci:full label, not
+    # only the labeled event's: either of a pull request's two runs for one
+    # commit may be the one that survives (see the top of this file). Not
+    # in a run for another label, which builds nothing and cancels nothing.
+    # Deletes the run this one superseded, with that run's checks. Only a
+    # Distribution run (this workflow) for this pull request's head commit,
+    # older than this one, that ended cancelled: never one that passed or
+    # failed, another commit's, or another workflow's (CI's), and never the
+    # newer twin, which cancelled this run if it exists. One still being
+    # cancelled is waited for, two minutes at most. Its token can manage the
     # repository's runs and nothing else, and it checks out nothing.
     # Nothing waits for it, and it never fails the run: a token that can't
     # delete (a fork's, which is read-only) is a warning.
     name: Delete the run ci:full superseded
-    if: github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'ci:full'
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
