@@ -386,7 +386,7 @@ fn xref_summary(dto: &Reading, open: bool) -> String {
 /// The Cross references list's rows: each verse that has any, with its
 /// chips, in order.
 pub fn xref_rows(dto: &Reading) -> String {
-    dto        .current_verses
+    dto.current_verses
         .iter()
         .filter(|v| !v.xrefs.is_empty())
         .map(|v| {
