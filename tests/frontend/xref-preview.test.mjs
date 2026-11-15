@@ -329,6 +329,7 @@ test('a citation in the chapter’s Cross references opens its passage, selected
 
 test('every citation in the list is a button named by its reference', () =>
     withApp({ book: 'Psalms', chapter: 23, translation: 'kjv' }, async (app) => {
+        openList(app);
         const all = listed(app);
         const count = Number(/\((\d+)\)/.exec(app.document.querySelector('.disclosure-toggle[data-disclosure="xrefs"]').textContent)[1]);
         assert.equal(all.length, count);

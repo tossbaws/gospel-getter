@@ -355,14 +355,38 @@ fn end_verse(xref: &Xref) -> String {
 /// The cross-references' credit, with its links (which the backend opens).
 const XREF_CREDIT: &str = r#"<p class="xref-credit">Cross-reference data from <a class="credit-link" data-link="openbible" href="https://www.openbible.info/labs/cross-references/">OpenBible.info</a>, licensed under <a class="credit-link" data-link="cc-by" href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>"#;
 
-/// The chapter's Cross references: each verse's chips, and the
-/// OpenBible.info credit with its links (which the backend opens).
+/// The chapter's Cross references: the toggle with its count, the list
+/// (its rows only while open), and the OpenBible.info credit with its
+/// links (which the backend opens).
+///
+/// A closed list is left empty and filled with [`xref_rows`] when it's
+/// first opened, or printed (`reader::fill_xref_rows`): the rows are over
+/// half the elements a chapter would otherwise draw (three quarters in
+/// Psalm 119), for a list most readers never open.
 fn xref_summary(dto: &Reading, open: bool) -> String {
     if !dto.has_chapter_xrefs {
         return String::new();
     }
-    let rows: String = dto
-        .current_verses
+    let rows = if open { xref_rows(dto) } else { String::new() };
+    let count: usize = dto.current_verses.iter().map(|v| v.xrefs.len()).sum();
+    format!(
+        "<div class=\"xref-summary\">\n{s20}<h3 class=\"xref-summary-title\">{}</h3>\n{s20}<div class=\"xref-summary-list disclosure-body\" id=\"xref-summary-list\"{}>{rows}</div>\n{s20}{XREF_CREDIT}\n{s16}</div>",
+        disclosure_toggle(
+            Disclosure::Xrefs,
+            "xref-summary-list",
+            &format!("Cross references ({count})"),
+            open,
+        ),
+        if open { "" } else { " hidden" },
+        s20 = spaces(20),
+        s16 = spaces(16),
+    )
+}
+
+/// The Cross references list's rows: each verse that has any, with its
+/// chips, in order.
+pub fn xref_rows(dto: &Reading) -> String {
+    dto        .current_verses
         .iter()
         .filter(|v| !v.xrefs.is_empty())
         .map(|v| {
@@ -388,20 +412,7 @@ fn xref_summary(dto: &Reading, open: bool) -> String {
                 s24 = spaces(24),
             )
         })
-        .collect();
-    let count: usize = dto.current_verses.iter().map(|v| v.xrefs.len()).sum();
-    format!(
-        "<div class=\"xref-summary\">\n{s20}<h3 class=\"xref-summary-title\">{}</h3>\n{s20}<div class=\"xref-summary-list disclosure-body\" id=\"xref-summary-list\"{}>{rows}</div>\n{s20}{XREF_CREDIT}\n{s16}</div>",
-        disclosure_toggle(
-            Disclosure::Xrefs,
-            "xref-summary-list",
-            &format!("Cross references ({count})"),
-            open,
-        ),
-        if open { "" } else { " hidden" },
-        s20 = spaces(20),
-        s16 = spaces(16),
-    )
+        .collect()
 }
 
 /// Compare's rows: one per verse number any column numbers, in order, with
@@ -1180,14 +1191,34 @@ mod tests {
 
     /// The page's own `renderReadingPane` output for this chapter (at
     /// 4a7f6f5, both lists closed, run on the same answer), byte for byte.
+    /// It drew the closed Cross references list's rows; the pane leaves
+    /// them out until the list is opened, when they're the fixture's.
     const GENESIS_1: &str = include_str!("../fixtures/genesis-1.html");
 
     #[test]
     fn the_pane_is_the_page_s_markup_byte_for_byte() {
+        let rows = xref_rows(&reading());
+        assert!(rows.starts_with(r#"<div class="xref-summary-row">"#));
+        assert_eq!(GENESIS_1.matches(&rows).count(), 1, "the fixture's rows");
         assert_eq!(
             reading_pane(&reading(), Beside::Nothing, "kjv", Opened::default()),
-            GENESIS_1
+            GENESIS_1.replacen(&rows, "", 1)
         );
+    }
+
+    /// Open, the list is drawn with the rows it's filled with on opening.
+    #[test]
+    fn an_open_cross_references_list_is_drawn_with_its_rows() {
+        let open = Opened {
+            footnotes: false,
+            xrefs: true,
+        };
+        let rows = xref_rows(&reading());
+        let pane = reading_pane(&reading(), Beside::Nothing, "kjv", open);
+        assert!(pane.contains(&format!(r#"id="xref-summary-list">{rows}</div>"#)));
+        let closed = reading_pane(&reading(), Beside::Nothing, "kjv", Opened::default());
+        assert!(closed.contains(r#"id="xref-summary-list" hidden></div>"#));
+        assert!(closed.contains("Cross references (1)"));
     }
 
     /// Compare with Notes: the text exactly as normal reading has it (the
