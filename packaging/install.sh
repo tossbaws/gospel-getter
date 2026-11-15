@@ -39,9 +39,9 @@ fi
 #   - linuxdeploy's own bundled `strip` doesn't understand the newer
 #     `.relr.dyn` ELF section some system libraries are now built with,
 #     and aborts on it; NO_STRIP skips stripping instead (the binary is
-#     already stripped by cargo/rustc, so this doesn't leave debug info
-#     behind, just the still-unstripped system libraries bundled from
-#     /usr/lib).
+#     already stripped by the workspace's release profile, `strip = true`
+#     in src-tauri/Cargo.toml, so this leaves only the system libraries
+#     bundled from /usr/lib unstripped).
 #
 # The bundle folder can keep AppImages from older builds, so which one to
 # install is decided by identity, not by whichever `find` lists first: the
