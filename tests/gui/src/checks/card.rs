@@ -563,14 +563,7 @@ impl Run<'_> {
             "Copy chapter… markdown: toast \"{}\"",
             toast.as_str().unwrap_or("?")
         ));
-        self.ui
-            .wait_within(
-                "the toast to go",
-                "return [document.getElementById('data-status').classList.contains('is-hidden'), null];",
-                Vec::new(),
-                Some(std::time::Duration::from_secs(20)),
-            )
-            .await?;
+        self.ui.toast_gone().await?;
         let read_by = if self.config.xvfb.is_some() {
             "pasted on the private display"
         } else {

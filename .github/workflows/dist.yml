@@ -16,10 +16,15 @@ name: Distribution Artifacts
 # sign-rehearsal too, in its own pull_request run, as a release/ branch's
 # does, so a branch needs no run dispatched by hand for them (which built
 # everything twice). Adding the label starts that run (pull_request
-# "labeled"), which cancels the one in progress on the pull request as a
-# push does, and then deletes the run it cancelled (the supersede job, the
-# only one here whose token does more than read: actions: write). In that
-# run gui-linux was still waiting for linux, so it was cancelled before it
+# "labeled"), which shares the pull request's concurrency group, so one of
+# the two runs for the head commit cancels the other: the labeled run
+# cancels the one in progress, as a push does, or, when the label comes
+# with the pull request (opened, then labeled a second later, as on #246),
+# whichever run started second cancels the first. The run that survives
+# deletes the one cancelled (the supersede job, which runs in every run of
+# a pull request with the label for that reason, and the only one here
+# whose token does more than read: actions: write). In the cancelled run
+# gui-linux was still waiting for linux, so it was cancelled before it
 # started, and would stay on the pull request as a failed check under its
 # name's expression (see below), which the new run's "GUI checks (Linux)"
 # never replaces. Adding any other label (Dependabot labels its pull requests)
@@ -44,10 +49,11 @@ name: Distribution Artifacts
 # checks' test build of the app (feature gui-test-updater: its updater
 # reads a test settings file, talks to the checks' own local server, and
 # never installs), built into an artifact of its own (gui-check-test-app-*)
-# from the same commit: on Linux by its own job, gui-test-app-linux, beside
-# the linux job (gui-linux waits for both), which uploads nothing else and
-# restores the linux job's Rust cache without saving one; on Windows by the
-# windows job, after its installers are uploaded. It is never an installer
+# from the same commit by a job of its own beside each installer job:
+# gui-test-app-linux beside linux, and gui-test-app-windows beside windows
+# when gui-windows runs. gui-linux and gui-windows each wait for both of
+# theirs. Each test-app job uploads nothing else and restores its
+# installer job's Rust cache without saving one. It is never an installer
 # and never released; tests/packaging_config.rs fails if any installer or
 # packaging build enables the feature.
 #
@@ -92,8 +98,8 @@ name: Distribution Artifacts
 # Every action is pinned to a commit (Dependabot proposes updates:
 # .github/dependabot.yml), and every job builds with one Rust release,
 # RUST_TOOLCHAIN below. Only main's runs save the Rust caches (save-if, as
-# in ci.yml); every other run restores main's, and gui-test-app-linux
-# never saves (see its cache step). Every job has a time limit
+# in ci.yml); every other run restores main's, and the gui-test-app jobs
+# never save (see gui-test-app-linux's cache step). Every job has a time limit
 # (timeout-minutes, about three times its slowest green run, more where a
 # cold cache needs it), so a hung runner fails in minutes, not after
 # GitHub's six hours; apt-get retries a failed download and gives up on a
@@ -125,9 +131,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Exactly: the bundler's tools are pinned for this version
-  # (tools/ci/build-tools.txt, set bundler), and a version with none pinned
-  # stops the build.
+  # Exactly: the bundler's tools and the prebuilt CLI are pinned for this
+  # version (tools/ci/build-tools.txt, sets bundler and signer), and a
+  # version with none pinned stops the build.
   TAURI_CLI_VERSION: "2.12.4"
   # The Rust every job here builds with, so a release is built by a known
   # compiler rather than whatever is stable that day. ci.yml builds with
@@ -138,17 +144,21 @@ env:
 
 jobs:
   supersede:
-    # The ci:full label's run only (see the top of this file): deletes the
-    # run it cancelled, with that run's checks. Only a Distribution run
-    # (this workflow) for this pull request's head commit, older than this
-    # one, that ended cancelled: never one that passed or failed, another
-    # commit's, or another workflow's (CI's). One still being cancelled is
-    # waited for, two minutes at most. Its token can manage the
+    # Every pull_request run of a pull request with the ci:full label, not
+    # only the labeled event's: either of a pull request's two runs for one
+    # commit may be the one that survives (see the top of this file). Not
+    # in a run for another label, which builds nothing and cancels nothing.
+    # Deletes the run this one superseded, with that run's checks. Only a
+    # Distribution run (this workflow) for this pull request's head commit,
+    # older than this one, that ended cancelled: never one that passed or
+    # failed, another commit's, or another workflow's (CI's), and never the
+    # newer twin, which cancelled this run if it exists. One still being
+    # cancelled is waited for, two minutes at most. Its token can manage the
     # repository's runs and nothing else, and it checks out nothing.
     # Nothing waits for it, and it never fails the run: a token that can't
     # delete (a fork's, which is read-only) is a warning.
     name: Delete the run ci:full superseded
-    if: github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'ci:full'
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
@@ -260,8 +270,38 @@ jobs:
             src-tauri
             ui-leptos
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+      # tauri-apps' own prebuilt cargo-tauri for TAURI_CLI_VERSION, as the
+      # sign job gets it (see its comment), not tauri-cli compiled from
+      # crates.io here, which takes about five minutes whenever main's Rust
+      # cache is cold.
+      - name: Get the Tauri CLI (Tauri's prebuilt, pinned by SHA-256)
+        uses: ./.github/actions/build-tools
+        with:
+          set: signer
+
+      # The sign job's check. The Rust cache above restores the cargo bin
+      # folder, which may hold the tauri-cli an earlier run compiled there,
+      # and cargo would run that one first: it goes.
+      - name: Check the Tauri CLI is the pinned one
+        run: |
+          set -euo pipefail
+          want="$RUNNER_TEMP/build-tools/bin/cargo-tauri"
+          shadow="${CARGO_HOME:-$HOME/.cargo}/bin/cargo-tauri"
+          if [ -e "$shadow" ]; then
+            echo "Removing $shadow, a cargo-installed tauri-cli the Rust cache restored"
+            rm -f "$shadow"
+          fi
+          found="$(command -v cargo-tauri || true)"
+          version="$(cargo tauri --version)"
+          echo "tauri-cli: cargo tauri --version: $version, at ${found:-nowhere} ($(cargo --version))"
+          if [ "$found" != "$want" ] || [ -e "$shadow" ]; then
+            echo "::error::cargo tauri isn't the pinned CLI at $want: cargo-tauri on PATH is ${found:-none}, $shadow $([ -e "$shadow" ] && echo exists || echo 'is absent')"
+            exit 1
+          fi
+          if [ "$version" != "tauri-cli $TAURI_CLI_VERSION" ]; then
+            echo "::error::cargo tauri --version printed '$version', not 'tauri-cli $TAURI_CLI_VERSION'"
+            exit 1
+          fi
 
       # What the bundler would download for the AppImage (linuxdeploy, its
       # AppImage plugin, AppRun), the same way as Trunk above.
@@ -536,16 +576,45 @@ jobs:
         with:
           set: trunk
 
+      # shared-key is this job's id, as for the linux job, so the key is
+      # unchanged; gui-test-app-windows restores it.
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          shared-key: windows
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             src-tauri
             ui-leptos
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "${{ env.TAURI_CLI_VERSION }}" --locked
+      # As for the linux job: tauri-apps' prebuilt cargo-tauri.
+      - name: Get the Tauri CLI (Tauri's prebuilt, pinned by SHA-256)
+        uses: ./.github/actions/build-tools
+        with:
+          set: signer
+
+      # The linux job's check, in PowerShell for Windows' paths.
+      - name: Check the Tauri CLI is the pinned one
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $want = Join-Path $env:RUNNER_TEMP "build-tools\bin\cargo-tauri.exe"
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME ".cargo" }
+          $shadow = Join-Path $cargoHome "bin\cargo-tauri.exe"
+          if (Test-Path -LiteralPath $shadow) {
+            Write-Host "Removing $shadow, a cargo-installed tauri-cli the Rust cache restored"
+            Remove-Item -LiteralPath $shadow -Force
+          }
+          $found = (Get-Command cargo-tauri -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+          $version = "$(cargo tauri --version)".Trim()
+          if ($LASTEXITCODE -ne 0) { Write-Error "cargo tauri --version failed: $version" }
+          Write-Host "tauri-cli: cargo tauri --version: $version, at $(if ($found) { $found } else { 'nowhere' }) ($(cargo --version))"
+          if (-not $found -or [IO.Path]::GetFullPath($found) -ne [IO.Path]::GetFullPath($want) -or (Test-Path -LiteralPath $shadow)) {
+            Write-Error "cargo tauri isn't the pinned CLI at ${want}: cargo-tauri on PATH is $(if ($found) { $found } else { 'none' })"
+          }
+          if ($version -ne "tauri-cli $env:TAURI_CLI_VERSION") {
+            Write-Error "cargo tauri --version printed '$version', not 'tauri-cli $env:TAURI_CLI_VERSION'"
+          }
 
       # What the bundler would download for the installers (NSIS with its
       # nsis_tauri_utils plugin, and WiX), the same way as Trunk above.
@@ -753,11 +822,62 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # Last, after the installers above are uploaded, and only when
-      # gui-windows runs: the GUI checks' test build (see the top of this
-      # file), for its updater checks.
+  gui-test-app-windows:
+    # The GUI checks' test build for gui-windows (see the top of this file),
+    # beside the windows job rather than after its installers, as
+    # gui-test-app-linux is for gui-linux: gui-windows, and sign after it,
+    # then wait for the longer of the two builds, not both in turn. A name
+    # no required check has, and no expression in it, as for that job.
+    name: GUI-check test app (Windows)
+    # Only when gui-windows runs (its condition), and never in another
+    # label's run, which builds nothing (the windows job's gate).
+    if: (github.event.action != 'labeled' || github.event.label.name == 'ci:full') && (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full'))))
+    runs-on: windows-latest
+    # A cold cache builds the whole app.
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # As the windows job installs it, wasm target and all, or this misses
+      # that job's cache (see gui-test-app-linux's cache step).
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          # The page's Rust pieces (ui-leptos/) compile to WebAssembly.
+          targets: wasm32-unknown-unknown
+
+      # The app embeds dist/, which nothing else builds here: `cargo build`
+      # doesn't run Tauri's beforeBuildCommand.
+      - name: Install Trunk
+        uses: ./.github/actions/build-tools
+        with:
+          set: trunk
+
+      # The windows job's cache, restored and never saved, as
+      # gui-test-app-linux restores the linux job's.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows
+          save-if: false
+          workspaces: |
+            src-tauri
+            ui-leptos
+
+      - name: Build the page (Trunk)
+        working-directory: .
+        run: trunk build --release
+
+      - name: Check Trunk fetched no tools itself
+        working-directory: .
+        shell: bash
+        run: python tools/ci/build_tools.py check trunk
+
       - name: Build the GUI-check test app
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
         shell: pwsh
         run: |
           cargo build --release --locked --features gui-test-updater
@@ -766,7 +886,6 @@ jobs:
           Copy-Item target/release/gospel_getter.exe "$env:RUNNER_TEMP/gui-check-test-app/"
 
       - name: Upload the GUI-check test app
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gui-check-test-app-windows
@@ -880,7 +999,7 @@ jobs:
     # Windows has no private display, so this runs on the runner's desktop;
     # the native save-dialog step stops at "the dialog appeared" (UI
     # Automation finds and closes it).
-    needs: windows
+    needs: [windows, gui-test-app-windows]
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
     runs-on: windows-latest
     # Room for the whole suite twice (GUI_CHECK_RETRY below).

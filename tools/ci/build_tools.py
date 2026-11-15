@@ -15,9 +15,10 @@ tools/ci/build-tools.txt (which says where each version is set). Three sets:
              folder (~/.cache/tauri, %LOCALAPPDATA%\\tauri), where it looks
              before downloading
     signer   Tauri's own prebuilt cargo-tauri for TAURI_CLI_VERSION, into the
-             same bin folder on PATH, for dist.yml's signing jobs: a pinned
-             download in place of compiling tauri-cli in a job with no build
-             cache (5-6 minutes, on every release)
+             same bin folder on PATH, for dist.yml's installer and signing
+             jobs: a pinned download in place of compiling tauri-cli, which
+             took 5-6 minutes in a job with no build cache, or with a cold
+             one, and one provenance for the tool in every job
 
 .github/actions/build-tools runs it: `plan` names the cache (key and path),
 actions/cache restores it, `install` checks every cached file against its

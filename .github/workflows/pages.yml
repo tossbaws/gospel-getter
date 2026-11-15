@@ -87,24 +87,21 @@ jobs:
           fi
           python3 tools/release/site_version_gate.py --site site/index.html "${published[@]}" >> "$GITHUB_OUTPUT"
 
-  deploy:
+  # The site's files, as the artifact the deploy job publishes. A job of its
+  # own, not the deploy job's first steps: deploy-pages looks the run's
+  # artifact up by name, and straight after an upload in the same job that
+  # lookup can come back empty, on these same versions (actions/deploy-pages
+  # issue 451: 2.29.4's release deploy failed so, "Fetching artifact
+  # metadata failed"). Re-running that job uploaded a second artifact of the
+  # name, which deploy-pages refuses as ambiguous (issue 338). From a job of
+  # its own the upload has long finished, and a failed deploy re-runs alone
+  # (Re-run failed jobs), uploading nothing.
+  upload:
     needs: check
     if: needs.check.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     # Its wait for the downloads alone may take 15 minutes.
     timeout-minutes: 25
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    # One deployment at a time; a newer one waits rather than cancelling one
-    # that's already publishing.
-    concurrency:
-      group: pages
-      cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -130,13 +127,30 @@ jobs:
           echo "The downloads still don't serve $want after 15 minutes." >&2
           exit 1
 
-      - name: Configure Pages
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-
       - name: Upload site
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
+
+  deploy:
+    needs: upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    # One deployment at a time; a newer one waits rather than cancelling one
+    # that's already publishing.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Deploy to GitHub Pages
         id: deployment

@@ -427,8 +427,9 @@ const TEST_FEATURE: &str = "gui-test-updater";
 /// What builds the test app in dist.yml, and the artifacts it goes into.
 const TEST_BUILD_STEP: &str = "Build the GUI-check test app";
 const TEST_ARTIFACT: &str = "gui-check-test-app-";
-/// The job that builds the Linux test app, beside the linux job.
+/// The jobs that build the test app, beside the linux and windows jobs.
 const LINUX_TEST_APP_JOB: &str = "gui-test-app-linux";
+const WINDOWS_TEST_APP_JOB: &str = "gui-test-app-windows";
 
 /// One step of a workflow's job: its job, its name (if it has one) and its
 /// text. Crude, as `cargo_package_version` is, but enough for the shape
@@ -497,9 +498,8 @@ fn workflow_steps(workflow: &str) -> Vec<Step> {
 /// on every feature); and in dist.yml the installers' builds take no
 /// features, while the test app is built only in its own steps, into its
 /// own artifacts, which the release procedure never takes (it takes the
-/// four installers by name): on Linux by a job of its own that builds and
-/// uploads nothing else, and on Windows after the job's installers are
-/// uploaded.
+/// four installers by name), by a job of its own on each platform that
+/// builds and uploads nothing else.
 #[test]
 fn no_release_or_packaging_build_enables_the_gui_test_updater() {
     // The crate: declared, and not a default.
@@ -580,37 +580,43 @@ fn no_release_or_packaging_build_enables_the_gui_test_updater() {
     let builds: Vec<&Step> = steps.iter().filter(|s| s.name == TEST_BUILD_STEP).collect();
     assert_eq!(
         builds.iter().map(|s| s.job.as_str()).collect::<Vec<_>>(),
-        [LINUX_TEST_APP_JOB, "windows"],
-        "the test app is built by its Linux job and the Windows job, once each"
+        [LINUX_TEST_APP_JOB, WINDOWS_TEST_APP_JOB],
+        "the test app is built by its own Linux and Windows jobs, once each"
     );
-    // The linux job builds the installers and nothing with features.
-    for step in steps.iter().filter(|s| s.job == "linux") {
+    for (build, own_job, artifact) in [
+        ("linux", LINUX_TEST_APP_JOB, "gui-check-test-app-linux"),
+        (
+            "windows",
+            WINDOWS_TEST_APP_JOB,
+            "gui-check-test-app-windows",
+        ),
+    ] {
+        // The installer job builds the installers and nothing with features.
+        for step in steps.iter().filter(|s| s.job == build) {
+            assert!(
+                !step.text.contains(TEST_FEATURE)
+                    && !step.text.contains(TEST_ARTIFACT)
+                    && !step.text.contains("--features"),
+                "the {build} job builds or uploads the test app again: {step:#?}"
+            );
+        }
+        // Its own job: no installer, no release artifact, only the test app's.
+        let own: Vec<&Step> = steps.iter().filter(|s| s.job == own_job).collect();
         assert!(
-            !step.text.contains(TEST_FEATURE)
-                && !step.text.contains(TEST_ARTIFACT)
-                && !step.text.contains("--features"),
-            "the linux job builds or uploads the test app again: {step:#?}"
+            !own.iter().any(|s| s.text.contains("cargo tauri")),
+            "{own_job} builds an installer: {own:#?}"
+        );
+        let uploads: Vec<Option<&str>> = own
+            .iter()
+            .filter(|s| s.text.contains("actions/upload-artifact@"))
+            .map(|s| with_value(s, "name"))
+            .collect();
+        assert_eq!(
+            uploads,
+            [Some(artifact)],
+            "{own_job} uploads something other than the test app"
         );
     }
-    // Its own job: no installer, no release artifact, only the test app's.
-    let own: Vec<&Step> = steps
-        .iter()
-        .filter(|s| s.job == LINUX_TEST_APP_JOB)
-        .collect();
-    assert!(
-        !own.iter().any(|s| s.text.contains("cargo tauri")),
-        "{LINUX_TEST_APP_JOB} builds an installer: {own:#?}"
-    );
-    let uploads: Vec<Option<&str>> = own
-        .iter()
-        .filter(|s| s.text.contains("actions/upload-artifact@"))
-        .map(|s| with_value(s, "name"))
-        .collect();
-    assert_eq!(
-        uploads,
-        [Some("gui-check-test-app-linux")],
-        "{LINUX_TEST_APP_JOB} uploads something other than the test app"
-    );
     for build in builds {
         assert!(
             build.text.contains(&format!(
@@ -649,21 +655,40 @@ fn no_release_or_packaging_build_enables_the_gui_test_updater() {
 /// step in dist.yml for rust-cache's key).
 #[test]
 fn the_linux_test_app_is_built_beside_the_installers_from_their_cache() {
-    let keys = dist_job_keys("gui-linux");
+    test_app_is_built_beside(LINUX_TEST_APP_JOB, "linux", "gui-linux", "ubuntu-22.04");
+}
+
+/// The same for Windows: gui-test-app-windows beside the windows job, on
+/// its runner, from its cache, which gui-windows (and sign after it) waits
+/// for with the installers.
+#[test]
+fn the_windows_test_app_is_built_beside_the_installers_from_their_cache() {
+    test_app_is_built_beside(
+        WINDOWS_TEST_APP_JOB,
+        "windows",
+        "gui-windows",
+        "windows-latest",
+    );
+}
+
+/// A test-app job (`own`) beside its installer job (`build`), as the tests
+/// above say, for the GUI job that runs both.
+fn test_app_is_built_beside(own_job: &str, build: &str, gui: &str, runs_on: &str) {
+    let keys = dist_job_keys(gui);
     assert!(
-        keys.contains(&format!("needs: [linux, {LINUX_TEST_APP_JOB}]").as_str()),
-        "gui-linux should wait for the AppImage and the test app: {keys:#?}"
+        keys.contains(&format!("needs: [{build}, {own_job}]").as_str()),
+        "{gui} should wait for the installers and the test app: {keys:#?}"
     );
 
-    let own = dist_job_keys(LINUX_TEST_APP_JOB);
-    let linux = dist_job_keys("linux");
+    let own = dist_job_keys(own_job);
+    let linux = dist_job_keys(build);
     let key = |keys: &[&'static str], key: &str| -> Option<&'static str> {
         let prefix = format!("{key}: ");
         keys.iter().find_map(|k| k.strip_prefix(prefix.as_str()))
     };
-    assert_eq!(key(&own, "runs-on"), Some("ubuntu-22.04"), "{own:#?}");
+    assert_eq!(key(&own, "runs-on"), Some(runs_on), "{own:#?}");
     assert_eq!(key(&own, "runs-on"), key(&linux, "runs-on"));
-    assert_eq!(key(&own, "needs"), None, "it runs beside the linux job");
+    assert_eq!(key(&own, "needs"), None, "it runs beside the {build} job");
     let name = key(&own, "name").unwrap_or_else(|| panic!("no name: {own:#?}"));
     assert!(!name.contains("${{"), "{name}");
     for required in [
@@ -673,7 +698,7 @@ fn the_linux_test_app_is_built_beside_the_installers_from_their_cache() {
     ] {
         assert!(
             !name.contains(required),
-            "{LINUX_TEST_APP_JOB}'s name could pass for {required}: {name}"
+            "{own_job}'s name could pass for {required}: {name}"
         );
     }
 
@@ -696,22 +721,22 @@ fn the_linux_test_app_is_built_beside_the_installers_from_their_cache() {
     };
     let rust = "uses: dtolnay/rust-toolchain@";
     assert_eq!(
-        code(step(LINUX_TEST_APP_JOB, rust)),
-        code(step("linux", rust)),
-        "another Rust install misses the linux job's cache"
+        code(step(own_job, rust)),
+        code(step(build, rust)),
+        "another Rust install misses the {build} job's cache"
     );
     let cache = "uses: Swatinem/rust-cache@";
-    let (own_cache, linux_cache) = (step(LINUX_TEST_APP_JOB, cache), step("linux", cache));
-    assert_eq!(with_value(own_cache, "shared-key"), Some("linux"));
+    let (own_cache, linux_cache) = (step(own_job, cache), step(build, cache));
+    assert_eq!(with_value(own_cache, "shared-key"), Some(build));
     assert_eq!(
         with_value(linux_cache, "shared-key"),
-        Some("linux"),
-        "the linux job's key would change"
+        Some(build),
+        "the {build} job's key would change"
     );
     assert_eq!(
         with_value(own_cache, "save-if"),
         Some("false"),
-        "{LINUX_TEST_APP_JOB} saves a cache entry of its own"
+        "{own_job} saves a cache entry of its own"
     );
     assert_eq!(
         with_value(linux_cache, "save-if"),
@@ -734,7 +759,7 @@ fn the_linux_test_app_is_built_beside_the_installers_from_their_cache() {
     assert_eq!(
         workspaces(own_cache),
         workspaces(linux_cache),
-        "other workspaces miss the linux job's cache"
+        "other workspaces miss the {build} job's cache"
     );
 }
 
@@ -878,7 +903,7 @@ fn every_installer_build_carries_the_sidecar() {
 }
 
 /// AppImage users can't reach a sidecar (F8), so the program goes up on its
-/// own too, from the job that built it, before the job's test app is built.
+/// own too, from the job that built it.
 #[test]
 fn the_cli_is_also_uploaded_on_its_own() {
     let steps = dist_steps();
@@ -1092,7 +1117,7 @@ fn pkgbuild_builds_the_page_before_the_app() {
 }
 
 /// gui-windows launches the installed app by its name, the app crate's
-/// binary, which the windows job also builds as the test app, never the
+/// binary, which gui-test-app-windows also builds as the test app, never the
 /// first program its folder lists: the CLI sidecar sits beside it (GG-19).
 #[test]
 fn the_windows_gui_checks_launch_the_app_by_its_name() {
@@ -1130,8 +1155,8 @@ fn the_windows_gui_checks_launch_the_app_by_its_name() {
     }
     let test_app = steps
         .iter()
-        .find(|s| s.job == "windows" && s.name == TEST_BUILD_STEP)
-        .expect("the windows job builds the test app");
+        .find(|s| s.job == WINDOWS_TEST_APP_JOB && s.name == TEST_BUILD_STEP)
+        .expect("gui-test-app-windows builds the test app");
     assert!(
         test_app.text.contains(&format!("target/release/{exe}")),
         "{test_app:#?}"
@@ -1471,11 +1496,15 @@ fn the_gui_checks_retry_once_in_ci_and_never_force_a_failure() {
 
 /// Only main saves the Rust caches: every Swatinem/rust-cache step in every
 /// workflow saves only on main (`save-if`, which may also ask more, as the
-/// frontend shards do) or never (`false`, as gui-test-app-linux, which
-/// restores the linux job's), so pull requests and other branches restore
+/// frontend shards do) or never (`false`, as the gui-test-app jobs, which
+/// restore their installer jobs'), so pull requests and other branches restore
 /// main's and don't save copies of it, which pushed main's own out of the
 /// repository's 10 GB. cache-cleanup.yml deletes a pull request's caches when
-/// it closes, with a token that can manage caches and nothing else.
+/// it closes, and main's superseded ones after main's CI and Distribution
+/// runs (or by hand), with a token that can manage caches and read the
+/// repository, nothing else: the job for main's checks out tools/ci alone, for the script that says
+/// which, without keeping the token, and the pull request's job checks out
+/// nothing.
 #[test]
 fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
     const ON_MAIN: &str = "github.ref == 'refs/heads/main'";
@@ -1512,7 +1541,23 @@ fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
         .take_while(|l| l.starts_with(' '))
         .map(str::trim)
         .collect();
-    assert_eq!(on, ["pull_request:", "types: [closed]"]);
+    assert_eq!(
+        on,
+        [
+            "pull_request:",
+            "types: [closed]",
+            "workflow_run:",
+            "workflows: [CI, Distribution Artifacts]",
+            "types: [completed]",
+            "branches: [main]",
+            "workflow_dispatch:",
+            "inputs:",
+            "dry-run:",
+            "description: \"Only list the caches it would delete\"",
+            "type: boolean",
+            "default: false",
+        ]
+    );
     let permissions: Vec<&str> = cleanup
         .lines()
         .skip_while(|l| *l != "permissions:")
@@ -1520,18 +1565,53 @@ fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
         .take_while(|l| l.starts_with(' '))
         .map(str::trim)
         .collect();
-    assert_eq!(permissions, ["actions: write"]);
+    assert_eq!(permissions, ["actions: write", "contents: read"]);
     assert!(
         cleanup.contains("refs/pull/${{ github.event.pull_request.number }}/merge")
             && cleanup.contains("gh cache delete"),
         "{cleanup}"
     );
-    for (_, body) in workflow_jobs(&cleanup) {
+    let jobs = workflow_jobs(&cleanup);
+    assert_eq!(
+        jobs.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+        ["delete-caches", "delete-superseded"]
+    );
+    for (id, body) in &jobs {
         assert!(
             !body.contains("permissions:"),
             "a job asks for more: {body}"
         );
-        assert!(!body.contains("actions/checkout"), "{body}");
+        if id == "delete-caches" {
+            assert!(
+                body.contains("    if: github.event_name == 'pull_request'\n"),
+                "{body}"
+            );
+            assert!(!body.contains("actions/checkout"), "{body}");
+        } else {
+            assert!(
+                body.contains(
+                    "        with:\n          sparse-checkout: tools/ci\n          \
+                     persist-credentials: false\n"
+                ),
+                "{id} checks out more than tools/ci, or keeps the token: {body}"
+            );
+            assert!(
+                body.contains("--ref refs/heads/main ")
+                    && body.contains("python3 tools/ci/superseded_caches.py")
+                    && !body.contains("refs/pull/"),
+                "{id} acts on more than main's caches, or decides itself: {body}"
+            );
+            let (dry, delete) = (
+                body.find("if [ \"$DRY_RUN\" = true ]; then")
+                    .expect("a dry run"),
+                body.find("gh cache delete").expect("a delete"),
+            );
+            assert!(
+                body.find("cat \"$RUNNER_TEMP/superseded.txt\"")
+                    .is_some_and(|printed| printed < dry && dry < delete),
+                "{id} deletes before it prints what it deletes: {body}"
+            );
+        }
     }
 }
 
@@ -2167,9 +2247,11 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
 /// tools/ci/build-tools.txt, the build tools' pins (columns as its header).
 const BUILD_TOOLS: &str = include_str!("../../tools/ci/build-tools.txt");
 
-/// The version of the signer set's one row, checked to be tauri-apps' own release of the
-/// prebuilt Tauri CLI for its version, for Linux (where both signing jobs
-/// run), pinned by a SHA-256 and laid out as `cargo-tauri` on PATH.
+/// The version of the signer set's rows, one per OS, checked to be
+/// tauri-apps' own release of the prebuilt Tauri CLI for that version (the
+/// Linux one for both signing jobs, which run there, and each for its
+/// platform's installer job), pinned by a SHA-256 and laid out as
+/// `cargo-tauri` on PATH.
 fn signer_version() -> String {
     let rows: Vec<Vec<&str>> = BUILD_TOOLS
         .lines()
@@ -2180,32 +2262,110 @@ fn signer_version() -> String {
         .collect();
     assert_eq!(
         rows.len(),
-        1,
-        "build-tools.txt has one signer row: {rows:#?}"
+        2,
+        "build-tools.txt has a signer row for Linux and one for Windows: {rows:#?}"
     );
-    let row = &rows[0];
-    assert_eq!(row.len(), 9, "{row:?}");
-    let version = row[3];
-    assert_eq!(
-        (row[1], row[2], row[4], row[6], row[8]),
+    let version = rows[0][3];
+    for (row, (os, asset, install)) in rows.iter().zip([
         (
             "Linux",
-            "cargo-tauri",
-            "tauri-apps/tauri",
             "cargo-tauri-x86_64-unknown-linux-gnu.tgz",
-            "bin=cargo-tauri"
+            "bin=cargo-tauri",
         ),
-        "{row:?}"
-    );
-    assert_eq!(row[5], format!("tauri-cli-v{version}"), "{row:?}");
-    assert!(
-        row[7].len() == 64
-            && row[7]
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
-        "the signer isn't pinned by a SHA-256: {row:?}"
-    );
+        (
+            "Windows",
+            "cargo-tauri-x86_64-pc-windows-msvc.zip",
+            "bin=cargo-tauri.exe",
+        ),
+    ]) {
+        assert_eq!(row.len(), 9, "{row:?}");
+        assert_eq!(
+            (row[1], row[2], row[3], row[4], row[6], row[8]),
+            (
+                os,
+                "cargo-tauri",
+                version,
+                "tauri-apps/tauri",
+                asset,
+                install
+            ),
+            "{row:?}"
+        );
+        assert_eq!(row[5], format!("tauri-cli-v{version}"), "{row:?}");
+        assert!(
+            row[7].len() == 64
+                && row[7]
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "the signer isn't pinned by a SHA-256: {row:?}"
+        );
+    }
     version.to_owned()
+}
+
+/// The installer jobs build with the prebuilt Tauri CLI the signing jobs
+/// sign with (the `signer` set, at TAURI_CLI_VERSION), never tauri-cli
+/// compiled by `cargo install`, which took about five minutes on a cold
+/// cache. Each checks `cargo tauri` is that binary at that version, as the
+/// signing jobs do, before its installers are built; the Rust cache may
+/// have restored a cargo-installed one, which cargo would run first, so
+/// the check removes it.
+#[test]
+fn the_installer_jobs_build_with_the_pinned_prebuilt_tauri_cli() {
+    let signer = signer_version();
+    assert_eq!(
+        workflow_env(DIST_YML, "TAURI_CLI_VERSION"),
+        Some(signer.as_str())
+    );
+    let steps = dist_steps();
+    for job in ["linux", "windows"] {
+        let own: Vec<&Step> = steps.iter().filter(|s| s.job == job).collect();
+        assert!(
+            !own.iter().any(|s| s.text.contains("cargo install")),
+            "job {job} compiles a tool: {own:#?}"
+        );
+        let got = own
+            .iter()
+            .position(|s| {
+                s.text.contains("uses: ./.github/actions/build-tools")
+                    && with_value(s, "set") == Some("signer")
+            })
+            .unwrap_or_else(|| panic!("job {job} doesn't get the prebuilt CLI"));
+        let check = own
+            .iter()
+            .position(|s| s.name == "Check the Tauri CLI is the pinned one")
+            .unwrap_or_else(|| panic!("job {job} doesn't check the CLI"));
+        let build = own
+            .iter()
+            .position(|s| {
+                s.text
+                    .lines()
+                    .any(|l| l.trim_start().starts_with("cargo tauri build"))
+            })
+            .unwrap_or_else(|| panic!("job {job} builds no installers"));
+        assert!(
+            got < check && check < build,
+            "job {job}: the CLI is got, then checked, then used"
+        );
+        let text = &own[check].text;
+        for must in [
+            "cargo tauri --version",
+            "TAURI_CLI_VERSION",
+            "build-tools",
+            "cargo-tauri",
+        ] {
+            assert!(
+                text.contains(must),
+                "job {job}'s check lacks {must}: {text}"
+            );
+        }
+        let removes = if job == "windows" {
+            "Remove-Item -LiteralPath $shadow"
+        } else {
+            "rm -f \"$shadow\""
+        };
+        assert!(text.contains(removes), "job {job}: {text}");
+    }
 }
 
 /// The release's files are assembled by the bundle job (CI-05,
@@ -2445,7 +2605,7 @@ fn ci_cancels_only_a_pull_requests_superseded_run() {
 }
 
 /// The `ci:full` label: a pull request that has it runs gui-windows and
-/// sign-rehearsal (and the windows job's GUI-check test app) in its own
+/// sign-rehearsal (and their GUI-check test app's job) in its own
 /// pull_request run, as a release/ branch's does, in place of a run
 /// dispatched by hand that built everything twice; adding the label
 /// (`labeled`) starts that run. A run for any other label builds nothing
@@ -2482,21 +2642,16 @@ fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
         );
     }
     let steps = dist_steps();
-    let test_app: Vec<&Step> = steps
-        .iter()
-        .filter(|s| s.job == "windows" && s.name.contains("GUI-check test app"))
-        .collect();
-    assert_eq!(test_app.len(), 2, "{test_app:#?}");
     let gui_windows = dist_job_keys("gui-windows")
         .into_iter()
         .find_map(|k| k.strip_prefix("if: "))
         .expect("gui-windows's if");
-    for step in test_app {
-        assert!(
-            step.text.contains(&format!("        if: {gui_windows}\n")),
-            "the test app isn't built when gui-windows runs: {step:#?}"
-        );
-    }
+    // Its test app is built whenever it runs, and in no other label's run.
+    let test_app = dist_job_keys(WINDOWS_TEST_APP_JOB);
+    assert!(
+        test_app.contains(&format!("if: ({LABEL_GATE}) && ({gui_windows})").as_str()),
+        "the test app isn't built when gui-windows runs: {test_app:#?}"
+    );
 
     // Another label's run: every job that runs anything is skipped by the
     // builds' gate, and none behind a required check is named as it is.
@@ -2576,20 +2731,27 @@ fn ci_full_runs_the_windows_checks_and_rehearsal_but_never_signs() {
     );
 }
 
-/// Adding `ci:full` cancels the run in progress on the pull request, whose
-/// gui-linux, cancelled before it started, would stay on the pull request
-/// as a failed check under its name's expression. The label's run deletes
-/// that run (the `supersede` job): in that run alone, with a token that can
-/// manage runs and do nothing else, nothing waiting for it, never failing
-/// the run, and deleting only a Distribution run for the pull request's
-/// head commit, older than itself, that ended cancelled.
+/// Adding `ci:full` makes two runs for the pull request's head commit, and
+/// the one that starts second cancels the other, whose gui-linux, cancelled
+/// before it started, would stay on the pull request as a failed check
+/// under its name's expression. Which survives isn't the label's to say:
+/// on #246 the label came a second after the pull request opened, and the
+/// opened run cancelled the labeled one. So the run that survives deletes
+/// the other (the `supersede` job): in every run of a pull request with
+/// the label, but not another label's run ([`LABEL_GATE`]), with a token
+/// that can manage runs and do nothing else, nothing waiting for it, never
+/// failing the run, and deleting only a Distribution run for the pull
+/// request's head commit, older than itself, that ended cancelled.
 #[test]
 fn the_ci_full_run_deletes_only_the_run_it_superseded() {
     let keys = dist_job_keys("supersede");
     assert!(
         keys.contains(
-            &"if: github.event_name == 'pull_request' && github.event.action == 'labeled' \
-              && github.event.label.name == 'ci:full'"
+            &format!(
+                "if: github.event_name == 'pull_request' && \
+                 contains(github.event.pull_request.labels.*.name, 'ci:full') && ({LABEL_GATE})"
+            )
+            .as_str()
         ),
         "{keys:#?}"
     );

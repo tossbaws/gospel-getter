@@ -4,7 +4,8 @@
 # number and name: PASS (it ran and passed), SKIP (it can't run on this
 # platform, where `gui-check --list` says: neither a pass nor a failure),
 # FAIL, or, after a retry (retry_suite), FLAKY (it failed in attempt 1 and
-# passed in attempt 2: not a failure, and never counted as a pass). The
+# passed in attempt 2: not a failure, and never counted as a pass; one
+# attempt 1 never ran, its setup having failed, is a PASS). The
 # result functions read the caller's $results (the file) and $checks (every
 # check, "N name", the first two columns of `gui-check --list`);
 # retry_suite reads $out and $runner.
@@ -54,7 +55,9 @@ run_status() {
 # state behind, and a failure cascades. $runner (gui-check --retried) then
 # judges both: attempt 2's verdicts, a check that failed in attempt 1 and
 # passed in attempt 2 FLAKY, never a clean pass, with a ::warning each (on
-# stdout) and retry-summary.md, added to the job's summary
+# stdout), a ::notice when attempt 1's setup failed before any check ran
+# (its checks pass, not FLAKY: see tests/gui src/retried.rs), and
+# retry-summary.md, added to the job's summary
 # ($GITHUB_STEP_SUMMARY). The status is attempt 2's, and 0 only if that
 # judgement passes too: a FAIL in attempt 2 fails the run.
 retry_suite() {

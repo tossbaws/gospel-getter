@@ -3,10 +3,14 @@
 //! fresh data, keeping the first attempt in `attempt-1/`, and
 //! `gui-check --retried` judges each check from both attempts' results.txt
 //! ([`judge`]). Attempt 2's verdict stands, except that a check that failed
-//! in attempt 1 and passed in attempt 2 is FLAKY: never a clean pass. It
-//! rewrites the final results.txt with those verdicts, prints a GitHub
-//! `::warning` for each flaky check, and writes the job summary's section
-//! (`retry-summary.md`). The run passes only if attempt 2 has no FAIL.
+//! in attempt 1 and passed in attempt 2 is FLAKY: never a clean pass. A
+//! check attempt 1 never ran because its setup failed (tauri-driver not
+//! starting, say: `setup_failed` in the script) didn't fail, so passing in
+//! attempt 2 is its one run and a PASS; the setup failure gets a `::notice`
+//! and a line in the summary instead. It rewrites the final results.txt
+//! with those verdicts, prints a GitHub `::warning` for each flaky check,
+//! and writes the job summary's section (`retry-summary.md`). The run
+//! passes only if attempt 2 has no FAIL.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -22,6 +26,8 @@ pub enum Seen {
     Pass,
     Skip,
     Fail,
+    /// A FAIL that says the check never ran: the run's setup failed first.
+    SetupFailed,
 }
 
 /// A check's verdict over both attempts.
@@ -38,17 +44,23 @@ pub enum Judged {
 /// results.txt says (`None`: it has no line for the check). Attempt 2's
 /// stands: a FAIL there is a FAIL, whatever attempt 1 said, and so is no
 /// result; a SKIP stays a SKIP. A pass in attempt 2 is FLAKY when attempt 1
-/// failed (or had no result), and a clean PASS only when it didn't.
+/// failed (or had no result), and a clean PASS only when it didn't, or
+/// never ran it because the run's setup failed.
 pub fn judge(first: Option<Seen>, second: Option<Seen>) -> Judged {
     match second {
-        None | Some(Seen::Fail) => Judged::Fail,
+        None | Some(Seen::Fail | Seen::SetupFailed) => Judged::Fail,
         Some(Seen::Skip) => Judged::Skip,
         Some(Seen::Pass) => match first {
-            Some(Seen::Pass | Seen::Skip) => Judged::Pass,
+            Some(Seen::Pass | Seen::Skip | Seen::SetupFailed) => Judged::Pass,
             Some(Seen::Fail) | None => Judged::Flaky,
         },
     }
 }
+
+/// The detail `setup_failed` in scripts/gui-check.sh gives every check when
+/// the run fails before any check starts; the setup's reason follows it.
+/// Move both together.
+const SETUP_FAILED: &str = "not run: setup failed: ";
 
 /// One attempt's results.txt: each check's verdict and its detail, by
 /// number, and any other line (such as a setup failure's), as it is.
@@ -93,6 +105,11 @@ fn parse_line(line: &str) -> Option<(u8, Seen, &str)> {
     let (number, rest) = rest.split_once(' ')?;
     let number: u8 = number.parse().ok()?;
     let (_name, detail) = rest.split_once(": ").unwrap_or((rest, ""));
+    let seen = if seen == Seen::Fail && detail.starts_with(SETUP_FAILED) {
+        Seen::SetupFailed
+    } else {
+        seen
+    };
     Some((number, seen, detail))
 }
 
@@ -123,6 +140,9 @@ pub struct Retried {
     /// Attempt 2's lines that aren't a check's (a setup failure's): each a
     /// FAIL too when it says FAIL.
     pub other: Vec<String>,
+    /// Why attempt 1's setup failed, when it ran none of the checks that
+    /// passed in attempt 2.
+    pub first_setup_failed: Option<String>,
 }
 
 /// What results.txt says for no result.
@@ -133,6 +153,7 @@ fn word(seen: Option<Seen>) -> &'static str {
         Some(Seen::Pass) => "PASS",
         Some(Seen::Skip) => "SKIP",
         Some(Seen::Fail) => "FAIL",
+        Some(Seen::SetupFailed) => "not run (setup failed)",
         None => NO_RESULT,
     }
 }
@@ -153,6 +174,14 @@ pub fn retried(first: &str, second: &str) -> Retried {
         let line = match judge(one.map(|(s, _)| *s), two.map(|(s, _)| *s)) {
             Judged::Pass => {
                 out.passed += 1;
+                if let Some((Seen::SetupFailed, detail)) = one {
+                    out.first_setup_failed.get_or_insert_with(|| {
+                        detail
+                            .strip_prefix(SETUP_FAILED)
+                            .unwrap_or(detail)
+                            .to_owned()
+                    });
+                }
                 format!("PASS {number} {name}: {}", two.map_or("", |(_, d)| d))
             }
             Judged::Flaky => {
@@ -208,29 +237,39 @@ impl Retried {
         )
     }
 
-    /// A GitHub `::warning` for each flaky check: its number, its name and
-    /// why it failed in attempt 1.
+    /// A GitHub `::notice` when attempt 1's setup failed, then a
+    /// `::warning` for each flaky check: its number, its name and why it
+    /// failed in attempt 1.
     pub fn annotations(&self) -> Vec<String> {
-        self.flaky
-            .iter()
-            .map(|flake| {
-                format!(
-                    "::warning title={}::{}",
-                    escape_property(&format!(
-                        "Flaky GUI check {} {}",
-                        flake.check.number(),
-                        flake.check.name()
-                    )),
-                    escape_data(&format!(
-                        "Check {} {} failed in attempt 1 and passed when the whole suite ran again \
+        let setup = self.first_setup_failed.iter().map(|why| {
+            format!(
+                "::notice title={}::{}",
+                escape_property("GUI checks: attempt 1's setup failed"),
+                escape_data(&format!(
+                    "Attempt 1's setup failed before any check ran ({}), so the whole suite ran \
+                     again; no check ran in attempt 1, so none is FLAKY for it.",
+                    shortened(why, 600)
+                ))
+            )
+        });
+        let flaky = self.flaky.iter().map(|flake| {
+            format!(
+                "::warning title={}::{}",
+                escape_property(&format!(
+                    "Flaky GUI check {} {}",
+                    flake.check.number(),
+                    flake.check.name()
+                )),
+                escape_data(&format!(
+                    "Check {} {} failed in attempt 1 and passed when the whole suite ran again \
                          (FLAKY in results.txt). Attempt 1: {}",
-                        flake.check.number(),
-                        flake.check.name(),
-                        shortened(&flake.first, 600)
-                    ))
-                )
-            })
-            .collect()
+                    flake.check.number(),
+                    flake.check.name(),
+                    shortened(&flake.first, 600)
+                ))
+            )
+        });
+        setup.chain(flaky).collect()
     }
 
     /// The job summary's section: the totals, every flaky check with why it
@@ -245,6 +284,14 @@ impl Retried {
              attempt 1 and passed in attempt 2 is FLAKY, not a pass. Attempt 1's results.txt \
              and screenshots are in the artifact's `attempt-1/`.\n"
         );
+        if let Some(why) = &self.first_setup_failed {
+            let _ = writeln!(
+                text,
+                "Attempt 1's setup failed before any check ran ({}): no check ran in it, so a \
+                 check that passed in attempt 2 is a PASS.\n",
+                cell(why)
+            );
+        }
         let _ = writeln!(text, "**{}**\n", self.totals());
         let _ = writeln!(text, "#### Flaky (passed on retry)\n");
         if self.flaky.is_empty() {
@@ -534,6 +581,84 @@ mod tests {
             judged
                 .summary("Linux")
                 .contains("#### Flaky (passed on retry)\n\nNone.")
+        );
+    }
+
+    /// Attempt 1's setup failed (tauri-driver couldn't listen on its port,
+    /// as on release run 43697444672), so `setup_failed` marked every check
+    /// not run: none of them failed, and passing in attempt 2 is a PASS,
+    /// with a notice and a summary line saying why the suite ran twice.
+    #[test]
+    fn a_check_attempt_1_never_ran_for_its_setup_is_a_pass() {
+        let why = "tauri-driver exited (see driver.log)";
+        let first = every("FAIL", &[]).replace(": fine\n", &format!(": {SETUP_FAILED}{why}\n"));
+        let second = every(
+            "PASS",
+            &[("SKIP", Check::StartupFailure, "not run on Windows")],
+        );
+        let judged = retried(&first, &second);
+        assert!(judged.passed(), "{}", judged.results);
+        assert!(judged.flaky.is_empty(), "{:#?}", judged.flaky);
+        assert_eq!(judged.passed, Check::all().len() - 1);
+        assert!(!judged.results.contains("FLAKY "), "{}", judged.results);
+        assert_eq!(judged.first_setup_failed.as_deref(), Some(why));
+        assert_eq!(
+            judged.annotations(),
+            [format!(
+                "::notice title=GUI checks%3A attempt 1's setup failed::Attempt 1's setup failed \
+                 before any check ran ({why}), so the whole suite ran again; no check ran in \
+                 attempt 1, so none is FLAKY for it."
+            )]
+        );
+        let summary = judged.summary("Windows");
+        assert!(
+            summary.contains(&format!(
+                "Attempt 1's setup failed before any check ran ({why}): no check ran in it"
+            )),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("#### Flaky (passed on retry)\n\nNone."),
+            "{summary}"
+        );
+
+        // Its setup failing again in attempt 2 fails the run.
+        let judged = retried(&first, &first);
+        assert!(!judged.passed());
+        assert_eq!(judged.failed.len(), Check::all().len());
+        assert!(
+            judged.results.contains(&format!(
+                "\nFAIL 2 csp: {SETUP_FAILED}{why}; attempt 1: not run (setup failed)\n"
+            )),
+            "{}",
+            judged.results
+        );
+    }
+
+    /// A check that really failed in attempt 1 stays FLAKY beside one that
+    /// passed, and no setup notice is given: the setup ran.
+    #[test]
+    fn a_real_failure_that_passed_on_retry_stays_flaky() {
+        let first = every(
+            "PASS",
+            &[(
+                "FAIL",
+                Check::NoteDraft,
+                "not run: the session didn't start",
+            )],
+        );
+        let judged = retried(&first, &every("PASS", &[]));
+        assert!(judged.passed());
+        assert_eq!(judged.first_setup_failed, None);
+        assert_eq!(judged.flaky.len(), 1, "{:#?}", judged.flaky);
+        assert_eq!(judged.flaky[0].check, Check::NoteDraft);
+        let annotations = judged.annotations();
+        assert_eq!(annotations.len(), 1, "{annotations:#?}");
+        assert!(annotations[0].starts_with("::warning title=Flaky GUI check 65 note-draft::"));
+        assert!(
+            !judged.summary("Linux").contains("setup failed"),
+            "{}",
+            judged.summary("Linux")
         );
     }
 
