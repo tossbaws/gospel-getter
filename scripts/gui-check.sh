@@ -94,7 +94,8 @@
 # GUI_CHECK_SESSION_TIMEOUT (seconds to start the app, default 30),
 # GUI_CHECK_RUNNER (a prebuilt gui-check binary instead of building
 # tests/gui; gui-launch must be beside it), TAURI_DRIVER and NATIVE_DRIVER
-# (paths, if not on PATH).
+# (paths, if not on PATH). tauri-driver gets three tries to start, each on
+# fresh ports, before the run's setup fails (see start_driver).
 #
 # GUI_CHECK_REPEAT=<check>:<times> (by hand, to chase a flaky check; never
 # in CI, and off by default): that check runs <times> times in a row in its
@@ -116,7 +117,9 @@
 # a check that failed in attempt 1 and passed in attempt 2 as FLAKY (with
 # attempt 1's reason), never PASS; each FLAKY is also a ::warning on stdout
 # and a row of retry-summary.md, which goes into the job's summary
-# ($GITHUB_STEP_SUMMARY). The exit code is 0 only if attempt 2 has no FAIL.
+# ($GITHUB_STEP_SUMMARY). A check attempt 1 never ran, its setup having
+# failed, is no flake: passing in attempt 2 is a PASS, and the setup's
+# failure a ::notice. The exit code is 0 only if attempt 2 has no FAIL.
 # See retry_suite in scripts/gui-check-results.sh, and gui-check --retried
 # (tests/gui src/retried.rs).
 
@@ -569,10 +572,6 @@ else
     [[ -z $cli ]] || cli="$(cygpath -w "$cli")"
 fi
 
-port="$(free_port)" || setup_failed "no free port for tauri-driver"
-native_port="$(free_port)" || setup_failed "no free port for the native driver"
-while [[ $native_port == "$port" ]]; do native_port="$(free_port)"; done
-
 # Which package a file comes from, with its version, where the system can
 # say (neither tauri-driver nor WebKitWebDriver reports its own version).
 package_of() {
@@ -610,18 +609,63 @@ fi
     fi
 } >"$out/environment.txt"
 
-"${run_env[@]}" "$tauri_driver" --port "$port" --native-port "$native_port" "${driver_args[@]}" \
-    >"$out/driver.log" 2>&1 &
-driver_pid=$!
+# tauri-driver, on fresh ports each try, up to driver_tries times before
+# the run's setup fails. A port free_port found can be taken before the
+# driver binds it: on release run 43697444672 Windows' tauri-driver exited
+# with "can not listen to address", and the whole suite's one retry went on
+# a run in which no check had started.
+driver_tries=3
+driver_failure=""
 
-# Ready when it answers.
-deadline=$((SECONDS + 10))
-until curl -fsS --max-time 1 "http://127.0.0.1:$port/status" >/dev/null 2>&1; do
-    kill -0 "$driver_pid" 2>/dev/null || setup_failed "tauri-driver exited (see driver.log)"
-    ((SECONDS < deadline)) || setup_failed "tauri-driver did not answer within 10s (see driver.log)"
-    sleep 0.1
+# One try ($1): 0 once the driver answers; else 1, with driver_failure set
+# and the driver perhaps still running (stop_driver).
+start_driver() {
+    local deadline
+    port="$(free_port)" || { driver_failure="no free port for tauri-driver"; return 1; }
+    native_port="$(free_port)" || { driver_failure="no free port for the native driver"; return 1; }
+    while [[ $native_port == "$port" ]]; do native_port="$(free_port)"; done
+    echo "== gui-check: tauri-driver, try $1 of $driver_tries, on 127.0.0.1:$port (native driver on $native_port)" >>"$out/driver.log"
+    "${run_env[@]}" "$tauri_driver" --port "$port" --native-port "$native_port" "${driver_args[@]}" \
+        >>"$out/driver.log" 2>&1 &
+    driver_pid=$!
+    # Ready when it answers.
+    deadline=$((SECONDS + 10))
+    until curl -fsS --max-time 1 "http://127.0.0.1:$port/status" >/dev/null 2>&1; do
+        if ! kill -0 "$driver_pid" 2>/dev/null; then
+            driver_failure="tauri-driver exited"
+            return 1
+        fi
+        if ((SECONDS >= deadline)); then
+            driver_failure="tauri-driver did not answer within 10s"
+            return 1
+        fi
+        sleep 0.1
+    done
+}
+
+# A driver that didn't start, and the native driver it may have started,
+# stopped before the next try takes their place.
+stop_driver() {
+    [[ -n $driver_pid ]] || return 0
+    if [[ $platform == linux ]]; then
+        pkill -KILL -P "$driver_pid" 2>/dev/null || true
+    else
+        taskkill //F //IM msedgedriver.exe >/dev/null 2>&1 || true
+    fi
+    kill -KILL "$driver_pid" 2>/dev/null || true
+    wait "$driver_pid" 2>/dev/null || true
+    driver_pid=""
+}
+
+for try in $(seq 1 "$driver_tries"); do
+    start_driver "$try" && break
+    log "tauri-driver, try $try of $driver_tries: $driver_failure (see driver.log)"
+    echo "== gui-check: try $try failed: $driver_failure" >>"$out/driver.log"
+    stop_driver
+    ((try < driver_tries)) \
+        || setup_failed "tauri-driver did not start in $driver_tries tries, the last: $driver_failure (see driver.log)"
 done
-log "tauri-driver on 127.0.0.1:$port (native driver on $native_port)"
+log "tauri-driver on 127.0.0.1:$port (native driver on $native_port), try $try of $driver_tries"
 
 # Windows: what the app's processes and windows were doing, every 2s,
 # while the checks run.
