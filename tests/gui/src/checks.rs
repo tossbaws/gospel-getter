@@ -1394,11 +1394,7 @@ impl Run<'_> {
                 )
                 .await?;
             }
-            ui.wait(
-                "the toast to go",
-                "return [document.getElementById('data-status').classList.contains('is-hidden'), null];",
-            )
-            .await?;
+            ui.toast_gone().await?;
 
             ui.click("open Aa", "#aa-toggle").await?;
             ui.wait(

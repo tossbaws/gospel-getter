@@ -228,6 +228,45 @@ impl Ui {
         }
     }
 
+    /// The toast (`#data-status`) gone, for a screenshot that mustn't show
+    /// it. No check here tests how long a toast stays (6 s, an error's
+    /// 12 s), and waiting that out cost the suite about 27 s a run, so this
+    /// hides it as its own time running out does: the app's fade
+    /// (`fade_toast` in ui-leptos/src/page.rs) only adds `is-hidden`, and
+    /// the stylesheet fades it from that class, which the screenshot then
+    /// waits out ([`Ui::settled`]). The fade's timer still fires later and
+    /// adds the class again, which changes nothing; a new message clears
+    /// that timer first. A toast with a button (a deleted note's Undo) is
+    /// waited for instead: its fade also removes the button and moves focus
+    /// out of it home, which the page offers no way to ask for, so hiding
+    /// it here would leave the page in a state the app never makes.
+    pub async fn toast_gone(&self) -> Result<()> {
+        let done = self
+            .step("hide the toast, as its fade does", async {
+                self.js(
+                    "const toast = document.getElementById('data-status');
+                     if (toast.classList.contains('is-hidden')) return 'already hidden';
+                     if (toast.querySelector('.toast-action')) return 'has a button';
+                     toast.classList.add('is-hidden');
+                     return 'hidden';",
+                    Vec::new(),
+                )
+                .await
+            })
+            .await?;
+        self.log(&format!("  the toast: {done}"));
+        if done == "has a button" {
+            self.wait_within(
+                "the toast with a button to go",
+                "return [document.getElementById('data-status').classList.contains('is-hidden'), null];",
+                Vec::new(),
+                Some(Duration::from_secs(20)),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     /// Clicks the element `css` finds, as a pointer would (WebDriver's
     /// element click: scrolled into view, refused if something covers it).
     pub async fn click(&self, what: &str, css: &str) -> Result<()> {

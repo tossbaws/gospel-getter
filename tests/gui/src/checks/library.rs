@@ -165,12 +165,7 @@ impl Run<'_> {
 
     /// Screenshot `name` of the Library, once the toast has gone.
     async fn library_shot(&mut self, what: &str, name: &'static str) -> Result<()> {
-        self.ui
-            .wait(
-                "the toast to go",
-                "return [document.getElementById('data-status').classList.contains('is-hidden'), null];",
-            )
-            .await?;
+        self.ui.toast_gone().await?;
         self.shot(what, name).await;
         Ok(())
     }

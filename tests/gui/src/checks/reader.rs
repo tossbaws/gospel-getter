@@ -831,15 +831,8 @@ impl Run<'_> {
                 ),
             )
             .await?;
-        // An error's toast stays 12 s: the next checks' screenshots wait for
-        // none.
-        ui.wait_within(
-            "the toast to go",
-            "return [document.getElementById('data-status').classList.contains('is-hidden'), null];",
-            Vec::new(),
-            Some(std::time::Duration::from_secs(20)),
-        )
-        .await?;
+        // The next checks' screenshots show no toast (an error's stays 12 s).
+        ui.toast_gone().await?;
         Ok(format!(
             "→ from Psalm 120 with get_reading turned down: \"{}\" ({}), Psalm 120 still on screen, toast \"{}\"; \
              Try again: {} read, the notice gone",

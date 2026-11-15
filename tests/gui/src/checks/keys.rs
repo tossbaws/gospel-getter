@@ -484,14 +484,7 @@ impl Run<'_> {
             chapter["formats"]["reference"].as_str().unwrap_or(""),
         )
         .await?;
-        self.ui
-            .wait_within(
-                "the toast to go",
-                "return [document.getElementById('data-status').classList.contains('is-hidden'), null];",
-                Vec::new(),
-                Some(std::time::Duration::from_secs(20)),
-            )
-            .await?;
+        self.ui.toast_gone().await?;
         Ok(format!(
             "Next chapter: John 4; Back after Romans 8: John 4; Copy chapter: \"{}\", the clipboard the backend's text",
             toast["toast"].as_str().unwrap_or("?")
