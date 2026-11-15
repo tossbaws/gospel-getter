@@ -13,7 +13,8 @@ and the KJV's search is ready sooner after it. AI agents using
 `gospel-getter-cli` or its MCP tools get `list_bookmarks`,
 `list_highlights` and `list_notes` back much faster: a page of 100
 passages comes back in about a millisecond, where it took most of a
-second. The download is smaller too. Backups are unchanged, in the same
+second. The Linux downloads are about 1 MB smaller, and the Windows
+installers are about the same size. Backups are unchanged, in the same
 data formats. Updating keeps your bookmarks, highlights, notes, findings,
 reading position and settings.
 
