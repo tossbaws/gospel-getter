@@ -245,39 +245,44 @@ async fn insert_bundled_rows(
     code: &str,
     books: &[RawBook],
 ) -> anyhow::Result<usize> {
-    let mut inserted = 0;
+    // Every verse it numbers, in the order the bundled file has them, so each
+    // gets the rowid it always has. The text is bound exactly as parsed.
+    let mut verses = Vec::new();
     for (book_index, book) in books.iter().enumerate() {
-        let book_id = book_index as i64 + 1;
-        for (chapter_index, verses) in book.chapters.iter().enumerate() {
-            let chapter = chapter_index as i64 + 1;
-            for (verse_index, text) in verses.iter().enumerate() {
-                let verse = verse_index as i64 + 1;
+        for (chapter_index, chapter) in book.chapters.iter().enumerate() {
+            for (verse_index, text) in chapter.iter().enumerate() {
                 let Some(text) = numbered(text) else { continue };
-                sqlx::query(
-                    "INSERT INTO verses (translation_id, book_id, chapter, verse, text) \
-                     VALUES ($1, $2, $3, $4, $5)",
-                )
-                .bind(translation_id)
-                .bind(book_id)
-                .bind(chapter)
-                .bind(verse)
-                .bind(text)
-                .execute(&mut *conn)
-                .await
-                .context(format!(
-                    "Failed to insert {code} {} {chapter}:{verse}",
-                    book.name
-                ))?;
-                inserted += 1;
+                let place = Place {
+                    book: &book.name,
+                    book_id: book_index as i64 + 1,
+                    chapter: chapter_index as i64 + 1,
+                    verse: verse_index as i64 + 1,
+                };
+                verses.push((place, text));
             }
         }
     }
+    insert_rows(
+        conn,
+        "INSERT INTO verses (translation_id, book_id, chapter, verse, text) ",
+        &verses,
+        |mut row, (place, text)| {
+            row.push_bind(translation_id)
+                .push_bind(place.book_id)
+                .push_bind(place.chapter)
+                .push_bind(place.verse)
+                .push_bind(*text);
+        },
+        |chunk| format!("{code} verses {}", span(chunk, |(place, _)| place)),
+    )
+    .await?;
 
     sqlx::query("DELETE FROM footnotes WHERE translation_id = $1")
         .bind(translation_id)
         .execute(&mut *conn)
         .await
         .context(format!("Failed to clear footnotes for {code}"))?;
+    let mut footnotes = Vec::new();
     for (book_index, book) in books.iter().enumerate() {
         let mut ordinal = 0;
         let mut last = (0, 0);
@@ -288,27 +293,84 @@ async fn insert_bundled_rows(
                 0
             };
             last = (note.chapter, note.verse);
-            sqlx::query(
-                "INSERT INTO footnotes \
-                 (translation_id, book_id, chapter, verse, ordinal, position, usfm) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            )
-            .bind(translation_id)
-            .bind(book_index as i64 + 1)
-            .bind(note.chapter)
-            .bind(note.verse)
-            .bind(ordinal)
-            .bind(note.at)
-            .bind(&note.usfm)
-            .execute(&mut *conn)
-            .await
-            .context(format!(
-                "Failed to insert a footnote on {code} {} {}:{}",
-                book.name, note.chapter, note.verse
-            ))?;
+            let place = Place {
+                book: &book.name,
+                book_id: book_index as i64 + 1,
+                chapter: note.chapter,
+                verse: note.verse,
+            };
+            footnotes.push((place, ordinal, note));
         }
     }
-    Ok(inserted)
+    insert_rows(
+        conn,
+        "INSERT INTO footnotes \
+         (translation_id, book_id, chapter, verse, ordinal, position, usfm) ",
+        &footnotes,
+        |mut row, (place, ordinal, note)| {
+            row.push_bind(translation_id)
+                .push_bind(place.book_id)
+                .push_bind(place.chapter)
+                .push_bind(place.verse)
+                .push_bind(*ordinal)
+                .push_bind(note.at)
+                .push_bind(note.usfm.as_str());
+        },
+        |chunk| format!("{code} footnotes {}", span(chunk, |(place, _, _)| place)),
+    )
+    .await?;
+    Ok(verses.len())
+}
+
+/// How many rows one of seeding's `INSERT`s sends (and the KJV's search
+/// index's, `search::TranslationBuild::index_book`). Each statement is a round
+/// trip to sqlx's SQLite thread, and one per row was most of a first
+/// launch's seeding; 500 rows binds at most 4,000 values (8 columns), well
+/// under SQLite's limit of 32,766 per statement.
+const ROWS_PER_INSERT: usize = 500;
+
+/// Insert `rows`, in order, [`ROWS_PER_INSERT`] to a statement: `insert`
+/// (`INSERT INTO table (columns) `) with a `VALUES` tuple for each row, whose
+/// values `bind` pushes. Rows go in exactly the order given, so each gets
+/// the rowid it would one statement at a time. `describe` names a chunk's
+/// rows for the error if one fails.
+pub(super) async fn insert_rows<T>(
+    conn: &mut sqlx::SqliteConnection,
+    insert: &str,
+    rows: &[T],
+    mut bind: impl FnMut(sqlx::query_builder::Separated<'_, sqlx::Sqlite, &'static str>, &T),
+    describe: impl Fn(&[T]) -> String,
+) -> anyhow::Result<()> {
+    for chunk in rows.chunks(ROWS_PER_INSERT) {
+        let mut statement = sqlx::QueryBuilder::<sqlx::Sqlite>::new(insert);
+        statement.push_values(chunk, &mut bind);
+        statement
+            .build()
+            .execute(&mut *conn)
+            .await
+            .with_context(|| format!("Failed to insert {}", describe(chunk)))?;
+    }
+    Ok(())
+}
+
+/// Where a bundled row belongs, with its book's name for an error message.
+struct Place<'a> {
+    book: &'a str,
+    book_id: i64,
+    chapter: i64,
+    verse: i64,
+}
+
+/// The first and last of `rows`' places, as an error names a chunk of them
+/// ("Genesis 1:1 to Genesis 20:6"). A chunk is never empty.
+fn span<T>(rows: &[T], place: impl Fn(&T) -> &Place<'_>) -> String {
+    match (rows.first().map(&place), rows.last().map(&place)) {
+        (Some(first), Some(last)) => format!(
+            "{} {}:{} to {} {}:{}",
+            first.book, first.chapter, first.verse, last.book, last.chapter, last.verse
+        ),
+        _ => "no rows".to_owned(),
+    }
 }
 
 /// A change to a bundled translation's rows that an install seeded before
@@ -562,7 +624,7 @@ const CROSS_REFERENCES_JSON: &str = include_str!("../../../data/cross_references
 
 #[derive(Deserialize)]
 struct RawCrossRefBook {
-    #[allow(dead_code)] // provenance only, not used at runtime
+    /// Its book's code ("GEN"), which names it in an error.
     code: String,
     chapters: Vec<Vec<Vec<RawCrossRef>>>,
 }
@@ -622,33 +684,40 @@ async fn seed_cross_references(
         return Ok(false);
     }
 
+    let mut rows = Vec::new();
     for (book_index, book) in books.iter().enumerate() {
-        let book_id = book_index as i64 + 1;
         for (chapter_index, verses) in book.chapters.iter().enumerate() {
-            let chapter = chapter_index as i64 + 1;
             for (verse_index, refs) in verses.iter().enumerate() {
-                let verse = verse_index as i64 + 1;
-                for r in refs {
-                    sqlx::query(
-                        "INSERT INTO cross_references \
-                         (book_id, chapter, verse, ref_book_id, ref_chapter, ref_verse, ref_end_verse, score) \
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-                    )
-                    .bind(book_id)
-                    .bind(chapter)
-                    .bind(verse)
-                    .bind(r.book)
-                    .bind(r.chapter)
-                    .bind(r.verse)
-                    .bind(r.end_verse)
-                    .bind(r.score)
-                    .execute(&mut *tx)
-                    .await
-                    .context("Failed to insert cross reference")?;
-                }
+                rows.extend(refs.iter().map(|r| {
+                    let place = Place {
+                        book: &book.code,
+                        book_id: book_index as i64 + 1,
+                        chapter: chapter_index as i64 + 1,
+                        verse: verse_index as i64 + 1,
+                    };
+                    (place, r)
+                }));
             }
         }
     }
+    insert_rows(
+        &mut tx,
+        "INSERT INTO cross_references \
+         (book_id, chapter, verse, ref_book_id, ref_chapter, ref_verse, ref_end_verse, score) ",
+        &rows,
+        |mut row, (place, r)| {
+            row.push_bind(place.book_id)
+                .push_bind(place.chapter)
+                .push_bind(place.verse)
+                .push_bind(r.book)
+                .push_bind(r.chapter)
+                .push_bind(r.verse)
+                .push_bind(r.end_verse)
+                .push_bind(r.score);
+        },
+        |chunk| format!("cross-references {}", span(chunk, |(place, _)| place)),
+    )
+    .await?;
 
     tx.commit()
         .await
@@ -698,5 +767,130 @@ mod tests {
         assert_eq!(count(one.write()).await, one_dataset);
         two.close().await;
         one.close().await;
+    }
+
+    /// `stored` (read in rowid order) is `expected`, row `i` with rowid
+    /// `i + 1` as a new install numbers them; a failure names the first row
+    /// that differs, not the whole table.
+    fn assert_rows_in_rowid_order<T: PartialEq + std::fmt::Debug>(
+        table: &str,
+        stored: &[(i64, T)],
+        expected: &[T],
+    ) {
+        assert_eq!(stored.len(), expected.len(), "{table}: row count");
+        let at = stored
+            .iter()
+            .zip(expected)
+            .enumerate()
+            .position(|(i, ((rowid, row), want))| *rowid != i as i64 + 1 || row != want);
+        if let Some(i) = at {
+            panic!(
+                "{table}: row {i} is {:?}, expected rowid {} {:?}",
+                stored[i],
+                i + 1,
+                expected[i]
+            );
+        }
+    }
+
+    /// A new install's verses, footnotes and cross-references are exactly
+    /// the bundled files' rows, byte for byte, in the files' order, one rowid
+    /// after another: so the rows either side of every multi-row `INSERT`'s
+    /// edge ([`ROWS_PER_INSERT`]) are where one-row-at-a-time seeding put
+    /// them, and none is lost or repeated at an edge.
+    #[tokio::test]
+    async fn seeded_rows_are_the_bundled_rows_in_order_across_every_insert_s_edge() {
+        let (_db, pool) = prepared_database("seeded_rows_in_order").await;
+        let read = pool.read();
+
+        let mut verses = Vec::new();
+        let mut footnotes = Vec::new();
+        for (index, code) in SEED_ORDER.iter().enumerate() {
+            let translation_id = index as i64 + 1;
+            for (b, book) in bundled_books(code).unwrap().into_iter().enumerate() {
+                let book_id = b as i64 + 1;
+                for (c, chapter) in book.chapters.iter().enumerate() {
+                    for (v, text) in chapter.iter().enumerate() {
+                        if let Some(text) = numbered(text) {
+                            let place = (translation_id, book_id, c as i64 + 1, v as i64 + 1);
+                            verses.push((place, text.to_owned()));
+                        }
+                    }
+                }
+                let mut last = (0, 0);
+                let mut ordinal = 0;
+                for note in book.footnotes {
+                    ordinal = if (note.chapter, note.verse) == last {
+                        ordinal + 1
+                    } else {
+                        0
+                    };
+                    last = (note.chapter, note.verse);
+                    let place = (translation_id, book_id, note.chapter, note.verse);
+                    footnotes.push((place, ordinal, note.at, note.usfm));
+                }
+            }
+        }
+        let mut cross_references = Vec::new();
+        for (b, book) in bundled_cross_references().unwrap().into_iter().enumerate() {
+            for (c, chapter) in book.chapters.into_iter().enumerate() {
+                for (v, refs) in chapter.into_iter().enumerate() {
+                    for r in refs {
+                        let from = (b as i64 + 1, c as i64 + 1, v as i64 + 1);
+                        let to = (r.book, r.chapter, r.verse, r.end_verse);
+                        cross_references.push((from, to, r.score));
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            (verses.len(), footnotes.len(), cross_references.len()),
+            (93_286, 4_854, 133_770)
+        );
+
+        let stored: Vec<(i64, i64, i64, i64, i64, String)> = sqlx::query_as(
+            "SELECT rowid, translation_id, book_id, chapter, verse, text \
+             FROM verses ORDER BY rowid",
+        )
+        .fetch_all(read)
+        .await
+        .unwrap();
+        let stored: Vec<_> = stored
+            .into_iter()
+            .map(|(rowid, t, b, c, v, text)| (rowid, ((t, b, c, v), text)))
+            .collect();
+        assert_rows_in_rowid_order("verses", &stored, &verses);
+
+        type FootnoteRow = (i64, i64, i64, i64, i64, i64, i64, String);
+        let stored: Vec<FootnoteRow> = sqlx::query_as(
+            "SELECT rowid, translation_id, book_id, chapter, verse, ordinal, position, usfm \
+             FROM footnotes ORDER BY rowid",
+        )
+        .fetch_all(read)
+        .await
+        .unwrap();
+        let stored: Vec<_> = stored
+            .into_iter()
+            .map(|(rowid, t, b, c, v, ordinal, at, usfm)| {
+                (rowid, ((t, b, c, v), ordinal, at, usfm))
+            })
+            .collect();
+        assert_rows_in_rowid_order("footnotes", &stored, &footnotes);
+
+        type CrossReferenceRow = (i64, i64, i64, i64, i64, i64, i64, Option<i64>, i64);
+        let stored: Vec<CrossReferenceRow> = sqlx::query_as(
+            "SELECT rowid, book_id, chapter, verse, ref_book_id, ref_chapter, ref_verse, \
+             ref_end_verse, score FROM cross_references ORDER BY rowid",
+        )
+        .fetch_all(read)
+        .await
+        .unwrap();
+        let stored: Vec<_> = stored
+            .into_iter()
+            .map(|(rowid, b, c, v, rb, rc, rv, re, score)| {
+                (rowid, ((b, c, v), (rb, rc, rv, re), score))
+            })
+            .collect();
+        assert_rows_in_rowid_order("cross_references", &stored, &cross_references);
     }
 }

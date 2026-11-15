@@ -29,6 +29,14 @@ path = "src/lib.rs"
 members = ["core", "cli"]
 default-members = [".", "core", "cli"]
 
+# Symbols stripped from every release binary (the app, the CLI, the GUI
+# checks' test build): the app's binary goes from 50.8 MB to 41.4 MB.
+# No panic hook or log reads them; a panic still prints its message and
+# location. opt-level stays 3 and panic stays unwind (a panicking command
+# ends its own task, not the app). LTO is measured separately.
+[profile.release]
+strip = true
+
 # Off in every build but one. `gui-test-updater` is the GUI checks' test
 # build (scripts/gui-check.sh, tests/gui): its updater reads where to check,
 # with which key, in which mode and how long to wait from a test settings

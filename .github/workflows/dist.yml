@@ -270,14 +270,14 @@ jobs:
         with:
           set: bundler
 
-      # Stripped: nothing else strips it, and a backtrace on it has no use.
+      # Already stripped: see [profile.release] in src-tauri/Cargo.toml.
       - name: Build the CLI sidecar
         run: |
           set -euo pipefail
           cargo build --release --locked -p gospel-getter-cli
           triple="$(rustc -vV | sed -n 's/^host: //p')"
           mkdir -p binaries
-          strip -o "binaries/gospel-getter-cli-$triple" target/release/gospel-getter-cli
+          cp target/release/gospel-getter-cli "binaries/gospel-getter-cli-$triple"
 
       # Unsigned on every run (see the top of this file): the sign job signs
       # these very files on a run dispatched on main.

@@ -2497,6 +2497,86 @@ async fn a_chapter_s_last_verse_is_one_index_seek_per_translation() {
     }
 }
 
+/// `EXPLAIN QUERY PLAN` of `sql` with a translation and a JSON list of
+/// passages bound, as the queries that read passages are asked: each
+/// step's detail, in the order SQLite runs them (outer loop first).
+async fn passages_query_plan(pool: &sqlx::SqlitePool, sql: &str) -> Vec<String> {
+    let passages: Vec<[i64; 4]> = (1..=100).map(|chapter| [19, chapter, 1, 2]).collect();
+    let plan: Vec<(i64, i64, i64, String)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("EXPLAIN QUERY PLAN {sql}")))
+            .bind(KJV)
+            .bind(serde_json::to_string(&passages).expect("encode the passages"))
+            .fetch_all(pool)
+            .await
+            .expect("explain the passages' query");
+    plan.into_iter().map(|(_, _, _, detail)| detail).collect()
+}
+
+/// The verses of a page of passages (the CLI's list tools) are read with the
+/// passages as the outer loop and one seek into the verses' index for each,
+/// with the book, chapter and verse range all in that seek; never a pass
+/// over a translation's verses that reads the list again for each.
+#[tokio::test]
+async fn a_page_of_passages_is_one_index_seek_per_passage() {
+    use super::queries::VERSES_OF_PASSAGES_SQL;
+    let (_db, pool) = prepared_database("verses_of_passages_plan").await;
+    let details = passages_query_plan(pool.read(), VERSES_OF_PASSAGES_SQL).await;
+    let passages = details
+        .iter()
+        .position(|d| d.starts_with("SCAN json_each"))
+        .unwrap_or_else(|| panic!("{details:#?}"));
+    let verses = details
+        .iter()
+        .position(|d| {
+            d.starts_with("SEARCH v USING INDEX")
+                && d.ends_with(
+                    "(translation_id=? AND book_id=? AND chapter=? AND verse>? AND verse<?)",
+                )
+        })
+        .unwrap_or_else(|| panic!("{details:#?}"));
+    assert!(passages < verses, "{details:#?}");
+    assert!(
+        !details.iter().any(|d| d.starts_with("SCAN v")),
+        "{details:#?}"
+    );
+}
+
+/// Highlighted passages' previews read the same way: the passages outside,
+/// and each look into `verses` (the first verse, and the count of the
+/// passage's verses) one seek with book and chapter in it. Its `LEFT JOIN`
+/// fixes that order; this keeps it fixed.
+#[tokio::test]
+async fn highlighted_passages_preview_with_one_index_seek_per_passage() {
+    use super::highlights::HIGHLIGHT_PASSAGE_PREVIEWS_SQL;
+    let (_db, pool) = prepared_database("highlight_previews_plan").await;
+    let details = passages_query_plan(pool.read(), HIGHLIGHT_PASSAGE_PREVIEWS_SQL).await;
+    let passages = details
+        .iter()
+        .position(|d| d.starts_with("SCAN json_each"))
+        .unwrap_or_else(|| panic!("{details:#?}"));
+    let first = details
+        .iter()
+        .position(|d| {
+            d.starts_with("SEARCH first USING INDEX")
+                && d.contains("(translation_id=? AND book_id=? AND chapter=? AND verse=?)")
+        })
+        .unwrap_or_else(|| panic!("{details:#?}"));
+    assert!(passages < first, "{details:#?}");
+    assert!(
+        details.iter().any(|d| d.starts_with("SEARCH v USING INDEX")
+            && d.ends_with(
+                "(translation_id=? AND book_id=? AND chapter=? AND verse>? AND verse<?)"
+            )),
+        "{details:#?}"
+    );
+    assert!(
+        !details
+            .iter()
+            .any(|d| d.starts_with("SCAN v") || d.starts_with("SCAN first")),
+        "{details:#?}"
+    );
+}
+
 /// Every note's place is its book, chapter and date, as the whole note
 /// has them, in book and chapter order, read without its text.
 #[tokio::test]

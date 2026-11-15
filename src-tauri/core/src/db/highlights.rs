@@ -229,6 +229,23 @@ pub fn group_into_passages(highlights: &[Highlight]) -> Vec<HighlightPassage> {
     passages
 }
 
+/// [`list_highlight_passages`]' query. Its `LEFT JOIN` already keeps the
+/// passages the outer loop (SQLite never moves the right side of one
+/// outside), so each passage is one seek into the verses' index; a plain
+/// `JOIN` here would scan a translation's verses per passage, as
+/// `queries::VERSES_OF_PASSAGES_SQL` explains.
+pub(crate) const HIGHLIGHT_PASSAGE_PREVIEWS_SQL: &str = concat!(
+    "WITH p AS (SELECT key AS position, \
+         json_extract(value, '$[0]') AS book_id, json_extract(value, '$[1]') AS chapter, \
+         json_extract(value, '$[2]') AS verse_start, json_extract(value, '$[3]') AS verse_end \
+         FROM json_each($2)) \
+     SELECT ",
+    passage_preview_sql!(columns),
+    " FROM p ",
+    passage_preview_sql!(joins),
+    " ORDER BY p.position",
+);
+
 /// Every highlighted passage, in Bible order, with its first verse's text
 /// in one translation (previewed exactly as bookmarks are).
 pub async fn list_highlight_passages(
@@ -246,22 +263,12 @@ pub async fn list_highlight_passages(
         .iter()
         .map(|p| [p.book_id, p.chapter, p.verse_start, p.verse_end])
         .collect();
-    let previews: Vec<(Option<String>, bool)> = sqlx::query_as(concat!(
-        "WITH p AS (SELECT key AS position, \
-             json_extract(value, '$[0]') AS book_id, json_extract(value, '$[1]') AS chapter, \
-             json_extract(value, '$[2]') AS verse_start, json_extract(value, '$[3]') AS verse_end \
-             FROM json_each($2)) \
-         SELECT ",
-        passage_preview_sql!(columns),
-        " FROM p ",
-        passage_preview_sql!(joins),
-        " ORDER BY p.position",
-    ))
-    .bind(translation_id)
-    .bind(serde_json::to_string(&coordinates).context("Failed to encode passages")?)
-    .fetch_all(pool)
-    .await
-    .context("Failed to preview highlighted passages")?;
+    let previews: Vec<(Option<String>, bool)> = sqlx::query_as(HIGHLIGHT_PASSAGE_PREVIEWS_SQL)
+        .bind(translation_id)
+        .bind(serde_json::to_string(&coordinates).context("Failed to encode passages")?)
+        .fetch_all(pool)
+        .await
+        .context("Failed to preview highlighted passages")?;
     anyhow::ensure!(
         previews.len() == passages.len(),
         "Previewed {} highlighted passages, expected {}",

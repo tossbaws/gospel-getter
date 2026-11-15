@@ -278,6 +278,21 @@ pub async fn get_chapter_cross_references(
     .context("Failed to fetch cross references")
 }
 
+/// [`verses_of_passages`]'s query. `CROSS JOIN` keeps the passages the
+/// outer loop, so each is one seek into the verses' index: SQLite never
+/// reorders a `CROSS JOIN`, and with a plain `JOIN` it put `verses` outside
+/// and read the whole JSON list again for each of a translation's 31,102
+/// verses (0.7 s for a page of 100 passages, against under 1 ms).
+pub(crate) const VERSES_OF_PASSAGES_SQL: &str = "WITH p AS (SELECT key AS position, \
+         json_extract(value, '$[0]') AS book_id, json_extract(value, '$[1]') AS chapter, \
+         json_extract(value, '$[2]') AS verse_start, json_extract(value, '$[3]') AS verse_end \
+         FROM json_each($2)) \
+     SELECT p.position, v.verse, v.text FROM p \
+     CROSS JOIN verses v ON v.translation_id = $1 AND v.book_id = p.book_id \
+         AND v.chapter = p.chapter AND v.verse BETWEEN p.verse_start AND p.verse_end \
+         AND v.text <> '' \
+     ORDER BY p.position, v.verse";
+
 /// The verses one translation numbers in each of `passages` (book, chapter,
 /// first and last verse), in verse order, each passage's at its own place:
 /// what [`get_verse_range`] gives for each, read in one query however many
@@ -293,22 +308,12 @@ pub async fn verses_of_passages(
     }
     // The passages go to SQLite as one JSON array, as highlighted passages'
     // previews do (`highlights::list_highlight_passages`).
-    let rows: Vec<(i64, i64, String)> = sqlx::query_as(
-        "WITH p AS (SELECT key AS position, \
-             json_extract(value, '$[0]') AS book_id, json_extract(value, '$[1]') AS chapter, \
-             json_extract(value, '$[2]') AS verse_start, json_extract(value, '$[3]') AS verse_end \
-             FROM json_each($2)) \
-         SELECT p.position, v.verse, v.text FROM p \
-         JOIN verses v ON v.translation_id = $1 AND v.book_id = p.book_id \
-             AND v.chapter = p.chapter AND v.verse BETWEEN p.verse_start AND p.verse_end \
-             AND v.text <> '' \
-         ORDER BY p.position, v.verse",
-    )
-    .bind(translation_id)
-    .bind(serde_json::to_string(passages).context("Failed to encode passages")?)
-    .fetch_all(pool)
-    .await
-    .context("Failed to fetch the passages' verses")?;
+    let rows: Vec<(i64, i64, String)> = sqlx::query_as(VERSES_OF_PASSAGES_SQL)
+        .bind(translation_id)
+        .bind(serde_json::to_string(passages).context("Failed to encode passages")?)
+        .fetch_all(pool)
+        .await
+        .context("Failed to fetch the passages' verses")?;
     for (position, verse, text) in rows {
         let at = usize::try_from(position)
             .ok()
