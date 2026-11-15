@@ -1500,7 +1500,11 @@ fn the_gui_checks_retry_once_in_ci_and_never_force_a_failure() {
 /// restore their installer jobs'), so pull requests and other branches restore
 /// main's and don't save copies of it, which pushed main's own out of the
 /// repository's 10 GB. cache-cleanup.yml deletes a pull request's caches when
-/// it closes, with a token that can manage caches and nothing else.
+/// it closes, and main's superseded ones after main's CI and Distribution
+/// runs (or by hand), with a token that can manage caches and nothing else:
+/// the job for main's checks out tools/ci alone, for the script that says
+/// which, without keeping the token, and the pull request's job checks out
+/// nothing.
 #[test]
 fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
     const ON_MAIN: &str = "github.ref == 'refs/heads/main'";
@@ -1537,7 +1541,23 @@ fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
         .take_while(|l| l.starts_with(' '))
         .map(str::trim)
         .collect();
-    assert_eq!(on, ["pull_request:", "types: [closed]"]);
+    assert_eq!(
+        on,
+        [
+            "pull_request:",
+            "types: [closed]",
+            "workflow_run:",
+            "workflows: [CI, Distribution Artifacts]",
+            "types: [completed]",
+            "branches: [main]",
+            "workflow_dispatch:",
+            "inputs:",
+            "dry-run:",
+            "description: \"Only list the caches it would delete\"",
+            "type: boolean",
+            "default: false",
+        ]
+    );
     let permissions: Vec<&str> = cleanup
         .lines()
         .skip_while(|l| *l != "permissions:")
@@ -1551,12 +1571,47 @@ fn only_main_saves_the_rust_caches_and_a_closed_pull_requests_go() {
             && cleanup.contains("gh cache delete"),
         "{cleanup}"
     );
-    for (_, body) in workflow_jobs(&cleanup) {
+    let jobs = workflow_jobs(&cleanup);
+    assert_eq!(
+        jobs.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+        ["delete-caches", "delete-superseded"]
+    );
+    for (id, body) in &jobs {
         assert!(
             !body.contains("permissions:"),
             "a job asks for more: {body}"
         );
-        assert!(!body.contains("actions/checkout"), "{body}");
+        if id == "delete-caches" {
+            assert!(
+                body.contains("    if: github.event_name == 'pull_request'\n"),
+                "{body}"
+            );
+            assert!(!body.contains("actions/checkout"), "{body}");
+        } else {
+            assert!(
+                body.contains(
+                    "        with:\n          sparse-checkout: tools/ci\n          \
+                     persist-credentials: false\n"
+                ),
+                "{id} checks out more than tools/ci, or keeps the token: {body}"
+            );
+            assert!(
+                body.contains("--ref refs/heads/main ")
+                    && body.contains("python3 tools/ci/superseded_caches.py")
+                    && !body.contains("refs/pull/"),
+                "{id} acts on more than main's caches, or decides itself: {body}"
+            );
+            let (dry, delete) = (
+                body.find("if [ \"$DRY_RUN\" = true ]; then")
+                    .expect("a dry run"),
+                body.find("gh cache delete").expect("a delete"),
+            );
+            assert!(
+                body.find("cat \"$RUNNER_TEMP/superseded.txt\"")
+                    .is_some_and(|printed| printed < dry && dry < delete),
+                "{id} deletes before it prints what it deletes: {body}"
+            );
+        }
     }
 }
 
