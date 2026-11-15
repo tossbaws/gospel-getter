@@ -322,7 +322,8 @@ async fn insert_bundled_rows(
     Ok(verses.len())
 }
 
-/// How many rows one of seeding's `INSERT`s sends. Each statement is a round
+/// How many rows one of seeding's `INSERT`s sends (and the KJV's search
+/// index's, `search::TranslationBuild::index_book`). Each statement is a round
 /// trip to sqlx's SQLite thread, and one per row was most of a first
 /// launch's seeding; 500 rows binds at most 4,000 values (8 columns), well
 /// under SQLite's limit of 32,766 per statement.
@@ -333,7 +334,7 @@ const ROWS_PER_INSERT: usize = 500;
 /// values `bind` pushes. Rows go in exactly the order given, so each gets
 /// the rowid it would one statement at a time. `describe` names a chunk's
 /// rows for the error if one fails.
-async fn insert_rows<T>(
+pub(super) async fn insert_rows<T>(
     conn: &mut sqlx::SqliteConnection,
     insert: &str,
     rows: &[T],

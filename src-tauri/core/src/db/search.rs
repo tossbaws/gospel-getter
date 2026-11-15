@@ -365,13 +365,21 @@ impl TranslationBuild {
             .await?;
         match shown {
             Some(verses) => {
-                for (rowid, text) in verses {
-                    sqlx::query("INSERT INTO verse_search (rowid, text) VALUES ($1, $2)")
-                        .bind(rowid)
-                        .bind(text)
-                        .execute(&mut *tx)
-                        .await?;
-                }
+                super::seed::insert_rows(
+                    &mut tx,
+                    "INSERT INTO verse_search (rowid, text) ",
+                    &verses,
+                    |mut row, (rowid, text)| {
+                        row.push_bind(*rowid).push_bind(text.as_str());
+                    },
+                    |chunk| {
+                        format!(
+                            "{} verses of book {book_id} into the search index",
+                            chunk.len()
+                        )
+                    },
+                )
+                .await?;
             }
             None => {
                 sqlx::query(
