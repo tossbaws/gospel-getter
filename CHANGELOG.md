@@ -4,6 +4,17 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.29.6] - 2026-11-15
+
+Faster, with nothing else changed from 2.29.5. Chapters with many
+cross-references open faster: the Cross references list under a chapter
+is set up when you open it, so a long chapter like Psalm 119 is drawn in
+about half the time. Typing in search stays quick with many verses
+shown, about twice as fast for each key you press. Nothing you see
+changes, and no verse changes. Backups are unchanged, in the same data
+formats. Updating keeps your bookmarks, highlights, notes, findings,
+reading position and settings.
+
 ## [2.29.5] - 2026-11-15
 
 Faster and smaller, with nothing else changed from 2.29.4. The first
