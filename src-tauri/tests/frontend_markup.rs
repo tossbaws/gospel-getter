@@ -5090,7 +5090,7 @@ fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
 #[test]
 fn chapter_end_cross_references_are_quiet_links() {
     // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
-    let summary = block_after(piece("reader_text.rs"), "fn xref_summary(");
+    let summary = block_after(piece("reader_text.rs"), "fn xref_rows(");
     assert!(summary.contains(r#"<button type="button" class="xref-summary-chip" data-book="{}""#));
     let rules = rules();
     let chip = screen_rule(&rules, ".xref-summary-chip");

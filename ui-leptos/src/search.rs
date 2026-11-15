@@ -460,6 +460,14 @@ impl Search {
     /// its options in order, then the box's ARIA, Show more and the status
     /// for the empty box and ">", and the active option.
     fn render(self) {
+        self.draw(false);
+    }
+
+    /// [`Self::render`]; with `keep_verses`, the Verses already drawn stay
+    /// as they are (renumbered after the options above them), not built
+    /// again: a keystroke can't change them before the search answers, and
+    /// every answer, or anything else that changes them, draws them anew.
+    fn draw(self, keep_verses: bool) {
         let Some(results) = self.results.get_untracked() else {
             return;
         };
@@ -515,6 +523,8 @@ impl Search {
         }
         let mut more = None;
         let current = self.more_offset(shown.as_ref());
+        let verses_from = keys.len();
+        let mut kept = None;
         if let Some(Shown::Text {
             total,
             page_size,
@@ -522,7 +532,22 @@ impl Search {
             ..
         }) = &shown
         {
-            if !verses.is_empty() {
+            kept = keep_verses
+                .then(|| {
+                    results
+                        .query_selector(r#"[aria-labelledby="palette-group-verses"]"#)
+                        .ok()
+                        .flatten()
+                })
+                .flatten()
+                .filter(|_| !verses.is_empty());
+            if kept.is_some() {
+                keys.extend(
+                    verses
+                        .iter()
+                        .map(|v| format!("verse:{}:{}:{}", v.book_id, v.chapter, v.verse)),
+                );
+            } else if !verses.is_empty() {
                 let options = verses
                     .iter()
                     .map(|v| {
@@ -544,6 +569,21 @@ impl Search {
         // hold nothing reactive to drop).
         let mut drawn = groups.into_iter().collect_view().build();
         drawn.mount(&results, None);
+        if let Some(kept) = kept {
+            // Last, before the list's closing marker, where a list drawn
+            // afresh has its Verses.
+            let end = results
+                .last_child()
+                .filter(|node| node.node_type() == web_sys::Node::COMMENT_NODE);
+            let _ = results.insert_before(&kept, end.as_ref());
+            let options = kept
+                .query_selector_all(r#"[role="option"]"#)
+                .map(|found| dom::elements(&found))
+                .unwrap_or_default();
+            for (i, option) in options.iter().enumerate() {
+                let _ = option.set_attribute("id", &format!("palette-option-{}", verses_from + i));
+            }
+        }
 
         if let Some(input) = self.input.get_untracked() {
             let _ = input.set_attribute(
@@ -681,7 +721,7 @@ impl Search {
         self.cancel_enter();
         self.cancel_timer();
         self.state.update_value(|s| s.moved = false);
-        self.render();
+        self.draw(self.query().searches());
         if self.query().searches() {
             self.search_soon();
         } else {

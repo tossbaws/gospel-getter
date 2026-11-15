@@ -215,8 +215,21 @@ fn opened() -> Opened {
     }
 }
 
+/// Gives the Cross references list its rows if it has none: a list drawn
+/// closed is drawn without them (`reader_text::xref_summary`). From the
+/// chapter on screen, which the pane is always drawn from
+/// (`render_current`).
+fn fill_xref_rows(list: &Element) {
+    if list.first_child().is_none()
+        && let Some(dto) = with(|s| s.last_dto.clone())
+    {
+        list.set_inner_html(&text::xref_rows(&dto));
+    }
+}
+
 /// Opens or closes every disclosure of that kind on screen (both columns'
-/// footnotes while comparing), and remembers it.
+/// footnotes while comparing), and remembers it; a Cross references list
+/// opened is filled ([`fill_xref_rows`]).
 fn set_disclosure(kind: Disclosure, open: bool) {
     if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
         let _ = storage.set_item(kind.key(), if open { "open" } else { "closed" });
@@ -234,6 +247,9 @@ fn set_disclosure(kind: Disclosure, open: bool) {
             .get_attribute("aria-controls")
             .and_then(|id| by_id(&id))
         {
+            if open && kind == Disclosure::Xrefs {
+                fill_xref_rows(&body);
+            }
             body.set_hidden(!open);
         }
     }
@@ -1395,6 +1411,13 @@ pub fn mount() {
         scrolled.forget();
         dom::on(&window, "pagehide", |_| save_place());
         dom::on(&window, "blur", |_| save_place());
+        // The print stylesheet prints both lists open, whatever they show
+        // on screen, so a closed Cross references list is filled first.
+        dom::on(&window, "beforeprint", |_| {
+            if let Some(list) = by_id("xref-summary-list") {
+                fill_xref_rows(&list);
+            }
+        });
     }
     dom::on(&document, "visibilitychange", |_| {
         if bridge::document().is_some_and(|d| d.hidden()) {

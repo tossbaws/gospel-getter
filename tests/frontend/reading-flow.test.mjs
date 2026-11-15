@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { card, clickAndWaitForCalls as clickAndWait, closeBridge, el as $, main, openApp, withApp } from './harness.mjs';
+import { backend, bookId, card, clickAndWaitForCalls as clickAndWait, closeBridge, el as $, main, openApp, withApp } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-reading-flow-'));
 after(async () => {
@@ -102,7 +102,7 @@ test('Footnotes and Cross references start closed, with their counts', () =>
         assert.equal(footnotes.textContent, 'Footnotes (4)');
         assert.match(xrefs.textContent, /^Cross references \(\d+\)$/);
         const count = Number(/\((\d+)\)/.exec(xrefs.textContent)[1]);
-        assert.equal(count, bodyOf(app, xrefs).querySelectorAll('.xref-summary-chip').length);
+        assert.equal(bodyOf(app, xrefs).querySelectorAll('.xref-summary-chip').length, 0, 'a closed list has no rows yet');
         for (const toggle of [footnotes, xrefs]) {
             assert.equal(toggle.tagName, 'BUTTON');
             assert.equal(toggle.getAttribute('aria-expanded'), 'false');
@@ -112,7 +112,65 @@ test('Footnotes and Cross references start closed, with their counts', () =>
         }
         // The cross-references' credit stays in view.
         assert.equal(app.document.querySelector('.xref-credit').closest('[hidden]'), null);
+        app.click(xrefs);
+        assert.equal(count, bodyOf(app, xrefs).querySelectorAll('.xref-summary-chip').length);
     }));
+
+// The Cross references list's rows as the reader draws them
+// (reader_text.rs's `xref_rows`), from the backend's own answer.
+const escaped = (text) => text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const xrefRows = (dto) => dto.currentVerses.filter((v) => v.xrefs.length > 0).map((v) => {
+    const chips = v.xrefs.map((x) => {
+        const end = x.endVerse == null ? '' : ` data-end-verse="${x.endVerse}"`;
+        return `<span class="xref-summary-item"><button type="button" class="xref-summary-chip" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${end}>${escaped(x.citation)}</button></span>`;
+    }).join('');
+    return `<div class="xref-summary-row">\n${' '.repeat(28)}<span class="xref-summary-verse">${dto.currentChapter}:${v.number}</span>\n${' '.repeat(28)}<span class="xref-summary-chips">${chips}</span>\n${' '.repeat(24)}</div>`;
+}).join('');
+const reading = (chapter) => backend('get_reading', { bookId: bookId('Psalms'), chapter, translationCode: 'kjv' });
+
+test('a closed Cross references list gets its rows when opened, the same rows an open one is drawn with', async () => {
+    const psalm119 = await reading(119);
+    const count = psalm119.currentVerses.reduce((n, v) => n + v.xrefs.length, 0);
+    assert.ok(count > 800, 'fixture: Psalm 119 has many cross-references');
+    let opened;
+    await withApp({ book: 'Psalms', chapter: 119, translation: 'kjv' }, async (app) => {
+        const [xrefs] = toggles(app, 'xrefs');
+        assert.equal(xrefs.textContent, `Cross references (${count})`);
+        const list = bodyOf(app, xrefs);
+        assert.equal(list.childNodes.length, 0);
+        xrefs.focus();
+        app.click(xrefs);
+        assert.equal(list.hidden, false);
+        assert.equal(xrefs.getAttribute('aria-expanded'), 'true');
+        assert.equal(list.innerHTML, xrefRows(psalm119));
+        assert.equal(list.querySelectorAll('.xref-summary-chip').length, count);
+        assert.equal(app.document.activeElement, xrefs, 'focus stays on the toggle');
+        opened = app.document.querySelector('.xref-summary').outerHTML;
+
+        // Closed and opened again: the same rows, once.
+        app.click(xrefs);
+        assert.equal(list.hidden, true);
+        app.click(xrefs);
+        assert.equal(list.innerHTML, xrefRows(psalm119));
+
+        // A chapter turned with the list open shows the new chapter's rows.
+        await clickAndWait(app, main(app).querySelector('.chapter-step-next'), 'get_reading');
+        assert.equal(app.heading(), 'Psalms 120');
+        const [next] = toggles(app, 'xrefs');
+        assert.equal(next.getAttribute('aria-expanded'), 'true');
+        assert.equal(bodyOf(app, next).innerHTML, xrefRows(await reading(120)));
+    });
+    // Saved open, the chapter is drawn with the very list opening it filled.
+    await withApp({ book: 'Psalms', chapter: 119, translation: 'kjv', storage: { 'gospel-getter-cross-references': 'open' } }, async (app) => {
+        assert.equal(app.document.querySelector('.xref-summary').outerHTML, opened);
+    });
+    // While comparing, the list is the chapter's, as in a single column.
+    await withApp({ book: 'Psalms', chapter: 119, translation: 'kjv', compare: true }, async (app) => {
+        assert.ok(app.isComparing());
+        app.click(toggles(app, 'xrefs')[0]);
+        assert.equal(app.document.querySelector('.xref-summary').outerHTML, opened);
+    });
+});
 
 test('opening or closing one remembers it, for every chapter and after a restart', async () => {
     let storage;
@@ -156,6 +214,17 @@ test('a chapter with neither shows neither', () =>
         assert.equal(app.document.querySelector('.footnote-summary, .xref-summary'), null);
         assert.ok(main(app).querySelector('.chapter-end'), 'the buttons still show');
     }));
+
+test('printing a closed Cross references list prints its rows', async () => {
+    const psalm23 = await reading(23);
+    await withApp({ book: 'Psalms', chapter: 23, translation: 'kjv' }, async (app) => {
+        const list = bodyOf(app, toggles(app, 'xrefs')[0]);
+        assert.equal(list.childNodes.length, 0);
+        app.window.dispatchEvent(new app.window.Event('beforeprint'));
+        assert.equal(list.innerHTML, xrefRows(psalm23));
+        assert.equal(list.hidden, true, 'still closed on screen');
+    });
+});
 
 test('printing opens both lists', () =>
     withApp({}, async (app) => {

@@ -231,6 +231,43 @@ test('common words are paged, not all rendered at once', () =>
         assert.match(app.searchStatus(), /showing 100\.$/);
     }));
 
+// A keystroke can't change the verses before the search answers: they
+// stay as drawn, renumbered after the options above them, and are what
+// drawing the list afresh gives.
+test('a keystroke leaves the verses shown as they are until the search answers', () =>
+    withApp({ translation: 'web' }, async (app) => {
+        await app.search('love');
+        let before = app.calls.length;
+        app.click(app.document.getElementById('search-more'));
+        await app.idle(before, 'search');
+        const rows = app.searchResults();
+        assert.equal(rows.length, 100);
+        const options = () => [...app.document.querySelectorAll('#search-results [role="option"]')];
+
+        const release = app.holdCommand('search');
+        before = app.calls.length;
+        app.type(app.searchInput(), 'lovel');
+        const kept = app.searchResults();
+        assert.equal(kept.length, 100);
+        assert.ok(kept.every((row, i) => row === rows[i]), 'the same rows, not built again');
+        assert.deepEqual(options().map((o) => o.id), options().map((_, i) => `palette-option-${i}`));
+        const typed = app.document.getElementById('search-results').innerHTML;
+
+        // Closed and opened again, the list is drawn afresh from the same
+        // verses: the same markup.
+        app.key('Escape', {}, app.searchInput());
+        assert.equal(app.searchPanel().hidden, true);
+        app.key('/');
+        assert.equal(app.searchPanel().hidden, false);
+        assert.equal(app.document.getElementById('search-results').innerHTML, typed);
+        assert.ok(app.searchResults().every((row, i) => row !== rows[i]), 'built again');
+
+        // The answer draws the new words' verses.
+        release();
+        await app.idle(before, 'search');
+        assert.deepEqual(refs(app), await firstPage('lovel', 'web'));
+    }));
+
 // Show more says how many the next page holds, of how many, in the
 // status line's number format; the button's name is that label.
 test('Show more says how many more it shows, of how many, down to the last page', () =>

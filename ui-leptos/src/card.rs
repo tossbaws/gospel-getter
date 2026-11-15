@@ -2312,6 +2312,12 @@ pub fn shown(
         start: None,
         end: None,
     };
+    // The same answer drawn again (Compare on or off): see the end.
+    let redrawn = with(|s| {
+        s.chapter
+            .as_ref()
+            .is_some_and(|c| Rc::ptr_eq(&c.reading, &chapter.reading))
+    });
     with(|s| s.chapter = Some(chapter));
     close_menu(false);
     fetch_copy(Slot::Chapter, copy);
@@ -2324,7 +2330,21 @@ pub fn shown(
     if let Some((book_id, chapter)) = with(|s| s.chapter.as_ref().map(|c| (c.book_id, c.chapter))) {
         crate::findings::chapter_shown(book_id, chapter);
     }
-    spawn_local(refresh_chapter_notes());
+    // The same reading drawn again (Compare turned on or off) keeps the
+    // notes already read for its chapter: every change to them through the
+    // app reads them again ([`refresh_notes`]). A chapter loaded, even the
+    // one on screen, reads them afresh, as does a failed read. The findings
+    // are asked again regardless: an agent may have saved some meanwhile.
+    let read_already = redrawn
+        && with(|s| {
+            s.chapter_notes_read
+                && s.chapter
+                    .as_ref()
+                    .is_some_and(|c| s.chapter_notes_of == Some((c.book_id, c.chapter)))
+        });
+    if !read_already {
+        spawn_local(refresh_chapter_notes());
+    }
 }
 
 /// A passage the reader opened (a jump, Back or Forward) whose verses are
