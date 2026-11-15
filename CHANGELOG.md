@@ -4,6 +4,19 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.29.5] - 2026-11-15
+
+Faster and smaller, with nothing else changed from 2.29.4. The first
+launch gets ready faster: setting up the built-in Bibles and
+cross-references takes about a third of a second, down from about two,
+and the KJV's search is ready sooner after it. AI agents using
+`gospel-getter-cli` or its MCP tools get `list_bookmarks`,
+`list_highlights` and `list_notes` back much faster: a page of 100
+passages comes back in about a millisecond, where it took most of a
+second. The download is smaller too. Backups are unchanged, in the same
+data formats. Updating keeps your bookmarks, highlights, notes, findings,
+reading position and settings.
+
 ## [2.29.4] - 2026-11-14
 
 Nothing you'll see changes from 2.29.3. Behind the scenes, the checks run
