@@ -7,23 +7,7 @@
 //!
 //! One module per area of the app, each with its own tests; everything they
 //! make public is re-exported here, so a command is `commands::get_reading`
-//! wherever it's named (`lib.rs`'s handler list, the tests):
-//!
-//! - `state`: `AppState` and the search index's progress.
-//! - `lookup`: a book's name, a translation's id or code, and `failed`.
-//! - `reading`: the home screen, the chapter being read and the saved position.
-//! - `passages`: a passage read in place (a cross-reference) or copied.
-//! - `bookmarks`, `highlights`, `notes`: the reader's own marks on verses.
-//! - `findings`: the AI-flagged findings an agent saved at the reader's
-//!   request, and the reader's switch for them.
-//! - `search`: search, and going to a reference.
-//! - `compare`: a chapter in several translations side by side.
-//! - `backup`: exporting and importing the reader's data.
-//! - `export_notes`: the notes as Markdown.
-//! - `files`: saving a file completely or not at all, and the file dialog.
-//! - `bridge_script`: what the frontend tests' bridge answers in place of
-//!   the file dialogs, the browser, the clock and the updater (never set in
-//!   the app).
+//! wherever it's named (`lib.rs`'s handler list, the tests).
 
 mod backup;
 mod bookmarks;

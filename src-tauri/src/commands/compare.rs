@@ -7,8 +7,6 @@ use serde::Serialize;
 use super::{AppState, SimpleVerseDto, failed};
 use crate::domain::passage::translations_named;
 
-// ---- Compare translations (GH-13)
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompareColumnDto {

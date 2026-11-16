@@ -845,8 +845,7 @@ mod tests {
         assert!(!john.contents.contains("Confess") && !john.contents.contains("Doxology"));
 
         // Every note: Romans 14:24 is numbered in the WEB, not the KJV, and
-        // is kept either way. (Until 2.29.2 the KJV's Matthew 2:23, a verse
-        // it was short, was the example.)
+        // is kept either way.
         let kjv = export("kjv", None).await.unwrap();
         assert_eq!(kjv.file_name, "gospel-getter-notes-2026-10-09.md");
         assert_eq!(kjv.notes, 4);

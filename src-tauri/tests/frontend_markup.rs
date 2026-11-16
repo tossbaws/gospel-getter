@@ -19,16 +19,7 @@ fn pieces_dir() -> std::path::PathBuf {
 
 /// The page's pieces written in Rust (`ui-leptos/src`), as (file name,
 /// source): every module there, read from the folder when the tests run,
-/// so a new one is read too (`the_pieces_are_every_module`). They own the
-/// modal dialogs' markup and keyboard handling, the Library's tabs and
-/// lists, the search box and its palette, the table of shortcuts, the book
-/// and chapter picker's books and chapters, Aa with the translations and
-/// the saved settings, the header's surfaces with the picker's shapes, the
-/// reader (the chapter's markup, its loading and the passage history), the
-/// selection card (copying, and the card's bookmark, highlight and notes),
-/// and what was the page's main script (the keyboard and click dispatchers,
-/// boot, and the page's glue): checks of those read them where they now
-/// live, and the "nothing anywhere does X" checks read every one.
+/// so a new one is read too (`the_pieces_are_every_module`).
 static PIECES: LazyLock<Vec<(&'static str, &'static str)>> = LazyLock::new(|| {
     let dir = pieces_dir();
     let mut pieces: Vec<(&'static str, &'static str)> = std::fs::read_dir(&dir)

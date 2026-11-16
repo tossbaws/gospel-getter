@@ -117,8 +117,7 @@ async fn export_round_trips_into_a_fresh_install() {
     let (db, a) = app("rd_export").await;
     commands::bookmark_passage(&a, 43, 3, 16, 18).await.unwrap();
     commands::bookmark_passage(&a, 19, 23, 1, 1).await.unwrap();
-    // Romans 14:24 is numbered only in the WEB; it still travels. (Until
-    // 2.29.2 the KJV's Matthew 2:23, a verse it was short, was the example.)
+    // Romans 14:24 is numbered only in the WEB; it still travels.
     commands::bookmark_passage(&a, 45, 14, 24, 24)
         .await
         .unwrap();
@@ -1056,7 +1055,7 @@ async fn highlights_round_trip_in_a_format_2_export() {
         .await
         .unwrap();
     // Romans 14:24 is numbered only in the WEB; its highlight still
-    // travels. (Until 2.29.2 the KJV's Matthew 2:23 was the example.)
+    // travels.
     commands::highlight_passage(&a, 45, 14, 24, 24, "blue")
         .await
         .unwrap();
@@ -1474,8 +1473,6 @@ async fn notes_round_trip_in_a_format_3_export() {
         .await
         .unwrap();
     // Luke 17:36 is numbered only in the KJV; its note still travels.
-    // (Until 2.29.2 the KJV's Matthew 2:23, numbered only in the WEB, was
-    // the example.)
     let kjv_only = Passage {
         book_id: 42,
         chapter: 17,

@@ -20,8 +20,6 @@ use crate::reader_data::{
     PositionRecord, Preferences, ReaderData, ValidatedImport,
 };
 
-// ---- Export and import the reader's own data
-
 /// An import the reader is previewing: the file, already validated against
 /// this install, waiting for them to confirm. Applying it uses exactly what
 /// was previewed, even if the file has changed on disk since.

@@ -9,8 +9,6 @@ use crate::db::{BookmarkError, BookmarkInTranslation};
 use crate::domain::kjv_markup::VerseText;
 use crate::passage_reference::passage_reference;
 
-// ---- Bookmarks (GH-11)
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BookmarkDto {

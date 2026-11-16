@@ -465,8 +465,8 @@ mod tests {
     }
 
     /// C1 and C5 apart: saving needs the reader to ask for it, and a lookup
-    /// only earns an offer. The old sentence, which read as leave to save
-    /// after any topical lookup, is gone.
+    /// only earns an offer. No sentence reads as leave to save after any
+    /// topical lookup.
     #[test]
     fn the_instructions_save_findings_only_on_an_explicit_request() {
         for words in [

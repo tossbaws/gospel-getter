@@ -10,8 +10,6 @@ use super::{
 use crate::db::{HighlightColor, HighlightPassageInTranslation};
 use crate::passage_reference::passage_reference;
 
-// ---- Highlights
-
 /// One highlighted verse.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
