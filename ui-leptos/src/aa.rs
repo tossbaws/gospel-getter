@@ -11,23 +11,20 @@
 //! their headings, the stepper, Compare and Reading mode) are the page's;
 //! opening and closing them is `surfaces`'. As one opens, it has it drawn
 //! ([`draw`]): the translations' rows and the choices' marks are drawn
-//! here, there and then, before focus moves in. This draws the
-//! choices themselves, and fills the hidden `<select>`s that record Aa's
-//! settings for the page's other scripts, from the one table
-//! (`preferences`).
+//! here, there and then, before focus moves in. This draws the choices
+//! themselves, and fills the hidden `<select>`s that record Aa's settings
+//! for the other pieces, from the one table (`preferences`).
 //!
-//! The `<select>`s stay the record, as they were: choosing sets one and
-//! sends its `change`, which applies and saves the setting here, and which
-//! the page's own listeners hear as before (a translation is read again; a
-//! new layout keeps the reader's place and moves the selection's card).
-//! `#translation-select` is the page's (boot fills it from the backend); a
-//! translation is chosen through it the same way.
+//! The `<select>`s are the record: choosing sets one and sends its
+//! `change`, which applies and saves the setting here, and which the page's
+//! own listeners hear (a translation is read again; a new layout keeps the
+//! reader's place and moves the selection's card). `#translation-select` is
+//! the page's (boot fills it from the backend); a translation is chosen
+//! through it the same way.
 //!
-//! This is the head script's Aa (`ui/index.html` at 4b2d15e, from `choose`
-//! to `gospelGetterPreferences`) in Rust: the same ids, classes, ARIA,
-//! text and focus order. Everything happens within the click or key, as it
-//! did; the choices are drawn as Leptos views, built and put in place at
-//! once. See `bridge` for what crosses to the page.
+//! Everything happens within the click or key; the choices are drawn as
+//! Leptos views, built and put in place at once. See `bridge` for what
+//! crosses to the page.
 
 use std::cell::{Cell, OnceCell};
 
@@ -142,7 +139,7 @@ fn append(parent: &Element, view: AnyView) {
     drawn.mount(parent, None);
 }
 
-/// Sends `name` on `document`, as the page's own `new CustomEvent(name)`.
+/// Sends `name` on `document`, as a plain `new CustomEvent(name)`.
 fn announce(name: &str) {
     if let (Some(document), Ok(event)) = (bridge::document(), CustomEvent::new(name)) {
         let _ = document.dispatch_event(&event);

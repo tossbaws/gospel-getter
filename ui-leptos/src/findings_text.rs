@@ -232,7 +232,7 @@ mod tests {
         }
     }
 
-    /// The text without its tags, as the page reads it.
+    /// The text without its tags, as a reader sees it.
     fn plain(html: &str) -> String {
         let mut out = String::new();
         let mut in_tag = false;

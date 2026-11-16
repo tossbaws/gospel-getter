@@ -27,8 +27,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use super::desktop::Settings;
-use super::{CHECK_TIMEOUT, UpdateMode};
+use super::{CHECK_TIMEOUT, Settings, UpdateMode};
 
 /// Names the test settings file.
 pub const SETTINGS_VAR: &str = "GOSPEL_GETTER_TEST_UPDATER";

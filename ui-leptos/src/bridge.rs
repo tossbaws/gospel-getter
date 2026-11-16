@@ -1,28 +1,13 @@
-//! What this crate shares with the page's JavaScript, and the events its
-//! pieces send each other, in one place.
+//! The custom events the pieces send each other, the globals they set for
+//! the tests, the page markup they use, and the two events that cross to
+//! the page's own scripts, in one place.
 //!
-//! The page's JavaScript is now four small inline scripts, none of which
-//! reads this crate's variables or this crate theirs:
-//! - the pre-paint script (`<head>`): the saved look, as `<html>`'s data
-//!   attributes, before the first frame (see `preferences`);
-//! - boot's prefetch (`<head>`): boot's first two commands, sent at once so
-//!   they're on their way while the module loads: `get_home`, then, with its
-//!   answer, the chapter the reader was on (`get_reading`, unless
-//!   comparing). This crate takes them over with [`BOOT_EVENT`]
-//!   ([`boot_prefetch`], `boot`);
-//! - the loader (Trunk inlines `ui/leptos-loader.js` in `<head>`), which
-//!   fetches, compiles and starts this module, and says
-//!   `gospel-getter:pieces-failed` on `document` (no `detail`) if it can't;
-//! - the plain-text fallback (the end of `<body>`), which hears that and
-//!   shows the chapter as plain text. Nothing in this crate hears it.
-//!
-//! So these cross, and only these: [`BOOT_EVENT`] (page to Rust: a
-//! cancelable `CustomEvent` on `document` whose `detail` is `{}`; the
-//! prefetch cancels it and puts in `detail.boot` its state, [`Prefetch`])
-//! and `gospel-getter:pieces-failed` (loader to fallback). Without this
-//! module nothing else answers anything: the reader sees the chapter as
-//! plain text with the fallback's line saying the rest isn't available, and
-//! every control does nothing.
+//! The page's own scripts (the pre-paint script, boot's prefetch, the
+//! loader and the plain-text fallback) read none of this crate's
+//! variables, nor it theirs; what each does is in this crate's `README.md`
+//! ("Building and running"). Only two events cross: [`BOOT_EVENT`] (page to
+//! Rust, [`boot_prefetch`]) and `gospel-getter:pieces-failed` (loader to
+//! fallback, on `document`, no `detail`; nothing in this crate hears it).
 //!
 //! Globals this crate sets for the frontend tests and the GUI checks (the
 //! page reads none of them): `window.gospelGetterShortcuts`, the table of
@@ -33,72 +18,23 @@
 //! header surface's name or `null`.
 //!
 //! Within this crate, the pieces send each other custom events on
-//! `document` (a `detail` snapshot each, as below), so a piece mounted
-//! later hears what it missed when [`READY_EVENT`] comes:
-//! - Requests to open, each cancelable; the piece cancels it to say it has
-//!   it, and if nothing does (it hasn't mounted yet), the asker says it
-//!   isn't available (`page`): [`EXPORT_CHOICE_EVENT`]
-//!   (`gospel-getter:export-choice`, ☰ → Export data…'s chooser, its
-//!   [`ExportFacts`]); [`OPEN_EVENT`] (`gospel-getter:export-notes`, the
-//!   Export notes dialog, an [`OpenRequest`]); [`SHORTCUTS_EVENT`]
-//!   (`gospel-getter:shortcuts`, the sheet); [`WELCOME_EVENT`]
-//!   (`gospel-getter:welcome`, at the end of boot with what the
-//!   fresh-install rule needs, or from ☰, with the places to start, a
-//!   [`WelcomeRequest`]; boot's is asked again on [`READY_EVENT`] if nobody
-//!   answered); [`IMPORT_EVENT`] (`gospel-getter:import`, no detail);
-//!   [`SEARCH_EVENT`] (`gospel-getter:search`, `{ open }`); and
-//!   `detail.returnFocus` on the chooser's, Export notes', the sheet's and
-//!   welcome's ([`return_focus`]).
-//! - [`EXPORT_FACTS_EVENT`] (`gospel-getter:export-facts`, its
-//!   [`ExportFacts`]): whether there are notes, or an export or import is
-//!   running, changed (`page`); the chooser follows it.
-//! - [`LAUNCH_CHECK_EVENT`] (`gospel-getter:update-check`): boot is done,
-//!   so the updater runs its quiet launch check, unless
-//!   `html[data-update-check]` is `off` ([`launch_check_on`]); asked again
-//!   on [`READY_EVENT`] if nobody answered.
-//! - [`LIBRARY_REFRESH_EVENT`] (`gospel-getter:library-refresh`): the one
-//!   way to have the Library's lists reloaded (boot, an import, a
-//!   translation switch, the card's bookmark, highlight and restored note),
-//!   `{ lists }`; the Library cancels it and puts in `detail.done` a promise
-//!   that settles once each list has its answer. Asked before the Library
-//!   has mounted, it's asked again on [`READY_EVENT`] ([`refresh_library`]).
-//!   [`LIBRARY_LOADED_EVENT`] (`gospel-getter:library-loaded`, `{ list,
-//!   items }`) answers with the bookmarks (the card's markers) and the notes
-//!   (`page`'s copy, for the welcome, the chooser and Export notes).
-//! - [`PICKER_BOOKS_EVENT`] (`gospel-getter:picker-books`, `{ otBooks,
-//!   ntBooks }`, boot's, sent again on [`READY_EVENT`]),
-//!   [`PICKER_CURRENT_EVENT`] (`gospel-getter:picker-current`, the
-//!   reader's chapter on screen) and [`PICKER_SHOWN_EVENT`]
-//!   (`gospel-getter:picker-shown`, `surfaces` showed the picker): the
-//!   picker's.
-//! - [`ABOUT_CREDITS_EVENT`] (`gospel-getter:about-credits`, `{ credits }`,
-//!   the reader's from boot, again on [`READY_EVENT`]): About's.
-//! - [`SURFACE_OPEN_EVENT`] and [`SURFACE_CLOSE_EVENT`]
-//!   (`gospel-getter:surface-open`, `-close`, `{ name }`): a header surface
-//!   opened or closed (`surfaces`); one opening closes the search box, and
-//!   About closing part way through an install brings the banner back.
-//! - [`NOTE_EVENT`] (`gospel-getter:note`, a [`NoteRequest`], cancelable):
-//!   the card opens the note editor; [`NOTE_OTHERS_EVENT`]
-//!   (`gospel-getter:note-others`, `{ passage, others }`) follows the
-//!   selection's notes while it may be open; [`NOTE_DONE_EVENT`] (`gospel-getter:note-done`, `{ action,
-//!   note }`) says what the editor did.
-//! - `aa::COMPARE_CHANGE_EVENT` (`gospel-getter:compare-change`) and
-//!   `aa::LAYOUT_CHANGE_EVENT` (`gospel-getter:layout-change`): Compare or
-//!   the layout changed (the reader and the card).
-//! - [`READY_EVENT`] (`gospel-getter:pieces-ready`): every piece has
-//!   mounted.
+//! `document` (a `detail` snapshot each), so a piece mounted later hears
+//! what it missed when [`READY_EVENT`] comes. Each `_EVENT` constant below
+//! says what it carries and who hears it. A request to open is cancelable:
+//! the piece cancels it to say it has it, and if nothing does (it hasn't
+//! mounted yet), the asker says it isn't available (`page`).
 //!
-//! Direct calls, where the page's script used to be in between: the toast
-//! ([`toast`], `page`), a modal opening ([`modal_opening`]) or getting
-//! ready to ([`page::modal_claim`](crate::page::modal_claim),
+//! Direct calls between the pieces: the toast ([`toast`], `page`), a modal
+//! opening ([`modal_opening`]) or getting ready to
+//! ([`page::modal_claim`](crate::page::modal_claim),
 //! [`page::modal_holds`](crate::page::modal_holds)), an export or import
 //! running ([`page::set_data_busy`](crate::page::set_data_busy)), an
 //! import's reloads ([`imported`]), the chooser's two choices
 //! ([`page::export_data`](crate::page::export_data),
-//! [`page::open_export_notes`](crate::page::open_export_notes)), what
-//! the palette's commands need ([`palette_state`]) and the commands whose
-//! code was the page's ([`page_command`]); and the reader's and the card's
-//! own `reader::ask` and `card::ask`.
+//! [`page::open_export_notes`](crate::page::open_export_notes)), what the
+//! palette's commands need ([`palette_state`]) and the commands `page` runs
+//! ([`page_command`]); and the reader's and the card's own `reader::ask`
+//! and `card::ask`.
 //!
 //! Page markup this crate uses as a reader would: `#theme-select`, read and
 //! changed (with a `change` event, as Aa does) for the welcome's looks
@@ -143,6 +79,7 @@ pub const EXPORT_CHOICE_EVENT: &str = "gospel-getter:export-choice";
 
 /// Whether there are notes, or an export or import is running, changed: a
 /// `CustomEvent` whose `detail` is the page's [`ExportFacts`] now (`page`).
+/// The chooser follows it.
 pub const EXPORT_FACTS_EVENT: &str = "gospel-getter:export-facts";
 
 /// What the export chooser needs of the page: whether there are notes to
@@ -191,9 +128,8 @@ pub fn toast_with_action(message: &str, label: &str, duration: i32) -> Option<Ht
     crate::page::set_data_status_with_action(message, label, duration)
 }
 
-/// Where focus goes when what had it is gone, as the page's `focusHome`:
-/// Aa in reading mode (which hides the menu), else the menu button. A
-/// plain focus, as there.
+/// Where focus goes when what had it is gone: Aa in reading mode (which
+/// hides the menu), else the menu button. A plain focus.
 pub fn focus_home() {
     let Some(document) = document() else {
         return;
@@ -225,9 +161,9 @@ pub fn open_request(event: &CustomEvent) -> Result<OpenRequest, JsValue> {
 /// `{ returnFocus }` (see [`return_focus`]).
 pub const SHORTCUTS_EVENT: &str = "gospel-getter:shortcuts";
 
-/// Puts the table of shortcuts where the page had it, for the frontend
-/// tests and the GUI checks: `window.gospelGetterShortcuts`, an array of
-/// `{ id, group, keys, aria, does, handles }`, as `SHORTCUTS` was.
+/// Puts the table of shortcuts at `window.gospelGetterShortcuts`, for the
+/// frontend tests and the GUI checks: an array of
+/// `{ id, group, keys, aria, does, handles }`.
 pub fn export_shortcuts() {
     let Some(window) = web_sys::window() else {
         return;
@@ -349,7 +285,7 @@ pub fn choose_theme(value: &str) {
 }
 
 /// The page's local storage keys, or `None` if it can't be read (it can
-/// throw in the webview, so every use is guarded, as the page's are).
+/// throw in the webview, so every use is guarded).
 pub fn stored_keys() -> Option<Vec<String>> {
     let storage = web_sys::window()?.local_storage().ok()??;
     let length = storage.length().ok()?;
@@ -501,8 +437,9 @@ pub fn note_done(action: &str, note: &JsValue) {
     }
 }
 
-/// Boot is done: run the quiet launch check (unless it's turned off). A cancelable `CustomEvent` on `document`, no `detail`; the updater
-/// cancels it to say it has it.
+/// Boot is done: run the quiet launch check, unless it's turned off
+/// ([`launch_check_on`]). A cancelable `CustomEvent` on `document`, no
+/// `detail`; the updater cancels it to say it has it.
 pub const LAUNCH_CHECK_EVENT: &str = "gospel-getter:update-check";
 
 /// Whether the launch check is on: `html[data-update-check]` isn't `off`
@@ -528,7 +465,8 @@ pub fn about_credits(event: &CustomEvent) -> Result<Vec<String>, JsValue> {
 }
 
 /// A header surface closed (`surfaces`): `{ name }` ("about", "menu",
-/// ...).
+/// ...). About closing part way through an install brings the banner
+/// back.
 pub const SURFACE_CLOSE_EVENT: &str = "gospel-getter:surface-close";
 
 #[derive(Debug, Deserialize)]
@@ -547,7 +485,9 @@ pub fn surface_closed(event: &CustomEvent) -> Option<String> {
 /// `detail.done` to a promise that settles once every list named has its
 /// answer, shown (or dropped, when a newer reload of the same list has
 /// already been asked for: only the latest of overlapping reloads shows).
-/// Whoever asked waits for it where the page waited for its reloads.
+/// Asked by boot, an import, a translation switch, and the card's
+/// bookmark, highlight and restored note ([`refresh_library`], which asks
+/// again on [`READY_EVENT`] if the Library hadn't mounted).
 pub const LIBRARY_REFRESH_EVENT: &str = "gospel-getter:library-refresh";
 
 #[derive(Debug, Deserialize)]
@@ -568,7 +508,9 @@ pub fn library_refresh_done(event: &CustomEvent, done: &js_sys::Promise) {
 /// The Library's bookmarks or notes have loaded: a `CustomEvent` whose
 /// `detail` is `{ list, items }`, `list` being `bookmarks` or `notes` and
 /// `items` the backend's answer as it came (`null` if it failed). Not sent
-/// for an answer a newer reload has overtaken.
+/// for an answer a newer reload has overtaken. The card hears the
+/// bookmarks (its markers) and `page` the notes (its copy, for the
+/// welcome, the chooser and Export notes).
 pub const LIBRARY_LOADED_EVENT: &str = "gospel-getter:library-loaded";
 
 /// Says [`LIBRARY_LOADED_EVENT`].
@@ -657,7 +599,8 @@ pub fn search_request(event: &CustomEvent) -> Result<bool, JsValue> {
     detail::<SearchRequest>(event).map(|r| r.open)
 }
 
-/// A header surface opened (`surfaces`): `{ name }`.
+/// A header surface opened (`surfaces`): `{ name }`. One opening closes the
+/// search box.
 pub const SURFACE_OPEN_EVENT: &str = "gospel-getter:surface-open";
 
 /// What the palette's commands need now: the page's settings and controls
@@ -670,7 +613,7 @@ pub fn palette_state() -> PaletteState {
     state
 }
 
-/// Runs a palette command whose code was the page's (`palette::Run::Page`):
+/// Runs a palette command `page` runs (`palette::Run::Page`):
 /// `copy-chapter`, `copy-chapter-as`, `next-chapter`, `previous-chapter`,
 /// `next-book`, `previous-book`, `back`, `forward`, `shortcuts`,
 /// `export-notes` (the Export notes dialog) and `export-data` (the backup;

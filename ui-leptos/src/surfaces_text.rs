@@ -1,9 +1,7 @@
 //! The header surfaces' rules, free of the DOM so they are tested natively
 //! (`cargo test`): the seven surfaces, their elements, buttons and first
 //! focus; when the book and chapter picker is the sidebar; and the ☰
-//! menu's keys. They are the head script's (`ui/index.html` at 49736df:
-//! `SURFACES`, `sidebarShown`, `focusInto` and the menu's keydown), rule
-//! for rule.
+//! menu's keys.
 
 /// One of the header's popovers and panels. Only one is open at a time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,10 +140,9 @@ pub enum MenuKey {
 }
 
 /// What `key` does among `count` items, focus on the one at `index` (or on
-/// none of them). As the head script's: ↑ from outside the items lands one
-/// before the last.
+/// none of them). ↑ from outside the items lands one before the last.
 pub fn menu_key(key: &str, index: Option<usize>, count: usize) -> MenuKey {
-    // The head script's `items.indexOf(activeElement)`: -1 when outside.
+    // As `items.indexOf(activeElement)`: -1 when outside.
     let at = index.map_or(-1, |i| i as i64);
     let len = count as i64;
     let to = |i: i64| {
@@ -317,7 +314,7 @@ mod tests {
     #[test]
     fn the_menu_arrows_from_outside_its_items() {
         assert_eq!(menu_key("ArrowDown", None, 5), MenuKey::Move(0));
-        // (-1 - 1 + 5) % 5, as the head script had it.
+        // (-1 - 1 + 5) % 5.
         assert_eq!(menu_key("ArrowUp", None, 5), MenuKey::Move(3));
         assert_eq!(menu_key("ArrowUp", None, 1), MenuKey::Move(0));
     }

@@ -1,10 +1,7 @@
 //! The import preview's words: the summary of a file, the choice between
-//! adding and replacing, the warning, and how it went. The pure part of
-//! what `ui/index.html`'s import script composed (`openImportPreview`,
-//! `updateImportMode`, `describePreferences` and the confirm handler),
-//! kept free of the DOM so it is tested natively (`cargo test`). Numbers
-//! read as the page wrote them: `plural` groups thousands, the bare counts
-//! do not.
+//! adding and replacing, the warning, and how it went, kept free of the DOM
+//! so it is tested natively (`cargo test`). `plural` groups thousands, the
+//! bare counts do not.
 
 use crate::dto::{ImportPreview, ImportResult, Preferences};
 use crate::text::{plural, plural_as};
@@ -624,7 +621,7 @@ mod tests {
         );
         assert!(!choice(&empty).merge.contains("AI finding"), "none to add");
 
-        // None here to remove: replacing names the rest, as before.
+        // None here to remove: replacing names the rest.
         let none_here = ImportPreview {
             current_findings: 0,
             ..with_findings()

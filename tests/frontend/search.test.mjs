@@ -428,6 +428,20 @@ test('arrow keys move through results without turning the chapter', () =>
         assert.equal(app.searchPanel().hidden, true);
     }));
 
+test('← and → pressed on a focused settings <select> turn no page', () =>
+    withApp({ book: 'John', chapter: 3 }, async (app) => {
+        const select = app.document.getElementById('theme-select');
+        select.focus();
+        app.key('ArrowRight', {}, select);
+        app.key('ArrowLeft', {}, select);
+        await app.idle(0);
+        assert.equal(app.heading(), 'John 3');
+        // The same key anywhere else does turn the page.
+        app.key('ArrowRight');
+        await app.idle(0, 'get_reading');
+        assert.equal(app.heading(), 'John 4');
+    }));
+
 test('a search that fails says so', () =>
     withApp({}, async (app) => {
         app.failCommand('search', 'Search failed.');

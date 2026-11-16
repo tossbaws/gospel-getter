@@ -68,50 +68,17 @@ pub const FORMAT_VERSION_2: u64 = 2;
 pub const FORMAT_VERSION_1: u64 = 1;
 /// The suggested file-name suffix.
 pub const FILE_SUFFIX: &str = ".gospel-getter.json";
-/// The largest file import will read: 128 MiB. Every export imports
-/// again (bookmarking, highlighting and merging an import have no limit,
-/// so neither does importing), and this is the only limit on bookmarks
-/// and highlights in a file: it refuses a file that can't be an export
-/// without reading all of it. Worst cases, pretty-printed as
-/// `to_file_contents` writes them, with the longest book name, the largest
-/// book, chapter and verse numbers and every optional field present
-/// (`a_maximal_file_fits_the_size_limit` builds one and checks every
-/// figure here):
-///
-/// - a bookmark takes 188 bytes, a highlight 231;
-/// - a note takes 254 bytes besides its text: 10,000 of them (`MAX_NOTES`),
-///   2,540,000 bytes;
-/// - the notes' text is at most `MAX_TOTAL_NOTE_CHARS` (25,000,000)
-///   characters in all, of plain text (see `db::notes::normalize_body`),
-///   and none of those takes more than 4 bytes in the file — 4 bytes of
-///   UTF-8 unescaped, or 2 for `\n`, `\t`, `\"` and `\\`; the control
-///   characters JSON would escape in 6, like `\u0001`, are refused — so
-///   100,000,000 bytes;
-/// - an AI finding takes 708 bytes, its agent's name and its request at
-///   their longest (60 characters each, `MAX_AGENT_CHARS` and
-///   `MAX_REQUEST_CHARS`, of 4 bytes apiece: neither keeps a control
-///   character): 10,000 of them (`MAX_FINDINGS`), 7,080,000 bytes;
-/// - the rest of the file (its header, reading position, every preference
-///   and the AI findings switch, `false` being longer than `true`) takes
-///   614 bytes.
-///
-/// A highlight is one verse, and a record can be on 31,109 (the 31,105 the
-/// bundled translations number between them, and the 4 the KJV numbered
-/// until 2.29.2, `seed::RETIRED_VERSES`), so at most 7,186,179 bytes of
-/// highlights. With
-/// every verse highlighted, the notes at both their limits and the AI
-/// findings at theirs, a file of 50,000 bookmarks is 126,206,793 bytes
-/// (120.4 MiB), and one of 92,611 fits. Without notes, every bookmark there
-/// can be — each of the 530,288 verse ranges within a chapter — every
-/// highlight and every finding fit, in 113,960,937 bytes (108.7 MiB). Only
-/// a reader with notes near both their limits (25 million characters, every
-/// one 4 bytes long) and more than 92,611 bookmarks could export a file too
-/// large to import.
-///
-/// Format 2's limit was 16 MiB; it rose because the reader's notes can
-/// hold far more text than every other record together, and a backup of
-/// them must always import. Checking a file of 128 MiB briefly holds a
-/// few times that in memory, which a desktop has to spare.
+/// The largest file import will read: 128 MiB, and the only limit on
+/// bookmarks and highlights in a file (bookmarking, highlighting and
+/// merging an import have none, so neither does importing): it refuses a
+/// file that can't be an export without reading all of it. Sized so every
+/// export imports again: with every verse highlighted, the notes at both
+/// their limits and the AI findings at theirs, 92,611 bookmarks still fit
+/// (`a_maximal_file_fits_the_size_limit` works out each record's worst
+/// case). Format 2's limit was 16 MiB; it rose because the reader's notes
+/// can hold far more text than every other record together. Checking a
+/// file of 128 MiB briefly holds a few times that in memory, which a
+/// desktop has to spare.
 pub const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
 /// The most notes one file may hold: as many as the reader can keep.
 pub const MAX_NOTES: usize = crate::db::notes::MAX_NOTES;
@@ -1732,9 +1699,11 @@ mod tests {
         assert_eq!(widest, (4, 4));
     }
 
-    /// The arithmetic in `MAX_FILE_BYTES`'s documentation, with every
-    /// record as large as it can be, the notes at both their limits and the
-    /// AI findings at theirs.
+    /// The worst case `MAX_FILE_BYTES` is sized for: every record as large
+    /// as it can be, pretty-printed as `to_file_contents` writes it (the
+    /// longest book name, the largest book, chapter and verse numbers and
+    /// every optional field present), the notes at both their limits and
+    /// the AI findings at theirs.
     #[test]
     fn a_maximal_file_fits_the_size_limit() {
         use crate::db::notes::MAX_NOTE_CHARS;
@@ -1750,9 +1719,13 @@ mod tests {
         assert_eq!(maximal_file_size(1, 1, 3, 1) - base, 2 * note);
         assert_eq!(maximal_file_size(1, 1, 1, 3) - base, 2 * finding);
         let rest = base - bookmark - highlight - note - finding;
-        // A maximal note's text is 4 bytes a character; the rest is the record.
+        // A maximal note's text is 4 bytes a character: 4 bytes of UTF-8
+        // unescaped, or 2 for `\n`, `\t`, `\"` and `\\`; the control
+        // characters JSON would escape in 6 are refused
+        // (`db::notes::normalize_body`). The rest is the record.
         let note_record = note - 4 * MAX_NOTE_CHARS;
-        // As documented on `MAX_FILE_BYTES`.
+        // A bookmark, a highlight, a note besides its text, an AI finding,
+        // and the rest of the file.
         assert_eq!(
             (bookmark, highlight, note_record, finding, rest),
             (188, 231, 254, 708, 614)

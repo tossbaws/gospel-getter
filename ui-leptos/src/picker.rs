@@ -17,12 +17,10 @@
 //! chapter's, closes the popover and is read as a jump of the reader's
 //! (`reader::jump`): from its top, unless it's the one on screen.
 //!
-//! This is the page's picker script (`ui/index.html` at 13911c4, from
-//! `pickRandomBookAndChapter` to the picker's keydown) in Rust: the same
-//! ids, classes, ARIA, text and focus order. Everything happens within the
-//! click or key, as it did: the lists and the chapters are drawn (as Leptos
-//! views, built and put in place at once) and the marks set there and then.
-//! Random chapter's numbers are the webview's `Math.random`.
+//! Everything happens within the click or key: the lists and the chapters
+//! are drawn (as Leptos views, built and put in place at once) and the
+//! marks set there and then. Random chapter's numbers are the webview's
+//! `Math.random`.
 
 use leptos::prelude::*;
 use leptos::tachys::view::{Mountable, Render};
@@ -82,8 +80,7 @@ fn grid_after(book: &Element) -> Option<HtmlElement> {
     book.next_element_sibling()?.dyn_into::<HtmlElement>().ok()
 }
 
-/// The picker's `scrollTop`, as the page reads it (a fraction, on some
-/// screens).
+/// The picker's `scrollTop` (a fraction, on some screens).
 fn scroll_top(picker: &Element) -> f64 {
     js_sys::Reflect::get(picker, &JsValue::from_str("scrollTop"))
         .ok()
@@ -339,7 +336,7 @@ impl Picker {
                 FromChapter::Chapter(j) => buttons.get(j).cloned(),
                 FromChapter::Book => book.and_then(|b| b.dyn_into::<HtmlElement>().ok()),
                 // What follows the book (Random chapter, if the book isn't
-                // one of the items, as the page's indexOf had it).
+                // one of the items).
                 FromChapter::AfterBook => {
                     let after = book.as_ref().and_then(place).map_or(0, |i| i + 1);
                     items.get(after).cloned()

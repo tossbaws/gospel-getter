@@ -31,7 +31,7 @@
 //! draft was kept, or not), or a save or delete still on its way. A request
 //! to open another note then is turned down, with a toast saying why, and
 //! the open note stays exactly as it was. With nothing changed, a request
-//! opens over it as before.
+//! opens over it.
 //!
 //! "Keep as mine" on an AI finding (C10) opens this as + Add note on the
 //! finding's verses, its text the finding's words, all of them selected as
@@ -41,11 +41,8 @@
 //! changes nothing. The reader's notes already on the verse are listed, and
 //! never changed.
 //!
-//! This is the page's note panel script (`ui/index.html` at fa5969d,
-//! `charCount` to its keydown trap) as a Leptos component: the same ids,
-//! classes, ARIA, `hidden` and `disabled`, text and focus order. The panel
-//! answers within the click or key that asks, as the page's did: opening
-//! and closing, the controls that follow the text as it's typed, and the
+//! The panel answers within the click or key that asks: opening and
+//! closing, the controls that follow the text as it's typed, and the
 //! discard prompt are written straight to their elements; the words it
 //! shows are signals.
 

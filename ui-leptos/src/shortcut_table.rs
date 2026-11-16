@@ -1,15 +1,12 @@
 //! The keyboard shortcuts: every key the app answers, in one table, free of
 //! the DOM so it is tested natively (`cargo test`). The shortcuts sheet
 //! (`shortcuts`) lists it, and the palette's commands (`palette`) show
-//! their keys from it, by `id`. The page's key handlers are still its
-//! JavaScript and keep their own key comparisons; each key they compare
-//! against is in some row's `handles` (the `KeyboardEvent` key or code
-//! values it covers; `src-tauri/tests/frontend_markup.rs` checks every one
-//! is listed). The page's copy of the table, `window.gospelGetterShortcuts`,
-//! is this one, put there when the module loads (`bridge::export_shortcuts`).
-//!
-//! The rows are the page's `SHORTCUTS` (`ui/index.html` at 201ab8f), byte
-//! for byte, in its order.
+//! their keys from it, by `id`. The key handlers keep their own key
+//! comparisons; each key they compare against is in some row's `handles`
+//! (the `KeyboardEvent` key or code values it covers;
+//! `src-tauri/tests/frontend_markup.rs` checks every one is listed). The
+//! page's copy of the table, `window.gospelGetterShortcuts`, is this one,
+//! put there when the module loads (`bridge::export_shortcuts`).
 
 use serde::Serialize;
 

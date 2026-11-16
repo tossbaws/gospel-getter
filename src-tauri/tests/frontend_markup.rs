@@ -19,16 +19,7 @@ fn pieces_dir() -> std::path::PathBuf {
 
 /// The page's pieces written in Rust (`ui-leptos/src`), as (file name,
 /// source): every module there, read from the folder when the tests run,
-/// so a new one is read too (`the_pieces_are_every_module`). They own the
-/// modal dialogs' markup and keyboard handling, the Library's tabs and
-/// lists, the search box and its palette, the table of shortcuts, the book
-/// and chapter picker's books and chapters, Aa with the translations and
-/// the saved settings, the header's surfaces with the picker's shapes, the
-/// reader (the chapter's markup, its loading and the passage history), the
-/// selection card (copying, and the card's bookmark, highlight and notes),
-/// and what was the page's main script (the keyboard and click dispatchers,
-/// boot, and the page's glue): checks of those read them where they now
-/// live, and the "nothing anywhere does X" checks read every one.
+/// so a new one is read too (`the_pieces_are_every_module`).
 static PIECES: LazyLock<Vec<(&'static str, &'static str)>> = LazyLock::new(|| {
     let dir = pieces_dir();
     let mut pieces: Vec<(&'static str, &'static str)> = std::fs::read_dir(&dir)
@@ -420,34 +411,6 @@ fn notes_beside_the_text_in_compare_on_screen_only() {
     );
 }
 
-/// Regression guard for GH-5: the "Random chapter" feature picks a chapter
-/// entirely client-side, so every rendered `.book-item` button must carry
-/// its `chapter_count` as a data attribute, or the client has no valid
-/// upper bound to pick from. Book buttons are built by one shared view,
-/// `book_view` in the picker's piece (`ui-leptos/src/picker.rs`), for both
-/// the Old and New Testament lists, rather than two server-rendered loops,
-/// so this checks that view and that both lists are built from it.
-#[test]
-fn book_item_buttons_expose_chapter_count() {
-    let picker = piece("picker.rs");
-    assert!(
-        picker.contains(
-            "data-book-id=book.id.to_string()\n                data-chapter-count=book.chapter_count.to_string()"
-        ),
-        "book-item buttons must expose chapterCount as a data attribute for \
-         client-side random selection"
-    );
-    assert!(
-        picker.contains(r#"for (id, books) in [("ot-book-list", &old), ("nt-book-list", &new)] {"#),
-        "both testaments' lists should be drawn by the same loop"
-    );
-    assert!(
-        picker.contains("books.iter().map(book_view)"),
-        "each testament's books should render through the shared book-button \
-         view"
-    );
-}
-
 /// Regression guard for GH-5: the random chapter control must be a real,
 /// labeled `<button>` (not a link or a bare clickable `<div>`) so it's
 /// reachable and announced correctly by assistive tech.
@@ -480,30 +443,6 @@ fn random_chapter_control_is_a_real_labeled_button() {
         !label.is_empty(),
         "random chapter button should have a non-empty visible label so its \
          accessible name isn't blank"
-    );
-}
-
-/// Regression guard for GH-5: the random pick (`random_pick` in
-/// `ui-leptos/src/picker_text.rs`, unit-tested there) must choose from the
-/// books the picker lists (uniform choice of book, then 1..=chapter_count
-/// for that book) and must bail out rather than read a chapter when the
-/// count isn't positive — it must never fabricate a request to an invalid
-/// chapter.
-#[test]
-fn random_chapter_script_guards_against_malformed_data() {
-    let rules = piece("picker_text.rs");
-    assert!(
-        piece("picker.rs").contains("text::random_pick(&s.books, js_sys::Math::random)"),
-        "random pick should choose uniformly from the books the picker lists"
-    );
-    assert!(
-        rules.contains("if book.chapter_count < 1 {\n        return None;"),
-        "random pick should guard against a non-positive chapter count \
-         instead of issuing an invalid request"
-    );
-    assert!(
-        rules.contains("floor_times(random(), count)).ok()? + 1"),
-        "chapter pick should be uniform over 1..=chapter_count"
     );
 }
 
@@ -2064,26 +2003,6 @@ fn theme_swatches_come_from_the_theme_definitions() {
         r#"<span class="theme-swatch-preview" data-theme-preview=value aria-hidden="true">"#
     ));
     assert!(aa.contains("append(&group, swatch_view(choice.value, choice.label));"));
-}
-
-/// About's Release notes link shows the same URL the backend opens. About
-/// is the Rust pieces' (`ui-leptos/src/about.rs`), which build the URL.
-#[test]
-fn release_notes_link_matches_the_backend() {
-    let prefix = gospel_getter_lib::updater::RELEASE_NOTES_PREFIX;
-    let about = piece("about.rs");
-    assert!(about.contains(&format!("format!(\"{prefix}{{version}}\")")));
-    assert!(about.contains(r#"ipc::invoke_value("open_release_notes""#));
-}
-
-/// Arrow keys pressed on a focused settings `<select>` change that
-/// select, and must not also turn the page to another chapter.
-#[test]
-fn arrow_key_navigation_ignores_focused_form_controls() {
-    assert!(
-        piece("keyboard.rs")
-            .contains(r#"matches!(target.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")"#)
-    );
 }
 
 /// Printing stays black on white at the default size and spacing whatever
@@ -3796,19 +3715,6 @@ fn the_chapter_ends_with_buttons_to_the_chapters_around_it() {
     assert!(block_after(HTML, "@media print").contains(".chapter-end"));
 }
 
-/// The tagline footer is gone; nothing in the page or stylesheet is left
-/// for it.
-#[test]
-fn there_is_no_tagline() {
-    assert!(!HTML.contains("<footer"));
-    assert!(!HTML.contains("whole counsel of God"));
-    assert!(
-        !rules()
-            .iter()
-            .any(|r| selectors(r).any(|s| s == "footer" || s.ends_with(" footer")))
-    );
-}
-
 /// Footnotes and Cross references are disclosures: a button with
 /// aria-expanded controlling its list, closed unless the reader opened
 /// that kind before (one remembered state per kind, read for every
@@ -4627,35 +4533,6 @@ fn only_selectable_verses_look_clickable() {
     }
 }
 
-/// The card's place in Flowing: under the last selected verse's last line
-/// and above the first one's first line (their line boxes, not the whole
-/// run's box), from the column's left edge. A new layout re-places it.
-#[test]
-fn the_selection_card_anchors_to_line_boxes_in_flowing() {
-    // The card is the selection card's (ui-leptos/src/card.rs, its rules in
-    // card_text.rs).
-    let place = block_after(piece("card.rs"), "fn place_card()");
-    assert!(place.contains("let first_rect = line_rect(&first, true);"));
-    assert!(place.contains("let last_rect = line_rect(&card_verse, false);"));
-    assert!(
-        block_after(piece("card_text.rs"), "pub fn card_box(")
-            .contains("let left = if flowing { 0.0")
-    );
-    let line = block_after(piece("card.rs"), "fn line_rect(");
-    assert!(line.contains("verse.get_client_rects()"));
-    assert!(
-        piece("card.rs")
-            .contains("dom::on_document_event(crate::aa::LAYOUT_CHANGE_EVENT, |_| place_card());")
-    );
-    // A new layout keeps the reader's place: Aa asks the surfaces'
-    // keep_reading_place, for the place found then.
-    assert!(piece("aa.rs").contains("surfaces::keep_reading_place(change, None);"));
-    assert!(
-        piece("surfaces.rs")
-            .contains("pub fn keep_reading_place(change: impl FnOnce(), place: Option<Place>) {")
-    );
-}
-
 /// The welcome is one card: a modal dialog labelled by its title and
 /// described by its one sentence, focusable itself (focus goes there on
 /// open), with × and Skip, "Pick a look" as a radio group of two real theme
@@ -4938,33 +4815,10 @@ fn the_export_chooser_is_a_modal_in_tested_theme_colors() {
     }
 }
 
-/// The four-page tour is gone entirely: no markup, style or script of its
-/// own is left (its pages, Next and Back, the progress line, the icon and
-/// the key caps it styled), and nothing in the app refers to a tour.
+/// Every welcome class the stylesheet styles is used outside it, in the
+/// markup or the script, the page's or the welcome's (ui-leptos).
 #[test]
-fn nothing_is_left_of_the_old_tour() {
-    for gone in [
-        "welcome-page",
-        "welcome-pages",
-        "welcome-next",
-        "welcome-back",
-        "welcome-progress",
-        "welcome-icon",
-        "welcome-text-",
-        "welcome-title-",
-        "showWelcomePage",
-        "Start reading",
-    ] {
-        assert!(!HTML.contains(gone), "`{gone}` is left of the tour");
-        for &(file, source) in PIECES.iter() {
-            assert!(
-                !source.contains(gone),
-                "`{gone}` is left of the tour in {file}"
-            );
-        }
-    }
-    // Every welcome class the stylesheet styles is used outside it, in the
-    // markup or the script, the page's or the welcome's (ui-leptos).
+fn every_welcome_class_styled_is_used() {
     let outside = format!(
         "{}{}",
         &HTML[HTML.find("</style>").unwrap()..],

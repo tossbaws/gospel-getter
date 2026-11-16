@@ -78,7 +78,6 @@ impl AppState {
 
     /// Open `url` in the system browser (`open::that_detached`), or, under
     /// the frontend tests' bridge, what its script does instead.
-    #[cfg(desktop)]
     pub(crate) fn open_in_browser(&self, url: &str) -> std::io::Result<()> {
         match self.bridge_script() {
             Some(script) => script.open_in_browser(url),

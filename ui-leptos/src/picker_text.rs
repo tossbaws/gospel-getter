@@ -2,10 +2,7 @@
 //! DOM so they are tested natively (`cargo test`): the books as boot hands
 //! them over, which books get the compact grid, Random chapter's pick, the
 //! keyboard's moves through Random chapter, the books and a book's
-//! chapters, and how far the picker scrolls to show something. They are the
-//! page's (`ui/index.html` at 13911c4: `pickRandomBookAndChapter`,
-//! `showPickerChapters`, `revealInPicker`, `revealCurrentInPicker` and the
-//! picker's keydown), rule for rule.
+//! chapters, and how far the picker scrolls to show something.
 
 /// A book, as the backend lists it (`get_home`'s `otBooks` and `ntBooks`).
 pub use crate::wire::BookDto as Book;

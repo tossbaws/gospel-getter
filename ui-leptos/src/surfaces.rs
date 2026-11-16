@@ -32,11 +32,8 @@
 //! read which is open from `window.gospelGetterSurfaces.current()`
 //! ([`export_surfaces`]). Without this module, nothing opens.
 //!
-//! This is the head script's surfaces controller (`ui/index.html` at
-//! 49736df, from `isWide` to its Escape handler) in Rust: the same ids,
-//! ARIA, focus order and keys. Everything happens within the click or key,
-//! as it did. Since then, main's #116, #118 and #121 (D14): a resize across
-//! 1200px keeps the reading place the reader last saw ([`on_shape_change`],
+//! Everything happens within the click or key. A resize across 1200px
+//! (D14) keeps the reading place the reader last saw ([`on_shape_change`],
 //! [`note_painted_place`]), even right after a scroll, and in Chromium,
 //! whatever place its scroll anchoring kept ([`SCROLL_BEFORE_RESIZE`]),
 //! also when the scroll's own events came after the resize's

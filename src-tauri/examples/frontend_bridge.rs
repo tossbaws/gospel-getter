@@ -47,14 +47,9 @@
 //! `__save_findings` saves findings as an agent does, and `__verse_text`
 //! shows a verse by the app's own rule.
 //!
-//! Requests are answered one at a time, in order, as they always were here:
+//! Requests are answered one at a time, in order:
 //! the next is read once the last has answered, or, for an install that
 //! restarts, once it has restarted (it never answers).
-//!
-//! `frontend_bridge <database path> --fresh` prepares the database from
-//! an empty file instead, seeding it then and there as a new install's is:
-//! seconds of work, for a test of the seeding itself (`harness.mjs`'s
-//! `useFreshDatabase`).
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -594,32 +589,24 @@ fn copy_new(template: &Path, path: &Path) -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
-    // A panic anywhere, a command's on Tauri's runtime too, ends the bridge
-    // (as it did when the bridge ran the commands itself), so the tests see
-    // it, with its message on stderr, rather than wait for an answer that
-    // never comes.
+    // A panic anywhere, a command's on Tauri's runtime too, ends the bridge,
+    // so the tests see it, with its message on stderr, rather than wait for
+    // an answer that never comes.
     let report = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic| {
         report(panic);
         std::process::exit(101);
     }));
 
-    const USAGE: &str = "usage: frontend_bridge <database path> [--fresh]";
+    const USAGE: &str = "usage: frontend_bridge <database path>";
     let mut args = std::env::args_os().skip(1);
     let path = PathBuf::from(args.next().context(USAGE)?);
-    let fresh = match args.next() {
-        None => false,
-        Some(flag) if flag == "--fresh" => true,
-        Some(other) => bail!("{USAGE}, not {}", other.display()),
-    };
     if let Some(extra) = args.next() {
         bail!("{USAGE}, with nothing after it: {}", extra.display());
     }
     let (pool, state) = tauri::async_runtime::block_on(async {
-        if !fresh {
-            let template = template().await?;
-            copy_new(&template, &path)?;
-        }
+        let template = template().await?;
+        copy_new(&template, &path)?;
         // The app's own startup steps, as at every launch. On a copy of the
         // template they find everything made, seeded and indexed, and take
         // a fraction of a second.

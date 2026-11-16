@@ -21,8 +21,6 @@ fn translation_name(state: &AppState, translation_id: i64) -> &str {
         .map_or("this translation", |t| t.name.as_str())
 }
 
-// ---- Search and go-to-reference (GH-12)
-
 /// Interpret the search box input against one translation: a passage to
 /// go to (checking its verses exist in that translation), or a page of
 /// text-search results; for a book's name alone, the results and its first
@@ -196,8 +194,7 @@ mod tests {
         assert_eq!(v["verseStart"], serde_json::Value::Null);
         assert_eq!(v["reference"], "Psalms 23");
 
-        // Romans 14:24 is numbered in the WEB only. (Until 2.29.2 the KJV's
-        // Matthew 2:23, a verse it was short, was the example.)
+        // Romans 14:24 is numbered in the WEB only.
         assert_eq!(
             search_in(&state, "Romans 14:24", "web").await["kind"],
             "passage"

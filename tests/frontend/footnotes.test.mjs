@@ -5,7 +5,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, markers, openApp, shownVerse, storedVerse, withApp } from './harness.mjs';
+import { backend, bookId, clickAndWaitForCalls, closeBridge, markers, openApp, shownVerse, storedVerse, withApp } from './harness.mjs';
 
 after(closeBridge);
 
@@ -24,13 +24,6 @@ const visiblePopup = (verse) => {
 const popupEntries = (verse) => [...(visiblePopup(verse)?.querySelectorAll('.selection-footnotes .footnote-entry') || [])];
 const popupFootnotes = (verse) => popupEntries(verse)
     .map((entry) => [entry.querySelector('.footnote-label').textContent, entry.textContent.slice(entry.querySelector('.footnote-label').textContent.length)]);
-
-async function clickAndWait(app, target, cmd) {
-    const before = app.calls.length;
-    const event = app.click(target);
-    await app.idle(before, cmd);
-    return event;
-}
 
 const PSALM_23 = [
     '23:2a green...: Heb. pastures of tender grass',
@@ -138,7 +131,7 @@ test('a footnote’s lemma is in italics, in the section and in the selection ca
         assert.deepEqual(summaryRows(app), PSALM_23);
 
         const verse = app.verse(2);
-        await clickAndWait(app, verse.querySelector('.fn-marker'), 'list_notes');
+        await clickAndWaitForCalls(app, verse.querySelector('.fn-marker'), 'list_notes');
         assert.deepEqual(popupLemmas(verse), ['green...', 'still...']);
         assert.deepEqual(popupFootnotes(verse), [
             ['a', 'green...: Heb. pastures of tender grass'],
@@ -159,7 +152,7 @@ test('a note without a colon has no lemma: Psalms 73:22’s second, plain', () =
         assert.equal(rows[1].querySelector('.footnote-text').innerHTML, 'before Heb. with');
 
         const verse = app.verse(22);
-        await clickAndWait(app, verse.querySelector('.fn-marker'), 'list_notes');
+        await clickAndWaitForCalls(app, verse.querySelector('.fn-marker'), 'list_notes');
         assert.deepEqual(popupLemmas(verse), ['ignorant', null]);
     }));
 
@@ -168,7 +161,7 @@ test('clicking a marker selects its verse and the card lists its footnotes, then
         const verse = app.verse(105);
         const marker = verse.querySelector('.fn-marker');
         assert.equal(marker.textContent, 'a');
-        await clickAndWait(app, marker, 'list_notes');
+        await clickAndWaitForCalls(app, marker, 'list_notes');
         assert.deepEqual(app.selectedVerseNumbers(), [105]);
         const popup = visiblePopup(verse);
         assert.ok(popup, 'the card shows');
@@ -179,7 +172,7 @@ test('clicking a marker selects its verse and the card lists its footnotes, then
 
         // Clicking the marker again keeps it selected (the verse itself
         // toggles), and clicking the footnote's text leaves it be.
-        await clickAndWait(app, marker, 'list_notes');
+        await clickAndWaitForCalls(app, marker, 'list_notes');
         assert.deepEqual(app.selectedVerseNumbers(), [105]);
         app.click(popup.querySelector('.footnote-entry'));
         await app.idle(0);
@@ -200,7 +193,7 @@ test('the card shows a verse’s footnotes and cross references exactly when it 
 
         const verse = app.verse(13);
         assert.ok(!verse.classList.contains('has-xref'));
-        await clickAndWait(app, verse, 'list_notes');
+        await clickAndWaitForCalls(app, verse, 'list_notes');
         const popup = visiblePopup(verse);
         assert.ok(popup);
         assert.deepEqual(popupFootnotes(verse), [['a', 'And the evening...: Heb. And the evening was, and the morning was etc.']]);
@@ -212,7 +205,7 @@ test('the card shows a verse’s footnotes and cross references exactly when it 
         const v15 = dto.currentVerses[14];
         assert.deepEqual([v15.xrefs, v15.footnotes], [[], []], 'fixture: Genesis 1:15 has neither');
         for (const v of dto.currentVerses) {
-            await clickAndWait(app, app.verse(v.number), 'list_notes');
+            await clickAndWaitForCalls(app, app.verse(v.number), 'list_notes');
             const card = visiblePopup(app.verse(v.number));
             assert.equal(card.querySelector('.selection-footnotes').hidden, v.footnotes.length === 0, `Genesis 1:${v.number} footnotes`);
             assert.equal(card.querySelector('.selection-xrefs').hidden, v.xrefs.length === 0, `Genesis 1:${v.number} cross references`);
@@ -221,7 +214,7 @@ test('the card shows a verse’s footnotes and cross references exactly when it 
 
 test('Copy and the note panel’s quote use the plain text and italics, with no markers', () =>
     withApp({ book: 'Psalms', chapter: 23, translation: 'kjv' }, async (app) => {
-        await clickAndWait(app, app.verse(2), 'list_notes');
+        await clickAndWaitForCalls(app, app.verse(2), 'list_notes');
         await app.copyButton();
         assert.equal(
             app.clipboardWrites.at(-1),
@@ -246,11 +239,11 @@ test('a cross reference chip’s Go to opens its passage, selected, with the KJV
     withApp({ book: 'John', chapter: 10, translation: 'kjv' }, async (app) => {
         // John 10:11 refers to Psalms 23:1.
         const verse = app.verse(11);
-        await clickAndWait(app, verse, 'list_notes');
+        await clickAndWaitForCalls(app, verse, 'list_notes');
         const citation = [...visiblePopup(verse).querySelectorAll('.xref-citation')].find((c) => c.textContent === 'Psalms 23:1');
         assert.ok(citation, 'fixture: John 10:11 cites Psalms 23:1');
-        await clickAndWait(app, citation, 'get_passage');
-        await clickAndWait(app, visiblePopup(verse).querySelector('.xref-preview-go'), 'get_reading');
+        await clickAndWaitForCalls(app, citation, 'get_passage');
+        await clickAndWaitForCalls(app, visiblePopup(verse).querySelector('.xref-preview-go'), 'get_reading');
         assert.equal(app.heading(), 'Psalms 23');
         assert.deepEqual(app.selectedVerseNumbers(), [1]);
         assert.deepEqual(supplied(app.verse(1)), ['is']);
@@ -259,8 +252,8 @@ test('a cross reference chip’s Go to opens its passage, selected, with the KJV
 
 test('Library previews are the plain text', () =>
     withApp({ book: 'Psalms', chapter: 119, translation: 'kjv' }, async (app) => {
-        await clickAndWait(app, app.verse(105), 'list_notes');
-        await clickAndWait(app, app.actions().querySelector('.verse-bookmark-btn'), 'list_bookmarks');
+        await clickAndWaitForCalls(app, app.verse(105), 'list_notes');
+        await clickAndWaitForCalls(app, app.actions().querySelector('.verse-bookmark-btn'), 'list_bookmarks');
         const preview = app.document.querySelector('.bookmark-preview');
         assert.equal(preview.textContent, 'NUN. Thy word is a lamp unto my feet, and a light unto my path.');
         assert.equal(preview.querySelectorAll('*').length, 0);
@@ -288,7 +281,7 @@ test('comparing: the KJV column has the markers, and the section is the KJV’s,
         assert.ok(section.nextElementSibling.classList.contains('xref-summary'));
 
         // A KJV marker selects its verse in the KJV column.
-        await clickAndWait(app, app.verse(2, 'kjv').querySelector('.fn-marker'), 'list_notes');
+        await clickAndWaitForCalls(app, app.verse(2, 'kjv').querySelector('.fn-marker'), 'list_notes');
         assert.deepEqual(app.selectedVerseNumbers('kjv'), [2]);
         assert.deepEqual(popupFootnotes(app.verse(2, 'kjv')).map(([label]) => label), ['a', 'b']);
     }));
@@ -334,7 +327,7 @@ test('footnotes and supplied words are rendered as text, never as markup (synthe
             assert.equal(verse.querySelector('.fn-marker').textContent, '<u>a</u>');
             assert.ok(summaryRows(app).includes('23:1<u>a</u> <img src=x onerror="window.pwned=1">: <b>"q"</b> \'a\''));
             assert.deepEqual(sectionLemmas(app)[0], '<img src=x onerror="window.pwned=1">');
-            await clickAndWait(app, verse, 'list_notes');
+            await clickAndWaitForCalls(app, verse, 'list_notes');
             assert.deepEqual(popupFootnotes(verse), [['<u>a</u>', '<img src=x onerror="window.pwned=1">: <b>"q"</b> \'a\'']]);
             assert.deepEqual(popupLemmas(verse), ['<img src=x onerror="window.pwned=1">']);
             assert.equal(app.window.pwned, undefined);

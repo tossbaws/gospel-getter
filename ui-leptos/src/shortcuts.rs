@@ -9,10 +9,6 @@
 //! closes it, Tab moves between the close button and the scrolling list,
 //! a click on the dimmed page closes it, and focus goes back to where it
 //! was (or ☰, when opened from there).
-//!
-//! This is the page's sheet script (`ui/index.html` at fa5969d,
-//! `renderShortcuts` to its keydown trap) as a Leptos component: the same
-//! ids, classes, ARIA, `hidden`, text and focus order.
 
 use leptos::html;
 use leptos::prelude::*;

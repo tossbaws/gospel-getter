@@ -6,15 +6,11 @@
 //! Boot's first two commands don't wait for this module: the page's
 //! prefetch script, in `<head>`, sends `get_home` as the page loads and,
 //! with its answer, the chapter's `get_reading` (unless comparing, when the
-//! reader asks for it beside the comparison), as the main script's boot did
-//! from the end of the page. Boot takes them over here ([`start`],
-//! `bridge::boot_prefetch`): an answer already in is drawn at once, within
-//! the module's start; one on its way is adopted, never asked again. Without
-//! the prefetch (it isn't there), boot asks `get_home` itself.
-//!
-//! This is the main script's boot (`ui/index.html` at 2a9d85c: `boot`,
-//! `startReader` and the launch check's `askUpdateCheck` after it) in Rust:
-//! the same commands, in the same order, with the same arguments.
+//! reader asks for it beside the comparison). Boot takes them over here
+//! ([`start`], `bridge::boot_prefetch`): an answer already in is drawn at
+//! once, within the module's start; one on its way is adopted, never asked
+//! again. Without the prefetch (it isn't there), boot asks `get_home`
+//! itself.
 
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
@@ -100,7 +96,7 @@ fn boot_from(answered: Result<Answered, JsValue>) {
 
 /// Starts boot. Called once the reader has mounted, before the rest of the
 /// pieces (`lib::start`): if `get_home` has answered, the reader starts
-/// within this call, as it did when it said it was ready.
+/// within this call.
 pub fn start() {
     let Some(prefetch) = bridge::boot_prefetch() else {
         // No prefetch: boot asks itself, and the reader asks for the chapter.

@@ -1,10 +1,10 @@
 # ui-leptos: the page's Rust pieces
 
-Gospel Getter's page (`ui/index.html`) has been moved to Rust a piece at a
-time. This crate holds the pieces, written with [Leptos] and compiled to
-WebAssembly; they run inside the same Tauri app. The page keeps only three
-small inline scripts of its own (the pre-paint script, boot's prefetch and
-the plain-text fallback) and the loader. What crosses between them and the
+Gospel Getter's page (`ui/index.html`) is run by this crate's pieces,
+written with [Leptos] and compiled to WebAssembly; they run inside the
+Tauri app. The page has only three small inline scripts of its own (the
+pre-paint script, boot's prefetch and the plain-text fallback) and the
+loader. What crosses between them and the
 pieces, and the events the pieces send each other, are in `src/bridge.rs`.
 
 The saved settings' one table, their keys, values and names (in the page
@@ -34,7 +34,7 @@ numbers and rules, free of the DOM and unit-tested natively (`cargo test`).
 The root and what the pieces share:
 
 - `lib`: the crate root; mounts the pieces when the module loads (below).
-- `bridge`: what crosses to the page's remaining scripts, the globals set for the tests and the GUI checks, the custom events the pieces send each other, and the page controls they use.
+- `bridge`: what crosses to the page's own scripts, the globals set for the tests and the GUI checks, the custom events the pieces send each other, and the page controls they use.
 - `ipc`: Tauri commands through the global the page uses, `window.__TAURI__.core.invoke` (a `wasm_bindgen` extern plus `serde-wasm-bindgen`), with the same command names and argument objects.
 - `dto`: the shapes the commands exchange that the page declares for itself, with the names the JSON carries, and the shared ones (`wire`) under the page's names (see "What stays mirrored").
 - `dom`: the DOM helpers the pieces share (focus that never scrolls, the modals' Tab trap, listening, timers).
@@ -86,7 +86,7 @@ The header, the Library and search:
 The reader, the selection card and notes:
 
 - `reader`: the chapter on screen, how it gets there, and the passage history.
-- `reader_text`: the chapter's markup, byte for byte the page's former templates (`fixtures/genesis-1.html` is their output, which a test compares), Compare's rows, the reference, and the passage history's bookkeeping.
+- `reader_text`: the chapter's markup, byte for byte `fixtures/genesis-1.html` (which a test compares), Compare's rows, the reference, and the passage history's bookkeeping.
 - `card`: the selection card: the verse selection, Copy and Copy as…, the card's bookmark, highlight and notes, the verses' marks and the Shift ghost.
 - `card_text`: the card's markup and placement.
 - `margin`: the notes in the margin in reading mode.
@@ -106,12 +106,12 @@ Shared with the backend, from `../shared/`:
 - `wire`: the commands' answers both sides read whole, one definition each, with their JSON pinned by its tests.
 
 `src/lib.rs` mounts the pieces when the module loads: the page's own
-listeners first (`page`, `clicks`, `keyboard`, where the main script's
-were), then the surfaces, Aa, the card and the reader, then boot (its
-chapter drawn at once if its answer is in), then the rest in the next task
-(About and the banner are moved to where the page had them, for focus
-order, and the Library's tabs and lists into its panel), then tells the
-pieces every one is listening (`gospel-getter:pieces-ready`).
+listeners first (`page`, `clicks`, `keyboard`), then the surfaces, Aa, the
+card and the reader, then boot (its chapter drawn at once if its answer is
+in), then the rest in the next task (About and the banner are moved to
+their places, for focus order, and the Library's tabs and lists into its
+panel), then tells the pieces every one is listening
+(`gospel-getter:pieces-ready`).
 
 ## Building and running
 
@@ -175,27 +175,22 @@ runs wasm-opt `-Oz`.
 ## Tests
 
 The frontend tests (`tests/frontend/`) drive the real page in jsdom against
-the real backend, and the dialogs with it, as a black box: the same ids,
-classes, ARIA, `hidden` and `disabled`, text and focus order as the
-JavaScript version, so the dialogs' tests (`notes-export.test.mjs`,
-`shortcuts.test.mjs`, `welcome.test.mjs`, `reader-data.test.mjs`,
-`notes.test.mjs` and others) are the ones they had. jsdom runs no module
+the real backend, and the dialogs with it, as a black box: ids, classes,
+ARIA, `hidden` and `disabled`, text and focus order. jsdom runs no module
 scripts and has no `fetch`, so the test harness runs the glue as a classic
 script and hands it the `.wasm` bytes itself (`loadLeptos` in
 `harness.mjs`), the same files the app ships.
 `npm test` builds `dist/` first.
 
-Leptos updates the DOM after the current task, where the page's scripts
-update it within the click or key itself, so the harness's `app.click` and
-`app.key` return the event as before and can also be awaited:
+Leptos updates the DOM after the current task, so the harness's `app.click`
+and `app.key` return the event and can also be awaited:
 `await app.click(el)` resolves once pending DOM updates have flushed. Tests
-that look at a dialog right after a click or key await it; assertions did
-not change. Where the page answered within the event itself and a test
+that look at a dialog right after a click or key await it. Where a test
 looks at once with nothing to await (typing in the note editor, its discard
 prompt, the import's add-or-replace choice, and the updater throughout:
 Check now's line while it checks, the views as an install starts, Later;
 and the Library's tabs), the piece writes to those elements within the
-event, as the page did. The search box does so throughout: it opens and
+event. The search box does so throughout: it opens and
 closes, and draws its list (static Leptos views, built and put in place
 at once) and its active option, within the key or click; and so does the
 picker, for its books, a book's chapters, the marks and the focus. `openApp({ leptos: 'late' })` loads the pieces only

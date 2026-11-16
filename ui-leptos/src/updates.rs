@@ -17,12 +17,9 @@
 //! and closing About part way through brings the banner up, so the download
 //! never runs out of sight.
 //!
-//! This is the page's updater script (`ui/index.html` at 41e04f3, from
-//! `withinUpdateCheckTime` to the launch check) in Rust: the same ids,
-//! classes, ARIA, `hidden`, text and focus. As there, each event writes
-//! the DOM within itself (the views, the status lines, focus), then any
-//! command it starts runs on; the frontend tests look at the DOM right
-//! after a click, while a check is still on its way.
+//! Each event writes the DOM within itself (the views, the status lines,
+//! focus), then any command it starts runs on; the frontend tests look at
+//! the DOM right after a click, while a check is still on its way.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -409,8 +406,8 @@ impl Updates {
         });
     }
 
-    /// A Tauri `Channel` (`window.__TAURI__.core.Channel`, as the page made
-    /// it) whose messages move both views' progress.
+    /// A Tauri `Channel` (`window.__TAURI__.core.Channel`) whose messages
+    /// move both views' progress.
     fn channel(self) -> Result<JsValue, JsValue> {
         let window: JsValue = web_sys::window()
             .ok_or_else(|| JsValue::from_str("no window"))?

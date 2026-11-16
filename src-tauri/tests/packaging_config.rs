@@ -1629,20 +1629,12 @@ fn release_builds_use_one_pinned_rust() {
         parts.len() == 3 && parts.iter().all(|p| p.parse::<u32>().is_ok()),
         "RUST_TOOLCHAIN should be an exact release, X.Y.Z: {pinned}"
     );
-    let installs: Vec<Step> = dist_steps()
-        .into_iter()
-        .filter(|s| s.text.contains("dtolnay/rust-toolchain@"))
-        .collect();
-    assert!(!installs.is_empty());
-    for install in &installs {
-        assert!(
-            install
-                .text
-                .contains("          toolchain: ${{ env.RUST_TOOLCHAIN }}\n"),
-            "job {} installs another Rust: {install:#?}",
-            install.job
-        );
-    }
+    // That every install is this one is every_workflow_builds_with_the_release_rust's.
+    assert!(
+        dist_steps()
+            .iter()
+            .any(|s| s.text.contains("dtolnay/rust-toolchain@"))
+    );
 }
 
 /// A workflow's own `env:` value for `key` (the block at the top, not a

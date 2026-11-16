@@ -3,7 +3,7 @@ name = "ui-leptos"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "Gospel Getter's Leptos pieces: Rust compiled to WebAssembly, living beside the page's JavaScript"
+description = "Gospel Getter's UI: Rust (Leptos) compiled to WebAssembly, loaded by the page"
 license = "MIT"
 
 [lib]

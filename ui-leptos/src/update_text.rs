@@ -1,7 +1,7 @@
-//! The updater's words and its download arithmetic: the pure part of what
-//! `ui/index.html`'s updater script did (its sentences, `megabytes`, and
-//! what each download event does to the progress bars and the status
-//! line), kept free of the DOM so it is tested natively (`cargo test`).
+//! The updater's words and its download arithmetic (its sentences,
+//! `megabytes`, and what each download event does to the progress bars and
+//! the status line), kept free of the DOM so it is tested natively
+//! (`cargo test`).
 //! The check's time limit and its "couldn't reach GitHub" message are the
 //! backend's (`updater::CHECK_TIMEOUT`, `messages::OFFLINE`).
 
@@ -55,7 +55,7 @@ pub fn version_line(version: &str) -> String {
     format!("Version {version}")
 }
 
-/// Bytes as megabytes to one place: "12.3 MB" (the page's `megabytes`).
+/// Bytes as megabytes to one place: "12.3 MB".
 pub fn megabytes(bytes: u64) -> String {
     // Exact for any download size an app has (well under 2^53 bytes).
     #[allow(clippy::cast_precision_loss)]

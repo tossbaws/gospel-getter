@@ -5,8 +5,7 @@
 //! The bridge serves the app's own commands (`invoke_handler`) on Tauri's
 //! mock runtime, which has none of these, so it scripts them through a
 //! [`BridgeScript`] it sets on the state (`AppState::with_bridge_script`).
-//! The app never sets one: each command that asks finds none and goes on
-//! exactly as it did before the bridge could ask.
+//! The app never sets one.
 
 use std::path::PathBuf;
 use std::time::Duration;

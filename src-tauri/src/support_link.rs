@@ -6,27 +6,20 @@
 //! rather than the website's, since an installed app's link can't change
 //! until the next release and the Ko-fi address won't move.
 
+use crate::commands::AppState;
+use crate::credit_links::messages;
+
 /// The page About's Support Gospel Getter link opens.
 pub const SUPPORT_PAGE: &str = "https://ko-fi.com/crcllc";
 
-#[cfg(desktop)]
-pub use desktop::*;
-
-#[cfg(desktop)]
-mod desktop {
-    use super::SUPPORT_PAGE;
-    use crate::commands::AppState;
-    use crate::credit_links::messages;
-
-    /// Open [`SUPPORT_PAGE`] in the system browser (About's Support Gospel
-    /// Getter link).
-    #[tauri::command]
-    pub fn open_support_page(state: tauri::State<'_, AppState>) -> Result<(), String> {
-        state.open_in_browser(SUPPORT_PAGE).map_err(|e| {
-            tracing::error!("Failed to open {SUPPORT_PAGE}: {e}");
-            messages::OPEN_FAILED.to_string()
-        })
-    }
+/// Open [`SUPPORT_PAGE`] in the system browser (About's Support Gospel
+/// Getter link).
+#[tauri::command]
+pub fn open_support_page(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.open_in_browser(SUPPORT_PAGE).map_err(|e| {
+        tracing::error!("Failed to open {SUPPORT_PAGE}: {e}");
+        messages::OPEN_FAILED.to_string()
+    })
 }
 
 #[cfg(test)]

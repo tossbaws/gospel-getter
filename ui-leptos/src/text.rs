@@ -1,6 +1,5 @@
 //! The dialog's words and numbers, and the filter it builds from its
-//! fields: the pure part of what `ui/index.html`'s export-notes script did,
-//! kept free of the DOM so it is tested natively (`cargo test`).
+//! fields, kept free of the DOM so they are tested natively (`cargo test`).
 
 use crate::dto::{Commentary, DatePresets, Filter, NotedBook};
 use crate::reader_text::escape_html;
@@ -64,7 +63,7 @@ pub fn replace_question(existing: &[String], folder: &str) -> String {
 
 /// A chapter field's number, held to the book's chapters; an empty or
 /// unreadable one is `fallback` (the book's first or last chapter with
-/// notes). As the page did: `Math.round(Number(value))`, clamped to
+/// notes). As JavaScript's `Math.round(Number(value))`, clamped to
 /// `1..=chapter_count`.
 pub fn chapter_value(raw: &str, chapter_count: i64, fallback: i64) -> i64 {
     let trimmed = raw.trim();

@@ -1,7 +1,6 @@
 //! Aa's rules, free of the DOM so they are tested natively (`cargo test`):
-//! which keys change the text size, and stepping through the sizes (the
-//! page's, `ui/index.html` at 4b2d15e: `sizeKey` and `stepTextSize`, rule
-//! for rule), and what Compare shows beside the text.
+//! which keys change the text size, and stepping through the sizes, and
+//! what Compare shows beside the text.
 
 /// What Compare shows beside the text being read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,7 +16,7 @@ pub enum Beside {
 /// What Compare shows, with Compare on or off (`compare`), Notes chosen as
 /// what it compares with or not (`notes`), in reading mode or not.
 /// Reading mode shows the text with its margin notes, never the notes
-/// column; it compares translations as it always has.
+/// column; it compares translations.
 pub fn beside(compare: bool, notes: bool, reading_mode: bool) -> Beside {
     match (compare, notes) {
         (false, _) => Beside::Nothing,

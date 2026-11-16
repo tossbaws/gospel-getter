@@ -3,9 +3,7 @@
 //! active as the reader types and moves, Show more's next page and label,
 //! and a verse's text split at the words the search matched (the backend
 //! says where they are: `marks`, the one rule for which words those are,
-//! beside the search's own). The words are the page's (`ui/index.html` at
-//! 201ab8f; Show more's label at a1219bf, #106; a book's first chapter
-//! offered with its verses at 0dad77e, #124), byte for byte.
+//! beside the search's own).
 
 /// The empty box says what it takes, words in quotes (a phrase) among it.
 pub const HINT: &str = "Type words to search (\"in quotes\" for an exact phrase), a reference to go there, or > for a command.";
@@ -26,7 +24,7 @@ pub fn cannot_run(label: &str, reason: &str) -> String {
     format!("{label}: {reason}.")
 }
 
-/// `n` as the page wrote counts (`toLocaleString('en')`): "12,345".
+/// `n` as `toLocaleString('en')` writes a count: "12,345".
 pub fn thousands(n: i64) -> String {
     let digits = n.unsigned_abs().to_string();
     let mut out = String::new();

@@ -31,8 +31,7 @@
 //! reader's own marks and the welcome need with
 //! `bridge::LIBRARY_LOADED_EVENT`: each list is asked of
 //! the backend here, once per reload, never there too. Only the latest of
-//! overlapping reloads of a list is shown, as before (each list has its own
-//! token).
+//! overlapping reloads of a list is shown (each list has its own token).
 //!
 //! The Notes tab also lists the AI-flagged findings an agent saved at the
 //! reader's request (C4), apart from "My notes" under their own heading,
@@ -42,11 +41,7 @@
 //! each time the Library opens and whenever the notes are, so what an agent
 //! saved while the app was open shows then.
 //!
-//! This is the page's Library script (`ui/index.html` at 6d8d9a5: the tabs,
-//! `renderBookmarkList`, `renderHighlightList`, `renderNoteList`, their
-//! refreshes and their clicks) as a Leptos component: the same ids,
-//! classes, ARIA, `hidden` and `disabled`, text and focus order. The tabs
-//! answer within the click or key, as they did; the lists are signals.
+//! The tabs answer within the click or key; the lists are signals.
 
 use leptos::html;
 use leptos::prelude::*;
@@ -70,8 +65,8 @@ use crate::note_markdown::{self, Layout};
 use crate::surfaces::{self, Surface};
 
 /// A list as last shown: its rows, or why it couldn't be loaded (or a row
-/// removed) in place of them. The rows stay meanwhile, as the page kept
-/// them: the color filter shows them again.
+/// removed) in place of them. The rows stay meanwhile: the color filter
+/// shows them again.
 #[derive(Clone)]
 struct Shown<T> {
     items: Vec<T>,
@@ -172,7 +167,7 @@ fn target_of(event: &web_sys::Event) -> Option<Element> {
     event.target()?.dyn_into::<Element>().ok()
 }
 
-/// A plain `focus()`, as the page's list handlers did.
+/// A plain `focus()`.
 fn focus_plain(el: &HtmlElement) {
     let _ = el.focus();
 }
@@ -690,8 +685,7 @@ impl Library {
                 );
                 return;
             }
-            // The reader's highlights, then this list (as the page's
-            // `refreshHighlights` did).
+            // The reader's highlights, then this list.
             card::refresh_highlights().await;
             self.reload(List::Highlights).await;
             // Keep keyboard focus in the list, on the next passage, or on
@@ -842,7 +836,7 @@ impl Library {
         // Another filter: a removal's focus is let go.
         self.focus.update_value(Generation::cancel);
         self.filter.set(filter);
-        // Shown again as a list, as the page re-rendered it.
+        // Shown again as a list.
         self.highlights.update(|s| match s {
             Some(shown) => shown.error = None,
             None => *s = Some(Shown::rows(Vec::new())),
@@ -1113,8 +1107,8 @@ fn finding_groups(shown: Option<Shown<FindingRequest>>) -> AnyView {
 type RowClick = fn(Library, Element);
 
 /// Draws the Library's tablist and its three tab panels, puts them inside
-/// `#library-panel` (between its heading and its hint, where the page had
-/// them), and starts listening for the page's reloads.
+/// `#library-panel` (between its heading and its hint), and starts
+/// listening for the page's reloads.
 pub fn mount() {
     let Some(holder) = bridge::document()
         .and_then(|d| d.create_element("div").ok())

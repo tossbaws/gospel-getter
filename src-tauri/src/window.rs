@@ -15,6 +15,10 @@
 //! `DocumentTitleChanged`) copies it to the native window. So the webview
 //! needs no window permission.
 
+use anyhow::Context;
+use tauri::{LogicalSize, PhysicalPosition, PhysicalSize, WebviewWindowBuilder};
+use tauri_plugin_window_state::{StateFlags, WindowExt};
+
 /// The window's label in `tauri.conf.json` and the capability file.
 pub const MAIN: &str = "main";
 
@@ -116,179 +120,167 @@ pub fn at_least(size: (u32, u32), scale: f64, min: (f64, f64)) -> Option<(f64, f
         .then(|| (logical.0.max(min.0), logical.1.max(min.1)))
 }
 
-#[cfg(desktop)]
-pub use desktop::*;
+/// What comes back on launch: size, position and maximized state. Not
+/// visibility (the window is always shown) or decorations (always the
+/// native title bar).
+pub fn state_flags() -> StateFlags {
+    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED
+}
 
-#[cfg(desktop)]
-mod desktop {
-    use anyhow::Context;
-    use tauri::{LogicalSize, PhysicalPosition, PhysicalSize, WebviewWindowBuilder};
-    use tauri_plugin_window_state::{StateFlags, WindowExt};
+/// The window state plugin, keeping its file in `data_dir`. It saves
+/// when the app exits. It doesn't restore the main window by itself:
+/// [`create_main_window`] does, before showing it.
+pub fn state_plugin<R: tauri::Runtime>(
+    data_dir: &std::path::Path,
+) -> anyhow::Result<tauri::plugin::TauriPlugin<R>> {
+    // The plugin joins its file name to the config directory; an
+    // absolute path replaces that, so the file sits with the database.
+    let file = data_dir.join(STATE_FILE);
+    let file = file
+        .to_str()
+        .context("The app data directory isn't valid UTF-8")?;
+    Ok(tauri_plugin_window_state::Builder::new()
+        .with_state_flags(state_flags())
+        .with_filename(file)
+        .skip_initial_state(MAIN)
+        .build())
+}
 
-    use super::{MAIN, Rect, STATE_FILE, at_least, reachable, recovered};
-
-    /// What comes back on launch: size, position and maximized state. Not
-    /// visibility (the window is always shown) or decorations (always the
-    /// native title bar).
-    pub fn state_flags() -> StateFlags {
-        StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED
+fn rect(position: PhysicalPosition<i32>, size: PhysicalSize<u32>) -> Rect {
+    Rect {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
     }
+}
 
-    /// The window state plugin, keeping its file in `data_dir`. It saves
-    /// when the app exits. It doesn't restore the main window by itself:
-    /// [`create_main_window`] does, before showing it.
-    pub fn state_plugin<R: tauri::Runtime>(
-        data_dir: &std::path::Path,
-    ) -> anyhow::Result<tauri::plugin::TauriPlugin<R>> {
-        // The plugin joins its file name to the config directory; an
-        // absolute path replaces that, so the file sits with the database.
-        let file = data_dir.join(STATE_FILE);
-        let file = file
-            .to_str()
-            .context("The app data directory isn't valid UTF-8")?;
-        Ok(tauri_plugin_window_state::Builder::new()
-            .with_state_flags(state_flags())
-            .with_filename(file)
-            .skip_initial_state(MAIN)
-            .build())
-    }
+/// One app at a time. Opening Gospel Getter while it's already open
+/// (from the launcher, the desktop or a command line) doesn't start a
+/// second app on the same database: the second process hands over to
+/// the first and exits, before it reads or writes anything, and the
+/// window already open comes forward ([`show_main_window`]). It must be
+/// the first plugin registered, so that nothing else starts first.
+///
+/// On Linux the app owns a name on the session bus
+/// (`com.tossbaws.gospel-getter.SingleInstance`), so it's one app per
+/// login session: without a session bus it starts as before, with no
+/// guard. On Windows it's a named mutex. The arguments of the second
+/// launch are ignored: the app takes none.
+pub fn single_instance_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        tracing::info!("Gospel Getter was opened again; showing the window already open");
+        show_main_window(app);
+    })
+}
 
-    fn rect(position: PhysicalPosition<i32>, size: PhysicalSize<u32>) -> Rect {
-        Rect {
-            x: position.x,
-            y: position.y,
-            width: size.width,
-            height: size.height,
+/// Bring the main window forward: out of the taskbar if it was
+/// minimised, shown, and focused. Nothing happens if it doesn't exist
+/// yet (the app is still starting, and shows it once it's ready).
+pub fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::Manager;
+    let Some(window) = app.get_webview_window(MAIN) else {
+        return;
+    };
+    for (what, done) in [
+        ("unminimize", window.unminimize()),
+        ("show", window.show()),
+        ("focus", window.set_focus()),
+    ] {
+        if let Err(e) = done {
+            tracing::warn!("Failed to {what} the window: {e}");
         }
     }
+}
 
-    /// One app at a time. Opening Gospel Getter while it's already open
-    /// (from the launcher, the desktop or a command line) doesn't start a
-    /// second app on the same database: the second process hands over to
-    /// the first and exits, before it reads or writes anything, and the
-    /// window already open comes forward ([`show_main_window`]). It must be
-    /// the first plugin registered, so that nothing else starts first.
-    ///
-    /// On Linux the app owns a name on the session bus
-    /// (`com.tossbaws.gospel-getter.SingleInstance`), so it's one app per
-    /// login session: without a session bus it starts as before, with no
-    /// guard. On Windows it's a named mutex. The arguments of the second
-    /// launch are ignored: the app takes none.
-    pub fn single_instance_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-        tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tracing::info!("Gospel Getter was opened again; showing the window already open");
-            show_main_window(app);
-        })
-    }
-
-    /// Bring the main window forward: out of the taskbar if it was
-    /// minimised, shown, and focused. Nothing happens if it doesn't exist
-    /// yet (the app is still starting, and shows it once it's ready).
-    pub fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-        use tauri::Manager;
-        let Some(window) = app.get_webview_window(MAIN) else {
-            return;
-        };
-        for (what, done) in [
-            ("unminimize", window.unminimize()),
-            ("show", window.show()),
-            ("focus", window.set_focus()),
-        ] {
-            if let Err(e) = done {
-                tracing::warn!("Failed to {what} the window: {e}");
+/// Build the main window from `tauri.conf.json`, hidden; give it last
+/// run's size and place; then show it.
+pub fn create_main_window(app: &tauri::App) -> anyhow::Result<()> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == MAIN)
+        .context("tauri.conf.json has no main window")?
+        .clone();
+    let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
+        .on_document_title_changed(|window, title| {
+            if let Err(e) = window.set_title(&title) {
+                tracing::warn!("Failed to set the window title: {e}");
             }
-        }
-    }
+        })
+        .build()
+        .context("Failed to create the main window")?;
 
-    /// Build the main window from `tauri.conf.json`, hidden; give it last
-    /// run's size and place; then show it.
-    pub fn create_main_window(app: &tauri::App) -> anyhow::Result<()> {
-        let config = app
-            .config()
-            .app
-            .windows
-            .iter()
-            .find(|w| w.label == MAIN)
-            .context("tauri.conf.json has no main window")?
-            .clone();
-        let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
-            .on_document_title_changed(|window, title| {
-                if let Err(e) = window.set_title(&title) {
-                    tracing::warn!("Failed to set the window title: {e}");
-                }
-            })
-            .build()
-            .context("Failed to create the main window")?;
-
-        // Best-effort: a window at the default size is better than none.
-        if let Err(e) = window.restore_state(state_flags()) {
-            tracing::warn!("Failed to restore the window's size and position: {e}");
-        }
-        let min = (
-            config.min_width.unwrap_or(config.width),
-            config.min_height.unwrap_or(config.height),
-        );
-        if let Err(e) = keep_on_screen(&window, min) {
-            tracing::warn!("Failed to check the window is on screen: {e}");
-        }
-        window.show()?;
-        window.set_focus()?;
-        Ok(())
+    // Best-effort: a window at the default size is better than none.
+    if let Err(e) = window.restore_state(state_flags()) {
+        tracing::warn!("Failed to restore the window's size and position: {e}");
     }
-
-    /// A window restored to a screen that's gone (or mostly off one) moves
-    /// to the middle of the primary screen, and one restored smaller than
-    /// its minimum grows to it. A maximized window is the window manager's
-    /// to place. (The plugin already leaves the position alone when no
-    /// screen overlaps the saved window at all; this also catches one
-    /// with only a corner on a screen, or its title bar off the top.)
-    fn keep_on_screen<R: tauri::Runtime>(
-        window: &tauri::WebviewWindow<R>,
-        min: (f64, f64),
-    ) -> tauri::Result<()> {
-        let scale = window.scale_factor()?;
-        if let Some((width, height)) = at_least(window.inner_size()?.into(), scale, min) {
-            window.set_size(LogicalSize { width, height })?;
-        }
-        if window.is_maximized()? {
-            return Ok(());
-        }
-        let screens: Vec<Rect> = window
-            .available_monitors()?
-            .iter()
-            .map(|m| rect(m.work_area().position, m.work_area().size))
-            .collect();
-        let here = rect(window.outer_position()?, window.outer_size()?);
-        // No screens reported (some Wayland sessions), or a hidden window
-        // GTK hasn't placed yet (it reads as 0x0 at 0,0; GTK and the
-        // window manager keep a title bar on screen there): nothing to
-        // check. On Windows a hidden window has its real place.
-        if screens.is_empty() || here.width == 0 || here.height == 0 || reachable(here, &screens) {
-            return Ok(());
-        }
-        let Some(primary) = window
-            .primary_monitor()?
-            .or(window.available_monitors()?.pop())
-        else {
-            return Ok(());
-        };
-        let area = primary.work_area();
-        let min_physical = (
-            (min.0 * primary.scale_factor()).ceil() as u32,
-            (min.1 * primary.scale_factor()).ceil() as u32,
-        );
-        let inner = window.inner_size()?;
-        let frame = (
-            here.width.saturating_sub(inner.width),
-            here.height.saturating_sub(inner.height),
-        );
-        let (to, (width, height)) =
-            recovered(here, rect(area.position, area.size), frame, min_physical);
-        tracing::info!("The window was off screen at {here:?}; moving it to {to:?}");
-        window.set_size(PhysicalSize::new(width, height))?;
-        window.set_position(PhysicalPosition::new(to.x, to.y))?;
-        Ok(())
+    let min = (
+        config.min_width.unwrap_or(config.width),
+        config.min_height.unwrap_or(config.height),
+    );
+    if let Err(e) = keep_on_screen(&window, min) {
+        tracing::warn!("Failed to check the window is on screen: {e}");
     }
+    window.show()?;
+    window.set_focus()?;
+    Ok(())
+}
+
+/// A window restored to a screen that's gone (or mostly off one) moves
+/// to the middle of the primary screen, and one restored smaller than
+/// its minimum grows to it. A maximized window is the window manager's
+/// to place. (The plugin already leaves the position alone when no
+/// screen overlaps the saved window at all; this also catches one
+/// with only a corner on a screen, or its title bar off the top.)
+fn keep_on_screen<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    min: (f64, f64),
+) -> tauri::Result<()> {
+    let scale = window.scale_factor()?;
+    if let Some((width, height)) = at_least(window.inner_size()?.into(), scale, min) {
+        window.set_size(LogicalSize { width, height })?;
+    }
+    if window.is_maximized()? {
+        return Ok(());
+    }
+    let screens: Vec<Rect> = window
+        .available_monitors()?
+        .iter()
+        .map(|m| rect(m.work_area().position, m.work_area().size))
+        .collect();
+    let here = rect(window.outer_position()?, window.outer_size()?);
+    // No screens reported (some Wayland sessions), or a hidden window
+    // GTK hasn't placed yet (it reads as 0x0 at 0,0; GTK and the
+    // window manager keep a title bar on screen there): nothing to
+    // check. On Windows a hidden window has its real place.
+    if screens.is_empty() || here.width == 0 || here.height == 0 || reachable(here, &screens) {
+        return Ok(());
+    }
+    let Some(primary) = window
+        .primary_monitor()?
+        .or(window.available_monitors()?.pop())
+    else {
+        return Ok(());
+    };
+    let area = primary.work_area();
+    let min_physical = (
+        (min.0 * primary.scale_factor()).ceil() as u32,
+        (min.1 * primary.scale_factor()).ceil() as u32,
+    );
+    let inner = window.inner_size()?;
+    let frame = (
+        here.width.saturating_sub(inner.width),
+        here.height.saturating_sub(inner.height),
+    );
+    let (to, (width, height)) =
+        recovered(here, rect(area.position, area.size), frame, min_physical);
+    tracing::info!("The window was off screen at {here:?}; moving it to {to:?}");
+    window.set_size(PhysicalSize::new(width, height))?;
+    window.set_position(PhysicalPosition::new(to.x, to.y))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -444,7 +436,6 @@ mod tests {
         assert_eq!(at_least((800, 600), 1.25, min), None);
     }
 
-    #[cfg(desktop)]
     #[test]
     fn size_position_and_maximized_come_back() {
         use tauri_plugin_window_state::StateFlags;

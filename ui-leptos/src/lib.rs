@@ -1,15 +1,14 @@
-//! Gospel Getter's Leptos pieces: Rust compiled to WebAssembly, loaded by
-//! `ui/index.html` beside its JavaScript (Trunk builds the page; see
-//! `Trunk.toml`). Each module's role is in the module map, this crate's
-//! `README.md`.
+//! Gospel Getter's UI: Rust (Leptos) compiled to WebAssembly and loaded by
+//! `ui/index.html` (Trunk builds the page; see `Trunk.toml`). Each module's
+//! role is in the module map, this crate's `README.md`.
 //!
 //! If this module fails to load, the chapter still shows, as plain text, in
 //! the saved look (the page's small fallback reads it, and its pre-paint
 //! script applies the look), with a line saying the rest of the reader
 //! isn't available. That line is all a reader is told: nothing else on the
-//! page answers a click or a key (there is no script left to say what isn't
-//! available), nothing opens, no setting can be changed, and no update is
-//! offered.
+//! page answers a click or a key (the page has no script of its own to say
+//! what isn't available), nothing opens, no setting can be changed, and no
+//! update is offered.
 
 mod aa;
 mod aa_text;
@@ -89,15 +88,14 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
-    // The page's own listeners first, where its main script's were: the ☰
-    // items, the click dispatcher, the keyboard dispatcher. Each runs before
-    // any piece's listener for the same event on the same element, as the
-    // main script's did.
+    // The page's own listeners first (the ☰ items, the click dispatcher, the
+    // keyboard dispatcher), so each runs before any piece's listener for the
+    // same event on the same element.
     page::mount();
     // Before anything under the document sees a click on a note's link.
     note_links::mount();
-    // The popovers and panels, and the picker's shape: they were the page's
-    // head script's, which ran before the other pieces' code.
+    // The popovers and panels, and the picker's shape, ahead of the other
+    // pieces.
     surfaces::mount();
     // Aa and the saved settings next: their records (the `<select>`s) are
     // filled before any piece reads them.
@@ -113,10 +111,10 @@ pub fn start() {
     // Back, Forward and Recent places hear boot's books.
     nav::mount();
     boot::start();
-    // The table of shortcuts, where the page had it.
+    // The table of shortcuts, for the tests (`window.gospelGetterShortcuts`).
     bridge::export_shortcuts();
     // The rest in a task of its own, so the chapter is shown (painted, and
-    // the window titled) before they mount, as it was before they loaded.
+    // the window titled) before they mount.
     let rest = Closure::once_into_js(mount_the_rest);
     if web_sys::window()
         .and_then(|w| w.set_timeout_with_callback(rest.unchecked_ref()).ok())
@@ -146,7 +144,7 @@ fn mount_the_rest() {
     leptos::mount::mount_to(body.clone(), import_preview::ImportDialog).forget();
     leptos::mount::mount_to(body, note_editor::NoteEditor).forget();
     // About and the update banner are not modals stacked anywhere: each
-    // goes where the page had it (focus order), so they are drawn in a
+    // has its own place in the page (focus order), so they are drawn in a
     // holder first and moved there.
     if let Some(holder) = web_sys::window()
         .and_then(|w| w.document())

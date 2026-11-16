@@ -1,7 +1,6 @@
 //! Small DOM helpers the pieces share: focus that never scrolls the page,
 //! "is this element usable", the Tab trap's arithmetic, listening for the
-//! page's events and the keyboard, and timers. As the page's scripts do
-//! them.
+//! page's events and the keyboard, and timers.
 
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -194,7 +193,7 @@ pub fn clear_timeout(handle: Option<i32>) {
 }
 
 /// Listens for `keydown` on `window`, capturing: before any of the page's
-/// own handlers, as its modals do. For as long as the page lives.
+/// own handlers, as the modals need. For as long as the page lives.
 pub fn on_window_keydown(handler: impl FnMut(KeyboardEvent) + 'static) {
     let Some(window) = web_sys::window() else {
         return;

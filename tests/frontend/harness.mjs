@@ -4,7 +4,7 @@
 // and a real SQLite database, through `src-tauri/examples/frontend_bridge.rs`
 // (both built by `npm test` before the tests run). Each test file gets one bridge
 // process and its own disposable database, a copy of the database the
-// bridge prepared once for its build (see `useFreshDatabase`); each test
+// bridge prepared once for its build (its `template`); each test
 // resets the bookmarks and reading position first. The clipboard is a stub
 // that can succeed, fail, or be missing; get_reading can be made to fail,
 // or (for escaping tests only) it and other commands can have a clearly
@@ -61,7 +61,7 @@ export const bookId = (name) => {
  * null (the BSB's), and not empty (the WEB's five, Luke 17:36, Acts 8:37,
  * 15:34, 24:7 and Romans 16:25), the seed step's own rule.
  */
-export const isNumbered = (text) => typeof text === 'string' && text !== '';
+const isNumbered = (text) => typeof text === 'string' && text !== '';
 
 /** A verse's stored text: exactly the string in the bundled data file. */
 export function storedVerse(code, book, chapter, verse) {
@@ -91,20 +91,6 @@ const BRIDGE = process.env.GOSPEL_GETTER_BRIDGE
     || fileURLToPath(new URL(`src-tauri/target/debug/examples/frontend_bridge${process.platform === 'win32' ? '.exe' : ''}`, root));
 
 let bridge = null;
-let freshDatabase = false;
-
-/**
- * Gives this test file a database prepared from an empty file, as a new
- * install's is: three Bibles and the cross-references seeded and the search
- * index built then and there, seconds of work. Without it, the file's
- * database is a copy of one the bridge prepared that way once for its build
- * (its `template`), the same database, ready in milliseconds. For a test of
- * the seeding itself; call it before the file's first call on the backend.
- */
-export function useFreshDatabase() {
-    if (bridge) throw new Error('useFreshDatabase() comes before the first call on the backend');
-    freshDatabase = true;
-}
 
 function startBridge() {
     const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-frontend-'));
@@ -117,8 +103,7 @@ function startBridge() {
         } catch {}
     };
     process.once('exit', removeAtExit);
-    const args = [join(dir, 'gospel_getter.db'), ...(freshDatabase ? ['--fresh'] : [])];
-    const child = spawn(BRIDGE, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(BRIDGE, [join(dir, 'gospel_getter.db')], { stdio: ['pipe', 'pipe', 'pipe'] });
     const pending = new Map();
     let stderr = '';
     let nextId = 1;
@@ -692,7 +677,7 @@ export async function settle() {
     for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
-export async function until(check, what = 'condition') {
+async function until(check, what = 'condition') {
     for (let i = 0; i < 400; i++) {
         if (check()) return;
         await new Promise((r) => setTimeout(r, 5));

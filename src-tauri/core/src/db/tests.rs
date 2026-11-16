@@ -1515,8 +1515,7 @@ async fn bookmarks_follow_each_translations_own_verse_numbering() {
 
     // Romans 14:24 is numbered in the WEB (26 verses) but not the KJV (23),
     // and Romans 16:25 the other way round (the WEB's Romans 16 ends at 24).
-    // Both can be bookmarked. (Until 2.29.2 the KJV's misnumbered Matthew 2
-    // and 3 John were the examples.)
+    // Both can be bookmarked.
     let web_only = add_bookmark(pool.write(), 45, 14, 23, 24).await.unwrap();
     let kjv_only = add_bookmark(pool.write(), 45, 16, 25, 25).await.unwrap();
     assert!(matches!(
@@ -1791,8 +1790,7 @@ async fn highlighted_passages_preview_each_translations_own_verses() {
     assert_eq!(list_highlight_passages(pool.read(), KJV).await.unwrap(), []);
 
     // John 3:16-18 green with 3:17 recolored pink; Romans 14:23-24 (14:24
-    // is numbered in the WEB only); Romans 16:25 (the KJV only). (Until
-    // 2.29.2 the KJV's misnumbered Matthew 2 and 3 John were the examples.)
+    // is numbered in the WEB only); Romans 16:25 (the KJV only).
     set_highlights(pool.write(), 43, 3, 16, 18, HighlightColor::Green)
         .await
         .unwrap();
@@ -1914,8 +1912,6 @@ async fn notes_are_added_edited_listed_and_deleted() {
         .await
         .unwrap();
     // Luke 17:36 is numbered only in the KJV; it can still have a note.
-    // (Until 2.29.2 the KJV's Matthew 2:23, numbered only in the WEB, was
-    // the example.)
     let kjv_only = Passage {
         book_id: 42,
         chapter: 17,

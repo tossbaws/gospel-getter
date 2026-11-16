@@ -18,13 +18,10 @@
 //! cancel. An answer for a preview no longer shown changes nothing on
 //! screen.
 //!
-//! This is the page's import script (`ui/index.html` at fa5969d,
-//! `describePreferences` to its keydown handler) as a Leptos component:
-//! the same ids, classes, ARIA, `hidden` and `disabled`, text and focus
-//! order. The radio buttons and checkboxes are the reader's (and the
-//! tests'), so their state is read from them when it matters; the warning
-//! and the confirm button's label follow the add-or-replace choice within
-//! the change that made it.
+//! The radio buttons and checkboxes are the reader's (and the tests'), so
+//! their state is read from them when it matters; the warning and the
+//! confirm button's label follow the add-or-replace choice within the
+//! change that made it.
 
 use leptos::html;
 use leptos::prelude::*;

@@ -15,15 +15,11 @@
 //! with Ctrl, Cmd or Alt, the arrows and Escape still work. The sheet (☰ →
 //! Keyboard shortcuts) and the palette (Ctrl+K) are reached either way.
 //!
-//! This is the main script's keyboard dispatcher (`ui/index.html` at
-//! 2a9d85c: its `keydown` listener, `turnChapter`, `stepBook`,
-//! `stepSelection`, `viewTop`, `verseInView`, `revealVerse`, `goHistory`) in
-//! Rust: the same keys in the same order, each `preventDefault` within the
-//! key, as before. It's registered first of the pieces' `document`
-//! listeners (`page::mount`), as the main script's was, so the Escape it
-//! uses is marked handled before the surfaces' Escape (`surfaces`) and Aa's
-//! keys hear it; the modals' capturing listeners on `window` still come
-//! before it, and stop the keys they take.
+//! Each `preventDefault` is within the key. The dispatcher is registered
+//! first of the pieces' `document` listeners (`page::mount`), so the Escape
+//! it uses is marked handled before the surfaces' Escape (`surfaces`) and
+//! Aa's keys hear it; the modals' capturing listeners on `window` still
+//! come before it, and stop the keys they take.
 
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;

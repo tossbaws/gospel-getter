@@ -13,8 +13,6 @@ use crate::reader_data;
 // Shared with the page, which reads it whole (see shared/wire.rs).
 pub use crate::wire::NoteLinkDto;
 
-// ---- Notes
-
 /// One note.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
