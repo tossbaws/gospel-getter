@@ -203,7 +203,11 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
             "Reading mode"
         }
         .into(),
-        if reader_mode { "reader-exit" } else { "" },
+        if reader_mode {
+            "reader-exit"
+        } else {
+            "reader-mode"
+        },
         "distraction free focus",
         None,
         click(if reader_mode {
@@ -711,8 +715,14 @@ mod tests {
         }
         let random = find(&list, "random-chapter");
         assert_eq!((random.key.as_str(), random.keys), ("", ""));
-        // Reading mode shows its key only once it's on: Escape leaves it.
-        assert_eq!(find(&list, "reader-mode").key, "");
+        // Off, R turns reading mode on; on, it shows Escape, which leaves
+        // it (as R does too).
+        let off = find(&list, "reader-mode");
+        assert_eq!(
+            (off.label.as_str(), off.key.as_str(), off.keys),
+            ("Reading mode", "R", "R")
+        );
+        assert_eq!(off.run, Run::Click("reader-mode-btn"));
         let on = commands(&PaletteState {
             reader_mode: true,
             ..john_3()

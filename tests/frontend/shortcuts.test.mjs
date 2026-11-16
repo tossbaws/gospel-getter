@@ -53,6 +53,10 @@ test('the sheet lists every shortcut in its groups, with key caps', () =>
         assert.equal(text('back'), 'Alt+Left arrow Back to the passage you jumped from');
         assert.equal(text('previous-book'), '[ Previous book, at chapter 1');
         assert.equal(text('shortcuts'), '? These keyboard shortcuts');
+        assert.equal(text('reader-mode'), 'R Reading mode, on or off');
+        assert.equal(text('reader-exit'), 'Esc Leave reading mode');
+        assert.equal(row('reader-mode').nextElementSibling, row('reader-exit'), 'R just before Esc');
+        assert.equal(row('reader-mode').closest('.shortcut-group').querySelector('h3').textContent, 'Text & display');
         // Key caps, the hint's: drawn arrows named for screen readers.
         assert.deepEqual([...row('copy-as').querySelectorAll('kbd')].map((k) => k.textContent), ['Ctrl', 'Shift', 'C']);
         assert.equal(row('next-chapter').querySelector('kbd svg').getAttribute('aria-hidden'), 'true');

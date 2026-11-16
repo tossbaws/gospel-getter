@@ -271,6 +271,7 @@ The main ones:
 | Ctrl+Shift+C | Copy as…: the selected verses with verse numbers, as a Markdown quote, or as plain text |
 | `T` | Open or close the translations and Compare (the translation button) |
 | `C` | Compare translations on/off |
+| `R` | Reading mode on/off (Esc also leaves it) |
 | Ctrl+= / Ctrl+- | Larger / smaller text, through the four sizes |
 | Ctrl+0 | Text size back to Medium |
 | Ctrl+B | Open or close the Library (bookmarks, highlights and notes) |
@@ -279,8 +280,8 @@ The main ones:
 | Esc | Close search or the open panel or popover, then clear the selection, then leave reading mode |
 | `?` | All the keyboard shortcuts |
 
-The keys that work pressed on their own (`G`, `T`, `C`, `N`, `j`, `k`,
-`[`, `]`, `/` and `?`) can get in the way of speech input or a screen
+The keys that work pressed on their own (`G`, `T`, `C`, `R`, `N`, `j`,
+`k`, `[`, `]`, `/` and `?`) can get in the way of speech input or a screen
 reader. **Single-key shortcuts** under **Aa** turns them off: those keys
 then do nothing, and the shortcuts with Ctrl or Alt, the arrow keys and Esc
 still work. With them off, Ctrl+K opens the search box and the command

@@ -287,10 +287,11 @@ pub fn text_size_shortcut(step: i8) {
     show_text_size();
 }
 
-/// Reading mode on or off (also Escape, last of all, leaving it). Focus
-/// goes to whichever control undoes it, so a keyboard reader always lands
-/// somewhere sensible: the exit button, or Aa, which holds its toggle. It
-/// hides the sidebar, and leaving it brings the sidebar back.
+/// Reading mode on or off, from Aa's button and R (also Escape, last of
+/// all, leaving it). Focus goes to whichever control undoes it, so a
+/// keyboard reader always lands somewhere sensible: the exit button, or Aa,
+/// which holds its toggle. It hides the sidebar, and leaving it brings the
+/// sidebar back.
 pub fn set_reader_mode(on: bool) {
     let was = beside();
     prefs::set(&preferences::READER_MODE, if on { "on" } else { "off" });

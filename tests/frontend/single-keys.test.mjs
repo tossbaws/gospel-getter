@@ -56,6 +56,7 @@ const seen = (app) => ({
     heading: app.heading(),
     selected: app.selectedVerseNumbers(),
     comparing: app.isComparing(),
+    readerMode: app.document.documentElement.dataset.readerMode,
     surface: app.window.gospelGetterSurfaces.current(),
     search: !app.searchPanel().hidden,
     sheet: sheetOpen(app),
@@ -90,7 +91,8 @@ test('Aa’s Single-key shortcuts: a switch, on by default, saved as it changes'
 
 test('off, no shortcut in the table that’s a character key pressed on its own does anything', () =>
     withApp({}, async (app) => {
-        // A verse selected, so the selection's keys (j, k, N, C) would act.
+        // A verse selected, so the selection's keys (j, k, N, C) would act;
+        // R would turn reading mode on.
         const before = app.calls.length;
         app.click(app.verse(16));
         await app.idle(before, 'list_notes');
@@ -110,7 +112,7 @@ test('off, no shortcut in the table that’s a character key pressed on its own 
                 }
             }
         }
-        for (const key of ['g', 'G', 't', 'c', 'n', 'j', 'k', 'J', 'K', '[', ']', '/', '?']) {
+        for (const key of ['g', 'G', 't', 'c', 'r', 'R', 'n', 'j', 'k', 'J', 'K', '[', ']', '/', '?']) {
             assert.ok(ignored.includes(key), `the table's ways to press include ${key}`);
         }
 
