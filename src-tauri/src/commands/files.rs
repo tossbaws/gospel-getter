@@ -207,15 +207,10 @@ pub(super) fn over_main_window<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     dialog: tauri_plugin_dialog::FileDialogBuilder<R>,
 ) -> tauri_plugin_dialog::FileDialogBuilder<R> {
-    #[cfg(desktop)]
-    {
-        use tauri::Manager;
-        if let Some(window) = app.get_webview_window(crate::window::MAIN) {
-            return dialog.set_parent(&window);
-        }
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window(crate::window::MAIN) {
+        return dialog.set_parent(&window);
     }
-    #[cfg(not(desktop))]
-    let _ = app;
     dialog
 }
 

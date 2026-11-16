@@ -5,6 +5,8 @@
 //! in [`CREDIT_LINKS`] open anything, the same way `updater`'s Release notes
 //! and releases page only ever open their own URLs.
 
+use crate::commands::AppState;
+
 /// Each credit link the page shows: its key, and the page it opens.
 pub const CREDIT_LINKS: &[(&str, &str)] = &[
     (
@@ -29,30 +31,18 @@ pub fn credit_link_url(which: &str) -> Option<&'static str> {
         .map(|(_, url)| *url)
 }
 
-#[cfg(desktop)]
-pub use desktop::*;
-
-#[cfg(desktop)]
-mod desktop {
-    use super::{credit_link_url, messages};
-    use crate::commands::AppState;
-
-    /// Open credit link `which` ("openbible" or "cc-by") in the system
-    /// browser. Any other key is refused.
-    #[tauri::command]
-    pub fn open_credit_link(
-        state: tauri::State<'_, AppState>,
-        which: String,
-    ) -> Result<(), String> {
-        let Some(url) = credit_link_url(&which) else {
-            tracing::error!("Refused to open an unknown credit link: {which:?}");
-            return Err(messages::UNKNOWN_LINK.to_string());
-        };
-        state.open_in_browser(url).map_err(|e| {
-            tracing::error!("Failed to open {url}: {e}");
-            messages::OPEN_FAILED.to_string()
-        })
-    }
+/// Open credit link `which` ("openbible" or "cc-by") in the system
+/// browser. Any other key is refused.
+#[tauri::command]
+pub fn open_credit_link(state: tauri::State<'_, AppState>, which: String) -> Result<(), String> {
+    let Some(url) = credit_link_url(&which) else {
+        tracing::error!("Refused to open an unknown credit link: {which:?}");
+        return Err(messages::UNKNOWN_LINK.to_string());
+    };
+    state.open_in_browser(url).map_err(|e| {
+        tracing::error!("Failed to open {url}: {e}");
+        messages::OPEN_FAILED.to_string()
+    })
 }
 
 #[cfg(test)]

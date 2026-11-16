@@ -22,13 +22,19 @@
 //! ([`release_notes_page`]). Neither takes a URL from the page.
 
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager, Runtime, State};
+use tauri_plugin_updater::{Error, Update, UpdaterExt};
 
+use crate::commands::AppState;
 use crate::release_notes;
 
-#[cfg(all(desktop, feature = "gui-test-updater"))]
+#[cfg(feature = "gui-test-updater")]
 pub mod test_hook;
 
 /// Where a build that can't update itself sends the reader.
@@ -258,383 +264,362 @@ pub fn with_causes(error: &dyn std::error::Error) -> String {
     line
 }
 
-#[cfg(desktop)]
-pub use desktop::*;
+/// The update the last check found, for `install_update`.
+#[derive(Default)]
+pub struct PendingUpdate {
+    update: Mutex<Option<Update>>,
+    /// Set by the Windows hook ([`installer_hook`]) right before the
+    /// installer is started: an install that returns once it's set
+    /// didn't start the installer.
+    installer_starting: Arc<AtomicBool>,
+}
 
-#[cfg(desktop)]
-mod desktop {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex};
+/// The bundle type the Tauri bundler marked this binary with.
+fn current_bundle() -> Option<Bundle> {
+    use tauri::utils::config::BundleType;
+    Some(match tauri::utils::platform::bundle_type()? {
+        BundleType::AppImage => Bundle::AppImage,
+        BundleType::Deb => Bundle::Deb,
+        BundleType::Rpm => Bundle::Rpm,
+        BundleType::Msi => Bundle::Msi,
+        BundleType::Nsis => Bundle::Nsis,
+        BundleType::App | BundleType::Dmg => Bundle::MacApp,
+    })
+}
 
-    use tauri::ipc::Channel;
-    use tauri::{AppHandle, Manager, Runtime, State};
-    use tauri_plugin_updater::{Error, Update, UpdaterExt};
+pub fn current_mode() -> UpdateMode {
+    update_mode(SELF_UPDATE_MARKER, current_bundle())
+}
 
-    use super::{
-        Bundle, CHECK_TIMEOUT, DownloadEvent, Problem, RELEASES_PAGE, SELF_UPDATE_MARKER,
-        UpdateInfo, UpdateMode, check_message, install_message, is_offered, link_only_target,
-        messages, release_notes_page, update_mode, with_causes, within_check_time,
-    };
-    use crate::commands::AppState;
+/// Where this copy looks for updates and what it may do with one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settings {
+    pub mode: UpdateMode,
+    /// How long a check may take ([`CHECK_TIMEOUT`]).
+    pub timeout: std::time::Duration,
+    /// An endpoint and public key in place of `tauri.conf.json`'s, and
+    /// whether an update may be installed: only a GUI-check test build
+    /// (feature `gui-test-updater`, see `test_hook`) can have anything
+    /// but `None`, `None` and `true`; every other build checks
+    /// `tauri.conf.json`'s endpoint, verifies with its key, and
+    /// installs.
+    pub endpoint: Option<tauri::Url>,
+    pub pubkey: Option<String>,
+    pub installs: bool,
+}
 
-    /// The update the last check found, for `install_update`.
-    #[derive(Default)]
-    pub struct PendingUpdate {
-        update: Mutex<Option<Update>>,
-        /// Set by the Windows hook ([`installer_hook`]) right before the
-        /// installer is started: an install that returns once it's set
-        /// didn't start the installer.
-        installer_starting: Arc<AtomicBool>,
+/// This build's [`Settings`]: `tauri.conf.json`'s endpoint and key (the
+/// updater plugin's own configuration), the build's mode, and
+/// [`CHECK_TIMEOUT`].
+pub fn settings() -> Result<Settings, String> {
+    #[cfg(feature = "gui-test-updater")]
+    if let Some(settings) = test_hook::settings()? {
+        return Ok(settings);
     }
+    Ok(Settings {
+        mode: current_mode(),
+        timeout: CHECK_TIMEOUT,
+        endpoint: None,
+        pubkey: None,
+        installs: true,
+    })
+}
 
-    /// The bundle type the Tauri bundler marked this binary with.
-    fn current_bundle() -> Option<Bundle> {
-        use tauri::utils::config::BundleType;
-        Some(match tauri::utils::platform::bundle_type()? {
-            BundleType::AppImage => Bundle::AppImage,
-            BundleType::Deb => Bundle::Deb,
-            BundleType::Rpm => Bundle::Rpm,
-            BundleType::Msi => Bundle::Msi,
-            BundleType::Nsis => Bundle::Nsis,
-            BundleType::App | BundleType::Dmg => Bundle::MacApp,
+/// Sort an updater error into what the reader needs to know.
+pub fn classify(error: &Error) -> Problem {
+    match error {
+        Error::Reqwest(e) if e.is_connect() || e.is_timeout() => Problem::Offline,
+        Error::Reqwest(e) if e.is_decode() || e.is_status() => Problem::NoReleaseInfo,
+        Error::Reqwest(_) => Problem::Offline,
+        Error::Network(_) | Error::ReleaseNotFound | Error::Serialization(_) => {
+            Problem::NoReleaseInfo
+        }
+        Error::TargetNotFound(_) | Error::TargetsNotFound(_) => Problem::NotForThisInstall,
+        Error::Minisign(_)
+        | Error::Base64(_)
+        | Error::SignatureUtf8(_)
+        | Error::SignedVersionMismatch { .. }
+        | Error::MissingSignedVersion => Problem::NotVerified,
+        // A cancelled or failed password prompt is this too: the
+        // updater never returns `AuthenticationFailed` from an install.
+        Error::PackageInstallFailed => Problem::PackageNotInstalled,
+        _ => Problem::Other,
+    }
+}
+
+/// Close the database, so nothing is left half-written when the app
+/// restarts once an update is installed. Blocks until it's closed: call
+/// it from synchronous code off the runtime's workers (`spawn_blocking`).
+/// The pool is closed from a thread of its own.
+fn close_database<R: Runtime>(app: &AppHandle<R>) {
+    let store = app.state::<AppState>().store.clone();
+    let closed = std::thread::spawn(move || tauri::async_runtime::block_on(store.close())).join();
+    if closed.is_err() {
+        tracing::error!("Failed to close the database before updating");
+    }
+}
+
+/// Fold the database's write-ahead log into its file
+/// (`Store::checkpoint`), leaving every connection open, so the app
+/// carries on as it was if it doesn't exit. Blocks until it's done: the
+/// Windows hook calls it, where the install runs, off the runtime's
+/// workers; it runs on a thread of its own, as [`close_database`] does.
+fn checkpoint_database<R: Runtime>(app: &AppHandle<R>) {
+    let store = app.state::<AppState>().store.clone();
+    let done =
+        std::thread::spawn(move || tauri::async_runtime::block_on(store.checkpoint())).join();
+    match done {
+        Ok(Ok(true)) => {}
+        Ok(Ok(false)) => tracing::warn!(
+            "Part of the database's write-ahead log was still being read before updating; \
+             it's folded in the next time the database is opened"
+        ),
+        Ok(Err(e)) => {
+            tracing::error!("Failed to checkpoint the database before updating: {e:#}")
+        }
+        Err(_) => tracing::error!("Failed to checkpoint the database before updating"),
+    }
+}
+
+/// The Windows hook (the updater's `on_before_exit`): what runs right
+/// before the installer is started. If it starts, the updater exits with
+/// `process::exit` (tauri-plugin-updater 2.13.2, `install_inner`), so no
+/// exit event comes and nothing else runs; if it doesn't, the install
+/// returns its error and the app carries on. So this does only what's
+/// harmless either way: it notes that the installer is starting
+/// (`starting`), saves the window's size and place, as an ordinary exit
+/// does, and folds the database's write-ahead log into its file. It
+/// closes nothing and cleans nothing up: the database stays open and the
+/// window shown. An exit without closing the database leaves it whole:
+/// SQLite commits each write atomically, and the write-ahead log is
+/// empty by then.
+pub(crate) fn installer_hook<R: Runtime>(
+    app: AppHandle<R>,
+    starting: Arc<AtomicBool>,
+) -> impl Fn() + Send + Sync + 'static {
+    move || {
+        starting.store(true, Ordering::SeqCst);
+        save_window_state(&app);
+        checkpoint_database(&app);
+    }
+}
+
+/// Save the window's size and place, as on an ordinary exit (see
+/// `window::state_plugin`).
+fn save_window_state<R: Runtime>(app: &AppHandle<R>) {
+    use tauri_plugin_window_state::AppHandleExt;
+    if let Err(e) = app.save_window_state(crate::window::state_flags()) {
+        tracing::warn!("Failed to save the window's size and position: {e}");
+    }
+}
+
+fn updater<R: Runtime>(
+    app: &AppHandle<R>,
+    settings: &Settings,
+    installer_starting: &Arc<AtomicBool>,
+) -> Result<tauri_plugin_updater::Updater, Error> {
+    let mut builder = app
+        .updater_builder()
+        .version_comparator(|current, release| is_offered(&current, &release.version));
+    if let Some(endpoint) = &settings.endpoint {
+        builder = builder.endpoints(vec![endpoint.clone()])?;
+    }
+    if let Some(pubkey) = &settings.pubkey {
+        builder = builder.pubkey(pubkey.clone());
+    }
+    match settings.mode {
+        UpdateMode::SelfUpdate => {
+            // Windows only: runs right before the installer starts.
+            builder =
+                builder.on_before_exit(installer_hook(app.clone(), installer_starting.clone()));
+        }
+        UpdateMode::LinkOnly => {
+            if let Some(target) = link_only_target(std::env::consts::OS) {
+                builder = builder.target(target);
+            }
+        }
+    }
+    builder.build()
+}
+
+fn update_info(update: &Update, mode: UpdateMode) -> UpdateInfo {
+    UpdateInfo::new(
+        update.version.clone(),
+        update.body.clone(),
+        update
+            .date
+            .map(|d| format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())),
+        mode == UpdateMode::SelfUpdate,
+    )
+}
+
+/// The latest release, if it's newer than this one. A check that takes
+/// longer than the settings' limit ([`CHECK_TIMEOUT`]) is given up on,
+/// as if GitHub couldn't be reached.
+#[tauri::command]
+pub async fn check_for_update<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    pending: State<'_, PendingUpdate>,
+) -> Result<Option<UpdateInfo>, String> {
+    if let Some(script) = state.bridge_script() {
+        let check = script.check_for_update();
+        return within_check_time(check.limit, async move {
+            match check.answer {
+                Some(answer) => answer.map_err(|problem| check_message(problem).to_string()),
+                None => std::future::pending().await,
+            }
         })
+        .await;
     }
-
-    pub fn current_mode() -> UpdateMode {
-        update_mode(SELF_UPDATE_MARKER, current_bundle())
-    }
-
-    /// Where this copy looks for updates and what it may do with one.
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct Settings {
-        pub mode: UpdateMode,
-        /// How long a check may take ([`CHECK_TIMEOUT`]).
-        pub timeout: std::time::Duration,
-        /// An endpoint and public key in place of `tauri.conf.json`'s, and
-        /// whether an update may be installed: only a GUI-check test build
-        /// (feature `gui-test-updater`, see `test_hook`) can have anything
-        /// but `None`, `None` and `true`; every other build checks
-        /// `tauri.conf.json`'s endpoint, verifies with its key, and
-        /// installs.
-        pub endpoint: Option<tauri::Url>,
-        pub pubkey: Option<String>,
-        pub installs: bool,
-    }
-
-    /// This build's [`Settings`]: `tauri.conf.json`'s endpoint and key (the
-    /// updater plugin's own configuration), the build's mode, and
-    /// [`CHECK_TIMEOUT`].
-    pub fn settings() -> Result<Settings, String> {
-        #[cfg(feature = "gui-test-updater")]
-        if let Some(settings) = super::test_hook::settings()? {
-            return Ok(settings);
-        }
-        Ok(Settings {
-            mode: current_mode(),
-            timeout: CHECK_TIMEOUT,
-            endpoint: None,
-            pubkey: None,
-            installs: true,
+    let settings = settings()?;
+    let mode = settings.mode;
+    let found = within_check_time(settings.timeout, async {
+        let found = match updater(&app, &settings, &pending.installer_starting) {
+            Ok(updater) => updater.check().await,
+            Err(e) => Err(e),
+        };
+        found.map_err(|e| {
+            tracing::error!("Failed to check for updates: {}", with_causes(&e));
+            check_message(classify(&e)).to_string()
         })
-    }
+    })
+    .await?;
+    let info = found.as_ref().map(|u| update_info(u, mode));
+    *pending.update.lock().unwrap_or_else(|e| e.into_inner()) = found;
+    Ok(info)
+}
 
-    /// Sort an updater error into what the reader needs to know.
-    pub fn classify(error: &Error) -> Problem {
-        match error {
-            Error::Reqwest(e) if e.is_connect() || e.is_timeout() => Problem::Offline,
-            Error::Reqwest(e) if e.is_decode() || e.is_status() => Problem::NoReleaseInfo,
-            Error::Reqwest(_) => Problem::Offline,
-            Error::Network(_) | Error::ReleaseNotFound | Error::Serialization(_) => {
-                Problem::NoReleaseInfo
-            }
-            Error::TargetNotFound(_) | Error::TargetsNotFound(_) => Problem::NotForThisInstall,
-            Error::Minisign(_)
-            | Error::Base64(_)
-            | Error::SignatureUtf8(_)
-            | Error::SignedVersionMismatch { .. }
-            | Error::MissingSignedVersion => Problem::NotVerified,
-            // A cancelled or failed password prompt is this too: the
-            // updater never returns `AuthenticationFailed` from an install.
-            Error::PackageInstallFailed => Problem::PackageNotInstalled,
-            _ => Problem::Other,
+/// Download the update the last check found, verify it, install it and
+/// restart. On Windows the installer takes over and relaunches the app;
+/// elsewhere this restarts once it's installed. Either way it only
+/// returns on failure.
+#[tauri::command]
+pub async fn install_update<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    pending: State<'_, PendingUpdate>,
+    on_event: Channel<DownloadEvent>,
+) -> Result<(), String> {
+    if let Some(script) = state.bridge_script() {
+        let install = script.install_update();
+        for event in install.events {
+            let _ = on_event.send(event);
         }
+        if let Some(problem) = install.problem {
+            return Err(install_message(problem).to_string());
+        }
+        script.restart();
+        return std::future::pending().await;
     }
-
-    /// Close the database, so nothing is left half-written when the app
-    /// restarts once an update is installed. Blocks until it's closed: call
-    /// it from synchronous code off the runtime's workers (`spawn_blocking`).
-    /// The pool is closed from a thread of its own.
-    fn close_database<R: Runtime>(app: &AppHandle<R>) {
-        let store = app.state::<AppState>().store.clone();
-        let closed =
-            std::thread::spawn(move || tauri::async_runtime::block_on(store.close())).join();
-        if closed.is_err() {
-            tracing::error!("Failed to close the database before updating");
-        }
+    let settings = settings()?;
+    if settings.mode != UpdateMode::SelfUpdate {
+        return Err(messages::LINK_ONLY.to_string());
     }
+    let update = pending
+        .update
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .ok_or_else(|| messages::NOTHING_TO_INSTALL.to_string())?;
 
-    /// Fold the database's write-ahead log into its file
-    /// (`Store::checkpoint`), leaving every connection open, so the app
-    /// carries on as it was if it doesn't exit. Blocks until it's done: the
-    /// Windows hook calls it, where the install runs, off the runtime's
-    /// workers; it runs on a thread of its own, as [`close_database`] does.
-    fn checkpoint_database<R: Runtime>(app: &AppHandle<R>) {
-        let store = app.state::<AppState>().store.clone();
-        let done =
-            std::thread::spawn(move || tauri::async_runtime::block_on(store.checkpoint())).join();
-        match done {
-            Ok(Ok(true)) => {}
-            Ok(Ok(false)) => tracing::warn!(
-                "Part of the database's write-ahead log was still being read before updating; \
-                 it's folded in the next time the database is opened"
-            ),
-            Ok(Err(e)) => {
-                tracing::error!("Failed to checkpoint the database before updating: {e:#}")
-            }
-            Err(_) => tracing::error!("Failed to checkpoint the database before updating"),
-        }
-    }
-
-    /// The Windows hook (the updater's `on_before_exit`): what runs right
-    /// before the installer is started. If it starts, the updater exits with
-    /// `process::exit` (tauri-plugin-updater 2.13.2, `install_inner`), so no
-    /// exit event comes and nothing else runs; if it doesn't, the install
-    /// returns its error and the app carries on. So this does only what's
-    /// harmless either way: it notes that the installer is starting
-    /// (`starting`), saves the window's size and place, as an ordinary exit
-    /// does, and folds the database's write-ahead log into its file. It
-    /// closes nothing and cleans nothing up: the database stays open and the
-    /// window shown. An exit without closing the database leaves it whole:
-    /// SQLite commits each write atomically, and the write-ahead log is
-    /// empty by then.
-    pub(crate) fn installer_hook<R: Runtime>(
-        app: AppHandle<R>,
-        starting: Arc<AtomicBool>,
-    ) -> impl Fn() + Send + Sync + 'static {
-        move || {
-            starting.store(true, Ordering::SeqCst);
-            save_window_state(&app);
-            checkpoint_database(&app);
-        }
-    }
-
-    /// Save the window's size and place, as on an ordinary exit (see
-    /// `window::state_plugin`).
-    fn save_window_state<R: Runtime>(app: &AppHandle<R>) {
-        use tauri_plugin_window_state::AppHandleExt;
-        if let Err(e) = app.save_window_state(crate::window::state_flags()) {
-            tracing::warn!("Failed to save the window's size and position: {e}");
-        }
-    }
-
-    fn updater<R: Runtime>(
-        app: &AppHandle<R>,
-        settings: &Settings,
-        installer_starting: &Arc<AtomicBool>,
-    ) -> Result<tauri_plugin_updater::Updater, Error> {
-        let mut builder = app
-            .updater_builder()
-            .version_comparator(|current, release| is_offered(&current, &release.version));
-        if let Some(endpoint) = &settings.endpoint {
-            builder = builder.endpoints(vec![endpoint.clone()])?;
-        }
-        if let Some(pubkey) = &settings.pubkey {
-            builder = builder.pubkey(pubkey.clone());
-        }
-        match settings.mode {
-            UpdateMode::SelfUpdate => {
-                // Windows only: runs right before the installer starts.
-                builder =
-                    builder.on_before_exit(installer_hook(app.clone(), installer_starting.clone()));
-            }
-            UpdateMode::LinkOnly => {
-                if let Some(target) = link_only_target(std::env::consts::OS) {
-                    builder = builder.target(target);
+    let mut started = false;
+    let progress = on_event.clone();
+    let bytes = update
+        .download(
+            move |chunk_length, content_length| {
+                if !started {
+                    started = true;
+                    let _ = progress.send(DownloadEvent::Started { content_length });
                 }
-            }
-        }
-        builder.build()
-    }
-
-    fn update_info(update: &Update, mode: UpdateMode) -> UpdateInfo {
-        UpdateInfo::new(
-            update.version.clone(),
-            update.body.clone(),
-            update
-                .date
-                .map(|d| format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())),
-            mode == UpdateMode::SelfUpdate,
+                let _ = progress.send(DownloadEvent::Progress { chunk_length });
+            },
+            || {},
         )
-    }
-
-    /// The latest release, if it's newer than this one. A check that takes
-    /// longer than the settings' limit ([`CHECK_TIMEOUT`]) is given up on,
-    /// as if GitHub couldn't be reached.
-    #[tauri::command]
-    pub async fn check_for_update<R: Runtime>(
-        app: AppHandle<R>,
-        state: State<'_, AppState>,
-        pending: State<'_, PendingUpdate>,
-    ) -> Result<Option<UpdateInfo>, String> {
-        if let Some(script) = state.bridge_script() {
-            let check = script.check_for_update();
-            return within_check_time(check.limit, async move {
-                match check.answer {
-                    Some(answer) => answer.map_err(|problem| check_message(problem).to_string()),
-                    None => std::future::pending().await,
-                }
-            })
-            .await;
-        }
-        let settings = settings()?;
-        let mode = settings.mode;
-        let found = within_check_time(settings.timeout, async {
-            let found = match updater(&app, &settings, &pending.installer_starting) {
-                Ok(updater) => updater.check().await,
-                Err(e) => Err(e),
-            };
-            found.map_err(|e| {
-                tracing::error!("Failed to check for updates: {}", with_causes(&e));
-                check_message(classify(&e)).to_string()
-            })
-        })
-        .await?;
-        let info = found.as_ref().map(|u| update_info(u, mode));
-        *pending.update.lock().unwrap_or_else(|e| e.into_inner()) = found;
-        Ok(info)
-    }
-
-    /// Download the update the last check found, verify it, install it and
-    /// restart. On Windows the installer takes over and relaunches the app;
-    /// elsewhere this restarts once it's installed. Either way it only
-    /// returns on failure.
-    #[tauri::command]
-    pub async fn install_update<R: Runtime>(
-        app: AppHandle<R>,
-        state: State<'_, AppState>,
-        pending: State<'_, PendingUpdate>,
-        on_event: Channel<DownloadEvent>,
-    ) -> Result<(), String> {
-        if let Some(script) = state.bridge_script() {
-            let install = script.install_update();
-            for event in install.events {
-                let _ = on_event.send(event);
-            }
-            if let Some(problem) = install.problem {
-                return Err(install_message(problem).to_string());
-            }
-            script.restart();
-            return std::future::pending().await;
-        }
-        let settings = settings()?;
-        if settings.mode != UpdateMode::SelfUpdate {
-            return Err(messages::LINK_ONLY.to_string());
-        }
-        let update = pending
-            .update
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-            .ok_or_else(|| messages::NOTHING_TO_INSTALL.to_string())?;
-
-        let mut started = false;
-        let progress = on_event.clone();
-        let bytes = update
-            .download(
-                move |chunk_length, content_length| {
-                    if !started {
-                        started = true;
-                        let _ = progress.send(DownloadEvent::Started { content_length });
-                    }
-                    let _ = progress.send(DownloadEvent::Progress { chunk_length });
-                },
-                || {},
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    "Failed to download update {}: {}",
-                    update.version,
-                    with_causes(&e)
-                );
-                install_message(classify(&e)).to_string()
-            })?;
-        let _ = on_event.send(DownloadEvent::Finished);
-        // A GUI-check test build stops here, downloaded and verified: it
-        // never replaces itself. (No other build has this.)
-        #[cfg(feature = "gui-test-updater")]
-        if !settings.installs {
-            tracing::info!(
-                "Downloaded and verified update {}; a test build doesn't install it",
-                update.version
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "Failed to download update {}: {}",
+                update.version,
+                with_causes(&e)
             );
-            return Err(super::test_hook::DOESNT_INSTALL.to_string());
-        }
-
-        let installing = update.clone();
-        run_install(&pending.installer_starting, &update.version, move || {
-            installing.install(bytes)
-        })
-        .await?;
-        tracing::info!("Installed update {}; restarting", update.version);
-        let closing = app.clone();
-        if let Err(e) = tokio::task::spawn_blocking(move || close_database(&closing)).await {
-            tracing::error!("Failed to close the database before restarting: {e}");
-        }
-        app.restart();
-    }
-
-    /// Run `install`, the updater's: on Windows it runs [`installer_hook`],
-    /// starts the installer and exits; elsewhere it can take minutes (a .deb
-    /// waits on pkexec's password prompt; an AppImage is copied), so it runs
-    /// off the runtime's workers. If it returns an error, what the reader is
-    /// told: once the hook has run (`installer_starting`), that the
-    /// installer didn't start, and the app carries on; before it, as for any
-    /// failure.
-    pub(crate) async fn run_install(
-        installer_starting: &AtomicBool,
-        version: &str,
-        install: impl FnOnce() -> Result<(), Error> + Send + 'static,
-    ) -> Result<(), String> {
-        installer_starting.store(false, Ordering::SeqCst);
-        let installed = tokio::task::spawn_blocking(install).await.map_err(|e| {
-            tracing::error!("The install of update {version} stopped: {e}");
-            install_message(Problem::Other).to_string()
+            install_message(classify(&e)).to_string()
         })?;
-        installed.map_err(|e| {
-            if installer_starting.load(Ordering::SeqCst) {
-                tracing::error!(
-                    "The installer for update {version} didn't start, so the app carries on: {}",
-                    with_causes(&e)
-                );
-                install_message(Problem::InstallerDidntStart).to_string()
-            } else {
-                tracing::error!("Failed to install update {version}: {}", with_causes(&e));
-                install_message(classify(&e)).to_string()
-            }
-        })
+    let _ = on_event.send(DownloadEvent::Finished);
+    // A GUI-check test build stops here, downloaded and verified: it
+    // never replaces itself. (No other build has this.)
+    #[cfg(feature = "gui-test-updater")]
+    if !settings.installs {
+        tracing::info!(
+            "Downloaded and verified update {}; a test build doesn't install it",
+            update.version
+        );
+        return Err(test_hook::DOESNT_INSTALL.to_string());
     }
 
-    /// Open the releases page in the system browser (for builds that can't
-    /// update themselves).
-    #[tauri::command]
-    pub fn open_download_page(state: State<'_, AppState>) -> Result<(), String> {
-        state.open_in_browser(RELEASES_PAGE).map_err(|e| {
-            tracing::error!("Failed to open {RELEASES_PAGE}: {e}");
-            messages::OPEN_FAILED.to_string()
-        })
+    let installing = update.clone();
+    run_install(&pending.installer_starting, &update.version, move || {
+        installing.install(bytes)
+    })
+    .await?;
+    tracing::info!("Installed update {}; restarting", update.version);
+    let closing = app.clone();
+    if let Err(e) = tokio::task::spawn_blocking(move || close_database(&closing)).await {
+        tracing::error!("Failed to close the database before restarting: {e}");
     }
+    app.restart();
+}
 
-    /// Open this version's release page in the system browser (About's
-    /// Release notes link). The version is the app's own, never the page's.
-    #[tauri::command]
-    pub fn open_release_notes(state: State<'_, AppState>) -> Result<(), String> {
-        let url = release_notes_page(crate::commands::app_version());
-        state.open_in_browser(&url).map_err(|e| {
-            tracing::error!("Failed to open {url}: {e}");
-            messages::NOTES_OPEN_FAILED.to_string()
-        })
-    }
+/// Run `install`, the updater's: on Windows it runs [`installer_hook`],
+/// starts the installer and exits; elsewhere it can take minutes (a .deb
+/// waits on pkexec's password prompt; an AppImage is copied), so it runs
+/// off the runtime's workers. If it returns an error, what the reader is
+/// told: once the hook has run (`installer_starting`), that the
+/// installer didn't start, and the app carries on; before it, as for any
+/// failure.
+pub(crate) async fn run_install(
+    installer_starting: &AtomicBool,
+    version: &str,
+    install: impl FnOnce() -> Result<(), Error> + Send + 'static,
+) -> Result<(), String> {
+    installer_starting.store(false, Ordering::SeqCst);
+    let installed = tokio::task::spawn_blocking(install).await.map_err(|e| {
+        tracing::error!("The install of update {version} stopped: {e}");
+        install_message(Problem::Other).to_string()
+    })?;
+    installed.map_err(|e| {
+        if installer_starting.load(Ordering::SeqCst) {
+            tracing::error!(
+                "The installer for update {version} didn't start, so the app carries on: {}",
+                with_causes(&e)
+            );
+            install_message(Problem::InstallerDidntStart).to_string()
+        } else {
+            tracing::error!("Failed to install update {version}: {}", with_causes(&e));
+            install_message(classify(&e)).to_string()
+        }
+    })
+}
+
+/// Open the releases page in the system browser (for builds that can't
+/// update themselves).
+#[tauri::command]
+pub fn open_download_page(state: State<'_, AppState>) -> Result<(), String> {
+    state.open_in_browser(RELEASES_PAGE).map_err(|e| {
+        tracing::error!("Failed to open {RELEASES_PAGE}: {e}");
+        messages::OPEN_FAILED.to_string()
+    })
+}
+
+/// Open this version's release page in the system browser (About's
+/// Release notes link). The version is the app's own, never the page's.
+#[tauri::command]
+pub fn open_release_notes(state: State<'_, AppState>) -> Result<(), String> {
+    let url = release_notes_page(crate::commands::app_version());
+    state.open_in_browser(&url).map_err(|e| {
+        tracing::error!("Failed to open {url}: {e}");
+        messages::NOTES_OPEN_FAILED.to_string()
+    })
 }
 
 #[cfg(test)]
@@ -871,7 +856,6 @@ mod tests {
         );
     }
 
-    #[cfg(desktop)]
     #[test]
     fn updater_errors_are_classified() {
         use tauri_plugin_updater::Error;
@@ -907,7 +891,6 @@ mod tests {
     /// A .deb whose install didn't go ahead (a password prompt cancelled,
     /// which the updater reports as the package not installed) tells the
     /// reader nothing was changed, not that the install failed.
-    #[cfg(desktop)]
     #[test]
     fn a_deb_not_installed_says_nothing_was_changed() {
         let error = tauri_plugin_updater::Error::PackageInstallFailed;
@@ -924,7 +907,6 @@ mod tests {
     /// and the reader is told the update didn't start. A failure before the
     /// hook (a download that can't be unpacked) is told as it always was,
     /// and leaves the app as it was too.
-    #[cfg(desktop)]
     #[test]
     fn an_installer_that_does_not_start_leaves_a_working_app() {
         use std::sync::Arc;
@@ -997,7 +979,6 @@ mod tests {
 
     /// No network (here, nothing listening on the port): the reader is
     /// told to check their connection.
-    #[cfg(desktop)]
     #[tokio::test]
     async fn a_refused_connection_means_offline() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1036,7 +1017,7 @@ mod tests {
     /// `tauri.conf.json`'s updater configuration exactly, nothing replaces
     /// the endpoint or key, the build's own mode and the 20 s limit apply,
     /// and an update is installed.
-    #[cfg(all(desktop, not(feature = "gui-test-updater")))]
+    #[cfg(not(feature = "gui-test-updater"))]
     #[test]
     fn without_the_test_hook_the_updater_is_tauri_conf_jsons() {
         let config: serde_json::Value =

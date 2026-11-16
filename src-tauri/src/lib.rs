@@ -230,15 +230,12 @@ fn setup_app(app: &mut tauri::App) -> anyhow::Result<()> {
     spawn_search_index_build(&state);
     app.manage(state);
 
-    // Desktop only (as the plugin is). Registered here, not on the
-    // builder, as its file goes in the data directory resolved above.
-    #[cfg(desktop)]
-    {
-        app.handle()
-            .plugin(window::state_plugin(&app_data_dir)?)
-            .context("Failed to set up the window state")?;
-        window::create_main_window(app)?;
-    }
+    // Registered here, not on the builder, as its file goes in the data
+    // directory resolved above.
+    app.handle()
+        .plugin(window::state_plugin(&app_data_dir)?)
+        .context("Failed to set up the window state")?;
+    window::create_main_window(app)?;
 
     Ok(())
 }
