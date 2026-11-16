@@ -10,10 +10,7 @@
 //! history, a busy export. That's read as a [`PaletteState`]
 //! each time the palette is drawn or a command chosen (see
 //! `bridge::palette_state`), so the reasons are always the page's state at
-//! that moment, as they were.
-//!
-//! The commands, labels, words, reasons and order are the page's
-//! `paletteCommands` (`ui/index.html` at 201ab8f), byte for byte.
+//! that moment.
 
 use serde::Deserialize;
 use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
@@ -102,8 +99,7 @@ pub enum Run {
     CompareWith(String),
     /// Compares with the reader's notes, as Compare's "with" Notes does.
     CompareNotes,
-    /// The code that was the page's (`page::run_command`): the command's
-    /// name there.
+    /// A command `page::run_command` runs: the command's name there.
     Page(&'static str),
 }
 
@@ -491,9 +487,9 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
 // keeps its own order.
 
 /// `s` decomposed (NFD). In the webview by the engine's own
-/// `String.prototype.normalize`, which the page's `foldWord` used, so the
-/// module needn't carry the tables (about 64 KB compressed); natively (the
-/// tests) by `unicode-normalization`, the same Unicode algorithm.
+/// `String.prototype.normalize`, so the module needn't carry the tables
+/// (about 64 KB compressed); natively (the tests) by
+/// `unicode-normalization`, the same Unicode algorithm.
 fn decomposed(s: &str) -> String {
     #[cfg(target_arch = "wasm32")]
     {
@@ -505,8 +501,8 @@ fn decomposed(s: &str) -> String {
     }
 }
 
-/// A word folded for matching, as the page's `foldWord`: decomposed (NFD),
-/// its marks dropped, lowercased.
+/// A word folded for matching: decomposed (NFD), its marks dropped,
+/// lowercased.
 pub fn fold_word(s: &str) -> String {
     decomposed(s)
         .chars()
@@ -907,10 +903,9 @@ mod tests {
         assert_eq!(find(&list, "back").run, page("back"));
     }
 
-    /// Export notes… and Export data… are as they were before ☰'s Export
-    /// data… became a chooser: the same labels, words, reasons and place,
-    /// between Open Library: Notes and Import data…; and each runs its own
-    /// action directly (the page's code), not ☰'s chooser.
+    /// Export notes… and Export data… keep their labels, words, reasons and
+    /// place, between Open Library: Notes and Import data…; and each runs
+    /// its own action directly (`page::run_command`), not ☰'s chooser.
     #[test]
     fn the_exports_are_unchanged_and_skip_the_chooser() {
         let shown = |state: &PaletteState| -> Vec<(String, String, String, Option<&str>)> {

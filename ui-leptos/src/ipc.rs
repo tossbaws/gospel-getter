@@ -1,6 +1,5 @@
-//! Tauri commands, called the way the page's JavaScript calls them: through
-//! the global `window.__TAURI__.core.invoke` (`app.withGlobalTauri` is on),
-//! with the same command names and camelCase argument objects. Going
+//! Tauri commands, called through the global `window.__TAURI__.core.invoke`
+//! (`app.withGlobalTauri` is on), with camelCase argument objects. Going
 //! through the global, not a bundled API, is what lets the frontend test
 //! harness answer the calls from the real backend.
 
@@ -17,9 +16,9 @@ extern "C" {
 }
 
 /// Calls `cmd` with `args` ([`JsValue::UNDEFINED`] for a command that takes
-/// nothing, as the page passes no second argument) and reads its answer as
-/// `T`. The error is the command's own error value, as `invoke` rejected
-/// with it; see [`error_text`] for the reader's words.
+/// nothing: no second argument) and reads its answer as `T`. The error is
+/// the command's own error value, as `invoke` rejected with it; see
+/// [`error_text`] for the reader's words.
 pub async fn invoke<T: DeserializeOwned>(cmd: &str, args: JsValue) -> Result<T, JsValue> {
     let answer = invoke_js(cmd, args).await?;
     serde_wasm_bindgen::from_value(answer).map_err(|e| JsValue::from(e.to_string()))
@@ -33,8 +32,7 @@ extern "C" {
 }
 
 /// As [`invoke`], but the command is sent now, within the caller's event,
-/// as the page's own `invoke` calls are, rather than when the future is
-/// first awaited.
+/// rather than when the future is first awaited.
 pub fn invoke_now<T: DeserializeOwned>(
     cmd: &str,
     args: JsValue,
@@ -59,8 +57,8 @@ pub async fn invoke_value(cmd: &str, args: JsValue) -> Result<JsValue, JsValue> 
     invoke_js(cmd, args).await
 }
 
-/// A command's argument object as the page's JavaScript builds it: a plain
-/// object, with `null` (not a missing key) where the page passed `null`.
+/// A command's argument object: a plain object, with `null` (not a missing
+/// key) for a `None`.
 pub fn args(value: &impl Serialize) -> Result<JsValue, JsValue> {
     let serializer = serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true);
     value
@@ -68,9 +66,9 @@ pub fn args(value: &impl Serialize) -> Result<JsValue, JsValue> {
         .map_err(|e| JsValue::from(e.to_string()))
 }
 
-/// An error's text for the reader, as the page's `errorText` reads it: its
-/// `message`, or what it was thrown as. Never empty (a command can fail
-/// with `""`), so a failure always says so and is never taken for success.
+/// An error's text for the reader: its `message`, or what it was thrown as.
+/// Never empty (a command can fail with `""`), so a failure always says so
+/// and is never taken for success.
 pub fn error_text(error: &JsValue) -> String {
     let message = if error.is_object() {
         js_sys::Reflect::get(error, &JsValue::from_str("message"))
@@ -97,7 +95,7 @@ pub fn error_text(error: &JsValue) -> String {
     }
 }
 
-/// `console.error(context, error)`, as the page logs a failed command.
+/// `console.error(context, error)`, for a failed command.
 pub fn log_error(context: &str, error: &JsValue) {
     web_sys::console::error_2(&JsValue::from_str(context), error);
 }

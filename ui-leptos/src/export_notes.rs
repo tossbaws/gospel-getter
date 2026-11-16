@@ -25,11 +25,6 @@
 //! closes it, Tab stays inside, and closing gives focus back to where it was
 //! asked for from (☰, or where the palette left it). It opens fresh every
 //! time: nothing is kept.
-//!
-//! This is the page's export-notes script (`ui/index.html` at v2.16.1,
-//! 6960–7217) as a Leptos component: the same ids, classes, ARIA, `hidden`
-//! and `disabled`, text and focus order, so the CSS, the page's own
-//! handlers and the frontend tests see what they saw.
 
 use std::collections::BTreeSet;
 
@@ -682,7 +677,7 @@ async fn print_commentary(commentary: &Commentary) {
 }
 
 /// The page is no longer printing the commentary: the container empty, and
-/// the page prints as it always has.
+/// the page prints as it normally does.
 fn done_printing() {
     let Some(document) = bridge::document() else {
         return;

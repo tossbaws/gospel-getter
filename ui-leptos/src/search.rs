@@ -8,30 +8,25 @@
 //! box, a combobox: ↓ and ↑ move through every group's options, Enter runs
 //! the one that's active, Escape closes it.
 //!
-//! The panel is the page's (`#search-panel`, whose `hidden` the page reads);
-//! this draws what's inside it and opens and closes it, from its button,
-//! from the keys and a click away (`bridge::SEARCH_EVENT`, `page`), and
-//! when a surface opens.
-//! Opening it closes the surfaces. A result opens as a jump of the reader's
-//! (`reader::open`), a command through its own control or the
-//! code that was the page's (`palette::Run`, `page`). Only the latest
-//! search's answer shows.
+//! The panel is the page's (`#search-panel`, whose `hidden` the page
+//! reads); this draws what's inside it and opens and closes it, from its
+//! button, from the keys and a click away (`bridge::SEARCH_EVENT`, `page`),
+//! and when a surface opens. Opening it closes the surfaces. A result opens
+//! as a jump of the reader's (`reader::open`), a command through its own
+//! control or through `page` (`palette::Run`). Only the latest search's
+//! answer shows.
 //!
 //! Enter pressed while a search for what's typed is still on its way runs
-//! the active option once that search is answered, as it always has, but
-//! only if the search is still the current one and Enter still belongs to
-//! what it was pressed on (GG-09): the box still open, the same words in
-//! the same translation, and nothing newer since (typing, the arrows, a
-//! click in the box, closing or reopening it, a translation switch, or any
-//! navigation, `reader::loads`). Otherwise the late answer is shown and
-//! nothing runs.
+//! the active option once that search is answered, but only if the search
+//! is still the current one and Enter still belongs to what it was pressed
+//! on (GG-09): the box still open, the same words in the same translation,
+//! and nothing newer since (typing, the arrows, a click in the box, closing
+//! or reopening it, a translation switch, or any navigation,
+//! `reader::loads`). Otherwise the late answer is shown and nothing runs.
 //!
-//! This is the page's search script (`ui/index.html` at 201ab8f,
-//! `setSearchOpen` to the panel's keydown) in Rust: the same ids, classes,
-//! ARIA, `hidden`, text and focus order. Everything a test or a reader sees
-//! at once happens within the key or click, as it did: the list is drawn
-//! (as Leptos views, built and put in place there and then) and the active
-//! option set before the event is over.
+//! Everything a test or a reader sees at once happens within the key or
+//! click: the list is drawn (as Leptos views, built and put in place there
+//! and then) and the active option set before the event is over.
 
 use leptos::html;
 use leptos::prelude::*;
@@ -270,7 +265,7 @@ impl Search {
             self.render();
             return None;
         }
-        // Sent now, within the key or event, as the page sent it.
+        // Sent now, within the key or event.
         let sent = ipc::args(&SearchArgs {
             query: &query,
             translation_code: &translation_code,
@@ -755,7 +750,7 @@ impl Search {
                 event.prevent_default();
                 // A search still on its way for what's typed (Enter pressed
                 // straight after typing a reference) is waited for, so
-                // Enter goes there, as it always has. Otherwise the option
+                // Enter goes there. Otherwise the option
                 // runs within the key (copying needs that).
                 let value = self.value();
                 let code = bridge::translation_code();
@@ -908,8 +903,8 @@ impl Search {
     }
 }
 
-/// Runs a command's action: its control, clicked as a reader would, or the
-/// code that was the page's (`page::run_command`).
+/// Runs a command's action: its control, clicked as a reader would, or
+/// `page::run_command`.
 fn run(action: &Run) {
     let click = |id: &str| {
         if let Some(control) = by_id(id) {

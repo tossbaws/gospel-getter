@@ -4,11 +4,9 @@
 //! did before the settings existed). What the settings are, their keys and
 //! values, is the one table in `preferences` (shared with the backend).
 //!
-//! This is the head script's preferences store (`ui/index.html` at
-//! 4b2d15e: `store`, `load`, `isValue` and `apply`) in Rust. The page's
-//! pre-paint script applies what's saved before the first frame; from then
-//! on the settings are kept here. Local storage can throw in the webview,
-//! so every use is guarded, as the page's were.
+//! The page's pre-paint script applies what's saved before the first
+//! frame; from then on the settings are kept here. Local storage can throw
+//! in the webview, so every use is guarded.
 
 use wasm_bindgen::JsCast;
 use web_sys::HtmlElement;
@@ -87,9 +85,8 @@ pub fn on(pref: &Preference) -> bool {
     value(pref) == "on"
 }
 
-/// A value from an export file, as the page received it: `true` or
-/// `false`, text, or anything else (shown as JavaScript's `String` shows
-/// it).
+/// A value from an export file: `true` or `false`, text, or anything else
+/// (shown as JavaScript's `String` shows it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Raw {
     Bool(bool),
@@ -150,7 +147,7 @@ mod tests {
         assert_eq!((pref.name, value.as_str()), ("readerMode", "on"));
         let (_, value) = checked("compare", &Raw::Bool(false)).unwrap();
         assert_eq!(value, "off");
-        // "on" and "off" as text are fine too, as they were.
+        // "on" and "off" as text are fine too.
         assert_eq!(checked("compare", &text("on")).unwrap().1, "on");
         let (pref, value) = checked("compare_with", &text("bsb")).unwrap();
         assert_eq!((pref.name, value.as_str()), ("compareWith", "bsb"));
@@ -195,7 +192,7 @@ mod tests {
         );
     }
 
-    /// The table as the page's script had it (ten settings), then the
+    /// The table's first ten settings, then the
     /// margin notes' switch, Compare's notes and the single-key shortcuts:
     /// their keys, defaults and values, and the renamed theme.
     #[test]

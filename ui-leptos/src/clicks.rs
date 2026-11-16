@@ -11,10 +11,7 @@
 //! and makes its click a Shift-click even if Shift is let go before the
 //! button comes up.
 //!
-//! This is the main script's (`ui/index.html` at 2a9d85c: its body `click`
-//! and `mousedown` listeners and `jumpTo`) in Rust, in the same order. Its
-//! listeners are registered before any piece's (`page::mount`), as the main
-//! script's were.
+//! Its listeners are registered before any piece's (`page::mount`).
 
 use std::cell::Cell;
 

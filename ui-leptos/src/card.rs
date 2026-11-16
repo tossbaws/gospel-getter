@@ -35,13 +35,8 @@
 //! the click or key that asked (WebKitGTK refuses it afterwards), so each
 //! passage's text is asked for as soon as it's selected or shown.
 //!
-//! This is the page's selection card (`ui/index.html` at 5af9b54:
-//! `setActionStatus` to `placeCard`, `selectVerses`, Copy and Copy as…,
-//! the bookmarks' and highlights' card halves, the notes' card half, and
-//! the Shift ghost) in Rust: the same commands with the same arguments, in
-//! the same order, the same markup (`card_text`), ids, classes, ARIA, text
-//! and focus. Its elements are made once and moved in and out of the
-//! reading pane as before, which the reader rebuilds whole per chapter.
+//! Its elements are made once and moved in and out of the reading pane,
+//! which the reader rebuilds whole per chapter.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -357,14 +352,13 @@ fn contains_focus(el: &Element) -> bool {
     active_element().is_some_and(|active| el.contains(Some(&active)))
 }
 
-/// `el.focus()`, which may scroll the page to it (as the page's plain
-/// `focus()` calls did).
+/// `el.focus()`, which may scroll the page to it.
 fn focus_scrolling(el: &HtmlElement) {
     let _ = el.focus();
 }
 
 /// A number property of an element (`scrollTop`, a double), read and
-/// written as the page did, without rounding.
+/// written without rounding.
 fn number_property(el: &Element, name: &str) -> f64 {
     js_sys::Reflect::get(el, &JsValue::from_str(name))
         .ok()
@@ -1256,8 +1250,7 @@ fn toggle_bookmark() -> Task {
 
 /// Reloads the highlights (only the latest reload is shown: an earlier one
 /// answering after it is dropped), then marks them. The Library's list of
-/// them is reloaded by whoever asked (as the page's `refreshHighlights`
-/// went on to do).
+/// them is reloaded by whoever asked.
 pub fn refresh_highlights() -> impl Future<Output = ()> + 'static {
     let token = with(|s| {
         s.highlights_token += 1;
@@ -1436,7 +1429,7 @@ fn highlight_selection(color: Option<String>) -> Task {
         if overtook {
             spawn_local(refresh_highlights());
         }
-        // The Library's list, not waited for (as before).
+        // The Library's list, not waited for.
         spawn_local(refresh_library(&["highlights"]));
     })
 }
@@ -1745,8 +1738,7 @@ pub fn refresh_notes() -> impl Future<Output = ()> + 'static {
     }
 }
 
-/// Runs `task` by itself (as the page's `async` functions ran), as a
-/// promise of its end.
+/// Runs `task` by itself, as a promise of its end.
 fn to_promise(task: Task) -> js_sys::Promise {
     wasm_bindgen_futures::future_to_promise(async move {
         task.await;

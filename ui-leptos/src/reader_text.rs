@@ -6,10 +6,10 @@
 //! Compare fetches, and the passage history's bookkeeping. `reader` puts
 //! them on the page.
 //!
-//! The markup is the page's former templates' (`ui/index.html` at
-//! 4a7f6f5: `verseHtml` to `renderReadingPane`), byte for byte, spaces and
-//! line breaks included (the page rebuilds the pane from it, and the
-//! Flowing layout shows the line break between verses as a space). Every
+//! The chapter's markup is `fixtures/genesis-1.html`'s, byte for byte,
+//! spaces and line breaks included (a test compares them; the page rebuilds
+//! the pane from it, and the Flowing layout shows the line break between
+//! verses as a space). Every
 //! word of scripture is the backend's, as it sent it: escaped, set in
 //! italics or raised where the backend's parts say, never changed.
 
@@ -20,7 +20,7 @@ use crate::verse_parts::{Footnote, PartKind, SegmentKind};
 
 // ---- Text as markup.
 
-/// `text` escaped for markup, as the page's `escapeHtml`: `&`, `<`, `>`,
+/// `text` escaped for markup: `&`, `<`, `>`,
 /// `"` and `'`.
 pub fn escape_html(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -1189,10 +1189,10 @@ mod tests {
         }
     }
 
-    /// The page's own `renderReadingPane` output for this chapter (at
-    /// 4a7f6f5, both lists closed, run on the same answer), byte for byte.
-    /// It drew the closed Cross references list's rows; the pane leaves
-    /// them out until the list is opened, when they're the fixture's.
+    /// The chapter's markup for this answer, both lists closed, byte for
+    /// byte: the pane must match it, never the other way round. It has the
+    /// closed Cross references list's rows; the pane leaves them out until
+    /// the list is opened, when they're the fixture's.
     const GENESIS_1: &str = include_str!("../fixtures/genesis-1.html");
 
     #[test]
@@ -1297,7 +1297,7 @@ mod tests {
         assert_eq!(pane.matches(r#"class="verse has-xref""#).count(), 2);
         // No footnotes in either column here: no list.
         assert!(!pane.contains("footnote-summary"));
-        // The neighbors' attributes stay, so ← and → turn as before.
+        // The neighbors' attributes stay, so ← and → still turn.
         assert!(pane.contains(r#" data-next-book="1" data-next-chapter="2""#));
     }
 

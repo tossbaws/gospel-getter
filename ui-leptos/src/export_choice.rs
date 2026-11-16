@@ -1,13 +1,11 @@
 //! ☰ → Export data…: a small chooser of what to export. "Everything
-//! (backup)" is the backup Export data… has always saved (`page`'s
-//! `export_data`: the same command, file and toasts), and "My notes" opens
-//! the Export notes dialog (`export_notes`) with what it has always been
-//! given. My notes is greyed out, saying why, while there are no notes, and
-//! Everything while an export or import runs: the page's own facts
-//! ([`bridge::ExportFacts`]), as it said them when the chooser was asked for
-//! and whenever they change ([`bridge::EXPORT_FACTS_EVENT`]). The command
-//! palette's Export notes… and Export data… don't come here: they run the
-//! two directly, as they always have.
+//! (backup)" is the backup (`page`'s `export_data`), and "My notes" opens
+//! the Export notes dialog (`export_notes`). My notes is greyed out, saying
+//! why, while there are no notes, and Everything while an export or import
+//! runs: the page's own facts ([`bridge::ExportFacts`]), as it said them
+//! when the chooser was asked for and whenever they change
+//! ([`bridge::EXPORT_FACTS_EVENT`]). The command palette's Export notes…
+//! and Export data… don't come here: they run the two directly.
 //!
 //! A small modal, as the page's others: while open it has the keyboard (a
 //! capturing `keydown` on `window`, stopping every other handler), Escape

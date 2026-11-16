@@ -12,10 +12,6 @@
 //! closes it, the arrow keys move between the looks (and choose, as radio
 //! buttons do), and Tab stays inside. Opened at startup, closing gives the
 //! keyboard back to the page; opened from ☰, focus goes back there.
-//!
-//! This is the page's welcome script (`ui/index.html` at fa5969d,
-//! `renderStartHere` to its keydown trap) as a Leptos component: the same
-//! ids, classes, ARIA, `hidden`, text and focus order.
 
 use leptos::html;
 use leptos::prelude::*;

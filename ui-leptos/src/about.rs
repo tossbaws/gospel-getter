@@ -8,14 +8,10 @@
 //! keeps one surface open at a time, puts focus on its close button and
 //! back on ☰ when it closes, and says `gospel-getter:surface-close`. This
 //! renders it, fills it, and has its keys: Escape closes it, on the
-//! overlay as the head script had it, and Tab stays inside it, bringing
-//! back focus that got outside it, as the other modals' Tab does; the reader's
-//! shortcuts wait meanwhile (the keyboard dispatcher, `keyboard`, looks
-//! the overlay up). Its `hidden` is `surfaces`' alone.
-//!
-//! This is the page's About markup and its version, Release notes and
-//! credits scripts (`ui/index.html` at 41e04f3) as a Leptos component: the
-//! same ids, classes, ARIA, text and focus order.
+//! overlay, and Tab stays inside it, bringing back focus that got outside
+//! it, as the other modals' Tab does; the reader's shortcuts wait meanwhile
+//! (the keyboard dispatcher, `keyboard`, looks the overlay up). Its
+//! `hidden` is `surfaces`' alone.
 
 use leptos::html;
 use leptos::prelude::*;
@@ -39,8 +35,7 @@ fn release_notes_page(version: &str) -> String {
 /// The cross-references' credit, after the bundled texts'.
 const CROSS_REFERENCES_CREDIT: &str = "Cross-references from OpenBible.info, CC BY 4.0";
 
-/// Escape closes About. Everything else passes, as when the head script
-/// had them (Tab is [`trap_tab`]'s).
+/// Escape closes About. Everything else passes (Tab is [`trap_tab`]'s).
 fn on_keydown(event: &KeyboardEvent) {
     if event.key() == "Escape" {
         event.prevent_default();
@@ -65,7 +60,7 @@ fn trap_tab(panel: NodeRef<html::Div>, event: &KeyboardEvent) {
 }
 
 /// About and the update banner, which share the offer: mounted once, then
-/// each moved to where the page had it (see `lib.rs`).
+/// each moved to its place ([`place`]).
 #[component]
 pub fn AboutAndUpdates() -> impl IntoView {
     // Informational only: if the version can't be read, the line stays
@@ -212,9 +207,8 @@ pub fn AboutAndUpdates() -> impl IntoView {
     }
 }
 
-/// Puts About and the banner where the page had them: About before the
-/// toast (`#data-status`), the banner before the page's `<main>`, so focus
-/// order and stacking are as before.
+/// Puts About before the toast (`#data-status`) and the banner before the
+/// page's `<main>`: that fixes focus order and stacking.
 pub fn place(holder: &HtmlElement) {
     let Some(document) = bridge::document() else {
         return;

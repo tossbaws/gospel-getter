@@ -5,12 +5,10 @@
 //! which highlight controls show, what the status line says, and where the
 //! card goes. `card` puts them on the page.
 //!
-//! The markup is the page's former templates' (`ui/index.html` at 5af9b54:
-//! the `verseActions` and `copyMenu` markup, `renderCardReferences`,
-//! `toggleXrefPreview`, `renderNotesSection`, `openNotePanel`), byte for
-//! byte, spaces and line breaks included. Every word of scripture in it is
-//! the backend's, as it sent it: drawn by `reader_text`'s `verse_html` and
-//! `footnote_html`, escaped, never changed.
+//! The markup is pinned by the tests below, spaces and line breaks
+//! included. Every word of scripture in it is the backend's, as it sent it:
+//! drawn by `reader_text`'s `verse_html` and `footnote_html`, escaped,
+//! never changed.
 
 use crate::dto::{SelectionNote, Verse, Xref};
 use crate::note_markdown::{Layout, note_html};
@@ -105,7 +103,7 @@ pub fn actions_html() -> String {
 }
 
 /// The Bookmark button's label, for a selection bookmarked or not (with
-/// its star as an entity, as the page wrote it).
+/// its star as an entity).
 pub fn bookmark_label(bookmarked: bool) -> &'static str {
     if bookmarked {
         "&#9733; Remove bookmark"
@@ -199,7 +197,7 @@ pub fn xrefs_html(rows: &[(i64, &[Xref])], chapter: i64, range: bool) -> String 
 
 /// A chip's citation as a passage's name, for when the backend couldn't
 /// name it: its first hyphen between two digits as an en dash ("1 John
-/// 4:9-10" → "1 John 4:9–10"), as the page's `/(\d)-(\d)/` did.
+/// 4:9-10" → "1 John 4:9–10").
 pub fn chip_reference(citation: &str) -> String {
     let chars: Vec<char> = citation.chars().collect();
     let at = chars

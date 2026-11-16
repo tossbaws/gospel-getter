@@ -3,8 +3,7 @@
 //! the lists' empty and error rows, a preview the translation doesn't
 //! number, which highlights the color filter shows, which notes the Notes
 //! tab's search shows and what it marks in them, and the tabs' and the
-//! lists' focus arithmetic. The words that
-//! were the page's are its (`ui/index.html` at 6d8d9a5), byte for byte.
+//! lists' focus arithmetic.
 
 use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 

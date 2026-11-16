@@ -89,7 +89,7 @@ pub fn always_prevented(route: Route) -> bool {
 /// or `None`.
 pub fn route(press: &Press) -> Option<Route> {
     let key = press.key;
-    // JavaScript's `toLowerCase()`, as the page compared Ctrl's letters.
+    // JavaScript's `toLowerCase()`, for Ctrl's letters.
     let lower = key.to_lowercase();
     let lower_key = lower.as_str();
     let ctrl = press.ctrl || press.meta;
@@ -699,8 +699,8 @@ mod tests {
             step_selection(&numbers, Some(&s), "kjv", 1, false, none),
             Some((4, 4))
         );
-        // An end not in the column counts from before its first verse, as
-        // the page's `indexOf` did.
+        // An end not in the column counts from before its first verse (an
+        // `indexOf` of -1).
         let missing = selected(3, 3, 3);
         assert_eq!(
             step_selection(&numbers, Some(&missing), "kjv", 1, false, none),

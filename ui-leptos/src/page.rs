@@ -1,28 +1,23 @@
-//! The page's glue, which its main script was: the toast at the foot of
+//! The page's glue: the toast at the foot of
 //! the window; ☰'s Export data… (its chooser, `export_choice`, and the
 //! backup, its own command) and Import data…, and an import's reloads;
 //! the Export notes dialog asked for (the chooser's My notes, the
 //! palette's Export notes…); the welcome (from ☰, and the startup question
 //! boot asks); the keyboard shortcuts sheet; opening and closing the search
-//! box; what the palette's commands need, and the commands whose code was
-//! the page's; the translation changing; the Library's lists reloaded, and
+//! box; what the palette's commands need, and the commands it runs here;
+//! the translation changing; the Library's lists reloaded, and
 //! its notes kept for the welcome, the chooser and Export notes; Compare's
 //! partner; and the launch check for updates. Boot is `boot`, the keys
 //! `keyboard` and the clicks `clicks`.
 //!
-//! This is the main script of `ui/index.html` at 2a9d85c (`errorText` to
-//! `aboutOpen`, less what `boot`, `keyboard` and `clicks` took) in Rust: the
-//! same commands with the same arguments, in the same order, the same words,
-//! ids, classes and focus. Its listeners are the first this module adds
-//! ([`mount`], before any piece mounts), where the main script's were, so
-//! they run first, as theirs did.
+//! Its listeners are the first this crate adds ([`mount`], before any piece
+//! mounts), so they run first.
 //!
-//! The main script's "… isn't available." for the header's buttons and keys
-//! (when `window.gospelGetterSurfaces` wasn't there) has no place here: the
-//! surfaces (`surfaces`) mount in the same call as this, before any click or
-//! key can come. What can come before the rest of the pieces have mounted
-//! (`lib::mount_the_rest`) still says so: the sheet, the welcome, the
-//! import, the export chooser, Export notes, search and About.
+//! The header's buttons and keys never say "… isn't available.": the
+//! surfaces (`surfaces`) mount in the same call as this, before any click
+//! or key can come. What can come before the rest of the pieces have
+//! mounted (`lib::mount_the_rest`) still says so: the sheet, the welcome,
+//! the import, the export chooser, Export notes, search and About.
 
 use std::cell::RefCell;
 
@@ -452,8 +447,8 @@ fn import_data() {
 /// After an import: the file's reading position (if chosen), then the
 /// bookmarks, highlights and notes, then the result.
 pub fn imported(position: Option<PositionPreview>, message: String) {
-    // What comes first is asked within the event, as the page's handler
-    // asked it: the position's chapter, or else the bookmarks.
+    // What comes first is asked within the event: the position's chapter,
+    // or else the bookmarks.
     let first = match position {
         Some(position) => Err(reader::ask(Request::Load {
             book_id: position.book_id,
@@ -663,7 +658,7 @@ pub fn set_search_open(open: bool) {
 }
 
 // ---- The palette: what its commands need of the page, and the commands
-// whose code was the page's.
+// it runs here.
 
 fn choices(id: &str) -> Vec<Choice> {
     select(id)
@@ -719,8 +714,9 @@ pub fn palette_state() -> PaletteState {
     }
 }
 
-/// Runs the palette's `command` whose code was the page's, within the
-/// click or key that chose it (copying needs that).
+/// Runs `command`, one of the palette's commands that `page` runs (see
+/// `palette::Run::Page`), within the click or key that chose it (copying
+/// needs that).
 pub fn run_command(command: &str) {
     match command {
         "copy-chapter" => {
@@ -738,7 +734,7 @@ pub fn run_command(command: &str) {
         "shortcuts" => open_shortcuts(None),
         // Straight to the dialog and the backup, not by way of ☰'s
         // chooser. The dialog gives focus to the page's focus home when it
-        // closes, as it did when this clicked the Library's button.
+        // closes.
         "export-notes" => open_export_notes(None),
         "export-data" => export_data(),
         _ => {}
@@ -778,12 +774,10 @@ fn on_ready() {
     }
 }
 
-/// Listens where the main script listened: the ☰ items, the search and
-/// About buttons, the translation changing,
-/// the Library's notes and every piece being there; then the click
-/// dispatcher (`clicks`) and the keyboard dispatcher (`keyboard`). Called
-/// first of all, before any piece mounts, so these run first, as the main
-/// script's did.
+/// Listens to the ☰ items, the search and About buttons, the translation
+/// changing, the Library's notes and every piece being there; then the
+/// click dispatcher (`clicks`) and the keyboard dispatcher (`keyboard`).
+/// Called first of all, before any piece mounts, so these run first.
 pub fn mount() {
     let on_click = |id: &str, handler: fn()| {
         if let Some(el) = by_id(id) {

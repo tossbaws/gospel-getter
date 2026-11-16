@@ -16,24 +16,19 @@
 //! The selection card (`card`) hears each chapter loading and shown, and
 //! each passage to select, from here; boot (`boot`), the keyboard
 //! (`keyboard`), the click dispatcher (`clicks`) and the page's glue
-//! (`page`) ask it for chapters ([`start`], [`ask`]). A stale answer
-//! never overwrites a newer one: each load has its token, as the page's
-//! `loadToken`, each step back or forward its own, and a position is saved
-//! only for a chapter put on screen, in the order they were shown. What
-//! outlives a load has its own generation (`intent`): a note's Edit waiting
-//! for its jump opens the note only if nothing newer has happened (another
-//! navigation, or any note editor opening), and Compare's own fetch, when
-//! it's switched on or its translations change, shows (or says it failed)
-//! only while it's still the comparison of the chapter on screen asked for.
+//! (`page`) ask it for chapters ([`start`], [`ask`]). A stale answer never
+//! overwrites a newer one: each load has its token, each step back or
+//! forward its own, and a position is saved only for a chapter put on
+//! screen, in the order they were shown. What outlives a load has its own
+//! generation (`intent`): a note's Edit waiting for its jump opens the note
+//! only if nothing newer has happened (another navigation, or any note
+//! editor opening), and Compare's own fetch, when it's switched on or its
+//! translations change, shows (or says it failed) only while it's still the
+//! comparison of the chapter on screen asked for.
 //!
-//! This is the page's reader (`ui/index.html` at 4a7f6f5: `updateReference`
-//! to the `compare-change` listener, `openPassage`, `savePosition` and the
-//! passage history) in Rust: the same commands with the same arguments, in
-//! the same order, the same markup (`reader_text`), ids, classes, ARIA,
-//! text and focus. The pane is rebuilt whole per chapter, from markup, as it
-//! was: the page moves its selection card, Copy as… and the cross-reference
-//! preview in and out of it, which a view owning the pane's nodes would
-//! fight.
+//! The pane is rebuilt whole per chapter, from markup (`reader_text`): the
+//! page moves its selection card, Copy as… and the cross-reference preview
+//! in and out of it, which a view owning the pane's nodes would fight.
 
 use std::cell::RefCell;
 use std::future::Future;
@@ -68,7 +63,7 @@ pub type Load = Pin<Box<dyn Future<Output = bool>>>;
 /// the selection card then had selected (`card::select_passage`).
 type OpenedPassage = Pin<Box<dyn Future<Output = (bool, Option<(i64, i64)>)>>>;
 
-/// The chapter on screen, as the page's `reading` named it.
+/// The chapter on screen.
 #[derive(Debug, Clone)]
 struct Here {
     book_id: i64,
@@ -804,7 +799,7 @@ fn save_place_soon() {
 /// the top of the reading pane, `offset` px below the bar, and is kept
 /// there as the page settles (`surfaces::hold_place`, the way the reading
 /// place logic puts one back). A verse the translation doesn't number
-/// leaves the chapter at its top, as before.
+/// leaves the chapter at its top.
 fn reopen_at(verse: i64, offset: Option<f64>) {
     let Some(here) = with(|s| s.reading.clone()) else {
         return;
@@ -1256,7 +1251,7 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
 }
 
 /// `load`, then the page scrolled to the top if it put a chapter there and
-/// `top` asks for that (the chapter's end and `[`/`]`, as before).
+/// `top` asks for that (the chapter's end and `[`/`]`).
 fn from_top(load: Load, top: bool) -> Load {
     if !top {
         return load;
