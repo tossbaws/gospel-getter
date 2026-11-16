@@ -71,6 +71,8 @@ pub enum Route {
     Book(Which),
     /// C: Compare, through its own toggle.
     Compare,
+    /// R: reading mode, on or off.
+    ReadingMode,
     /// ← and →: the chapter before or after.
     Turn(Which),
 }
@@ -143,6 +145,9 @@ pub fn route(press: &Press) -> Option<Route> {
     }
     if plain && !shift && (key == "c" || key == "C") {
         return Some(Route::Compare);
+    }
+    if plain && !shift && (key == "r" || key == "R") {
+        return Some(Route::ReadingMode);
     }
     // Any modifiers: the page's last two lines compared the key alone.
     if key == "ArrowLeft" {
@@ -345,6 +350,9 @@ mod tests {
         for key in ["c", "C"] {
             assert_eq!(route(&press(key)), Some(Route::Compare));
         }
+        for key in ["r", "R"] {
+            assert_eq!(route(&press(key)), Some(Route::ReadingMode));
+        }
         let step = |step, extend| Some(Route::Step { step, extend });
         assert_eq!(route(&press("j")), step(1, false));
         assert_eq!(route(&press("k")), step(-1, false));
@@ -358,6 +366,29 @@ mod tests {
         assert_eq!(route(&press("ArrowRight")), Some(Route::Turn(Which::Next)));
         assert_eq!(route(&press("x")), None);
         assert_eq!(route(&press("Enter")), None);
+    }
+
+    /// R alone, either case (Caps Lock gives `R`), is reading mode; with
+    /// Ctrl or Cmd it's left to the WebView (Ctrl+R reloads in WebView2),
+    /// and with Alt or Shift to whatever else wants it. Off, Single-key
+    /// shortcuts turn it off like the other letters.
+    #[test]
+    fn r_alone_is_reading_mode() {
+        for key in ["r", "R"] {
+            assert_eq!(route(&press(key)), Some(Route::ReadingMode), "{key}");
+            assert!(always_prevented(Route::ReadingMode));
+            assert_eq!(with(key, |p| p.ctrl = true), None, "Ctrl+{key}");
+            assert_eq!(with(key, |p| p.meta = true), None, "Cmd+{key}");
+            assert_eq!(with(key, |p| p.alt = true), None, "Alt+{key}");
+            assert_eq!(with(key, |p| p.shift = true), None, "Shift+{key}");
+            assert!(character_only(&press(key)));
+            assert_eq!(
+                route_for(&press(key), false),
+                None,
+                "{key} with single keys off"
+            );
+            assert_eq!(route_for(&press(key), true), Some(Route::ReadingMode));
+        }
     }
 
     /// The key values one way of pressing a shortcut (one of the table's

@@ -332,6 +332,8 @@ test('next and previous chapter turn as the arrow keys do; reading mode and the 
         assert.deepEqual(commandLabels(app), ['Show sidebar']);
 
         await type(app, 'reading mode');
+        assert.equal(option(app, 'Reading mode').querySelector('kbd').textContent, 'R');
+        assert.equal(option(app, 'Reading mode').getAttribute('aria-keyshortcuts'), 'R');
         await enter(app);
         assert.equal(root.dataset.readerMode, 'on');
         await type(app, 'reading mode');

@@ -72,6 +72,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     Shortcut { id: "text-larger", group: "Text & display", keys: &[&["Ctrl", "="]], aria: "Control+=", does: "Larger text", handles: &["=", "+", "NumpadAdd"] },
     Shortcut { id: "text-smaller", group: "Text & display", keys: &[&["Ctrl", "-"]], aria: "Control+-", does: "Smaller text", handles: &["-", "_", "NumpadSubtract"] },
     Shortcut { id: "text-medium", group: "Text & display", keys: &[&["Ctrl", "0"]], aria: "Control+0", does: "Medium text", handles: &["0", "Numpad0"] },
+    Shortcut { id: "reader-mode", group: "Text & display", keys: &[&["R"]], aria: "R", does: "Reading mode, on or off", handles: &["r", "R"] },
     Shortcut { id: "reader-exit", group: "Text & display", keys: &[&["Esc"]], aria: "Escape", does: "Leave reading mode", handles: &["Escape"] },
     Shortcut { id: "back", group: "History", keys: &[&["Alt", "←"]], aria: "Alt+ArrowLeft", does: "Back to the passage you jumped from", handles: &["ArrowLeft"] },
     Shortcut { id: "forward", group: "History", keys: &[&["Alt", "→"]], aria: "Alt+ArrowRight", does: "Forward again", handles: &["ArrowRight"] },
