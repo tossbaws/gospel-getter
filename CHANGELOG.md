@@ -4,6 +4,18 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.30.0] - 2026-11-16
+
+A key for reading mode. Press `R` to turn reading mode on or off; Esc
+still leaves it. Like the other keys that work pressed on their own, it
+does nothing while you're typing, and it turns off with them: choose
+**Aa**, then under **Keyboard** turn off **Single-key shortcuts**. The
+**Reading mode** button under **Aa** now shows its key, **Reading mode
+(R)**, and `R` is listed in **Keyboard shortcuts** and the command
+palette. No verse changes. Backups are unchanged, in the same data
+formats. Updating keeps your bookmarks, highlights, notes, findings,
+reading position and settings.
+
 ## [2.29.6] - 2026-11-15
 
 Faster, with nothing else changed from 2.29.5. Chapters with many
