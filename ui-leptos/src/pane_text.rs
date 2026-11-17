@@ -1,15 +1,73 @@
 //! The reading panes' words and rules, free of the DOM (`pane` puts them on
-//! the page): what each pane's bar is called, what Compare says while two
-//! panes are open, and how far the keys that scroll a page scroll a pane's
-//! own column, which the keyboard dispatcher does itself while the panes
-//! are split (no webview can be trusted to pick the right one of two
-//! scrolling columns when focus is on the page itself).
+//! the page): how two open panes are laid out ([`shape`]), what each pane's
+//! bar and the tabs are called, which tab an arrow key goes to, what
+//! Compare says while two panes are open, and how far the keys that scroll
+//! a page scroll a pane's own column, which the keyboard dispatcher does
+//! itself while the panes are split (no webview can be trusted to pick the
+//! right one of two scrolling columns when focus is on the page itself).
 
-/// While two panes are open, at least this wide, each pane's bar has its
-/// controls and the top bar's own reference, arrows and translation button
-/// give way; the page's stylesheet hides them by the same width (move both
-/// together).
+/// While two panes are open, at least this wide, they sit side by side,
+/// each with its bar; narrower, they're tabs (S7). The stylesheet doesn't
+/// ask the width itself: it follows `html[data-pane-tabs]`, which `pane`
+/// sets as this query's answer changes, after the reading place logic has
+/// found each pane's place in the shape the reader last saw (as
+/// `html[data-wide]` follows `preferences::WIDE_QUERY`).
 pub const BARS_QUERY: &str = "(min-width: 900px)";
+
+/// How the panes are laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Shape {
+    /// One pane, the page as it has always been.
+    #[default]
+    One,
+    /// Two, side by side, each with its bar.
+    SideBySide,
+    /// Two, as tabs: only the active one shows, and the top bar's own
+    /// reference, arrows and translation button act on it.
+    Tabs,
+}
+
+impl Shape {
+    /// Only the active pane shows.
+    pub fn alone(self) -> bool {
+        self == Self::Tabs
+    }
+
+    /// The panes' bars show (and the top bar's own reference, arrows and
+    /// translation button give way to them).
+    pub fn bars(self) -> bool {
+        self == Self::SideBySide
+    }
+}
+
+/// How the panes are laid out: `split`, two open; `two_across`, the window
+/// [`BARS_QUERY`] wide.
+pub fn shape(split: bool, two_across: bool) -> Shape {
+    match (split, two_across) {
+        (false, _) => Shape::One,
+        (true, true) => Shape::SideBySide,
+        (true, false) => Shape::Tabs,
+    }
+}
+
+/// The tabs' list's name, for screen readers.
+pub const TABS_LABEL: &str = "Passages";
+
+/// The tab `key` moves to from tab `index` of `count`, as the WAI-ARIA
+/// tabs pattern has it: ← and → to the one before and after, round the
+/// ends, Home and End to the first and last. `None` for any other key.
+pub fn tab_key(key: &str, index: usize, count: usize) -> Option<usize> {
+    if count == 0 {
+        return None;
+    }
+    match key {
+        "ArrowRight" => Some((index + 1) % count),
+        "ArrowLeft" => Some((index + count - 1) % count),
+        "Home" => Some(0),
+        "End" => Some(count - 1),
+        _ => None,
+    }
+}
 
 /// The second pane's close button, named and titled.
 pub const CLOSE_SECOND: &str = "Close the second pane";
@@ -167,6 +225,31 @@ mod tests {
         );
         assert_eq!(scroll_move(ScrollKey::Top, 800.0), ScrollMove::Top);
         assert_eq!(scroll_move(ScrollKey::Bottom, 800.0), ScrollMove::Bottom);
+    }
+
+    #[test]
+    fn two_panes_are_tabs_below_the_bars_width() {
+        assert_eq!(shape(false, true), Shape::One);
+        assert_eq!(shape(false, false), Shape::One);
+        assert_eq!(shape(true, true), Shape::SideBySide);
+        assert_eq!(shape(true, false), Shape::Tabs);
+        assert!(Shape::Tabs.alone() && !Shape::Tabs.bars());
+        assert!(!Shape::SideBySide.alone() && Shape::SideBySide.bars());
+        assert!(!Shape::One.alone() && !Shape::One.bars());
+    }
+
+    #[test]
+    fn the_arrows_go_round_the_tabs_and_home_and_end_to_their_ends() {
+        assert_eq!(tab_key("ArrowRight", 0, 2), Some(1));
+        assert_eq!(tab_key("ArrowRight", 1, 2), Some(0));
+        assert_eq!(tab_key("ArrowLeft", 0, 2), Some(1));
+        assert_eq!(tab_key("ArrowLeft", 1, 2), Some(0));
+        assert_eq!(tab_key("Home", 1, 2), Some(0));
+        assert_eq!(tab_key("End", 0, 2), Some(1));
+        for key in ["ArrowUp", "ArrowDown", "Enter", " ", "j"] {
+            assert_eq!(tab_key(key, 0, 2), None, "{key:?}");
+        }
+        assert_eq!(tab_key("ArrowRight", 0, 0), None);
     }
 
     #[test]

@@ -86,8 +86,8 @@ The header, the Library and search:
 The reader, the selection card and notes:
 
 - `reader`: the chapter on screen, how it gets there, and the passage history.
-- `pane`: the reading panes' elements (each one's root, `#reading-pane-inner` and notice, by its own ids), which the reading view's queries run on, and each one's `Scroller` (the window, or its own column while two are open), the one way a reading view's scroll position and the band in view are read and set; which pane is active and which are shown, and `PerPane`, the state the pieces keep for each pane; the second pane opened and closed, the panes' bars, the keys that scroll a pane's column, and `window.gospelGetterPanes`.
-- `pane_text`: the panes' bars' names, what Compare says while two are open, and how far the keys that scroll a page scroll a pane's column.
+- `pane`: the reading panes' elements (each one's root, `#reading-pane-inner` and notice, by its own ids), which the reading view's queries run on, and each one's `Scroller` (the window, or its own column while two are open), the one way a reading view's scroll position and the band in view are read and set; which pane is active, which are open and which are in view, and `PerPane`, the state the pieces keep for each pane; the second pane opened and closed, the panes' bars, the tabs on a narrow window, the keys that scroll a pane's column, and `window.gospelGetterPanes`.
+- `pane_text`: how two panes are laid out (side by side, or tabs), the panes' bars' and tabs' names, which tab an arrow key goes to, what Compare says while two are open, and how far the keys that scroll a page scroll a pane's column.
 - `reader_text`: the chapter's markup, byte for byte `fixtures/genesis-1.html` (which a test compares), Compare's rows, the reference, and the passage history's bookkeeping.
 - `card`: the selection card: the verse selection, Copy and Copy as…, the card's bookmark, highlight and notes, the verses' marks and the Shift ghost.
 - `card_text`: the card's markup and placement.

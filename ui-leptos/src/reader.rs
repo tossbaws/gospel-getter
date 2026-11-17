@@ -268,11 +268,10 @@ fn reference_of(here: &Here, compare: Option<&Compare>) -> text::Reference {
     text::reference(&here.book_name, here.chapter, &codes, translation_name)
 }
 
-/// `pane`'s bar says where the reader is in it, as the reference button
-/// does (two panes open).
+/// `pane`'s bar and tab say where the reader is in it, as the reference
+/// button does (two panes open).
 fn show_bar_reference(pane: PaneId, here: &Here, compare: Option<&Compare>) {
-    let reference = reference_of(here, compare);
-    pane::show_reference(pane, &text::reference_markup(&reference), &reference.label);
+    pane::show_reference(pane, &reference_of(here, compare));
 }
 
 /// The reference button and the window title (which the backend copies to

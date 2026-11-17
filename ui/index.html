@@ -3812,21 +3812,117 @@
             .pane[data-pane-active="false"] .pane-bar .ref-btn {
                 color: var(--text-dim);
             }
-        }
 
-        /* With the panes' bars there, the top bar's own reference, arrows
-           and translation button give way (pane_text.rs's BARS_QUERY is
-           this width; move both together), and Back and Forward push the
-           rest of the bar right, as the › did. */
-        @media screen and (min-width: 900px) {
-            :root[data-split] #chapter-prev,
-            :root[data-split] #ref-btn,
-            :root[data-split] #chapter-next,
-            :root[data-split] #translation-toggle {
+            /* Two panes as tabs, on a window too narrow for them side by
+               side (html[data-pane-tabs], which pane.rs sets by
+               pane_text.rs's BARS_QUERY): a tab list under the top bar,
+               then the active pane's column (the other is [hidden]),
+               the rest of the window's height, with no bar of its own. The
+               column spans the window, so it scrolls from anywhere across
+               it, as the page does with one pane; its chapter and the tabs
+               keep to the reader's Width, as one pane's chapter does. */
+            :root[data-pane-tabs] .container {
+                display: flex;
+                flex-direction: column;
+            }
+
+            :root[data-pane-tabs] .pane {
+                flex: 1 1 auto;
+                height: auto;
+                min-height: 0;
+                margin-left: -1.5rem;
+                padding-left: 1.5rem;
+                border-left: none;
+                scroll-padding-top: 0;
+            }
+
+            :root[data-pane-tabs] .pane-bar {
                 display: none;
             }
 
-            :root[data-split] .history-nav {
+            :root[data-pane-tabs] .pane > .reader-notice,
+            :root[data-pane-tabs] .pane > [id^="reading-pane"],
+            :root[data-pane-tabs] .pane-tabs {
+                width: 100%;
+                max-width: var(--column);
+                margin-left: auto;
+                margin-right: auto;
+            }
+
+            .pane-tabs:not([hidden]) {
+                display: flex;
+                flex: none;
+                align-items: center;
+                margin-bottom: 0.9rem;
+                border-bottom: 1px solid var(--rule);
+                font-family: var(--font-ui);
+            }
+
+            .pane-tablist {
+                display: flex;
+                min-width: 0;
+            }
+
+            .pane-tabs-spacer {
+                flex: 1 1 auto;
+            }
+
+            .pane-tab {
+                display: inline-flex;
+                align-items: baseline;
+                gap: 0.4rem;
+                min-width: 0;
+                margin-bottom: -1px;
+                padding: 0.55rem 0.8rem;
+                background: none;
+                border: none;
+                border-bottom: 2px solid transparent;
+                color: var(--text-dim);
+                font-family: inherit;
+                font-size: 0.95rem;
+                white-space: nowrap;
+                cursor: pointer;
+            }
+
+            .pane-tab[aria-selected="true"] {
+                color: var(--text);
+                border-bottom-color: var(--accent);
+            }
+
+            .pane-tab:hover {
+                color: var(--text);
+            }
+
+            .pane-tab:focus-visible {
+                outline: 2px solid var(--accent);
+                outline-offset: -2px;
+            }
+
+            .pane-tab-place {
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .pane-tab-code {
+                font-size: 0.8em;
+                letter-spacing: 0.04em;
+                color: var(--text-dim);
+            }
+        }
+
+        /* With the panes' bars there (two panes side by side), the top
+           bar's own reference, arrows and translation button give way, and
+           Back and Forward push the rest of the bar right, as the › did.
+           As tabs, they're back, acting on the active pane. */
+        @media screen {
+            :root[data-split]:not([data-pane-tabs]) #chapter-prev,
+            :root[data-split]:not([data-pane-tabs]) #ref-btn,
+            :root[data-split]:not([data-pane-tabs]) #chapter-next,
+            :root[data-split]:not([data-pane-tabs]) #translation-toggle {
+                display: none;
+            }
+
+            :root[data-split]:not([data-pane-tabs]) .history-nav {
                 margin-right: auto;
             }
         }
