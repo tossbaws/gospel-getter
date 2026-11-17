@@ -4,6 +4,23 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.32.0] - 2026-11-17
+
+Four more keys. Press `B` to bookmark the verses you've selected, and
+press it again to remove their bookmark. `H` highlights them in the next
+color: yellow, green, blue, pink, then none; verses in mixed colors go
+to yellow. With two passages open side by side, `X` closes the second
+side, and `P` switches the active side, as F6 does. With nothing
+selected, `B` and `H` do nothing, and with one passage open, `X` and `P`
+do nothing. Like the other keys that work pressed on their own, they do
+nothing while you're typing, and they turn off with them: choose **Aa**,
+then under **Keyboard** turn off **Single-key shortcuts**. Ctrl+B still
+opens the Library, and Ctrl+P still prints. The four keys are listed in
+**Keyboard shortcuts** (`?`), and hovering **★ Bookmark** shows its key,
+as does hovering a highlight color. No verse changes. Backups are
+unchanged, in the same data formats. Updating keeps your bookmarks,
+highlights, notes, findings, reading position and settings.
+
 ## [2.31.0] - 2026-11-17
 
 Two passages side by side. **Open beside** opens a passage next to the
