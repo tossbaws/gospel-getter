@@ -47,16 +47,23 @@ const said = (app, choice) => [el(app, `${choice.id}-name`).textContent, el(app,
 const EVERYTHING_HINT = 'Bookmarks, highlights, notes, findings and settings, to restore later';
 const NOTES_HINT = 'Choose notes and a layout, then save or print';
 
-/** Counts the requests the page makes for the chooser and for Export notes, and keeps the last one's detail. */
-function watchRequests(app) {
-    const seen = { choice: 0, notes: 0, notesDetail: null };
-    app.document.addEventListener('gospel-getter:export-choice', () => { seen.choice += 1; }, true);
-    app.document.addEventListener('gospel-getter:export-notes', (event) => {
-        seen.notes += 1;
-        seen.notesDetail = event.detail;
-    }, true);
+/** Counts the times the chooser and Export notes open: their overlays shown, from hidden. */
+function watchOpenings(app) {
+    const seen = { choice: 0, notes: 0 };
+    for (const [id, key] of [['export-choice-overlay', 'choice'], ['export-notes-overlay', 'notes']]) {
+        const overlay = el(app, id);
+        new app.window.MutationObserver((changes) => {
+            seen[key] += changes.filter((c) => c.oldValue !== null && !overlay.hidden).length;
+        }).observe(overlay, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
+    }
     return seen;
 }
+
+/** What Export notes shows of what it was opened with: the book ticked, and the translation its file quotes. */
+const notesOpenedWith = (app) => ({
+    ticked: [...el(app, 'export-notes-books').querySelectorAll('input:checked')].map((b) => Number(b.value)),
+    translation: el(app, 'export-notes-translation').textContent,
+});
 
 // ---- The palette's helpers, as palette.test.mjs has them.
 
@@ -141,7 +148,7 @@ test('Everything (backup) is the backup as it always was: the same command, file
 
 test('My notes opens Export notes with what the Library’s button gave it; closing it, focus is back on ☰', () =>
     withApp({}, async (app) => {
-        const seen = watchRequests(app);
+        const seen = watchOpenings(app);
         await app.openExport();
         const before = app.calls.length;
         await app.click(myNotes(app));
@@ -149,17 +156,9 @@ test('My notes opens Export notes with what the Library’s button gave it; clos
         await app.idle(before, 'count_notes_export');
         assert.ok(notesDialogOpen(app));
         assert.equal(seen.notes, 1);
-        const { returnFocus, ...asked } = seen.notesDetail;
-        assert.deepEqual(JSON.parse(JSON.stringify(asked)), {
-            noteCount: 2,
-            bookId: JOHN,
-            translationCode: 'kjv',
-            translationName: 'King James Version',
-        });
-        assert.equal(returnFocus, el(app, 'menu-toggle'));
-        // The dialog as it always opened: on the book being read.
-        const ticked = [...el(app, 'export-notes-books').querySelectorAll('input:checked')].map((b) => Number(b.value));
-        assert.deepEqual(ticked, [JOHN]);
+        // The dialog as it always opened: on the book being read, quoting
+        // the translation being read.
+        assert.deepEqual(notesOpenedWith(app), { ticked: [JOHN], translation: 'King James Version' });
         assert.equal(callsOf(app, 'export_reader_data').length, 0);
 
         await app.key('Escape', {}, app.document.activeElement);
@@ -169,7 +168,7 @@ test('My notes opens Export notes with what the Library’s button gave it; clos
 
 test('without notes My notes is greyed out, saying why, and does nothing', () =>
     withApp({ notes: [] }, async (app) => {
-        const seen = watchRequests(app);
+        const seen = watchOpenings(app);
         await app.openExport();
         assert.ok(myNotes(app).disabled);
         assert.deepEqual(said(app, myNotes(app)), ['My notes', 'There are no notes yet']);
@@ -280,7 +279,7 @@ test('Escape, Cancel and the dimmed page close it, focus back on ☰; Tab and th
 
 test('the palette’s Export notes… and Export data… are as they were, and skip the chooser', () =>
     withApp({}, async (app) => {
-        const seen = watchRequests(app);
+        const seen = watchOpenings(app);
         // Listed as before: the same labels, in the same order, found by
         // the same words.
         await type(app, 'export');
@@ -307,14 +306,8 @@ test('the palette’s Export notes… and Export data… are as they were, and s
         assert.equal(seen.choice, 0);
         assert.ok(!chooserOpen(app));
         assert.ok(notesDialogOpen(app));
-        const { returnFocus, ...asked } = seen.notesDetail;
-        assert.deepEqual(JSON.parse(JSON.stringify(asked)), {
-            noteCount: 2,
-            bookId: JOHN,
-            translationCode: 'kjv',
-            translationName: 'King James Version',
-        });
-        assert.equal(returnFocus, null);
+        assert.equal(seen.notes, 1);
+        assert.deepEqual(notesOpenedWith(app), { ticked: [JOHN], translation: 'King James Version' });
         // Closed, focus goes home, as it did.
         await app.key('Escape', {}, app.document.activeElement);
         assert.ok(!notesDialogOpen(app));

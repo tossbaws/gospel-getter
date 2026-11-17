@@ -5556,3 +5556,70 @@ fn reading_view_scroll_stays_in_pane() {
         }
     }
 }
+
+/// The pieces call each other directly (`ui-leptos/src/bridge.rs`'s header
+/// says so): the only events they send are the ones the page's own scripts
+/// answer, each named here with its reason, and they hear none. One
+/// `_EVENT` constant is left, and no piece listens on `document` for an
+/// event of its own. `gospel-getter:pieces-failed` crosses the other way,
+/// from the loader to the page's fallback, and no piece sends or hears it.
+#[test]
+fn the_pieces_send_events_only_to_the_pages_scripts() {
+    // (piece, event, why it crosses)
+    const CROSSINGS: [(&str, &str, &str); 1] = [(
+        "bridge.rs",
+        "gospel-getter:boot",
+        "boot asks the prefetch script in <head> for the get_home and get_reading \
+         it sent before the module loaded; that script cancels it and answers",
+    )];
+    let constants: Vec<(&str, &str)> = PIECES
+        .iter()
+        .flat_map(|(file, source)| {
+            source
+                .lines()
+                .filter(|line| line.contains("_EVENT: &str"))
+                .map(move |line| (*file, line.trim()))
+        })
+        .collect();
+    assert_eq!(
+        constants,
+        [(
+            "bridge.rs",
+            "pub const BOOT_EVENT: &str = \"gospel-getter:boot\";"
+        )],
+        "the only event constant is BOOT_EVENT"
+    );
+    for (file, source) in PIECES.iter() {
+        assert!(
+            !source.contains("on_document_event"),
+            "{file} listens on document for an event: the pieces call each other"
+        );
+        let crossing = CROSSINGS.iter().find(|(piece, _, _)| piece == file);
+        let names: Vec<&str> = source
+            .match_indices("\"gospel-getter:")
+            .map(|(at, _)| {
+                let name = &source[at + 1..];
+                &name[..name.find('"').unwrap_or(name.len())]
+            })
+            .collect();
+        match crossing {
+            Some((_, event, why)) => {
+                assert_eq!(names, [*event], "{file} names only its crossing: {why}");
+                assert!(
+                    HTML.contains(&format!("document.addEventListener('{event}'")),
+                    "ui/index.html still answers {event}: {why}"
+                );
+            }
+            None => {
+                assert!(
+                    !source.contains("CustomEvent"),
+                    "{file} makes a CustomEvent: the pieces call each other directly"
+                );
+                assert!(
+                    names.is_empty(),
+                    "{file} names an event of the page's ({names:?}): the pieces call each other"
+                );
+            }
+        }
+    }
+}

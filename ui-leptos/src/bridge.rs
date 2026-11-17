@@ -15,9 +15,10 @@
 //! page reads none of them): `window.gospelGetterShortcuts`, the table of
 //! shortcuts (`shortcut_table`, [`export_shortcuts`]);
 //! `window.gospelGetterPreferences` (`aa`): `current()`, the display
-//! settings an export carries, and `apply(values)`; and
+//! settings an export carries, and `apply(values)`;
 //! `window.gospelGetterSurfaces` (`surfaces`): `current()`, the open
-//! header surface's name or `null`.
+//! header surface's name or `null`; and `window.gospelGetterLibrary`
+//! (`library`): `refresh(lists)`, the Library's lists reloaded.
 //!
 //! Page markup this crate uses as a reader would: `#theme-select`, read and
 //! changed (with a `change` event, as Aa does) for the welcome's looks

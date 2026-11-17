@@ -49,6 +49,7 @@ use leptos::html;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use serde::de::DeserializeOwned;
+use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Element, HtmlElement, KeyboardEvent, MouseEvent};
 
@@ -1184,7 +1185,27 @@ pub fn mount() {
         dom::on_click(&found, move |event| library.on_finding_click(&event));
     }
     LIBRARY.set(Some(library));
+    export_library();
     place(&holder);
+}
+
+/// `window.gospelGetterLibrary`, for the GUI checks: `refresh(lists)`, the
+/// lists named reloaded as the card has them reloaded after a change
+/// ([`refresh`]), a promise that settles once they're shown. Set as the
+/// Library mounts.
+fn export_library() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let global = js_sys::Object::new();
+    let reload = Closure::<dyn Fn(JsValue) -> JsValue>::new(|lists: JsValue| {
+        let lists: Vec<String> = serde_wasm_bindgen::from_value(lists).unwrap_or_default();
+        let lists: Vec<&str> = lists.iter().map(String::as_str).collect();
+        refresh(&lists).map_or(JsValue::NULL, JsValue::from)
+    });
+    let _ = js_sys::Reflect::set(&global, &JsValue::from_str("refresh"), reload.as_ref());
+    let _ = js_sys::Reflect::set(&window, &JsValue::from_str("gospelGetterLibrary"), &global);
+    reload.forget();
 }
 
 fn lists(library: Library) -> impl IntoView {
