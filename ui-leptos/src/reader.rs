@@ -520,9 +520,9 @@ fn load_sent(pane: PaneId, book_id: i64, chapter: i64, sent: Option<Sent>) -> Lo
 /// Compare changing on the way asks again through here, as the same load
 /// (a note's Edit waiting for it still opens after).
 fn send_load(pane: PaneId, book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
-    // The reader has asked for something else: a verse put back where they
-    // were at launch stays put no longer.
-    surfaces::let_go_of_place();
+    // The reader has asked for something else in the pane: a verse put back
+    // where they were at launch stays put no longer.
+    surfaces::let_go_of_place(pane);
     let token = with(pane, |s| {
         s.load_token += 1;
         s.asked = Some((book_id, chapter));
@@ -843,17 +843,18 @@ fn save_place_soon(pane: PaneId) {
     dom::clear_timeout(replaced);
 }
 
-/// Boot's chapter is on screen: the verse the reader was at goes back to
-/// the top of the reading pane, `offset` px below the bar, and is kept
-/// there as the page settles (`surfaces::hold_place`, the way the reading
-/// place logic puts one back). A verse the translation doesn't number
+/// Boot's chapter is on screen (the first pane's, or the second's reopened
+/// beside it): the verse the reader was at goes back to the top of the
+/// pane's view, `offset` px below the bar, and is kept there as the page
+/// settles (`surfaces::hold_place`, the way the reading place logic puts
+/// one back). A verse the translation doesn't number
 /// leaves the chapter at its top.
 fn reopen_at(pane: PaneId, verse: i64, offset: Option<f64>) {
     let Some(here) = with(pane, |s| s.reading.clone()) else {
         return;
     };
     if let Some(mark) = pane.query(&text::verse_selector(&here.translation_code, verse)) {
-        surfaces::hold_place(mark, offset.unwrap_or(0.0));
+        surfaces::hold_place(pane, mark, offset.unwrap_or(0.0));
         save_place(pane);
     }
 }
@@ -1520,6 +1521,31 @@ pub fn open_beside(passage: &OpenPassage, code: Option<String>) -> Load {
     // the one it's reading (`Request::Translation` leaves it be).
     pane::set_active(pane);
     load
+}
+
+/// Boot's second pane, opened empty beside the first before the first's
+/// chapter was drawn (`pane::reopen`), once that chapter is on screen: its
+/// own chapter, in its own translation, then the verse the reader was at
+/// put back at the top of its view (as [`start`] does the first's), its
+/// history starting there. The first pane stays the active one (D8). Its
+/// end is the load's.
+pub fn reopen_beside(place: SecondPlace) -> Load {
+    let pane = PaneId::Second;
+    if !pane::split() {
+        return Box::pin(async { false });
+    }
+    pane::set_code(pane, &place.translation);
+    let load = load_reading(pane, place.book_id, place.chapter);
+    Box::pin(async move {
+        let loaded = load.await;
+        if with(pane, |s| s.reading.is_some()) {
+            start_history(pane);
+        }
+        if let (true, Some(verse)) = (loaded, place.verse) {
+            reopen_at(pane, verse, place.offset);
+        }
+        loaded
+    })
 }
 
 /// `pane` is the active one now (`pane::set_active`): the header, the

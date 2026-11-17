@@ -56,6 +56,7 @@ use crate::dom::{self, by_id};
 use crate::keyboard;
 use crate::nav_text;
 use crate::pane_text::{self as text, ScrollMove, SecondPlace, Shape};
+use crate::picker_text::Book;
 use crate::preferences;
 use crate::prefs;
 use crate::reader::{self, OpenPassage};
@@ -552,7 +553,7 @@ pub fn sync_shape() {
 /// pane's column scrolls below the top bar, and the first pane's place
 /// moves into its column with it, the same verse at the same height
 /// (`surfaces::move_place`). The faded neighbors give way (D7), and Compare
-/// pauses (S14).
+/// pauses (S14). The next launch opens it again ([`reopen`]).
 pub fn open_second() {
     if split() {
         return;
@@ -566,7 +567,7 @@ pub fn open_second() {
     let Some(main) = root.parent_element() else {
         return;
     };
-    surfaces::let_go_of_place();
+    surfaces::let_go_of_place(PaneId::First);
     CODES.with_borrow_mut(|codes| codes[PaneId::Second] = String::new());
     let code = code(PaneId::First);
     surfaces::move_place(PaneId::First, &code, || {
@@ -658,6 +659,46 @@ fn forget_place() {
     if let Some(storage) = dom::storage() {
         let _ = storage.remove_item(text::SECOND_PANE_KEY);
     }
+}
+
+/// The second pane's place as this computer kept it, read back: `None` if
+/// there's none, it can't be read, or it isn't a place's shape.
+fn kept_place() -> Option<SecondPlace> {
+    let value = dom::storage()?.get_item(text::SECOND_PANE_KEY).ok()??;
+    let length = u32::try_from(value.encode_utf16().count()).ok()?;
+    if length > text::PLACE_MAX {
+        return None;
+    }
+    let parsed = js_sys::JSON::parse(&value).ok()?;
+    serde_wasm_bindgen::from_value(parsed).ok()
+}
+
+/// Boot's start, before the first pane's chapter is drawn (`boot`): if the
+/// panes were split as the app last closed (`preferences::SPLIT`, which
+/// the pre-paint script has laid the page out for), and the second pane's
+/// kept place is one there can be, by the books there are (`books`) and
+/// the bundled translations (`codes`), the second pane opens now, empty, so
+/// the first pane's chapter is drawn into its own column and its place put
+/// back there; the second's chapter follows the first's
+/// (`reader::reopen_beside`). Opened after, the first pane would have been
+/// drawn into a page that doesn't scroll (the split's), and its place lost
+/// on the way to its column. Split with no place to open the second pane
+/// at, or with one that can't be, closes, and both keys go: the page is
+/// laid out for one pane (a rare reflow, before any chapter is drawn).
+pub fn reopen(books: &[Book], codes: &[String]) -> Option<SecondPlace> {
+    if !prefs::on(&preferences::SPLIT) {
+        return None;
+    }
+    if let Some(place) = kept_place().filter(|place| place.is_valid(books, codes)) {
+        open_second();
+        if split() {
+            return Some(place);
+        }
+    }
+    prefs::apply(&preferences::SPLIT, preferences::SPLIT.fallback);
+    prefs::forget(&preferences::SPLIT);
+    forget_place();
+    None
 }
 
 // ---- The columns and their bars.

@@ -455,13 +455,18 @@ pub struct SearchArgs<'a> {
 // ---- The reader.
 
 /// What the reader takes from `get_home`'s answer (`commands::HomeDto`):
-/// the translations and where the reader was: the chapter, and the verse
-/// at the top of the reading pane, its top `current_verse_offset` px below
-/// the bar (none: the chapter's top).
+/// the translations, the books (the second pane's kept place is checked
+/// against both, `pane::reopen`) and where the reader was: the chapter, and
+/// the verse at the top of the reading pane, its top `current_verse_offset`
+/// px below the bar (none: the chapter's top).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Home {
     pub translations: Vec<Translation>,
+    #[serde(default)]
+    pub ot_books: Vec<crate::picker_text::Book>,
+    #[serde(default)]
+    pub nt_books: Vec<crate::picker_text::Book>,
     pub current_translation_code: String,
     pub current_book_id: i64,
     pub current_chapter: i64,

@@ -39,7 +39,7 @@ pub const NARROW_QUERY: &str = "(max-width: 759px)";
 
 /// The most verses a chapter has (Psalm 119's 176): a verse past it isn't
 /// a place.
-const MAX_VERSE: i64 = 176;
+pub const MAX_VERSE: i64 = 176;
 
 /// One recent place: a chapter, the verses a jump selected there (if any),
 /// and the translation it was read in, by code ("kjv").
