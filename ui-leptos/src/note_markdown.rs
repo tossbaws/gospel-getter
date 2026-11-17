@@ -39,6 +39,24 @@ pub enum Layout {
     OneLine,
 }
 
+/// The references of `links` that [`note_html`] draws as links in `body`
+/// (not one in code, or in a web link's text), each passage once, in the
+/// note's order: those the card's note row offers to open beside.
+pub fn drawn_links<'a>(body: &str, links: &'a [NoteLink]) -> Vec<&'a NoteLink> {
+    let passage = |l: &NoteLink| (l.book_id, l.chapter, l.verse_start, l.verse_end);
+    let mut drawn: Vec<&NoteLink> = Vec::new();
+    for link in links {
+        if drawn.iter().any(|d| passage(d) == passage(link)) {
+            continue;
+        }
+        let html = note_html(body, std::slice::from_ref(link), &[], Layout::Blocks);
+        if html.contains("note-ref-link") {
+            drawn.push(link);
+        }
+    }
+    drawn
+}
+
 /// The note `body` as HTML, with `links` (the backend's references in
 /// it, by byte offsets) as links to their passages, and the words a
 /// search found (`words`, `library_text::query_words`) marked.
@@ -984,6 +1002,23 @@ mod tests {
             ..link(body, "Rom", 45, 5, None, "Romans 5")
         };
         assert!(!note_html(body, &[wrong], &[], Layout::Blocks).contains("<a"));
+    }
+
+    #[test]
+    fn the_links_drawn_are_the_references_outside_code_each_passage_once() {
+        let body = "Rom 5:8, `Ps 23`, Romans 5:8 and Ps 23:1";
+        let links = [
+            link(body, "Rom 5:8", 45, 5, Some((8, 8)), "Romans 5:8"),
+            link(body, "Ps 23", 19, 23, None, "Psalms 23"),
+            link(body, "Romans 5:8", 45, 5, Some((8, 8)), "Romans 5:8"),
+            link(body, "Ps 23:1", 19, 23, Some((1, 1)), "Psalms 23:1"),
+        ];
+        let drawn: Vec<&str> = drawn_links(body, &links)
+            .iter()
+            .map(|l| l.reference.as_str())
+            .collect();
+        assert_eq!(drawn, ["Romans 5:8", "Psalms 23:1"]);
+        assert!(drawn_links("No references.", &[]).is_empty());
     }
 
     #[test]

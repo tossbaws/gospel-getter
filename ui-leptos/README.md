@@ -96,7 +96,7 @@ The reader, the selection card and notes:
 - `findings`: the AI-flagged findings an agent saved at the reader's request, in the margin, Compare's notes column and the Library, with Aa's switch for them.
 - `findings_text`: the findings' rules and markup.
 - `note_markdown`: a note's text as Markdown wherever it shows: the subset, everything else escaped, the references the backend found in it as links.
-- `note_links`: the links in a note: a reference goes to its passage, a web link opens through the backend.
+- `note_links`: the links in a note: a reference goes to its passage (Shift- or Alt-click, or the card's Open beside: in the second pane), a web link opens through the backend.
 - `note_copy`: a note's Copy as Markdown.
 
 Shared with the backend, from `../shared/`:

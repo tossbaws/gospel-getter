@@ -11,7 +11,7 @@
 //! never changed.
 
 use crate::dto::{SelectionNote, Verse, Xref};
-use crate::note_markdown::{Layout, note_html};
+use crate::note_markdown::{Layout, drawn_links, note_html};
 use crate::passage_reference::passage_reference;
 use crate::reader_text::{escape_html, footnote_html, verse_html};
 use crate::verse_parts::Footnote;
@@ -330,12 +330,13 @@ pub fn notes_html(notes: &[SelectionNote], error: &str, show_all: bool) -> Strin
                  {s32}<button type=\"button\" class=\"note-link note-more\" aria-expanded=\"false\" aria-controls=\"note-card-body-{id}\" hidden>more</button>\n\
                  {s32}<button type=\"button\" class=\"note-link note-edit\" data-note-id=\"{id}\" aria-label=\"Edit note on {reference}\">Edit</button>\n\
                  {s32}<button type=\"button\" class=\"note-link note-copy\" data-note-id=\"{id}\" aria-label=\"Copy the note on {reference} as Markdown\">Copy as Markdown</button>\n\
-                 {s28}</span>\n\
+                 {beside}{s28}</span>\n\
                  {s24}</article>",
                 id = n.id,
                 created = escape_html(&n.created_at),
                 display = escape_html(&n.created_at_display),
                 body = note_html(&n.body, &n.links, &[], Layout::Blocks),
+                beside = beside_links(&n.body, &n.links, &s32),
             )
         })
         .collect();
@@ -351,6 +352,27 @@ pub fn notes_html(notes: &[SelectionNote], error: &str, show_all: bool) -> Strin
         r#"<p class="verse-notes-title">Notes ({})</p>{cards}{all}"#,
         notes.len()
     )
+}
+
+/// The note row's Open beside, one for each passage the note links to
+/// (`note_markdown::drawn_links`), named for it: the way to a link's
+/// passage beside without Shift- or Alt-click (`note_links`). Each line
+/// indented by `indent`.
+fn beside_links(body: &str, links: &[crate::dto::NoteLink], indent: &str) -> String {
+    drawn_links(body, links)
+        .into_iter()
+        .map(|link| {
+            let verses = match (link.verse_start, link.verse_end) {
+                (Some(first), Some(last)) => format!(" data-start=\"{first}\" data-end=\"{last}\""),
+                _ => String::new(),
+            };
+            let label = beside_label(&escape_html(&link.reference));
+            format!(
+                "{indent}<button type=\"button\" class=\"note-link note-beside\" data-book=\"{}\" data-chapter=\"{}\"{verses} aria-label=\"{label}\" title=\"{label}\">{OPEN_BESIDE}</button>\n",
+                link.book_id, link.chapter,
+            )
+        })
+        .collect()
 }
 
 /// The passage the note editor quotes: its verses as this translation
@@ -1019,6 +1041,21 @@ mod tests {
             "<div class=\"note-card-body note-text\" id=\"note-card-body-5\"><p><strong>See</strong> \
              <a class=\"note-ref-link\" href=\"#\" data-book=\"45\" data-chapter=\"5\" data-start=\"8\" data-end=\"8\" title=\"Go to Romans 5:8\">Rom 5:8</a></p>\
              <ul><li>one</li></ul></div>"
+        ));
+        // A note's row offers each passage it links to beside.
+        let mut linked = note(6, "See Rom 5:8");
+        linked.links = vec![crate::dto::NoteLink {
+            start: 4,
+            end: 11,
+            book_id: 45,
+            chapter: 5,
+            verse_start: Some(8),
+            verse_end: Some(8),
+            reference: "Romans 5:8".to_string(),
+        }];
+        assert!(notes_html(&[linked], "", false).contains(
+            "Copy as Markdown</button>\n                                \
+             <button type=\"button\" class=\"note-link note-beside\" data-book=\"45\" data-chapter=\"5\" data-start=\"8\" data-end=\"8\" aria-label=\"Open Romans 5:8 beside\" title=\"Open Romans 5:8 beside\">Open beside</button>\n                            </span>"
         ));
         let all = notes_html(&notes, "", true);
         assert_eq!(all.matches("<article").count(), 4);

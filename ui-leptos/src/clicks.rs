@@ -180,7 +180,8 @@ fn on_click(event: &MouseEvent) {
     }
 
     // The selection's notes: Edit opens one; "more" shows all of one's
-    // text; Copy as Markdown copies one; "Show all" shows every one.
+    // text; Copy as Markdown copies one; Open beside opens a passage it
+    // links to in the second pane; "Show all" shows every one.
     if let Some(edit) = closest_html(&target, ".note-edit") {
         return ask(Ask::NoteEdit {
             note_id: data(&edit, "note-id").unwrap_or_default(),
@@ -189,6 +190,9 @@ fn on_click(event: &MouseEvent) {
     }
     if let Some(more) = closest_html(&target, ".note-more") {
         return ask(Ask::NoteMore(more));
+    }
+    if let Some(beside) = closest(&target, "#selection-card .note-beside") {
+        return crate::note_links::open_beside(&beside);
     }
     if let Some(copy) = closest_html(&target, "#selection-card .note-copy") {
         return ask(Ask::NoteCopy(number(&copy, "note-id").unwrap_or_default()));

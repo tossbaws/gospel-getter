@@ -1480,8 +1480,11 @@ pub fn scrolled(pane: PaneId) {
 
 // ---- Two panes.
 
-/// Opens `passage` in the second pane (`pane`'s `gospelGetterPanes`), in
-/// `code`, or in the active pane's translation: a pane opened beside reads
+/// Opens `passage` in the second pane: every Open beside (the selection
+/// card's cross-reference preview and note row, a Library row, a search
+/// result, a note's link Shift- or Alt-clicked, the palette) and
+/// `pane`'s `gospelGetterPanes` come here, the one way in (S8). In `code`,
+/// or in the active pane's translation, the pane asked from (D9): a pane opened beside reads
 /// it, its history starting there; one already open jumps to it, as a jump
 /// in its own history, so its Back returns (S12). The first pane is never
 /// replaced. The second pane is then the active one (S13). Its end is the
