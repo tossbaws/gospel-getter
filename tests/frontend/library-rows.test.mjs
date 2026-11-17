@@ -26,11 +26,11 @@ async function withLibrary(body) {
 
 const rowsOf = (app, list) => [...app.document.querySelectorAll(`#${list}-list .bookmark-item`)];
 
-// No control holds another, and each row has one way in plus its own
-// secondary button.
+// No control holds another, and each row has one way in plus Open beside
+// and its own secondary button.
 function assertRowSemantics(row, secondary) {
     const controls = [...row.querySelectorAll('button, a, input, [tabindex], [role="button"], [role="link"]')];
-    assert.deepEqual(controls.map((c) => c.className), ['bookmark-open', secondary]);
+    assert.deepEqual(controls.map((c) => c.className), ['bookmark-open', 'library-beside', secondary]);
     for (const control of controls) {
         assert.equal(control.querySelector('button, a, input, [tabindex]'), null, `${control.className} holds no control`);
         assert.equal(control.parentElement, row, 'side by side in the row');
@@ -70,11 +70,12 @@ test('a click anywhere on a Highlights row opens its passage; × stays separate'
 
 // A note's row: its link (named by its reference, described by the
 // note's start beside it, which is Markdown and may hold links of its own,
-// so it can't be inside the row's link), then Edit and Copy as Markdown.
+// so it can't be inside the row's link), then Edit, Copy as Markdown and
+// Open beside.
 // No control holds another.
 function assertNoteRowSemantics(row) {
     const controls = [...row.querySelectorAll('button, a, input, [tabindex], [role="button"], [role="link"]')];
-    assert.deepEqual(controls.map((c) => c.className), ['bookmark-open', 'note-list-edit', 'note-list-copy']);
+    assert.deepEqual(controls.map((c) => c.className), ['bookmark-open', 'note-list-edit', 'note-list-copy', 'library-beside']);
     for (const control of controls) {
         assert.equal(control.querySelector('button, a, input, [tabindex]'), null, `${control.className} holds no control`);
         assert.equal(control.closest('.bookmark-item'), row);
@@ -123,7 +124,7 @@ test('the keyboard reaches each row’s link and its secondary button, in that o
         app.openLibrary('notes');
         const [row] = rowsOf(app, 'note');
         const focusable = [...app.document.querySelectorAll('#note-list button')];
-        assert.deepEqual(focusable, [row.querySelector('.bookmark-open'), row.querySelector('.note-list-edit'), row.querySelector('.note-list-copy')]);
+        assert.deepEqual(focusable, [row.querySelector('.bookmark-open'), row.querySelector('.note-list-edit'), row.querySelector('.note-list-copy'), row.querySelector('.library-beside')]);
         assert.ok(focusable.every((b) => b.tabIndex === 0 && b.type === 'button'));
     }));
 

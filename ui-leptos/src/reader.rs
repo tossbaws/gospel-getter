@@ -1187,6 +1187,7 @@ pub fn palette_facts(state: &mut PaletteState) {
     };
     state.next_chapter = has("data-next-book");
     state.previous_chapter = has("data-prev-book");
+    state.split = pane::split();
     with(pane, |s| {
         let dto = s.last_dto.as_ref();
         state.next_book = dto.is_some_and(|d| d.next_book.is_some());
@@ -1479,8 +1480,11 @@ pub fn scrolled(pane: PaneId) {
 
 // ---- Two panes.
 
-/// Opens `passage` in the second pane (`pane`'s `gospelGetterPanes`), in
-/// `code`, or in the active pane's translation: a pane opened beside reads
+/// Opens `passage` in the second pane: every Open beside (the selection
+/// card's cross-reference preview and note row, a Library row, a search
+/// result, a note's link Shift- or Alt-clicked, the palette) and
+/// `pane`'s `gospelGetterPanes` come here, the one way in (S8). In `code`,
+/// or in the active pane's translation, the pane asked from (D9): a pane opened beside reads
 /// it, its history starting there; one already open jumps to it, as a jump
 /// in its own history, so its Back returns (S12). The first pane is never
 /// replaced. The second pane is then the active one (S13). Its end is the
@@ -1494,33 +1498,61 @@ pub fn open_beside(passage: &OpenPassage, code: Option<String>) -> Load {
     }
     let (book_id, chapter) = (passage.book_id, passage.chapter);
     let (start, end) = (passage.verse_start, passage.verse_end);
-    let load = if with(pane, |s| s.reading.is_some()) {
+    if with(pane, |s| s.reading.is_some()) {
+        // Active first, so it's in view: a pane out of view (the tabs,
+        // reading mode) has its place put back as it comes into view
+        // (`surfaces`), and the jump then records where the reader left
+        // it, not a hidden column's scroll position (0 in WebKitGTK and
+        // WebView2), which would send its Back to the chapter's top.
+        pane::set_active(pane);
         if code != pane::code(pane) {
-            if pane == pane::active() {
-                switch_for_jump(pane, &code);
-            } else {
-                pane::set_code(pane, &code);
-            }
+            switch_for_jump(pane, &code);
         }
-        jump_to(pane, book_id, chapter, start, end, start.is_none())
-    } else {
-        pane::set_code(pane, &code);
-        let open = open_passage(pane, book_id, chapter, start, end);
-        Box::pin(async move {
-            let (loaded, _) = open.await;
-            if loaded && start.is_none() {
-                pane.scroller().scroll_to(0.0);
-            }
-            if with(pane, |s| s.reading.is_some()) && !with(pane, |s| s.history.started()) {
-                start_history(pane);
-            }
-            loaded
-        }) as Load
-    };
+        return jump_to(pane, book_id, chapter, start, end, start.is_none());
+    }
+    pane::set_code(pane, &code);
+    let open = open_passage(pane, book_id, chapter, start, end);
     // After its load has begun, so the translation the record then says is
     // the one it's reading (`Request::Translation` leaves it be).
     pane::set_active(pane);
-    load
+    Box::pin(async move {
+        let (loaded, _) = open.await;
+        if loaded && start.is_none() {
+            pane.scroller().scroll_to(0.0);
+        }
+        if with(pane, |s| s.reading.is_some()) && !with(pane, |s| s.history.started()) {
+            start_history(pane);
+        }
+        loaded
+    })
+}
+
+/// The palette's "Open this passage beside": the active pane's chapter
+/// opened in the second pane ([`open_beside`], in the active pane's
+/// translation), with the verse at the top of the active pane's view put
+/// at the top of the second's, as far below its bar. Its end is the load's.
+pub fn open_here_beside() -> Load {
+    let from = pane::active();
+    let Some((book_id, chapter)) =
+        with(from, |s| s.reading.as_ref().map(|r| (r.book_id, r.chapter)))
+    else {
+        return Box::pin(async { false });
+    };
+    let top = surfaces::top_verse(from, &pane::code(from));
+    let passage = OpenPassage {
+        book_id,
+        chapter,
+        verse_start: None,
+        verse_end: None,
+    };
+    let load = open_beside(&passage, None);
+    Box::pin(async move {
+        let loaded = load.await;
+        if let (true, Some((verse, offset))) = (loaded, top) {
+            reopen_at(PaneId::Second, verse, Some(offset));
+        }
+        loaded
+    })
 }
 
 /// Boot's second pane, opened empty beside the first before the first's

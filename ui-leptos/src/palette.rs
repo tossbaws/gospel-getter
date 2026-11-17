@@ -75,6 +75,8 @@ pub struct PaletteState {
     /// There's somewhere to go back (forward) to in the passage history.
     pub back: bool,
     pub forward: bool,
+    /// Two panes are open.
+    pub split: bool,
 }
 
 /// What running a command does: what its own control does.
@@ -165,10 +167,16 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         let row = (!shortcut_id.is_empty())
             .then(|| shortcut(shortcut_id))
             .flatten();
+        // A label that names its key already ("Switch pane (F6)") doesn't
+        // show it again.
+        let key = row
+            .map(|r| r.first_keys())
+            .filter(|key| !label.ends_with(&format!("({key})")))
+            .unwrap_or_default();
         list.push(Command {
             id,
             label,
-            key: row.map(|r| r.first_keys()).unwrap_or_default(),
+            key,
             keys: row.map_or("", |r| r.aria),
             words: words.to_string(),
             reason,
@@ -475,6 +483,33 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         page("forward"),
     );
     add(
+        "open-beside".into(),
+        "Open this passage beside".into(),
+        "",
+        "split second pane side by side",
+        (!state.chapter_shown).then_some("No chapter is shown"),
+        page("open-beside"),
+    );
+    // Only while there's a second pane to switch to or close.
+    if state.split {
+        add(
+            "switch-pane".into(),
+            "Switch pane (F6)".into(),
+            "switch-pane",
+            "split second other side",
+            None,
+            page("switch-pane"),
+        );
+        add(
+            "close-second".into(),
+            "Close the second pane".into(),
+            "",
+            "split side by side",
+            None,
+            page("close-second"),
+        );
+    }
+    add(
         "shortcuts".into(),
         "Keyboard shortcuts".into(),
         "shortcuts",
@@ -669,8 +704,9 @@ mod tests {
             assert!(list[..i].iter().all(|o| o.id != c.id), "{} twice", c.id);
         }
         // 2 + 2 layouts + 2 widths + 3 sizes + 2 themes + 3 translations
-        // + 2 to compare with + Notes + 20 more.
-        assert_eq!(list.len(), 37);
+        // + 2 to compare with + Notes + 21 more (one pane: neither Switch
+        // pane nor Close the second pane).
+        assert_eq!(list.len(), 38);
         let ids: Vec<&str> = list.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(
             &ids[..9],
@@ -733,6 +769,58 @@ mod tests {
             ("Exit reading mode", "Esc")
         );
         assert_eq!(exit.run, Run::Click("reader-exit"));
+    }
+
+    #[test]
+    fn switching_and_closing_panes_are_listed_only_while_split() {
+        let ids = |list: &[Command]| -> Vec<String> { list.iter().map(|c| c.id.clone()).collect() };
+        let one = commands(&john_3());
+        let beside = find(&one, "open-beside");
+        assert_eq!(beside.label, "Open this passage beside");
+        assert_eq!(
+            (beside.reason, &beside.run),
+            (None, &Run::Page("open-beside"))
+        );
+        assert!(!ids(&one).contains(&"switch-pane".to_owned()));
+        assert!(!ids(&one).contains(&"close-second".to_owned()));
+        let none = commands(&PaletteState {
+            chapter_shown: false,
+            ..john_3()
+        });
+        assert_eq!(
+            find(&none, "open-beside").reason,
+            Some("No chapter is shown")
+        );
+
+        let two = commands(&PaletteState {
+            split: true,
+            ..john_3()
+        });
+        assert_eq!(two.len(), one.len() + 2);
+        let order = ids(&two);
+        let at = |id: &str| order.iter().position(|o| o == id).unwrap();
+        assert_eq!(
+            (
+                at("open-beside") + 1,
+                at("switch-pane") + 1,
+                at("close-second") + 1
+            ),
+            (at("switch-pane"), at("close-second"), at("shortcuts"))
+        );
+        let switch = find(&two, "switch-pane");
+        // Its label names its key, which isn't shown again; the shortcut
+        // is still its own.
+        assert_eq!(
+            (switch.label.as_str(), switch.key.as_str(), switch.keys),
+            ("Switch pane (F6)", "", "F6 Shift+F6")
+        );
+        assert_eq!(switch.run, Run::Page("switch-pane"));
+        let close = find(&two, "close-second");
+        assert_eq!(close.label, "Close the second pane");
+        assert_eq!(
+            (close.reason, &close.run),
+            (None, &Run::Page("close-second"))
+        );
     }
 
     #[test]

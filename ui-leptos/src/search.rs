@@ -6,7 +6,9 @@
 //! "Verses" (the search's matches, the words found marked). A leading ">"
 //! lists commands only; the empty box suggests a few. Focus stays in the
 //! box, a combobox: ↓ and ↑ move through every group's options, Enter runs
-//! the one that's active, Escape closes it.
+//! the one that's active, Escape closes it. Alt+Enter, or a verse's own
+//! Open beside, opens a passage in the second pane instead
+//! (`reader::open_beside`, S8).
 //!
 //! The panel is the page's (`#search-panel`, whose `hidden` the page
 //! reads); this draws what's inside it and opens and closes it, from its
@@ -39,6 +41,7 @@ use web_sys::{Element, HtmlElement, KeyboardEvent};
 
 use crate::aa;
 use crate::bridge;
+use crate::card_text::{OPEN_BESIDE, beside_label};
 use crate::dom::{self, by_id, closest, data_number};
 use crate::dto::{GoTo, SearchAnswer, SearchArgs, SearchVerse};
 use crate::intent::{Claim, Generation};
@@ -47,6 +50,9 @@ use crate::palette::{self, Command, Query, Run};
 use crate::search_text::{self as text};
 use crate::shortcuts::drawn_arrow;
 use crate::surfaces::{self, Surface};
+
+/// A verse's Open beside's tooltip, naming its key.
+const BESIDE_TITLE: &str = "Open beside (Alt+Enter)";
 
 /// How long typing pauses before the words are searched.
 const DEBOUNCE_MS: i32 = 150;
@@ -678,8 +684,10 @@ impl Search {
 
     // ---- Running an option.
 
-    /// Goes to the option's passage: the box closes, and the reader jumps.
-    fn open_result(self, option: &Element) {
+    /// Goes to the option's passage: the box closes, and the reader jumps;
+    /// or, `beside`, opens it in the second pane, as
+    /// `gospelGetterPanes.openBeside` does (S12, S13, D9).
+    fn open_result(self, option: &Element, beside: bool) {
         let (Some(book_id), Some(chapter)) = (
             data_number(option, "data-book"),
             data_number(option, "data-chapter"),
@@ -693,17 +701,24 @@ impl Search {
             verse_end: data_number(option, "data-verse-end"),
         };
         self.set_open(false);
+        if beside {
+            let load = crate::reader::open_beside(&passage, None);
+            spawn_local(async move {
+                load.await;
+            });
+            return;
+        }
         crate::reader::open(crate::pane::active(), &passage, JsValue::NULL);
     }
 
-    /// Runs an option: goes to its passage, or runs its command once the
-    /// box has closed and focus is back where it was. A command that can't
-    /// run now says why, and the box stays.
-    fn run_option(self, option: &Element) {
+    /// Runs an option: goes to its passage (`beside`: in the second pane),
+    /// or runs its command once the box has closed and focus is back where
+    /// it was. A command that can't run now says why, and the box stays.
+    fn run_option(self, option: &Element, beside: bool) {
         // An option run is newer than an Enter still waiting.
         self.cancel_enter();
         let Some(id) = option.get_attribute("data-command") else {
-            self.open_result(option);
+            self.open_result(option, beside);
             return;
         };
         let command = palette::commands(&crate::page::palette_state())
@@ -771,6 +786,9 @@ impl Search {
             }
             "Enter" => {
                 event.prevent_default();
+                // Alt+Enter: a passage opens beside (a command runs as
+                // with Enter).
+                let beside = event.alt_key();
                 // A search still on its way for what's typed (Enter pressed
                 // straight after typing a reference) is waited for, so
                 // Enter goes there. Otherwise the option
@@ -785,7 +803,7 @@ impl Search {
                     });
                 let search = if pending { self.run_search(0) } else { None };
                 let Some(search) = search else {
-                    self.run_active();
+                    self.run_active(beside);
                     return;
                 };
                 let Some(claim) = self.state.try_update_value(|s| s.enter.claim()) else {
@@ -795,7 +813,7 @@ impl Search {
                 spawn_local(async move {
                     let current = search.await;
                     if current && self.still_pressed(claim, &value, &code, loads) {
-                        self.run_active();
+                        self.run_active(beside);
                     }
                 });
             }
@@ -821,20 +839,22 @@ impl Search {
             && crate::reader::loads() == loads
     }
 
-    fn run_active(self) {
+    fn run_active(self, beside: bool) {
         let options = self.options();
         if let Some(option) = self.active_index(&options).map(|i| options[i].clone()) {
-            self.run_option(&option);
+            self.run_option(&option, beside);
         }
     }
 
-    /// A click on an option runs it; on Show more, the next page.
+    /// A click on an option runs it (on a verse's Open beside, beside); on
+    /// Show more, the next page.
     fn on_panel_click(self, event: &web_sys::Event) {
         let Some(target) = target_of(event) else {
             return;
         };
         if let Some(option) = closest(&target, "#search-results [role=\"option\"]") {
-            self.run_option(&option);
+            let beside = closest(&target, ".search-beside").is_some();
+            self.run_option(&option, beside);
             return;
         }
         if closest(&target, "#search-more").is_some() {
@@ -1077,8 +1097,10 @@ fn key_view(key: &str) -> Option<AnyView> {
 }
 
 /// A verse that matched, the words found marked (as DOM nodes: the text is
-/// never markup).
+/// never markup), and its Open beside: pressed by the pointer only, as the
+/// box keeps focus (Alt+Enter is its key), so out of the Tab order.
 fn verse_view(n: usize, verse: &SearchVerse) -> AnyView {
+    let beside = beside_label(&verse.reference);
     let pieces = text::marked(&verse.text, &verse.marks)
         .into_iter()
         .map(|(piece, marked)| {
@@ -1106,6 +1128,9 @@ fn verse_view(n: usize, verse: &SearchVerse) -> AnyView {
             <span class="search-ref">{verse.reference.clone()}</span>
             " "
             <span class="search-text">{pieces}</span>
+            <button type="button" class="search-beside" tabindex="-1" aria-label=beside title=BESIDE_TITLE>
+                {OPEN_BESIDE}
+            </button>
         </div>
     }
     .into_any()

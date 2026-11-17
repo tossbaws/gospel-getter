@@ -85,6 +85,26 @@ fn jump_to(go: &Element) {
     });
 }
 
+/// The selection card's Open beside: the passage in the second pane, as
+/// `gospelGetterPanes.openBeside` opens it (S12, S13, D9), selected.
+fn open_beside(beside: &Element) {
+    let (Some(book_id), Some(chapter)) = (number(beside, "book"), number(beside, "chapter")) else {
+        return;
+    };
+    let load = reader::open_beside(
+        &reader::OpenPassage {
+            book_id,
+            chapter,
+            verse_start: number(beside, "verse"),
+            verse_end: number(beside, "end-verse"),
+        },
+        None,
+    );
+    spawn_local(async move {
+        load.await;
+    });
+}
+
 thread_local! {
     /// Shift was held when the last mouse button went down.
     static PRESSED_WITH_SHIFT: Cell<bool> = const { Cell::new(false) };
@@ -160,7 +180,8 @@ fn on_click(event: &MouseEvent) {
     }
 
     // The selection's notes: Edit opens one; "more" shows all of one's
-    // text; Copy as Markdown copies one; "Show all" shows every one.
+    // text; Copy as Markdown copies one; Open beside opens a passage it
+    // links to in the second pane; "Show all" shows every one.
     if let Some(edit) = closest_html(&target, ".note-edit") {
         return ask(Ask::NoteEdit {
             note_id: data(&edit, "note-id").unwrap_or_default(),
@@ -170,6 +191,9 @@ fn on_click(event: &MouseEvent) {
     if let Some(more) = closest_html(&target, ".note-more") {
         return ask(Ask::NoteMore(more));
     }
+    if let Some(beside) = closest(&target, "#selection-card .note-beside") {
+        return crate::note_links::open_beside(&beside);
+    }
     if let Some(copy) = closest_html(&target, "#selection-card .note-copy") {
         return ask(Ask::NoteCopy(number(&copy, "note-id").unwrap_or_default()));
     }
@@ -177,12 +201,16 @@ fn on_click(event: &MouseEvent) {
         return ask(Ask::ShowAll);
     }
     // A cross-reference chip in the card shows that passage in the card;
-    // its Go to button reads it, selected (Back returns).
+    // its Go to button reads it, selected (Back returns), and Open beside
+    // reads it in the second pane.
     if let Some(chip) = closest_html(&target, "#selection-card .xref-citation") {
         return ask(Ask::Xref(chip));
     }
     if let Some(go) = closest(&target, "#selection-card .xref-preview-go") {
         return jump_to(&go);
+    }
+    if let Some(beside) = closest(&target, "#selection-card .xref-preview-beside") {
+        return open_beside(&beside);
     }
     if closest(&target, THE_READERS).is_some() {
         return;

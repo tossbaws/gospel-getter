@@ -11,7 +11,7 @@
 //! never changed.
 
 use crate::dto::{SelectionNote, Verse, Xref};
-use crate::note_markdown::{Layout, note_html};
+use crate::note_markdown::{Layout, drawn_links, note_html};
 use crate::passage_reference::passage_reference;
 use crate::reader_text::{escape_html, footnote_html, verse_html};
 use crate::verse_parts::Footnote;
@@ -232,8 +232,8 @@ pub struct Preview<'a> {
     pub end: i64,
 }
 
-/// The preview's title, its verses (no note markers), its notice, and Go
-/// to.
+/// The preview's title, its verses (no note markers), its notice, Go to,
+/// and Open beside (the same passage in the second pane, S8).
 pub fn preview_html(preview: &Preview<'_>) -> String {
     let reference = escape_html(preview.reference);
     let verses = preview
@@ -262,15 +262,32 @@ pub fn preview_html(preview: &Preview<'_>) -> String {
         )
     };
     let s20 = " ".repeat(20);
-    format!(
-        "<p class=\"xref-preview-title\" id=\"xref-preview-title\">{reference} ({code})</p>\n{s20}{text}\n{s20}{notice}\n{s20}<button type=\"button\" class=\"xref-preview-go\" data-book=\"{book}\" data-chapter=\"{chapter}\" data-verse=\"{start}\" data-end-verse=\"{end}\">Go to {reference} <span aria-hidden=\"true\">→</span></button>",
-        code = escape_html(&preview.code.to_uppercase()),
+    let passage = format!(
+        "data-book=\"{book}\" data-chapter=\"{chapter}\" data-verse=\"{start}\" data-end-verse=\"{end}\"",
         book = preview.book_id,
         chapter = preview.chapter,
         start = preview.start,
         end = preview.end,
+    );
+    let beside = beside_label(&reference);
+    format!(
+        "<p class=\"xref-preview-title\" id=\"xref-preview-title\">{reference} ({code})</p>\n{s20}{text}\n{s20}{notice}\n{s20}<button type=\"button\" class=\"xref-preview-go\" {passage}>Go to {reference} <span aria-hidden=\"true\">→</span></button><button type=\"button\" class=\"xref-preview-beside\" {passage} aria-label=\"{beside}\" title=\"{beside}\">{BESIDE_ICON}{OPEN_BESIDE}</button>",
+        code = escape_html(&preview.code.to_uppercase()),
     )
 }
+
+/// What every way to open a passage in the second pane says (S8).
+pub const OPEN_BESIDE: &str = "Open beside";
+
+/// An Open beside button's name, saying where it goes ("Open Romans 5:8
+/// beside"), from `reference` as it's shown (escaped first, where it goes
+/// into markup).
+pub fn beside_label(reference: &str) -> String {
+    format!("Open {reference} beside")
+}
+
+/// The two columns drawn before the preview's Open beside.
+const BESIDE_ICON: &str = r#"<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><path d="M8 2.75v10.5"/></svg>"#;
 
 /// Said in the preview when the passage couldn't be read.
 pub fn preview_failed(reference: &str, failure: &str) -> String {
@@ -313,12 +330,13 @@ pub fn notes_html(notes: &[SelectionNote], error: &str, show_all: bool) -> Strin
                  {s32}<button type=\"button\" class=\"note-link note-more\" aria-expanded=\"false\" aria-controls=\"note-card-body-{id}\" hidden>more</button>\n\
                  {s32}<button type=\"button\" class=\"note-link note-edit\" data-note-id=\"{id}\" aria-label=\"Edit note on {reference}\">Edit</button>\n\
                  {s32}<button type=\"button\" class=\"note-link note-copy\" data-note-id=\"{id}\" aria-label=\"Copy the note on {reference} as Markdown\">Copy as Markdown</button>\n\
-                 {s28}</span>\n\
+                 {beside}{s28}</span>\n\
                  {s24}</article>",
                 id = n.id,
                 created = escape_html(&n.created_at),
                 display = escape_html(&n.created_at_display),
                 body = note_html(&n.body, &n.links, &[], Layout::Blocks),
+                beside = beside_links(&n.body, &n.links, &s32),
             )
         })
         .collect();
@@ -334,6 +352,27 @@ pub fn notes_html(notes: &[SelectionNote], error: &str, show_all: bool) -> Strin
         r#"<p class="verse-notes-title">Notes ({})</p>{cards}{all}"#,
         notes.len()
     )
+}
+
+/// The note row's Open beside, one for each passage the note links to
+/// (`note_markdown::drawn_links`), named for it: the way to a link's
+/// passage beside without Shift- or Alt-click (`note_links`). Each line
+/// indented by `indent`.
+fn beside_links(body: &str, links: &[crate::dto::NoteLink], indent: &str) -> String {
+    drawn_links(body, links)
+        .into_iter()
+        .map(|link| {
+            let verses = match (link.verse_start, link.verse_end) {
+                (Some(first), Some(last)) => format!(" data-start=\"{first}\" data-end=\"{last}\""),
+                _ => String::new(),
+            };
+            let label = beside_label(&escape_html(&link.reference));
+            format!(
+                "{indent}<button type=\"button\" class=\"note-link note-beside\" data-book=\"{}\" data-chapter=\"{}\"{verses} aria-label=\"{label}\" title=\"{label}\">{OPEN_BESIDE}</button>\n",
+                link.book_id, link.chapter,
+            )
+        })
+        .collect()
 }
 
 /// The passage the note editor quotes: its verses as this translation
@@ -956,7 +995,10 @@ mod tests {
         });
         assert_eq!(
             html,
-            "<p class=\"xref-preview-title\" id=\"xref-preview-title\">1 John 4:9–10 (KJV)</p>\n                    <p class=\"xref-preview-text\"><span class=\"xref-preview-verse\"><span class=\"xref-preview-num\">9</span>In this <em class=\"supplied\">was</em></span> <span class=\"xref-preview-verse\"><span class=\"xref-preview-num\">10</span>Herein is love</span></p>\n                    \n                    <button type=\"button\" class=\"xref-preview-go\" data-book=\"62\" data-chapter=\"4\" data-verse=\"9\" data-end-verse=\"10\">Go to 1 John 4:9–10 <span aria-hidden=\"true\">→</span></button>"
+            "<p class=\"xref-preview-title\" id=\"xref-preview-title\">1 John 4:9–10 (KJV)</p>\n                    <p class=\"xref-preview-text\"><span class=\"xref-preview-verse\"><span class=\"xref-preview-num\">9</span>In this <em class=\"supplied\">was</em></span> <span class=\"xref-preview-verse\"><span class=\"xref-preview-num\">10</span>Herein is love</span></p>\n                    \n                    <button type=\"button\" class=\"xref-preview-go\" data-book=\"62\" data-chapter=\"4\" data-verse=\"9\" data-end-verse=\"10\">Go to 1 John 4:9–10 <span aria-hidden=\"true\">→</span></button><button type=\"button\" class=\"xref-preview-beside\" data-book=\"62\" data-chapter=\"4\" data-verse=\"9\" data-end-verse=\"10\" aria-label=\"Open 1 John 4:9–10 beside\" title=\"Open 1 John 4:9–10 beside\">"
+                .to_owned()
+                + BESIDE_ICON
+                + "Open beside</button>"
         );
         let failed = preview_failed("Jude 1:3", "no such book");
         let html = preview_html(&Preview {
@@ -999,6 +1041,21 @@ mod tests {
             "<div class=\"note-card-body note-text\" id=\"note-card-body-5\"><p><strong>See</strong> \
              <a class=\"note-ref-link\" href=\"#\" data-book=\"45\" data-chapter=\"5\" data-start=\"8\" data-end=\"8\" title=\"Go to Romans 5:8\">Rom 5:8</a></p>\
              <ul><li>one</li></ul></div>"
+        ));
+        // A note's row offers each passage it links to beside.
+        let mut linked = note(6, "See Rom 5:8");
+        linked.links = vec![crate::dto::NoteLink {
+            start: 4,
+            end: 11,
+            book_id: 45,
+            chapter: 5,
+            verse_start: Some(8),
+            verse_end: Some(8),
+            reference: "Romans 5:8".to_string(),
+        }];
+        assert!(notes_html(&[linked], "", false).contains(
+            "Copy as Markdown</button>\n                                \
+             <button type=\"button\" class=\"note-link note-beside\" data-book=\"45\" data-chapter=\"5\" data-start=\"8\" data-end=\"8\" aria-label=\"Open Romans 5:8 beside\" title=\"Open Romans 5:8 beside\">Open beside</button>\n                            </span>"
         ));
         let all = notes_html(&notes, "", true);
         assert_eq!(all.matches("<article").count(), 4);

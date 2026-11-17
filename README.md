@@ -272,6 +272,7 @@ The main ones:
 | `T` | Open or close the translations and Compare (the translation button) |
 | `C` | Compare translations on/off |
 | `R` | Reading mode on/off (Esc also leaves it) |
+| F6 / Shift+F6 | Switch pane, with two passages open side by side |
 | Ctrl+= / Ctrl+- | Larger / smaller text, through the four sizes |
 | Ctrl+0 | Text size back to Medium |
 | Ctrl+B | Open or close the Library (bookmarks, highlights and notes) |
@@ -283,8 +284,8 @@ The main ones:
 The keys that work pressed on their own (`G`, `T`, `C`, `R`, `N`, `j`,
 `k`, `[`, `]`, `/` and `?`) can get in the way of speech input or a screen
 reader. **Single-key shortcuts** under **Aa** turns them off: those keys
-then do nothing, and the shortcuts with Ctrl or Alt, the arrow keys and Esc
-still work. With them off, Ctrl+K opens the search box and the command
+then do nothing, and the shortcuts with Ctrl or Alt, the arrow keys, F6 and
+Esc still work. With them off, Ctrl+K opens the search box and the command
 palette, and **Keyboard shortcuts** in the ☰ menu (or in the palette) lists
 every key, saying they're off. The switch is kept on this computer, not in
 backups.

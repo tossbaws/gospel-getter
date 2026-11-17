@@ -3,8 +3,10 @@
 //! ("see Rom 5:8", found by the backend) goes to its passage as Go to
 //! does: a step in the history, its verses selected, or its chapter from
 //! the top for a chapter alone; a verse this translation doesn't number
-//! opens its chapter, saying so (`reader::open`). From the Library, it
-//! closes first. A web link opens in the browser through the backend
+//! opens its chapter, saying so (`reader::open`). Shift-click or Alt-click
+//! opens it in the second pane instead (`reader::open_beside`, S8), as
+//! does the card's note row's Open beside for each of a note's references;
+//! from the Library, it closes first. A web link opens in the browser through the backend
 //! (`open_web_link`, which opens only `http` and `https`, and says why
 //! not otherwise); the page never follows one itself, as the webview
 //! would leave the app.
@@ -67,22 +69,45 @@ fn on_click(event: &MouseEvent, follow: bool) {
     if link.class_list().contains("note-web-link") {
         open_web_link(&link.get_attribute("href").unwrap_or_default());
     } else {
-        go_to(&link);
+        go_to(&link, event.shift_key() || event.alt_key());
     }
+}
+
+/// The card's note row's Open beside (`.note-beside`, which carries its
+/// reference's passage as the link does): the passage in the second pane.
+pub fn open_beside(button: &Element) {
+    go_to(button, true);
 }
 
 fn number(link: &Element, name: &str) -> Option<i64> {
     link.get_attribute(name)?.parse().ok()
 }
 
-/// A reference's passage, as Go to opens it.
-fn go_to(link: &Element) {
+/// A reference's passage, as Go to opens it, or `beside`, in the second
+/// pane, as `gospelGetterPanes.openBeside` opens it (S12, S13, D9).
+fn go_to(link: &Element, beside: bool) {
     let (Some(book_id), Some(chapter)) = (number(link, "data-book"), number(link, "data-chapter"))
     else {
         return;
     };
     if surfaces::current() == Some(Surface::Library) {
         surfaces::close(true);
+    }
+    if beside {
+        let verses = number(link, "data-start").zip(number(link, "data-end"));
+        let load = crate::reader::open_beside(
+            &crate::reader::OpenPassage {
+                book_id,
+                chapter,
+                verse_start: verses.map(|v| v.0),
+                verse_end: verses.map(|v| v.1),
+            },
+            None,
+        );
+        spawn_local(async move {
+            load.await;
+        });
+        return;
     }
     match (number(link, "data-start"), number(link, "data-end")) {
         (Some(start), Some(end)) => crate::reader::open(

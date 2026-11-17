@@ -35,7 +35,8 @@
 //! reader's note (70, `findings`); two passages side by side, each pane
 //! scrolling on its own and the keys scrolling the active one (75,
 //! `split`), and as tabs on a narrow window and in reading mode, each
-//! keeping its place (76, `split`); the app opened again while it's open,
+//! keeping its place (76, `split`), and Open beside from a cross-reference
+//! preview, F6 switching panes (78, `split`); the app opened again while it's open,
 //! the second launch handing over and exiting (73, `instance`); and, last,
 //! the plain-text fallback (44, `reader`);
 //! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
@@ -432,6 +433,7 @@ async fn shipped(
             checked!(PalettePageCommands, palette_page_commands),
             checked!(SplitPanes, split_panes),
             checked!(SplitTabs, split_tabs),
+            checked!(OpenBeside, open_beside),
             checked!(SingleKeys, single_key_switch),
         ];
         if let Some(check) = config.repeat.map(Repeat::check)

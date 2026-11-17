@@ -701,7 +701,8 @@ pub fn palette_state() -> PaletteState {
 /// Runs `command`, one of the palette's commands that `page` runs (see
 /// `palette::Run::Page`): `copy-chapter`, `copy-chapter-as`,
 /// `next-chapter`, `previous-chapter`, `next-book`, `previous-book`,
-/// `back`, `forward`, `shortcuts`, `export-notes` (the Export notes dialog)
+/// `back`, `forward`, `open-beside`, `switch-pane`, `close-second`,
+/// `shortcuts`, `export-notes` (the Export notes dialog)
 /// and `export-data` (the backup; neither by way of ☰'s chooser), within
 /// the click or key that chose it (copying needs that), after the box has
 /// closed and focus has gone back.
@@ -719,6 +720,13 @@ pub fn run_command(command: &str) {
         "previous-book" => keyboard::step_book(Which::Prev),
         "back" => keyboard::go_history(-1),
         "forward" => keyboard::go_history(1),
+        "open-beside" => spawn_local(async {
+            reader::open_here_beside().await;
+        }),
+        "switch-pane" => {
+            pane::switch();
+        }
+        "close-second" => pane::close_second(),
         "shortcuts" => open_shortcuts(None),
         // Straight to the dialog and the backup, not by way of ☰'s
         // chooser. The dialog gives focus to the page's focus home when it
