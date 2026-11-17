@@ -1883,9 +1883,12 @@
             margin-bottom: 0.35rem;
         }
 
+        /* Each row is its own grid, so a key column narrower than a row's
+           keys pushes that row's words out of line: 11rem fits the widest,
+           Switch pane's "F6 or Shift+F6 or P". */
         .shortcut-row {
             display: grid;
-            grid-template-columns: minmax(9rem, auto) 1fr;
+            grid-template-columns: minmax(11rem, auto) 1fr;
             gap: 0.2rem 1rem;
             align-items: baseline;
             padding: 0.25rem 0;
