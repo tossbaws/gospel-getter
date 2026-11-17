@@ -22,7 +22,9 @@
 //! A window narrower than `pane_text::BARS_QUERY` has no room for two
 //! panes side by side: they're tabs (S7), a tab list under the top bar
 //! naming each pane's place, and only the active pane shows, the top bar's
-//! own controls acting on it. Which panes are laid out is [`in_view`]; the
+//! own controls acting on it. Reading mode shows the active pane alone too,
+//! as its one centred column (D6); leaving it brings the other back. Which
+//! panes are laid out is [`in_view`]; the
 //! reading place logic (`surfaces`) keeps the place of a pane that goes
 //! out of view and puts it back as it comes into view.
 //!
@@ -52,8 +54,9 @@ use crate::bridge;
 use crate::dom::{self, by_id};
 use crate::keyboard;
 use crate::nav_text;
-use crate::pane_text::Shape;
-use crate::pane_text::{self as text, ScrollMove};
+use crate::pane_text::{self as text, ScrollMove, Shape};
+use crate::preferences;
+use crate::prefs;
 use crate::reader::{self, OpenPassage};
 use crate::reader_text::{self, PaneIds, Reference, Which};
 use crate::surfaces::{self, Surface};
@@ -368,12 +371,23 @@ pub fn shown() -> impl Iterator<Item = PaneId> {
 
 /// The panes aren't laid out as the window's width now calls for: two are
 /// open, and it has crossed `pane_text::BARS_QUERY` since they were.
+/// (Reading mode lays them out as it changes, `aa::set_reader_mode`.)
 pub fn reshape_due() -> bool {
-    split() && text::shape(split(), surfaces::two_across()) != SHAPE.get()
+    split() && due_shape() != SHAPE.get()
+}
+
+/// How the panes should be laid out now: by the window's width and reading
+/// mode.
+fn due_shape() -> Shape {
+    text::shape(
+        split(),
+        surfaces::two_across(),
+        prefs::on(&preferences::READER_MODE),
+    )
 }
 
 /// Every pane laid out on the page now, in order: both of two side by
-/// side, the active one alone as tabs. What the page shows, not what the
+/// side, the active one alone as tabs or in reading mode. What the page shows, not what the
 /// window's width now calls for: as the window crosses a width, the
 /// reading place logic finds each pane's place in the shape the reader
 /// saw, then changes it ([`sync_shape`]).
@@ -464,7 +478,7 @@ pub fn set_active(pane: PaneId) {
     crate::findings::pane_switched();
 }
 
-/// Lays the panes out as the window's width now calls for
+/// Lays the panes out as the window's width and reading mode now call for
 /// (`pane_text::shape`), and says on the page which is active: each
 /// column's `data-pane-active` (for its heading's rule), and, as tabs,
 /// `html[data-pane-tabs]` (the stylesheet's), the tab list shown, the
@@ -474,7 +488,7 @@ pub fn set_active(pane: PaneId) {
 /// goes to the active tab, or the reference button acting on the active
 /// pane.
 pub fn sync_shape() {
-    let shape = text::shape(split(), surfaces::two_across());
+    let shape = due_shape();
     let was = SHAPE.replace(shape);
     // The translation popover, opened from a bar that's going or from the
     // top bar's button as it goes.

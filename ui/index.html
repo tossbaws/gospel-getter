@@ -3908,21 +3908,51 @@
                 letter-spacing: 0.04em;
                 color: var(--text-dim);
             }
+
+            /* Reading mode with two panes open shows the active one alone
+               (pane.rs; the other is [hidden]), as reading mode's one
+               centred column, with no bar of its own. The column itself
+               spans the window, so the margin's notes (margin.rs, beside
+               the text) are inside what it scrolls, not cut off at its
+               edge. */
+            :root[data-split][data-reader-mode="on"] .container {
+                display: block;
+                max-width: none;
+            }
+
+            :root[data-split][data-reader-mode="on"] .pane {
+                margin-left: -1.5rem;
+                padding-left: 1.5rem;
+                border-left: none;
+                scroll-padding-top: 0;
+            }
+
+            :root[data-split][data-reader-mode="on"] .pane > .reader-notice,
+            :root[data-split][data-reader-mode="on"] .pane > [id^="reading-pane"] {
+                max-width: var(--reader-column);
+                margin-left: auto;
+                margin-right: auto;
+            }
+
+            :root[data-split][data-reader-mode="on"] .pane-bar {
+                display: none;
+            }
         }
 
         /* With the panes' bars there (two panes side by side), the top
            bar's own reference, arrows and translation button give way, and
            Back and Forward push the rest of the bar right, as the › did.
-           As tabs, they're back, acting on the active pane. */
+           As tabs, and in reading mode, they're back, acting on the active
+           pane. */
         @media screen {
-            :root[data-split]:not([data-pane-tabs]) #chapter-prev,
-            :root[data-split]:not([data-pane-tabs]) #ref-btn,
-            :root[data-split]:not([data-pane-tabs]) #chapter-next,
-            :root[data-split]:not([data-pane-tabs]) #translation-toggle {
+            :root[data-split]:not([data-pane-tabs]):not([data-reader-mode="on"]) #chapter-prev,
+            :root[data-split]:not([data-pane-tabs]):not([data-reader-mode="on"]) #ref-btn,
+            :root[data-split]:not([data-pane-tabs]):not([data-reader-mode="on"]) #chapter-next,
+            :root[data-split]:not([data-pane-tabs]):not([data-reader-mode="on"]) #translation-toggle {
                 display: none;
             }
 
-            :root[data-split]:not([data-pane-tabs]) .history-nav {
+            :root[data-split]:not([data-pane-tabs]):not([data-reader-mode="on"]) .history-nav {
                 margin-right: auto;
             }
         }

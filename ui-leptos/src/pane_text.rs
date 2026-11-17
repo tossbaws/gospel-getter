@@ -1,5 +1,6 @@
 //! The reading panes' words and rules, free of the DOM (`pane` puts them on
-//! the page): how two open panes are laid out ([`shape`]), what each pane's
+//! the page): how two open panes are laid out ([`shape`]: side by side,
+//! tabs, or reading mode's one column), what each pane's
 //! bar and the tabs are called, which tab an arrow key goes to, what
 //! Compare says while two panes are open, and how far the keys that scroll
 //! a page scroll a pane's own column, which the keyboard dispatcher does
@@ -25,12 +26,16 @@ pub enum Shape {
     /// Two, as tabs: only the active one shows, and the top bar's own
     /// reference, arrows and translation button act on it.
     Tabs,
+    /// Two, in reading mode: only the active one shows, as reading mode's
+    /// one centred column (D6), with neither bars nor tabs. Two columns and
+    /// their margins wouldn't fit, and the margin follows one chapter.
+    Reading,
 }
 
 impl Shape {
     /// Only the active pane shows.
     pub fn alone(self) -> bool {
-        self == Self::Tabs
+        matches!(self, Self::Tabs | Self::Reading)
     }
 
     /// The panes' bars show (and the top bar's own reference, arrows and
@@ -41,12 +46,13 @@ impl Shape {
 }
 
 /// How the panes are laid out: `split`, two open; `two_across`, the window
-/// [`BARS_QUERY`] wide.
-pub fn shape(split: bool, two_across: bool) -> Shape {
-    match (split, two_across) {
-        (false, _) => Shape::One,
-        (true, true) => Shape::SideBySide,
-        (true, false) => Shape::Tabs,
+/// [`BARS_QUERY`] wide; `reading`, reading mode on.
+pub fn shape(split: bool, two_across: bool, reading: bool) -> Shape {
+    match (split, two_across, reading) {
+        (false, _, _) => Shape::One,
+        (true, _, true) => Shape::Reading,
+        (true, true, false) => Shape::SideBySide,
+        (true, false, false) => Shape::Tabs,
     }
 }
 
@@ -229,13 +235,23 @@ mod tests {
 
     #[test]
     fn two_panes_are_tabs_below_the_bars_width() {
-        assert_eq!(shape(false, true), Shape::One);
-        assert_eq!(shape(false, false), Shape::One);
-        assert_eq!(shape(true, true), Shape::SideBySide);
-        assert_eq!(shape(true, false), Shape::Tabs);
+        assert_eq!(shape(false, true, false), Shape::One);
+        assert_eq!(shape(false, false, false), Shape::One);
+        assert_eq!(shape(true, true, false), Shape::SideBySide);
+        assert_eq!(shape(true, false, false), Shape::Tabs);
         assert!(Shape::Tabs.alone() && !Shape::Tabs.bars());
         assert!(!Shape::SideBySide.alone() && Shape::SideBySide.bars());
         assert!(!Shape::One.alone() && !Shape::One.bars());
+    }
+
+    #[test]
+    fn reading_mode_shows_the_active_pane_alone_at_any_width() {
+        for two_across in [true, false] {
+            assert_eq!(shape(true, two_across, true), Shape::Reading);
+            // One pane is reading mode as ever.
+            assert_eq!(shape(false, two_across, true), Shape::One);
+        }
+        assert!(Shape::Reading.alone() && !Shape::Reading.bars());
     }
 
     #[test]
