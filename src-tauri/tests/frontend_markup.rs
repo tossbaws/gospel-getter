@@ -5518,3 +5518,41 @@ fn ai_findings_have_their_own_violet_in_every_theme() {
         "the words shown are who found it and for what"
     );
 }
+
+/// The reading view's scroll position and the band of it in view are read
+/// and set only through `ui-leptos/src/pane.rs`'s `Scroller` (its header
+/// says why): no other piece calls the window's scroll APIs, or reads the
+/// window's height as the view's bottom. No piece scrolls the window for
+/// anything else, so nothing is let off; one that has to (a dialog, say)
+/// is named here with its reason.
+#[test]
+fn reading_view_scroll_stays_in_pane() {
+    const WINDOW_SCROLL: [&str; 9] = [
+        ".scroll_y()",
+        "scroll_to_with_",
+        "scroll_by_with_",
+        "scroll_with_",
+        "page_y_offset",
+        "inner_height",
+        "\"scrollY\"",
+        "\"pageYOffset\"",
+        "\"innerHeight\"",
+    ];
+    let pane = piece("pane.rs");
+    for call in [
+        ".scroll_y()",
+        "scroll_to_with_x_and_y",
+        "scroll_by_with_x_and_y",
+        "inner_height",
+    ] {
+        assert!(pane.contains(call), "the seam should make `{call}`");
+    }
+    for (file, source) in PIECES.iter().filter(|(file, _)| *file != "pane.rs") {
+        for call in WINDOW_SCROLL {
+            assert!(
+                !source.contains(call),
+                "{file} calls `{call}`: the reading view scrolls through pane::Scroller"
+            );
+        }
+    }
+}
