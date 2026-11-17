@@ -5,7 +5,11 @@
 //! Compare says while two panes are open, and how far the keys that scroll
 //! a page scroll a pane's own column, which the keyboard dispatcher does
 //! itself while the panes are split (no webview can be trusted to pick the
-//! right one of two scrolling columns when focus is on the page itself).
+//! right one of two scrolling columns when focus is on the page itself);
+//! and the second pane's place as this computer keeps it for the next
+//! launch ([`SECOND_PANE_KEY`]).
+
+use serde::{Deserialize, Serialize};
 
 /// While two panes are open, at least this wide, they sit side by side,
 /// each with its bar; narrower, they're tabs (S7). The stylesheet doesn't
@@ -151,6 +155,30 @@ pub fn scroll_move(key: ScrollKey, height: f64) -> ScrollMove {
         ScrollKey::Top => ScrollMove::Top,
         ScrollKey::Bottom => ScrollMove::Bottom,
     }
+}
+
+/// The second pane's place's key in local storage: kept on this computer
+/// only, as Recent places are (`nav_text::RECENT_KEY`), and in no backup or
+/// export (S9). It isn't one of the saved settings (`preferences`): the
+/// pre-paint script writes each of those to `<html>`, and checks it against
+/// a list of values, which a place isn't. `preferences::SPLIT` says whether
+/// the panes were split; this says where the second one was.
+pub const SECOND_PANE_KEY: &str = "gospel-getter-second-pane";
+
+/// Where the second pane is: its chapter, in its translation (by code,
+/// "kjv"), and, once the reader has a place in it, the verse at the top of
+/// its view and how far that verse's top is below its bar, as the backend
+/// keeps the first pane's (S15: the second's never goes there).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecondPlace {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub translation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verse: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<f64>,
 }
 
 #[cfg(test)]

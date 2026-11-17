@@ -19,7 +19,8 @@
 //! (`page`) ask it for chapters ([`start`], [`ask`]). With a second pane
 //! open beside the first (`pane`, [`open_beside`]), each pane has its own
 //! chapter, translation, loads and history, and the header says the active
-//! one's; only the first pane's place is saved (S15). A stale answer never
+//! one's; only the first pane's place is the backend's (S15), and the
+//! second's is kept on this computer (`pane::keep_place`). A stale answer never
 //! overwrites a newer one: each load has its token, each step back or
 //! forward its own, and a position is saved only for a chapter put on
 //! screen, in the order they were shown. What outlives a load has its own
@@ -57,6 +58,7 @@ use crate::nav::{self, Facts};
 use crate::nav_text::RecentPlace;
 use crate::palette::PaletteState;
 use crate::pane::{self, PaneId, PerPane};
+use crate::pane_text::SecondPlace;
 use crate::reader_text::{self as text, Disclosure, History, Opened, Place, Which};
 use crate::surfaces;
 
@@ -736,8 +738,16 @@ fn retry(pane: PaneId) {
 /// one wins. The first is sent now.
 fn save_position(pane: PaneId, position: Position) {
     // The place the backend keeps is the first pane's, and the second's is
-    // never sent (S15).
-    if pane != PaneId::First {
+    // never sent (S15): this computer keeps it, for the next launch (S9).
+    if pane == PaneId::Second {
+        pane::keep_place(&SecondPlace {
+            book_id: position.book_id,
+            chapter: position.chapter,
+            translation: position.translation_code.clone(),
+            verse: position.verse,
+            offset: position.offset,
+        });
+        with(pane, |s| s.last_sent = Some(position));
         return;
     }
     let first = with(pane, |s| {
@@ -792,9 +802,6 @@ const PLACE_SAVE_MS: i32 = 400;
 /// place logic keeps), if it's changed since the last save: so the next
 /// launch opens there. At the chapter's heading it's the chapter's top.
 fn save_place(pane: PaneId) {
-    if pane != PaneId::First {
-        return;
-    }
     with(pane, |s| {
         if let Some(timer) = s.place_timer.take()
             && let Some(window) = web_sys::window()
@@ -831,9 +838,6 @@ fn save_places() {
 /// A scroll: where the reader is is saved once the page has been still for
 /// [`PLACE_SAVE_MS`].
 fn save_place_soon(pane: PaneId) {
-    if pane != PaneId::First {
-        return;
-    }
     let timer = SAVE_PLACE.with(|save| dom::set_timeout(&save[pane], PLACE_SAVE_MS));
     let replaced = with(pane, |s| std::mem::replace(&mut s.place_timer, timer));
     dom::clear_timeout(replaced);

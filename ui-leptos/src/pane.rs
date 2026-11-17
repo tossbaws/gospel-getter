@@ -43,6 +43,7 @@ use std::cell::{Cell, RefCell};
 use std::ops::{Index, IndexMut};
 use std::rc::Rc;
 
+use serde::Serialize;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
@@ -54,7 +55,7 @@ use crate::bridge;
 use crate::dom::{self, by_id};
 use crate::keyboard;
 use crate::nav_text;
-use crate::pane_text::{self as text, ScrollMove, Shape};
+use crate::pane_text::{self as text, ScrollMove, SecondPlace, Shape};
 use crate::preferences;
 use crate::prefs;
 use crate::reader::{self, OpenPassage};
@@ -67,7 +68,8 @@ pub enum PaneId {
     /// The page's reading pane: the one the reader opens, whose place the
     /// backend saves.
     First,
-    /// The pane opened beside it. Its place is never saved (S15).
+    /// The pane opened beside it. Its place is never the backend's (S15):
+    /// this computer keeps it for the next launch ([`keep_place`]).
     Second,
 }
 
@@ -584,7 +586,8 @@ pub fn open_second() {
 /// Closes the second pane: the page is as it was before it opened, the
 /// first pane active, its place moved back to the window (the same verse
 /// at the same height), and focus on its reference button. Nothing of the
-/// second pane is kept.
+/// second pane is kept, here or for the next launch: `preferences::SPLIT`
+/// and its place ([`keep_place`]) are forgotten.
 pub fn close_second() {
     if !split() {
         return;
@@ -617,6 +620,7 @@ pub fn close_second() {
         SPLIT.set(false);
         prefs::apply(&preferences::SPLIT, preferences::SPLIT.fallback);
         prefs::forget(&preferences::SPLIT);
+        forget_place();
         sync_shape();
         surfaces::forget(PaneId::Second);
         reader::forget(PaneId::Second);
@@ -627,6 +631,32 @@ pub fn close_second() {
     crate::aa::split_changed();
     if let Some(reference) = by_id("ref-btn") {
         dom::focus(&reference);
+    }
+}
+
+// ---- The second pane's place, for the next launch.
+
+/// Keeps `place` as the second pane's for the next launch, on this computer
+/// only (`pane_text::SECOND_PANE_KEY`); quietly not, if local storage can't
+/// be written, as a setting isn't (`prefs::store`).
+pub fn keep_place(place: &SecondPlace) {
+    let Some(storage) = dom::storage() else {
+        return;
+    };
+    let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+    if let Ok(json) = place
+        .serialize(&serializer)
+        .map_err(JsValue::from)
+        .and_then(|value| js_sys::JSON::stringify(&value))
+    {
+        let _ = storage.set_item(text::SECOND_PANE_KEY, &String::from(json));
+    }
+}
+
+/// Forgets the second pane's place: it's closed.
+fn forget_place() {
+    if let Some(storage) = dom::storage() {
+        let _ = storage.remove_item(text::SECOND_PANE_KEY);
     }
 }
 
