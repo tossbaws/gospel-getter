@@ -23,11 +23,13 @@
 //! confirm button's label follow the add-or-replace choice within the
 //! change that made it.
 
+use std::cell::Cell;
+
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use wasm_bindgen::JsValue;
-use web_sys::{CustomEvent, KeyboardEvent, MouseEvent};
+use web_sys::{KeyboardEvent, MouseEvent};
 
 use crate::bridge;
 use crate::dom;
@@ -45,6 +47,17 @@ enum Shown {
         message: String,
         problems: Vec<String>,
     },
+}
+
+thread_local! {
+    /// The import, once it has mounted (`None` before: see `page`).
+    static IMPORT: Cell<Option<Import>> = const { Cell::new(None) };
+}
+
+/// ☰ → Import data…: the file is chosen, then previewed. Whether the
+/// import is there to begin.
+pub fn begin() -> bool {
+    IMPORT.get().map(Import::choose).is_some()
 }
 
 #[derive(Clone, Copy)]
@@ -400,10 +413,7 @@ impl Import {
     }
 
     fn listen(self) {
-        dom::on_document_event(bridge::IMPORT_EVENT, move |event: CustomEvent| {
-            event.prevent_default();
-            self.choose();
-        });
+        IMPORT.set(Some(self));
         dom::on_window_keydown(move |event: KeyboardEvent| self.on_keydown(event));
     }
 }

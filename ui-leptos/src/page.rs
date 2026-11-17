@@ -17,21 +17,27 @@
 //! surfaces (`surfaces`) mount in the same call as this, before any click
 //! or key can come. What can come before the rest of the pieces have
 //! mounted (`lib::mount_the_rest`) still says so: the sheet, the welcome,
-//! the import, the export chooser, Export notes, search and About.
+//! the import, the export chooser, Export notes, search and About. Each of
+//! those pieces keeps a handle to itself from its mount, `None` until then,
+//! and its call here answers whether it was there; a piece that wasn't is
+//! asked again from `lib`'s ready list where boot asked it (the Library's
+//! lists, the welcome's startup question, the picker's books, the launch
+//! check), and said to be unavailable where the reader asked.
 
 use std::cell::RefCell;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{HtmlButtonElement, HtmlElement, HtmlOptionElement, HtmlSelectElement};
 
 use crate::bridge;
-use crate::bridge::ExportFacts;
 use crate::card::{self, Ask};
 use crate::card_text::Slot;
 use crate::dom::{self, by_id};
 use crate::dto::PositionPreview;
+use crate::export_choice::{self, ExportFacts};
+use crate::export_notes::{self, OpenRequest};
 use crate::intent::{Claim, Generation};
 use crate::ipc;
 use crate::keyboard;
@@ -40,6 +46,7 @@ use crate::palette::{Choice, PaletteState};
 use crate::reader::{self, Request};
 use crate::reader_text::Which;
 use crate::surfaces;
+use crate::welcome::{self, StartRow, WelcomeRequest};
 
 #[derive(Default)]
 struct State {
@@ -173,10 +180,6 @@ fn request(name: &str, fields: &[(&str, &JsValue)]) -> bool {
     bridge::request(name, &detail)
 }
 
-fn element_or_null(el: Option<HtmlElement>) -> JsValue {
-    el.map_or(JsValue::NULL, JsValue::from)
-}
-
 // ---- The toast: export and import say how it went at the foot of the
 // window, and fade after a while (errors stay longer). It sits above the
 // update banner when that's showing.
@@ -279,9 +282,9 @@ fn export_facts() -> ExportFacts {
     })
 }
 
-/// Tells the chooser what changed ([`bridge::EXPORT_FACTS_EVENT`]).
+/// Tells the chooser what changed.
 fn send_export_facts() {
-    bridge::dispatch(bridge::EXPORT_FACTS_EVENT, &export_facts());
+    export_choice::set_facts(export_facts());
 }
 
 // ---- Back up or move your data. The native file dialogs, file access and
@@ -364,15 +367,7 @@ pub fn export_data() {
 /// ☰ → Export data…: the chooser, Everything (the backup) or My notes (the
 /// Export notes dialog); focus goes back to `return_focus`.
 fn open_export_choice(return_focus: Option<HtmlElement>) {
-    let Ok(facts) = ipc::args(&export_facts()) else {
-        return;
-    };
-    let _ = js_sys::Reflect::set(
-        &facts,
-        &JsValue::from_str("returnFocus"),
-        &element_or_null(return_focus),
-    );
-    if !bridge::request(bridge::EXPORT_CHOICE_EVENT, &facts) {
+    if !export_choice::open(export_facts(), return_focus) {
         set_data_status(text::EXPORT_UNAVAILABLE, true);
     }
 }
@@ -386,29 +381,13 @@ pub fn open_export_notes(return_focus: Option<HtmlElement>) {
         return;
     }
     let code = bridge::translation_code();
-    let book_id = card::facts().chapter.map(|c| c.book_id);
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Open<'a> {
-        note_count: u32,
-        book_id: Option<i64>,
-        translation_code: &'a str,
-        translation_name: &'a str,
-    }
-    let Ok(detail) = ipc::args(&Open {
-        note_count: notes,
-        book_id,
-        translation_code: &code,
-        translation_name: &reader::translation_name(&code),
-    }) else {
-        return;
+    let request = OpenRequest {
+        note_count: u64::from(notes),
+        book_id: card::facts().chapter.map(|c| c.book_id),
+        translation_name: reader::translation_name(&code),
+        translation_code: code,
     };
-    let _ = js_sys::Reflect::set(
-        &detail,
-        &JsValue::from_str("returnFocus"),
-        &element_or_null(return_focus),
-    );
-    if !bridge::request(bridge::OPEN_EVENT, &detail) {
+    if !export_notes::open(request, return_focus) {
         set_data_status(text::EXPORT_NOTES_UNAVAILABLE, true);
     }
 }
@@ -439,7 +418,7 @@ pub fn modal_holds(claim: Claim) -> bool {
 /// ☰ → Import data…: the import preview runs the open dialog, the preview
 /// and the import, and says how it's going.
 fn import_data() {
-    if !bridge::request(bridge::IMPORT_EVENT, &JsValue::NULL) {
+    if !crate::import_preview::begin() {
         set_data_status(text::IMPORT_UNAVAILABLE, true);
     }
 }
@@ -548,22 +527,26 @@ pub fn set_start_here(start_here: JsValue) {
     with(|s| s.start_here = Some(start_here));
 }
 
-fn start_here() -> JsValue {
-    with(|s| s.start_here.clone()).unwrap_or_else(|| js_sys::Array::new().into())
-}
-
-fn ask_welcome(fields: &[(&str, &JsValue)]) -> bool {
-    request(bridge::WELCOME_EVENT, fields)
+/// Boot's places to start, as the welcome lists them (none, if they can't
+/// be read: that's logged).
+fn start_here() -> Option<Vec<StartRow>> {
+    let start_here = with(|s| s.start_here.clone()).unwrap_or_else(|| js_sys::Array::new().into());
+    serde_wasm_bindgen::from_value(start_here)
+        .map_err(|e| ipc::log_error("The welcome request couldn't be read", &JsValue::from(e)))
+        .ok()
 }
 
 /// ☰ → Show welcome; focus goes back to `return_focus`.
 fn open_welcome(return_focus: Option<HtmlElement>) {
-    let asked = ask_welcome(&[
-        ("startup", &JsValue::FALSE),
-        ("startHere", &start_here()),
-        ("returnFocus", &element_or_null(return_focus)),
-    ]);
-    if !asked {
+    let Some(start_here) = start_here() else {
+        return;
+    };
+    let request = WelcomeRequest {
+        startup: false,
+        install: None,
+        start_here,
+    };
+    if !welcome::request(request, return_focus) {
         set_data_status(text::WELCOME_UNAVAILABLE, true);
     }
 }
@@ -577,35 +560,24 @@ pub fn ask_welcome_at_startup(home: &JsValue) {
     let has_saved_position = js_sys::Reflect::get(home, &JsValue::from_str("hasSavedPosition"))
         .is_ok_and(|v| v.is_truthy());
     let notes = with(|s| s.notes);
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Install {
-        has_saved_position: bool,
-        bookmarks_loaded: bool,
-        bookmarks: usize,
-        highlights_loaded: bool,
-        highlights: usize,
-        notes_loaded: bool,
-        notes: u32,
-    }
-    let Ok(install) = ipc::args(&Install {
+    let install = crate::install::Install {
         has_saved_position,
         bookmarks_loaded: facts.bookmarks_loaded,
-        bookmarks: facts.bookmarks,
+        bookmarks: facts.bookmarks as u64,
         highlights_loaded: facts.highlights_loaded,
-        highlights: facts.highlights,
+        highlights: facts.highlights as u64,
         notes_loaded: notes.is_some(),
-        notes: notes.unwrap_or(0),
-    }) else {
+        notes: u64::from(notes.unwrap_or(0)),
+    };
+    let Some(start_here) = start_here() else {
         return;
     };
-    let asked = ask_welcome(&[
-        ("startup", &JsValue::TRUE),
-        ("install", &install),
-        ("startHere", &start_here()),
-        ("returnFocus", &JsValue::NULL),
-    ]);
-    if !asked {
+    let request = WelcomeRequest {
+        startup: true,
+        install: Some(install),
+        start_here,
+    };
+    if !welcome::request(request, None) {
         with(|s| s.welcome_waiting = Some(home.clone()));
     }
 }
@@ -637,10 +609,7 @@ pub fn open_shortcuts(opener: Option<HtmlElement>) {
     }
     let return_focus = opener.or_else(focused);
     modal_opening(true);
-    if !request(
-        bridge::SHORTCUTS_EVENT,
-        &[("returnFocus", &element_or_null(return_focus))],
-    ) {
+    if !crate::shortcuts::open(return_focus) {
         set_data_status(text::SHORTCUTS_UNAVAILABLE, true);
     }
 }
@@ -747,7 +716,7 @@ pub fn run_command(command: &str) {
 
 /// Asks the updater for its quiet launch check.
 pub fn ask_update_check() {
-    let asked = bridge::request(bridge::LAUNCH_CHECK_EVENT, &JsValue::NULL);
+    let asked = crate::updates::launch_check();
     with(|s| s.update_check_waiting = !asked);
 }
 

@@ -278,22 +278,16 @@ fn show_translations(home: &Home) {
     }
     show_translation();
     let credits: Vec<String> = home.translations.iter().map(|t| t.credit.clone()).collect();
-    send_credits(&credits);
+    if !credits.is_empty() {
+        crate::about::show_credits(credits.clone());
+    }
     with(|s| s.credits = credits);
 }
 
-/// About's credits, to About (which may not be there yet: they go again
-/// once every piece is, [`on_ready`]).
-fn send_credits(credits: &[String]) {
-    if !credits.is_empty() {
-        bridge::dispatch(bridge::ABOUT_CREDITS_EVENT, &Credits { credits });
-    }
-}
-
-/// About's credits, each bundled text's, in order.
-#[derive(Serialize)]
-struct Credits<'a> {
-    credits: &'a [String],
+/// Each bundled translation's credit, in order, from boot (none before):
+/// About takes them as it mounts.
+pub fn credits() -> Vec<String> {
+    with(|s| s.credits.clone())
 }
 
 // ---- Putting a chapter on screen.
@@ -1323,12 +1317,10 @@ fn on_click(event: &MouseEvent) {
     }
 }
 
-/// Every piece has mounted (`lib`'s ready list): About and the picker,
-/// mounted after this, hear its credits and the chapter on screen again.
+/// Every piece has mounted (`lib`'s ready list): the picker, mounted after
+/// this, hears the chapter on screen again.
 pub fn on_ready() {
-    let (credits, here) = with(|s| (s.credits.clone(), s.reading.clone()));
-    send_credits(&credits);
-    if let Some(here) = here {
+    if let Some(here) = with(|s| s.reading.clone()) {
         bridge::show_picker_current(here.book_id, here.chapter);
     }
 }

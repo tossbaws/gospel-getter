@@ -13,18 +13,48 @@
 //! buttons do), and Tab stays inside. Opened at startup, closing gives the
 //! keyboard back to the page; opened from ☰, focus goes back there.
 
+use std::cell::Cell;
+
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use wasm_bindgen::JsCast;
-use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent, MouseEvent};
+use web_sys::{Element, HtmlElement, KeyboardEvent, MouseEvent};
 
-use crate::bridge::{self, StartRow, WelcomeRequest};
+use crate::bridge;
 use crate::dom;
-use crate::install;
+use crate::install::{self, Install};
 
 /// The two looks, in order: the theme each applies and its name.
 const LOOKS: [(&str, &str); 2] = [("chi-rho", "Chi Rho"), ("vellum", "Vellum")];
+
+/// What the welcome is told.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WelcomeRequest {
+    /// Asked at the end of boot: open only for a fresh install.
+    pub startup: bool,
+    /// What boot loaded, for the rule (with `startup`).
+    pub install: Option<Install>,
+    /// The places to start, the backend's `startHere` list.
+    pub start_here: Vec<StartRow>,
+}
+
+/// One place to start: a book (or a chapter) and a line about it.
+pub use crate::wire::StartHereDto as StartRow;
+
+thread_local! {
+    /// The welcome, once it has mounted (`None` before: see `page`).
+    static WELCOME: Cell<Option<Welcome>> = const { Cell::new(None) };
+}
+
+/// The page's request ([`WelcomeRequest`]); closing it gives focus back to
+/// `return_to`. Whether the welcome is there to be asked.
+pub fn request(request: WelcomeRequest, return_to: Option<HtmlElement>) -> bool {
+    WELCOME
+        .get()
+        .map(|welcome| welcome.request(request, return_to))
+        .is_some()
+}
 
 #[derive(Clone, Copy)]
 struct Welcome {
@@ -193,13 +223,7 @@ impl Welcome {
     }
 
     fn listen(self) {
-        dom::on_document_event(bridge::WELCOME_EVENT, move |event: CustomEvent| {
-            event.prevent_default();
-            match bridge::welcome_request(&event) {
-                Ok(request) => self.request(request, bridge::return_focus(&event)),
-                Err(e) => crate::ipc::log_error("The welcome request couldn't be read", &e),
-            }
-        });
+        WELCOME.set(Some(self));
         dom::on_window_keydown(move |event: KeyboardEvent| self.on_keydown(event));
     }
 }

@@ -2,9 +2,9 @@
 //! (backup)" is the backup (`page`'s `export_data`), and "My notes" opens
 //! the Export notes dialog (`export_notes`). My notes is greyed out, saying
 //! why, while there are no notes, and Everything while an export or import
-//! runs: the page's own facts ([`bridge::ExportFacts`]), as it said them
-//! when the chooser was asked for and whenever they change
-//! ([`bridge::EXPORT_FACTS_EVENT`]). The command palette's Export notes…
+//! runs: the page's own facts ([`ExportFacts`]), as it said them when the
+//! chooser was asked for ([`open`]) and whenever they change
+//! ([`set_facts`]). The command palette's Export notes…
 //! and Export data… don't come here: they run the two directly.
 //!
 //! A small modal, as the page's others: while open it has the keyboard (a
@@ -14,15 +14,26 @@
 //! it, or choosing, gives focus back to ☰ (or the page's focus home); My
 //! notes' dialog gives it back there too when it closes.
 
+use std::cell::Cell;
+
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use wasm_bindgen::JsCast;
-use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent, MouseEvent};
+use web_sys::{Element, HtmlElement, KeyboardEvent, MouseEvent};
 
-use crate::bridge::{self, ExportFacts};
+use crate::bridge;
 use crate::dom::{self, focus};
 use crate::page;
+
+/// What the export chooser needs of the page: whether there are notes to
+/// export (My notes), and whether an export or import is running
+/// (Everything waits for it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ExportFacts {
+    pub notes: bool,
+    pub busy: bool,
+}
 
 /// The chooser's title.
 pub const TITLE: &str = "Export";
@@ -68,6 +79,28 @@ pub fn step(at: Option<usize>, len: usize, down: bool) -> Option<usize> {
         (Some(i), true) => (i + 1) % len,
         (Some(i), false) => (i + len - 1) % len,
     })
+}
+
+thread_local! {
+    /// The chooser, once it has mounted (`None` before: see `page`).
+    static CHOOSER: Cell<Option<Chooser>> = const { Cell::new(None) };
+}
+
+/// Opens the chooser with the page's `facts`; closing it gives focus back
+/// to `return_to`. Whether the chooser is there to open.
+pub fn open(facts: ExportFacts, return_to: Option<HtmlElement>) -> bool {
+    CHOOSER
+        .get()
+        .map(|chooser| chooser.open(facts, return_to))
+        .is_some()
+}
+
+/// The page's facts have changed: an open chooser follows them (one opened
+/// later is given them as it opens).
+pub fn set_facts(facts: ExportFacts) {
+    if let Some(chooser) = CHOOSER.get() {
+        chooser.facts.set(facts);
+    }
 }
 
 /// The chooser's state and the elements it reaches for.
@@ -190,19 +223,7 @@ impl Chooser {
     }
 
     fn listen(self) {
-        dom::on_document_event(bridge::EXPORT_CHOICE_EVENT, move |event: CustomEvent| {
-            // Handled, whatever happens next: the chooser is here.
-            event.prevent_default();
-            match bridge::detail::<ExportFacts>(&event) {
-                Ok(facts) => self.open(facts, bridge::return_focus(&event)),
-                Err(e) => crate::ipc::log_error("The export request couldn't be read", &e),
-            }
-        });
-        dom::on_document_event(bridge::EXPORT_FACTS_EVENT, move |event: CustomEvent| {
-            if let Ok(facts) = bridge::detail::<ExportFacts>(&event) {
-                self.facts.set(facts);
-            }
-        });
+        CHOOSER.set(Some(self));
         dom::on_window_keydown(move |event: KeyboardEvent| self.on_keydown(event));
     }
 }

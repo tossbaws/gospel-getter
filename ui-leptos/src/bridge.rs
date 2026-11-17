@@ -72,43 +72,6 @@ use web_sys::{CustomEvent, CustomEventInit, Document, HtmlElement};
 
 use crate::palette::PaletteState;
 
-/// ☰ → Export data… asks its chooser to open (`page`): a cancelable
-/// `CustomEvent` whose `detail` is the page's [`ExportFacts`] now, plus
-/// `returnFocus` (☰).
-pub const EXPORT_CHOICE_EVENT: &str = "gospel-getter:export-choice";
-
-/// Whether there are notes, or an export or import is running, changed: a
-/// `CustomEvent` whose `detail` is the page's [`ExportFacts`] now (`page`).
-/// The chooser follows it.
-pub const EXPORT_FACTS_EVENT: &str = "gospel-getter:export-facts";
-
-/// What the export chooser needs of the page: whether there are notes to
-/// export (My notes), and whether an export or import is running
-/// (Everything waits for it).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct ExportFacts {
-    pub notes: bool,
-    pub busy: bool,
-}
-
-/// The Export notes dialog is asked to open (the chooser's My notes, the
-/// palette's Export notes…; `page`): a cancelable `CustomEvent` whose
-/// `detail` is an [`OpenRequest`] plus `returnFocus`.
-pub const OPEN_EVENT: &str = "gospel-getter:export-notes";
-
-/// What the dialog needs, taken when it's asked for: how many notes there
-/// are (none: nothing to export), the book being read (ticked first, if it
-/// has notes), and the translation whose text the file quotes (the one
-/// chosen with the translation button).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OpenRequest {
-    pub note_count: u64,
-    pub book_id: Option<i64>,
-    pub translation_code: String,
-    pub translation_name: String,
-}
-
 /// The page's document, when there is one (there always is in the webview;
 /// this crate never assumes it).
 pub fn document() -> Option<Document> {
@@ -149,17 +112,6 @@ pub fn focus_home() {
         let _ = target.focus();
     }
 }
-
-/// `document.createElement` et al. are not needed; this reads an event's
-/// `detail` as an [`OpenRequest`], or says what was wrong with it.
-pub fn open_request(event: &CustomEvent) -> Result<OpenRequest, JsValue> {
-    serde_wasm_bindgen::from_value(event.detail()).map_err(|e| JsValue::from(e.to_string()))
-}
-
-/// The shortcuts sheet is asked to open (`?`, ☰ → Keyboard shortcuts, the
-/// palette's command; `page`): a cancelable `CustomEvent` whose `detail` is
-/// `{ returnFocus }` (see [`return_focus`]).
-pub const SHORTCUTS_EVENT: &str = "gospel-getter:shortcuts";
 
 /// Puts the table of shortcuts at `window.gospelGetterShortcuts`, for the
 /// frontend tests and the GUI checks: an array of
@@ -209,32 +161,6 @@ pub fn dispatch(name: &str, detail: &impl Serialize) {
 /// before the modal takes focus (`page`).
 pub fn modal_opening(close_search: bool) {
     crate::page::modal_opening(close_search);
-}
-
-/// The welcome is asked to open (`page`): a cancelable `CustomEvent` whose
-/// `detail` is a [`WelcomeRequest`] plus `returnFocus`. At the end of boot
-/// it is a question (`startup`, with the facts the fresh-install rule needs;
-/// the welcome opens only for a fresh install); from ☰ → Show welcome it
-/// opens. Either way the welcome cancels it to say it has it.
-pub const WELCOME_EVENT: &str = "gospel-getter:welcome";
-
-/// What the welcome is told.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WelcomeRequest {
-    /// Asked at the end of boot: open only for a fresh install.
-    pub startup: bool,
-    /// What boot loaded, for the rule (with `startup`).
-    pub install: Option<crate::install::Install>,
-    /// The places to start, the backend's `startHere` list.
-    pub start_here: Vec<StartRow>,
-}
-
-/// One place to start: a book (or a chapter) and a line about it.
-pub use crate::wire::StartHereDto as StartRow;
-
-pub fn welcome_request(event: &CustomEvent) -> Result<WelcomeRequest, JsValue> {
-    detail(event)
 }
 
 /// Aa's record of the theme: `#theme-select`, a hidden `<select>`. The
@@ -294,10 +220,6 @@ pub fn welcome_seen() {
         let _ = storage.set_item(WELCOME_KEY, "seen");
     }
 }
-
-/// The import is asked to begin (☰ → Import data…, `page`): a cancelable
-/// `CustomEvent`, no `detail`. The import cancels it to say it has it.
-pub const IMPORT_EVENT: &str = "gospel-getter:import";
 
 /// An import has changed the reader's data: what's shown of it is reloaded,
 /// in order: the chapter at `position` (or none, to stay put), then the
@@ -424,11 +346,6 @@ pub fn note_done(action: &str, note: &JsValue) {
     }
 }
 
-/// Boot is done: run the quiet launch check, unless it's turned off
-/// ([`launch_check_on`]). A cancelable `CustomEvent` on `document`, no
-/// `detail`; the updater cancels it to say it has it.
-pub const LAUNCH_CHECK_EVENT: &str = "gospel-getter:update-check";
-
 /// Whether the launch check is on: `html[data-update-check]` isn't `off`
 /// (the pre-paint script applies the stored setting there before the page
 /// draws, and `aa` keeps it).
@@ -436,19 +353,6 @@ pub fn launch_check_on() -> bool {
     document()
         .and_then(|d| d.document_element())
         .is_none_or(|html| html.get_attribute("data-update-check").as_deref() != Some("off"))
-}
-
-/// The reader has the bundled texts' credits for About: a `CustomEvent`
-/// whose `detail` is `{ credits }`, each translation's credit in order.
-pub const ABOUT_CREDITS_EVENT: &str = "gospel-getter:about-credits";
-
-#[derive(Debug, Deserialize)]
-struct Credits {
-    credits: Vec<String>,
-}
-
-pub fn about_credits(event: &CustomEvent) -> Result<Vec<String>, JsValue> {
-    detail::<Credits>(event).map(|c| c.credits)
 }
 
 /// A header surface closed (`surfaces`): `{ name }` ("about", "menu",

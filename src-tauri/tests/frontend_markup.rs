@@ -5201,7 +5201,7 @@ fn every_handled_key_is_in_the_shortcuts_table() {
     // page's request to open says only where focus goes back to), and
     // lists each group's rows.
     let open = block_after(piece("page.rs"), "pub fn open_shortcuts(");
-    assert!(open.contains(r#"&[("returnFocus", &element_or_null(return_focus))],"#));
+    assert!(open.contains("crate::shortcuts::open(return_focus)"));
     let sheet = piece("shortcuts.rs");
     assert!(sheet.contains("shortcut_table::GROUPS"));
     assert!(sheet.contains("shortcut_table::in_group(group)"));
