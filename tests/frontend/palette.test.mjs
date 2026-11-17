@@ -147,7 +147,7 @@ test('">" lists commands only, without searching', () =>
         await type(app, '> theme ma');
         assert.deepEqual(commandLabels(app), ['Theme: Matrix']);
         await type(app, '>');
-        assert.equal(commandLabels(app).length, 45);
+        assert.equal(commandLabels(app).length, 46);
         assert.equal(commandLabels(app)[0], 'Compare on');
         assert.equal(commandLabels(app).at(-1), 'Keyboard shortcuts');
         await type(app, '>nothing like this');

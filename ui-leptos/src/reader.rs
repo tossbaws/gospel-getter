@@ -1187,6 +1187,7 @@ pub fn palette_facts(state: &mut PaletteState) {
     };
     state.next_chapter = has("data-next-book");
     state.previous_chapter = has("data-prev-book");
+    state.split = pane::split();
     with(pane, |s| {
         let dto = s.last_dto.as_ref();
         state.next_book = dto.is_some_and(|d| d.next_book.is_some());
@@ -1518,6 +1519,34 @@ pub fn open_beside(passage: &OpenPassage, code: Option<String>) -> Load {
         }
         if with(pane, |s| s.reading.is_some()) && !with(pane, |s| s.history.started()) {
             start_history(pane);
+        }
+        loaded
+    })
+}
+
+/// The palette's "Open this passage beside": the active pane's chapter
+/// opened in the second pane ([`open_beside`], in the active pane's
+/// translation), with the verse at the top of the active pane's view put
+/// at the top of the second's, as far below its bar. Its end is the load's.
+pub fn open_here_beside() -> Load {
+    let from = pane::active();
+    let Some((book_id, chapter)) =
+        with(from, |s| s.reading.as_ref().map(|r| (r.book_id, r.chapter)))
+    else {
+        return Box::pin(async { false });
+    };
+    let top = surfaces::top_verse(from, &pane::code(from));
+    let passage = OpenPassage {
+        book_id,
+        chapter,
+        verse_start: None,
+        verse_end: None,
+    };
+    let load = open_beside(&passage, None);
+    Box::pin(async move {
+        let loaded = load.await;
+        if let (true, Some((verse, offset))) = (loaded, top) {
+            reopen_at(PaneId::Second, verse, Some(offset));
         }
         loaded
     })
