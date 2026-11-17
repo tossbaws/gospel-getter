@@ -99,6 +99,11 @@ fn on_click(event: &MouseEvent) {
     let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else {
         return;
     };
+    // A click in a pane is for that pane (D8): a click from the keyboard
+    // has no press to have made it active.
+    if let Some(pane) = pane::of(&target) {
+        pane::set_active(pane);
+    }
     let ask = |what: Ask| {
         card::ask(what);
     };

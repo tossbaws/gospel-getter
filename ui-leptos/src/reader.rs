@@ -16,7 +16,10 @@
 //! The selection card (`card`) hears each chapter loading and shown, and
 //! each passage to select, from here; boot (`boot`), the keyboard
 //! (`keyboard`), the click dispatcher (`clicks`) and the page's glue
-//! (`page`) ask it for chapters ([`start`], [`ask`]). A stale answer never
+//! (`page`) ask it for chapters ([`start`], [`ask`]). With a second pane
+//! open beside the first (`pane`, [`open_beside`]), each pane has its own
+//! chapter, translation, loads and history, and the header says the active
+//! one's; only the first pane's place is saved (S15). A stale answer never
 //! overwrites a newer one: each load has its token, each step back or
 //! forward its own, and a position is saved only for a chapter put on
 //! screen, in the order they were shown. What outlives a load has its own
@@ -240,7 +243,7 @@ fn set_disclosure(kind: Disclosure, open: bool) {
 // ---- What the header says.
 
 /// The translation button: the translation being read by its code, named
-/// in full.
+/// in full (the active pane's); and each pane's bar's, its own.
 fn show_translation() {
     let code = bridge::translation_code();
     let (label, name) = text::translation_button(&code, &translation_name(&code));
@@ -248,17 +251,35 @@ fn show_translation() {
         toggle.set_text_content(Some(&label));
         let _ = toggle.set_attribute("aria-label", &name);
     }
+    for pane in pane::shown().filter(|_| pane::split()) {
+        let code = pane::code(pane);
+        let (label, name) = text::translation_button(&code, &translation_name(&code));
+        pane::show_translation(pane, &label, &name);
+    }
 }
 
-/// The reference button and the window title (which the backend copies to
-/// the window) say where the reader is: the chapter, in each translation on
-/// screen.
-fn update_reference(here: &Here, compare: Option<&Compare>) {
+/// The chapter on screen as the reference button says it: the chapter, in
+/// each translation on screen.
+fn reference_of(here: &Here, compare: Option<&Compare>) -> text::Reference {
     let codes: Vec<&str> = match compare {
         Some(compare) => compare.columns.iter().map(|c| c.code.as_str()).collect(),
         None => vec![here.translation_code.as_str()],
     };
-    let reference = text::reference(&here.book_name, here.chapter, &codes, translation_name);
+    text::reference(&here.book_name, here.chapter, &codes, translation_name)
+}
+
+/// `pane`'s bar says where the reader is in it, as the reference button
+/// does (two panes open).
+fn show_bar_reference(pane: PaneId, here: &Here, compare: Option<&Compare>) {
+    let reference = reference_of(here, compare);
+    pane::show_reference(pane, &text::reference_markup(&reference), &reference.label);
+}
+
+/// The reference button and the window title (which the backend copies to
+/// the window) say where the reader is in the active pane (D13): the
+/// chapter, in each translation on screen.
+fn update_reference(here: &Here, compare: Option<&Compare>) {
+    let reference = reference_of(here, compare);
     if let Some(ref_text) = by_id("ref-text") {
         // The translations apart, which a narrow window leaves out (the
         // translation button says it).
@@ -346,11 +367,19 @@ fn render_current(pane: PaneId) {
         (None, Beside::Notes) => text::Beside::Notes { name: &name },
         (None, _) => text::Beside::Nothing,
     };
+    // The faded neighbors give way while two panes share the window (D7).
+    let neighbours = if pane::split() {
+        text::Neighbours::Omit
+    } else {
+        text::Neighbours::Draw
+    };
     root.set_inner_html(&text::reading_pane(
         &dto,
         beside,
         &here.translation_code,
         opened(),
+        pane.ids(),
+        neighbours,
     ));
     // The grid's column count goes through the CSSOM, not a style attribute
     // in the markup, which the Content Security Policy would block.
@@ -364,7 +393,11 @@ fn render_current(pane: PaneId) {
         let _ = grid.style().set_property("--compare-columns", &count);
     }
     with(pane, |s| s.columns = columns);
-    update_reference(&here, compare.as_deref());
+    show_bar_reference(pane, &here, compare.as_deref());
+    // The top bar and the window's title say the active pane's (D13).
+    if pane == pane::active() {
+        update_reference(&here, compare.as_deref());
+    }
     crate::picker::show_current(pane, here.book_id, here.chapter);
     show_nav(pane);
     card::shown(pane, dto, compare, &here.translation_code, compare_first);
@@ -385,7 +418,11 @@ fn show_nav(pane: PaneId) {
         prev: s.last_dto.as_ref().and_then(|d| side(d.prev.as_ref())),
         next: s.last_dto.as_ref().and_then(|d| side(d.next.as_ref())),
     });
-    nav::show(facts);
+    pane::show_steps(pane, facts.prev.as_deref(), facts.next.as_deref());
+    // The bar's say the active pane's (D11).
+    if pane == pane::active() {
+        nav::show(facts);
+    }
 }
 
 /// `place`, read in `translation_code`, as a recent place.
@@ -494,7 +531,7 @@ fn send_load(pane: PaneId, book_id: i64, chapter: i64, sent: Option<Sent>) -> Lo
         s.load_token
     });
     card::loading(pane);
-    let translation_code = bridge::translation_code();
+    let translation_code = pane::code(pane);
     let layout = compare_layout();
     let reading = match sent {
         Some(sent) => Ok(sent),
@@ -577,7 +614,7 @@ fn answered(
     // The translation was switched (`Request::Translation`), or Compare
     // (or its translations), on the way: what came back is for the old
     // one, so it's asked for again.
-    if bridge::translation_code() != translation_code || compare_layout() != layout {
+    if pane::code(pane) != translation_code || compare_layout() != layout {
         return Outcome::Again;
     }
     with(pane, |s| s.asked = None);
@@ -699,6 +736,11 @@ fn retry(pane: PaneId) {
 /// it, so they reach the backend in the order they were made and the last
 /// one wins. The first is sent now.
 fn save_position(pane: PaneId, position: Position) {
+    // The place the backend keeps is the first pane's, and the second's is
+    // never sent (S15).
+    if pane != PaneId::First {
+        return;
+    }
     let first = with(pane, |s| {
         s.last_sent = Some(position.clone());
         s.waiting = Some(position);
@@ -751,6 +793,9 @@ const PLACE_SAVE_MS: i32 = 400;
 /// place logic keeps), if it's changed since the last save: so the next
 /// launch opens there. At the chapter's heading it's the chapter's top.
 fn save_place(pane: PaneId) {
+    if pane != PaneId::First {
+        return;
+    }
     with(pane, |s| {
         if let Some(timer) = s.place_timer.take()
             && let Some(window) = web_sys::window()
@@ -763,7 +808,7 @@ fn save_place(pane: PaneId) {
     let Some(here) = with(pane, |s| s.reading.clone()).filter(|_| pane.inner().is_some()) else {
         return;
     };
-    let top = surfaces::top_verse(&here.translation_code);
+    let top = surfaces::top_verse(pane, &here.translation_code);
     let position = Position {
         book_id: here.book_id,
         chapter: here.chapter,
@@ -787,6 +832,9 @@ fn save_places() {
 /// A scroll: where the reader is is saved once the page has been still for
 /// [`PLACE_SAVE_MS`].
 fn save_place_soon(pane: PaneId) {
+    if pane != PaneId::First {
+        return;
+    }
     let timer = SAVE_PLACE.with(|save| dom::set_timeout(&save[pane], PLACE_SAVE_MS));
     let replaced = with(pane, |s| std::mem::replace(&mut s.place_timer, timer));
     dom::clear_timeout(replaced);
@@ -928,8 +976,12 @@ fn open_passage(
                 .map(|(_, numbers)| numbers.clone())
                 .unwrap_or_default()
         });
+        // The card is the active pane's: a pane left on the way keeps no
+        // selection.
         if numbers.contains(&start) && numbers.contains(&end) {
-            let selected = card::select_passage(&here.translation_code, start, end);
+            let selected = (pane == pane::active())
+                .then(|| card::select_passage(&here.translation_code, start, end))
+                .flatten();
             return (loaded, selected);
         }
         // Past the chapter's end in this translation, or a verse it leaves
@@ -1227,8 +1279,8 @@ fn run(pane: PaneId, request: Request, sent: Option<Sent>) -> Load {
             translation_code,
             top,
         } => {
-            if let (Some(code), Some(select)) = (translation_code, translation_select()) {
-                select.set_value(&code);
+            if let Some(code) = translation_code {
+                pane::set_code(pane, &code);
                 show_translation();
             }
             from_top(pane, load_reading(pane, book_id, chapter), top)
@@ -1261,6 +1313,18 @@ fn run(pane: PaneId, request: Request, sent: Option<Sent>) -> Load {
             // its answer is in (`answered`): that one, not the chapter
             // still on screen, and as its own jump or step (C2-02).
             if with(pane, |s| s.jump_follows || s.asked.is_some()) {
+                return Box::pin(async { false });
+            }
+            // A pane made active, whose translation the record now says
+            // (`pane::set_active`): it reads it already.
+            let code = pane::code(pane);
+            if pane::split()
+                && with(pane, |s| {
+                    s.reading
+                        .as_ref()
+                        .is_some_and(|r| r.translation_code == code)
+                })
+            {
                 return Box::pin(async { false });
             }
             let inner = pane.inner();
@@ -1387,6 +1451,117 @@ fn on_click(event: &MouseEvent) {
     }
 }
 
+/// Listens for Try again in `pane`'s notice (the second pane's, as it's
+/// made).
+pub fn listen_to_notice(pane: PaneId) {
+    if let Some(notice) = pane.notice() {
+        dom::on(&notice, "click", move |event| {
+            let on_retry = event
+                .target()
+                .and_then(|t| t.dyn_into::<Element>().ok())
+                .is_some_and(|t| closest(&t, ".reading-retry").is_some());
+            if on_retry {
+                retry(pane);
+            }
+        });
+    }
+}
+
+/// `pane`'s own column scrolled (two panes open): where the reader is is
+/// saved once it's still, as the window's scrolling does for one pane.
+pub fn scrolled(pane: PaneId) {
+    save_place_soon(pane);
+}
+
+// ---- Two panes.
+
+/// Opens `passage` in the second pane (`pane`'s `gospelGetterPanes`), in
+/// `code`, or in the active pane's translation: a pane opened beside reads
+/// it, its history starting there; one already open jumps to it, as a jump
+/// in its own history, so its Back returns (S12). The first pane is never
+/// replaced. The second pane is then the active one (S13). Its end is the
+/// load's.
+pub fn open_beside(passage: &OpenPassage, code: Option<String>) -> Load {
+    let code = code.unwrap_or_else(|| pane::code(pane::active()));
+    let pane = PaneId::Second;
+    pane::open_second();
+    if !pane::split() {
+        return Box::pin(async { false });
+    }
+    let (book_id, chapter) = (passage.book_id, passage.chapter);
+    let (start, end) = (passage.verse_start, passage.verse_end);
+    let load = if with(pane, |s| s.reading.is_some()) {
+        if code != pane::code(pane) {
+            if pane == pane::active() {
+                switch_for_jump(pane, &code);
+            } else {
+                pane::set_code(pane, &code);
+            }
+        }
+        jump_to(pane, book_id, chapter, start, end, start.is_none())
+    } else {
+        pane::set_code(pane, &code);
+        let open = open_passage(pane, book_id, chapter, start, end);
+        Box::pin(async move {
+            let (loaded, _) = open.await;
+            if loaded && start.is_none() {
+                pane.scroller().scroll_to(0.0);
+            }
+            if with(pane, |s| s.reading.is_some()) && !with(pane, |s| s.history.started()) {
+                start_history(pane);
+            }
+            loaded
+        }) as Load
+    };
+    // After its load has begun, so the translation the record then says is
+    // the one it's reading (`Request::Translation` leaves it be).
+    pane::set_active(pane);
+    load
+}
+
+/// `pane` is the active one now (`pane::set_active`): the header, the
+/// window's title, the picker, Back and Forward and the translation button
+/// say its place.
+pub fn activated(pane: PaneId) {
+    show_translation();
+    let (here, compare) = with(pane, |s| (s.reading.clone(), s.last_compare.clone()));
+    if let Some(here) = &here {
+        let compare = compare.filter(|c| {
+            is_comparing()
+                && text::compare_is_current(c, here.book_id, here.chapter, &compare_codes())
+        });
+        update_reference(here, compare.as_deref());
+        crate::picker::show_current(pane, here.book_id, here.chapter);
+    }
+    show_nav(pane);
+}
+
+/// The panes changed (one opened beside `pane`, or closed): its chapter
+/// drawn again for them, without its faded neighbors while two share the
+/// window, and in Compare as it is now (paused while they do).
+pub fn redraw(pane: PaneId) {
+    if is_comparing() {
+        on_compare_change(pane);
+    } else {
+        render_current(pane);
+    }
+}
+
+/// The second pane closed: nothing of it is kept, and anything still on its
+/// way for it is dropped as it comes.
+pub fn forget(pane: PaneId) {
+    with(pane, |s| {
+        s.edit.cancel();
+        s.compare.cancel();
+        *s = State {
+            load_token: s.load_token + 1,
+            edit: s.edit,
+            compare: s.compare,
+            ..State::default()
+        };
+    });
+}
+
 /// Every piece has mounted (`lib`'s ready list): the picker, mounted after
 /// this, hears the chapter on screen again.
 pub fn on_ready() {
@@ -1420,17 +1595,7 @@ pub fn mount() {
         });
     }
     for pane in pane::shown() {
-        if let Some(notice) = pane.notice() {
-            dom::on(&notice, "click", move |event| {
-                let on_retry = event
-                    .target()
-                    .and_then(|t| t.dyn_into::<Element>().ok())
-                    .is_some_and(|t| closest(&t, ".reading-retry").is_some());
-                if on_retry {
-                    retry(pane);
-                }
-            });
-        }
+        listen_to_notice(pane);
     }
     // Where the reader is, saved once they stop scrolling, and at once as
     // the window is hidden or loses focus, or the pointer leaves the page
@@ -1457,7 +1622,7 @@ pub fn mount() {
         // on screen, so a closed Cross references list is filled first.
         dom::on(&window, "beforeprint", |_| {
             for pane in pane::shown() {
-                if let Some(list) = pane.query("#xref-summary-list") {
+                if let Some(list) = pane.query(&format!("#{}", pane.ids().xrefs)) {
                     fill_xref_rows(pane, &list);
                 }
             }

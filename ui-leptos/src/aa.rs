@@ -165,13 +165,23 @@ pub fn partner() -> Option<String> {
     crate::page_text::partner(chosen.as_deref(), &bridge::translation_code(), &codes)
 }
 
-/// What Compare shows beside the text now (`aa_text::beside`).
+/// What Compare shows beside the text now (`aa_text::beside`): nothing
+/// while two panes are open, which pauses it (S14) without changing it.
 pub fn beside() -> Beside {
+    if crate::pane::split() {
+        return Beside::Nothing;
+    }
     text::beside(
         prefs::on(&preferences::COMPARE),
         prefs::on(&preferences::COMPARE_NOTES),
         prefs::on(&preferences::READER_MODE),
     )
+}
+
+/// A second pane opened or closed: Aa shows Compare as it now is (paused
+/// while two panes are open, [`beside`]).
+pub fn split_changed() {
+    sync_aa();
 }
 
 /// Compare's "with": chooses `code`, unless it's already the one (and
@@ -294,8 +304,13 @@ pub fn set_reader_mode(on: bool) {
     }
 }
 
-/// Compare, on or off.
+/// Compare, on or off; while two panes are open, it says it's paused
+/// instead (S14).
 fn toggle_compare() {
+    if crate::pane::split() {
+        crate::page::set_data_status(crate::pane_text::COMPARE_PAUSED, false);
+        return;
+    }
     let value = if prefs::on(&preferences::COMPARE) {
         "off"
     } else {

@@ -14,6 +14,12 @@
 //! Shift ghost (holding Shift makes the card faint, and clicks go through
 //! it, so a Shift-click reaches a verse under it).
 //!
+//! With two panes open (`pane`), the card is the active pane's: one
+//! selection at a time, made there, and gone as another pane becomes
+//! active (D3); Copy chapter copies the active pane's chapter. The marks
+//! are every pane's: a bookmark or highlight shows on its verse in each
+//! pane showing that chapter, and each pane's notes are its chapter's.
+//!
 //! The reader (`reader`) tells this what it shows: a chapter loading
 //! ([`loading`]) and shown ([`shown`]), a passage to select
 //! ([`select_passage`]) and a Library note to edit ([`edit_note`]). The
@@ -259,10 +265,11 @@ impl State {
         &self.panes[pane::active()]
     }
 
-    fn copy(&mut self, slot: Slot) -> &mut Option<CopyEntry> {
+    /// The selection's text to copy, or `pane`'s chapter's.
+    fn copy(&mut self, slot: Slot, pane: PaneId) -> &mut Option<CopyEntry> {
         match slot {
             Slot::Selection => &mut self.copy_selection,
-            Slot::Chapter => &mut self.panes[pane::active()].copy_chapter,
+            Slot::Chapter => &mut self.panes[pane].copy_chapter,
         }
     }
 
@@ -338,11 +345,9 @@ fn query_all(root: &Element, selector: &str) -> Vec<HtmlElement> {
         .unwrap_or_default()
 }
 
-fn selectable() -> Vec<HtmlElement> {
-    bridge::document()
-        .and_then(|d| d.document_element())
-        .map(|root| query_all(&root, SELECTABLE))
-        .unwrap_or_default()
+/// Every selectable verse in `pane`.
+fn selectable(pane: PaneId) -> Vec<HtmlElement> {
+    pane.query_all(SELECTABLE)
 }
 
 fn toggle_class(el: &Element, name: &str, on: bool) {
@@ -353,9 +358,10 @@ fn has_class(el: &Element, name: &str) -> bool {
     el.class_list().contains(name)
 }
 
-/// A selectable verse, by column and number.
+/// A selectable verse of the active pane (where the selection is), by
+/// column and number.
 fn verse_element(code: &str, number: i64) -> Option<HtmlElement> {
-    dom::query(&format!(
+    pane::active().query(&format!(
         r#"{SELECTABLE}[data-translation="{code}"][data-verse="{number}"]"#
     ))
 }
@@ -554,11 +560,15 @@ fn render_selection() {
     let had_focus = contains_focus(&els.card);
     let selection = with(|s| s.selection.clone());
     let mut last = None;
-    for el in selectable() {
-        let selected = selection.as_ref().is_some_and(|sel| {
-            let code = el.get_attribute("data-translation").unwrap_or_default();
-            data_number(&el, "data-verse").is_some_and(|n| sel.covers(&code, n))
-        });
+    // The selection is the active pane's; the other has none (D3).
+    for (pane, el) in
+        pane::shown().flat_map(|pane| selectable(pane).into_iter().map(move |el| (pane, el)))
+    {
+        let selected = pane == pane::active()
+            && selection.as_ref().is_some_and(|sel| {
+                let code = el.get_attribute("data-translation").unwrap_or_default();
+                data_number(&el, "data-verse").is_some_and(|n| sel.covers(&code, n))
+            });
         toggle_class(&el, "verse-selected", selected);
         if selected && data_number(&el, "data-verse") == selection.as_ref().map(|s| s.end) {
             last = Some(el);
@@ -596,7 +606,7 @@ fn render_selection() {
         })
     });
     if let Some(copy) = copy {
-        fetch_copy(Slot::Selection, copy);
+        fetch_copy(Slot::Selection, pane::active(), copy);
     }
     let citation = with(|s| s.citation()).unwrap_or_default();
     let _ = els
@@ -842,7 +852,9 @@ fn place_card() {
         }
     });
     let scrolled = number_property(card, "scrollTop");
-    let first: Element = dom::query(&format!("{SELECTABLE}.verse-selected"))
+    let pane = pane::active();
+    let first: Element = pane
+        .query(&format!("{SELECTABLE}.verse-selected"))
         .map_or_else(|| card_verse.clone().into(), Into::into);
     let flowing = bridge::document()
         .and_then(|d| d.document_element())
@@ -853,7 +865,7 @@ fn place_card() {
     let column_rect = rect(&column);
     let first_rect = line_rect(&first, true);
     let last_rect = line_rect(&card_verse, false);
-    let view = PaneId::First.scroller().view().unwrap_or_default();
+    let view = pane.scroller().view().unwrap_or_default();
     let (width, left) = text::card_box(column_rect, first_rect, flowing);
     let _ = card.class_list().remove_2("is-docked", "is-above");
     set_style(card, "max-height", "");
@@ -913,12 +925,12 @@ fn place_card() {
 // if that fails. An answer that failed is asked for again, by the next
 // render or copy.
 
-/// Asks for `slot`'s text with `args`, unless it's already been asked for
-/// (on its way, or in) and didn't fail. Each answer goes to its own entry,
-/// so a late one never replaces a newer entry's.
-fn fetch_copy(slot: Slot, args: CopyTextArgs) {
+/// Asks for `slot`'s text (in `pane`) with `args`, unless it's already been
+/// asked for (on its way, or in) and didn't fail. Each answer goes to its
+/// own entry, so a late one never replaces a newer entry's.
+fn fetch_copy(slot: Slot, pane: PaneId, args: CopyTextArgs) {
     let asked = with(|s| {
-        s.copy(slot)
+        s.copy(slot, pane)
             .as_ref()
             .is_some_and(|e| e.args == args && !answer_failed(&e.answer.borrow()))
     });
@@ -942,7 +954,7 @@ fn fetch_copy(slot: Slot, args: CopyTextArgs) {
         answer: answer_cell,
         done,
     };
-    with(|s| *s.copy(slot) = Some(entry));
+    with(|s| *s.copy(slot, pane) = Some(entry));
 }
 
 /// Whether a copy's text was asked for and couldn't be had.
@@ -984,14 +996,15 @@ fn copy_passage(slot: Slot, format: &str) {
     if !ready {
         return;
     }
-    let Some(mut entry) = with(|s| s.copy(slot).clone()) else {
+    let pane = pane::active();
+    let Some(mut entry) = with(|s| s.copy(slot, pane).clone()) else {
         return;
     };
     // Text that couldn't be had is asked for again, and the copy waits for
     // it, as for text not in yet.
     if answer_failed(&entry.answer.borrow()) {
-        fetch_copy(slot, entry.args.clone());
-        let Some(again) = with(|s| s.copy(slot).clone()) else {
+        fetch_copy(slot, pane, entry.args.clone());
+        let Some(again) = with(|s| s.copy(slot, pane).clone()) else {
             return;
         };
         entry = again;
@@ -1173,23 +1186,25 @@ fn update_bookmark_button() {
 }
 
 /// Marks every bookmarked verse of the chapter on screen, in every column
-/// (bookmarks belong to no one translation).
+/// and every pane (bookmarks belong to no one translation, nor pane).
 fn apply_bookmark_markers() {
-    let spans = with(|s| {
-        s.here().chapter.as_ref().map(|c| {
-            s.bookmarks
-                .iter()
-                .filter(|b| b.book_id == c.book_id && b.chapter == c.chapter)
-                .map(|b| (b.verse_start, b.verse_end))
-                .collect::<Vec<_>>()
-        })
-    });
-    for el in selectable() {
-        let number = data_number(&el, "data-verse");
-        let marked = spans.as_ref().is_some_and(|spans| {
-            number.is_some_and(|n| spans.iter().any(|&(start, end)| n >= start && n <= end))
+    for pane in pane::shown() {
+        let spans = with(|s| {
+            s.panes[pane].chapter.as_ref().map(|c| {
+                s.bookmarks
+                    .iter()
+                    .filter(|b| b.book_id == c.book_id && b.chapter == c.chapter)
+                    .map(|b| (b.verse_start, b.verse_end))
+                    .collect::<Vec<_>>()
+            })
         });
-        toggle_class(&el, "is-bookmarked", marked);
+        for el in selectable(pane) {
+            let number = data_number(&el, "data-verse");
+            let marked = spans.as_ref().is_some_and(|spans| {
+                number.is_some_and(|n| spans.iter().any(|&(start, end)| n >= start && n <= end))
+            });
+            toggle_class(&el, "is-bookmarked", marked);
+        }
     }
 }
 
@@ -1314,25 +1329,25 @@ fn set_highlight_marker(el: &Element, color: Option<&str>) {
     }
 }
 
-/// Shows every highlight on screen: in the chapter being read (every
-/// column, while comparing) and the faded neighbors.
+/// Shows every highlight on screen, in every pane: in the chapter being
+/// read (every column, while comparing) and the faded neighbors.
 fn apply_highlight_markers() {
-    let (here, highlights) = with(|s| {
-        (
-            s.here().chapter.as_ref().map(|c| (c.book_id, c.chapter)),
-            s.highlights.clone(),
-        )
-    });
-    for el in selectable() {
-        let color = here
-            .zip(data_number(&el, "data-verse"))
-            .and_then(|((book, chapter), verse)| highlights.get(&(book, chapter, verse)));
-        set_highlight_marker(&el, color.map(String::as_str));
+    let highlights = with(|s| s.highlights.clone());
+    for pane in pane::shown() {
+        let here = with(|s| {
+            s.panes[pane]
+                .chapter
+                .as_ref()
+                .map(|c| (c.book_id, c.chapter))
+        });
+        for el in selectable(pane) {
+            let color = here
+                .zip(data_number(&el, "data-verse"))
+                .and_then(|((book, chapter), verse)| highlights.get(&(book, chapter, verse)));
+            set_highlight_marker(&el, color.map(String::as_str));
+        }
     }
-    let Some(root) = bridge::document().and_then(|d| d.document_element()) else {
-        return;
-    };
-    for el in query_all(&root, ".chapter-side .verse[data-verse]") {
+    for el in pane::shown().flat_map(|pane| pane.query_all(".chapter-side .verse[data-verse]")) {
         let key = (
             data_number(&el, "data-book"),
             data_number(&el, "data-chapter"),
@@ -1460,12 +1475,12 @@ fn highlight_selection(color: Option<String>) -> Task {
 // markers, the selection's Notes section and the Library), so none of them
 // goes stale.
 
-/// Marks every verse of the chapter on screen that a note covers, in every
+/// Marks every verse of `pane`'s chapter that a note covers, in every
 /// column, with the pencil (CSS) and, for screen readers, one hidden "has
 /// notes" per verse.
-fn apply_note_markers() {
+fn apply_note_markers(pane: PaneId) {
     let spans = with(|s| {
-        let here = s.here();
+        let here = &s.panes[pane];
         here.chapter.as_ref().map(|c| {
             here.chapter_notes
                 .iter()
@@ -1477,7 +1492,7 @@ fn apply_note_markers() {
     let Some(document) = bridge::document() else {
         return;
     };
-    for el in selectable() {
+    for el in selectable(pane) {
         let number = data_number(&el, "data-verse");
         let noted = spans.as_ref().is_some_and(|spans| {
             number.is_some_and(|n| spans.iter().any(|&(start, end)| n >= start && n <= end))
@@ -1546,7 +1561,7 @@ fn refresh_chapter_notes(pane: PaneId) -> Task {
             s.chapter_notes_of = Some(of);
             s.chapter_notes_read = read;
         });
-        apply_note_markers();
+        apply_note_markers(pane);
         show_margin();
     })
 }
@@ -2312,13 +2327,20 @@ pub fn shown(
             .is_some_and(|c| Rc::ptr_eq(&c.reading, &chapter.reading))
     });
     with(|s| s.panes[pane].chapter = Some(chapter));
-    close_menu(false);
-    fetch_copy(Slot::Chapter, copy);
-    with(|s| s.selection = None);
-    render_selection();
+    // The selection, and Copy as…, are the active pane's: another pane's
+    // chapter leaves them be.
+    let active = pane == pane::active();
+    if active {
+        close_menu(false);
+    }
+    fetch_copy(Slot::Chapter, pane, copy);
+    if active {
+        with(|s| s.selection = None);
+        render_selection();
+    }
     apply_bookmark_markers();
     apply_highlight_markers();
-    apply_note_markers();
+    apply_note_markers(pane);
     show_margin();
     if let Some((book_id, chapter)) = with(|s| {
         s.panes[pane]
@@ -2344,6 +2366,31 @@ pub fn shown(
     if !read_already {
         spawn_local(refresh_chapter_notes(pane));
     }
+}
+
+/// Another pane is about to be the active one (`pane::set_active`): the
+/// selection, and Copy as…, go with the pane left (one selection at a
+/// time, D3).
+pub fn pane_switching() {
+    close_menu(false);
+    clear_selection();
+}
+
+/// Another pane is the active one: the margin shows its notes.
+pub fn pane_switched() {
+    show_margin();
+}
+
+/// `pane` closed: what the card knew of its chapter goes, and its notes
+/// still on their way are dropped as they come.
+pub fn forget(pane: PaneId) {
+    with(|s| {
+        let token = s.panes[pane].chapter_notes_token + 1;
+        s.panes[pane] = InPane {
+            chapter_notes_token: token,
+            ..InPane::default()
+        };
+    });
 }
 
 /// A passage the reader opened (a jump, Back or Forward) whose verses are
@@ -2533,7 +2580,7 @@ pub fn ask(ask: Ask) -> bool {
                         .flatten()
                         .and_then(|b| b.dyn_into::<HtmlElement>().ok())
                 }),
-                Slot::Chapter => dom::query(".chapter-copy-btn"),
+                Slot::Chapter => pane::active().query(".chapter-copy-btn"),
             };
             let can = slot == Slot::Chapter || has_selection();
             if can {

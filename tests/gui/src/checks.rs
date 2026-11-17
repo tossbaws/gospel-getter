@@ -32,7 +32,9 @@
 //! references in the card, the Library and the margin, and Copy as
 //! Markdown (66, `notes`); an AI-flagged finding saved by gospel-getter-cli
 //! while the app runs, shown in the margin, opened and kept as the
-//! reader's note (70, `findings`); the app opened again while it's open,
+//! reader's note (70, `findings`); two passages side by side, each pane
+//! scrolling on its own and the keys scrolling the active one (75,
+//! `split`); the app opened again while it's open,
 //! the second launch handing over and exiting (73, `instance`); and, last,
 //! the plain-text fallback (44, `reader`);
 //! screenshots in Chi Rho and Vellum (4, most taken by the other checks).
@@ -60,6 +62,7 @@ mod picker;
 mod place;
 mod reader;
 mod search;
+mod split;
 mod startup;
 mod surfaces;
 mod updates;
@@ -424,6 +427,7 @@ async fn shipped(
             checked!(KeyCopy, key_copy),
             checked!(KeyHistoryNote, key_history_note),
             checked!(PalettePageCommands, palette_page_commands),
+            checked!(SplitPanes, split_panes),
             checked!(SingleKeys, single_key_switch),
         ];
         if let Some(check) = config.repeat.map(Repeat::check)

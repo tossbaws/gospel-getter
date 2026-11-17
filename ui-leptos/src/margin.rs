@@ -59,7 +59,7 @@ use crate::dom;
 use crate::dto::SelectionNote;
 use crate::findings_text::{self, FindingGroup};
 use crate::margin_text::{self as text, Anchor, Entry};
-use crate::pane::PaneId;
+use crate::pane::{self, PaneId};
 use crate::preferences;
 use crate::prefs;
 use crate::surfaces;
@@ -205,10 +205,10 @@ fn now() -> f64 {
 }
 
 /// The reading column of the chapter the notes are for, if it's the one on
-/// screen.
+/// screen in the active pane (the margin follows it).
 fn column() -> Option<HtmlElement> {
     let (book_id, chapter, _) = with(|s| s.chapter.clone())?;
-    let inner = PaneId::First.inner()?;
+    let inner = pane::active().inner()?;
     let number = |name: &str| inner.get_attribute(name)?.parse::<i64>().ok();
     if number("data-current-book") != Some(book_id)
         || number("data-current-chapter") != Some(chapter)

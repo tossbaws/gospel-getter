@@ -128,7 +128,9 @@ pub fn chapter_shown(pane: PaneId, book_id: i64, chapter: i64) {
         show(pane);
     } else {
         with_pane(pane, |s| s.findings.clear());
-        margin::findings(book_id, chapter, Vec::new());
+        if pane == pane::active() {
+            margin::findings(book_id, chapter, Vec::new());
+        }
     }
     spawn_local(refresh_pane(pane));
 }
@@ -180,7 +182,8 @@ pub async fn refresh_everywhere() {
     }
 }
 
-/// Marks `pane`'s flagged verses and hands the findings to the margin.
+/// Marks `pane`'s flagged verses and, if it's the active pane (the margin
+/// follows it), hands the findings to the margin.
 fn show(pane: PaneId) {
     let Some((book_id, chapter, findings)) = with_pane(pane, |s| {
         let (book_id, chapter) = s.chapter?;
@@ -188,22 +191,36 @@ fn show(pane: PaneId) {
     }) else {
         return;
     };
-    mark(&findings);
-    margin::findings(book_id, chapter, text::groups(findings));
+    mark(pane, &findings);
+    if pane == pane::active() {
+        margin::findings(book_id, chapter, text::groups(findings));
+    }
 }
 
-/// Gives every verse of the chapter on screen a finding covers, in every
+/// Another pane is the active one: the margin shows its findings.
+pub fn pane_switched() {
+    show(pane::active());
+}
+
+/// `pane` closed: its findings go, and a read still on its way for it is
+/// dropped as it comes.
+pub fn forget(pane: PaneId) {
+    with_pane(pane, |s| {
+        *s = InPane {
+            token: s.token + 1,
+            ..InPane::default()
+        };
+    });
+}
+
+/// Gives every verse of `pane`'s chapter a finding covers, in every
 /// column, the dotted underline (C8) and, for a screen reader, one hidden
 /// "(AI finding)".
-fn mark(findings: &[Finding]) {
+fn mark(pane: PaneId, findings: &[Finding]) {
     let Some(document) = bridge::document() else {
         return;
     };
-    let verses = document
-        .query_selector_all(card::SELECTABLE)
-        .map(|found| dom::elements(&found))
-        .unwrap_or_default();
-    for verse in verses {
+    for verse in pane.query_all(card::SELECTABLE) {
         let number = verse
             .get_attribute("data-verse")
             .and_then(|n| n.parse::<i64>().ok());

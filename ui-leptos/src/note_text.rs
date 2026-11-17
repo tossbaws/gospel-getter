@@ -1,8 +1,8 @@
 //! The note editor's rules and words: how long a note may be, when Save can
 //! save, what the length line says, whether a note has changed, and whose
-//! other notes it lists; and its drafts: which draft is whose, which are kept and for how long, and when
-//! one is offered back. Kept free of the DOM so it is tested natively
-//! (`cargo test`).
+//! other notes it lists; and its drafts: which draft is whose, which are
+//! kept and for how long, and when one is offered back. Kept free of the
+//! DOM so it is tested natively (`cargo test`).
 
 use serde::{Deserialize, Serialize};
 

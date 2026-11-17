@@ -33,7 +33,8 @@
 //! ([`export_surfaces`]). Without this module, nothing opens.
 //!
 //! Everything happens within the click or key. A resize across 1200px
-//! (D14) keeps the reading place the reader last saw ([`on_shape_change`],
+//! (D14) keeps the reading place the reader last saw, in every pane
+//! ([`on_shape_change`],
 //! [`note_painted_place`]), even right after a scroll, and in Chromium,
 //! whatever place its scroll anchoring kept ([`SCROLL_BEFORE_RESIZE`]),
 //! also when the scroll's own events came after the resize's
@@ -52,7 +53,7 @@ use crate::aa;
 use crate::bridge;
 use crate::dom::{self, by_id};
 use crate::nav;
-use crate::pane::PaneId;
+use crate::pane::{self, PaneId, PerPane};
 use crate::preferences;
 use crate::prefs;
 pub use crate::surfaces_text::Surface;
@@ -67,8 +68,9 @@ thread_local! {
     static PICKER_POPOVER_OPEN: Cell<bool> = const { Cell::new(false) };
     /// `matchMedia(WIDE_QUERY)`: is there room for the sidebar?
     static WIDE: RefCell<Option<MediaQueryList>> = const { RefCell::new(None) };
-    /// The page as last painted ([`note_painted_place`]).
-    static PAINTED_LAYOUT: RefCell<Option<PaintedLayout>> = const { RefCell::new(None) };
+    /// Each pane as last painted ([`note_painted_place`]).
+    static PAINTED_LAYOUT: RefCell<PerPane<Option<PaintedLayout>>> =
+        RefCell::new(PerPane::default());
     /// A frame is asked for, to note the painted layout.
     static LAYOUT_PENDING: Cell<bool> = const { Cell::new(false) };
     /// The scroll position the page's last `scroll` event found.
@@ -186,6 +188,7 @@ pub fn sync_picker() {
     }
     let _ = ref_btn.set_attribute("aria-expanded", &(!picker.hidden()).to_string());
     let _ = sidebar_toggle.set_attribute("aria-expanded", &sidebar.to_string());
+    crate::pane::picker_synced(&ref_btn);
     if was_hidden && !picker.hidden() {
         crate::picker::picker_shown();
     }
@@ -203,13 +206,9 @@ const ROW_MARKS: &str = ".reading-row .chapter-heading, .reading-row .chapter-he
      .reading-row .edge-card-title, .reading-row .edge-card-detail, \
      .reading-row .verse[data-verse], .reading-row .compare-gap";
 
-/// The marks a reading place can be, in order.
-fn place_marks() -> Vec<HtmlElement> {
-    matching(PLACE_MARKS)
-}
-
-fn matching(selector: &str) -> Vec<HtmlElement> {
-    PaneId::First.query_all(selector)
+/// The marks a reading place can be in `pane`, in order.
+fn place_marks(pane: PaneId) -> Vec<HtmlElement> {
+    pane.query_all(PLACE_MARKS)
 }
 
 /// Each element's top and bottom in the page, scrolled to `y`.
@@ -223,17 +222,19 @@ fn page_boxes(elements: &[HtmlElement], y: f64) -> Vec<(f64, f64)> {
         .collect()
 }
 
-/// The reader's place: the first heading or verse of the chapter being
-/// read that reaches below the bar, and where it is on screen.
+/// The reader's place in a pane: the first heading or verse of the chapter
+/// being read there that reaches below the bar over it, and where it is on
+/// screen.
 #[derive(Clone)]
 pub struct Place {
+    pane: PaneId,
     mark: HtmlElement,
     top: f64,
 }
 
-/// The page as last painted: where each mark [`reading_place`] looks at is
-/// in the page (its top and bottom; scrolling doesn't move it there), and
-/// where the bar ends on screen.
+/// A pane as last painted: where each mark [`reading_place`] looks at is
+/// in what scrolls it (its top and bottom; scrolling doesn't move it
+/// there), and where the bar over it ends on screen.
 struct PaintedLayout {
     bar_bottom: f64,
     marks: Vec<HtmlElement>,
@@ -245,11 +246,11 @@ struct PaintedLayout {
     row_at: Vec<(f64, f64)>,
 }
 
-/// The reader's place as the page is laid out now, if anything of the
+/// The reader's place in `pane` as it's laid out now, if anything of the
 /// chapter reaches below the bar.
-fn reading_place() -> Option<Place> {
-    let bar_bottom = PaneId::First.scroller().view()?.top;
-    let marks = place_marks();
+fn reading_place(pane: PaneId) -> Option<Place> {
+    let bar_bottom = pane.scroller().view()?.top;
+    let marks = place_marks(pane);
     // Each mark's box is read once, up to the one kept.
     let mut top = 0.0;
     let index = text::first_below(
@@ -261,37 +262,45 @@ fn reading_place() -> Option<Place> {
         }),
     )?;
     Some(Place {
+        pane,
         mark: marks[index].clone(),
         top,
     })
 }
 
-/// Notes the page as painted ([`PaintedLayout`]), in the animation frame
+/// Notes each pane as painted ([`PaintedLayout`]), in the animation frame
 /// after anything that can move it (one frame asked for at most). By then
 /// that frame's resize and media query listeners have run, so
 /// [`on_shape_change`] still finds the layout from before the change.
-fn note_painted_place() {
+pub fn note_painted_place() {
     if LAYOUT_PENDING.replace(true) {
         return;
     }
     let noted = Closure::once_into_js(|| {
         LAYOUT_PENDING.set(false);
-        let scroller = PaneId::First.scroller();
-        let y = scroller.y().unwrap_or(0.0);
-        let marks = place_marks();
-        let at = page_boxes(&marks, y);
-        let row = matching(ROW_MARKS);
-        let row_at = page_boxes(&row, y);
-        let Some(view) = scroller.view() else {
-            return;
-        };
-        PAINTED_LAYOUT.set(Some(PaintedLayout {
-            bar_bottom: view.top,
-            marks,
-            at,
-            row,
-            row_at,
-        }));
+        for pane in [PaneId::First, PaneId::Second] {
+            if !pane::shown().any(|shown| shown == pane) {
+                PAINTED_LAYOUT.with_borrow_mut(|layouts| layouts[pane] = None);
+                continue;
+            }
+            let scroller = pane.scroller();
+            let y = scroller.y().unwrap_or(0.0);
+            let marks = place_marks(pane);
+            let at = page_boxes(&marks, y);
+            let row = pane.query_all(ROW_MARKS);
+            let row_at = page_boxes(&row, y);
+            let Some(view) = scroller.view() else {
+                continue;
+            };
+            let layout = PaintedLayout {
+                bar_bottom: view.top,
+                marks,
+                at,
+                row,
+                row_at,
+            };
+            PAINTED_LAYOUT.with_borrow_mut(|layouts| layouts[pane] = Some(layout));
+        }
     });
     let asked = web_sys::window().is_some_and(|window| {
         window
@@ -303,30 +312,31 @@ fn note_painted_place() {
     }
 }
 
-/// The reader's place in the painted layout scrolled to `y`, as
+/// The reader's place in `pane`'s painted layout scrolled to `y`, as
 /// [`reading_place`] would have measured it there; none with no layout
 /// painted yet, or a place no longer on the page.
-fn painted_place_at(y: f64) -> Option<Place> {
-    PAINTED_LAYOUT.with_borrow(|layout| {
-        let layout = layout.as_ref()?;
+fn painted_place_at(pane: PaneId, y: f64) -> Option<Place> {
+    PAINTED_LAYOUT.with_borrow(|layouts| {
+        let layout = layouts[pane].as_ref()?;
         let (index, top) = text::place_at(layout.bar_bottom, &layout.at, y)?;
         let mark = &layout.marks[index];
         mark.is_connected().then(|| Place {
+            pane,
             mark: mark.clone(),
             top,
         })
     })
 }
 
-/// The scroll position the page had before Chromium's anchoring scrolled
+/// The scroll position `pane` had before Chromium's anchoring scrolled
 /// it for a resize: the one at which the painted layout's first mark of
 /// the reading row under the bar, Chromium's anchor, stood where it stands
 /// now (`surfaces_text::scroll_before_anchoring`). None with no layout
 /// painted, or no mark that fits.
-fn scroll_before_anchoring() -> Option<f64> {
-    let height = PaneId::First.scroller().view()?.bottom;
-    PAINTED_LAYOUT.with_borrow(|layout| {
-        let layout = layout.as_ref()?;
+fn scroll_before_anchoring(pane: PaneId) -> Option<f64> {
+    let height = pane.scroller().view()?.bottom;
+    PAINTED_LAYOUT.with_borrow(|layouts| {
+        let layout = layouts[pane].as_ref()?;
         let now: Vec<_> = layout
             .row
             .iter()
@@ -341,17 +351,33 @@ fn scroll_before_anchoring() -> Option<f64> {
     })
 }
 
-/// Runs `change` (which reflows the page) keeping the reader's place: the
-/// first heading or verse of the chapter being read that reaches below the
-/// bar stays where it was on screen, or where `place` says it was.
+/// Runs `change` (which reflows the page) keeping the reader's place in
+/// every pane: the first heading or verse of the chapter being read there
+/// that reaches below the bar stays where it was on screen, or where
+/// `place` says it was in its pane.
 pub fn keep_reading_place(change: impl FnOnce(), place: Option<Place>) {
-    let place = place.or_else(reading_place);
+    keep_places(change, place.into_iter().collect());
+}
+
+/// [`keep_reading_place`], with a place for any number of panes: each
+/// pane's is `given`'s, or as it's found before `change`.
+fn keep_places(change: impl FnOnce(), given: Vec<Place>) {
+    let places: Vec<Place> = pane::shown()
+        .filter_map(|pane| {
+            given
+                .iter()
+                .find(|place| place.pane == pane)
+                .cloned()
+                .or_else(|| reading_place(pane))
+        })
+        .collect();
     change();
-    if let Some(place) = place
-        && let Some(shift) =
+    for place in places {
+        if let Some(shift) =
             text::scroll_shift(place.top, place.mark.get_bounding_client_rect().top())
-    {
-        PaneId::First.scroller().scroll_by(shift);
+        {
+            place.pane.scroller().scroll_by(shift);
+        }
     }
     note_painted_place();
 }
@@ -363,15 +389,15 @@ pub fn keep_reading_place(change: impl FnOnce(), place: Option<Place>) {
 /// chapter's), measured now ([`reading_place`]). None when the place is the
 /// chapter's heading or a gap in Compare's columns (the chapter's top, as
 /// far as reopening goes), or nothing of the chapter reaches below the bar.
-pub fn top_verse(code: &str) -> Option<(i64, f64)> {
-    let scroller = PaneId::First.scroller();
+pub fn top_verse(pane: PaneId, code: &str) -> Option<(i64, f64)> {
+    let scroller = pane.scroller();
     let y = scroller.y()?;
     let painted = PAINTED_LAYOUT
-        .with_borrow(|layout| layout.as_ref().map(|layout| layout.bar_bottom))
-        .and_then(|bar_bottom| Some((painted_place_at(y)?, bar_bottom)));
+        .with_borrow(|layouts| layouts[pane].as_ref().map(|layout| layout.bar_bottom))
+        .and_then(|bar_bottom| Some((painted_place_at(pane, y)?, bar_bottom)));
     let (place, bar_bottom) = match painted {
         Some(found) => found,
-        None => (reading_place()?, scroller.view()?.top),
+        None => (reading_place(pane)?, scroller.view()?.top),
     };
     if place.mark.get_attribute("data-translation").as_deref() != Some(code) {
         return None;
@@ -380,16 +406,39 @@ pub fn top_verse(code: &str) -> Option<(i64, f64)> {
     Some((verse, place.top - bar_bottom))
 }
 
-/// Scrolls so `mark`'s top is `offset` px below the bar's bottom, as
+/// Scrolls `pane` so `mark`'s top is `offset` px below the bar's bottom, as
 /// [`keep_reading_place`] puts a place back: to the nearest whole pixel
 /// (`surfaces_text::whole_pixel_top`), as the page can only scroll by one.
-fn put_place(mark: HtmlElement, offset: f64) {
-    let Some(view) = PaneId::First.scroller().view() else {
+fn put_place(pane: PaneId, mark: HtmlElement, offset: f64) {
+    let Some(view) = pane.scroller().view() else {
         return;
     };
     let wanted = view.top + offset;
     let top = text::whole_pixel_top(mark.get_bounding_client_rect().top(), wanted);
-    keep_reading_place(|| {}, Some(Place { mark, top }));
+    keep_reading_place(|| {}, Some(Place { pane, mark, top }));
+}
+
+/// Runs `change`, which moves `pane` into another scroller (a second pane
+/// opened beside it, or closed), keeping the reader's place in it: the
+/// verse at the top of its view ([`top_verse`], in `code`'s column) goes
+/// back the same distance below the bar over it, or the chapter's top if
+/// that's where it was.
+pub fn move_place(pane: PaneId, code: &str, change: impl FnOnce()) {
+    let top = top_verse(pane, code);
+    change();
+    let mark = top.and_then(|(verse, offset)| {
+        Some((
+            pane.query(&crate::reader_text::verse_selector(code, verse))?,
+            offset,
+        ))
+    });
+    match mark {
+        Some((mark, offset)) => put_place(pane, mark, offset),
+        None => {
+            pane.scroller().scroll_to(0.0);
+            note_painted_place();
+        }
+    }
 }
 
 /// A verse put back where the reader was ([`hold_place`]): the scroll
@@ -408,7 +457,7 @@ struct Held {
 /// another chapter drawn ([`let_go_of_place`]), ends it.
 pub fn hold_place(mark: HtmlElement, offset: f64) {
     let_go_of_place();
-    put_place(mark.clone(), offset);
+    put_place(PaneId::First, mark.clone(), offset);
     let (Some(window), Some(pane)) = (web_sys::window(), PaneId::First.root()) else {
         return;
     };
@@ -424,7 +473,7 @@ pub fn hold_place(mark: HtmlElement, offset: f64) {
             let_go_of_place();
             return;
         }
-        put_place(mark, offset);
+        put_place(PaneId::First, mark, offset);
         note_held_scroll();
     });
     let Ok(observer) = ResizeObserver::new(resized.as_ref().unchecked_ref()) else {
@@ -496,6 +545,13 @@ fn set_sidebar(open: bool) {
 /// closes (`toggle`). Focus goes to the chapter being read. The books are
 /// `picker`'s: until boot has handed them over, it says they aren't there.
 pub fn open_picker(toggle: bool) {
+    open_picker_from(toggle, None);
+}
+
+/// [`open_picker`], from `opener` (a pane's bar's reference button,
+/// `pane`): the control the popover gives focus back to, and which toggles
+/// it, as the top bar's own does.
+pub fn open_picker_from(toggle: bool, opener: Option<HtmlElement>) {
     if is_wide() && !is_reader_mode() {
         if CURRENT.get().is_some_and(Surface::popover) {
             close(false);
@@ -505,9 +561,9 @@ pub fn open_picker(toggle: bool) {
         }
         focus_into(Surface::Picker);
     } else if toggle {
-        toggle_surface(Surface::Picker, None);
+        toggle_surface(Surface::Picker, opener);
     } else if CURRENT.get() != Some(Surface::Picker) {
-        open(Surface::Picker, None);
+        open(Surface::Picker, opener);
     }
     if let Some(picker) = by_id("picker")
         && !picker.hidden()
@@ -553,24 +609,31 @@ fn on_shape_change() {
     };
     let focus_was_inside = contains(&picker, active().as_deref());
     let before_resize = SCROLL_BEFORE_RESIZE.take();
-    let scroller = PaneId::First.scroller();
-    let anchors = scroller.anchors_on_resize();
-    let place = if anchors && SCROLLED_AFTER_RESIZE.replace(false) {
-        scroll_before_anchoring().and_then(painted_place_at)
-    } else {
-        scroller
-            .y()
-            .map(|now| text::scroll_read_at(anchors, before_resize, now))
-            .and_then(painted_place_at)
-    };
-    keep_reading_place(
+    // Each pane's place; only the window anchors, so a pane's own column
+    // (two panes open) is where WebKitGTK leaves the window: its place is
+    // the painted layout's at the scroll position it has now.
+    let places = pane::shown()
+        .filter_map(|pane| {
+            let scroller = pane.scroller();
+            let anchors = scroller.anchors_on_resize();
+            if anchors && SCROLLED_AFTER_RESIZE.replace(false) {
+                scroll_before_anchoring(pane).and_then(|y| painted_place_at(pane, y))
+            } else {
+                scroller
+                    .y()
+                    .map(|now| text::scroll_read_at(anchors, before_resize, now))
+                    .and_then(|y| painted_place_at(pane, y))
+            }
+        })
+        .collect();
+    keep_places(
         || {
             if CURRENT.get() == Some(Surface::Picker) {
                 close(false);
             }
             sync_picker();
         },
-        place,
+        places,
     );
     if focus_was_inside
         && picker.hidden()
@@ -630,6 +693,7 @@ pub fn close(restore_focus: bool) {
     // The update banner comes back if About closes on an install.
     crate::updates::surface_closed(closing);
     crate::library::surface_closed();
+    crate::pane::surface_closed(closing);
 }
 
 /// Moves focus into `surface`, by its first-focus rule.
@@ -780,7 +844,10 @@ fn on_document_click(event: &web_sys::Event) {
     };
     let target = event.target().and_then(|t| t.dyn_into::<Node>().ok());
     let inside = |el: Option<HtmlElement>| el.is_some_and(|el| contains(&el, target.as_ref()));
-    if inside(element(surface)) || inside(toggle_of(surface)) {
+    // The button it was opened from counts as its own (a pane's bar's copy
+    // of the top bar's, `pane`), which toggles it itself.
+    let opener = RETURN_FOCUS.with_borrow(Clone::clone);
+    if inside(element(surface)) || inside(toggle_of(surface)) || inside(opener) {
         return;
     }
     close(true);

@@ -50,6 +50,7 @@ mod page;
 mod page_text;
 mod palette;
 mod pane;
+mod pane_text;
 // How a passage is named, shared with the backend, which compiles the same
 // file.
 #[path = "../../shared/passage_reference.rs"]
@@ -98,6 +99,9 @@ pub fn start() {
     // The popovers and panels, and the picker's shape, ahead of the other
     // pieces.
     surfaces::mount();
+    // The panes: a press or focus in one makes it active, and the tests'
+    // way into a second one (`window.gospelGetterPanes`).
+    pane::mount();
     // Aa and the saved settings next: their records (the `<select>`s) are
     // filled before any piece reads them.
     aa::mount();
