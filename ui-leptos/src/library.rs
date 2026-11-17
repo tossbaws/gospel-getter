@@ -1,6 +1,6 @@
 //! The Library's tabs and its three lists: Bookmarks, Highlights (every
 //! highlighted passage, with a color filter) and Notes, each row one link
-//! to its passage with its own × or Edit beside it.
+//! to its passage with its own × or Edit beside it, and Open beside.
 //!
 //! The Library is one of the page's surfaces: `surfaces` opens and closes
 //! `#library-panel` (not in reading mode), keeps one surface open at a
@@ -8,7 +8,8 @@
 //! inside it (put there by [`place`]), switches the tabs, loads the lists
 //! and acts on their rows: opening a row closes the Library and has the
 //! reader jump to the passage (a note's Edit then has the page open the
-//! note editor);
+//! note editor), and a row's Open beside closes it and opens the passage
+//! in the second pane (`reader::open_beside`, S8);
 //! removing a bookmark or a highlight keeps focus in the list, on the next
 //! row, once the list is reloaded, but only while the Library still owns
 //! focus (GG-11): nothing newer since (another tab, the color filter, any
@@ -55,6 +56,7 @@ use web_sys::{Element, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge;
 use crate::card;
+use crate::card_text::{OPEN_BESIDE, beside_label};
 use crate::dom::{self, closest};
 use crate::dto::{
     Bookmark, FindingRequest, HighlightPassage, Note, PassageArgs, RemoveBookmarkArgs,
@@ -618,9 +620,38 @@ impl Library {
         );
     }
 
+    /// A row's Open beside: the Library closes (focus back to its button),
+    /// and the passage opens in the second pane, as
+    /// `gospelGetterPanes.openBeside` opens it (S12, S13, D9).
+    fn open_beside(passage: PassageArgs) {
+        surfaces::close(true);
+        let load = crate::reader::open_beside(
+            &crate::reader::OpenPassage {
+                book_id: passage.book_id,
+                chapter: passage.chapter,
+                verse_start: Some(passage.verse_start),
+                verse_end: Some(passage.verse_end),
+            },
+            None,
+        );
+        spawn_local(async move {
+            load.await;
+        });
+    }
+
+    /// Opens the row's passage (`open`, with a note to edit), or beside
+    /// it, as `button` (the row's link, Edit or Open beside) says.
+    fn open_from(button: &Element, passage: PassageArgs, note: &JsValue) {
+        if button.class_list().contains("library-beside") {
+            Self::open_beside(passage);
+        } else {
+            Self::open(passage, note);
+        }
+    }
+
     fn on_bookmark_click(self, target: Element) {
         let remove = closest(&target, ".bookmark-remove");
-        let open = closest(&target, ".bookmark-open");
+        let open = closest(&target, ".bookmark-open, .library-beside");
         let Some(button) = remove.as_ref().or(open.as_ref()) else {
             return;
         };
@@ -636,7 +667,8 @@ impl Library {
             return;
         };
         if remove.is_none() {
-            Self::open(
+            Self::open_from(
+                button,
                 PassageArgs {
                     book_id: bookmark.book_id,
                     chapter: bookmark.chapter,
@@ -678,7 +710,7 @@ impl Library {
 
     fn on_highlight_click(self, target: Element) {
         let remove = closest(&target, ".bookmark-remove");
-        let open = closest(&target, ".bookmark-open");
+        let open = closest(&target, ".bookmark-open, .library-beside");
         let Some(button) = remove.as_ref().or(open.as_ref()) else {
             return;
         };
@@ -698,7 +730,7 @@ impl Library {
             verse_end: passage.verse_end,
         };
         let Some(remove) = remove else {
-            Self::open(args, &JsValue::NULL);
+            Self::open_from(button, args, &JsValue::NULL);
             return;
         };
         let list = self.highlight_list;
@@ -766,7 +798,7 @@ impl Library {
 
     /// Opening a note's row works as opening a bookmark: its chapter, with
     /// its passage selected, so its Notes section shows. Edit does the
-    /// same, then opens the note. Copy as Markdown copies it, and says so
+    /// same, then opens the note; Open beside opens it in the second pane. Copy as Markdown copies it, and says so
     /// in the toast.
     fn on_note_click(self, target: Element) {
         if closest(&target, ".note-list-copy").is_some() {
@@ -778,7 +810,10 @@ impl Library {
             return;
         }
         let edit = closest(&target, ".note-list-edit");
-        let Some(button) = edit.clone().or_else(|| closest(&target, ".bookmark-open")) else {
+        let Some(button) = edit
+            .clone()
+            .or_else(|| closest(&target, ".bookmark-open, .library-beside"))
+        else {
             return;
         };
         let Some(id) = data_number::<i64>(&button, "data-note-id") else {
@@ -795,7 +830,8 @@ impl Library {
         };
         let note = &row.note;
         let none = JsValue::NULL;
-        Self::open(
+        Self::open_from(
+            &button,
             PassageArgs {
                 book_id: note.book_id,
                 chapter: note.chapter,
@@ -920,12 +956,17 @@ fn bookmark_rows(shown: Option<Shown<Bookmark>>) -> AnyView {
         .map(|b| {
             let id = b.id.to_string();
             let label = format!("Remove bookmark {}", b.reference);
+            let beside = beside_label(&b.reference);
             view! {
                 <li class="bookmark-item">
                     <button type="button" class="bookmark-open" data-bookmark-id=id.clone()>
                         <span class="bookmark-ref">{b.reference}</span>
                         " "
                         {preview(b.preview, b.complete, &code)}
+                    </button>
+                    " "
+                    <button type="button" class="library-beside" data-bookmark-id=id.clone() aria-label=beside.clone() title=beside>
+                        {OPEN_BESIDE}
                     </button>
                     " "
                     <button type="button" class="bookmark-remove" data-bookmark-id=id aria-label=label title="Remove bookmark">
@@ -960,6 +1001,7 @@ fn highlight_rows(shown: Option<Shown<HighlightPassage>>, filter: &str) -> AnyVi
         .map(|(index, h)| {
             let index = index.to_string();
             let label = format!("Remove highlight {}", h.reference);
+            let beside = beside_label(&h.reference);
             let name = text::color_name(&h.color);
             let color = h.color.clone();
             view! {
@@ -975,6 +1017,10 @@ fn highlight_rows(shown: Option<Shown<HighlightPassage>>, filter: &str) -> AnyVi
                         </span>
                         " "
                         {preview(h.preview, h.complete, &code)}
+                    </button>
+                    " "
+                    <button type="button" class="library-beside" data-index=index.clone() aria-label=beside.clone() title=beside>
+                        {OPEN_BESIDE}
                     </button>
                     " "
                     <button type="button" class="bookmark-remove" data-index=index aria-label=label title="Remove highlight">
@@ -1039,6 +1085,8 @@ fn note_rows(shown: Option<Shown<NoteRow>>, query: &str) -> AnyView {
             let (row_id, open_id, edit_id) = (id.clone(), id.clone(), id.clone());
             let label = format!("Edit note on {}", note.reference);
             let copy_label = format!("Copy the note on {} as Markdown", note.reference);
+            let beside = beside_label(&note.reference);
+            let beside_id = id.clone();
             let preview_id = format!("note-preview-{id}");
             let reference = with_marks(
                 &note.reference,
@@ -1060,6 +1108,9 @@ fn note_rows(shown: Option<Shown<NoteRow>>, query: &str) -> AnyView {
                         </button>
                         <button type="button" class="note-list-copy" data-note-id=id aria-label=copy_label title="Copy as Markdown">
                             "Copy as Markdown"
+                        </button>
+                        <button type="button" class="library-beside" data-note-id=beside_id aria-label=beside.clone() title=beside>
+                            {OPEN_BESIDE}
                         </button>
                     </span>
                 </li>

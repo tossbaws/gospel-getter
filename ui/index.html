@@ -2630,7 +2630,8 @@
 
         /* My notes: the Bookmarks list's look, with the start of each note
            (two lines, clipped visually, never shortened) in place of the
-           verse text, and a small Edit and Copy as Markdown beside it. The
+           verse text, and a small Edit, Copy as Markdown and Open beside
+           beside it (Open beside on the other lists' rows too). The
            start is the note as Markdown run onto one line, under the row's
            link (not in it: the links in a note are links of their own). */
         .note-item-main {
@@ -2663,6 +2664,7 @@
             align-items: flex-end;
         }
 
+        .library-beside,
         .note-list-edit,
         .note-list-copy {
             flex: 0 0 auto;
@@ -2676,6 +2678,7 @@
             cursor: pointer;
         }
 
+        .library-beside:hover,
         .note-list-edit:hover,
         .note-list-copy:hover {
             color: var(--accent);
@@ -4514,6 +4517,7 @@
 
         .note-link:focus-visible,
         .verse-note-btn:focus-visible,
+        .library-beside:focus-visible,
         .note-list-edit:focus-visible,
         .note-list-copy:focus-visible {
             outline: 2px solid var(--accent);
