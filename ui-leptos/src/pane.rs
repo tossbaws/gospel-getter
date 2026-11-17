@@ -11,8 +11,8 @@
 //!
 //! One pane is the page as it has always been: the window scrolls it, and
 //! its elements are the page's own (`#reader-notice`, `#reading-pane`). A
-//! second pane opens beside it ([`open_second`]; only `gospelGetterPanes`
-//! opens one for now): each pane then has a column of its own, which
+//! second pane opens beside it ([`open_second`], from an Open beside:
+//! `reader::open_beside`, S8): each pane then has a column of its own, which
 //! scrolls by itself below the top bar, with a bar at its top whose
 //! controls are copies of the top bar's reference, arrows and translation
 //! button. Each control makes its pane active, then does exactly what the
@@ -1161,13 +1161,13 @@ pub fn on_scroll_key(event: &KeyboardEvent) -> bool {
 
 // ---- Mounting.
 
-/// `window.gospelGetterPanes`, for the frontend tests and the GUI checks,
-/// and until the reader has a way in of its own, the only way into two
-/// panes: `openBeside({ bookId, chapter, verse, translation })` (a promise
+/// `window.gospelGetterPanes`, for the frontend tests and the GUI checks:
+/// `openBeside({ bookId, chapter, verse, translation })` (a promise
 /// of whether the chapter was put on screen; `verse` and `translation`
 /// optional, the active pane's translation by default) opens the passage in
 /// the second pane, opening it if it isn't, and makes it active (S12,
-/// S13); `close()` closes it; `active()` and `shown()` name the active
+/// S13), through `reader::open_beside` as every Open beside does;
+/// `close()` closes it; `active()` and `shown()` name the active
 /// pane and the panes on screen (`"first"`, `"second"`).
 fn export_panes() {
     let Some(window) = web_sys::window() else {

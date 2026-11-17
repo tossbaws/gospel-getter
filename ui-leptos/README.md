@@ -85,7 +85,7 @@ The header, the Library and search:
 
 The reader, the selection card and notes:
 
-- `reader`: the chapter on screen, how it gets there, and the passage history.
+- `reader`: the chapter on screen, how it gets there, and the passage history; Open beside, the one way a passage opens in the second pane.
 - `pane`: the reading panes' elements (each one's root, `#reading-pane-inner` and notice, by its own ids), which the reading view's queries run on, and each one's `Scroller` (the window, or its own column while two are open), the one way a reading view's scroll position and the band in view are read and set; which pane is active, which are open and which are in view, and `PerPane`, the state the pieces keep for each pane; the second pane opened and closed, and opened again at launch where it was (its place kept on this computer); the panes' bars, the tabs on a narrow window and reading mode's one pane, F6's switch between panes, the keys that scroll a pane's column, and `window.gospelGetterPanes`.
 - `pane_text`: how two panes are laid out (side by side, tabs, or reading mode's one), the panes' bars' and tabs' names, which tab an arrow key goes to, what Compare says while two are open, how far the keys that scroll a page scroll a pane's column, and the second pane's place as this computer keeps it (`SECOND_PANE_KEY`), and which can be one.
 - `reader_text`: the chapter's markup, byte for byte `fixtures/genesis-1.html` (which a test compares), Compare's rows, the reference, and the passage history's bookkeeping.

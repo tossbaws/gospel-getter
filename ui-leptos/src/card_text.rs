@@ -232,8 +232,8 @@ pub struct Preview<'a> {
     pub end: i64,
 }
 
-/// The preview's title, its verses (no note markers), its notice, and Go
-/// to.
+/// The preview's title, its verses (no note markers), its notice, Go to,
+/// and Open beside (the same passage in the second pane, S8).
 pub fn preview_html(preview: &Preview<'_>) -> String {
     let reference = escape_html(preview.reference);
     let verses = preview
@@ -262,15 +262,32 @@ pub fn preview_html(preview: &Preview<'_>) -> String {
         )
     };
     let s20 = " ".repeat(20);
-    format!(
-        "<p class=\"xref-preview-title\" id=\"xref-preview-title\">{reference} ({code})</p>\n{s20}{text}\n{s20}{notice}\n{s20}<button type=\"button\" class=\"xref-preview-go\" data-book=\"{book}\" data-chapter=\"{chapter}\" data-verse=\"{start}\" data-end-verse=\"{end}\">Go to {reference} <span aria-hidden=\"true\">→</span></button>",
-        code = escape_html(&preview.code.to_uppercase()),
+    let passage = format!(
+        "data-book=\"{book}\" data-chapter=\"{chapter}\" data-verse=\"{start}\" data-end-verse=\"{end}\"",
         book = preview.book_id,
         chapter = preview.chapter,
         start = preview.start,
         end = preview.end,
+    );
+    let beside = beside_label(&reference);
+    format!(
+        "<p class=\"xref-preview-title\" id=\"xref-preview-title\">{reference} ({code})</p>\n{s20}{text}\n{s20}{notice}\n{s20}<button type=\"button\" class=\"xref-preview-go\" {passage}>Go to {reference} <span aria-hidden=\"true\">→</span></button><button type=\"button\" class=\"xref-preview-beside\" {passage} aria-label=\"{beside}\" title=\"{beside}\">{BESIDE_ICON}{OPEN_BESIDE}</button>",
+        code = escape_html(&preview.code.to_uppercase()),
     )
 }
+
+/// What every way to open a passage in the second pane says (S8).
+pub const OPEN_BESIDE: &str = "Open beside";
+
+/// An Open beside button's name, saying where it goes ("Open Romans 5:8
+/// beside"), from `reference` as it's shown (escaped first, where it goes
+/// into markup).
+pub fn beside_label(reference: &str) -> String {
+    format!("Open {reference} beside")
+}
+
+/// The two columns drawn before the preview's Open beside.
+const BESIDE_ICON: &str = r#"<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><path d="M8 2.75v10.5"/></svg>"#;
 
 /// Said in the preview when the passage couldn't be read.
 pub fn preview_failed(reference: &str, failure: &str) -> String {
@@ -956,7 +973,10 @@ mod tests {
         });
         assert_eq!(
             html,
-            "<p class=\"xref-preview-title\" id=\"xref-preview-title\">1 John 4:9–10 (KJV)</p>\n                    <p class=\"xref-preview-text\"><span class=\"xref-preview-verse\"><span class=\"xref-preview-num\">9</span>In this <em class=\"supplied\">was</em></span> <span class=\"xref-preview-verse\"><span class=\"xref-preview-num\">10</span>Herein is love</span></p>\n                    \n                    <button type=\"button\" class=\"xref-preview-go\" data-book=\"62\" data-chapter=\"4\" data-verse=\"9\" data-end-verse=\"10\">Go to 1 John 4:9–10 <span aria-hidden=\"true\">→</span></button>"
+            "<p class=\"xref-preview-title\" id=\"xref-preview-title\">1 John 4:9–10 (KJV)</p>\n                    <p class=\"xref-preview-text\"><span class=\"xref-preview-verse\"><span class=\"xref-preview-num\">9</span>In this <em class=\"supplied\">was</em></span> <span class=\"xref-preview-verse\"><span class=\"xref-preview-num\">10</span>Herein is love</span></p>\n                    \n                    <button type=\"button\" class=\"xref-preview-go\" data-book=\"62\" data-chapter=\"4\" data-verse=\"9\" data-end-verse=\"10\">Go to 1 John 4:9–10 <span aria-hidden=\"true\">→</span></button><button type=\"button\" class=\"xref-preview-beside\" data-book=\"62\" data-chapter=\"4\" data-verse=\"9\" data-end-verse=\"10\" aria-label=\"Open 1 John 4:9–10 beside\" title=\"Open 1 John 4:9–10 beside\">"
+                .to_owned()
+                + BESIDE_ICON
+                + "Open beside</button>"
         );
         let failed = preview_failed("Jude 1:3", "no such book");
         let html = preview_html(&Preview {
