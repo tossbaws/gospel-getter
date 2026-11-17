@@ -366,6 +366,12 @@ pub fn shown() -> impl Iterator<Item = PaneId> {
         .chain(split().then_some(PaneId::Second))
 }
 
+/// The panes aren't laid out as the window's width now calls for: two are
+/// open, and it has crossed `pane_text::BARS_QUERY` since they were.
+pub fn reshape_due() -> bool {
+    split() && text::shape(split(), surfaces::two_across()) != SHAPE.get()
+}
+
 /// Every pane laid out on the page now, in order: both of two side by
 /// side, the active one alone as tabs. What the page shows, not what the
 /// window's width now calls for: as the window crosses a width, the
@@ -469,7 +475,12 @@ pub fn set_active(pane: PaneId) {
 /// pane.
 pub fn sync_shape() {
     let shape = text::shape(split(), surfaces::two_across());
-    SHAPE.set(shape);
+    let was = SHAPE.replace(shape);
+    // The translation popover, opened from a bar that's going or from the
+    // top bar's button as it goes.
+    if was.bars() != shape.bars() && surfaces::current() == Some(Surface::Translation) {
+        surfaces::close(false);
+    }
     let Some(made) = made() else {
         return;
     };

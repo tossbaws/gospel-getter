@@ -33,7 +33,8 @@
 //! ([`export_surfaces`]). Without this module, nothing opens.
 //!
 //! Everything happens within the click or key. A resize across 1200px
-//! (D14) keeps the reading place the reader last saw, in every pane
+//! (D14), or with two panes open across 900px (tabs, `pane`), keeps the
+//! reading place the reader last saw, in every pane
 //! ([`on_shape_change`],
 //! [`note_painted_place`]), even right after a scroll, and in Chromium,
 //! whatever place its scroll anchoring kept ([`SCROLL_BEFORE_RESIZE`]),
@@ -1065,12 +1066,17 @@ pub fn mount() {
     }
     WIDE.set(wide);
     // Only two panes change shape at this width (side by side, or tabs);
-    // one pane is the page as ever, whatever the width.
+    // one pane is the page as ever, whatever the width. A resize across
+    // both lines at once (1280px to 800px, say) is one change: `wide`'s
+    // listener, the older, runs first and lays the panes out for the new
+    // width too (`pane::sync_shape`), so this one finds nothing left to do.
+    // Run again, it would find each pane's place in a painted layout from
+    // before the first, which is no longer the page.
     let two_across =
         web_sys::window().and_then(|w| w.match_media(crate::pane_text::BARS_QUERY).ok().flatten());
     if let Some(two_across) = &two_across {
         let crossed = || {
-            if pane::split() {
+            if pane::reshape_due() {
                 on_shape_change();
             }
         };

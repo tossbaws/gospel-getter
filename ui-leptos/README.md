@@ -67,7 +67,7 @@ The dialogs:
 
 The header, the Library and search:
 
-- `surfaces`: the header's popovers and panels and the picker's two shapes, the sidebar or the popover: one open at a time, their buttons, focus in and back, a click outside, Escape, the menu's keys and the window crossing 1200px.
+- `surfaces`: the header's popovers and panels and the picker's two shapes, the sidebar or the popover: one open at a time, their buttons, focus in and back, a click outside, Escape, the menu's keys and the window crossing 1200px (and 900px, with two panes open), keeping each pane's place, and that of a pane out of view.
 - `surfaces_text`: the surfaces' table, the sidebar's rule and the ☰ menu's keys.
 - `aa`: Aa and the translation button's popover: the translations, Compare, text size, line spacing, width, layout, theme, reading mode and the launch check's setting.
 - `aa_text`: the size keys and stepping, and what Compare shows beside the text.
