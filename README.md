@@ -117,6 +117,19 @@ needed.
   the card. In a narrow window each note sits under its first verse. Reading
   mode keeps its margin notes, and the choice stays on this computer, out
   of backups.
+- **Two passages side by side.** **Open beside** opens a passage next to
+  the one you're reading, in its own translation: from a cross-reference's
+  preview, a bookmark, highlight or note in the Library, a verse in search
+  (or Alt+Enter), or a link in a note (Shift-click or Alt-click, or **Open
+  beside** in the card's note row). Each side has its own ‹ and ›, book and
+  chapter button and translation button, and × closes the second. The side
+  you last clicked is the active one, for the arrow keys, `T`, `G`, `N`,
+  Back and Forward; F6 switches sides. Opening beside again replaces the
+  right-hand side, and the left is always your saved reading place.
+  Compare waits while two passages are open and comes back when you close
+  the second. In a narrow window the sides become tabs, reading mode shows
+  the active side alone, and printing prints it. The second side reopens
+  where you left it, kept on this computer only, out of backups.
 - **Cross-references.** Select a verse to see related passages in its
   card. Click one to read it right there in the card, a whole range at
   once, in the translation you're reading; click it again to close it, and
@@ -225,7 +238,7 @@ needed.
 
 ## A quick tour
 
-All twelve screenshots in this README, including the one at the top, use
+All thirteen screenshots in this README, including the one at the top, use
 Chi Rho, the default theme, in a window wide enough for the picker's
 sidebar. The other eight themes are under **Aa**.
 
@@ -242,6 +255,13 @@ the WEB: in Romans 14 the WEB numbers three verses the KJV doesn't, and
 the KJV column says so rather than shifting anything.
 
 ![Romans 14 from verse 21 in compare mode in the Chi Rho theme, with KJV and WEB columns side by side, the KJV's supplied words in italics, and verses 24 to 26 marked "Not numbered in the KJV"](screenshots/compare-translations.png)
+
+**Read two passages side by side.** **Open beside**, here from John 3:16's
+cross-reference to Romans 5:8, opens a passage next to the one you're
+reading. Each side keeps its own translation, and the active one has the
+gold heading.
+
+![Two passages side by side in the Chi Rho theme: John 3 in the KJV on the left, and Romans 5 in the BSB on the right, the active side, with its heading in gold. Each side has its own bar with ‹ and ›, the reference button and the translation, and the right-hand bar ends with × to close it. The sidebar on the left lists the books, with the chapters of Romans open and 5 marked](screenshots/split-view.png)
 
 **Select a range and copy it with its reference.** The citation in the
 card shows exactly what will be copied.
@@ -368,15 +388,15 @@ without you choosing **Update and restart** or **Update now**.
 latest version, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.29.6?** Each updates itself to 2.30.0: it
+**Coming from 2.6.0 through 2.30.0?** Each updates itself to 2.31.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
-update themselves. The 2.19.0 pre-release updates itself to 2.30.0 the
+update themselves. The 2.19.0 pre-release updates itself to 2.31.0 the
 same way.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.30.0 by hand once, from the
+Install 2.31.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
@@ -417,6 +437,10 @@ Upgrading keeps your data.
   Backups and the notes export don't include them.
 - **Recent places** (the bar's ▾ list, the last 10) are kept in the app's
   web storage, on this computer only. Backups don't include them.
+- Split view's second side (whether two passages are open, and where the
+  right-hand one is) is kept in the app's web storage, on this computer
+  only. Backups don't include it: the reading position they keep is always
+  the left side's.
 - AI findings (see **Mark findings** under **Use with AI agents**) and the
   **Let AI agents save findings** switch are kept in the database. A backup
   includes them: one with findings, or with the switch on, is data format 4,

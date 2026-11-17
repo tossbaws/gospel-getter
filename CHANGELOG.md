@@ -4,6 +4,31 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.31.0] - 2026-11-17
+
+Two passages side by side. **Open beside** opens a passage next to the
+one you're reading, in its own translation. It's in four places: a
+cross-reference's preview in the card, after **Go to**; each bookmark,
+highlight and note in the Library; search, on each verse it finds, or
+with Alt+Enter; and links in your notes, with Shift-click or Alt-click,
+or **Open beside** in the card's note row. Each side has its own ‹ and
+›, book and chapter button, and translation button, and × closes the
+second side. Opening beside again replaces the right-hand side; the
+left side is always your saved reading place.
+
+The side you last clicked is the active one: the arrow keys, `T`, `G`,
+`N`, Back and Forward act on it, and F6 or Shift+F6 switches sides. The
+command palette has **Open this passage beside**, and while two
+passages are open, **Switch pane (F6)** and **Close the second pane**.
+Compare still shows one passage in two translations, one row per verse:
+while two passages are open it waits, and it comes back when you close
+the second. On a narrow window the two sides become tabs, reading mode
+shows the active side alone, and printing prints the active side. The
+second side reopens where you left it the next time you start the app;
+that's kept on this computer only, not in backups. No verse changes.
+Backups are unchanged, in the same data formats. Updating keeps your
+bookmarks, highlights, notes, findings, reading position and settings.
+
 ## [2.30.0] - 2026-11-16
 
 A key for reading mode. Press `R` to turn reading mode on or off; Esc
