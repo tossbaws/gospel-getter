@@ -92,8 +92,8 @@ struct State {
     asked: Option<(i64, i64)>,
     /// A note's Edit waiting for its jump ([`open`]): claimed by the Edit,
     /// cancelled by any newer navigation ([`load_sent`]) and by any note
-    /// editor opening (`bridge::NOTE_EVENT`), so a late jump never opens a
-    /// note over something newer.
+    /// editor opening ([`note_editor_opening`]), so a late jump never opens
+    /// a note over something newer.
     edit: Generation,
     /// Compare's own fetch ([`on_compare_change`]), apart from a load's:
     /// claimed by each change of Compare (on, off, another translation),
@@ -826,6 +826,23 @@ fn export_place() {
     saved.forget();
 }
 
+/// Compare went on or off, or what it compares with changed (or reading
+/// mode, with Compare's Notes chosen; `aa`): every pane draws its chapter
+/// in the new layout ([`on_compare_change`]).
+pub fn compare_changed() {
+    for pane in pane::shown() {
+        on_compare_change(pane);
+    }
+}
+
+/// A note editor is opening (`card`): a note's Edit still waiting for its
+/// jump, in any pane, is let go ([`open`]).
+pub fn note_editor_opening() {
+    for pane in pane::shown() {
+        with(pane, |s| s.edit.cancel());
+    }
+}
+
 /// Compare went on or off, or what it compares with changed: the chapter on
 /// screen in the new layout, fetching the comparison only if it isn't the
 /// one there already. Its answer (or its failure's notice) shows only while
@@ -1373,8 +1390,8 @@ struct CreditArgs<'a> {
     which: &'a str,
 }
 
-/// Listens for Compare's changes, clicks on the pane's controls and on Try
-/// again, and the mouse's back and forward buttons. Called right after Aa's
+/// Listens for clicks on the pane's controls and on Try again, and the
+/// mouse's back and forward buttons. Called right after Aa's
 /// (whose records it fills) and the selection card's (which it tells about
 /// each chapter), and before boot (`boot`), which asks it for the first
 /// chapter at once, so it needn't wait for the other pieces to mount.
@@ -1382,18 +1399,6 @@ pub fn mount() {
     let Some(document) = bridge::document() else {
         return;
     };
-    dom::on_document_event(aa::COMPARE_CHANGE_EVENT, |_| {
-        for pane in pane::shown() {
-            on_compare_change(pane);
-        }
-    });
-    // Any note editor opening is newer than a note's Edit still waiting for
-    // its jump ([`open`]).
-    dom::on_document_event(bridge::NOTE_EVENT, |_| {
-        for pane in pane::shown() {
-            with(pane, |s| s.edit.cancel());
-        }
-    });
     // After the click dispatcher on the body (`clicks`), which ignores
     // these.
     if let Some(body) = document.body() {

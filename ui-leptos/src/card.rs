@@ -25,8 +25,8 @@
 //! ([`refresh_highlights`], [`refresh_notes`]). The Library
 //! hands over its bookmarks ([`library_loaded`]) and has the
 //! highlights refreshed; the note editor opens
-//! from here (`bridge::NOTE_EVENT`), has the notes refreshed
-//! ([`refresh_notes`]) and says what it did (`bridge::NOTE_DONE_EVENT`).
+//! from here (`note_editor::open`), has the notes refreshed
+//! ([`refresh_notes`]) and says what it did ([`note_done`]).
 //!
 //! A stale answer never overwrites a newer one: the highlights, the
 //! chapter's notes, the selection's notes and a preview each have their
@@ -48,7 +48,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
-use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent};
+use web_sys::{Element, HtmlElement, KeyboardEvent};
 
 use crate::bridge;
 use crate::card_text::{self as text, Change, Room, Selection, Side, Slot};
@@ -60,6 +60,8 @@ use crate::dto::{
 use crate::ipc;
 use crate::library_text::List;
 use crate::margin;
+use crate::note_editor::{self, KeepRef, NoteRef, NoteRequest, OtherNote};
+use crate::note_text::Passage;
 use crate::palette::PaletteState;
 use crate::pane::{self, PaneId, PerPane};
 
@@ -1602,7 +1604,7 @@ fn refresh_selection_notes() -> Task {
         return Box::pin(async {});
     };
     let sent = send("list_notes", &args);
-    let passage = PassageOut {
+    let passage = Passage {
         book_id: args.book_id,
         chapter: args.chapter,
         start: args.verse_start,
@@ -1637,46 +1639,22 @@ fn refresh_selection_notes() -> Task {
         render_notes_section();
         // The note editor, if it's open and adding on this passage, lists
         // them too.
-        dispatch_others(&passage);
+        note_editor::show_others(&passage, others());
     })
 }
 
 /// The selection's notes, as the note editor lists the others.
-#[derive(Serialize)]
-struct Other {
-    reference: String,
-    date: String,
-    body: String,
-}
-
-fn others() -> Vec<Other> {
+fn others() -> Vec<OtherNote> {
     with(|s| {
         s.selection_notes
             .iter()
-            .map(|n| Other {
+            .map(|n| OtherNote {
                 reference: n.note.reference.clone(),
                 date: n.note.created_at_display.clone(),
                 body: n.note.body.clone(),
             })
             .collect()
     })
-}
-
-/// Tells the note editor the notes on `passage`, the one they were listed
-/// for: it shows them only if it's adding on that passage (C2-01).
-fn dispatch_others(passage: &PassageOut) {
-    #[derive(Serialize)]
-    struct Others<'a> {
-        passage: &'a PassageOut,
-        others: Vec<Other>,
-    }
-    bridge::dispatch(
-        bridge::NOTE_OTHERS_EVENT,
-        &Others {
-            passage,
-            others: others(),
-        },
-    );
 }
 
 /// The selection's Notes section, under its actions: shown only when notes
@@ -1784,39 +1762,6 @@ struct NotePassage {
     verse_end: i64,
 }
 
-/// What the note editor is asked to open with (`bridge::NoteRequest`, plus
-/// `note` and `returnFocus`, set beside it).
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NoteOpen<'a> {
-    mode: &'a str,
-    passage: PassageOut,
-    reference: &'a str,
-    code: &'a str,
-    passage_html: &'a str,
-    others: Vec<Other>,
-    /// "Keep as mine": the AI finding the note is made from.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    keep: Option<KeepOut<'a>>,
-}
-
-/// The finding "Keep as mine" makes a note of: its id, and its words, which
-/// the editor opens with, all selected (C10).
-#[derive(Serialize)]
-struct KeepOut<'a> {
-    id: i64,
-    text: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PassageOut {
-    book_id: i64,
-    chapter: i64,
-    start: i64,
-    end: i64,
-}
-
 /// Opens the note editor: adding a note on `passage` (`note` is `None`), or
 /// editing `note` (as the backend gave it), with `code` the translation whose
 /// text is quoted, and focus going back to `opener` when it closes.
@@ -1865,45 +1810,43 @@ fn open_note_editor(
     let missing = end - start + 1 - verses.len() as i64;
     let quoted: Vec<&Verse> = verses.iter().collect();
     let passage_html = text::note_passage_html(&quoted, missing, code);
-    let open = NoteOpen {
-        mode,
-        passage: PassageOut {
+    // Any note editor opening is newer than a note's Edit still waiting
+    // for its jump.
+    crate::reader::note_editor_opening();
+    let edited = match note
+        .as_ref()
+        .map(|n| serde_wasm_bindgen::from_value::<NoteRef>(n.clone()))
+    {
+        Some(Err(e)) => {
+            ipc::log_error("The note request couldn't be read", &JsValue::from(e));
+            return;
+        }
+        Some(Ok(edited)) => Some(edited),
+        None => None,
+    };
+    let request = NoteRequest {
+        mode: mode.to_owned(),
+        note: edited,
+        passage: Passage {
             book_id,
             chapter,
             start,
             end,
         },
-        reference: &reference,
-        code,
-        passage_html: &passage_html,
+        reference,
+        code: code.to_owned(),
+        passage_html,
         others: match keep {
             Some(finding) => chapter_others(finding),
             None if mode == "add" => others(),
             None => Vec::new(),
         },
-        keep: keep.map(|f| KeepOut {
+        keep: keep.map(|f| KeepRef {
             id: f.id,
-            text: &f.text,
+            text: f.text.clone(),
         }),
     };
-    let Ok(detail) = ipc::args(&open) else {
-        return;
-    };
-    let set = |key: &str, value: &JsValue| {
-        let _ = js_sys::Reflect::set(&detail, &JsValue::from_str(key), value);
-    };
-    set("note", &note.unwrap_or(JsValue::NULL));
-    set("returnFocus", &opener.map_or(JsValue::NULL, JsValue::from));
-    let init = web_sys::CustomEventInit::new();
-    init.set_cancelable(true);
-    init.set_detail(&detail);
-    let (Some(document), Ok(request)) = (
-        bridge::document(),
-        CustomEvent::new_with_event_init_dict(bridge::NOTE_EVENT, &init),
-    ) else {
-        return;
-    };
-    if document.dispatch_event(&request).unwrap_or(true) {
+    if !note_editor::open(request, note.unwrap_or(JsValue::NULL), opener) {
         bridge::toast(text::EDITOR_UNAVAILABLE, true);
     }
 }
@@ -1986,7 +1929,7 @@ pub fn keep_finding(finding: &Finding, opener: Option<HtmlElement>) {
 
 /// The reader's own notes on a finding's verses, from the chapter's, as the
 /// editor lists the others.
-fn chapter_others(finding: &Finding) -> Vec<Other> {
+fn chapter_others(finding: &Finding) -> Vec<OtherNote> {
     with(|s| {
         s.here()
             .chapter_notes
@@ -1998,7 +1941,7 @@ fn chapter_others(finding: &Finding) -> Vec<Other> {
                     && n.verse_start <= finding.verse_end
                     && n.verse_end >= finding.verse_start
             })
-            .map(|n| Other {
+            .map(|n| OtherNote {
                 reference: n.reference.clone(),
                 date: n.created_at_display.clone(),
                 body: n.body.clone(),
@@ -2025,22 +1968,30 @@ pub fn edit_note(note: &JsValue) {
     }
 }
 
-/// What the editor did, its notes already refreshed.
-fn on_note_done(event: &CustomEvent) {
+/// What the note editor did.
+pub enum NoteDone {
+    Added,
+    Saved,
+    /// The note deleted, as the backend returned it.
+    Deleted(JsValue),
+}
+
+/// The note editor added, saved or deleted a note, the notes already
+/// refreshed in every pane ([`refresh_notes`]): the card says so in its
+/// status line, a deletion with its Undo, or in the page's toast when the
+/// card is gone.
+pub fn note_done(done: NoteDone) {
     let Some(els) = elements() else {
         return;
     };
-    let detail = event.detail();
-    let action = js_text(&get(&detail, "action"));
-    let note = get(&detail, "note");
     let card_open = els.actions.is_connected();
-    match action.as_str() {
-        "deleted" if card_open => {
+    match done {
+        NoteDone::Deleted(note) if card_open => {
             set_action_status(text::NOTE_DELETED, false, Some(note), text::UNDO_MS);
         }
-        "deleted" => deleted_elsewhere(note),
-        "saved" if card_open => status(text::NOTE_SAVED, false),
-        _ if card_open => status(text::NOTE_ADDED, false),
+        NoteDone::Deleted(note) => deleted_elsewhere(note),
+        NoteDone::Saved if card_open => status(text::NOTE_SAVED, false),
+        NoteDone::Added if card_open => status(text::NOTE_ADDED, false),
         _ => {}
     }
 }
@@ -2118,6 +2069,11 @@ fn refresh_library(lists: &[&str]) -> Task {
             Box::pin(async {})
         }
     }
+}
+
+/// A new layout (`aa`) has moved the selected verses: the card follows.
+pub fn layout_changed() {
+    place_card();
 }
 
 /// Every piece has mounted (`lib`'s ready list): the Library lists asked
@@ -2812,7 +2768,6 @@ pub fn mount() {
     });
     ELEMENTS.with_borrow_mut(|e| *e = Some(made));
 
-    dom::on_document_event(bridge::NOTE_DONE_EVENT, |event| on_note_done(&event));
     {
         let menu_for_keys = menu.clone();
         dom::on(&menu, "keydown", move |event| {
@@ -2871,8 +2826,6 @@ pub fn mount() {
             grown.forget();
         }
     }
-    // A new layout moves the selected verses.
-    dom::on_document_event(crate::aa::LAYOUT_CHANGE_EVENT, |_| place_card());
     dom::on(&document, "visibilitychange", |_| {
         if bridge::document().is_some_and(|d| d.hidden()) {
             release_shift();

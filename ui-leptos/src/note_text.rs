@@ -1,12 +1,30 @@
 //! The note editor's rules and words: how long a note may be, when Save can
-//! save, what the length line says, and whether a note has changed; and its
-//! drafts: which draft is whose, which are kept and for how long, and when
+//! save, what the length line says, whether a note has changed, and whose
+//! other notes it lists; and its drafts: which draft is whose, which are kept and for how long, and when
 //! one is offered back. Kept free of the DOM so it is tested natively
 //! (`cargo test`).
 
 use serde::{Deserialize, Serialize};
 
 use crate::text::thousands;
+
+/// The verses a note is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Passage {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub start: i64,
+    pub end: i64,
+}
+
+/// Whether the other notes the card listed for `listed` go in the editor,
+/// open on `editing` (`None`: it's closed) and `keeping` a finding or not:
+/// only while it's open, not keeping (a kept finding's verse has its own),
+/// and only for its own passage, never another's the card listed meanwhile
+/// (C2-01).
+pub fn lists_others(editing: Option<&Passage>, keeping: bool, listed: &Passage) -> bool {
+    !keeping && editing == Some(listed)
+}
 
 /// The longest note, in characters (code points), as the backend allows.
 pub const MAX_CHARS: u64 = 10_000;
@@ -215,6 +233,49 @@ pub fn draft_offer(at: f64, now: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const EDITING: Passage = Passage {
+        book_id: 43,
+        chapter: 3,
+        start: 16,
+        end: 16,
+    };
+
+    #[test]
+    fn the_editor_lists_only_its_own_passages_other_notes() {
+        assert!(lists_others(Some(&EDITING), false, &EDITING));
+        let romans_8_28 = Passage {
+            book_id: 45,
+            chapter: 8,
+            start: 28,
+            end: 28,
+        };
+        assert!(!lists_others(Some(&EDITING), false, &romans_8_28));
+        // Any one part of the passage differing makes it another's.
+        for other in [
+            Passage {
+                book_id: 44,
+                ..EDITING
+            },
+            Passage {
+                chapter: 4,
+                ..EDITING
+            },
+            Passage {
+                start: 15,
+                ..EDITING
+            },
+            Passage { end: 17, ..EDITING },
+        ] {
+            assert!(!lists_others(Some(&EDITING), false, &other), "{other:?}");
+        }
+    }
+
+    #[test]
+    fn a_closed_or_keeping_editor_lists_no_other_notes() {
+        assert!(!lists_others(None, false, &EDITING));
+        assert!(!lists_others(Some(&EDITING), true, &EDITING));
+    }
 
     #[test]
     fn length_counts_characters_once_trimmed() {
