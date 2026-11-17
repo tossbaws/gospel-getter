@@ -44,7 +44,7 @@ use crate::keyboard;
 use crate::library_text::List;
 use crate::page_text::{self as text, Saved};
 use crate::palette::{Choice, PaletteState};
-use crate::pane;
+use crate::pane::{self, PaneId};
 use crate::picker_text::Book;
 use crate::reader::{self, Request};
 use crate::reader_text::Which;
@@ -422,10 +422,12 @@ fn import_data() {
 /// bookmarks, highlights and notes, then the result.
 pub fn imported(position: Option<PositionPreview>, message: String) {
     // What comes first is asked within the event: the position's chapter,
-    // or else the bookmarks.
+    // or else the bookmarks. The position is the first pane's, the place
+    // the backend keeps (S15), whichever pane is active: the second, open
+    // beside it, is this computer's, and no import touches it (S9).
     let first = match position {
         Some(position) => Err(reader::ask(
-            pane::active(),
+            PaneId::First,
             Request::Load {
                 book_id: position.book_id,
                 chapter: position.chapter,
