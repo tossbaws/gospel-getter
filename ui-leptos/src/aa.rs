@@ -284,10 +284,24 @@ pub fn text_size_shortcut(step: i8) {
 /// all, leaving it). Focus goes to whichever control undoes it, so a
 /// keyboard reader always lands somewhere sensible: the exit button, or Aa,
 /// which holds its toggle. It hides the sidebar, and leaving it brings the
-/// sidebar back.
+/// sidebar back. With two panes open it shows the active one alone, and
+/// leaving it brings the other back (D6), each keeping its place
+/// (`pane::sync_shape`, inside the reading place logic's keeping).
 pub fn set_reader_mode(on: bool) {
     let was = beside();
-    prefs::set(&preferences::READER_MODE, if on { "on" } else { "off" });
+    let set = || prefs::set(&preferences::READER_MODE, if on { "on" } else { "off" });
+    if crate::pane::split() {
+        surfaces::keep_reading_place(
+            || {
+                set();
+                crate::pane::sync_shape();
+                surfaces::sync_picker();
+            },
+            None,
+        );
+    } else {
+        set();
+    }
     // Compare with Notes shows the text alone in reading mode, where the
     // margin has the notes: the chapter is drawn again for it.
     if beside() != was {
@@ -632,24 +646,39 @@ pub fn apply_preferences(values: &JsValue) -> Result<bool, JsValue> {
     let mut persisted = true;
     let was = beside();
     let mut compare_changed = false;
-    for (pref, value) in changes {
-        if *pref == preferences::COMPARE && prefs::on(pref) != (value == "on") {
-            compare_changed = true;
+    let apply = || {
+        for (pref, value) in changes {
+            if *pref == preferences::COMPARE && prefs::on(pref) != (value == "on") {
+                compare_changed = true;
+            }
+            if *pref == preferences::COMPARE_WITH && prefs::shown(pref).as_deref() != Some(&value) {
+                compare_changed = true;
+            }
+            prefs::set(pref, &value);
+            if prefs::stored(pref).as_deref() != Some(&value) {
+                persisted = false;
+            }
+            if let Some(select) = pref.select.and_then(select) {
+                select.set_value(&value);
+            }
         }
-        if *pref == preferences::COMPARE_WITH && prefs::shown(pref).as_deref() != Some(&value) {
-            compare_changed = true;
-        }
-        prefs::set(pref, &value);
-        if prefs::stored(pref).as_deref() != Some(&value) {
-            persisted = false;
-        }
-        if let Some(select) = pref.select.and_then(select) {
-            select.set_value(&value);
-        }
+        show_toggles();
+        sync_aa();
+        surfaces::sync_picker();
+    };
+    // Reading mode, imported while two panes are open, shows the active
+    // one alone as `set_reader_mode` does, each keeping its place.
+    if crate::pane::split() {
+        surfaces::keep_reading_place(
+            || {
+                apply();
+                crate::pane::sync_shape();
+            },
+            None,
+        );
+    } else {
+        apply();
     }
-    show_toggles();
-    sync_aa();
-    surfaces::sync_picker();
     if compare_changed || beside() != was {
         crate::reader::compare_changed();
     }

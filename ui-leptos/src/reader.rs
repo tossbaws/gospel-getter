@@ -268,11 +268,10 @@ fn reference_of(here: &Here, compare: Option<&Compare>) -> text::Reference {
     text::reference(&here.book_name, here.chapter, &codes, translation_name)
 }
 
-/// `pane`'s bar says where the reader is in it, as the reference button
-/// does (two panes open).
+/// `pane`'s bar and tab say where the reader is in it, as the reference
+/// button does (two panes open).
 fn show_bar_reference(pane: PaneId, here: &Here, compare: Option<&Compare>) {
-    let reference = reference_of(here, compare);
-    pane::show_reference(pane, &text::reference_markup(&reference), &reference.label);
+    pane::show_reference(pane, &reference_of(here, compare));
 }
 
 /// The reference button and the window title (which the backend copies to
@@ -1619,12 +1618,12 @@ pub fn mount() {
         dom::on(&window, "pagehide", |_| save_places());
         dom::on(&window, "blur", |_| save_places());
         // The print stylesheet prints both lists open, whatever they show
-        // on screen, so a closed Cross references list is filled first.
+        // on screen, so a closed Cross references list is filled first: the
+        // active pane's, the one that prints (D14).
         dom::on(&window, "beforeprint", |_| {
-            for pane in pane::shown() {
-                if let Some(list) = pane.query(&format!("#{}", pane.ids().xrefs)) {
-                    fill_xref_rows(pane, &list);
-                }
+            let pane = pane::active();
+            if let Some(list) = pane.query(&format!("#{}", pane.ids().xrefs)) {
+                fill_xref_rows(pane, &list);
             }
         });
     }

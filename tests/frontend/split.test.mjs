@@ -4,8 +4,10 @@
 // header acting on the active pane, a press making a pane active, marks
 // and the Library shared by both, each pane's own history, Open beside
 // again replacing the second pane (S12) and leaving it active (S13),
-// Compare paused (S14), the second pane's place never saved (S15), and ×
-// putting the page back exactly as it was.
+// Compare paused (S14), the second pane's place never saved (S15), ×
+// putting the page back exactly as it was, and reading mode showing the
+// active pane alone (D6). The tabs on a narrow window are
+// split-narrow.test.mjs's.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -300,4 +302,96 @@ test('× puts the page back exactly as it was, the first pane active and its ref
         panes(app).close();
         await app.idle();
         assert.deepEqual(snapshot(), was);
+    }));
+
+test('reading mode shows the active pane alone, the top bar acting on it, and leaving it brings the split back (D6)', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        const html = app.document.documentElement;
+        const seen = () => ({
+            readingMode: html.dataset.readerMode === 'on',
+            tabs: html.hasAttribute('data-pane-tabs'),
+            hidden: ['first', 'second'].filter((name) => column(app, name).hidden),
+            shown: [...panes(app).shown()],
+            active: panes(app).active(),
+        });
+        await openBeside(app, { bookId: ROMANS, chapter: 5, translation: 'bsb' });
+        await app.key('r');
+        assert.deepEqual(seen(), {
+            readingMode: true, tabs: false, hidden: ['first'], shown: ['first', 'second'], active: 'second',
+        });
+        assert.equal(app.document.querySelector('.pane-tabs').hidden, true, 'no tabs in reading mode');
+        assert.equal(app.document.activeElement, app.document.getElementById('reader-exit'));
+        assert.match(app.document.getElementById('ref-text').textContent, /^Romans 5/);
+        // → turns the pane shown.
+        app.document.activeElement.blur();
+        let before = app.calls.length;
+        app.key('ArrowRight');
+        await app.idle(before, 'get_reading');
+        assert.deepEqual(readings(app, before), [{ bookId: ROMANS, chapter: 6, translationCode: 'bsb' }]);
+        assert.equal(heading(app, 1), 'John 3');
+
+        // Escape leaves it: both panes again, the same one active.
+        await app.key('Escape');
+        assert.deepEqual(seen(), {
+            readingMode: false, tabs: false, hidden: [], shown: ['first', 'second'], active: 'second',
+        });
+
+        // On a narrow window, reading mode is still the active pane alone,
+        // not the tabs; leaving it, the tabs come back.
+        await press(app, verseIn(app, 1, 1));
+        app.resize(700);
+        await app.key('Escape');
+        assert.equal(seen().tabs, true);
+        await app.key('r');
+        assert.deepEqual(seen(), {
+            readingMode: true, tabs: false, hidden: ['second'], shown: ['first', 'second'], active: 'first',
+        });
+        assert.equal(app.document.querySelector('.pane-tabs').hidden, true);
+        await app.key('r');
+        assert.deepEqual(seen(), {
+            readingMode: false, tabs: true, hidden: ['second'], shown: ['first', 'second'], active: 'first',
+        });
+        assert.equal(app.document.querySelector('.pane-tabs').hidden, false);
+
+        // Reading mode from an import: the same.
+        app.resize(1280);
+        before = app.calls.length;
+        app.window.gospelGetterPreferences.apply({ reading_mode: true });
+        assert.deepEqual(seen(), {
+            readingMode: true, tabs: false, hidden: ['second'], shown: ['first', 'second'], active: 'first',
+        });
+        app.window.gospelGetterPreferences.apply({ reading_mode: false });
+        assert.deepEqual(seen().hidden, []);
+        await app.idle(before);
+    }));
+
+test('opened beside in reading mode, the second pane shows alone; × brings the first back as it was', () =>
+    withApp({ book: 'John', chapter: 3, readerMode: true }, async (app) => {
+        await openBeside(app, { bookId: ROMANS, chapter: 5 });
+        assert.equal(panes(app).active(), 'second');
+        assert.equal(column(app, 'first').hidden, true);
+        assert.equal(column(app, 'second').hidden, false);
+        const before = app.calls.length;
+        panes(app).close();
+        await app.idle(before);
+        assert.deepEqual([...panes(app).shown()], ['first']);
+        assert.equal(app.document.documentElement.dataset.readerMode, 'on');
+        assert.equal(app.document.getElementById('reading-pane').closest('.pane'), null);
+        assert.equal(heading(app, 1), 'John 3');
+    }));
+
+test('printing while split fills the Cross references list of the pane that prints, the active one (D14)', () =>
+    withApp({ book: 'John', chapter: 3 }, async (app) => {
+        await openBeside(app, { bookId: ROMANS, chapter: 5 });
+        const list = (id) => app.document.getElementById(id);
+        assert.equal(list('xref-summary-list').childNodes.length, 0);
+        assert.equal(list('xref-summary-list-2').childNodes.length, 0);
+        app.window.dispatchEvent(new app.window.Event('beforeprint'));
+        assert.ok(list('xref-summary-list-2').querySelector('.xref-summary-row'), 'the second pane’s, which prints');
+        assert.equal(list('xref-summary-list').childNodes.length, 0, 'not the first’s, which doesn’t');
+        assert.equal(list('xref-summary-list-2').hidden, true, 'still closed on screen');
+
+        await press(app, verseIn(app, 1, 1));
+        app.window.dispatchEvent(new app.window.Event('beforeprint'));
+        assert.ok(list('xref-summary-list').querySelector('.xref-summary-row'));
     }));

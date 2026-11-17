@@ -25,6 +25,22 @@
 //! Whatever happens, the second pane is closed after, and the window's
 //! width and the first pane's chapter put back: the checks share one app
 //! session.
+//!
+//! Check 76: the same two panes on a window too narrow for them side by
+//! side (S7), and in reading mode (D6), each pane's place kept, within a
+//! line, by the same measure:
+//!
+//! - The window crossing 900 px narrower makes them tabs: only the active
+//!   pane (the second) shows, where it was.
+//! - Choosing the first pane's tab shows it, at the place it had side by
+//!   side; choosing the second's, at its own.
+//! - The window crossing 900 px wider puts them side by side again, both
+//!   where they were.
+//! - R shows the active pane alone, where it was; Escape leaves reading
+//!   mode, both side by side, both where they were.
+//!
+//! Whatever happens, reading mode is left, the second pane closed, and the
+//! window's width and the first pane's chapter put back.
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
@@ -42,11 +58,13 @@ const NARROW_WIDTH: u32 = 1000;
 const WIDE_WIDTH: u32 = 1280;
 
 /// Each pane's place, as the reader sees it: its column's scroll position,
-/// the first heading or verse below its bar and how far below it that
+/// the first heading or verse below its bar (or, with no bar shown, as tabs
+/// or in reading mode, below the column's top) and how far below it that
 /// starts, a line's height, the band in view's height and how far the
-/// column can scroll; and the window's scroll, whether two panes are open
-/// and which is active. With one pane, the first pane's place is in the
-/// window, below the top bar.
+/// column can scroll, or `null` for a column hidden; and the window's
+/// scroll, whether two panes are open and which is active, whether they're
+/// tabs and whether reading mode is on. With one pane, the first pane's
+/// place is in the window, below the top bar.
 const PANES_JS: &str = "const marks = '.chapter-main .chapter-heading, .chapter-main .verse[data-verse]';
     const first = (root, bar) => {
         for (const mark of root.querySelectorAll(marks)) {
@@ -63,9 +81,10 @@ const PANES_JS: &str = "const marks = '.chapter-main .chapter-heading, .chapter-
     };
     const column = (name) => {
         const col = document.querySelector(`.pane[data-pane=\"${name}\"]`);
-        if (!col) return null;
-        const bar = col.querySelector('.pane-bar').getBoundingClientRect().bottom;
+        if (!col || col.hidden) return null;
         const rect = col.getBoundingClientRect();
+        const barBox = col.querySelector('.pane-bar').getBoundingClientRect();
+        const bar = barBox.height > 0 ? barBox.bottom : rect.top;
         return place(col, bar, col.scrollTop, { view: Math.round(rect.top + col.clientHeight - bar),
             max: col.scrollHeight - col.clientHeight, bar: Math.round(bar), foot: Math.round(rect.bottom),
             left: Math.round(rect.left), right: Math.round(rect.right) });
@@ -73,10 +92,18 @@ const PANES_JS: &str = "const marks = '.chapter-main .chapter-heading, .chapter-
     const split = !!document.documentElement.dataset.split;
     const topBar = document.getElementById('top-bar').getBoundingClientRect().bottom;
     return { split, active: window.gospelGetterPanes.active(), windowY: window.scrollY,
+        tabs: 'paneTabs' in document.documentElement.dataset,
+        reading: document.documentElement.dataset.readerMode === 'on',
         first: split ? column('first') : place(document.getElementById('reading-pane'), topBar, window.scrollY, {}),
         second: column('second'),
         heading2: (document.querySelector('#reading-pane-2 .chapter-heading') || {}).textContent || null,
         focus: document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : null };";
+
+/// The window widths check 76 crosses 900 px between: side by side (wide
+/// enough for both bars, not for the sidebar, which every window reaches,
+/// the Windows runner's included), and tabs.
+const SIDE_BY_SIDE_WIDTH: u32 = 1000;
+const TABS_WIDTH: u32 = 800;
 
 /// A press in a pane's bar, away from its controls (what a pointer pressed
 /// there does, D8), then focus off any control: keys then go to the page.
@@ -400,11 +427,199 @@ impl Run<'_> {
         Ok(said.join("; "))
     }
 
-    /// Puts things back whatever happened: one pane, nothing selected, the
-    /// window `width` wide, and the first pane on the chapter it had
-    /// (`was`).
+    /// Check 76.
+    pub(super) async fn split_tabs(&mut self) -> Result<String> {
+        self.plain_reading().await?;
+        let width = self.split_window_width().await?;
+        let was = self
+            .ui
+            .js(
+                "const inner = document.getElementById('reading-pane-inner');
+                 const h = document.querySelector('.chapter-main .chapter-heading');
+                 return { book: Number(inner.dataset.currentBook), chapter: Number(inner.dataset.currentChapter),
+                          heading: h.textContent.trim() };",
+                Vec::new(),
+            )
+            .await?;
+        let checked = self.split_tabs_steps().await;
+        let put_back = self.split_clean_up(width, &was).await;
+        let said = checked?;
+        put_back?;
+        Ok(said)
+    }
+
+    /// Makes the window `width` wide and waits for the panes to be laid out
+    /// for it (`tabs`: as tabs, else side by side) and to settle; returns
+    /// their places then.
+    async fn split_width(&self, width: u32, tabs: bool) -> Result<Value> {
+        self.window_width(width).await?;
+        let shape = if tabs { "tabs" } else { "side by side" };
+        self.panes_are(
+            &format!("the panes {shape} at {width} px"),
+            &format!(
+                "seen.tabs === {tabs} && window.innerWidth {} 900",
+                if tabs { "<" } else { ">=" }
+            ),
+        )
+        .await?;
+        self.ui
+            .settled(&format!("the panes to settle at {width} px"))
+            .await?;
+        self.panes().await
+    }
+
+    async fn split_tabs_steps(&mut self) -> Result<String> {
+        let ui = &self.ui;
+        let mut said = Vec::new();
+        if self.heading().await? != "Psalms 119" {
+            self.read_in_picker(PSALMS, PSALM, "Psalms 119").await?;
+        }
+        ui.js(
+            "window.gospelGetterPanes.openBeside({ bookId: arguments[0], chapter: arguments[1], translation: 'web' });
+             return null;",
+            vec![json!(PSALMS), json!(PSALM)],
+        )
+        .await?;
+        self.panes_are(
+            "the second pane to show Psalms 119, active",
+            "seen.split && seen.active === 'second' && seen.heading2 === 'Psalms 119' && seen.second && seen.first",
+        )
+        .await?;
+        self.split_width(SIDE_BY_SIDE_WIDTH, false).await?;
+        // Each pane somewhere of its own, well into the psalm, with a
+        // verse's top just below its bar. The reading place logic keeps a
+        // verse's top where it was (D14): a long verse begun well above the
+        // bar, its top kept there, can reflow out of view as the column
+        // widens (tabs, reading mode), which would be another verse first
+        // under the bar for the reason the logic was made, not a place lost.
+        ui.js(
+            "for (const [name, y] of [['first', 1500], ['second', 4000]]) {
+                 const col = document.querySelector(`.pane[data-pane=\"${name}\"]`);
+                 col.scrollTop = y;
+                 const bar = col.querySelector('.pane-bar').getBoundingClientRect().bottom;
+                 const verse = [...col.querySelectorAll('.chapter-main .verse[data-verse]')]
+                     .find((v) => v.getBoundingClientRect().bottom > bar);
+                 col.scrollTop += verse.getBoundingClientRect().top - bar - 4;
+             }
+             return null;",
+            Vec::new(),
+        )
+        .await?;
+        self.panes_are(
+            "both columns scrolled",
+            "seen.first.y > 1400 && seen.second.y > 3900",
+        )
+        .await?;
+        ui.settled("the panes to settle").await?;
+        let side = self.panes().await?;
+
+        // Narrower than 900 px: tabs, the second pane alone.
+        let tabs = self.split_width(TABS_WIDTH, true).await?;
+        ensure!(
+            tabs["first"].is_null() && tabs["active"] == json!("second"),
+            "as tabs, the second pane should show alone: {tabs}"
+        );
+        said.push(Self::same_split_place(
+            &format!("{SIDE_BY_SIDE_WIDTH} → {TABS_WIDTH} px, the second pane"),
+            &side["second"],
+            &tabs["second"],
+        )?);
+
+        // The first pane's tab, then the second's.
+        ui.click("click the first pane's tab", "#pane-tab-first")
+            .await?;
+        self.panes_are(
+            "the first pane shown alone, active",
+            "seen.tabs && seen.active === 'first' && seen.first && !seen.second",
+        )
+        .await?;
+        ui.settled("the first pane to settle").await?;
+        let first = self.panes().await?;
+        said.push(Self::same_split_place(
+            "the first pane's tab",
+            &side["first"],
+            &first["first"],
+        )?);
+        ui.click("click the second pane's tab", "#pane-tab-second")
+            .await?;
+        self.panes_are(
+            "the second pane shown alone, active",
+            "seen.tabs && seen.active === 'second' && seen.second && !seen.first",
+        )
+        .await?;
+        ui.settled("the second pane to settle").await?;
+        let second = self.panes().await?;
+        said.push(Self::same_split_place(
+            "the second pane's tab",
+            &tabs["second"],
+            &second["second"],
+        )?);
+
+        // Wider than 900 px: side by side again.
+        let back = self.split_width(SIDE_BY_SIDE_WIDTH, false).await?;
+        for (pane, before) in [("first", &first), ("second", &second)] {
+            said.push(Self::same_split_place(
+                &format!("{TABS_WIDTH} → {SIDE_BY_SIDE_WIDTH} px, the {pane} pane"),
+                &before[pane],
+                &back[pane],
+            )?);
+        }
+
+        // Reading mode: the active pane alone, then both again.
+        ui.js(
+            "if (document.activeElement) document.activeElement.blur(); return null;",
+            Vec::new(),
+        )
+        .await?;
+        ui.press("press R (reading mode)", "r").await?;
+        self.panes_are(
+            "reading mode, the second pane shown alone",
+            "seen.reading && !seen.tabs && seen.active === 'second' && seen.second && !seen.first",
+        )
+        .await?;
+        ui.settled("the second pane to settle in reading mode")
+            .await?;
+        let reading = self.panes().await?;
+        said.push(Self::same_split_place(
+            "reading mode, the second pane",
+            &back["second"],
+            &reading["second"],
+        )?);
+        ui.press("press Escape (leave reading mode)", Key::Escape)
+            .await?;
+        self.panes_are(
+            "reading mode left, both panes shown",
+            "!seen.reading && seen.first && seen.second",
+        )
+        .await?;
+        ui.settled("the panes to settle").await?;
+        let left = self.panes().await?;
+        for (pane, before) in [("first", &back), ("second", &reading)] {
+            said.push(Self::same_split_place(
+                &format!("reading mode left, the {pane} pane"),
+                &before[pane],
+                &left[pane],
+            )?);
+        }
+        Ok(said.join("; "))
+    }
+
+    /// Puts things back whatever happened: reading mode off, one pane,
+    /// nothing selected, the window `width` wide, and the first pane on the
+    /// chapter it had (`was`).
     async fn split_clean_up(&mut self, width: u32, was: &Value) -> Result<()> {
         let ui = &self.ui;
+        ui.js(
+            "if (document.documentElement.dataset.readerMode === 'on') document.getElementById('reader-exit').click();
+             return null;",
+            Vec::new(),
+        )
+        .await?;
+        ui.wait(
+            "reading mode off",
+            "return [document.documentElement.dataset.readerMode !== 'on', null];",
+        )
+        .await?;
         ui.js(
             "if (window.gospelGetterPanes.shown().length > 1) window.gospelGetterPanes.close(); return null;",
             Vec::new(),

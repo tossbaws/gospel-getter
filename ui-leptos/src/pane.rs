@@ -19,6 +19,15 @@
 //! top bar's does ([`set_active`], then the same call). [`close_second`]
 //! puts the page back as it was.
 //!
+//! A window narrower than `pane_text::BARS_QUERY` has no room for two
+//! panes side by side: they're tabs (S7), a tab list under the top bar
+//! naming each pane's place, and only the active pane shows, the top bar's
+//! own controls acting on it. Reading mode shows the active pane alone too,
+//! as its one centred column (D6); leaving it brings the other back. Which
+//! panes are laid out is [`in_view`]; the
+//! reading place logic (`surfaces`) keeps the place of a pane that goes
+//! out of view and puts it back as it comes into view.
+//!
 //! What each pane shows is its own (its chapter and translation, its loads,
 //! its history and place, the card's and the findings' facts about its
 //! chapter): the pieces keep it in a [`PerPane`], reached by the pane's
@@ -45,9 +54,11 @@ use crate::bridge;
 use crate::dom::{self, by_id};
 use crate::keyboard;
 use crate::nav_text;
-use crate::pane_text::{self as text, ScrollMove};
+use crate::pane_text::{self as text, ScrollMove, Shape};
+use crate::preferences;
+use crate::prefs;
 use crate::reader::{self, OpenPassage};
-use crate::reader_text::{PaneIds, Which};
+use crate::reader_text::{self, PaneIds, Reference, Which};
 use crate::surfaces::{self, Surface};
 
 /// A reading pane.
@@ -308,12 +319,15 @@ impl Scroller {
 
 // ---- Which panes there are, and which is active.
 
-/// The columns and bars, made the first time a second pane opens and kept
-/// (with their listeners) for the page's life, out of the page while one
-/// pane shows.
+/// The columns, bars and tabs, made the first time a second pane opens and
+/// kept (with their listeners) for the page's life, out of the page while
+/// one pane shows.
 struct Made {
     columns: PerPane<HtmlElement>,
     bars: PerPane<HtmlElement>,
+    /// The tab list and the second pane's ×, above the columns.
+    tabs: HtmlElement,
+    tab: PerPane<HtmlElement>,
     /// The second pane's notice and root, which stay in its column.
     notice: HtmlElement,
     root: HtmlElement,
@@ -324,6 +338,8 @@ thread_local! {
     /// Two panes are open.
     static SPLIT: Cell<bool> = const { Cell::new(false) };
     static ACTIVE: Cell<PaneId> = const { Cell::new(PaneId::First) };
+    /// How the panes are laid out on the page now ([`sync_shape`]).
+    static SHAPE: Cell<Shape> = const { Cell::new(Shape::One) };
     /// Each pane's translation while it isn't the active one.
     static CODES: RefCell<PerPane<String>> = RefCell::new(PerPane::default());
     /// Where the first pane's notice and root go back to as the second
@@ -346,11 +362,39 @@ pub fn active() -> PaneId {
     ACTIVE.get()
 }
 
-/// Every pane on screen, in order.
+/// Every pane open, in order.
 pub fn shown() -> impl Iterator<Item = PaneId> {
     [PaneId::First]
         .into_iter()
         .chain(split().then_some(PaneId::Second))
+}
+
+/// The panes aren't laid out as the window's width now calls for: two are
+/// open, and it has crossed `pane_text::BARS_QUERY` since they were.
+/// (Reading mode lays them out as it changes, `aa::set_reader_mode`.)
+pub fn reshape_due() -> bool {
+    split() && due_shape() != SHAPE.get()
+}
+
+/// How the panes should be laid out now: by the window's width and reading
+/// mode.
+fn due_shape() -> Shape {
+    text::shape(
+        split(),
+        surfaces::two_across(),
+        prefs::on(&preferences::READER_MODE),
+    )
+}
+
+/// Every pane laid out on the page now, in order: both of two side by
+/// side, the active one alone as tabs or in reading mode. What the page shows, not what the
+/// window's width now calls for: as the window crosses a width, the
+/// reading place logic finds each pane's place in the shape the reader
+/// saw, then changes it ([`sync_shape`]).
+pub fn in_view() -> impl Iterator<Item = PaneId> {
+    let alone = SHAPE.get().alone();
+    let active = active();
+    shown().filter(move |&pane| !alone || pane == active)
 }
 
 /// The pane `el` is in (its bar included), if it's in one.
@@ -388,15 +432,17 @@ fn translation_select() -> Option<HtmlSelectElement> {
     by_id("translation-select")?.dyn_into().ok()
 }
 
-/// Makes `pane` the active one (D8), if it's on screen: a pointer pressed
-/// in it, focus moving into it, one of its bar's controls, or a passage
-/// opened beside. The selection, in the pane left, goes (one at a time,
-/// D3); the translation button's record says the pane's translation (D12),
-/// and, if that's another, the Library's previews and search follow it as
-/// they would a translation chosen (its `change`, which the reader leaves
-/// alone: the pane already reads it). The pane's heading takes the accent
-/// rule; the header, the picker, Back and Forward and the window's title
-/// (D13) say the pane's place; the margin follows it.
+/// Makes `pane` the active one (D8), if it's open: a pointer pressed in
+/// it, focus moving into it, one of its bar's controls, its tab, or a
+/// passage opened beside. The selection, in the pane left, goes (one at a
+/// time, D3); the translation button's record says the pane's translation
+/// (D12), and, if that's another, the Library's previews and search follow
+/// it as they would a translation chosen (its `change`, which the reader
+/// leaves alone: the pane already reads it). The pane's heading takes the
+/// accent rule; the header, the picker, Back and Forward and the window's
+/// title (D13) say the pane's place; the margin follows it. Where only the
+/// active pane shows (tabs), it shows instead of the other, each keeping
+/// its place.
 pub fn set_active(pane: PaneId) {
     let was = active();
     if was == pane || !shown().any(|shown| shown == pane) {
@@ -408,8 +454,15 @@ pub fn set_active(pane: PaneId) {
         codes[was] = leaving.clone();
         codes[pane].clone()
     });
-    ACTIVE.set(pane);
-    mark_active();
+    let switch = || {
+        ACTIVE.set(pane);
+        sync_shape();
+    };
+    if SHAPE.get().alone() {
+        surfaces::keep_reading_place(switch, None);
+    } else {
+        switch();
+    }
     if coming != leaving
         && let Some(select) = translation_select()
     {
@@ -425,14 +478,70 @@ pub fn set_active(pane: PaneId) {
     crate::findings::pane_switched();
 }
 
-/// Says on each column which pane is active, for its heading's rule.
-fn mark_active() {
+/// Lays the panes out as the window's width and reading mode now call for
+/// (`pane_text::shape`), and says on the page which is active: each
+/// column's `data-pane-active` (for its heading's rule), and, as tabs,
+/// `html[data-pane-tabs]` (the stylesheet's), the tab list shown, the
+/// active pane's tab selected and the other pane hidden. The reading place
+/// logic runs it inside its keeping of places (`surfaces`), which parks the
+/// place of a pane it takes out of view. Focus left on something it hides
+/// goes to the active tab, or the reference button acting on the active
+/// pane.
+pub fn sync_shape() {
+    let shape = due_shape();
+    let was = SHAPE.replace(shape);
+    // The translation popover, opened from a bar that's going or from the
+    // top bar's button as it goes.
+    if was.bars() != shape.bars() && surfaces::current() == Some(Surface::Translation) {
+        surfaces::close(false);
+    }
     let Some(made) = made() else {
         return;
     };
+    let focus = dom::active_element();
+    let focus_in = |el: &HtmlElement| focus.as_ref().is_some_and(|f| el.contains(Some(f)));
+    let mut lost = (shape != Shape::Tabs && focus_in(&made.tabs))
+        || (!shape.bars()
+            && [PaneId::First, PaneId::Second]
+                .iter()
+                .any(|&p| focus_in(&made.bars[p])));
+    if let Some(html) = bridge::document().and_then(|d| d.document_element()) {
+        let _ = if shape == Shape::Tabs {
+            html.set_attribute("data-pane-tabs", "")
+        } else {
+            html.remove_attribute("data-pane-tabs")
+        };
+    }
+    made.tabs.set_hidden(shape != Shape::Tabs);
     for pane in [PaneId::First, PaneId::Second] {
-        let _ =
-            made.columns[pane].set_attribute("data-pane-active", &(pane == active()).to_string());
+        let is_active = pane == active();
+        let column = &made.columns[pane];
+        let _ = column.set_attribute("data-pane-active", &is_active.to_string());
+        let hide = shape.alone() && !is_active;
+        lost |= hide && focus_in(column);
+        column.set_hidden(hide);
+        let tab = &made.tab[pane];
+        let _ = tab.set_attribute("aria-selected", &is_active.to_string());
+        let _ = tab.set_attribute("tabindex", if is_active { "0" } else { "-1" });
+        if shape == Shape::Tabs {
+            let _ = column.set_attribute("role", "tabpanel");
+            let _ = column.set_attribute("aria-labelledby", &tab.id());
+        } else {
+            let _ = column.remove_attribute("role");
+            let _ = column.remove_attribute("aria-labelledby");
+        }
+    }
+    if lost {
+        let to = if shape == Shape::Tabs {
+            Some(made.tab[active()].clone())
+        } else if shape.bars() {
+            active().in_bar(".ref-btn")
+        } else {
+            by_id("ref-btn")
+        };
+        if let Some(to) = to {
+            dom::focus(&to);
+        }
     }
 }
 
@@ -461,14 +570,14 @@ pub fn open_second() {
     surfaces::move_place(PaneId::First, &code, || {
         SLOTS.set(Some((notice.next_sibling(), root.next_sibling())));
         let first = &made.columns[PaneId::First];
-        let _ = notice.before_with_node_1(first);
+        let _ = notice.before_with_node_2(&made.tabs, first);
         let _ = first.append_with_node_2(&notice, &root);
         let _ = main.append_with_node_1(&made.columns[PaneId::Second]);
         SPLIT.set(true);
         if let Some(html) = bridge::document().and_then(|d| d.document_element()) {
             let _ = html.set_attribute("data-split", "on");
         }
-        mark_active();
+        sync_shape();
         reader::redraw(PaneId::First);
     });
     crate::aa::split_changed();
@@ -501,6 +610,7 @@ pub fn close_second() {
         let (notice_slot, root_slot) = SLOTS.take().unwrap_or_default();
         let _ = main.insert_before(&notice, notice_slot.as_ref());
         let _ = main.insert_before(&root, root_slot.as_ref());
+        made.tabs.remove();
         made.columns[PaneId::First].remove();
         made.columns[PaneId::Second].remove();
         made.root.set_inner_html("");
@@ -510,6 +620,8 @@ pub fn close_second() {
         if let Some(html) = bridge::document().and_then(|d| d.document_element()) {
             let _ = html.remove_attribute("data-split");
         }
+        sync_shape();
+        surfaces::forget(PaneId::Second);
         reader::forget(PaneId::Second);
         crate::card::forget(PaneId::Second);
         crate::findings::forget(PaneId::Second);
@@ -540,6 +652,7 @@ fn make() -> Option<Rc<Made>> {
     let mut bars = Vec::new();
     for pane in [PaneId::First, PaneId::Second] {
         let column = element("section", "pane")?;
+        column.set_id(&format!("pane-{}", pane.name()));
         let _ = column.set_attribute("data-pane", pane.name());
         let bar = bar(&element, pane)?;
         let _ = column.append_with_node_1(&bar);
@@ -561,6 +674,7 @@ fn make() -> Option<Rc<Made>> {
     observe_root(&root);
     let [first, second]: [HtmlElement; 2] = columns.try_into().ok()?;
     let [first_bar, second_bar]: [HtmlElement; 2] = bars.try_into().ok()?;
+    let (tabs, [first_tab, second_tab]) = tabs(&element)?;
     let made = Rc::new(Made {
         columns: PerPane::new(|pane| match pane {
             PaneId::First => first.clone(),
@@ -569,6 +683,11 @@ fn make() -> Option<Rc<Made>> {
         bars: PerPane::new(|pane| match pane {
             PaneId::First => first_bar.clone(),
             PaneId::Second => second_bar.clone(),
+        }),
+        tabs,
+        tab: PerPane::new(|pane| match pane {
+            PaneId::First => first_tab.clone(),
+            PaneId::Second => second_tab.clone(),
         }),
         notice,
         root,
@@ -630,17 +749,81 @@ fn bar(element: &impl Fn(&str, &str) -> Option<HtmlElement>, pane: PaneId) -> Op
         toggle_translation_from(&item, &translation);
     });
     if pane == PaneId::Second {
-        let close = element("button", "bar-btn pane-close")?;
-        let _ = close.set_attribute("type", "button");
-        let _ = close.set_attribute("aria-label", text::CLOSE_SECOND);
-        let _ = close.set_attribute("title", text::CLOSE_SECOND);
-        close.set_inner_html(
-            r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>"#,
-        );
-        dom::on_click(&close, |_| close_second());
+        let close = close_button(element)?;
         let _ = bar.append_with_node_1(&close);
     }
     Some(bar)
+}
+
+/// The second pane's ×, which closes it.
+fn close_button(element: &impl Fn(&str, &str) -> Option<HtmlElement>) -> Option<HtmlElement> {
+    let close = element("button", "bar-btn pane-close")?;
+    let _ = close.set_attribute("type", "button");
+    let _ = close.set_attribute("aria-label", text::CLOSE_SECOND);
+    let _ = close.set_attribute("title", text::CLOSE_SECOND);
+    close.set_inner_html(
+        r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>"#,
+    );
+    dom::on_click(&close, |_| close_second());
+    Some(close)
+}
+
+/// The tabs (S7), as the WAI-ARIA tabs pattern has them: a tab list of the
+/// two panes, each tab naming its pane's place and translation, selected
+/// while its pane is active and controlling its column (the tab panel,
+/// [`sync_shape`]), only the selected one in the Tab order; ← and → (Home
+/// and End) move between them, choosing as they go, and never turn the
+/// chapter. The second pane's × follows the list, outside it (a tab list
+/// holds only tabs). Returned with each pane's tab.
+fn tabs(
+    element: &impl Fn(&str, &str) -> Option<HtmlElement>,
+) -> Option<(HtmlElement, [HtmlElement; 2])> {
+    let row = element("div", "pane-tabs")?;
+    row.set_hidden(true);
+    let list = element("div", "pane-tablist")?;
+    let _ = list.set_attribute("role", "tablist");
+    let _ = list.set_attribute("aria-label", text::TABS_LABEL);
+    let mut made = Vec::new();
+    for pane in [PaneId::First, PaneId::Second] {
+        let tab = element("button", "pane-tab")?;
+        tab.set_id(&format!("pane-tab-{}", pane.name()));
+        let _ = tab.set_attribute("type", "button");
+        let _ = tab.set_attribute("role", "tab");
+        let _ = tab.set_attribute("data-pane", pane.name());
+        let _ = tab.set_attribute("aria-controls", &format!("pane-{}", pane.name()));
+        let place = element("span", "pane-tab-place")?;
+        let code = element("span", "pane-tab-code")?;
+        let _ = tab.append_with_node_2(&place, &code);
+        dom::on_click(&tab, move |_| set_active(pane));
+        let _ = list.append_with_node_1(&tab);
+        made.push(tab);
+    }
+    let tabs: [HtmlElement; 2] = made.try_into().ok()?;
+    let order = tabs.clone();
+    dom::on(&list, "keydown", move |event| {
+        let Some(event) = event.dyn_ref::<KeyboardEvent>() else {
+            return;
+        };
+        if event.alt_key() || event.ctrl_key() || event.meta_key() || event.shift_key() {
+            return;
+        }
+        let index = order
+            .iter()
+            .position(|tab| dom::same(dom::active_element().as_ref(), tab))
+            .unwrap_or(0);
+        let Some(to) = text::tab_key(&event.key(), index, order.len()) else {
+            return;
+        };
+        // The page's ← and → turn the chapter; on a tab, they're the tabs'.
+        event.prevent_default();
+        event.stop_propagation();
+        dom::focus(&order[to]);
+        set_active([PaneId::First, PaneId::Second][to]);
+    });
+    let spacer = element("span", "pane-tabs-spacer")?;
+    let close = close_button(element)?;
+    let _ = row.append_with_node_3(&list, &spacer, &close);
+    Some((row, tabs))
 }
 
 /// A column scrolled: the reader saves its place (the first pane's), and
@@ -722,13 +905,10 @@ pub fn open_picker() {
     surfaces::open_picker_from(false, opener);
 }
 
-/// Whether the panes' bars have the top bar's place: two panes, at least
-/// [`text::BARS_QUERY`] wide.
+/// Whether the panes' bars have the top bar's place: two panes, side by
+/// side.
 fn bars_shown() -> bool {
-    split()
-        && web_sys::window()
-            .and_then(|w| w.match_media(text::BARS_QUERY).ok().flatten())
-            .is_some_and(|query| query.matches())
+    SHAPE.get().bars()
 }
 
 /// A header surface has closed (`surfaces`): the translation popover goes
@@ -778,13 +958,25 @@ pub fn picker_synced(reference: &HtmlElement) {
     }
 }
 
-/// The pane's bar says its place: the reference (`markup`, named `label`).
-pub fn show_reference(pane: PaneId, markup: &str, label: &str) {
+/// The pane's bar and its tab say its place, as the reference button
+/// says the active pane's.
+pub fn show_reference(pane: PaneId, reference: &Reference) {
     if let Some(text) = pane.in_bar(".ref-text") {
-        text.set_inner_html(markup);
+        text.set_inner_html(&reader_text::reference_markup(reference));
     }
     if let Some(button) = pane.in_bar(".ref-btn") {
-        let _ = button.set_attribute("aria-label", label);
+        let _ = button.set_attribute("aria-label", &reference.label);
+    }
+    if let Some(made) = made() {
+        let tab = &made.tab[pane];
+        for (part, words) in [
+            (".pane-tab-place", &reference.place),
+            (".pane-tab-code", &reference.codes),
+        ] {
+            if let Ok(Some(el)) = tab.query_selector(part) {
+                el.set_text_content(Some(words));
+            }
+        }
     }
 }
 
