@@ -36,8 +36,8 @@ impl Surface {
         Surface::Recent,
     ];
 
-    /// The page's name for it, as `gospel-getter:surface-open` and
-    /// `-close` say it and `gospelGetterSurfaces.current()` answers.
+    /// The page's name for it, as `gospelGetterSurfaces.current()`
+    /// answers.
     pub fn name(self) -> &'static str {
         match self {
             Surface::Translation => "translation",

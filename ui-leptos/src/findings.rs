@@ -152,7 +152,7 @@ pub async fn refresh() {
 /// The chapter's findings, again, and the Library's: after any change to
 /// them.
 pub async fn refresh_everywhere() {
-    let library = bridge::refresh_library(&["findings"]);
+    let library = crate::library::refresh(&["findings"]);
     refresh().await;
     if let Some(library) = library {
         let _ = wasm_bindgen_futures::JsFuture::from(library).await;

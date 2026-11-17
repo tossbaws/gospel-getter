@@ -23,7 +23,7 @@
 //! controls; they, boot (`boot`) and an import (`page`) read what the
 //! selection is ([`facts`]) and have the highlights and notes reloaded
 //! ([`refresh_highlights`], [`refresh_notes`]). The Library
-//! hands over its bookmarks (`bridge::LIBRARY_LOADED_EVENT`) and has the
+//! hands over its bookmarks ([`library_loaded`]) and has the
 //! highlights refreshed; the note editor opens
 //! from here (`bridge::NOTE_EVENT`), has the notes refreshed
 //! ([`refresh_notes`]) and says what it did (`bridge::NOTE_DONE_EVENT`).
@@ -58,6 +58,7 @@ use crate::dto::{
     PassageTextArgs, Reading, RemoveBookmarkArgs, SelectionNote, SetHighlightArgs, Verse,
 };
 use crate::ipc;
+use crate::library_text::List;
 use crate::margin;
 use crate::palette::PaletteState;
 use crate::pane::PaneId;
@@ -1176,15 +1177,14 @@ fn apply_bookmark_markers() {
     }
 }
 
-/// The Library's bookmarks have loaded (or failed to: `items` is `null`).
-fn on_library_loaded(event: &CustomEvent) {
-    let detail = event.detail();
-    if get(&detail, "list").as_string().as_deref() != Some("bookmarks") {
+/// A Library list has loaded (`items`, or `null` if it failed): the
+/// bookmarks are the card's.
+pub fn library_loaded(list: List, items: &JsValue) {
+    if list != List::Bookmarks {
         return;
     }
-    let items = get(&detail, "items");
     if !items.is_null() && !items.is_undefined() {
-        match read::<Vec<Bookmark>>(items) {
+        match read::<Vec<Bookmark>>(items.clone()) {
             Ok(bookmarks) => with(|s| {
                 s.bookmarks = bookmarks;
                 s.bookmarks_loaded = true;
@@ -2071,11 +2071,11 @@ fn restore_note(note: JsValue, say: impl Fn(String, bool) + 'static) -> Task {
 
 // ---- The Library's lists.
 
-/// Has the Library reload `lists` (`bridge::LIBRARY_REFRESH_EVENT`),
-/// settling once it has; asked before the Library is there, they're asked
-/// for again once every piece is ([`on_ready`]).
+/// Has the Library reload `lists` (`library::refresh`), settling once it
+/// has; asked before the Library is there, they're asked for again once
+/// every piece is ([`on_ready`]).
 fn refresh_library(lists: &[&str]) -> Task {
-    match bridge::refresh_library(lists) {
+    match crate::library::refresh(lists) {
         Some(done) => Box::pin(async move {
             let _ = JsFuture::from(done).await;
         }),
@@ -2773,9 +2773,6 @@ pub fn mount() {
     });
     ELEMENTS.with_borrow_mut(|e| *e = Some(made));
 
-    dom::on_document_event(bridge::LIBRARY_LOADED_EVENT, |event| {
-        on_library_loaded(&event)
-    });
     dom::on_document_event(bridge::NOTE_DONE_EVENT, |event| on_note_done(&event));
     {
         let menu_for_keys = menu.clone();

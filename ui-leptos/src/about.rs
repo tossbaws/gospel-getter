@@ -6,7 +6,7 @@
 //!
 //! About is one of the page's surfaces: `surfaces` opens and closes it,
 //! keeps one surface open at a time, puts focus on its close button and
-//! back on ☰ when it closes, and says `gospel-getter:surface-close`. This
+//! back on ☰ when it closes, and tells the updater (`updates`). This
 //! renders it, fills it, and has its keys: Escape closes it, on the
 //! overlay, and Tab stays inside it, bringing back focus that got outside
 //! it, as the other modals' Tab does; the reader's shortcuts wait meanwhile
@@ -87,7 +87,7 @@ pub fn AboutAndUpdates() -> impl IntoView {
             .filter(|v| !v.is_empty())
     });
     let updates = Updates::new(version);
-    updates.listen();
+    updates.mounted();
 
     // The texts the page credits (each bundled translation's credit, from
     // boot): the reader's now, and whenever it has them again.

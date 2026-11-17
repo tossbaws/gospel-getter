@@ -41,6 +41,7 @@ use crate::export_notes::{self, OpenRequest};
 use crate::intent::{Claim, Generation};
 use crate::ipc;
 use crate::keyboard;
+use crate::library_text::List;
 use crate::page_text::{self as text, Saved};
 use crate::palette::{Choice, PaletteState};
 use crate::reader::{self, Request};
@@ -169,15 +170,6 @@ pub fn focused() -> Option<HtmlElement> {
         return None;
     }
     active.dyn_into::<HtmlElement>().ok()
-}
-
-/// A cancelable request with a `detail` object built from `fields`.
-fn request(name: &str, fields: &[(&str, &JsValue)]) -> bool {
-    let detail = js_sys::Object::new();
-    for (key, value) in fields {
-        let _ = js_sys::Reflect::set(&detail, &JsValue::from_str(key), value);
-    }
-    bridge::request(name, &detail)
 }
 
 // ---- The toast: export and import say how it went at the foot of the
@@ -474,7 +466,7 @@ pub fn imported(position: Option<PositionPreview>, message: String) {
 /// Has the Library reload `lists`: a promise that settles once each has its
 /// answer (at once, if the Library isn't there yet).
 pub fn refresh_library(lists: &[&str]) -> js_sys::Promise {
-    if let Some(done) = bridge::refresh_library(lists) {
+    if let Some(done) = crate::library::refresh(lists) {
         return js_sys::Promise::resolve(&done);
     }
     with(|s| {
@@ -494,15 +486,11 @@ pub fn library_resent() -> js_sys::Promise {
         .unwrap_or_else(|| js_sys::Promise::resolve(&JsValue::UNDEFINED))
 }
 
-/// Every note, as the Library loaded them: kept as their count, for the
-/// welcome, the chooser and Export notes.
-fn on_library_loaded(event: &web_sys::CustomEvent) {
-    let detail = event.detail();
-    let get = |key: &str| js_sys::Reflect::get(&detail, &JsValue::from_str(key)).ok();
-    let list = get("list").and_then(|l| l.as_string());
-    let items = get("items").filter(JsValue::is_truthy);
-    if let (Some("notes"), Some(items)) = (list.as_deref(), items) {
-        let count = js_sys::Reflect::get(&items, &JsValue::from_str("length"))
+/// A Library list has loaded (`items`, or `null` if it failed): every
+/// note, kept as their count, for the welcome, the chooser and Export notes.
+pub fn library_loaded(list: List, items: &JsValue) {
+    if list == List::Notes && items.is_truthy() {
+        let count = js_sys::Reflect::get(items, &JsValue::from_str("length"))
             .ok()
             .and_then(|n| n.as_f64())
             .map_or(0, |n| n as u32);
@@ -620,7 +608,7 @@ pub fn open_shortcuts(opener: Option<HtmlElement>) {
 
 /// Opens or closes the search box.
 pub fn set_search_open(open: bool) {
-    if request(bridge::SEARCH_EVENT, &[("open", &JsValue::from_bool(open))]) || !open {
+    if crate::search::set_open(open) || !open {
         return;
     }
     set_data_status(text::SEARCH_UNAVAILABLE, true);
@@ -744,8 +732,8 @@ pub fn on_ready() {
     }
 }
 
-/// Listens to the ☰ items, the search and About buttons, the translation
-/// changing and the Library's notes; then the
+/// Listens to the ☰ items, the search and About buttons and the translation
+/// changing; then the
 /// click dispatcher (`clicks`) and the keyboard dispatcher (`keyboard`).
 /// Called first of all, before any piece mounts, so these run first.
 pub fn mount() {
@@ -758,9 +746,6 @@ pub fn mount() {
         open_export_choice(by_id("menu-toggle"))
     });
     on_click("import-data-btn", import_data);
-    dom::on_document_event(bridge::LIBRARY_LOADED_EVENT, |event| {
-        on_library_loaded(&event);
-    });
     on_click("welcome-btn", || open_welcome(by_id("menu-toggle")));
     on_click("shortcuts-btn", || open_shortcuts(by_id("menu-toggle")));
     on_click("search-toggle", || {

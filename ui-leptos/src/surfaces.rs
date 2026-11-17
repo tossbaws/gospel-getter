@@ -27,8 +27,8 @@
 //!
 //! The keyboard (`keyboard`) and the page's glue (`page`) open and close
 //! them here ([`current`], [`close`], [`toggle_surface`], [`open_picker`]);
-//! the other pieces hear them open and close (`bridge::SURFACE_OPEN_EVENT`,
-//! `bridge::SURFACE_CLOSE_EVENT`). The frontend tests and the GUI checks
+//! the pieces that follow them are told as each opens (the Library, then
+//! search) and closes (the updater, then the Library). The frontend tests and the GUI checks
 //! read which is open from `window.gospelGetterSurfaces.current()`
 //! ([`export_surfaces`]). Without this module, nothing opens.
 //!
@@ -607,21 +607,6 @@ fn set_shown(surface: Surface, open: bool) {
     }
 }
 
-/// Says `name` (`gospel-getter:surface-open` or `-close`) with the
-/// surface's name.
-fn announce(name: &str, surface: Surface) {
-    #[derive(serde::Serialize)]
-    struct Named {
-        name: &'static str,
-    }
-    bridge::dispatch(
-        name,
-        &Named {
-            name: surface.name(),
-        },
-    );
-}
-
 /// Closes whatever is open. Focus goes back to the button that opened it,
 /// unless it has already moved on to something else (a dialog the surface
 /// opened, say), or `restore_focus` is false.
@@ -648,9 +633,9 @@ pub fn close(restore_focus: bool) {
     {
         dom::focus(&target);
     }
-    // The update banner comes back if About closes on an install
-    // (`updates`).
-    announce(bridge::SURFACE_CLOSE_EVENT, closing);
+    // The update banner comes back if About closes on an install.
+    crate::updates::surface_closed(closing);
+    crate::library::surface_closed();
 }
 
 /// Moves focus into `surface`, by its first-focus rule.
@@ -698,8 +683,9 @@ pub fn open(surface: Surface, opener: Option<HtmlElement>) {
     aa::draw(surface);
     nav::draw(surface);
     set_shown(surface, true);
-    // Search closes (`search`).
-    announce(bridge::SURFACE_OPEN_EVENT, surface);
+    crate::library::surface_opened(surface);
+    // One popover or panel at a time: search closes.
+    crate::search::surface_opened();
     focus_into(surface);
 }
 

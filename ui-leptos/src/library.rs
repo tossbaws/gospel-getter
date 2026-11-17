@@ -27,10 +27,10 @@
 //! its Edit and Copy as Markdown follow.
 //!
 //! Boot, an import, a translation switch and the card ask for the lists to
-//! be reloaded with `bridge::LIBRARY_REFRESH_EVENT`, and get back what the
-//! reader's own marks and the welcome need with
-//! `bridge::LIBRARY_LOADED_EVENT`: each list is asked of
-//! the backend here, once per reload, never there too. Only the latest of
+//! be reloaded ([`refresh`]), and `page` and the card are given what the
+//! welcome and the reader's own marks need as each list loads
+//! (`page::library_loaded`, then `card::library_loaded`): each list is
+//! asked of the backend here, once per reload, never there too. Only the latest of
 //! overlapping reloads of a list is shown (each list has its own token).
 //!
 //! The Notes tab also lists the AI-flagged findings an agent saved at the
@@ -43,12 +43,14 @@
 //!
 //! The tabs answer within the click or key; the lists are signals.
 
+use std::cell::Cell;
+
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use serde::de::DeserializeOwned;
 use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent, MouseEvent};
+use web_sys::{Element, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge;
 use crate::card;
@@ -108,6 +110,50 @@ impl NoteRow {
         );
         Self { note, raw, search }
     }
+}
+
+thread_local! {
+    /// The Library, once it has mounted (`None` before: see `page`).
+    static LIBRARY: Cell<Option<Library>> = const { Cell::new(None) };
+}
+
+/// Has the Library reload `lists` (`bookmarks`, `highlights`, `notes`;
+/// the findings come with the notes): each named starts reloading now. A
+/// promise that settles once each has its answer shown (or is dropped, when
+/// a newer reload of the same list has been asked for: only the latest of
+/// overlapping reloads shows), or `None` if the Library isn't there yet.
+pub fn refresh(lists: &[&str]) -> Option<js_sys::Promise> {
+    LIBRARY.get().map(|library| library.refresh(lists))
+}
+
+/// A header surface opened (`surfaces`): a removal waiting to move focus
+/// is let go, as any surface opening or closing (the Library's own among
+/// them, and a modal's, which closes them) is newer than it; and the
+/// Library opening reads the findings again (an agent may have saved some
+/// while the app was open).
+pub fn surface_opened(surface: Surface) {
+    let Some(library) = LIBRARY.get() else {
+        return;
+    };
+    library.focus.update_value(Generation::cancel);
+    if surface == Surface::Library {
+        spawn_local(library.reload_findings());
+    }
+}
+
+/// A header surface closed (`surfaces`): a removal waiting to move focus is
+/// let go (see [`surface_opened`]).
+pub fn surface_closed() {
+    if let Some(library) = LIBRARY.get() {
+        library.focus.update_value(Generation::cancel);
+    }
+}
+
+/// A list has loaded (`items`, the backend's answer as it came, or `null`
+/// if it failed): `page` keeps the notes' count, the card the bookmarks.
+fn loaded(list: List, items: &JsValue) {
+    crate::page::library_loaded(list, items);
+    card::library_loaded(list, items);
 }
 
 #[derive(Clone, Copy)]
@@ -303,7 +349,7 @@ impl Library {
         match answer {
             Ok((items, raw)) => {
                 self.bookmarks.set(Some(Shown::rows(items)));
-                bridge::library_loaded(List::Bookmarks.name(), &raw);
+                loaded(List::Bookmarks, &raw);
             }
             Err(e) => {
                 ipc::log_error("Failed to load bookmarks", &e);
@@ -311,7 +357,7 @@ impl Library {
                     List::Bookmarks,
                     List::Bookmarks.load_failed(&ipc::error_text(&e)),
                 );
-                bridge::library_loaded(List::Bookmarks.name(), &JsValue::NULL);
+                loaded(List::Bookmarks, &JsValue::NULL);
             }
         }
     }
@@ -354,12 +400,12 @@ impl Library {
                     .map(|(note, raw)| NoteRow::new(note, raw))
                     .collect();
                 self.notes.set(Some(Shown::rows(rows)));
-                bridge::library_loaded(List::Notes.name(), &raw);
+                loaded(List::Notes, &raw);
             }
             Err(e) => {
                 ipc::log_error("Failed to load notes", &e);
                 self.show_error(List::Notes, List::Notes.load_failed(&ipc::error_text(&e)));
-                bridge::library_loaded(List::Notes.name(), &JsValue::NULL);
+                loaded(List::Notes, &JsValue::NULL);
             }
         }
     }
@@ -479,23 +525,15 @@ impl Library {
         }
     }
 
-    /// Lists asked for: each named starts reloading now, and
-    /// `detail.done` settles once all have (each with this answer or a
-    /// newer one shown, see [`Library::reload`]).
-    fn on_refresh(self, event: CustomEvent) {
-        event.prevent_default();
-        let lists = match bridge::library_refresh(&event) {
-            Ok(lists) => lists,
-            Err(e) => {
-                ipc::log_error("A Library reload the Library can't read", &e);
-                Vec::new()
-            }
-        };
+    /// Lists asked for: each named starts reloading now, and the promise
+    /// settles once all have (each with this answer or a newer one shown,
+    /// see [`Library::reload`]).
+    fn refresh(self, lists: &[&str]) -> js_sys::Promise {
         let reloads = js_sys::Array::new();
         // The findings sit with the notes, and reload with them.
         if lists
             .iter()
-            .any(|name| name == "findings" || name == "notes")
+            .any(|&name| name == "findings" || name == "notes")
         {
             let reload = self.reload_findings();
             reloads.push(&wasm_bindgen_futures::future_to_promise(async move {
@@ -510,7 +548,7 @@ impl Library {
                 Ok(JsValue::UNDEFINED)
             }));
         }
-        bridge::library_refresh_done(&event, &js_sys::Promise::all(&reloads));
+        js_sys::Promise::all(&reloads)
     }
 
     // ---- The rows' clicks.
@@ -1107,8 +1145,9 @@ fn finding_groups(shown: Option<Shown<FindingRequest>>) -> AnyView {
 type RowClick = fn(Library, Element);
 
 /// Draws the Library's tablist and its three tab panels, puts them inside
-/// `#library-panel` (between its heading and its hint), and starts
-/// listening for the page's reloads.
+/// `#library-panel` (between its heading and its hint), and is there for
+/// the page's reloads ([`refresh`]) and the surfaces ([`surface_opened`],
+/// [`surface_closed`]).
 pub fn mount() {
     let Some(holder) = bridge::document()
         .and_then(|d| d.create_element("div").ok())
@@ -1143,26 +1182,7 @@ pub fn mount() {
     if let Some(found) = library.finding_box.get_untracked() {
         dom::on_click(&found, move |event| library.on_finding_click(&event));
     }
-    dom::on_document_event(bridge::LIBRARY_REFRESH_EVENT, move |event| {
-        library.on_refresh(event);
-    });
-    // Opening the Library reads the findings again: an agent may have saved
-    // some while the app was open.
-    // Any header surface opening or closing (the Library's own among them,
-    // and a modal's, which closes them) is newer than a removal waiting to
-    // move focus.
-    dom::on_document_event(bridge::SURFACE_CLOSE_EVENT, move |_| {
-        library.focus.update_value(Generation::cancel);
-    });
-    dom::on_document_event(bridge::SURFACE_OPEN_EVENT, move |event| {
-        library.focus.update_value(Generation::cancel);
-        let opened = js_sys::Reflect::get(&event.detail(), &JsValue::from_str("name"))
-            .ok()
-            .and_then(|name| name.as_string());
-        if opened.as_deref() == Some("library") {
-            spawn_local(library.reload_findings());
-        }
-    });
+    LIBRARY.set(Some(library));
     place(&holder);
 }
 

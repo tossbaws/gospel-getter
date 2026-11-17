@@ -355,67 +355,6 @@ pub fn launch_check_on() -> bool {
         .is_none_or(|html| html.get_attribute("data-update-check").as_deref() != Some("off"))
 }
 
-/// A header surface closed (`surfaces`): `{ name }` ("about", "menu",
-/// ...). About closing part way through an install brings the banner
-/// back.
-pub const SURFACE_CLOSE_EVENT: &str = "gospel-getter:surface-close";
-
-#[derive(Debug, Deserialize)]
-struct SurfaceClosed {
-    name: String,
-}
-
-/// The surface `event` says closed, if it can be read.
-pub fn surface_closed(event: &CustomEvent) -> Option<String> {
-    detail::<SurfaceClosed>(event).ok().map(|s| s.name)
-}
-
-/// The Library is asked to reload lists: a cancelable `CustomEvent`
-/// whose `detail` is `{ lists }`, each `bookmarks`, `highlights` or `notes`
-/// (`library_text::List`). The Library cancels it to say it has it and sets
-/// `detail.done` to a promise that settles once every list named has its
-/// answer, shown (or dropped, when a newer reload of the same list has
-/// already been asked for: only the latest of overlapping reloads shows).
-/// Asked by boot, an import, a translation switch, and the card's
-/// bookmark, highlight and restored note ([`refresh_library`], which asks
-/// again from `lib`'s ready list if the Library hadn't mounted).
-pub const LIBRARY_REFRESH_EVENT: &str = "gospel-getter:library-refresh";
-
-#[derive(Debug, Deserialize)]
-struct LibraryRefresh {
-    lists: Vec<String>,
-}
-
-/// The lists a [`LIBRARY_REFRESH_EVENT`] names, as it named them.
-pub fn library_refresh(event: &CustomEvent) -> Result<Vec<String>, JsValue> {
-    detail::<LibraryRefresh>(event).map(|r| r.lists)
-}
-
-/// Answers a [`LIBRARY_REFRESH_EVENT`]: `detail.done = done`.
-pub fn library_refresh_done(event: &CustomEvent, done: &js_sys::Promise) {
-    let _ = js_sys::Reflect::set(&event.detail(), &JsValue::from_str("done"), done);
-}
-
-/// The Library's bookmarks or notes have loaded: a `CustomEvent` whose
-/// `detail` is `{ list, items }`, `list` being `bookmarks` or `notes` and
-/// `items` the backend's answer as it came (`null` if it failed). Not sent
-/// for an answer a newer reload has overtaken. The card hears the
-/// bookmarks (its markers) and `page` the notes (its copy, for the
-/// welcome, the chooser and Export notes).
-pub const LIBRARY_LOADED_EVENT: &str = "gospel-getter:library-loaded";
-
-/// Says [`LIBRARY_LOADED_EVENT`].
-pub fn library_loaded(list: &str, items: &JsValue) {
-    let detail = js_sys::Object::new();
-    let _ = js_sys::Reflect::set(
-        &detail,
-        &JsValue::from_str("list"),
-        &JsValue::from_str(list),
-    );
-    let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("items"), items);
-    dispatch_object(LIBRARY_LOADED_EVENT, &detail);
-}
-
 /// A passage to open: a chapter, and its verses if not all of it (a
 /// Library row or a search result, opened through `reader::open`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -424,30 +363,6 @@ pub struct OpenPassage {
     pub chapter: i64,
     pub verse_start: Option<i64>,
     pub verse_end: Option<i64>,
-}
-
-/// Has the Library reload `lists` (`bookmarks`, `highlights`, `notes`): a
-/// cancelable [`LIBRARY_REFRESH_EVENT`] sent now; the
-/// promise the Library answers with, or `None` if nothing answered (the
-/// Library isn't there yet).
-pub fn refresh_library(lists: &[&str]) -> Option<js_sys::Promise> {
-    #[derive(Serialize)]
-    struct Refresh<'a> {
-        lists: &'a [&'a str],
-    }
-    let document = document()?;
-    let detail = serde_wasm_bindgen::to_value(&Refresh { lists }).ok()?;
-    let init = CustomEventInit::new();
-    init.set_cancelable(true);
-    init.set_detail(&detail);
-    let event = CustomEvent::new_with_event_init_dict(LIBRARY_REFRESH_EVENT, &init).ok()?;
-    if document.dispatch_event(&event).unwrap_or(true) {
-        return None;
-    }
-    js_sys::Reflect::get(&detail, &JsValue::from_str("done"))
-        .ok()?
-        .dyn_into::<js_sys::Promise>()
-        .ok()
 }
 
 /// Sends `name` with `detail` as it is (an object built here).
@@ -472,27 +387,6 @@ pub fn translation_code() -> String {
         .map(|select| select.value())
         .unwrap_or_default()
 }
-
-/// The search box is asked to open (`/`, Ctrl+K) or close (Escape outside
-/// it, a click away, a dialog opening; `page`): a cancelable `CustomEvent`
-/// whose `detail` is `{ open }`. The search box cancels it to say it has
-/// it; when nothing does (it hasn't mounted yet), opening says search
-/// isn't available.
-pub const SEARCH_EVENT: &str = "gospel-getter:search";
-
-#[derive(Debug, Deserialize)]
-struct SearchRequest {
-    open: bool,
-}
-
-/// Whether a [`SEARCH_EVENT`] asks to open (else to close).
-pub fn search_request(event: &CustomEvent) -> Result<bool, JsValue> {
-    detail::<SearchRequest>(event).map(|r| r.open)
-}
-
-/// A header surface opened (`surfaces`): `{ name }`. One opening closes the
-/// search box.
-pub const SURFACE_OPEN_EVENT: &str = "gospel-getter:surface-open";
 
 /// What the palette's commands need now: the page's settings and controls
 /// (`page`), the reader's chapters and history, and whether the card has the

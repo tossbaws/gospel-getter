@@ -10,8 +10,8 @@
 //!
 //! The panel is the page's (`#search-panel`, whose `hidden` the page
 //! reads); this draws what's inside it and opens and closes it, from its
-//! button, from the keys and a click away (`bridge::SEARCH_EVENT`, `page`),
-//! and when a surface opens. Opening it closes the surfaces. A result opens
+//! button, from the keys and a click away ([`set_open`], `page`), and when
+//! a surface opens ([`surface_opened`]). Opening it closes the surfaces. A result opens
 //! as a jump of the reader's (`reader::open`), a command through its own
 //! control or through `page` (`palette::Run`). Only the latest search's
 //! answer shows.
@@ -27,6 +27,8 @@
 //! Everything a test or a reader sees at once happens within the key or
 //! click: the list is drawn (as Leptos views, built and put in place there
 //! and then) and the active option set before the event is over.
+
+use std::cell::Cell;
 
 use leptos::html;
 use leptos::prelude::*;
@@ -122,6 +124,27 @@ struct State {
     /// Enter waiting for its search: claimed by Enter, cancelled by
     /// anything newer done in the box (see [`Search::still_pressed`]).
     enter: Generation,
+}
+
+thread_local! {
+    /// The search box, once it has mounted (`None` before: see `page`).
+    static SEARCH: Cell<Option<Search>> = const { Cell::new(None) };
+}
+
+/// Opens or closes the search box (its keys, a click away, a dialog
+/// opening; `page`). Whether the box is there to.
+pub fn set_open(open: bool) -> bool {
+    SEARCH.get().map(|search| search.set_open(open)).is_some()
+}
+
+/// A header surface opened (`surfaces`): one popover or panel at a time,
+/// so the search box closes.
+pub fn surface_opened() {
+    if let Some(search) = SEARCH.get()
+        && Search::is_open()
+    {
+        search.set_open(false);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -870,19 +893,7 @@ impl Search {
                 self.set_open(panel().is_some_and(|p| p.hidden()));
             });
         }
-        dom::on_document_event(bridge::SEARCH_EVENT, move |event| {
-            event.prevent_default();
-            match bridge::search_request(&event) {
-                Ok(open) => self.set_open(open),
-                Err(e) => ipc::log_error("The search request couldn't be read", &e),
-            }
-        });
-        // One popover or panel at a time: opening one closes search.
-        dom::on_document_event(bridge::SURFACE_OPEN_EVENT, move |_| {
-            if Self::is_open() {
-                self.set_open(false);
-            }
-        });
+        SEARCH.set(Some(self));
         // A new translation: what's typed is searched again in it (and an
         // Enter waiting for the old one's search is let go). Meanwhile the
         // old translation's verses have no more to show in this one.

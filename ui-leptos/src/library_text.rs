@@ -22,7 +22,7 @@ pub enum List {
 impl List {
     pub const ALL: [List; 3] = [List::Bookmarks, List::Highlights, List::Notes];
 
-    /// The list's name as it's asked for (`bridge::LIBRARY_REFRESH_EVENT`).
+    /// The list's name as it's asked for (`library::refresh`).
     pub fn name(self) -> &'static str {
         match self {
             List::Bookmarks => "bookmarks",

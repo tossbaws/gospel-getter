@@ -30,13 +30,13 @@ use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::Closure;
-use web_sys::{CustomEvent, Element, HtmlElement};
+use web_sys::{Element, HtmlElement};
 
 use crate::bridge;
 use crate::dom;
 use crate::dto::{DownloadEvent, NoteBlock, NoteSpan, UpdateInfo};
 use crate::ipc;
-use crate::surfaces;
+use crate::surfaces::{self, Surface};
 use crate::update_text::{self, Download};
 
 /// The banner or About: the two places an update shows.
@@ -67,6 +67,16 @@ pub fn launch_check() -> bool {
         updates.check(true);
     }
     true
+}
+
+/// A header surface closed (`surfaces`): About closing part way through an
+/// install brings the banner back.
+pub fn surface_closed(surface: Surface) {
+    if surface == Surface::About
+        && let Some(updates) = UPDATES.get()
+    {
+        updates.about_closed();
+    }
 }
 
 /// The updater's state and the elements it writes, shared by the banner and
@@ -524,15 +534,10 @@ impl Updates {
         hide(self.banner.get_untracked(), false);
     }
 
-    /// Is there for the launch check ([`launch_check`]), and listens for
-    /// About closing (`surfaces`' `gospel-getter:surface-close`).
-    pub fn listen(self) {
+    /// Is there for the launch check ([`launch_check`]) and About closing
+    /// ([`surface_closed`]).
+    pub fn mounted(self) {
         UPDATES.set(Some(self));
-        dom::on_document_event(bridge::SURFACE_CLOSE_EVENT, move |event: CustomEvent| {
-            if bridge::surface_closed(&event).as_deref() == Some("about") {
-                self.about_closed();
-            }
-        });
     }
 }
 
