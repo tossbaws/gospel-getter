@@ -2485,6 +2485,12 @@ fn has_selection() -> bool {
     with(|s| s.selection.is_some())
 }
 
+/// The selected verses' colors (`None` where there's none; empty with no
+/// selection), for H's next one (`card_text::next_highlight`).
+pub fn selection_colors() -> Vec<Option<String>> {
+    with(|s| s.selected_colors())
+}
+
 /// What the click and keyboard dispatchers (`clicks`, `keyboard`) and the
 /// palette's page commands (`page`) ask of the card, each within the click
 /// or key it's for (copying needs that).
@@ -2506,8 +2512,9 @@ pub enum Ask {
     CopyFormat(String),
     /// Any other click: Copy as… closes.
     CloseCopyMenu,
+    /// ★ Bookmark, or B.
     Bookmark,
-    /// A swatch (its colour), or Remove highlight (`None`).
+    /// A swatch (its colour), Remove highlight (`None`), or H.
     Highlight(Option<String>),
     /// + Add note, or N: the note editor, focus going back to `opener`.
     Note(Option<HtmlElement>),
@@ -2550,8 +2557,8 @@ pub enum Ask {
 
 /// Does what `ask` asks, within the caller's event. Whether there was
 /// something to do it to, where that matters (`Copy`: a selection to copy;
-/// `CopyAsOpen`: whether it could open; `Note`: a selection; `Escape`: a
-/// preview or a selection), else `true`.
+/// `CopyAsOpen`: whether it could open; `Note`, `Bookmark`, `Highlight`: a
+/// selection; `Escape`: a preview or a selection), else `true`.
 pub fn ask(ask: Ask) -> bool {
     match ask {
         Ask::Copy => {
@@ -2596,13 +2603,16 @@ pub fn ask(ask: Ask) -> bool {
             close_menu(false);
             true
         }
+        // B and H, like N, go on to other keys without a selection.
         Ask::Bookmark => {
+            let selected = has_selection();
             spawn_local(toggle_bookmark());
-            true
+            selected
         }
         Ask::Highlight(color) => {
+            let selected = has_selection();
             spawn_local(highlight_selection(color));
-            true
+            selected
         }
         // N goes on to other keys without a selection.
         Ask::Note(opener) => {

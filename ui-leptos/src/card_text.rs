@@ -82,7 +82,7 @@ pub fn actions_html() -> String {
         .iter()
         .map(|c| {
             format!(
-                r#"<button type="button" class="highlight-swatch" data-color="{c}" aria-label="Highlight {c}" title="Highlight {c}" aria-pressed="false"></button>"#
+                r#"<button type="button" class="highlight-swatch" data-color="{c}" aria-label="Highlight {c}" title="Highlight {c} (H: the next color)" aria-pressed="false"></button>"#
             )
         })
         .collect();
@@ -91,9 +91,9 @@ pub fn actions_html() -> String {
     format!(
         "<button type=\"button\" class=\"verse-copy-btn\" title=\"Copy (Ctrl+C)\">Copy</button>\n\
          {s16}<button type=\"button\" class=\"verse-copy-as-btn\" aria-haspopup=\"menu\" aria-expanded=\"false\" aria-controls=\"copy-as-menu\" title=\"Copy as… (Ctrl+Shift+C)\" aria-keyshortcuts=\"Control+Shift+C\">Copy as…</button>\n\
-         {s16}<button type=\"button\" class=\"verse-bookmark-btn\">&#9733; Bookmark</button>\n\
+         {s16}<button type=\"button\" class=\"verse-bookmark-btn\" title=\"Bookmark (B)\" aria-keyshortcuts=\"B\">&#9733; Bookmark</button>\n\
          {s16}<button type=\"button\" class=\"verse-note-btn\" title=\"Add a note (N)\" aria-keyshortcuts=\"N\"><span aria-hidden=\"true\">+</span> Add note</button>\n\
-         {s16}<span class=\"verse-highlight\" role=\"group\" aria-label=\"Highlight\">\n\
+         {s16}<span class=\"verse-highlight\" role=\"group\" aria-label=\"Highlight\" aria-keyshortcuts=\"H\">\n\
          {s20}{swatches}\n\
          {s20}<button type=\"button\" class=\"highlight-remove\" hidden>Remove highlight</button>\n\
          {s16}</span>\n\
@@ -551,6 +551,24 @@ pub fn extend(selection: Option<&Selection>, code: &str, number: i64) -> Change 
     }
 }
 
+/// What H highlights the selected verses in (`colors`, as
+/// [`highlight_controls`] takes them): the color after the one they all
+/// share, in [`HIGHLIGHT_COLORS`]' order, or none after the last (H
+/// removes it); yellow, the first, when they share none (all unhighlighted,
+/// or mixed: H2). The key names no one color, so the swatches' titles say
+/// "the next color", not "(H)".
+pub fn next_highlight(colors: &[Option<&str>]) -> Option<&'static str> {
+    let first = HIGHLIGHT_COLORS[0];
+    let shared = match colors {
+        [Some(color), rest @ ..] if rest.iter().all(|c| *c == Some(*color)) => *color,
+        _ => return Some(first),
+    };
+    match HIGHLIGHT_COLORS.iter().position(|c| *c == shared) {
+        Some(i) => HIGHLIGHT_COLORS.get(i + 1).copied(),
+        None => Some(first),
+    }
+}
+
 /// The highlight controls for the selected verses' colors (`None` where a
 /// verse has none): whether each of [`HIGHLIGHT_COLORS`]'s swatches is
 /// pressed (the whole selection has its color), and whether Remove
@@ -887,12 +905,18 @@ mod tests {
                 <button type="button" class="verse-copy-as-btn""#
         ));
         assert!(html.contains(
-            "aria-label=\"Highlight\">\n                    <button type=\"button\" class=\"highlight-swatch\" data-color=\"yellow\" aria-label=\"Highlight yellow\" title=\"Highlight yellow\" aria-pressed=\"false\"></button><button type=\"button\" class=\"highlight-swatch\" data-color=\"green\""
+            "aria-label=\"Highlight\" aria-keyshortcuts=\"H\">\n                    <button type=\"button\" class=\"highlight-swatch\" data-color=\"yellow\" aria-label=\"Highlight yellow\" title=\"Highlight yellow (H: the next color)\" aria-pressed=\"false\"></button><button type=\"button\" class=\"highlight-swatch\" data-color=\"green\""
         ));
         assert!(html.ends_with(
             "                <span class=\"verse-actions-ref\"></span>\n                <span class=\"verse-actions-status\" role=\"status\" aria-live=\"polite\"></span>"
         ));
         assert_eq!(html.matches("highlight-swatch").count(), 4);
+        // B and H as + Add note shows N: a title and aria-keyshortcuts, no
+        // visible key on the card (H7).
+        assert!(html.contains(
+            r#"<button type="button" class="verse-bookmark-btn" title="Bookmark (B)" aria-keyshortcuts="B">&#9733; Bookmark</button>"#
+        ));
+        assert!(!html.contains("(B)<") && !html.contains("(H)"));
         assert_eq!(bookmark_label(false), "&#9733; Bookmark");
         assert_eq!(bookmark_label(true), "&#9733; Remove bookmark");
     }
@@ -1109,6 +1133,29 @@ mod tests {
         );
         assert_eq!(extend(Some(&one), "web", 2), Change::Keep);
         assert!(range.covers("kjv", 4) && !range.covers("web", 4) && !range.covers("kjv", 6));
+    }
+
+    #[test]
+    fn h_steps_through_the_colors_and_off() {
+        assert_eq!(next_highlight(&[]), Some("yellow"));
+        assert_eq!(next_highlight(&[None]), Some("yellow"));
+        assert_eq!(next_highlight(&[None, None]), Some("yellow"));
+        assert_eq!(
+            next_highlight(&[Some("yellow"), Some("yellow")]),
+            Some("green")
+        );
+        assert_eq!(next_highlight(&[Some("green")]), Some("blue"));
+        assert_eq!(next_highlight(&[Some("blue"), Some("blue")]), Some("pink"));
+        assert_eq!(next_highlight(&[Some("pink"), Some("pink")]), None);
+        // Mixed: yellow, whatever the colors.
+        assert_eq!(
+            next_highlight(&[Some("yellow"), Some("green")]),
+            Some("yellow")
+        );
+        assert_eq!(next_highlight(&[Some("yellow"), None]), Some("yellow"));
+        assert_eq!(next_highlight(&[None, Some("pink")]), Some("yellow"));
+        // A color the swatches don't have starts again from the first.
+        assert_eq!(next_highlight(&[Some("red")]), Some("yellow"));
     }
 
     #[test]

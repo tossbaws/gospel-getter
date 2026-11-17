@@ -300,8 +300,11 @@ test('the palette: Open this passage beside with one pane; Switch pane (F6) and 
         await type(app, '>pane');
         assert.deepEqual(commandLabels(app), ['Open this passage beside', 'Switch pane (F6)', 'Close the second pane']);
         const switching = command(app, 'Switch pane (F6)');
-        assert.equal(switching.getAttribute('aria-keyshortcuts'), 'F6 Shift+F6');
+        assert.equal(switching.getAttribute('aria-keyshortcuts'), 'F6 Shift+F6 P');
         assert.equal(switching.querySelector('kbd'), null, 'its label names its key already');
+        const closing = command(app, 'Close the second pane');
+        assert.equal(closing.getAttribute('aria-keyshortcuts'), 'X');
+        assert.equal(closing.querySelector('kbd').textContent, 'X');
         await type(app, '>switch');
         assert.deepEqual(commandLabels(app), ['Switch pane (F6)']);
         app.key('Enter', {}, app.searchInput());

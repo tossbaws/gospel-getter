@@ -57,6 +57,17 @@ test('the sheet lists every shortcut in its groups, with key caps', () =>
         assert.equal(text('reader-exit'), 'Esc Leave reading mode');
         assert.equal(row('reader-mode').nextElementSibling, row('reader-exit'), 'R just before Esc');
         assert.equal(row('reader-mode').closest('.shortcut-group').querySelector('h3').textContent, 'Text & display');
+        // B and H after N, in Selection; X after Switch pane, which P joins,
+        // in Reading.
+        assert.equal(text('switch-pane'), 'F6 or Shift+F6 or P Switch pane');
+        assert.equal(text('close-pane'), 'X Close the second pane');
+        assert.equal(text('bookmark'), 'B Bookmark the selected verses, on or off');
+        assert.equal(text('highlight'), 'H Highlight the selected verses: the next color');
+        assert.equal(row('note').nextElementSibling, row('bookmark'));
+        assert.equal(row('bookmark').nextElementSibling, row('highlight'));
+        assert.equal(row('switch-pane').nextElementSibling, row('close-pane'));
+        const groupOf = (id) => row(id).closest('.shortcut-group').querySelector('h3').textContent;
+        assert.deepEqual(['bookmark', 'highlight', 'close-pane', 'switch-pane'].map(groupOf), ['Selection', 'Selection', 'Reading', 'Reading']);
         // Key caps, the hint's: drawn arrows named for screen readers.
         assert.deepEqual([...row('copy-as').querySelectorAll('kbd')].map((k) => k.textContent), ['Ctrl', 'Shift', 'C']);
         assert.equal(row('next-chapter').querySelector('kbd svg').getAttribute('aria-hidden'), 'true');

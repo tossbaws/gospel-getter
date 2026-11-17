@@ -60,6 +60,15 @@ pub enum Route {
     /// N: a note on the selected verses; without them, the key goes on, to
     /// nothing (no rule after this one takes `n`).
     Note,
+    /// B: the selected verses' bookmark, on or off, as ★ Bookmark does;
+    /// without them, the key goes on, as N's does (H4).
+    Bookmark,
+    /// H: the selected verses' highlight, a step along the colors
+    /// (`card_text::next_highlight`); without them, the key goes on (H4).
+    Highlight,
+    /// X: the second pane closed, as its × does (H5); with one pane, the
+    /// key goes on.
+    ClosePane,
     /// G: the book and chapter picker.
     Picker,
     /// T: the translations and Compare, opened or closed.
@@ -77,11 +86,15 @@ pub enum Route {
     Turn(Which),
     /// F6 and Shift+F6: the other pane, while two are open (D10). Not a
     /// character, so Single-key shortcuts off leaves it be (WCAG 2.1.4).
+    /// P is the same (H1), and is a character, so the switch does turn it
+    /// off. It changes which pane is active, never swaps their passages:
+    /// the first pane's is the saved reading place (S15).
     SwitchPane,
 }
 
 /// Whether a route's `preventDefault` comes with it, whatever happens: the
 /// rest depend on what the key did (`Escape`, `Copy`, `CopyAs`, `Note`,
+/// `Bookmark`, `Highlight`: only with a selection; `ClosePane`,
 /// `SwitchPane`: with one pane, F6 is the webview's) or never prevent it
 /// (`Compare`, `Turn`).
 pub fn always_prevented(route: Route) -> bool {
@@ -91,6 +104,9 @@ pub fn always_prevented(route: Route) -> bool {
             | Route::Copy
             | Route::CopyAs
             | Route::Note
+            | Route::Bookmark
+            | Route::Highlight
+            | Route::ClosePane
             | Route::Compare
             | Route::Turn(_)
             | Route::SwitchPane
@@ -135,6 +151,20 @@ pub fn route(press: &Press) -> Option<Route> {
     }
     if plain && !shift && (key == "n" || key == "N") {
         return Some(Route::Note);
+    }
+    // After Ctrl+B, which stays the Library: B is plain only.
+    if plain && !shift && (key == "b" || key == "B") {
+        return Some(Route::Bookmark);
+    }
+    if plain && !shift && (key == "h" || key == "H") {
+        return Some(Route::Highlight);
+    }
+    if plain && !shift && (key == "x" || key == "X") {
+        return Some(Route::ClosePane);
+    }
+    // Plain only: Ctrl+P (Cmd+P) stays the webview's print.
+    if plain && !shift && (key == "p" || key == "P") {
+        return Some(Route::SwitchPane);
     }
     if plain && !shift && (key == "g" || key == "G") {
         return Some(Route::Picker);
@@ -341,8 +371,9 @@ mod tests {
             ..altgr("[")
         };
         assert_eq!(route(&cmd), None);
-        // AltGr's Ctrl and Alt aren't Ctrl's shortcuts or Alt's history.
-        assert_eq!(route(&altgr("b")), None);
+        // AltGr's Ctrl and Alt aren't Ctrl's shortcuts or Alt's history:
+        // AltGr+B is B, not the Library.
+        assert_eq!(route(&altgr("b")), Some(Route::Bookmark));
         assert_eq!(route(&altgr("c")), Some(Route::Compare));
     }
 
@@ -377,7 +408,7 @@ mod tests {
         assert_eq!(route(&press("]")), Some(Route::Book(Which::Next)));
         assert_eq!(route(&press("ArrowLeft")), Some(Route::Turn(Which::Prev)));
         assert_eq!(route(&press("ArrowRight")), Some(Route::Turn(Which::Next)));
-        assert_eq!(route(&press("x")), None);
+        assert_eq!(route(&press("z")), None);
         assert_eq!(route(&press("Enter")), None);
     }
 
@@ -422,6 +453,71 @@ mod tests {
         assert_eq!(with("F6", |p| p.meta = true), None);
         assert_eq!(with("F6", |p| p.alt = true), None);
         assert_eq!(route(&press("F7")), None);
+    }
+
+    /// B, H, X and P alone, either case (Caps Lock gives the capital), are
+    /// the bookmark, the highlight, closing the second pane and switching
+    /// panes (H1-H6). With Ctrl, Cmd or Alt they're no part of it: Ctrl+B
+    /// stays the Library and Ctrl+P the webview's print. Off, Single-key
+    /// shortcuts turn all four off.
+    #[test]
+    fn b_h_x_and_p_alone_bookmark_highlight_close_and_switch() {
+        for (keys, to) in [
+            (["b", "B"], Route::Bookmark),
+            (["h", "H"], Route::Highlight),
+            (["x", "X"], Route::ClosePane),
+            (["p", "P"], Route::SwitchPane),
+        ] {
+            for key in keys {
+                assert_eq!(route(&press(key)), Some(to), "{key}");
+                assert!(character_only(&press(key)), "{key}");
+                assert_eq!(route_for(&press(key), true), Some(to), "{key} on");
+                assert_eq!(route_for(&press(key), false), None, "{key} off");
+                assert!(!always_prevented(to), "{key} prevents only when it acts");
+            }
+        }
+        let new = [
+            Route::Bookmark,
+            Route::Highlight,
+            Route::ClosePane,
+            Route::SwitchPane,
+        ];
+        let ctrl = |p: &mut Press| p.ctrl = true;
+        let cmd = |p: &mut Press| p.meta = true;
+        let alt = |p: &mut Press| p.alt = true;
+        for key in ["b", "B"] {
+            assert_eq!(with(key, ctrl), Some(Route::Library), "Ctrl+{key}");
+            assert_eq!(with(key, cmd), Some(Route::Library), "Cmd+{key}");
+        }
+        for (key, f) in [
+            ("p", ctrl as fn(&mut Press)),
+            ("P", ctrl),
+            ("p", cmd),
+            ("p", alt),
+            ("x", ctrl),
+            ("X", ctrl),
+            ("h", ctrl),
+            ("H", ctrl),
+            ("b", alt),
+            ("B", alt),
+            ("h", alt),
+            ("x", alt),
+        ] {
+            let routed = with(key, f);
+            assert!(
+                routed.is_none_or(|r| !new.contains(&r)),
+                "{key} with a modifier: {routed:?}"
+            );
+        }
+        // Ctrl+P, Cmd+P, Ctrl+X and Ctrl+H are nothing of the app's.
+        for (key, f) in [
+            ("p", ctrl as fn(&mut Press)),
+            ("p", cmd),
+            ("x", ctrl),
+            ("h", ctrl),
+        ] {
+            assert_eq!(with(key, f), None, "{key} with Ctrl or Cmd");
+        }
     }
 
     /// The key values one way of pressing a shortcut (one of the table's
@@ -501,8 +597,11 @@ mod tests {
         for id in ["search", "library", "back", "next-chapter", "close"] {
             assert!(kept.contains(&id), "{id} stays");
         }
+        for id in ["bookmark", "highlight", "close-pane", "switch-pane"] {
+            assert!(turned_off.contains(&id), "{id}'s letter is turned off");
+        }
         // A key that's no shortcut is no shortcut either way.
-        assert_eq!(route_for(&press("x"), false), None);
+        assert_eq!(route_for(&press("z"), false), None);
         // Typed with Ctrl, a letter is never a single-key shortcut.
         let ctrl_k = Press {
             key: "k",
@@ -593,7 +692,7 @@ mod tests {
     fn shift_takes_some_letters_and_not_others() {
         // ? is typed with Shift, and still opens the sheet.
         assert_eq!(with("?", |p| p.shift = true), Some(Route::Shortcuts));
-        for key in ["N", "G", "T", "C"] {
+        for key in ["N", "G", "T", "C", "B", "H", "X", "P"] {
             assert_eq!(with(key, |p| p.shift = true), None, "{key}");
         }
         assert_eq!(with("{", |p| p.shift = true), None);
@@ -632,6 +731,9 @@ mod tests {
             (Route::CopyAs, false),
             (Route::Library, true),
             (Route::Note, false),
+            (Route::Bookmark, false),
+            (Route::Highlight, false),
+            (Route::ClosePane, false),
             (Route::Picker, true),
             (Route::Translation, true),
             (

@@ -112,7 +112,7 @@ test('off, no shortcut in the table that’s a character key pressed on its own 
                 }
             }
         }
-        for (const key of ['g', 'G', 't', 'c', 'r', 'R', 'n', 'j', 'k', 'J', 'K', '[', ']', '/', '?']) {
+        for (const key of ['g', 'G', 't', 'c', 'r', 'R', 'n', 'b', 'B', 'h', 'H', 'x', 'X', 'p', 'P', 'j', 'k', 'J', 'K', '[', ']', '/', '?']) {
             assert.ok(ignored.includes(key), `the table's ways to press include ${key}`);
         }
 
