@@ -53,6 +53,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     Shortcut { id: "next-book", group: "Reading", keys: &[&["]"]], aria: "]", does: "Next book, at chapter 1", handles: &["]"] },
     Shortcut { id: "picker", group: "Reading", keys: &[&["G"]], aria: "G", does: "Choose a book and chapter", handles: &["g", "G"] },
     Shortcut { id: "compare", group: "Reading", keys: &[&["C"]], aria: "C", does: "Compare translations, on or off", handles: &["c", "C"] },
+    Shortcut { id: "switch-pane", group: "Reading", keys: &[&["F6"], &["Shift", "F6"]], aria: "F6 Shift+F6", does: "Switch pane", handles: &["F6"] },
     Shortcut { id: "next-verse", group: "Selection", keys: &[&["j"]], aria: "J", does: "Select the next verse", handles: &["j", "J"] },
     Shortcut { id: "previous-verse", group: "Selection", keys: &[&["k"]], aria: "K", does: "Select the previous verse", handles: &["k", "K"] },
     Shortcut { id: "extend-down", group: "Selection", keys: &[&["Shift", "j"]], aria: "Shift+J", does: "Extend the selection down a verse", handles: &[] },
@@ -134,6 +135,15 @@ mod tests {
         assert_eq!(shortcut("search").unwrap().first_keys(), "/");
         assert_eq!(shortcut("next-chapter").unwrap().first_keys(), "→");
         assert!(shortcut("nothing").is_none());
+    }
+
+    #[test]
+    fn f6_switches_pane() {
+        let row = shortcut("switch-pane").unwrap();
+        assert_eq!(row.group, "Reading");
+        assert_eq!(row.handles, ["F6"]);
+        assert_eq!(row.does, "Switch pane");
+        assert_eq!(row.first_keys(), "F6");
     }
 
     #[test]

@@ -7,13 +7,14 @@
 //! step the selection a verse; Alt+← and Alt+→ go back and forward; Escape
 //! backs out a step; Ctrl+C and Ctrl+Shift+C copy; N writes a note; `/` and
 //! Ctrl+K search; `?` the shortcuts; Ctrl+B, G, T, C and R the Library, the
-//! picker, the translations, Compare and reading mode. Which key does
+//! picker, the translations, Compare and reading mode; F6 and Shift+F6
+//! switch panes while two are open. Which key does
 //! what, and the selection's steps, are `keyboard_text`'s, tested on the
 //! host. With Aa's "Single-key shortcuts" off
 //! (`preferences::SINGLE_KEY_SHORTCUTS`), the keys that are a character
 //! pressed on its own (G, T, C, R, N, j and k, `[` and `]`, `/` and `?`)
 //! are left alone, unprevented, as if unheard; those with Ctrl, Cmd or Alt,
-//! the arrows and Escape still work. The sheet (☰ → Keyboard shortcuts) and
+//! the arrows, F6 and Escape still work. The sheet (☰ → Keyboard shortcuts) and
 //! the palette (Ctrl+K) are reached either way. Every key that acts on a
 //! passage acts on the active pane (`pane::active`); while two panes are
 //! open, the keys that scroll a page (Page Down, Space, Home…) scroll the
@@ -276,6 +277,11 @@ fn on_keydown(event: &KeyboardEvent) {
         // notes follow as they do from it.
         Route::ReadingMode => aa::set_reader_mode(!prefs::on(&preferences::READER_MODE)),
         Route::Turn(which) => turn_chapter(which),
+        Route::SwitchPane => {
+            if pane::switch() {
+                event.prevent_default();
+            }
+        }
     }
 }
 

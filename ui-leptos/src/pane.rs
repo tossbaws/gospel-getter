@@ -481,6 +481,30 @@ pub fn set_active(pane: PaneId) {
     crate::findings::pane_switched();
 }
 
+/// F6 and Shift+F6, and the palette's Switch pane (D10): the other pane
+/// becomes the active one, focus on the reference button acting on it (its
+/// bar's, side by side; the top bar's, tabbed or in reading mode). Whether
+/// there was another: with one pane, nothing happens.
+pub fn switch() -> bool {
+    if !split() {
+        return false;
+    }
+    let other = match active() {
+        PaneId::First => PaneId::Second,
+        PaneId::Second => PaneId::First,
+    };
+    set_active(other);
+    let reference = if bars_shown() {
+        other.in_bar(".ref-btn")
+    } else {
+        by_id("ref-btn")
+    };
+    if let Some(reference) = reference {
+        dom::focus(&reference);
+    }
+    true
+}
+
 /// Lays the panes out as the window's width and reading mode now call for
 /// (`pane_text::shape`), and says on the page which is active: each
 /// column's `data-pane-active` (for its heading's rule), and, as tabs,

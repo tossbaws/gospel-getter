@@ -75,15 +75,25 @@ pub enum Route {
     ReadingMode,
     /// ← and →: the chapter before or after.
     Turn(Which),
+    /// F6 and Shift+F6: the other pane, while two are open (D10). Not a
+    /// character, so Single-key shortcuts off leaves it be (WCAG 2.1.4).
+    SwitchPane,
 }
 
 /// Whether a route's `preventDefault` comes with it, whatever happens: the
-/// rest depend on what the key did (`Escape`, `Copy`, `CopyAs`, `Note`) or
-/// never prevent it (`Compare`, `Turn`).
+/// rest depend on what the key did (`Escape`, `Copy`, `CopyAs`, `Note`,
+/// `SwitchPane`: with one pane, F6 is the webview's) or never prevent it
+/// (`Compare`, `Turn`).
 pub fn always_prevented(route: Route) -> bool {
     !matches!(
         route,
-        Route::Escape | Route::Copy | Route::CopyAs | Route::Note | Route::Compare | Route::Turn(_)
+        Route::Escape
+            | Route::Copy
+            | Route::CopyAs
+            | Route::Note
+            | Route::Compare
+            | Route::Turn(_)
+            | Route::SwitchPane
     )
 }
 
@@ -100,6 +110,9 @@ pub fn route(press: &Press) -> Option<Route> {
 
     if key == "Escape" {
         return Some(Route::Escape);
+    }
+    if key == "F6" && !ctrl && !press.alt {
+        return Some(Route::SwitchPane);
     }
     if press.alt && !ctrl && !shift && (key == "ArrowLeft" || key == "ArrowRight") {
         return Some(Route::History(if key == "ArrowLeft" { -1 } else { 1 }));
@@ -391,6 +404,26 @@ mod tests {
         }
     }
 
+    /// F6, and Shift+F6, switch panes (D10), with Single-key shortcuts on
+    /// or off: F6 is no character. With Ctrl or Alt it's not this key.
+    #[test]
+    fn f6_and_shift_f6_switch_panes_either_way() {
+        for shift in [false, true] {
+            let f6 = Press {
+                key: "F6",
+                shift,
+                ..Press::default()
+            };
+            assert!(!character_only(&f6));
+            assert_eq!(route_for(&f6, true), Some(Route::SwitchPane));
+            assert_eq!(route_for(&f6, false), Some(Route::SwitchPane));
+        }
+        assert_eq!(with("F6", |p| p.ctrl = true), None);
+        assert_eq!(with("F6", |p| p.meta = true), None);
+        assert_eq!(with("F6", |p| p.alt = true), None);
+        assert_eq!(route(&press("F7")), None);
+    }
+
     /// The key values one way of pressing a shortcut (one of the table's
     /// combinations of caps) sends, each with its modifiers (Ctrl, Alt,
     /// Shift): a letter in either case (with Shift, its capital), an arrow
@@ -611,6 +644,7 @@ mod tests {
             (Route::Book(Which::Next), true),
             (Route::Compare, false),
             (Route::Turn(Which::Prev), false),
+            (Route::SwitchPane, false),
         ] {
             assert_eq!(always_prevented(route), prevented, "{route:?}");
         }

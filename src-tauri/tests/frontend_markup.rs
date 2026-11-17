@@ -5272,6 +5272,7 @@ fn every_handled_key_is_in_the_shortcuts_table() {
         "Escape",
         "NumpadAdd",
         "c",
+        "F6",
     ] {
         assert!(handled.iter().any(|k| k == key), "the scan finds {key}");
     }
