@@ -5113,6 +5113,26 @@
                 display: none !important;
             }
 
+            /* Two panes' bars and tabs: chrome, as the top bar is. */
+            .pane-bar,
+            .pane-tabs {
+                display: none !important;
+            }
+
+            /* Two panes open: only the active one prints (D14), and as
+               many pages as it takes. Its column scrolls only on screen
+               (the split rules are screen-only), but this holds whatever
+               they become: a scrolling column prints as one clipped
+               page. */
+            .pane[data-pane-active="false"] {
+                display: none !important;
+            }
+
+            .pane {
+                overflow: visible !important;
+                height: auto !important;
+            }
+
             /* A marker's opened AI findings, in the text: left out too. */
             .finding-inline {
                 display: none !important;

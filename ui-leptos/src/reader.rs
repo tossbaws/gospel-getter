@@ -1618,12 +1618,12 @@ pub fn mount() {
         dom::on(&window, "pagehide", |_| save_places());
         dom::on(&window, "blur", |_| save_places());
         // The print stylesheet prints both lists open, whatever they show
-        // on screen, so a closed Cross references list is filled first.
+        // on screen, so a closed Cross references list is filled first: the
+        // active pane's, the one that prints (D14).
         dom::on(&window, "beforeprint", |_| {
-            for pane in pane::shown() {
-                if let Some(list) = pane.query(&format!("#{}", pane.ids().xrefs)) {
-                    fill_xref_rows(pane, &list);
-                }
+            let pane = pane::active();
+            if let Some(list) = pane.query(&format!("#{}", pane.ids().xrefs)) {
+                fill_xref_rows(pane, &list);
             }
         });
     }
