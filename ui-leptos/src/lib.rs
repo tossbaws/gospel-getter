@@ -49,6 +49,7 @@ mod note_text;
 mod page;
 mod page_text;
 mod palette;
+mod pane;
 // How a passage is named, shared with the backend, which compiles the same
 // file.
 #[path = "../../shared/passage_reference.rs"]

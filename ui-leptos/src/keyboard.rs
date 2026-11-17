@@ -30,9 +30,10 @@ use crate::aa;
 use crate::bridge;
 use crate::card::{self, Ask, SelectionFacts};
 use crate::card_text::Slot;
-use crate::dom::{self, window_height};
+use crate::dom;
 use crate::keyboard_text::{self as text, Press, Rect, Route, Selected};
 use crate::page;
+use crate::pane::PaneId;
 use crate::preferences;
 use crate::prefs;
 use crate::reader::{self, Load, Request};
@@ -56,8 +57,7 @@ fn spawn(load: Load) {
 /// `#reading-pane-inner`'s `data-prev-book` and `data-prev-chapter` (or
 /// `data-next-*`), the backend's.
 pub fn turn_chapter(which: Which) {
-    let Some(inner) = bridge::document().and_then(|d| d.get_element_by_id("reading-pane-inner"))
-    else {
+    let Some(inner) = PaneId::First.inner() else {
         return;
     };
     let (book, chapter) = match which {
@@ -92,13 +92,6 @@ pub fn go_history(step: i32) {
     spawn(reader::ask(Request::History { step }));
 }
 
-/// The top bar's foot: the top of what's in view.
-fn view_top() -> f64 {
-    bridge::document()
-        .and_then(|d| d.get_element_by_id("top-bar"))
-        .map_or(0.0, |bar| bar.get_bounding_client_rect().bottom())
-}
-
 fn rect_of(el: &Element) -> Rect {
     let r = el.get_bounding_client_rect();
     Rect {
@@ -115,15 +108,12 @@ fn data_verse(el: &Element) -> Option<i64> {
 /// The first (`first`) or last verse of column `code` that's in view, or
 /// none when none is (or there's no layout to tell).
 fn verse_in_view(code: &str, first: bool) -> Option<i64> {
-    let document = bridge::document()?;
-    let found = document
-        .query_selector_all(&format!(r#"{SELECTABLE}[data-translation="{code}"]"#))
-        .ok()?;
-    let top = view_top();
-    let window = window_height();
-    let seen: Vec<HtmlElement> = dom::elements(&found)
+    let pane = PaneId::First;
+    let found = pane.query_all(&format!(r#"{SELECTABLE}[data-translation="{code}"]"#));
+    let view = pane.scroller().view().unwrap_or_default();
+    let seen: Vec<HtmlElement> = found
         .into_iter()
-        .filter(|el| text::in_view(rect_of(el), top, window))
+        .filter(|el| text::in_view(rect_of(el), view.top, view.bottom))
         .collect();
     let el = if first { seen.first() } else { seen.last() }?;
     data_verse(el)
@@ -131,16 +121,16 @@ fn verse_in_view(code: &str, first: bool) -> Option<i64> {
 
 /// Scrolls just enough to bring verse `number` of column `code` into view.
 fn reveal_verse(code: &str, number: i64) {
-    let Some(el) = dom::query(&format!(
+    let pane = PaneId::First;
+    let Some(el) = pane.query(&format!(
         r#"{SELECTABLE}[data-translation="{code}"][data-verse="{number}"]"#
     )) else {
         return;
     };
-    if let (Some(by), Some(window)) = (
-        text::reveal(rect_of(&el), view_top(), window_height()),
-        web_sys::window(),
-    ) {
-        window.scroll_by_with_x_and_y(0.0, by);
+    let scroller = pane.scroller();
+    let view = scroller.view().unwrap_or_default();
+    if let Some(by) = text::reveal(rect_of(&el), view.top, view.bottom) {
+        scroller.scroll_by(by);
     }
 }
 

@@ -73,14 +73,6 @@ pub(crate) fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok()?
 }
 
-/// `window.innerHeight`, or 0 without a window.
-pub(crate) fn window_height() -> f64 {
-    web_sys::window()
-        .and_then(|w| w.inner_height().ok())
-        .and_then(|h| h.as_f64())
-        .unwrap_or(0.0)
-}
-
 /// The HTML elements of a `NodeList`, in order.
 pub fn elements(list: &NodeList) -> Vec<HtmlElement> {
     (0..list.length())
