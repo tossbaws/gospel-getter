@@ -574,9 +574,7 @@ pub fn open_second() {
         let _ = first.append_with_node_2(&notice, &root);
         let _ = main.append_with_node_1(&made.columns[PaneId::Second]);
         SPLIT.set(true);
-        if let Some(html) = bridge::document().and_then(|d| d.document_element()) {
-            let _ = html.set_attribute("data-split", "on");
-        }
+        prefs::set(&preferences::SPLIT, "on");
         sync_shape();
         reader::redraw(PaneId::First);
     });
@@ -617,9 +615,8 @@ pub fn close_second() {
         made.notice.set_text_content(None);
         made.notice.set_hidden(true);
         SPLIT.set(false);
-        if let Some(html) = bridge::document().and_then(|d| d.document_element()) {
-            let _ = html.remove_attribute("data-split");
-        }
+        prefs::apply(&preferences::SPLIT, preferences::SPLIT.fallback);
+        prefs::forget(&preferences::SPLIT);
         sync_shape();
         surfaces::forget(PaneId::Second);
         reader::forget(PaneId::Second);

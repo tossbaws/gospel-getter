@@ -29,6 +29,14 @@ pub fn store(pref: &Preference, value: &str) {
     }
 }
 
+/// Forgets what's saved for `pref`, so the next launch has its default;
+/// quietly not, if local storage can't be written.
+pub fn forget(pref: &Preference) {
+    if let Some(storage) = storage() {
+        let _ = storage.remove_item(pref.key);
+    }
+}
+
 /// What's saved, as it was read back: `None` if nothing is, or it can't
 /// be read.
 pub fn stored(pref: &Preference) -> Option<String> {
@@ -186,6 +194,12 @@ mod tests {
             "Unknown display setting “single_key_shortcuts”."
         );
         assert_eq!(preferences::SINGLE_KEY_SHORTCUTS.file_name, None);
+        // Nor is two panes open (S9).
+        assert_eq!(
+            checked("split", &Raw::Bool(true)).unwrap_err(),
+            "Unknown display setting “split”."
+        );
+        assert_eq!(preferences::SPLIT.file_name, None);
         assert_eq!(
             checked("font", &text("serif")).unwrap_err(),
             "Unknown display setting “font”."
@@ -193,8 +207,9 @@ mod tests {
     }
 
     /// The table's first ten settings, then the
-    /// margin notes' switch, Compare's notes and the single-key shortcuts:
-    /// their keys, defaults and values, and the renamed theme.
+    /// margin notes' switch, Compare's notes, the single-key shortcuts and
+    /// two panes open: their keys, defaults and values, and the renamed
+    /// theme.
     #[test]
     fn the_table_is_the_page_s() {
         let rows: Vec<(&str, &str, &str, Vec<&str>)> = PREFERENCES
@@ -282,6 +297,7 @@ mod tests {
                     "on",
                     vec!["on", "off"]
                 ),
+                ("split", "gospel-getter-split", "off", vec!["off", "on"]),
             ]
         );
         assert_eq!(
