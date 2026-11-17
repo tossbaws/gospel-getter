@@ -36,17 +36,24 @@ pub(super) const SINGLE_KEYS_SHOTS: [&str; 2] = [
 ];
 
 /// Starts noting what the keys do, for check 72: each header surface
-/// opened (`gospel-getter:surface-open`), focus coming into the book and
-/// chapter picker (G's, in the sidebar), and the search box opened. Read
-/// back with [`SINGLE_KEYS_SEEN_JS`].
+/// opened (`gospelGetterSurfaces.current()` becoming it, as a surface's
+/// `hidden` changes), focus coming into the book and chapter picker (G's,
+/// in the sidebar), and the search box opened. Read back with
+/// [`SINGLE_KEYS_SEEN_JS`].
 const SINGLE_KEYS_WATCH_JS: &str = "const seen = [];
     window.__guiCheckSingleKeys = seen;
+    window.__guiCheckSingleKeysOpen = window.gospelGetterSurfaces.current();
     const picker = document.getElementById('picker');
     const search = document.getElementById('search-panel');
     if (!window.__guiCheckSingleKeysListening) {
         window.__guiCheckSingleKeysListening = true;
-        document.addEventListener('gospel-getter:surface-open',
-            (e) => window.__guiCheckSingleKeys.push('opened ' + (e.detail && e.detail.name)));
+        new MutationObserver(() => {
+            const open = window.gospelGetterSurfaces.current();
+            if (open && open !== window.__guiCheckSingleKeysOpen) {
+                window.__guiCheckSingleKeys.push('opened ' + open);
+            }
+            window.__guiCheckSingleKeysOpen = open;
+        }).observe(document.body, { attributes: true, attributeFilter: ['hidden'], subtree: true });
         document.addEventListener('focusin', (e) => {
             if (picker && picker.contains(e.target)) window.__guiCheckSingleKeys.push('focus in the picker');
         });

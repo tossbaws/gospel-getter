@@ -10,10 +10,10 @@
 //! reference button, keeps the reader's place as the sidebar comes and
 //! goes, and moves focus into it (the chapter being read, marked here). This
 //! draws the books into its lists from what boot hands over
-//! (`bridge::PICKER_BOOKS_EVENT`), a book's chapters, the marks for the
-//! chapter the reader puts on screen (`bridge::PICKER_CURRENT_EVENT`), and
-//! scrolls the picker (never the page) to it when the picker appears
-//! (`bridge::PICKER_SHOWN_EVENT`). A chapter chosen here, or Random
+//! ([`draw_books`]), a book's chapters, the marks for the chapter the
+//! reader puts on screen in the active pane ([`show_current`]), and scrolls
+//! the picker (never the page) to it when the picker appears
+//! ([`picker_shown`]). A chapter chosen here, or Random
 //! chapter's, closes the popover and is read as a jump of the reader's
 //! (`reader::jump`): from its top, unless it's the one on screen.
 //!
@@ -22,6 +22,8 @@
 //! marks set there and then. Random chapter's numbers are the webview's
 //! `Math.random`.
 
+use std::cell::Cell;
+
 use leptos::prelude::*;
 use leptos::tachys::view::{Mountable, Render};
 use wasm_bindgen::{JsCast, JsValue};
@@ -29,7 +31,7 @@ use web_sys::{Element, HtmlElement, KeyboardEvent};
 
 use crate::bridge;
 use crate::dom::{self, by_id, closest, data_number};
-use crate::ipc;
+use crate::pane::{self, PaneId};
 use crate::picker_text::{self as text, Book, FromChapter, FromItem, Key};
 use crate::surfaces::{self, Surface};
 
@@ -45,6 +47,39 @@ struct State {
     reading: Option<(i64, i64)>,
     /// The book whose chapters show.
     open: Option<i64>,
+}
+
+thread_local! {
+    /// The picker's books and chapters, once they've mounted (`None` before:
+    /// `page` hands the books over again then, and the reader the chapter on
+    /// screen).
+    static PICKER: Cell<Option<Picker>> = const { Cell::new(None) };
+}
+
+/// Boot's books, the Old Testament's then the New's: drawn into the lists,
+/// if the picker has mounted.
+pub fn draw_books(old: Vec<Book>, new: Vec<Book>) {
+    if let Some(picker) = PICKER.get() {
+        picker.draw_books(old, new);
+    }
+}
+
+/// The reader has put `book_id` `chapter` on screen in `pane`: marked, if
+/// that's the active pane (the picker is shared, and shows its chapter).
+pub fn show_current(pane: PaneId, book_id: i64, chapter: i64) {
+    if pane == pane::active()
+        && let Some(picker) = PICKER.get()
+    {
+        picker.mark_current(book_id, chapter);
+    }
+}
+
+/// `surfaces` has shown the picker (it was hidden): it's scrolled to the
+/// book being read.
+pub fn picker_shown() {
+    if let Some(picker) = PICKER.get() {
+        picker.reveal_current();
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -255,7 +290,7 @@ impl Picker {
             surfaces::close(true);
         }
         let shown = self.reading() == Some((book_id, chapter));
-        crate::reader::jump(book_id, chapter, !shown);
+        crate::reader::jump(crate::pane::active(), book_id, chapter, !shown);
     }
 
     fn random(self) {
@@ -386,21 +421,7 @@ impl Picker {
                 self.on_keydown(event);
             }
         });
-        dom::on_document_event(
-            bridge::PICKER_BOOKS_EVENT,
-            move |event| match bridge::picker_books(&event) {
-                Ok((old, new)) => self.draw_books(old, new),
-                Err(e) => ipc::log_error("The books couldn't be read", &e),
-            },
-        );
-        dom::on_document_event(bridge::PICKER_CURRENT_EVENT, move |event| {
-            match bridge::picker_current(&event) {
-                Ok((book_id, chapter)) => self.mark_current(book_id, chapter),
-                Err(e) => ipc::log_error("The chapter on screen couldn't be read", &e),
-            }
-        });
-        // `surfaces` shows the picker: scroll it to the book being read.
-        dom::on_document_event(bridge::PICKER_SHOWN_EVENT, move |_| self.reveal_current());
+        PICKER.set(Some(self));
     }
 }
 
@@ -457,7 +478,8 @@ fn grid_view(book_id: i64, name: &str, count: i64, current: Option<i64>) -> impl
     }
 }
 
-/// Starts drawing into the page's `#picker` and listening.
+/// Starts drawing into the page's `#picker`, listening to it, and being
+/// there for [`draw_books`], [`show_current`] and [`picker_shown`].
 pub fn mount() {
     let Some(picker) = picker() else {
         return;

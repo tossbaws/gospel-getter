@@ -3,12 +3,9 @@
 //! (`cargo test`). The page knows the facts (what its lists loaded); this
 //! decides.
 
-use serde::Deserialize;
-
 /// What the page knows when its boot has finished. A list that couldn't be
 /// loaded counts as one that has something in it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Install {
     /// The backend has a saved reading position (any chapter read saves
     /// one, so every upgrade has it).

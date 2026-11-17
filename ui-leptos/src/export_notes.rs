@@ -26,6 +26,7 @@
 //! asked for from (☰, or where the palette left it). It opens fresh every
 //! time: nothing is kept.
 
+use std::cell::Cell;
 use std::collections::BTreeSet;
 
 use leptos::html;
@@ -33,9 +34,9 @@ use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
-use web_sys::{CustomEvent, HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent, NodeList};
+use web_sys::{HtmlElement, HtmlInputElement, KeyboardEvent, MouseEvent, NodeList};
 
-use crate::bridge::{self, OpenRequest};
+use crate::bridge;
 use crate::dom::{self, focus, usable};
 use crate::dto::{
     Commentary, CommentaryArgs, ConfirmFolderArgs, CountArgs, ExportArgs, ExportOptions,
@@ -83,6 +84,32 @@ struct Busy {
     count_token: u64,
 }
 
+/// What the dialog needs, taken when it's asked for: how many notes there
+/// are (none: nothing to export), the book being read (ticked first, if it
+/// has notes), and the translation whose text the file quotes (the one
+/// chosen with the translation button).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenRequest {
+    pub note_count: u64,
+    pub book_id: Option<i64>,
+    pub translation_code: String,
+    pub translation_name: String,
+}
+
+thread_local! {
+    /// The dialog, once it has mounted (`None` before: see `page`).
+    static DIALOG: Cell<Option<Dialog>> = const { Cell::new(None) };
+}
+
+/// Opens the dialog for `request`; closing it gives focus back to
+/// `return_to`. Whether the dialog is there to open.
+pub fn open(request: OpenRequest, return_to: Option<HtmlElement>) -> bool {
+    DIALOG
+        .get()
+        .map(|dialog| dialog.open(request, return_to))
+        .is_some()
+}
+
 /// The dialog's state and the elements it reaches for. Everything is
 /// `Copy`, so the handlers below take the whole thing by value.
 #[derive(Clone, Copy)]
@@ -90,7 +117,7 @@ struct Dialog {
     open: RwSignal<bool>,
     /// What the page said when it asked the dialog to open.
     request: RwSignal<Option<OpenRequest>>,
-    /// Where focus goes back to on closing (`detail.returnFocus`).
+    /// Where focus goes back to on closing.
     return_to: StoredValue<Option<HtmlElement>, LocalStorage>,
     /// What the backend offered when the dialog opened.
     options: RwSignal<Option<ExportOptions>>,
@@ -315,7 +342,10 @@ impl Dialog {
                 Ok(options) => options,
                 Err(e) => {
                     ipc::log_error("Failed to prepare the notes export", &e);
-                    bridge::toast(&format!("Export failed: {}", ipc::error_text(&e)), true);
+                    crate::page::set_data_status(
+                        &format!("Export failed: {}", ipc::error_text(&e)),
+                        true,
+                    );
                     return;
                 }
             };
@@ -439,7 +469,7 @@ impl Dialog {
             match result {
                 Ok(ExportOutcome::Saved { path, notes }) => {
                     let on = book.map(|name| format!(" on {name}")).unwrap_or_default();
-                    bridge::toast(
+                    crate::page::set_data_status(
                         &format!("Exported {}{on} to {path}.", plural(notes, "note")),
                         false,
                     );
@@ -447,7 +477,10 @@ impl Dialog {
                 Ok(ExportOutcome::Cancelled) => {}
                 Err(e) => {
                     ipc::log_error("Notes export failed", &e);
-                    bridge::toast(&format!("Export failed: {}", ipc::error_text(&e)), true);
+                    crate::page::set_data_status(
+                        &format!("Export failed: {}", ipc::error_text(&e)),
+                        true,
+                    );
                 }
             }
             self.busy.update_value(|b| b.exporting = false);
@@ -552,13 +585,16 @@ impl Dialog {
             }
             Ok(FolderOutcome::Saved { folder, files, .. }) => {
                 self.close();
-                bridge::toast(&saved_files(files, &folder), false);
+                crate::page::set_data_status(&saved_files(files, &folder), false);
             }
             Ok(FolderOutcome::Cancelled) => self.close(),
             Err(e) => {
                 ipc::log_error("Notes export by book failed", &e);
                 self.close();
-                bridge::toast(&format!("Export failed: {}", ipc::error_text(&e)), true);
+                crate::page::set_data_status(
+                    &format!("Export failed: {}", ipc::error_text(&e)),
+                    true,
+                );
             }
         }
         self.busy.update_value(|b| b.exporting = false);
@@ -609,16 +645,10 @@ impl Dialog {
         }
     }
 
-    /// Listens for the page's request to open, and for the keyboard.
+    /// Is there for the page to open ([`open`]), and listens for the
+    /// keyboard.
     fn listen(self) {
-        dom::on_document_event(bridge::OPEN_EVENT, move |event: CustomEvent| {
-            // Handled, whatever happens next: the dialog is here.
-            event.prevent_default();
-            match bridge::open_request(&event) {
-                Ok(request) => self.open(request, bridge::return_focus(&event)),
-                Err(e) => ipc::log_error("The export-notes request couldn't be read", &e),
-            }
-        });
+        DIALOG.set(Some(self));
         dom::on_window_keydown(move |event: KeyboardEvent| self.on_keydown(event));
         if let Some(window) = web_sys::window() {
             dom::on(&window, "afterprint", |_| done_printing());

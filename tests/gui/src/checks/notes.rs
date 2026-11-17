@@ -42,12 +42,9 @@ const SEARCH_NOTES: [(u32, u32, u32, u32, &str); 3] = [
 ];
 
 /// Asks the Library to load its notes again, as the card does after a
-/// change (`bridge::LIBRARY_REFRESH_EVENT`): the notes check 64 adds and
-/// deletes through the IPC are no change the page made itself.
-const REFRESH_NOTES_JS: &str =
-    "document.dispatchEvent(new CustomEvent('gospel-getter:library-refresh',
-        { cancelable: true, detail: { lists: ['notes'] } }));
-    return null;";
+/// change (`window.gospelGetterLibrary.refresh`): the notes check 64 adds
+/// and deletes through the IPC are no change the page made itself.
+const REFRESH_NOTES_JS: &str = "window.gospelGetterLibrary.refresh(['notes']); return null;";
 
 /// The Notes tab as the reader sees it: the box, the line under it, the
 /// rows' references, the marks (their text, and whether each has a colour

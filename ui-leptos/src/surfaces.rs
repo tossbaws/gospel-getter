@@ -27,8 +27,8 @@
 //!
 //! The keyboard (`keyboard`) and the page's glue (`page`) open and close
 //! them here ([`current`], [`close`], [`toggle_surface`], [`open_picker`]);
-//! the other pieces hear them open and close (`bridge::SURFACE_OPEN_EVENT`,
-//! `bridge::SURFACE_CLOSE_EVENT`). The frontend tests and the GUI checks
+//! the pieces that follow them are told as each opens (the Library, then
+//! search) and closes (the updater, then the Library). The frontend tests and the GUI checks
 //! read which is open from `window.gospelGetterSurfaces.current()`
 //! ([`export_surfaces`]). Without this module, nothing opens.
 //!
@@ -44,8 +44,8 @@ use std::cell::{Cell, RefCell};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
-    AddEventListenerOptions, CustomEvent, Element, HtmlElement, KeyboardEvent, MediaQueryList,
-    Node, ResizeObserver,
+    AddEventListenerOptions, Element, HtmlElement, KeyboardEvent, MediaQueryList, Node,
+    ResizeObserver,
 };
 
 use crate::aa;
@@ -186,14 +186,8 @@ pub fn sync_picker() {
     }
     let _ = ref_btn.set_attribute("aria-expanded", &(!picker.hidden()).to_string());
     let _ = sidebar_toggle.set_attribute("aria-expanded", &sidebar.to_string());
-    if was_hidden
-        && !picker.hidden()
-        && let (Some(document), Ok(event)) = (
-            bridge::document(),
-            CustomEvent::new(bridge::PICKER_SHOWN_EVENT),
-        )
-    {
-        let _ = document.dispatch_event(&event);
+    if was_hidden && !picker.hidden() {
+        crate::picker::picker_shown();
     }
 }
 
@@ -519,7 +513,7 @@ pub fn open_picker(toggle: bool) {
         && !picker.hidden()
         && picker.query_selector(".book-item").ok().flatten().is_none()
     {
-        bridge::toast("The book list isn\u{2019}t available.", true);
+        crate::page::set_data_status("The book list isn\u{2019}t available.", true);
     }
 }
 
@@ -607,21 +601,6 @@ fn set_shown(surface: Surface, open: bool) {
     }
 }
 
-/// Says `name` (`gospel-getter:surface-open` or `-close`) with the
-/// surface's name.
-fn announce(name: &str, surface: Surface) {
-    #[derive(serde::Serialize)]
-    struct Named {
-        name: &'static str,
-    }
-    bridge::dispatch(
-        name,
-        &Named {
-            name: surface.name(),
-        },
-    );
-}
-
 /// Closes whatever is open. Focus goes back to the button that opened it,
 /// unless it has already moved on to something else (a dialog the surface
 /// opened, say), or `restore_focus` is false.
@@ -648,9 +627,9 @@ pub fn close(restore_focus: bool) {
     {
         dom::focus(&target);
     }
-    // The update banner comes back if About closes on an install
-    // (`updates`).
-    announce(bridge::SURFACE_CLOSE_EVENT, closing);
+    // The update banner comes back if About closes on an install.
+    crate::updates::surface_closed(closing);
+    crate::library::surface_closed();
 }
 
 /// Moves focus into `surface`, by its first-focus rule.
@@ -687,7 +666,7 @@ pub fn open(surface: Surface, opener: Option<HtmlElement>) {
     // About is a modal: one still getting ready to open (Export notes)
     // won't now (D2-01). Whatever is open goes, as below.
     if surface == Surface::About {
-        bridge::modal_opening(false);
+        crate::page::modal_opening(false);
     }
     if CURRENT.get().is_some() {
         close(false);
@@ -698,8 +677,9 @@ pub fn open(surface: Surface, opener: Option<HtmlElement>) {
     aa::draw(surface);
     nav::draw(surface);
     set_shown(surface, true);
-    // Search closes (`search`).
-    announce(bridge::SURFACE_OPEN_EVENT, surface);
+    crate::library::surface_opened(surface);
+    // One popover or panel at a time: search closes.
+    crate::search::surface_opened();
     focus_into(surface);
 }
 

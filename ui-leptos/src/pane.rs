@@ -9,6 +9,14 @@
 //!
 //! The selection card, the picker, search, the dialogs and the card's own
 //! scrolling aren't the reading view's: they scroll themselves.
+//!
+//! What each pane shows is its own (its chapter, its loads, its history and
+//! place, the card's and the findings' facts about its chapter): the pieces
+//! keep it in a [`PerPane`], reached by the pane's [`PaneId`]. What acts on
+//! a pane without being in one (the keys, the palette, the header) acts on
+//! the [`active`] one; what follows every pane goes to each [`shown`].
+
+use std::ops::{Index, IndexMut};
 
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Element, EventTarget, HtmlElement};
@@ -70,6 +78,55 @@ impl PaneId {
     pub fn scroller(self) -> Scroller {
         match self {
             Self::First => Scroller::Window,
+        }
+    }
+}
+
+/// The pane the keys, the palette, the header and the selection card act
+/// on.
+pub fn active() -> PaneId {
+    PaneId::First
+}
+
+/// Every pane on screen, in order.
+pub fn shown() -> impl Iterator<Item = PaneId> {
+    [PaneId::First].into_iter()
+}
+
+/// The pane `el` is in, if it's in one.
+pub fn of(el: &Element) -> Option<PaneId> {
+    shown().find(|pane| pane.root().is_some_and(|root| root.contains(Some(el))))
+}
+
+/// One `T` for each pane, reached by its [`PaneId`].
+#[derive(Debug, Default)]
+pub struct PerPane<T> {
+    first: T,
+}
+
+impl<T> PerPane<T> {
+    /// Each pane's `T`, made by `make`.
+    pub fn new(make: impl Fn(PaneId) -> T) -> Self {
+        Self {
+            first: make(PaneId::First),
+        }
+    }
+}
+
+impl<T> Index<PaneId> for PerPane<T> {
+    type Output = T;
+
+    fn index(&self, pane: PaneId) -> &T {
+        match pane {
+            PaneId::First => &self.first,
+        }
+    }
+}
+
+impl<T> IndexMut<PaneId> for PerPane<T> {
+    fn index_mut(&mut self, pane: PaneId) -> &mut T {
+        match pane {
+            PaneId::First => &mut self.first,
         }
     }
 }

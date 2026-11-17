@@ -5,7 +5,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, closeBridge, openApp, pickerChapter, settle, waitFor, where, withApp } from './harness.mjs';
+import { backend, closeBridge, openApp, pickerChapter, waitFor, where, withApp } from './harness.mjs';
 
 after(closeBridge);
 
@@ -382,6 +382,9 @@ test('C2-01: a mouse’s back and forward buttons wait while the note editor is 
     await backend('__reset', { bookId: 19, chapter: 23, translationCode: 'kjv' });
     await backend('add_note', { bookId: 45, chapter: 8, verseStart: 28, verseEnd: 28, body: 'All things.' });
     await backend('add_note', { bookId: 43, chapter: 3, verseStart: 16, verseEnd: 16, body: 'Loved.' });
+    // Another passage's note, in the same chapter: the editor on 3:16 never
+    // lists it (note_text::lists_others has the rule's own tests).
+    await backend('add_note', { bookId: 43, chapter: 3, verseStart: 17, verseEnd: 17, body: 'Not to condemn.' });
     await withApp({ book: 'Psalms', chapter: 23, translation: 'kjv', keepBookmarks: true }, async (app) => {
         // Romans 8:28, then John 3:16, each from its note's Library row.
         for (const [reference, heading] of [['Romans 8:28', 'Romans 8'], ['John 3:16', 'John 3']]) {
@@ -410,14 +413,6 @@ test('C2-01: a mouse’s back and forward buttons wait while the note editor is 
             assert.ok(noteEditorOpen(app));
             assert.deepEqual(otherNotes(app), ['Loved.'], 'John 3:16’s, not another passage’s');
         }
-
-        // The editor's other notes come only for its own passage, whatever
-        // the page says about another's.
-        app.document.dispatchEvent(new app.window.CustomEvent('gospel-getter:note-others', {
-            detail: { passage: { bookId: 45, chapter: 8, start: 28, end: 28 }, others: [{ reference: 'Romans 8:28', date: 'Nov 1, 2026', body: 'All things.' }] },
-        }));
-        await settle();
-        assert.deepEqual(otherNotes(app), ['Loved.']);
 
         // Closed (nothing typed), the buttons go back and forward again.
         app.click(app.document.getElementById('note-cancel'));

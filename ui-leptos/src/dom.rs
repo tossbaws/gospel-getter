@@ -1,11 +1,11 @@
 //! Small DOM helpers the pieces share: focus that never scrolls the page,
-//! "is this element usable", the Tab trap's arithmetic, listening for the
-//! page's events and the keyboard, and timers.
+//! "is this element usable", the Tab trap's arithmetic, listening for an
+//! element's events and the keyboard, and timers.
 
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::Closure;
-use web_sys::{CustomEvent, Element, FocusOptions, HtmlElement, KeyboardEvent, NodeList};
+use web_sys::{Element, FocusOptions, HtmlElement, KeyboardEvent, NodeList};
 
 use crate::bridge;
 
@@ -122,17 +122,6 @@ pub fn trap_tab(event: &KeyboardEvent, panel: &Element, stops: &[HtmlElement]) {
         event.prevent_default();
         focus(first);
     }
-}
-
-/// Listens for the page's `name` event on `document`, for as long as the
-/// page lives.
-pub fn on_document_event(name: &str, handler: impl FnMut(CustomEvent) + 'static) {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        return;
-    };
-    let handler = Closure::<dyn FnMut(CustomEvent)>::new(handler);
-    let _ = document.add_event_listener_with_callback(name, handler.as_ref().unchecked_ref());
-    handler.forget();
 }
 
 /// Listens for `click` on `el` itself, for as long as the page lives. The

@@ -1560,7 +1560,7 @@ fn the_bar_s_history_and_chapter_controls_are_ghost_svg_buttons() {
         "the menu's Forward"
     );
     assert!(
-        nav.contains("reader::ask(Request::Jump {"),
+        nav.contains("reader::ask(\n        pane,\n        Request::Jump {"),
         "a recent place"
     );
     assert!(nav.contains("keyboard::turn_chapter(which)"), "‹ and ›");
@@ -3350,9 +3350,9 @@ fn the_reference_button_says_where_the_reader_is() {
         reference.contains(r#"label: format!("{place}, {spoken}. Choose a book and chapter"),"#)
     );
     // Updated whenever a chapter is put on screen.
-    let render = block_after(piece("reader.rs"), "fn render_current()");
+    let render = block_after(piece("reader.rs"), "fn render_current(pane: PaneId)");
     assert!(render.contains("update_reference(&here, compare.as_deref());"));
-    assert!(render.contains("bridge::show_picker_current(here.book_id, here.chapter);"));
+    assert!(render.contains("crate::picker::show_current(pane, here.book_id, here.chapter);"));
     // G opens the picker, in the keyboard dispatcher, which leaves keys
     // typed into a form control alone.
     assert!(
@@ -5201,7 +5201,7 @@ fn every_handled_key_is_in_the_shortcuts_table() {
     // page's request to open says only where focus goes back to), and
     // lists each group's rows.
     let open = block_after(piece("page.rs"), "pub fn open_shortcuts(");
-    assert!(open.contains(r#"&[("returnFocus", &element_or_null(return_focus))],"#));
+    assert!(open.contains("crate::shortcuts::open(return_focus)"));
     let sheet = piece("shortcuts.rs");
     assert!(sheet.contains("shortcut_table::GROUPS"));
     assert!(sheet.contains("shortcut_table::in_group(group)"));
@@ -5553,6 +5553,73 @@ fn reading_view_scroll_stays_in_pane() {
                 !source.contains(call),
                 "{file} calls `{call}`: the reading view scrolls through pane::Scroller"
             );
+        }
+    }
+}
+
+/// The pieces call each other directly (`ui-leptos/src/bridge.rs`'s header
+/// says so): the only events they send are the ones the page's own scripts
+/// answer, each named here with its reason, and they hear none. One
+/// `_EVENT` constant is left, and no piece listens on `document` for an
+/// event of its own. `gospel-getter:pieces-failed` crosses the other way,
+/// from the loader to the page's fallback, and no piece sends or hears it.
+#[test]
+fn the_pieces_send_events_only_to_the_pages_scripts() {
+    // (piece, event, why it crosses)
+    const CROSSINGS: [(&str, &str, &str); 1] = [(
+        "bridge.rs",
+        "gospel-getter:boot",
+        "boot asks the prefetch script in <head> for the get_home and get_reading \
+         it sent before the module loaded; that script cancels it and answers",
+    )];
+    let constants: Vec<(&str, &str)> = PIECES
+        .iter()
+        .flat_map(|(file, source)| {
+            source
+                .lines()
+                .filter(|line| line.contains("_EVENT: &str"))
+                .map(move |line| (*file, line.trim()))
+        })
+        .collect();
+    assert_eq!(
+        constants,
+        [(
+            "bridge.rs",
+            "pub const BOOT_EVENT: &str = \"gospel-getter:boot\";"
+        )],
+        "the only event constant is BOOT_EVENT"
+    );
+    for (file, source) in PIECES.iter() {
+        assert!(
+            !source.contains("on_document_event"),
+            "{file} listens on document for an event: the pieces call each other"
+        );
+        let crossing = CROSSINGS.iter().find(|(piece, _, _)| piece == file);
+        let names: Vec<&str> = source
+            .match_indices("\"gospel-getter:")
+            .map(|(at, _)| {
+                let name = &source[at + 1..];
+                &name[..name.find('"').unwrap_or(name.len())]
+            })
+            .collect();
+        match crossing {
+            Some((_, event, why)) => {
+                assert_eq!(names, [*event], "{file} names only its crossing: {why}");
+                assert!(
+                    HTML.contains(&format!("document.addEventListener('{event}'")),
+                    "ui/index.html still answers {event}: {why}"
+                );
+            }
+            None => {
+                assert!(
+                    !source.contains("CustomEvent"),
+                    "{file} makes a CustomEvent: the pieces call each other directly"
+                );
+                assert!(
+                    names.is_empty(),
+                    "{file} names an event of the page's ({names:?}): the pieces call each other"
+                );
+            }
         }
     }
 }

@@ -15,7 +15,7 @@
 //! and read back once the books and translations are known, every entry
 //! checked against them; nothing in it is a display preference, and it's in
 //! no backup or export. Nothing here asks the backend for anything: names
-//! come from the books boot hands the picker (`bridge::PICKER_BOOKS_EVENT`).
+//! come from the books boot hands the picker ([`set_books`]).
 
 use std::cell::RefCell;
 
@@ -28,6 +28,7 @@ use crate::dom::{self, by_id, storage};
 use crate::ipc;
 use crate::keyboard;
 use crate::nav_text::{self as text, RecentPlace, RecentPlaces, Stored};
+use crate::pane;
 use crate::picker_text::Book;
 use crate::reader::{self, Request};
 use crate::reader_text::{Place, Which};
@@ -257,15 +258,19 @@ fn go_recent(index: usize) {
     let Some(place) = with(|s| s.recent.places().get(index).cloned()) else {
         return;
     };
+    let pane = pane::active();
     if place.translation != bridge::translation_code() {
-        reader::switch_for_jump(&place.translation);
+        reader::switch_for_jump(pane, &place.translation);
     }
-    let load = reader::ask(Request::Jump {
-        book_id: place.book_id,
-        chapter: place.chapter,
-        start: place.start,
-        end: place.end,
-    });
+    let load = reader::ask(
+        pane,
+        Request::Jump {
+            book_id: place.book_id,
+            chapter: place.chapter,
+            start: place.start,
+            end: place.end,
+        },
+    );
     spawn_local(async move {
         let _ = load.await;
     });
@@ -293,22 +298,18 @@ fn on_menu_click(event: &web_sys::Event) {
     }
 }
 
-/// Listens to Back, Forward, the menu's items, ‹ and ›, and for boot's
-/// books.
-/// Called before boot (`boot`), which hands the books over.
+/// Boot's books, the Old Testament's then the New's (`page`, before the
+/// picker's): Recent places is read back against them, and Back and
+/// Forward can name their places.
+pub fn set_books(old: Vec<Book>, new: Vec<Book>) {
+    with(|s| s.books = old.into_iter().chain(new).collect());
+    load();
+    let facts = with(|s| s.facts.clone());
+    show(facts);
+}
+
+/// Listens to Back, Forward, the menu's items, ‹ and ›.
 pub fn mount() {
-    dom::on_document_event(bridge::PICKER_BOOKS_EVENT, |event| {
-        match bridge::picker_books(&event) {
-            Ok((old, new)) => {
-                with(|s| s.books = old.into_iter().chain(new).collect());
-                load();
-                // Back and Forward can name their places now.
-                let facts = with(|s| s.facts.clone());
-                show(facts);
-            }
-            Err(e) => ipc::log_error("The books couldn't be read", &e),
-        }
-    });
     for (id, step) in [("history-back", -1), ("history-forward", 1)] {
         if let Some(button) = by_id(id) {
             let target = button.clone();

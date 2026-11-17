@@ -86,7 +86,8 @@ fn go_to(link: &Element) {
     }
     match (number(link, "data-start"), number(link, "data-end")) {
         (Some(start), Some(end)) => crate::reader::open(
-            &bridge::OpenPassage {
+            crate::pane::active(),
+            &crate::reader::OpenPassage {
                 book_id,
                 chapter,
                 verse_start: Some(start),
@@ -94,7 +95,7 @@ fn go_to(link: &Element) {
             },
             wasm_bindgen::JsValue::NULL,
         ),
-        _ => crate::reader::jump(book_id, chapter, true),
+        _ => crate::reader::jump(crate::pane::active(), book_id, chapter, true),
     }
 }
 
@@ -109,7 +110,7 @@ fn open_web_link(url: &str) {
         };
         if let Err(e) = answer {
             ipc::log_error("Failed to open a note's link", &e);
-            bridge::toast(&ipc::error_text(&e), true);
+            crate::page::set_data_status(&ipc::error_text(&e), true);
         }
     });
 }

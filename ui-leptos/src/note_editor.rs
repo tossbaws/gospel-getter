@@ -1,12 +1,13 @@
 //! The note editor: write a note on the selected verses, or edit or delete
 //! one, with the passage quoted as the reader is reading it. The selection
-//! card opens it (its + Add note and Edit, N, and the Library's Edit) with a
-//! snapshot of the passage and, when adding, the other notes on it; the
+//! card opens it (its + Add note and Edit, N, and the Library's Edit;
+//! [`open`]) with a snapshot of the passage and, when adding, the other
+//! notes on it, which it updates as they change ([`show_others`]); the
 //! editor saves and deletes through the backend, then has the card refresh
 //! the notes (markers, the card's Notes section, the Library) before
 //! closing, so focus can go back to the note's own Edit. The status
-//! afterwards, and a deleted note's Undo, are the card's (its status line);
-//! see `bridge`.
+//! afterwards, and a deleted note's Undo, are the card's (its status line,
+//! `card::note_done`).
 //!
 //! A modal, as the page's others: while open it has the keyboard (a
 //! capturing `keydown` on `window`, stopping every other handler). Escape
@@ -46,19 +47,106 @@
 //! discard prompt are written straight to their elements; the words it
 //! shows are signals.
 
+use std::cell::Cell;
+
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsValue;
-use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
+use web_sys::{HtmlElement, KeyboardEvent, MouseEvent};
 
-use crate::bridge::{self, NoteRequest, OtherNote};
-use crate::card;
+use crate::bridge;
+use crate::card::{self, NoteDone};
 use crate::dom::{self, focus, storage};
 use crate::dto::{AddNoteArgs, DeleteNoteArgs, KeepFindingArgs, UpdateNoteArgs};
 use crate::ipc;
-use crate::note_text::{self, DRAFTS_KEY, Draft, DraftPassage, Drafts};
+use crate::note_text::{self, DRAFTS_KEY, Draft, DraftPassage, Drafts, Passage};
+
+/// What the editor needs from the card to open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteRequest {
+    /// `add`, `edit`, or `keep` ("Keep as mine" on an AI finding: adding a
+    /// note, from the finding's words).
+    pub mode: String,
+    /// The note being edited.
+    pub note: Option<NoteRef>,
+    /// The verses the note is on.
+    pub passage: Passage,
+    /// The passage's reference, e.g. "John 3:16–18" (the title).
+    pub reference: String,
+    /// The translation whose text is quoted.
+    pub code: String,
+    /// The passage quoted, as markup: its verses as the reader draws them
+    /// (`reader_text::verse_html`: KJV supplied words in italics, no note
+    /// markers, escaped), with what the translation doesn't number said at
+    /// the end (`card_text::note_passage_html`). Shown as it is.
+    pub passage_html: String,
+    /// When adding, the other notes on these verses, read-only.
+    pub others: Vec<OtherNote>,
+    /// "Keep as mine": the finding the note is made from.
+    pub keep: Option<KeepRef>,
+}
+
+/// The AI finding "Keep as mine" makes a note of: its id, and its words,
+/// which the editor opens with, all selected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeepRef {
+    pub id: i64,
+    pub text: String,
+}
+
+/// The note being edited: its id and text (the rest stays the card's), as
+/// read from the backend's note.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct NoteRef {
+    pub id: i64,
+    pub body: String,
+}
+
+/// Another note on the passage, as the editor lists it: its reference,
+/// the date it was written (as the backend writes dates) and its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OtherNote {
+    pub reference: String,
+    pub date: String,
+    pub body: String,
+}
+
+thread_local! {
+    /// The editor, once it has mounted (`None` before: the card says it
+    /// isn't available).
+    static EDITOR: Cell<Option<Editor>> = const { Cell::new(None) };
+}
+
+/// Opens the editor for `request`, on `note` (the note being edited, as the
+/// backend gave it, or `null`; handed back with `card::note_done`); closing
+/// it gives focus back to `return_to`. Whether the editor is there to open.
+pub fn open(request: NoteRequest, note: JsValue, return_to: Option<HtmlElement>) -> bool {
+    EDITOR
+        .get()
+        .map(|editor| editor.open(request, note, return_to))
+        .is_some()
+}
+
+/// The card's notes on `passage`, the passage they were listed for, have
+/// changed: an open editor lists them if they're its own passage's
+/// (`note_text::lists_others`).
+pub fn show_others(passage: &Passage, others: Vec<OtherNote>) {
+    let Some(editor) = EDITOR.get() else {
+        return;
+    };
+    let open = editor.is_open();
+    let ours = editor.session.with_value(|s| {
+        s.as_ref().is_some_and(|s| {
+            let editing = open.then_some(&s.request.passage);
+            note_text::lists_others(editing, s.request.keep.is_some(), passage)
+        })
+    });
+    if ours {
+        editor.set_others(others);
+    }
+}
 
 // ---- The drafts, as local storage keeps them.
 
@@ -126,7 +214,7 @@ struct Session {
     /// opened again is not for this one.
     id: u64,
     request: NoteRequest,
-    /// The note as the page sent it, handed back for its Undo.
+    /// The note as the card sent it, handed back for its Undo.
     note: JsValue,
     /// What the editor opened with (the note's text, or nothing).
     initial: String,
@@ -415,7 +503,7 @@ impl Editor {
     fn open(self, request: NoteRequest, note: JsValue, return_to: Option<HtmlElement>) {
         // Never over unsaved text, whatever asked: the open note stays.
         if self.holds_unsaved() {
-            bridge::toast(note_text::STILL_WRITING, true);
+            crate::page::set_data_status(note_text::STILL_WRITING, true);
             return;
         }
         let id = self.next_id.get_value() + 1;
@@ -657,11 +745,11 @@ impl Editor {
                 self.set_busy(false);
             }
             let action = if session.request.mode == "edit" {
-                "saved"
+                NoteDone::Saved
             } else {
-                "added"
+                NoteDone::Added
             };
-            bridge::note_done(action, &JsValue::NULL);
+            card::note_done(action);
         });
     }
 
@@ -708,7 +796,7 @@ impl Editor {
             } else {
                 deleted
             };
-            bridge::note_done("deleted", &gone);
+            card::note_done(NoteDone::Deleted(gone));
         });
     }
 
@@ -768,38 +856,7 @@ impl Editor {
     fn listen(self) {
         self.draft_later
             .set_value(Some(dom::kept_callback(move || self.on_draft_timer())));
-        dom::on_document_event(bridge::NOTE_EVENT, move |event: CustomEvent| {
-            event.prevent_default();
-            match bridge::note_request(&event) {
-                Ok(request) => {
-                    let note = js_sys::Reflect::get(&event.detail(), &JsValue::from_str("note"))
-                        .unwrap_or(JsValue::NULL);
-                    self.open(request, note, bridge::return_focus(&event));
-                }
-                Err(e) => ipc::log_error("The note request couldn't be read", &e),
-            }
-        });
-        dom::on_document_event(bridge::NOTE_OTHERS_EVENT, move |event: CustomEvent| {
-            // The selection's notes; a kept finding's verse has its own.
-            let keeping = self
-                .session
-                .with_value(|s| s.as_ref().is_some_and(|s| s.request.keep.is_some()));
-            if !self.is_open() || keeping {
-                return;
-            }
-            match bridge::note_others(&event) {
-                // Only the notes on this note's own passage (C2-01).
-                Ok((passage, others)) => {
-                    let ours = self
-                        .session
-                        .with_value(|s| s.as_ref().is_some_and(|s| s.request.passage == passage));
-                    if ours {
-                        self.set_others(others);
-                    }
-                }
-                Err(e) => ipc::log_error("The other notes couldn't be read", &e),
-            }
-        });
+        EDITOR.set(Some(self));
         dom::on_window_keydown(move |event: KeyboardEvent| self.on_keydown(event));
         // The text is kept at once when the window is hidden or closed,
         // loses focus, or the pointer leaves the page (on its way to the

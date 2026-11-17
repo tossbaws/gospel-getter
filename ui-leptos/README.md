@@ -4,8 +4,8 @@ Gospel Getter's page (`ui/index.html`) is run by this crate's pieces,
 written with [Leptos] and compiled to WebAssembly; they run inside the
 Tauri app. The page has only three small inline scripts of its own (the
 pre-paint script, boot's prefetch and the plain-text fallback) and the
-loader. What crosses between them and the
-pieces, and the events the pieces send each other, are in `src/bridge.rs`.
+loader. What crosses between them and the pieces is in `src/bridge.rs`;
+the pieces call each other directly.
 
 The saved settings' one table, their keys, values and names (in the page
 and in an export file), is `../shared/preferences.rs`, a file the backend
@@ -34,7 +34,7 @@ numbers and rules, free of the DOM and unit-tested natively (`cargo test`).
 The root and what the pieces share:
 
 - `lib`: the crate root; mounts the pieces when the module loads (below).
-- `bridge`: what crosses to the page's own scripts, the globals set for the tests and the GUI checks, the custom events the pieces send each other, and the page controls they use.
+- `bridge`: what crosses to the page's own scripts, the globals set for the tests and the GUI checks, and the page controls and local storage the pieces use.
 - `ipc`: Tauri commands through the global the page uses, `window.__TAURI__.core.invoke` (a `wasm_bindgen` extern plus `serde-wasm-bindgen`), with the same command names and argument objects.
 - `dto`: the shapes the commands exchange that the page declares for itself, with the names the JSON carries, and the shared ones (`wire`) under the page's names (see "What stays mirrored").
 - `dom`: the DOM helpers the pieces share (focus that never scrolls, the modals' Tab trap, listening, timers).
@@ -43,7 +43,7 @@ The root and what the pieces share:
 The page's glue:
 
 - `boot`: startup, from the translations to the launch check; it takes over the `get_home` and `get_reading` the page's prefetch script sent from `<head>`.
-- `page`: the toast, Export and Import data…, the welcome, the shortcuts sheet and search opened, the palette's page commands, the launch check.
+- `page`: the toast, Export and Import data…, the welcome, the shortcuts sheet and search opened, what the palette's commands need and the ones it runs, the launch check.
 - `page_text`: the toast's words, Export data…'s summary and Compare's partner.
 - `keyboard`: the keyboard dispatcher, on `document`.
 - `keyboard_text`: which key does what, j and k's steps, and how far a verse is scrolled into view.
@@ -57,7 +57,7 @@ The dialogs:
 - `import_preview`: Import data…: the file's preview, then confirm or cancel.
 - `import_text`: the import's sentences and its add-or-replace choice.
 - `note_editor`: the note editor.
-- `note_text`: a note's length rule and its drafts.
+- `note_text`: a note's length rule, whose other notes the editor lists, and its drafts.
 - `shortcuts`: the keyboard shortcuts sheet.
 - `welcome`: the welcome.
 - `install`: the welcome's fresh-install rule.
@@ -86,7 +86,7 @@ The header, the Library and search:
 The reader, the selection card and notes:
 
 - `reader`: the chapter on screen, how it gets there, and the passage history.
-- `pane`: the reading pane's elements (its root, `#reading-pane-inner` and its notice), which the reading view's queries run on, and its `Scroller`, the one way the reading view's scroll position and the band in view are read and set.
+- `pane`: the reading pane's elements (its root, `#reading-pane-inner` and its notice), which the reading view's queries run on, and its `Scroller`, the one way the reading view's scroll position and the band in view are read and set; which pane is active and which are shown, and `PerPane`, the state the pieces keep for each pane.
 - `reader_text`: the chapter's markup, byte for byte `fixtures/genesis-1.html` (which a test compares), Compare's rows, the reference, and the passage history's bookkeeping.
 - `card`: the selection card: the verse selection, Copy and Copy as…, the card's bookmark, highlight and notes, the verses' marks and the Shift ghost.
 - `card_text`: the card's markup and placement.
@@ -111,8 +111,9 @@ listeners first (`page`, `clicks`, `keyboard`), then the surfaces, Aa, the
 card and the reader, then boot (its chapter drawn at once if its answer is
 in), then the rest in the next task (About and the banner are moved to
 their places, for focus order, and the Library's tabs and lists into its
-panel), then tells the pieces every one is listening
-(`gospel-getter:pieces-ready`).
+panel), then runs its ready list: what a piece asked of another before
+that one had mounted is asked again, in a fixed order (`page`, then the
+card, then the reader), which a native test pins.
 
 ## Building and running
 
@@ -160,8 +161,8 @@ be left), and no update is looked for. The module may also load after the
 page has read: boot's two commands are on their way (or answered) by then,
 and the chapter is drawn as it starts; the Library's lists, the welcome's
 startup question and the launch check are asked again once every piece
-has mounted (`gospel-getter:pieces-ready`), and the picker's books are
-sent again then.
+has mounted (`lib`'s ready list), and the picker's books are sent again
+then.
 
 The Content Security Policy allows exactly what this needs beyond the page's
 own code: `'wasm-unsafe-eval'` in `script-src` (compiling WebAssembly) and

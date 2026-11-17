@@ -33,7 +33,7 @@ use crate::card_text::Slot;
 use crate::dom;
 use crate::keyboard_text::{self as text, Press, Rect, Route, Selected};
 use crate::page;
-use crate::pane::PaneId;
+use crate::pane;
 use crate::preferences;
 use crate::prefs;
 use crate::reader::{self, Load, Request};
@@ -57,7 +57,7 @@ fn spawn(load: Load) {
 /// `#reading-pane-inner`'s `data-prev-book` and `data-prev-chapter` (or
 /// `data-next-*`), the backend's.
 pub fn turn_chapter(which: Which) {
-    let Some(inner) = PaneId::First.inner() else {
+    let Some(inner) = pane::active().inner() else {
         return;
     };
     let (book, chapter) = match which {
@@ -71,12 +71,15 @@ pub fn turn_chapter(which: Which) {
     if let (Some(book_id), Some(chapter)) =
         (number(Some(book)), number(inner.get_attribute(chapter)))
     {
-        spawn(reader::ask(Request::Load {
-            book_id,
-            chapter,
-            translation_code: None,
-            top: false,
-        }));
+        spawn(reader::ask(
+            pane::active(),
+            Request::Load {
+                book_id,
+                chapter,
+                translation_code: None,
+                top: false,
+            },
+        ));
     }
 }
 
@@ -84,12 +87,12 @@ pub fn turn_chapter(which: Which) {
 /// backend names them), or a toast at the Bible's ends. Not a jump: like ←
 /// and →, it moves on from where the reader is.
 pub fn step_book(which: Which) {
-    spawn(reader::ask(Request::Book { which }));
+    spawn(reader::ask(pane::active(), Request::Book { which }));
 }
 
 /// Back (-1) or forward (1) through the passages jumped to.
 pub fn go_history(step: i32) {
-    spawn(reader::ask(Request::History { step }));
+    spawn(reader::ask(pane::active(), Request::History { step }));
 }
 
 fn rect_of(el: &Element) -> Rect {
@@ -108,7 +111,7 @@ fn data_verse(el: &Element) -> Option<i64> {
 /// The first (`first`) or last verse of column `code` that's in view, or
 /// none when none is (or there's no layout to tell).
 fn verse_in_view(code: &str, first: bool) -> Option<i64> {
-    let pane = PaneId::First;
+    let pane = pane::active();
     let found = pane.query_all(&format!(r#"{SELECTABLE}[data-translation="{code}"]"#));
     let view = pane.scroller().view().unwrap_or_default();
     let seen: Vec<HtmlElement> = found
@@ -121,7 +124,7 @@ fn verse_in_view(code: &str, first: bool) -> Option<i64> {
 
 /// Scrolls just enough to bring verse `number` of column `code` into view.
 fn reveal_verse(code: &str, number: i64) {
-    let pane = PaneId::First;
+    let pane = pane::active();
     let Some(el) = pane.query(&format!(
         r#"{SELECTABLE}[data-translation="{code}"][data-verse="{number}"]"#
     )) else {

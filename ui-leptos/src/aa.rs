@@ -33,8 +33,7 @@ use leptos::tachys::view::{Mountable, Render};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
-    CustomEvent, Element, HtmlButtonElement, HtmlElement, HtmlOptionElement, HtmlSelectElement,
-    KeyboardEvent,
+    Element, HtmlButtonElement, HtmlElement, HtmlOptionElement, HtmlSelectElement, KeyboardEvent,
 };
 
 use crate::aa_text::{self as text, Beside, Press};
@@ -43,15 +42,6 @@ use crate::dom::{self, by_id};
 use crate::preferences::{self, Preference, Values};
 use crate::prefs::{self, Raw};
 use crate::surfaces::{self, Surface};
-
-/// Compare was switched on or off, or what it compares with changed (or
-/// reading mode, with Compare's Notes chosen): a `CustomEvent` on
-/// `document`, no `detail`. The page shows the chapter in the new layout.
-pub const COMPARE_CHANGE_EVENT: &str = "gospel-getter:compare-change";
-
-/// The layout changed: a `CustomEvent` on `document`, no `detail`. The
-/// page moves the selection's card to its verses' new place.
-pub const LAYOUT_CHANGE_EVENT: &str = "gospel-getter:layout-change";
 
 /// How long the text size shows after a size key, in milliseconds.
 const SIZE_SHOWN_MS: i32 = 1500;
@@ -139,13 +129,6 @@ fn append(parent: &Element, view: AnyView) {
     drawn.mount(parent, None);
 }
 
-/// Sends `name` on `document`, as a plain `new CustomEvent(name)`.
-fn announce(name: &str) {
-    if let (Some(document), Ok(event)) = (bridge::document(), CustomEvent::new(name)) {
-        let _ = document.dispatch_event(&event);
-    }
-}
-
 // ---- Choosing.
 
 /// Chooses `value` in a setting's `<select>`: the `change` it sends applies
@@ -204,7 +187,7 @@ pub fn compare_with(code: &str) {
     }
     prefs::set(&preferences::COMPARE_WITH, code);
     sync_aa();
-    announce(COMPARE_CHANGE_EVENT);
+    crate::reader::compare_changed();
 }
 
 /// Compare's "with" Notes: the reader's notes on the chapter beside the
@@ -216,7 +199,7 @@ pub fn compare_with_notes() {
     }
     prefs::set(&preferences::COMPARE_NOTES, "on");
     sync_aa();
-    announce(COMPARE_CHANGE_EVENT);
+    crate::reader::compare_changed();
 }
 
 /// Reads `code` instead: the translation button's popover's rows, and the
@@ -299,7 +282,7 @@ pub fn set_reader_mode(on: bool) {
     // margin has the notes: the chapter is drawn again for it.
     if beside() != was {
         sync_aa();
-        announce(COMPARE_CHANGE_EVENT);
+        crate::reader::compare_changed();
     }
     if let Some(toggle) = by_id("reader-mode-btn") {
         let _ = toggle.set_attribute("aria-pressed", &on.to_string());
@@ -323,7 +306,7 @@ fn toggle_compare() {
         let _ = compare.set_attribute("aria-pressed", &(value == "on").to_string());
     }
     sync_aa();
-    announce(COMPARE_CHANGE_EVENT);
+    crate::reader::compare_changed();
 }
 
 // ---- Drawing.
@@ -653,7 +636,7 @@ pub fn apply_preferences(values: &JsValue) -> Result<bool, JsValue> {
     sync_aa();
     surfaces::sync_picker();
     if compare_changed || beside() != was {
-        announce(COMPARE_CHANGE_EVENT);
+        crate::reader::compare_changed();
     }
     Ok(persisted)
 }
@@ -794,7 +777,7 @@ fn on_select_change(pref: Preference) {
     };
     if pref == preferences::LAYOUT {
         surfaces::keep_reading_place(change, None);
-        announce(LAYOUT_CHANGE_EVENT);
+        crate::card::layout_changed();
     } else {
         change();
     }

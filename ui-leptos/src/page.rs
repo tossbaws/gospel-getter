@@ -17,29 +17,39 @@
 //! surfaces (`surfaces`) mount in the same call as this, before any click
 //! or key can come. What can come before the rest of the pieces have
 //! mounted (`lib::mount_the_rest`) still says so: the sheet, the welcome,
-//! the import, the export chooser, Export notes, search and About.
+//! the import, the export chooser, Export notes, search and About. Each of
+//! those pieces keeps a handle to itself from its mount, `None` until then,
+//! and its call here answers whether it was there; a piece that wasn't is
+//! asked again from `lib`'s ready list where boot asked it (the Library's
+//! lists, the welcome's startup question, the picker's books, the launch
+//! check), and said to be unavailable where the reader asked.
 
 use std::cell::RefCell;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{HtmlButtonElement, HtmlElement, HtmlOptionElement, HtmlSelectElement};
 
 use crate::bridge;
-use crate::bridge::ExportFacts;
 use crate::card::{self, Ask};
 use crate::card_text::Slot;
 use crate::dom::{self, by_id};
 use crate::dto::PositionPreview;
+use crate::export_choice::{self, ExportFacts};
+use crate::export_notes::{self, OpenRequest};
 use crate::intent::{Claim, Generation};
 use crate::ipc;
 use crate::keyboard;
+use crate::library_text::List;
 use crate::page_text::{self as text, Saved};
 use crate::palette::{Choice, PaletteState};
+use crate::pane;
+use crate::picker_text::Book;
 use crate::reader::{self, Request};
 use crate::reader_text::Which;
 use crate::surfaces;
+use crate::welcome::{self, StartRow, WelcomeRequest};
 
 #[derive(Default)]
 struct State {
@@ -52,8 +62,9 @@ struct State {
     data_busy: bool,
     /// The backend's places to start, from boot, for the welcome.
     start_here: Option<JsValue>,
-    /// Boot's books for the picker, sent again once every piece is there.
-    picker_books: Option<JsValue>,
+    /// Boot's books for the picker (the Old Testament's, the New's), sent
+    /// again once every piece is there.
+    picker_books: Option<(Vec<Book>, Vec<Book>)>,
     /// Library lists asked for before the Library was there, in order.
     library_waiting: Vec<String>,
     /// Those lists, asked again: settles once they have their answers.
@@ -164,19 +175,6 @@ pub fn focused() -> Option<HtmlElement> {
     active.dyn_into::<HtmlElement>().ok()
 }
 
-/// A cancelable request with a `detail` object built from `fields`.
-fn request(name: &str, fields: &[(&str, &JsValue)]) -> bool {
-    let detail = js_sys::Object::new();
-    for (key, value) in fields {
-        let _ = js_sys::Reflect::set(&detail, &JsValue::from_str(key), value);
-    }
-    bridge::request(name, &detail)
-}
-
-fn element_or_null(el: Option<HtmlElement>) -> JsValue {
-    el.map_or(JsValue::NULL, JsValue::from)
-}
-
 // ---- The toast: export and import say how it went at the foot of the
 // window, and fade after a while (errors stay longer). It sits above the
 // update banner when that's showing.
@@ -279,9 +277,9 @@ fn export_facts() -> ExportFacts {
     })
 }
 
-/// Tells the chooser what changed ([`bridge::EXPORT_FACTS_EVENT`]).
+/// Tells the chooser what changed.
 fn send_export_facts() {
-    bridge::dispatch(bridge::EXPORT_FACTS_EVENT, &export_facts());
+    export_choice::set_facts(export_facts());
 }
 
 // ---- Back up or move your data. The native file dialogs, file access and
@@ -364,15 +362,7 @@ pub fn export_data() {
 /// ☰ → Export data…: the chooser, Everything (the backup) or My notes (the
 /// Export notes dialog); focus goes back to `return_focus`.
 fn open_export_choice(return_focus: Option<HtmlElement>) {
-    let Ok(facts) = ipc::args(&export_facts()) else {
-        return;
-    };
-    let _ = js_sys::Reflect::set(
-        &facts,
-        &JsValue::from_str("returnFocus"),
-        &element_or_null(return_focus),
-    );
-    if !bridge::request(bridge::EXPORT_CHOICE_EVENT, &facts) {
+    if !export_choice::open(export_facts(), return_focus) {
         set_data_status(text::EXPORT_UNAVAILABLE, true);
     }
 }
@@ -386,29 +376,13 @@ pub fn open_export_notes(return_focus: Option<HtmlElement>) {
         return;
     }
     let code = bridge::translation_code();
-    let book_id = card::facts().chapter.map(|c| c.book_id);
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Open<'a> {
-        note_count: u32,
-        book_id: Option<i64>,
-        translation_code: &'a str,
-        translation_name: &'a str,
-    }
-    let Ok(detail) = ipc::args(&Open {
-        note_count: notes,
-        book_id,
-        translation_code: &code,
-        translation_name: &reader::translation_name(&code),
-    }) else {
-        return;
+    let request = OpenRequest {
+        note_count: u64::from(notes),
+        book_id: card::facts().chapter.map(|c| c.book_id),
+        translation_name: reader::translation_name(&code),
+        translation_code: code,
     };
-    let _ = js_sys::Reflect::set(
-        &detail,
-        &JsValue::from_str("returnFocus"),
-        &element_or_null(return_focus),
-    );
-    if !bridge::request(bridge::OPEN_EVENT, &detail) {
+    if !export_notes::open(request, return_focus) {
         set_data_status(text::EXPORT_NOTES_UNAVAILABLE, true);
     }
 }
@@ -439,7 +413,7 @@ pub fn modal_holds(claim: Claim) -> bool {
 /// ☰ → Import data…: the import preview runs the open dialog, the preview
 /// and the import, and says how it's going.
 fn import_data() {
-    if !bridge::request(bridge::IMPORT_EVENT, &JsValue::NULL) {
+    if !crate::import_preview::begin() {
         set_data_status(text::IMPORT_UNAVAILABLE, true);
     }
 }
@@ -450,12 +424,15 @@ pub fn imported(position: Option<PositionPreview>, message: String) {
     // What comes first is asked within the event: the position's chapter,
     // or else the bookmarks.
     let first = match position {
-        Some(position) => Err(reader::ask(Request::Load {
-            book_id: position.book_id,
-            chapter: position.chapter,
-            translation_code: Some(position.translation_code),
-            top: false,
-        })),
+        Some(position) => Err(reader::ask(
+            pane::active(),
+            Request::Load {
+                book_id: position.book_id,
+                chapter: position.chapter,
+                translation_code: Some(position.translation_code),
+                top: false,
+            },
+        )),
         None => Ok(refresh_library(&["bookmarks"])),
     };
     spawn_local(async move {
@@ -478,9 +455,12 @@ pub fn imported(position: Option<PositionPreview>, message: String) {
         }
         card::refresh_notes().await;
         // Above the chapter (the reader's notice, shown within the ask).
-        let notice = reader::ask(Request::Notice {
-            message: message.clone(),
-        });
+        let notice = reader::ask(
+            pane::active(),
+            Request::Notice {
+                message: message.clone(),
+            },
+        );
         spawn_local(async move {
             notice.await;
         });
@@ -495,7 +475,7 @@ pub fn imported(position: Option<PositionPreview>, message: String) {
 /// Has the Library reload `lists`: a promise that settles once each has its
 /// answer (at once, if the Library isn't there yet).
 pub fn refresh_library(lists: &[&str]) -> js_sys::Promise {
-    if let Some(done) = bridge::refresh_library(lists) {
+    if let Some(done) = crate::library::refresh(lists) {
         return js_sys::Promise::resolve(&done);
     }
     with(|s| {
@@ -515,15 +495,11 @@ pub fn library_resent() -> js_sys::Promise {
         .unwrap_or_else(|| js_sys::Promise::resolve(&JsValue::UNDEFINED))
 }
 
-/// Every note, as the Library loaded them: kept as their count, for the
-/// welcome, the chooser and Export notes.
-fn on_library_loaded(event: &web_sys::CustomEvent) {
-    let detail = event.detail();
-    let get = |key: &str| js_sys::Reflect::get(&detail, &JsValue::from_str(key)).ok();
-    let list = get("list").and_then(|l| l.as_string());
-    let items = get("items").filter(JsValue::is_truthy);
-    if let (Some("notes"), Some(items)) = (list.as_deref(), items) {
-        let count = js_sys::Reflect::get(&items, &JsValue::from_str("length"))
+/// A Library list has loaded (`items`, or `null` if it failed): every
+/// note, kept as their count, for the welcome, the chooser and Export notes.
+pub fn library_loaded(list: List, items: &JsValue) {
+    if list == List::Notes && items.is_truthy() {
+        let count = js_sys::Reflect::get(items, &JsValue::from_str("length"))
             .ok()
             .and_then(|n| n.as_f64())
             .map_or(0, |n| n as u32);
@@ -548,22 +524,26 @@ pub fn set_start_here(start_here: JsValue) {
     with(|s| s.start_here = Some(start_here));
 }
 
-fn start_here() -> JsValue {
-    with(|s| s.start_here.clone()).unwrap_or_else(|| js_sys::Array::new().into())
-}
-
-fn ask_welcome(fields: &[(&str, &JsValue)]) -> bool {
-    request(bridge::WELCOME_EVENT, fields)
+/// Boot's places to start, as the welcome lists them (none, if they can't
+/// be read: that's logged).
+fn start_here() -> Option<Vec<StartRow>> {
+    let start_here = with(|s| s.start_here.clone()).unwrap_or_else(|| js_sys::Array::new().into());
+    serde_wasm_bindgen::from_value(start_here)
+        .map_err(|e| ipc::log_error("The welcome request couldn't be read", &JsValue::from(e)))
+        .ok()
 }
 
 /// ☰ → Show welcome; focus goes back to `return_focus`.
 fn open_welcome(return_focus: Option<HtmlElement>) {
-    let asked = ask_welcome(&[
-        ("startup", &JsValue::FALSE),
-        ("startHere", &start_here()),
-        ("returnFocus", &element_or_null(return_focus)),
-    ]);
-    if !asked {
+    let Some(start_here) = start_here() else {
+        return;
+    };
+    let request = WelcomeRequest {
+        startup: false,
+        install: None,
+        start_here,
+    };
+    if !welcome::request(request, return_focus) {
         set_data_status(text::WELCOME_UNAVAILABLE, true);
     }
 }
@@ -577,35 +557,24 @@ pub fn ask_welcome_at_startup(home: &JsValue) {
     let has_saved_position = js_sys::Reflect::get(home, &JsValue::from_str("hasSavedPosition"))
         .is_ok_and(|v| v.is_truthy());
     let notes = with(|s| s.notes);
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Install {
-        has_saved_position: bool,
-        bookmarks_loaded: bool,
-        bookmarks: usize,
-        highlights_loaded: bool,
-        highlights: usize,
-        notes_loaded: bool,
-        notes: u32,
-    }
-    let Ok(install) = ipc::args(&Install {
+    let install = crate::install::Install {
         has_saved_position,
         bookmarks_loaded: facts.bookmarks_loaded,
-        bookmarks: facts.bookmarks,
+        bookmarks: facts.bookmarks as u64,
         highlights_loaded: facts.highlights_loaded,
-        highlights: facts.highlights,
+        highlights: facts.highlights as u64,
         notes_loaded: notes.is_some(),
-        notes: notes.unwrap_or(0),
-    }) else {
+        notes: u64::from(notes.unwrap_or(0)),
+    };
+    let Some(start_here) = start_here() else {
         return;
     };
-    let asked = ask_welcome(&[
-        ("startup", &JsValue::TRUE),
-        ("install", &install),
-        ("startHere", &start_here()),
-        ("returnFocus", &JsValue::NULL),
-    ]);
-    if !asked {
+    let request = WelcomeRequest {
+        startup: true,
+        install: Some(install),
+        start_here,
+    };
+    if !welcome::request(request, None) {
         with(|s| s.welcome_waiting = Some(home.clone()));
     }
 }
@@ -613,15 +582,27 @@ pub fn ask_welcome_at_startup(home: &JsValue) {
 // ---- The book and chapter picker's books: boot's, which may come before
 // the picker has mounted, so they go again once every piece is there.
 
-/// Boot's books for the picker (`{ otBooks, ntBooks }`), sent now and kept.
+/// Boot's books for the picker (`{ otBooks, ntBooks }`, `get_home`'s, as
+/// it gave them), kept and sent now: to Back, Forward and Recent places
+/// (`nav`), then the picker.
 pub fn set_picker_books(books: JsValue) {
-    with(|s| s.picker_books = Some(books));
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Books {
+        ot_books: Vec<Book>,
+        nt_books: Vec<Book>,
+    }
+    match serde_wasm_bindgen::from_value::<Books>(books) {
+        Ok(books) => with(|s| s.picker_books = Some((books.ot_books, books.nt_books))),
+        Err(e) => ipc::log_error("The books couldn't be read", &JsValue::from(e)),
+    }
     send_picker_books();
 }
 
 fn send_picker_books() {
-    if let Some(books) = with(|s| s.picker_books.clone()) {
-        bridge::dispatch_object(bridge::PICKER_BOOKS_EVENT, &books);
+    if let Some((old, new)) = with(|s| s.picker_books.clone()) {
+        crate::nav::set_books(old.clone(), new.clone());
+        crate::picker::draw_books(old, new);
     }
 }
 
@@ -637,10 +618,7 @@ pub fn open_shortcuts(opener: Option<HtmlElement>) {
     }
     let return_focus = opener.or_else(focused);
     modal_opening(true);
-    if !request(
-        bridge::SHORTCUTS_EVENT,
-        &[("returnFocus", &element_or_null(return_focus))],
-    ) {
+    if !crate::shortcuts::open(return_focus) {
         set_data_status(text::SHORTCUTS_UNAVAILABLE, true);
     }
 }
@@ -651,7 +629,7 @@ pub fn open_shortcuts(opener: Option<HtmlElement>) {
 
 /// Opens or closes the search box.
 pub fn set_search_open(open: bool) {
-    if request(bridge::SEARCH_EVENT, &[("open", &JsValue::from_bool(open))]) || !open {
+    if crate::search::set_open(open) || !open {
         return;
     }
     set_data_status(text::SEARCH_UNAVAILABLE, true);
@@ -684,11 +662,12 @@ fn disabled(id: &str) -> bool {
     button(id).is_some_and(|b| b.disabled())
 }
 
-/// Aa's settings, comparing, the shape, the translations, a busy export:
-/// what the palette's commands need of the page now (the reader's and the
-/// card's facts are added by `bridge::palette_state`).
+/// What the palette's commands need now: Aa's settings, comparing, the
+/// shape, the translations and a busy export (the page's), the reader's
+/// chapters and history, and whether the card has the chapter's text ready
+/// to copy.
 pub fn palette_state() -> PaletteState {
-    PaletteState {
+    let mut state = PaletteState {
         comparing: is_comparing(),
         partner: crate::aa::partner(),
         compare_notes: crate::prefs::on(&crate::preferences::COMPARE_NOTES),
@@ -711,12 +690,19 @@ pub fn palette_state() -> PaletteState {
         checking: disabled("update-check-btn"),
         chapter_shown: dom::query(".chapter-copy-btn").is_some(),
         ..PaletteState::default()
-    }
+    };
+    reader::palette_facts(&mut state);
+    card::palette_facts(&mut state);
+    state
 }
 
 /// Runs `command`, one of the palette's commands that `page` runs (see
-/// `palette::Run::Page`), within the click or key that chose it (copying
-/// needs that).
+/// `palette::Run::Page`): `copy-chapter`, `copy-chapter-as`,
+/// `next-chapter`, `previous-chapter`, `next-book`, `previous-book`,
+/// `back`, `forward`, `shortcuts`, `export-notes` (the Export notes dialog)
+/// and `export-data` (the backup; neither by way of ☰'s chooser), within
+/// the click or key that chose it (copying needs that), after the box has
+/// closed and focus has gone back.
 pub fn run_command(command: &str) {
     match command {
         "copy-chapter" => {
@@ -747,13 +733,14 @@ pub fn run_command(command: &str) {
 
 /// Asks the updater for its quiet launch check.
 pub fn ask_update_check() {
-    let asked = bridge::request(bridge::LAUNCH_CHECK_EVENT, &JsValue::NULL);
+    let asked = crate::updates::launch_check();
     with(|s| s.update_check_waiting = !asked);
 }
 
-/// Every piece has mounted: boot's Library lists, its welcome question,
-/// the picker's books and the launch check, asked again if they came first.
-fn on_ready() {
+/// Every piece has mounted (`lib`'s ready list): boot's Library lists, its
+/// welcome question, the picker's books and the launch check, asked again if
+/// they came first.
+pub fn on_ready() {
     let lists = with(|s| std::mem::take(&mut s.library_waiting));
     if !lists.is_empty() {
         let lists: Vec<&str> = lists.iter().map(String::as_str).collect();
@@ -774,8 +761,8 @@ fn on_ready() {
     }
 }
 
-/// Listens to the ☰ items, the search and About buttons, the translation
-/// changing, the Library's notes and every piece being there; then the
+/// Listens to the ☰ items, the search and About buttons and the translation
+/// changing; then the
 /// click dispatcher (`clicks`) and the keyboard dispatcher (`keyboard`).
 /// Called first of all, before any piece mounts, so these run first.
 pub fn mount() {
@@ -788,9 +775,6 @@ pub fn mount() {
         open_export_choice(by_id("menu-toggle"))
     });
     on_click("import-data-btn", import_data);
-    dom::on_document_event(bridge::LIBRARY_LOADED_EVENT, |event| {
-        on_library_loaded(&event);
-    });
     on_click("welcome-btn", || open_welcome(by_id("menu-toggle")));
     on_click("shortcuts-btn", || open_shortcuts(by_id("menu-toggle")));
     on_click("search-toggle", || {
@@ -805,14 +789,13 @@ pub fn mount() {
     // this and searches again.
     if let Some(translations) = by_id("translation-select") {
         dom::on(&translations, "change", |_| {
-            let load = reader::ask(Request::Translation);
+            let load = reader::ask(pane::active(), Request::Translation);
             spawn_local(async move {
                 load.await;
             });
             let _ = refresh_library(&["bookmarks", "highlights"]);
         });
     }
-    dom::on_document_event(bridge::READY_EVENT, |_| on_ready());
     // Without the pieces there is no About to open.
     on_click("about-btn", || {
         if by_id("about-overlay").is_none() {

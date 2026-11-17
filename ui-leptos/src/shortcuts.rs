@@ -10,16 +10,28 @@
 //! a click on the dimmed page closes it, and focus goes back to where it
 //! was (or ☰, when opened from there).
 
+use std::cell::Cell;
+
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
-use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
+use web_sys::{HtmlElement, KeyboardEvent, MouseEvent};
 
-use crate::bridge;
 use crate::dom::{self, focus};
 use crate::preferences;
 use crate::prefs;
 use crate::shortcut_table::{self, Shortcut};
+
+thread_local! {
+    /// The sheet, once it has mounted (`None` before: see `page`).
+    static SHEET: Cell<Option<Sheet>> = const { Cell::new(None) };
+}
+
+/// Opens the sheet; closing it gives focus back to `return_to`. Whether the
+/// sheet is there to open.
+pub fn open(return_to: Option<HtmlElement>) -> bool {
+    SHEET.get().map(|sheet| sheet.open(return_to)).is_some()
+}
 
 /// The sheet's state and the elements it reaches for.
 #[derive(Clone, Copy)]
@@ -107,10 +119,7 @@ impl Sheet {
     }
 
     fn listen(self) {
-        dom::on_document_event(bridge::SHORTCUTS_EVENT, move |event: CustomEvent| {
-            event.prevent_default();
-            self.open(bridge::return_focus(&event));
-        });
+        SHEET.set(Some(self));
         dom::on_window_keydown(move |event: KeyboardEvent| self.on_keydown(event));
     }
 }

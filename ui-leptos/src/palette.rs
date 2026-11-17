@@ -9,7 +9,7 @@
 //! comparing, reading mode, Aa's settings, the chapter shown, the passage
 //! history, a busy export. That's read as a [`PaletteState`]
 //! each time the palette is drawn or a command chosen (see
-//! `bridge::palette_state`), so the reasons are always the page's state at
+//! `page::palette_state`), so the reasons are always the page's state at
 //! that moment.
 
 use serde::Deserialize;
@@ -26,7 +26,7 @@ pub struct Choice {
 }
 
 /// What the page knows that the commands need, taken when the palette is
-/// drawn or a command is chosen (`bridge::palette_state`).
+/// drawn or a command is chosen (`page::palette_state`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PaletteState {

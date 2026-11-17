@@ -21,7 +21,7 @@
 //! focus), then any command it starts runs on; the frontend tests look at
 //! the DOM right after a click, while a check is still on its way.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use leptos::html;
@@ -30,13 +30,13 @@ use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::Closure;
-use web_sys::{CustomEvent, Element, HtmlElement};
+use web_sys::{Element, HtmlElement};
 
 use crate::bridge;
 use crate::dom;
 use crate::dto::{DownloadEvent, NoteBlock, NoteSpan, UpdateInfo};
 use crate::ipc;
-use crate::surfaces;
+use crate::surfaces::{self, Surface};
 use crate::update_text::{self, Download};
 
 /// The banner or About: the two places an update shows.
@@ -50,6 +50,34 @@ const BOTH: [View; 2] = [View::Banner, View::About];
 
 /// What the download's channel calls with each message.
 type OnMessage = Closure<dyn FnMut(JsValue)>;
+
+thread_local! {
+    /// The updater, once it has mounted (`None` before: see `page`).
+    static UPDATES: Cell<Option<Updates>> = const { Cell::new(None) };
+}
+
+/// Boot is done: the quiet launch check runs, unless the reader turned it
+/// off (`html[data-update-check]` is `off`; the preference is `aa`'s).
+/// Whether the updater is there to be asked.
+pub fn launch_check() -> bool {
+    let Some(updates) = UPDATES.get() else {
+        return false;
+    };
+    if bridge::launch_check_on() {
+        updates.check(true);
+    }
+    true
+}
+
+/// A header surface closed (`surfaces`): About closing part way through an
+/// install brings the banner back.
+pub fn surface_closed(surface: Surface) {
+    if surface == Surface::About
+        && let Some(updates) = UPDATES.get()
+    {
+        updates.about_closed();
+    }
+}
 
 /// The updater's state and the elements it writes, shared by the banner and
 /// About's Updates section.
@@ -506,22 +534,10 @@ impl Updates {
         hide(self.banner.get_untracked(), false);
     }
 
-    /// Listens for About closing (`surfaces`'
-    /// `gospel-getter:surface-close`), and for the end of boot, when the
-    /// launch check runs unless the reader turned it off
-    /// (`html[data-update-check]` is `off`; the preference is `aa`'s).
-    pub fn listen(self) {
-        dom::on_document_event(bridge::SURFACE_CLOSE_EVENT, move |event: CustomEvent| {
-            if bridge::surface_closed(&event).as_deref() == Some("about") {
-                self.about_closed();
-            }
-        });
-        dom::on_document_event(bridge::LAUNCH_CHECK_EVENT, move |event: CustomEvent| {
-            event.prevent_default();
-            if bridge::launch_check_on() {
-                self.check(true);
-            }
-        });
+    /// Is there for the launch check ([`launch_check`]) and About closing
+    /// ([`surface_closed`]).
+    pub fn mounted(self) {
+        UPDATES.set(Some(self));
     }
 }
 

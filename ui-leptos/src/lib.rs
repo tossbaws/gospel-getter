@@ -125,8 +125,19 @@ pub fn start() {
     }
 }
 
-/// Mounts the dialogs, About, the Library, search and the picker, then says
-/// every piece is listening.
+/// What runs once every piece has mounted, in this order: what each asked
+/// for before the piece it asked had mounted, asked again. `page` first
+/// (boot's Library lists, its welcome question, the picker's books, the
+/// launch check), then the card (its Library lists), then the reader (the
+/// picker's chapter). The names are for the test that pins the order.
+const READY: [(&str, fn()); 3] = [
+    ("page", page::on_ready),
+    ("card", card::on_ready),
+    ("reader", reader::on_ready),
+];
+
+/// Mounts the dialogs, About, the Library, search and the picker, then runs
+/// [`READY`].
 fn mount_the_rest() {
     let Some(body) = web_sys::window()
         .and_then(|w| w.document())
@@ -161,7 +172,18 @@ fn mount_the_rest() {
     search::mount();
     // The picker's books and chapters go inside the page's picker.
     picker::mount();
-    // Everything is listening: the page may send again what it asked
-    // before the module had loaded.
-    bridge::ready();
+    // Every piece is there: what was asked of one before it mounted is
+    // asked again.
+    for (_, on_ready) in READY {
+        on_ready();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ready_runs_page_then_card_then_reader() {
+        let order: Vec<&str> = super::READY.iter().map(|(name, _)| *name).collect();
+        assert_eq!(order, ["page", "card", "reader"]);
+    }
 }

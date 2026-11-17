@@ -159,13 +159,19 @@ test('switching layout keeps the reader’s place and moves the card with its ve
         }
         const scrolls = [];
         window.scrollBy = (x, y) => scrolls.push([x, y]);
-        let placed = 0;
-        document.addEventListener('gospel-getter:layout-change', () => { placed++; });
+        // The card's place, each time it changes.
+        const tops = [card(app).style.top];
+        new window.MutationObserver(() => {
+            if (card(app).style.top !== tops.at(-1)) tops.push(card(app).style.top);
+        }).observe(card(app), { attributes: true, attributeFilter: ['style'] });
 
         app.open('aa');
         app.click(segments(app)[1]);
         assert.deepEqual(scrolls, [[0, 240]], 'verse 10 stays where it was on screen');
-        assert.equal(placed, 1);
+        // The observer's records come after the click.
+        await Promise.resolve();
+        // Once, under verse 16's new place (its top 340 + 6 * 30, 20 high).
+        assert.deepEqual(tops.slice(1), [`${340 + 6 * 30 + 20 + 8}px`], 'the card moved with its verses');
         assert.ok(card(app).isConnected, 'the selection and its card stay');
         assert.deepEqual(app.selectedVerseNumbers(), [16]);
     }));

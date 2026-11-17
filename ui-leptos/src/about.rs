@@ -6,18 +6,20 @@
 //!
 //! About is one of the page's surfaces: `surfaces` opens and closes it,
 //! keeps one surface open at a time, puts focus on its close button and
-//! back on ☰ when it closes, and says `gospel-getter:surface-close`. This
+//! back on ☰ when it closes, and tells the updater (`updates`). This
 //! renders it, fills it, and has its keys: Escape closes it, on the
 //! overlay, and Tab stays inside it, bringing back focus that got outside
 //! it, as the other modals' Tab does; the reader's shortcuts wait meanwhile
 //! (the keyboard dispatcher, `keyboard`, looks the overlay up). Its
 //! `hidden` is `surfaces`' alone.
 
+use std::cell::Cell;
+
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::JsValue;
-use web_sys::{CustomEvent, HtmlElement, KeyboardEvent, MouseEvent};
+use web_sys::{HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge;
 use crate::dom;
@@ -59,6 +61,19 @@ fn trap_tab(panel: NodeRef<html::Div>, event: &KeyboardEvent) {
     dom::trap_tab(event, &panel, &stops);
 }
 
+thread_local! {
+    /// About's credits, once About has mounted (it takes the reader's then).
+    static CREDITS: Cell<Option<RwSignal<Vec<String>>>> = const { Cell::new(None) };
+}
+
+/// The bundled texts' credits, each translation's in order (the reader's,
+/// from boot): shown in About, if it has mounted.
+pub fn show_credits(credits: Vec<String>) {
+    if let Some(shown) = CREDITS.get() {
+        shown.set(credits);
+    }
+}
+
 /// About and the update banner, which share the offer: mounted once, then
 /// each moved to its place ([`place`]).
 #[component]
@@ -72,17 +87,12 @@ pub fn AboutAndUpdates() -> impl IntoView {
             .filter(|v| !v.is_empty())
     });
     let updates = Updates::new(version);
-    updates.listen();
+    updates.mounted();
 
     // The texts the page credits (each bundled translation's credit, from
-    // boot), sent whenever it has them.
-    let credits = RwSignal::new(Vec::<String>::new());
-    dom::on_document_event(bridge::ABOUT_CREDITS_EVENT, move |event: CustomEvent| {
-        match bridge::about_credits(&event) {
-            Ok(list) => credits.set(list),
-            Err(e) => ipc::log_error("About's credits couldn't be read", &e),
-        }
-    });
+    // boot): the reader's now, and whenever it has them again.
+    let credits = RwSignal::new(crate::reader::credits());
+    CREDITS.set(Some(credits));
 
     let notes_status = RwSignal::new(String::new());
     let support_status = RwSignal::new(String::new());

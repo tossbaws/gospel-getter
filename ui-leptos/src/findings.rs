@@ -42,6 +42,7 @@ use crate::findings_text as text;
 use crate::intent::{Claim, Generation};
 use crate::ipc;
 use crate::margin;
+use crate::pane::{self, PaneId, PerPane};
 use crate::surfaces;
 
 /// How long a removal's Undo is offered, in milliseconds: as a note's.
@@ -50,8 +51,9 @@ const UNDO_MS: i32 = crate::card_text::UNDO_MS;
 /// The switch in Aa.
 const SWITCH_ID: &str = "ai-findings-toggle";
 
+/// The findings of one pane's chapter.
 #[derive(Default)]
-struct State {
+struct InPane {
     /// The chapter on screen (book, chapter).
     chapter: Option<(i64, i64)>,
     /// Its findings, once read, and the chapter they were read for.
@@ -59,6 +61,11 @@ struct State {
     of: Option<(i64, i64)>,
     /// Bumped by each read: only the latest is shown.
     token: u64,
+}
+
+#[derive(Default)]
+struct State {
+    panes: PerPane<InPane>,
     /// The switch's reads and changes: only the newest shows.
     switch: Generation,
     /// What the backend last said the switch is (read or saved).
@@ -75,6 +82,11 @@ thread_local! {
 
 fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with_borrow_mut(f)
+}
+
+/// [`with`], on `pane`'s findings.
+fn with_pane<R>(pane: PaneId, f: impl FnOnce(&mut InPane) -> R) -> R {
+    with(|s| f(&mut s.panes[pane]))
 }
 
 #[derive(Serialize)]
@@ -104,29 +116,38 @@ struct SwitchArgs {
     enabled: bool,
 }
 
-/// The reader has a chapter on screen (`book_id` `chapter`, its verses new):
-/// its findings are marked at once if they're known, and read again.
-pub fn chapter_shown(book_id: i64, chapter: i64) {
-    let known = with(|s| {
+/// The reader has a chapter on screen in `pane` (`book_id` `chapter`, its
+/// verses new): its findings are marked at once if they're known, and read
+/// again.
+pub fn chapter_shown(pane: PaneId, book_id: i64, chapter: i64) {
+    let known = with_pane(pane, |s| {
         s.chapter = Some((book_id, chapter));
         s.of == Some((book_id, chapter))
     });
     if known {
-        show();
+        show(pane);
     } else {
-        with(|s| s.findings.clear());
+        with_pane(pane, |s| s.findings.clear());
         margin::findings(book_id, chapter, Vec::new());
     }
-    spawn_local(refresh());
+    spawn_local(refresh_pane(pane));
 }
 
-/// Reads the chapter's findings again and shows them; only the latest read
-/// is shown.
+/// Reads every pane's chapter's findings again and shows them.
 pub async fn refresh() {
-    let Some((book_id, chapter)) = with(|s| s.chapter) else {
+    let panes: Vec<PaneId> = pane::shown().collect();
+    for pane in panes {
+        refresh_pane(pane).await;
+    }
+}
+
+/// Reads `pane`'s chapter's findings again and shows them; only the latest
+/// read is shown.
+async fn refresh_pane(pane: PaneId) {
+    let Some((book_id, chapter)) = with_pane(pane, |s| s.chapter) else {
         return;
     };
-    let token = with(|s| {
+    let token = with_pane(pane, |s| {
         s.token += 1;
         s.token
     });
@@ -134,16 +155,16 @@ pub async fn refresh() {
         Ok(args) => ipc::invoke::<Vec<Finding>>("list_findings", args).await,
         Err(e) => Err(e),
     };
-    if with(|s| s.token) != token {
+    if with_pane(pane, |s| s.token) != token {
         return;
     }
     match answer {
         Ok(findings) => {
-            with(|s| {
+            with_pane(pane, |s| {
                 s.findings = findings;
                 s.of = Some((book_id, chapter));
             });
-            show();
+            show(pane);
         }
         Err(e) => ipc::log_error("Failed to load the chapter\u{2019}s AI findings", &e),
     }
@@ -152,16 +173,16 @@ pub async fn refresh() {
 /// The chapter's findings, again, and the Library's: after any change to
 /// them.
 pub async fn refresh_everywhere() {
-    let library = bridge::refresh_library(&["findings"]);
+    let library = crate::library::refresh(&["findings"]);
     refresh().await;
     if let Some(library) = library {
         let _ = wasm_bindgen_futures::JsFuture::from(library).await;
     }
 }
 
-/// Marks the flagged verses and hands the findings to the margin.
-fn show() {
-    let Some((book_id, chapter, findings)) = with(|s| {
+/// Marks `pane`'s flagged verses and hands the findings to the margin.
+fn show(pane: PaneId) {
+    let Some((book_id, chapter, findings)) = with_pane(pane, |s| {
         let (book_id, chapter) = s.chapter?;
         (s.of == Some((book_id, chapter))).then(|| (book_id, chapter, s.findings.clone()))
     }) else {
@@ -210,9 +231,12 @@ fn mark(findings: &[Finding]) {
     }
 }
 
-/// The finding with this id, of the chapter on screen.
+/// The finding with this id, of the chapter on screen in the active pane
+/// (where the margin is).
 fn finding(id: i64) -> Option<Finding> {
-    with(|s| s.findings.iter().find(|f| f.id == id).cloned())
+    with_pane(pane::active(), |s| {
+        s.findings.iter().find(|f| f.id == id).cloned()
+    })
 }
 
 fn target(event: &web_sys::Event) -> Option<Element> {
@@ -307,7 +331,7 @@ async fn remove_one(found: Finding) {
         }
         Err(e) => {
             ipc::log_error("Failed to remove the finding", &e);
-            bridge::toast(
+            crate::page::set_data_status(
                 &format!("The finding wasn\u{2019}t removed: {}", ipc::error_text(&e)),
                 true,
             );
@@ -341,11 +365,11 @@ pub async fn remove_request(request: String) -> Result<(), String> {
 /// Says `message` in the toast, with an Undo that brings `gone` back as
 /// they were.
 fn offer_undo(message: &str, gone: Vec<Finding>) {
-    let Some(undo) = bridge::toast_with_action(message, "Undo", UNDO_MS) else {
+    let Some(undo) = crate::page::set_data_status_with_action(message, "Undo", UNDO_MS) else {
         return;
     };
     dom::on_click(&undo, move |_| {
-        bridge::toast("", false);
+        crate::page::set_data_status("", false);
         let gone = gone.clone();
         spawn_local(async move {
             let restored = match ipc::args(&RestoreArgs { findings: &gone }) {
@@ -355,11 +379,11 @@ fn offer_undo(message: &str, gone: Vec<Finding>) {
             match restored {
                 Ok(count) => {
                     refresh_everywhere().await;
-                    bridge::toast(&text::restored(count), false);
+                    crate::page::set_data_status(&text::restored(count), false);
                 }
                 Err(e) => {
                     ipc::log_error("Failed to restore findings", &e);
-                    bridge::toast(&ipc::error_text(&e), true);
+                    crate::page::set_data_status(&ipc::error_text(&e), true);
                 }
             }
         });
@@ -451,7 +475,7 @@ async fn save_switch(first: (bool, Claim)) {
                     switch.set_checked(stored.unwrap_or(!on));
                 }
                 if !newer {
-                    bridge::toast(text::SWITCH_FAILED, true);
+                    crate::page::set_data_status(text::SWITCH_FAILED, true);
                 }
             }
         }
