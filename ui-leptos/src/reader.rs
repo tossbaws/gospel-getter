@@ -283,7 +283,7 @@ fn show_translations(home: &Home) {
 }
 
 /// About's credits, to About (which may not be there yet: they go again
-/// once every piece is, `bridge::READY_EVENT`).
+/// once every piece is, [`on_ready`]).
 fn send_credits(credits: &[String]) {
     if !credits.is_empty() {
         bridge::dispatch(bridge::ABOUT_CREDITS_EVENT, &Credits { credits });
@@ -1323,6 +1323,16 @@ fn on_click(event: &MouseEvent) {
     }
 }
 
+/// Every piece has mounted (`lib`'s ready list): About and the picker,
+/// mounted after this, hear its credits and the chapter on screen again.
+pub fn on_ready() {
+    let (credits, here) = with(|s| (s.credits.clone(), s.reading.clone()));
+    send_credits(&credits);
+    if let Some(here) = here {
+        bridge::show_picker_current(here.book_id, here.chapter);
+    }
+}
+
 #[derive(Serialize)]
 struct CreditArgs<'a> {
     which: &'a str,
@@ -1337,15 +1347,6 @@ pub fn mount() {
     let Some(document) = bridge::document() else {
         return;
     };
-    // About and the picker are mounted after this: they hear its credits
-    // and the chapter on screen again once every piece is.
-    dom::on_document_event(bridge::READY_EVENT, |_| {
-        let (credits, here) = with(|s| (s.credits.clone(), s.reading.clone()));
-        send_credits(&credits);
-        if let Some(here) = here {
-            bridge::show_picker_current(here.book_id, here.chapter);
-        }
-    });
     dom::on_document_event(aa::COMPARE_CHANGE_EVENT, |_| on_compare_change());
     // Any note editor opening is newer than a note's Edit still waiting for
     // its jump ([`open`]).

@@ -111,8 +111,9 @@ listeners first (`page`, `clicks`, `keyboard`), then the surfaces, Aa, the
 card and the reader, then boot (its chapter drawn at once if its answer is
 in), then the rest in the next task (About and the banner are moved to
 their places, for focus order, and the Library's tabs and lists into its
-panel), then tells the pieces every one is listening
-(`gospel-getter:pieces-ready`).
+panel), then runs its ready list: what a piece asked of another before
+that one had mounted is asked again, in a fixed order (`page`, then the
+card, then the reader), which a native test pins.
 
 ## Building and running
 
@@ -160,8 +161,8 @@ be left), and no update is looked for. The module may also load after the
 page has read: boot's two commands are on their way (or answered) by then,
 and the chapter is drawn as it starts; the Library's lists, the welcome's
 startup question and the launch check are asked again once every piece
-has mounted (`gospel-getter:pieces-ready`), and the picker's books are
-sent again then.
+has mounted (`lib`'s ready list), and the picker's books are sent again
+then.
 
 The Content Security Policy allows exactly what this needs beyond the page's
 own code: `'wasm-unsafe-eval'` in `script-src` (compiling WebAssembly) and

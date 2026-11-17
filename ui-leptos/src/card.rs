@@ -2073,7 +2073,7 @@ fn restore_note(note: JsValue, say: impl Fn(String, bool) + 'static) -> Task {
 
 /// Has the Library reload `lists` (`bridge::LIBRARY_REFRESH_EVENT`),
 /// settling once it has; asked before the Library is there, they're asked
-/// for again once every piece is (`bridge::READY_EVENT`).
+/// for again once every piece is ([`on_ready`]).
 fn refresh_library(lists: &[&str]) -> Task {
     match bridge::refresh_library(lists) {
         Some(done) => Box::pin(async move {
@@ -2089,6 +2089,16 @@ fn refresh_library(lists: &[&str]) -> Task {
             });
             Box::pin(async {})
         }
+    }
+}
+
+/// Every piece has mounted (`lib`'s ready list): the Library lists asked
+/// for before the Library was there, asked again.
+pub fn on_ready() {
+    let lists = with(|s| std::mem::take(&mut s.library_waiting));
+    if !lists.is_empty() {
+        let lists: Vec<&str> = lists.iter().map(String::as_str).collect();
+        spawn_local(refresh_library(&lists));
     }
 }
 
@@ -2767,14 +2777,6 @@ pub fn mount() {
         on_library_loaded(&event)
     });
     dom::on_document_event(bridge::NOTE_DONE_EVENT, |event| on_note_done(&event));
-    // Library lists asked for before the Library was there.
-    dom::on_document_event(bridge::READY_EVENT, |_| {
-        let lists = with(|s| std::mem::take(&mut s.library_waiting));
-        if !lists.is_empty() {
-            let lists: Vec<&str> = lists.iter().map(String::as_str).collect();
-            spawn_local(refresh_library(&lists));
-        }
-    });
     {
         let menu_for_keys = menu.clone();
         dom::on(&menu, "keydown", move |event| {

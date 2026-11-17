@@ -18,8 +18,8 @@
 //! header surface's name or `null`.
 //!
 //! Within this crate, the pieces send each other custom events on
-//! `document` (a `detail` snapshot each), so a piece mounted later hears
-//! what it missed when [`READY_EVENT`] comes. Each `_EVENT` constant below
+//! `document` (a `detail` snapshot each), and a piece mounted later hears
+//! what it missed from `lib`'s ready list. Each `_EVENT` constant below
 //! says what it carries and who hears it. A request to open is cancelable:
 //! the piece cancels it to say it has it, and if nothing does (it hasn't
 //! mounted yet), the asker says it isn't available (`page`).
@@ -200,19 +200,6 @@ pub fn dispatch(name: &str, detail: &impl Serialize) {
     let init = CustomEventInit::new();
     init.set_detail(&detail);
     if let Ok(event) = CustomEvent::new_with_event_init_dict(name, &init) {
-        let _ = document.dispatch_event(&event);
-    }
-}
-
-/// Every piece has mounted and is listening: a `CustomEvent` on `document`,
-/// no `detail`. What was asked before a piece mounted is asked again (boot's
-/// Library lists, welcome, picker books and launch check; the reader's
-/// credits and chapter; the card's Library lists).
-pub const READY_EVENT: &str = "gospel-getter:pieces-ready";
-
-/// Says [`READY_EVENT`].
-pub fn ready() {
-    if let (Some(document), Ok(event)) = (document(), CustomEvent::new(READY_EVENT)) {
         let _ = document.dispatch_event(&event);
     }
 }
@@ -487,7 +474,7 @@ pub fn surface_closed(event: &CustomEvent) -> Option<String> {
 /// already been asked for: only the latest of overlapping reloads shows).
 /// Asked by boot, an import, a translation switch, and the card's
 /// bookmark, highlight and restored note ([`refresh_library`], which asks
-/// again on [`READY_EVENT`] if the Library hadn't mounted).
+/// again from `lib`'s ready list if the Library hadn't mounted).
 pub const LIBRARY_REFRESH_EVENT: &str = "gospel-getter:library-refresh";
 
 #[derive(Debug, Deserialize)]

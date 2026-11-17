@@ -751,9 +751,10 @@ pub fn ask_update_check() {
     with(|s| s.update_check_waiting = !asked);
 }
 
-/// Every piece has mounted: boot's Library lists, its welcome question,
-/// the picker's books and the launch check, asked again if they came first.
-fn on_ready() {
+/// Every piece has mounted (`lib`'s ready list): boot's Library lists, its
+/// welcome question, the picker's books and the launch check, asked again if
+/// they came first.
+pub fn on_ready() {
     let lists = with(|s| std::mem::take(&mut s.library_waiting));
     if !lists.is_empty() {
         let lists: Vec<&str> = lists.iter().map(String::as_str).collect();
@@ -775,7 +776,7 @@ fn on_ready() {
 }
 
 /// Listens to the ☰ items, the search and About buttons, the translation
-/// changing, the Library's notes and every piece being there; then the
+/// changing and the Library's notes; then the
 /// click dispatcher (`clicks`) and the keyboard dispatcher (`keyboard`).
 /// Called first of all, before any piece mounts, so these run first.
 pub fn mount() {
@@ -812,7 +813,6 @@ pub fn mount() {
             let _ = refresh_library(&["bookmarks", "highlights"]);
         });
     }
-    dom::on_document_event(bridge::READY_EVENT, |_| on_ready());
     // Without the pieces there is no About to open.
     on_click("about-btn", || {
         if by_id("about-overlay").is_none() {
