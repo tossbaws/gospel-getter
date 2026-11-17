@@ -65,7 +65,7 @@
 //! fresh-install rule) and writes [`WELCOME_KEY`]; the reader keeps the
 //! disclosures' (`gospel-getter-footnotes`, `gospel-getter-cross-references`).
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use web_sys::{CustomEvent, CustomEventInit, Document, HtmlElement};
@@ -123,26 +123,6 @@ pub fn export_shortcuts() {
     let serializer = serde_wasm_bindgen::Serializer::json_compatible();
     if let Ok(table) = crate::shortcut_table::SHORTCUTS.serialize(&serializer) {
         let _ = js_sys::Reflect::set(&window, &JsValue::from_str("gospelGetterShortcuts"), &table);
-    }
-}
-
-/// Reads an event's `detail` as `T`, or says what was wrong with it.
-pub fn detail<T: serde::de::DeserializeOwned>(event: &CustomEvent) -> Result<T, JsValue> {
-    serde_wasm_bindgen::from_value(event.detail()).map_err(|e| JsValue::from(e.to_string()))
-}
-
-/// Sends `name` as a `CustomEvent` on `document`, with `detail`.
-pub fn dispatch(name: &str, detail: &impl Serialize) {
-    let Some(document) = document() else {
-        return;
-    };
-    let Ok(detail) = serde_wasm_bindgen::to_value(detail) else {
-        return;
-    };
-    let init = CustomEventInit::new();
-    init.set_detail(&detail);
-    if let Ok(event) = CustomEvent::new_with_event_init_dict(name, &init) {
-        let _ = document.dispatch_event(&event);
     }
 }
 
@@ -238,18 +218,6 @@ pub struct OpenPassage {
     pub verse_end: Option<i64>,
 }
 
-/// Sends `name` with `detail` as it is (an object built here).
-pub fn dispatch_object(name: &str, detail: &JsValue) {
-    let Some(document) = document() else {
-        return;
-    };
-    let init = CustomEventInit::new();
-    init.set_detail(detail);
-    if let Ok(event) = CustomEvent::new_with_event_init_dict(name, &init) {
-        let _ = document.dispatch_event(&event);
-    }
-}
-
 /// The translation chosen with the translation button
 /// (`#translation-select`'s value), whose text the Library previews, as the
 /// page's `currentTranslation` read it.
@@ -281,57 +249,6 @@ pub fn palette_state() -> PaletteState {
 pub fn page_command(command: &str) {
     crate::page::run_command(command);
 }
-
-/// Boot's books for the picker: a `CustomEvent` whose `detail` is
-/// `{ otBooks, ntBooks }`, each a list of `{ id, name, chapterCount }`
-/// (`get_home`'s, as it gave them).
-pub const PICKER_BOOKS_EVENT: &str = "gospel-getter:picker-books";
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PickerBooks {
-    ot_books: Vec<crate::picker_text::Book>,
-    nt_books: Vec<crate::picker_text::Book>,
-}
-
-/// The Old and the New Testament's books a [`PICKER_BOOKS_EVENT`] carries.
-pub fn picker_books(
-    event: &CustomEvent,
-) -> Result<(Vec<crate::picker_text::Book>, Vec<crate::picker_text::Book>), JsValue> {
-    detail::<PickerBooks>(event).map(|b| (b.ot_books, b.nt_books))
-}
-
-/// The reader has put a chapter on screen: a `CustomEvent` whose `detail`
-/// is `{ bookId, chapter }`.
-pub const PICKER_CURRENT_EVENT: &str = "gospel-getter:picker-current";
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PickerCurrent {
-    book_id: i64,
-    chapter: i64,
-}
-
-/// Says [`PICKER_CURRENT_EVENT`] (the reader, of the chapter it has put on
-/// screen).
-pub fn show_picker_current(book_id: i64, chapter: i64) {
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Current {
-        book_id: i64,
-        chapter: i64,
-    }
-    dispatch(PICKER_CURRENT_EVENT, &Current { book_id, chapter });
-}
-
-/// The book id and chapter a [`PICKER_CURRENT_EVENT`] carries.
-pub fn picker_current(event: &CustomEvent) -> Result<(i64, i64), JsValue> {
-    detail::<PickerCurrent>(event).map(|c| (c.book_id, c.chapter))
-}
-
-/// `surfaces` has shown the picker (it was hidden): a `CustomEvent`,
-/// no `detail`.
-pub const PICKER_SHOWN_EVENT: &str = "gospel-getter:picker-shown";
 
 /// Boot's prefetch is asked for what it has sent (`boot`): a cancelable
 /// `CustomEvent` on `document`, its `detail` `{}`. The page's prefetch
@@ -400,7 +317,7 @@ pub fn boot_prefetch() -> Option<Prefetch> {
 
 /// Sends `name` on `document` as a cancelable `CustomEvent` with `detail`
 /// as it is: whether something cancelled it (has it).
-pub fn request(name: &str, detail: &JsValue) -> bool {
+fn request(name: &str, detail: &JsValue) -> bool {
     let Some(document) = document() else {
         return false;
     };

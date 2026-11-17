@@ -44,8 +44,8 @@ use std::cell::{Cell, RefCell};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
-    AddEventListenerOptions, CustomEvent, Element, HtmlElement, KeyboardEvent, MediaQueryList,
-    Node, ResizeObserver,
+    AddEventListenerOptions, Element, HtmlElement, KeyboardEvent, MediaQueryList, Node,
+    ResizeObserver,
 };
 
 use crate::aa;
@@ -186,14 +186,8 @@ pub fn sync_picker() {
     }
     let _ = ref_btn.set_attribute("aria-expanded", &(!picker.hidden()).to_string());
     let _ = sidebar_toggle.set_attribute("aria-expanded", &sidebar.to_string());
-    if was_hidden
-        && !picker.hidden()
-        && let (Some(document), Ok(event)) = (
-            bridge::document(),
-            CustomEvent::new(bridge::PICKER_SHOWN_EVENT),
-        )
-    {
-        let _ = document.dispatch_event(&event);
+    if was_hidden && !picker.hidden() {
+        crate::picker::picker_shown();
     }
 }
 

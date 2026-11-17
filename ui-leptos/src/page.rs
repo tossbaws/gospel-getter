@@ -45,6 +45,7 @@ use crate::library_text::List;
 use crate::page_text::{self as text, Saved};
 use crate::palette::{Choice, PaletteState};
 use crate::pane;
+use crate::picker_text::Book;
 use crate::reader::{self, Request};
 use crate::reader_text::Which;
 use crate::surfaces;
@@ -61,8 +62,9 @@ struct State {
     data_busy: bool,
     /// The backend's places to start, from boot, for the welcome.
     start_here: Option<JsValue>,
-    /// Boot's books for the picker, sent again once every piece is there.
-    picker_books: Option<JsValue>,
+    /// Boot's books for the picker (the Old Testament's, the New's), sent
+    /// again once every piece is there.
+    picker_books: Option<(Vec<Book>, Vec<Book>)>,
     /// Library lists asked for before the Library was there, in order.
     library_waiting: Vec<String>,
     /// Those lists, asked again: settles once they have their answers.
@@ -580,15 +582,27 @@ pub fn ask_welcome_at_startup(home: &JsValue) {
 // ---- The book and chapter picker's books: boot's, which may come before
 // the picker has mounted, so they go again once every piece is there.
 
-/// Boot's books for the picker (`{ otBooks, ntBooks }`), sent now and kept.
+/// Boot's books for the picker (`{ otBooks, ntBooks }`, `get_home`'s, as
+/// it gave them), kept and sent now: to Back, Forward and Recent places
+/// (`nav`), then the picker.
 pub fn set_picker_books(books: JsValue) {
-    with(|s| s.picker_books = Some(books));
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Books {
+        ot_books: Vec<Book>,
+        nt_books: Vec<Book>,
+    }
+    match serde_wasm_bindgen::from_value::<Books>(books) {
+        Ok(books) => with(|s| s.picker_books = Some((books.ot_books, books.nt_books))),
+        Err(e) => ipc::log_error("The books couldn't be read", &JsValue::from(e)),
+    }
     send_picker_books();
 }
 
 fn send_picker_books() {
-    if let Some(books) = with(|s| s.picker_books.clone()) {
-        bridge::dispatch_object(bridge::PICKER_BOOKS_EVENT, &books);
+    if let Some((old, new)) = with(|s| s.picker_books.clone()) {
+        crate::nav::set_books(old.clone(), new.clone());
+        crate::picker::draw_books(old, new);
     }
 }
 

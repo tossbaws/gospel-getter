@@ -3352,7 +3352,7 @@ fn the_reference_button_says_where_the_reader_is() {
     // Updated whenever a chapter is put on screen.
     let render = block_after(piece("reader.rs"), "fn render_current(pane: PaneId)");
     assert!(render.contains("update_reference(&here, compare.as_deref());"));
-    assert!(render.contains("bridge::show_picker_current(here.book_id, here.chapter);"));
+    assert!(render.contains("crate::picker::show_current(pane, here.book_id, here.chapter);"));
     // G opens the picker, in the keyboard dispatcher, which leaves keys
     // typed into a form control alone.
     assert!(

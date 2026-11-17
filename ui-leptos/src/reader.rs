@@ -365,7 +365,7 @@ fn render_current(pane: PaneId) {
     }
     with(pane, |s| s.columns = columns);
     update_reference(&here, compare.as_deref());
-    bridge::show_picker_current(here.book_id, here.chapter);
+    crate::picker::show_current(pane, here.book_id, here.chapter);
     show_nav(pane);
     card::shown(pane, dto, compare, &here.translation_code, compare_first);
 }
@@ -1380,8 +1380,9 @@ fn on_click(event: &MouseEvent) {
 /// Every piece has mounted (`lib`'s ready list): the picker, mounted after
 /// this, hears the chapter on screen again.
 pub fn on_ready() {
-    if let Some(here) = with(pane::active(), |s| s.reading.clone()) {
-        bridge::show_picker_current(here.book_id, here.chapter);
+    let pane = pane::active();
+    if let Some(here) = with(pane, |s| s.reading.clone()) {
+        crate::picker::show_current(pane, here.book_id, here.chapter);
     }
 }
 
