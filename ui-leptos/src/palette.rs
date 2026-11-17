@@ -503,7 +503,7 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         add(
             "close-second".into(),
             "Close the second pane".into(),
-            "",
+            "close-pane",
             "split side by side",
             None,
             page("close-second"),
@@ -809,14 +809,17 @@ mod tests {
         );
         let switch = find(&two, "switch-pane");
         // Its label names its key, which isn't shown again; the shortcut
-        // is still its own.
+        // is still its own, P and all.
         assert_eq!(
             (switch.label.as_str(), switch.key.as_str(), switch.keys),
-            ("Switch pane (F6)", "", "F6 Shift+F6")
+            ("Switch pane (F6)", "", "F6 Shift+F6 P")
         );
         assert_eq!(switch.run, Run::Page("switch-pane"));
         let close = find(&two, "close-second");
-        assert_eq!(close.label, "Close the second pane");
+        assert_eq!(
+            (close.label.as_str(), close.key.as_str(), close.keys),
+            ("Close the second pane", "X", "X")
+        );
         assert_eq!(
             (close.reason, &close.run),
             (None, &Run::Page("close-second"))

@@ -122,10 +122,11 @@ needed.
   preview, a bookmark, highlight or note in the Library, a verse in search
   (or Alt+Enter), or a link in a note (Shift-click or Alt-click, or **Open
   beside** in the card's note row). Each side has its own ‹ and ›, book and
-  chapter button and translation button, and × closes the second. The side
-  you last clicked is the active one, for the arrow keys, `T`, `G`, `N`,
-  Back and Forward; F6 switches sides. Opening beside again replaces the
-  right-hand side, and the left is always your saved reading place.
+  chapter button and translation button, and × (or `X`) closes the
+  second. The side you last clicked is the active one, for the arrow keys,
+  `T`, `G`, `N`, Back and Forward; F6 or `P` switches sides. Opening beside
+  again replaces the right-hand side, and the left is always your saved
+  reading place.
   Compare waits while two passages are open and comes back when you close
   the second. In a narrow window the sides become tabs, reading mode shows
   the active side alone, and printing prints it. The second side reopens
@@ -292,17 +293,20 @@ The main ones:
 | `T` | Open or close the translations and Compare (the translation button) |
 | `C` | Compare translations on/off |
 | `R` | Reading mode on/off (Esc also leaves it) |
-| F6 / Shift+F6 | Switch pane, with two passages open side by side |
+| F6 / Shift+F6 / `P` | Switch pane, with two passages open side by side |
+| `X` | Close the second pane |
 | Ctrl+= / Ctrl+- | Larger / smaller text, through the four sizes |
 | Ctrl+0 | Text size back to Medium |
 | Ctrl+B | Open or close the Library (bookmarks, highlights and notes) |
 | `N` | Write a note on the selected verses |
+| `B` | Bookmark the selected verses, or remove their bookmark |
+| `H` | Highlight the selected verses in the next color: yellow, green, blue, pink, then none. Verses in mixed colors go to yellow |
 | Shift-click | Extend the selection to a range within the chapter. Holding Shift lets the click through the selection card to a verse it covers |
 | Esc | Close search or the open panel or popover, then clear the selection, then leave reading mode |
 | `?` | All the keyboard shortcuts |
 
-The keys that work pressed on their own (`G`, `T`, `C`, `R`, `N`, `j`,
-`k`, `[`, `]`, `/` and `?`) can get in the way of speech input or a screen
+The keys that work pressed on their own (`G`, `T`, `C`, `R`, `N`, `B`,
+`H`, `X`, `P`, `j`, `k`, `[`, `]`, `/` and `?`) can get in the way of speech input or a screen
 reader. **Single-key shortcuts** under **Aa** turns them off: those keys
 then do nothing, and the shortcuts with Ctrl or Alt, the arrow keys, F6 and
 Esc still work. With them off, Ctrl+K opens the search box and the command

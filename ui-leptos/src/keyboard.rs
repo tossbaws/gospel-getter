@@ -5,16 +5,17 @@
 //! backend's, so books are crossed without this knowing the Bible's
 //! shape); `[` and `]` go a book at a time; j and k (with Shift, extending)
 //! step the selection a verse; Alt+← and Alt+→ go back and forward; Escape
-//! backs out a step; Ctrl+C and Ctrl+Shift+C copy; N writes a note; `/` and
-//! Ctrl+K search; `?` the shortcuts; Ctrl+B, G, T, C and R the Library, the
-//! picker, the translations, Compare and reading mode; F6 and Shift+F6
-//! switch panes while two are open. Which key does
+//! backs out a step; Ctrl+C and Ctrl+Shift+C copy; N writes a note, B
+//! bookmarks and H highlights; `/` and Ctrl+K search; `?` the shortcuts;
+//! Ctrl+B, G, T, C and R the Library, the picker, the translations, Compare
+//! and reading mode; F6, Shift+F6 and P switch panes while two are open,
+//! and X closes the second. Which key does
 //! what, and the selection's steps, are `keyboard_text`'s, tested on the
 //! host. With Aa's "Single-key shortcuts" off
 //! (`preferences::SINGLE_KEY_SHORTCUTS`), the keys that are a character
-//! pressed on its own (G, T, C, R, N, j and k, `[` and `]`, `/` and `?`)
-//! are left alone, unprevented, as if unheard; those with Ctrl, Cmd or Alt,
-//! the arrows, F6 and Escape still work. The sheet (☰ → Keyboard shortcuts) and
+//! pressed on its own (G, T, C, R, N, B, H, X, P, j and k, `[` and `]`, `/`
+//! and `?`) are left alone, unprevented, as if unheard; those with Ctrl,
+//! Cmd or Alt, the arrows, F6 and Escape still work. The sheet (☰ → Keyboard shortcuts) and
 //! the palette (Ctrl+K) are reached either way. Every key that acts on a
 //! passage acts on the active pane (`pane::active`); while two panes are
 //! open, the keys that scroll a page (Page Down, Space, Home…) scroll the
@@ -33,7 +34,7 @@ use web_sys::{Element, HtmlElement, KeyboardEvent};
 use crate::aa;
 use crate::bridge;
 use crate::card::{self, Ask, SelectionFacts};
-use crate::card_text::Slot;
+use crate::card_text::{self, Slot};
 use crate::dom;
 use crate::keyboard_text::{self as text, Press, Rect, Route, Selected};
 use crate::page;
@@ -257,6 +258,25 @@ fn on_keydown(event: &KeyboardEvent) {
         Route::Library => surfaces::toggle_surface(Surface::Library, None),
         Route::Note => {
             if card::ask(Ask::Note(page::focused())) {
+                event.prevent_default();
+            }
+        }
+        Route::Bookmark => {
+            if card::ask(Ask::Bookmark) {
+                event.prevent_default();
+            }
+        }
+        Route::Highlight => {
+            let colors = card::selection_colors();
+            let colors: Vec<Option<&str>> = colors.iter().map(Option::as_deref).collect();
+            let next = card_text::next_highlight(&colors).map(str::to_owned);
+            if card::ask(Ask::Highlight(next)) {
+                event.prevent_default();
+            }
+        }
+        Route::ClosePane => {
+            if pane::split() {
+                pane::close_second();
                 event.prevent_default();
             }
         }

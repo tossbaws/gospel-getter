@@ -53,7 +53,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
     Shortcut { id: "next-book", group: "Reading", keys: &[&["]"]], aria: "]", does: "Next book, at chapter 1", handles: &["]"] },
     Shortcut { id: "picker", group: "Reading", keys: &[&["G"]], aria: "G", does: "Choose a book and chapter", handles: &["g", "G"] },
     Shortcut { id: "compare", group: "Reading", keys: &[&["C"]], aria: "C", does: "Compare translations, on or off", handles: &["c", "C"] },
-    Shortcut { id: "switch-pane", group: "Reading", keys: &[&["F6"], &["Shift", "F6"]], aria: "F6 Shift+F6", does: "Switch pane", handles: &["F6"] },
+    Shortcut { id: "switch-pane", group: "Reading", keys: &[&["F6"], &["Shift", "F6"], &["P"]], aria: "F6 Shift+F6 P", does: "Switch pane", handles: &["F6", "p", "P"] },
+    Shortcut { id: "close-pane", group: "Reading", keys: &[&["X"]], aria: "X", does: "Close the second pane", handles: &["x", "X"] },
     Shortcut { id: "next-verse", group: "Selection", keys: &[&["j"]], aria: "J", does: "Select the next verse", handles: &["j", "J"] },
     Shortcut { id: "previous-verse", group: "Selection", keys: &[&["k"]], aria: "K", does: "Select the previous verse", handles: &["k", "K"] },
     Shortcut { id: "extend-down", group: "Selection", keys: &[&["Shift", "j"]], aria: "Shift+J", does: "Extend the selection down a verse", handles: &[] },
@@ -61,6 +62,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
     Shortcut { id: "copy", group: "Selection", keys: &[&["Ctrl", "C"]], aria: "Control+C", does: "Copy the selected verses with their reference", handles: &["c"] },
     Shortcut { id: "copy-as", group: "Selection", keys: &[&["Ctrl", "Shift", "C"]], aria: "Control+Shift+C", does: "Copy as…: with verse numbers, as Markdown, or plain", handles: &["c"] },
     Shortcut { id: "note", group: "Selection", keys: &[&["N"]], aria: "N", does: "Add a note to the selected verses", handles: &["n", "N"] },
+    Shortcut { id: "bookmark", group: "Selection", keys: &[&["B"]], aria: "B", does: "Bookmark the selected verses, on or off", handles: &["b", "B"] },
+    Shortcut { id: "highlight", group: "Selection", keys: &[&["H"]], aria: "H", does: "Highlight the selected verses: the next color", handles: &["h", "H"] },
     Shortcut { id: "clear-selection", group: "Selection", keys: &[&["Esc"]], aria: "Escape", does: "Clear the selection", handles: &["Escape"] },
     Shortcut { id: "search", group: "Search & palette", keys: &[&["/"], &["Ctrl", "K"]], aria: "/ Control+K", does: "Search, go to a reference, or run a command", handles: &["/", "k"] },
     Shortcut { id: "commands-only", group: "Search & palette", keys: &[&[">"]], aria: ">", does: "Typed first in the box: commands only", handles: &[] },
@@ -138,12 +141,31 @@ mod tests {
     }
 
     #[test]
-    fn f6_switches_pane() {
+    fn f6_and_p_switch_pane() {
         let row = shortcut("switch-pane").unwrap();
         assert_eq!(row.group, "Reading");
-        assert_eq!(row.handles, ["F6"]);
+        assert_eq!(row.handles, ["F6", "p", "P"]);
+        assert_eq!(row.aria, "F6 Shift+F6 P");
         assert_eq!(row.does, "Switch pane");
         assert_eq!(row.first_keys(), "F6");
+    }
+
+    #[test]
+    fn b_h_and_x_have_their_rows() {
+        for (id, group, after, key, handles) in [
+            ("bookmark", "Selection", "note", "B", ["b", "B"]),
+            ("highlight", "Selection", "bookmark", "H", ["h", "H"]),
+            ("close-pane", "Reading", "switch-pane", "X", ["x", "X"]),
+        ] {
+            let row = shortcut(id).unwrap();
+            assert_eq!(
+                (row.group, row.aria, row.first_keys().as_str(), row.handles),
+                (group, key, key, &handles[..]),
+                "{id}"
+            );
+            let at = |id: &str| SHORTCUTS.iter().position(|s| s.id == id);
+            assert_eq!(at(after).map(|i| i + 1), at(id), "{id} after {after}");
+        }
     }
 
     #[test]
