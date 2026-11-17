@@ -1013,6 +1013,54 @@ fn the_pre_paint_script_applies_the_saved_look_from_the_one_table() {
     assert!(piece("aa.rs").contains("prefs::set(&preferences::UPDATE_CHECK, value);"));
 }
 
+/// Two panes remembered on restart (S9): `preferences::SPLIT`, which the
+/// pre-paint script lays the page out for, and the second pane's place under
+/// a key of its own. Both are this computer's: no backup carries either
+/// (only a setting with an export file name is exported, `aa::current`).
+/// The plain-text fallback has no second pane, so it lays the page out for
+/// one.
+#[test]
+fn split_is_remembered_on_this_computer_only() {
+    let split = preferences::SPLIT;
+    assert_eq!(
+        (split.name, split.key, split.fallback, split.values.list()),
+        ("split", "gospel-getter-split", "off", vec!["off", "on"])
+    );
+    assert_eq!(split.file_name, None, "never in a backup");
+    assert!(preferences::PREFERENCES.contains(&split));
+    assert!(
+        preferences::prepaint_script()
+            .contains("['gospel-getter-split', 'split', 'off', ['off', 'on'], {}],"),
+        "the generated pre-paint row"
+    );
+    assert!(piece("aa.rs").contains("let Some(file_name) = pref.file_name else {"));
+
+    assert!(
+        piece("pane_text.rs")
+            .contains(r#"pub const SECOND_PANE_KEY: &str = "gospel-getter-second-pane";"#)
+    );
+    // Not one of the saved settings, which the pre-paint script writes to
+    // <html> and backups carry.
+    assert!(
+        preferences::PREFERENCES
+            .iter()
+            .all(|p| p.key != "gospel-getter-second-pane")
+    );
+    assert!(!preferences::prepaint_script().contains("gospel-getter-second-pane"));
+
+    let fallback = block_after(
+        HTML,
+        "document.addEventListener('gospel-getter:pieces-failed'",
+    );
+    let reset = fallback
+        .find("document.documentElement.removeAttribute('data-split');")
+        .expect("the fallback lays the page out for one pane");
+    assert!(
+        reset < fallback.find("invoke('get_home')").unwrap(),
+        "before the chapter is read"
+    );
+}
+
 /// With nothing saved, verse typography must be exactly what it was before
 /// the presets existed, and every non-default preset must actually change
 /// something.

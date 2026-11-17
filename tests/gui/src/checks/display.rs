@@ -527,7 +527,8 @@ impl Run<'_> {
 /// see `place`). Check 26 (check 25 left its settings): the page and Aa
 /// show every setting as it was left; then they're put back as they were
 /// before check 25. Check 45: the lists check 40 left open are open.
-/// Why checks 26, 45 and 65 aren't run on Windows: their SKIP.
+/// Then check 65 (a third session) and check 77 (two more, `split`).
+/// Why checks 26, 45, 65 and 77 aren't run on Windows: their SKIP.
 const NOT_ON_WINDOWS: &str = "not run on Windows: Edge WebDriver gives each session's WebView2 a fresh \
     user data folder (WEBVIEW2_USER_DATA_FOLDER, a new scoped_dir per session), so the app started again \
     in a new session can't see the first session's local storage (the app as shipped keeps one folder)";
@@ -535,10 +536,15 @@ const NOT_ON_WINDOWS: &str = "not run on Windows: Edge WebDriver gives each sess
 /// The checks the app started again doesn't run on Windows, each a SKIP
 /// there ([`NOT_ON_WINDOWS`]): the relaunch checks the checks' table says
 /// never run on Windows (a unit test holds them to it).
-const NOT_RUN_ON_WINDOWS: [Check; 3] = [Check::AaRestart, Check::DisclosuresKept, Check::NoteDraft];
+const NOT_RUN_ON_WINDOWS: [Check; 4] = [
+    Check::AaRestart,
+    Check::DisclosuresKept,
+    Check::NoteDraft,
+    Check::SplitRestart,
+];
 
 /// Ends `run`'s WebDriver session, which closes the app.
-async fn end_session(run: Run<'_>, started: std::time::Instant, which: &str) {
+pub(super) async fn end_session(run: Run<'_>, started: std::time::Instant, which: &str) {
     log_line(
         started,
         &format!("close the app (end the {which} WebDriver session)"),
@@ -564,7 +570,7 @@ pub(super) async fn restart(
     // data folder of its own (WEBVIEW2_USER_DATA_FOLDER, a new
     // `scoped_dir…` each time), so the app started again in a new session
     // can't see what the first one saved in local storage; the app itself
-    // always uses the one folder. Checks 26, 45 and 65 aren't run there:
+    // always uses the one folder. Checks 26, 45, 65 and 77 aren't run there:
     // SKIP, never PASS. The reading position is the backend's (its
     // database, in the account's own folder), so check 58 is.
     let windows = config.xvfb.is_none();
@@ -657,6 +663,13 @@ pub(super) async fn restart(
                 .await;
         }
         Some(Ok(left)) => draft_after_restart(config, report, started, &left).await,
+    }
+
+    // Check 77: two panes as the app quits, both where they were as it
+    // starts again, in sessions of its own.
+    if !windows {
+        let split = super::split::split_restart(config, started).await;
+        report.record(Check::SplitRestart, split).await;
     }
 }
 

@@ -146,6 +146,7 @@ checks! {
     (74, StartupFailure,      "startup-failure",        Startup,  OnWindows),
     (75, SplitPanes,          "split-panes",            Shipped,  Never),
     (76, SplitTabs,           "split-tabs",             Shipped,  Never),
+    (77, SplitRestart,        "split-restart",          Relaunch, OnWindows),
 }
 
 // The table is numbered 1, 2, 3… in order, with no gap: results.txt and
@@ -606,7 +607,7 @@ mod tests {
 
     /// The groups are the table's, each by number, their lengths counted
     /// from it: 1 check failing to start (no array: nothing but `all` ever
-    /// needed one), 65 on the app as shipped, 5 started again, 5 on the
+    /// needed one), 65 on the app as shipped, 6 started again, 5 on the
     /// updater.
     #[test]
     fn the_groups_are_the_tables() {
@@ -628,7 +629,7 @@ mod tests {
                 Check::RELAUNCH.len(),
                 Check::UPDATER.len()
             ],
-            [65, 5, 5]
+            [65, 6, 5]
         );
         assert_eq!(
             Check::UPDATER,
@@ -642,7 +643,7 @@ mod tests {
         );
     }
 
-    /// Where the checks skip themselves today: 26, 45, 65 and 74 never run
+    /// Where the checks skip themselves today: 26, 45, 65, 74 and 77 never run
     /// on Windows (`checks::display::NOT_RUN_ON_WINDOWS` and
     /// `checks::startup`), and the sidebar's checks (21, 24, 35, 36 and 37,
     /// through `Run::not_wide`) don't when the window can't be made wide
@@ -656,7 +657,7 @@ mod tests {
                 .map(Check::number)
                 .collect()
         };
-        assert_eq!(on(Skip::OnWindows), [26, 45, 65, 74]);
+        assert_eq!(on(Skip::OnWindows), [26, 45, 65, 74, 77]);
         assert_eq!(on(Skip::OnNarrowWindows), [21, 24, 35, 36, 37]);
         for check in Check::all() {
             assert!(!check.skip().allowed_on(Platform::Linux), "{check:?}");

@@ -1386,6 +1386,8 @@ mod tests {
                 .all(|name| Preferences::NAMES.contains(&name))
         );
         assert_eq!(crate::preferences::COMPARE_NOTES.file_name, None);
+        // Two panes open is this computer's, never a file's (S9).
+        assert_eq!(crate::preferences::SPLIT.file_name, None);
     }
 
     /// A file from a later version, with display settings this one doesn't

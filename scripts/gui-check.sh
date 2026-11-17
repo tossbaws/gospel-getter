@@ -103,8 +103,9 @@
 # if every run passed, else a FAIL counting and saying each failed run, with
 # a line per run in steps.log and screenshots of each failed one. Only the
 # checks the first session runs one after another (tests/gui checks.rs,
-# `checked!`); any other runs once, as steps.log says. Give it the time with
-# GUI_CHECK_BUDGET. See tests/gui src/repeat.rs.
+# `checked!`), and check 77, which repeats its own two sessions (tests/gui
+# checks/split.rs); any other runs once, as steps.log says. Give it the time
+# with GUI_CHECK_BUDGET. See tests/gui src/repeat.rs.
 #
 # GUI_CHECK_RETRY=1 (CI: dist.yml sets it for both GUI jobs; off by
 # default, so a run by hand shows every failure): when the suite fails, the

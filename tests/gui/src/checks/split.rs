@@ -41,6 +41,21 @@
 //!
 //! Whatever happens, reading mode is left, the second pane closed, and the
 //! window's width and the first pane's chapter put back.
+//!
+//! Check 77: two panes remembered as the app quits (S9), in two sessions of
+//! its own after check 65's (not run on Windows, for check 26's reason):
+//!
+//! - The first opens the second pane on Psalm 119 (the WEB), scrolls verse
+//!   40 to 13 px above its bar and the first pane's chapter to a verse of
+//!   its own, and waits for the app to keep both places: the second's on
+//!   this computer (`gospel-getter-second-pane`, with
+//!   `gospel-getter-split` on), the first's with the backend.
+//! - The app started again is split from the start, the first pane active
+//!   (D8), each pane's verse within a pixel of where it was left, and still
+//!   there once the page has settled.
+//!
+//! Whatever happens, each session closes the second pane before it ends,
+//! which forgets both keys: no other session starts split.
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
@@ -642,6 +657,274 @@ impl Run<'_> {
         }
         ui.js("window.scrollTo(0, 0); return null;", Vec::new())
             .await?;
+        Ok(())
+    }
+}
+
+/// Check 77's verse in the second pane (Psalm 119 in the WEB), and how far
+/// above the pane's bar its top is left.
+const RESTART_VERSE: u32 = 40;
+const ABOVE_THE_BAR: f64 = 13.0;
+
+/// Scrolls the pane `arguments[0]`'s column so its verse `arguments[1]`
+/// (or, if 0, the chapter's tenth verse, or its middle one if it has fewer
+/// than twenty) is [`ABOVE_THE_BAR`] above its bar, as far as the column
+/// can scroll; returns the verse it aimed at.
+const SCROLL_PANE_JS: &str =
+    "const col = document.querySelector(`.pane[data-pane=\"${arguments[0]}\"]`);
+    const verses = [...col.querySelectorAll('.chapter-main .verse[data-translation]')];
+    const verse = arguments[1] ? verses.find((v) => v.dataset.verse === String(arguments[1]))
+        : verses[Math.min(9, Math.floor(verses.length / 2))];
+    if (!verse) return null;
+    const bar = col.querySelector('.pane-bar').getBoundingClientRect().bottom;
+    col.scrollTop += verse.getBoundingClientRect().top - (bar - arguments[2]);
+    return Number(verse.dataset.verse);";
+
+/// A script returning the two panes' places ([`PANES_JS`]), with the first
+/// pane's heading,
+/// what this computer keeps for the second pane and for split
+/// (`gospel-getter-second-pane`, `gospel-getter-split`), and the first
+/// pane's place as the backend last saved it.
+fn kept_js() -> String {
+    format!(
+        "const seen = (() => {{ {PANES_JS} }})();
+         seen.heading1 = (document.querySelector('#reading-pane .chapter-heading') || {{}}).textContent || null;
+         seen.splitKey = localStorage.getItem('gospel-getter-split');
+         const kept = localStorage.getItem('gospel-getter-second-pane');
+         seen.kept = kept ? JSON.parse(kept) : null;
+         seen.saved = window.gospelGetterPlace.saved();
+         return seen;"
+    )
+}
+
+/// Whether a pane's place (`seen`, as [`PANES_JS`] has it) is the one
+/// `want` saw, within a pixel.
+const SAME_PLACE_JS: &str =
+    "const same = (seen, want) => !!seen && !!want && seen.verse === want.verse
+    && Math.abs(seen.top - want.top) <= 1;";
+
+/// Whether `check` is check 77, which GUI_CHECK_REPEAT repeats in sessions
+/// of its own ([`split_restart`]), not in the first session's.
+pub(super) fn repeats_itself(check: crate::report::Check) -> bool {
+    check == crate::report::Check::SplitRestart
+}
+
+/// Check 77, in two sessions of its own after check 65 (the app started
+/// again on the same data): two panes, each scrolled to a verse, as the app
+/// quits; started again, each pane is where it was. Run as many times as
+/// GUI_CHECK_REPEAT asks (`77:10`), each run in its own two sessions.
+pub(super) async fn split_restart(
+    config: &crate::config::Config,
+    started: std::time::Instant,
+) -> Result<String> {
+    let times = crate::repeat::Repeat::times_for(config.repeat, crate::report::Check::SplitRestart);
+    if times == 1 {
+        return split_restart_once(config, started).await;
+    }
+    let mut runs = crate::repeat::Runs::default();
+    for n in 1..=times {
+        let result = split_restart_once(config, started).await;
+        let line = runs.add(n, times, result);
+        crate::ui::log_line(started, &format!("check 77 split-restart, {line}"));
+    }
+    runs.verdict()
+}
+
+/// One run of check 77: the first session leaves two panes, each at a
+/// verse; the second finds them there. Whatever happens, the second pane
+/// is closed in each session before it ends, so no other check starts
+/// split.
+async fn split_restart_once(
+    config: &crate::config::Config,
+    started: std::time::Instant,
+) -> Result<String> {
+    let session = |what: &'static str| async move {
+        let driver = super::start_session(config, &config.app, started)
+            .await
+            .with_context(|| format!("no WebDriver session {what}"))?;
+        anyhow::Ok(Run {
+            config,
+            ui: crate::ui::Ui::new(driver, started, config.budget, config.step_timeout),
+            shots: super::Shots::default(),
+        })
+    };
+    crate::ui::log_line(
+        started,
+        "start the app again, to split it and quit (check 77)",
+    );
+    let mut run = session("to split the panes in").await?;
+    let left = run.split_left().await;
+    if left.is_err() {
+        run.failure_screenshot(crate::report::Check::SplitRestart)
+            .await;
+        // Nothing left split for the next session to open.
+        if let Err(e) = run.split_restart_clean_up().await {
+            run.ui
+                .log(&format!("putting things back after check 77 failed: {e:#}"));
+        }
+    }
+    super::display::end_session(run, started, "split").await;
+    let left = left?;
+
+    crate::ui::log_line(started, "start the app again, split as it quit (check 77)");
+    let mut run = session("on the app started again split").await?;
+    let back = run.split_reopened(&left).await;
+    if back.is_err() {
+        run.failure_screenshot(crate::report::Check::SplitRestart)
+            .await;
+    }
+    let put_back = run.split_restart_clean_up().await;
+    super::display::end_session(run, started, "split again").await;
+    let said = back?;
+    put_back?;
+    Ok(said)
+}
+
+impl Run<'_> {
+    /// Check 77's first session: the second pane opened on Psalm 119 (the
+    /// WEB), each pane scrolled to a verse, and the app's word that it kept
+    /// both places: the second's in local storage, the first's with the
+    /// backend. Returns the panes as they were left.
+    async fn split_left(&mut self) -> Result<Value> {
+        let ui = &self.ui;
+        let one = ui
+            .wait_within(
+                "the page to boot, one pane",
+                &format!(
+                    "const seen = (() => {{ {} }})();
+                     return [!!seen.heading1 && !seen.split && seen.splitKey === null && seen.kept === null, seen];",
+                    kept_js()
+                ),
+                Vec::new(),
+                Some(self.config.session_timeout),
+            )
+            .await?;
+        ui.js(
+            "window.gospelGetterPanes.openBeside({ bookId: arguments[0], chapter: arguments[1], translation: 'web' });
+             return null;",
+            vec![json!(PSALMS), json!(PSALM)],
+        )
+        .await?;
+        self.panes_are(
+            "the second pane to show Psalms 119",
+            "seen.split && seen.heading2 === 'Psalms 119' && seen.first && seen.second",
+        )
+        .await?;
+        ui.settled("the panes to settle").await?;
+        let verse = ui
+            .js(
+                SCROLL_PANE_JS,
+                vec![json!("second"), json!(RESTART_VERSE), json!(ABOVE_THE_BAR)],
+            )
+            .await?;
+        ensure!(
+            verse == json!(RESTART_VERSE),
+            "no verse {RESTART_VERSE} in the second pane: {verse}"
+        );
+        ui.js(
+            SCROLL_PANE_JS,
+            vec![json!("first"), json!(0), json!(ABOVE_THE_BAR)],
+        )
+        .await?;
+        ui.settled("the panes to settle, scrolled").await?;
+        let left = ui
+            .wait(
+                "the app to keep both panes' places: the second's on this computer, the first's with the backend",
+                &format!(
+                    "const seen = (() => {{ {kept} }})();
+                     const verse = (place) => place && place.verse !== 'heading' ? Number(place.verse) : undefined;
+                     const near = (a, b) => typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= 0.5;
+                     const second = seen.second, first = seen.first, kept = seen.kept, saved = seen.saved;
+                     return [!!second && !!first && second.verse === '{RESTART_VERSE}' && seen.splitKey === 'on'
+                         && !!kept && kept.bookId === {PSALMS} && kept.chapter === {PSALM} && kept.translation === 'web'
+                         && kept.verse === {RESTART_VERSE} && near(kept.offset, second.top)
+                         && !!saved && saved.verse === verse(first)
+                         && (saved.verse === undefined || near(saved.offset, first.top)),
+                         seen];",
+                    kept = kept_js()
+                ),
+            )
+            .await?;
+        ui.log(&format!(
+            "left split: the first pane at {} verse {} ({} px), the second at Psalms 119 verse {} ({} px); one pane before: {}",
+            left["heading1"], left["first"]["verse"], left["first"]["top"], left["second"]["verse"],
+            left["second"]["top"], one["heading1"]
+        ));
+        Ok(left)
+    }
+
+    /// Check 77's second session: the panes as the first left them (`left`):
+    /// split from the start, the first pane active, each at its verse within
+    /// a pixel of where it was, and still there once the page has settled.
+    async fn split_reopened(&mut self, left: &Value) -> Result<String> {
+        let ready = format!(
+            "const seen = (() => {{ {kept} }})();
+             {SAME_PLACE_JS}
+             const want = arguments[0];
+             return [seen.split && seen.active === 'first' && seen.windowY === 0
+                 && seen.heading1 === want.heading1 && seen.heading2 === 'Psalms 119'
+                 && same(seen.first, want.first) && same(seen.second, want.second), seen];",
+            kept = kept_js()
+        );
+        let seen = self
+            .ui
+            .wait_within(
+                "both panes back where they were, the first active",
+                &ready,
+                vec![left.clone()],
+                Some(self.config.session_timeout),
+            )
+            .await?;
+        self.ui
+            .settled("the page to settle after the restart")
+            .await?;
+        let settled = self
+            .ui
+            .wait_with(
+                "both panes still where they were, the page settled",
+                &ready,
+                vec![left.clone()],
+            )
+            .await?;
+        ensure!(
+            settled["splitKey"] == "on" && settled["kept"]["verse"] == json!(RESTART_VERSE),
+            "what's kept for the next launch changed: {settled}"
+        );
+        let at = |seen: &Value, pane: &str| {
+            format!(
+                "verse {} {} px below its bar",
+                seen[pane]["verse"], seen[pane]["top"]
+            )
+        };
+        Ok(format!(
+            "quit with two panes, started again: split from the start, the first pane active, {} at {} \
+             (left {}), the second at Psalms 119 (WEB) {} (left {}); settled: {}, {}; then closed",
+            seen["heading1"].as_str().unwrap_or("?"),
+            at(&seen, "first"),
+            at(left, "first"),
+            at(&seen, "second"),
+            at(left, "second"),
+            at(&settled, "first"),
+            at(&settled, "second"),
+        ))
+    }
+
+    /// Check 77's clean-up, in each of its sessions: the second pane closed,
+    /// and with it what this computer keeps for it.
+    async fn split_restart_clean_up(&mut self) -> Result<()> {
+        let ui = &self.ui;
+        ui.js(
+            "if (window.gospelGetterPanes && window.gospelGetterPanes.shown().length > 1) window.gospelGetterPanes.close();
+             return null;",
+            Vec::new(),
+        )
+        .await?;
+        ui.wait(
+            "one pane, and nothing kept to split the next launch",
+            "return [!document.documentElement.dataset.split && localStorage.getItem('gospel-getter-split') === null
+                 && localStorage.getItem('gospel-getter-second-pane') === null, null];",
+        )
+        .await?;
         Ok(())
     }
 }
