@@ -284,3 +284,43 @@ test('each pane keeps its place across the tabs and the 900px crossing, not trus
         app.resize(1280);
         assert.deepEqual([scrolled.first, scrolled.second], [300, 590]);
     }));
+
+test('Open beside into a hidden second pane records where the reader left it, so its Back returns there, tabbed or in reading mode', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv', width: 1280 }, async (app) => {
+        await openBeside(app, { bookId: ROMANS, chapter: 5, translation: 'bsb' });
+        const scrolled = layOut(app);
+        const back = async () => {
+            const before = app.calls.length;
+            app.key('ArrowLeft', { altKey: true });
+            await app.idle(before, 'get_reading');
+        };
+
+        // Tabbed: the second pane at verse 10 (the top of its view, which
+        // has no bar), then the first tab chosen, the second hidden.
+        app.resize(800);
+        await scrollColumn(app, scrolled, 'second', 600);
+        await app.click(tab(app, 'first'));
+        assert.deepEqual(tabsSeen(app).hidden, ['second']);
+        await openBeside(app, { bookId: ROMANS, chapter: 8 });
+        assert.deepEqual(tabsSeen(app).hidden, ['first'], 'the second pane’s tab shows (S13)');
+        assert.equal(heading(app, 2), 'Romans 8');
+        assert.equal(scrolled.second, 0, 'a chapter alone opens at its top');
+        await back();
+        assert.equal(heading(app, 2), 'Romans 5');
+        assert.equal(scrolled.second, 600, 'Back returns to verse 10, where the reader left it');
+
+        // Reading mode: the same, the first pane the one shown.
+        app.resize(1280);
+        await frame(app);
+        await scrollColumn(app, scrolled, 'second', 540);
+        await app.click(column(app, 'first').querySelector('.chapter-heading'));
+        app.key('r');
+        await frame(app);
+        assert.equal(app.document.documentElement.dataset.readerMode, 'on');
+        assert.deepEqual(tabsSeen(app).hidden, ['second']);
+        await openBeside(app, { bookId: ROMANS, chapter: 8 });
+        assert.deepEqual(tabsSeen(app).hidden, ['first'], 'reading mode shows the second pane (S13)');
+        await back();
+        assert.equal(heading(app, 2), 'Romans 5');
+        assert.equal(scrolled.second, 540, 'Back returns to where the reader left it');
+    }));

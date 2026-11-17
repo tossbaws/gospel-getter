@@ -1494,33 +1494,33 @@ pub fn open_beside(passage: &OpenPassage, code: Option<String>) -> Load {
     }
     let (book_id, chapter) = (passage.book_id, passage.chapter);
     let (start, end) = (passage.verse_start, passage.verse_end);
-    let load = if with(pane, |s| s.reading.is_some()) {
+    if with(pane, |s| s.reading.is_some()) {
+        // Active first, so it's in view: a pane out of view (the tabs,
+        // reading mode) has its place put back as it comes into view
+        // (`surfaces`), and the jump then records where the reader left
+        // it, not a hidden column's scroll position (0 in WebKitGTK and
+        // WebView2), which would send its Back to the chapter's top.
+        pane::set_active(pane);
         if code != pane::code(pane) {
-            if pane == pane::active() {
-                switch_for_jump(pane, &code);
-            } else {
-                pane::set_code(pane, &code);
-            }
+            switch_for_jump(pane, &code);
         }
-        jump_to(pane, book_id, chapter, start, end, start.is_none())
-    } else {
-        pane::set_code(pane, &code);
-        let open = open_passage(pane, book_id, chapter, start, end);
-        Box::pin(async move {
-            let (loaded, _) = open.await;
-            if loaded && start.is_none() {
-                pane.scroller().scroll_to(0.0);
-            }
-            if with(pane, |s| s.reading.is_some()) && !with(pane, |s| s.history.started()) {
-                start_history(pane);
-            }
-            loaded
-        }) as Load
-    };
+        return jump_to(pane, book_id, chapter, start, end, start.is_none());
+    }
+    pane::set_code(pane, &code);
+    let open = open_passage(pane, book_id, chapter, start, end);
     // After its load has begun, so the translation the record then says is
     // the one it's reading (`Request::Translation` leaves it be).
     pane::set_active(pane);
-    load
+    Box::pin(async move {
+        let (loaded, _) = open.await;
+        if loaded && start.is_none() {
+            pane.scroller().scroll_to(0.0);
+        }
+        if with(pane, |s| s.reading.is_some()) && !with(pane, |s| s.history.started()) {
+            start_history(pane);
+        }
+        loaded
+    })
 }
 
 /// Boot's second pane, opened empty beside the first before the first's
