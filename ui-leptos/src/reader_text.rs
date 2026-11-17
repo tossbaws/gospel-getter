@@ -300,10 +300,52 @@ pub struct Column<'a> {
     pub verses: &'a [Verse],
 }
 
+/// The ids a pane's chapter carries, its own so two panes' chapters never
+/// share one: the first pane's are the page's (`fixtures/genesis-1.html`'s,
+/// which the tests and the plain-text fallback name), the second's are
+/// those with `-2` in them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaneIds {
+    /// The chapter's root, `#reading-pane-inner`.
+    pub inner: &'static str,
+    /// The Cross references list.
+    pub xrefs: &'static str,
+    /// Each column's Footnotes list, before its translation's code.
+    pub footnotes: &'static str,
+}
+
+impl PaneIds {
+    pub const FIRST: Self = Self {
+        inner: "reading-pane-inner",
+        xrefs: "xref-summary-list",
+        footnotes: "footnote-list",
+    };
+    pub const SECOND: Self = Self {
+        inner: "reading-pane-2-inner",
+        xrefs: "xref-summary-list-2",
+        footnotes: "footnote-list-2",
+    };
+}
+
+/// Whether the faded chapters before and after are drawn beside the one
+/// being read: not while two panes share the window, which leaves each too
+/// narrow for them (they already give way below an 848px window).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Neighbours {
+    Draw,
+    Omit,
+}
+
 /// The footnotes of the chapter being read, one row each ("119:105a lamp:
 /// or, candle"), for every column on screen that has any. Named for its
 /// translation while comparing, where it could be either column's.
-fn footnote_summary(chapter: i64, columns: &[Column<'_>], comparing: bool, open: bool) -> String {
+fn footnote_summary(
+    chapter: i64,
+    columns: &[Column<'_>],
+    comparing: bool,
+    open: bool,
+    ids: PaneIds,
+) -> String {
     columns
         .iter()
         .map(|c| {
@@ -333,7 +375,7 @@ fn footnote_summary(chapter: i64, columns: &[Column<'_>], comparing: bool, open:
             } else {
                 format!("Footnotes ({count})")
             };
-            let list = format!("footnote-list-{}", escape_html(c.code));
+            let list = format!("{}-{}", ids.footnotes, escape_html(c.code));
             format!(
                 "<div class=\"footnote-summary\" data-code=\"{code}\">\n{s28}<h3 class=\"footnote-summary-title\">{}</h3>\n{s28}<div class=\"footnote-list disclosure-body\" id=\"{list}\"{}>{rows}</div>\n{s24}</div>",
                 disclosure_toggle(Disclosure::Footnotes, &list, &title, open),
@@ -363,21 +405,22 @@ const XREF_CREDIT: &str = r#"<p class="xref-credit">Cross-reference data from <a
 /// first opened, or printed (`reader::fill_xref_rows`): the rows are over
 /// half the elements a chapter would otherwise draw (three quarters in
 /// Psalm 119), for a list most readers never open.
-fn xref_summary(dto: &Reading, open: bool) -> String {
+fn xref_summary(dto: &Reading, open: bool, ids: PaneIds) -> String {
     if !dto.has_chapter_xrefs {
         return String::new();
     }
     let rows = if open { xref_rows(dto) } else { String::new() };
     let count: usize = dto.current_verses.iter().map(|v| v.xrefs.len()).sum();
     format!(
-        "<div class=\"xref-summary\">\n{s20}<h3 class=\"xref-summary-title\">{}</h3>\n{s20}<div class=\"xref-summary-list disclosure-body\" id=\"xref-summary-list\"{}>{rows}</div>\n{s20}{XREF_CREDIT}\n{s16}</div>",
+        "<div class=\"xref-summary\">\n{s20}<h3 class=\"xref-summary-title\">{}</h3>\n{s20}<div class=\"xref-summary-list disclosure-body\" id=\"{list}\"{}>{rows}</div>\n{s20}{XREF_CREDIT}\n{s16}</div>",
         disclosure_toggle(
             Disclosure::Xrefs,
-            "xref-summary-list",
+            ids.xrefs,
             &format!("Cross references ({count})"),
             open,
         ),
         if open { "" } else { " hidden" },
+        list = ids.xrefs,
         s20 = spaces(20),
         s16 = spaces(16),
     )
@@ -539,10 +582,17 @@ fn chapter_text(dto: &Reading, code: &str) -> String {
 /// The whole reading pane: `#reading-pane-inner` with the chapter on
 /// screen and its neighbors (`data-current-*`, `data-prev-*`,
 /// `data-next-*`), the verses (in the translation `code`) or Compare's
-/// grid, the chapter's end and its two lists. While comparing, the columns
-/// (the translations', or the text's and the notes') take the neighbors'
-/// place.
-pub fn reading_pane(dto: &Reading, beside: Beside<'_>, code: &str, open: Opened) -> String {
+/// grid, the chapter's end and its two lists, with `ids` (the pane's). While
+/// comparing, the columns (the translations', or the text's and the notes')
+/// take the neighbors' place; with [`Neighbours::Omit`], nothing does.
+pub fn reading_pane(
+    dto: &Reading,
+    beside: Beside<'_>,
+    code: &str,
+    open: Opened,
+    ids: PaneIds,
+    neighbours: Neighbours,
+) -> String {
     let compare = match beside {
         Beside::Translations(compare) => Some(compare),
         Beside::Nothing | Beside::Notes { .. } => None,
@@ -563,7 +613,7 @@ pub fn reading_pane(dto: &Reading, beside: Beside<'_>, code: &str, open: Opened)
         Beside::Nothing => chapter_text(dto, code),
     };
     let side = |s: Option<&ChapterSide>, edge: Option<&Edge>, which: Which| {
-        if comparing {
+        if comparing || neighbours == Neighbours::Omit {
             return String::new();
         }
         let inner = match s {
@@ -590,7 +640,8 @@ pub fn reading_pane(dto: &Reading, beside: Beside<'_>, code: &str, open: Opened)
         }],
     };
     format!(
-        "<div id=\"reading-pane-inner\"\n{s21}data-current-book=\"{book}\"\n{s21}data-current-chapter=\"{chapter}\"{prev}{next}\n{s16}>\n{s20}<div class=\"reading-row{comparing}\">\n{s24}{before}\n{s24}<section class=\"chapter-main\">\n{s28}<h2 class=\"chapter-heading\">{name} {chapter}</h2>\n{s28}{body}\n{s28}{end}\n{s28}{footnotes}\n{s28}{xrefs}\n{s24}</section>\n{s24}{after}\n{s20}</div>\n{s16}</div>",
+        "<div id=\"{inner}\"\n{s21}data-current-book=\"{book}\"\n{s21}data-current-chapter=\"{chapter}\"{prev}{next}\n{s16}>\n{s20}<div class=\"reading-row{comparing}\">\n{s24}{before}\n{s24}<section class=\"chapter-main\">\n{s28}<h2 class=\"chapter-heading\">{name} {chapter}</h2>\n{s28}{body}\n{s28}{end}\n{s28}{footnotes}\n{s28}{xrefs}\n{s24}</section>\n{s24}{after}\n{s20}</div>\n{s16}</div>",
+        inner = ids.inner,
         book = dto.current_book_id,
         chapter = dto.current_chapter,
         prev = attrs(dto.prev.as_ref(), "prev"),
@@ -607,9 +658,10 @@ pub fn reading_pane(dto: &Reading, beside: Beside<'_>, code: &str, open: Opened)
             dto.current_chapter,
             &columns,
             compare.is_some(),
-            open.footnotes
+            open.footnotes,
+            ids,
         ),
-        xrefs = xref_summary(dto, open.xrefs),
+        xrefs = xref_summary(dto, open.xrefs, ids),
         after = side(dto.next.as_ref(), dto.next_edge.as_ref(), Which::Next),
         s16 = spaces(16),
         s20 = spaces(20),
@@ -1195,13 +1247,18 @@ mod tests {
     /// the list is opened, when they're the fixture's.
     const GENESIS_1: &str = include_str!("../fixtures/genesis-1.html");
 
+    /// The first pane's chapter, as a single pane draws it.
+    fn first_pane(dto: &Reading, beside: Beside<'_>, code: &str, open: Opened) -> String {
+        reading_pane(dto, beside, code, open, PaneIds::FIRST, Neighbours::Draw)
+    }
+
     #[test]
     fn the_pane_is_the_page_s_markup_byte_for_byte() {
         let rows = xref_rows(&reading());
         assert!(rows.starts_with(r#"<div class="xref-summary-row">"#));
         assert_eq!(GENESIS_1.matches(&rows).count(), 1, "the fixture's rows");
         assert_eq!(
-            reading_pane(&reading(), Beside::Nothing, "kjv", Opened::default()),
+            first_pane(&reading(), Beside::Nothing, "kjv", Opened::default()),
             GENESIS_1.replacen(&rows, "", 1)
         );
     }
@@ -1214,9 +1271,9 @@ mod tests {
             xrefs: true,
         };
         let rows = xref_rows(&reading());
-        let pane = reading_pane(&reading(), Beside::Nothing, "kjv", open);
+        let pane = first_pane(&reading(), Beside::Nothing, "kjv", open);
         assert!(pane.contains(&format!(r#"id="xref-summary-list">{rows}</div>"#)));
-        let closed = reading_pane(&reading(), Beside::Nothing, "kjv", Opened::default());
+        let closed = first_pane(&reading(), Beside::Nothing, "kjv", Opened::default());
         assert!(closed.contains(r#"id="xref-summary-list" hidden></div>"#));
         assert!(closed.contains("Cross references (1)"));
     }
@@ -1227,8 +1284,8 @@ mod tests {
     /// region for the margin to fill; no neighbors, one Footnotes list.
     #[test]
     fn notes_sit_beside_the_text_as_normal_reading_sets_it() {
-        let normal = reading_pane(&reading(), Beside::Nothing, "kjv", Opened::default());
-        let pane = reading_pane(
+        let normal = first_pane(&reading(), Beside::Nothing, "kjv", Opened::default());
+        let pane = first_pane(
             &reading(),
             Beside::Notes {
                 name: "King James Version",
@@ -1258,7 +1315,7 @@ mod tests {
             footnotes: true,
             xrefs: true,
         };
-        let pane = reading_pane(&reading(), Beside::Nothing, "kjv", open);
+        let pane = first_pane(&reading(), Beside::Nothing, "kjv", open);
         assert!(pane.contains(r#"id="footnote-list-kjv"><div class="footnote-row">"#));
         assert!(pane.contains(r#"id="xref-summary-list"><div class="xref-summary-row">"#));
         assert_eq!(pane.matches(r#"aria-expanded="true""#).count(), 2);
@@ -1283,7 +1340,7 @@ mod tests {
                 },
             ],
         };
-        let pane = reading_pane(
+        let pane = first_pane(
             &dto,
             Beside::Translations(&compare),
             "kjv",
@@ -1299,6 +1356,83 @@ mod tests {
         assert!(!pane.contains("footnote-summary"));
         // The neighbors' attributes stay, so ← and → still turn.
         assert!(pane.contains(r#" data-next-book="1" data-next-chapter="2""#));
+    }
+
+    /// The second pane's chapter is the first's, byte for byte, but for its
+    /// ids: the same verses, words, italics, footnotes and cross-references,
+    /// drawn by the same code. Every list open, so each id is drawn.
+    #[test]
+    fn the_second_pane_differs_from_the_first_only_by_its_ids() {
+        let open = Opened {
+            footnotes: true,
+            xrefs: true,
+        };
+        for neighbours in [Neighbours::Draw, Neighbours::Omit] {
+            let first = reading_pane(
+                &reading(),
+                Beside::Nothing,
+                "kjv",
+                open,
+                PaneIds::FIRST,
+                neighbours,
+            );
+            let second = reading_pane(
+                &reading(),
+                Beside::Nothing,
+                "kjv",
+                open,
+                PaneIds::SECOND,
+                neighbours,
+            );
+            assert_ne!(first, second);
+            for id in [
+                r#"id="reading-pane-2-inner""#,
+                r#"id="xref-summary-list-2""#,
+                r#"aria-controls="xref-summary-list-2""#,
+                r#"id="footnote-list-2-kjv""#,
+                r#"aria-controls="footnote-list-2-kjv""#,
+            ] {
+                assert_eq!(second.matches(id).count(), 1, "{id}");
+            }
+            let text = chapter_text(&reading(), "kjv");
+            assert_eq!(first.matches(&text).count(), 1);
+            assert_eq!(second.matches(&text).count(), 1);
+            assert_eq!(
+                second
+                    .replace("reading-pane-2-inner", "reading-pane-inner")
+                    .replace("xref-summary-list-2", "xref-summary-list")
+                    .replace("footnote-list-2-", "footnote-list-"),
+                first
+            );
+        }
+    }
+
+    /// Omitted, the faded neighbors (and the edge card in a missing one's
+    /// place) are gone, and nothing else is: ← and → still know the
+    /// chapters either side.
+    #[test]
+    fn omitted_neighbors_leave_only_the_chapter() {
+        let drawn = first_pane(&reading(), Beside::Nothing, "kjv", Opened::default());
+        let omitted = reading_pane(
+            &reading(),
+            Beside::Nothing,
+            "kjv",
+            Opened::default(),
+            PaneIds::FIRST,
+            Neighbours::Omit,
+        );
+        assert!(drawn.contains("chapter-side"));
+        assert!(!omitted.contains("chapter-side"));
+        assert!(!omitted.contains("edge-card"));
+        assert!(omitted.contains(r#" data-next-book="1" data-next-chapter="2""#));
+        let main = |pane: &str| {
+            let start = pane.find(r#"<section class="chapter-main">"#).unwrap_or(0);
+            let end = pane[start..]
+                .find("</section>")
+                .map_or(pane.len(), |e| start + e);
+            pane[start..end].to_owned()
+        };
+        assert_eq!(main(&drawn), main(&omitted));
     }
 
     #[test]

@@ -14,7 +14,10 @@
 //! pressed on its own (G, T, C, R, N, j and k, `[` and `]`, `/` and `?`)
 //! are left alone, unprevented, as if unheard; those with Ctrl, Cmd or Alt,
 //! the arrows and Escape still work. The sheet (☰ → Keyboard shortcuts) and
-//! the palette (Ctrl+K) are reached either way.
+//! the palette (Ctrl+K) are reached either way. Every key that acts on a
+//! passage acts on the active pane (`pane::active`); while two panes are
+//! open, the keys that scroll a page (Page Down, Space, Home…) scroll the
+//! active pane's column, here (`pane::on_scroll_key`).
 //!
 //! Each `preventDefault` is within the key. The dispatcher is registered
 //! first of the pieces' `document` listeners (`page::mount`), so the Escape
@@ -214,6 +217,9 @@ fn on_keydown(event: &KeyboardEvent) {
     };
     let single_keys = prefs::on(&preferences::SINGLE_KEY_SHORTCUTS);
     let Some(route) = text::route_for(&press, single_keys) else {
+        // Page Down, Space, Home and the rest: the active pane's column,
+        // while two are open (`pane::on_scroll_key`); the browser's else.
+        pane::on_scroll_key(event);
         return;
     };
     if text::always_prevented(route) {
@@ -253,8 +259,8 @@ fn on_keydown(event: &KeyboardEvent) {
                 event.prevent_default();
             }
         }
-        Route::Picker => surfaces::open_picker(false),
-        Route::Translation => surfaces::toggle_surface(Surface::Translation, None),
+        Route::Picker => pane::open_picker(),
+        Route::Translation => pane::toggle_translation(),
         Route::Step { step, extend } => step_selection(step, extend),
         Route::Book(which) => step_book(which),
         // Through its own toggle, in the translation button's popover.

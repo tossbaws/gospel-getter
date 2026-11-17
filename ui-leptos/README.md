@@ -86,7 +86,8 @@ The header, the Library and search:
 The reader, the selection card and notes:
 
 - `reader`: the chapter on screen, how it gets there, and the passage history.
-- `pane`: the reading pane's elements (its root, `#reading-pane-inner` and its notice), which the reading view's queries run on, and its `Scroller`, the one way the reading view's scroll position and the band in view are read and set; which pane is active and which are shown, and `PerPane`, the state the pieces keep for each pane.
+- `pane`: the reading panes' elements (each one's root, `#reading-pane-inner` and notice, by its own ids), which the reading view's queries run on, and each one's `Scroller` (the window, or its own column while two are open), the one way a reading view's scroll position and the band in view are read and set; which pane is active and which are shown, and `PerPane`, the state the pieces keep for each pane; the second pane opened and closed, the panes' bars, the keys that scroll a pane's column, and `window.gospelGetterPanes`.
+- `pane_text`: the panes' bars' names, what Compare says while two are open, and how far the keys that scroll a page scroll a pane's column.
 - `reader_text`: the chapter's markup, byte for byte `fixtures/genesis-1.html` (which a test compares), Compare's rows, the reference, and the passage history's bookkeeping.
 - `card`: the selection card: the verse selection, Copy and Copy as…, the card's bookmark, highlight and notes, the verses' marks and the Shift ghost.
 - `card_text`: the card's markup and placement.
@@ -107,9 +108,9 @@ Shared with the backend, from `../shared/`:
 - `wire`: the commands' answers both sides read whole, one definition each, with their JSON pinned by its tests.
 
 `src/lib.rs` mounts the pieces when the module loads: the page's own
-listeners first (`page`, `clicks`, `keyboard`), then the surfaces, Aa, the
-card and the reader, then boot (its chapter drawn at once if its answer is
-in), then the rest in the next task (About and the banner are moved to
+listeners first (`page`, `clicks`, `keyboard`), then the surfaces, the
+panes, Aa, the card and the reader, then boot (its chapter drawn at once
+if its answer is in), then the rest in the next task (About and the banner are moved to
 their places, for focus order, and the Library's tabs and lists into its
 panel), then runs its ready list: what a piece asked of another before
 that one had mounted is asked again, in a fixed order (`page`, then the

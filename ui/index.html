@@ -3709,6 +3709,128 @@
             text-shadow: var(--glow);
         }
 
+        /* Two passages side by side (ui-leptos/src/pane.rs, which sets
+           html[data-split] while a second pane is open): the page stops
+           scrolling, and each pane is a column of its own below the top
+           bar that scrolls by itself, its bar stuck to its top. A column
+           never anchors (pane.rs's Scroller says why), and keeps a scroll
+           to itself. The faded neighbors aren't drawn, so the chapter
+           takes the column. The active pane's heading has the accent rule,
+           the other's is dimmed; a hairline in the rule's colour runs
+           between them. Screen only: on paper the page is as ever. */
+        @media screen {
+            :root[data-split] {
+                --pane-bar-height: 2.9rem;
+                overflow: hidden;
+            }
+
+            :root[data-split] body {
+                height: 100vh;
+                min-height: 0;
+                overflow: hidden;
+            }
+
+            :root[data-split] .container {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                column-gap: 3rem;
+                height: 100vh;
+                padding-top: calc(var(--bar-height) + 1rem);
+                padding-bottom: 0;
+            }
+
+            /* Each column reaches the hairline (and the second, the page's
+               gutter) and pads its text back in: an overlay scrollbar
+               (WebKitGTK's) takes no room, but takes about 22px of clicks
+               at the column's edge, which the bar's last button would sit
+               under. */
+            .pane {
+                min-width: 0;
+                height: calc(100vh - var(--bar-height) - 1rem);
+                overflow-y: auto;
+                overscroll-behavior: contain;
+                overflow-anchor: none;
+                scroll-padding-top: var(--pane-bar-height);
+                margin-right: -1.5rem;
+                padding-right: 1.5rem;
+                padding-bottom: 6rem;
+                overflow-x: hidden;
+            }
+
+            /* Room for the bar's first button to hang left of the text, as
+               the mockup has it, inside the column (a classic scrollbar
+               would otherwise scroll the column sideways for it). */
+            .pane[data-pane="first"] {
+                margin-left: -0.6rem;
+                padding-left: 0.6rem;
+            }
+
+            .pane[data-pane="second"] {
+                margin-left: -1.5rem;
+                padding-left: 1.5rem;
+                border-left: 1px solid var(--rule);
+            }
+
+            .pane .chapter-main {
+                max-width: none;
+                min-width: 0;
+            }
+
+            .pane-bar {
+                position: sticky;
+                top: 0;
+                z-index: 13;
+                display: flex;
+                align-items: center;
+                gap: 0.15rem;
+                height: var(--pane-bar-height);
+                margin: 0 0 0.6rem -0.6rem;
+                background: var(--bg);
+                background-attachment: fixed;
+                font-family: var(--font-ui);
+            }
+
+            .pane-bar .ref-btn {
+                padding: 0 0.5rem;
+                gap: 0.35rem;
+            }
+
+            .pane-bar-spacer {
+                flex: 1 1 auto;
+            }
+
+            /* The bar's own translation button says the translation. */
+            .pane-bar .ref-codes {
+                display: none;
+            }
+
+            .pane[data-pane-active="true"] .chapter-heading {
+                border-bottom-color: var(--accent);
+            }
+
+            .pane[data-pane-active="false"] .chapter-heading,
+            .pane[data-pane-active="false"] .pane-bar .ref-btn {
+                color: var(--text-dim);
+            }
+        }
+
+        /* With the panes' bars there, the top bar's own reference, arrows
+           and translation button give way (pane_text.rs's BARS_QUERY is
+           this width; move both together), and Back and Forward push the
+           rest of the bar right, as the › did. */
+        @media screen and (min-width: 900px) {
+            :root[data-split] #chapter-prev,
+            :root[data-split] #ref-btn,
+            :root[data-split] #chapter-next,
+            :root[data-split] #translation-toggle {
+                display: none;
+            }
+
+            :root[data-split] .history-nav {
+                margin-right: auto;
+            }
+        }
+
         .verse {
             font-family: var(--font-scripture);
             font-size: calc(1.05rem * var(--reading-scale));

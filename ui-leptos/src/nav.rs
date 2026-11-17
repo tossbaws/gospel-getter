@@ -182,6 +182,16 @@ fn set_button(id: &str, label: &str, title: &str, disabled: bool) {
     let Some(button) = by_id(id) else {
         return;
     };
+    set_on(&button, label, title, disabled);
+}
+
+/// A chapter arrow says where it goes ([`set_button`]): a pane's bar's
+/// (`pane`), as the top bar's do.
+pub fn set_button_on(button: &HtmlElement, step: &text::BarButton) {
+    set_on(button, &step.label, &step.title, step.disabled);
+}
+
+fn set_on(button: &HtmlElement, label: &str, title: &str, disabled: bool) {
     let _ = button.set_attribute("aria-label", label);
     let _ = button.set_attribute("title", title);
     if disabled {
