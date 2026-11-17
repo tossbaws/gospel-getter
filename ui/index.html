@@ -1577,6 +1577,22 @@
             background: rgba(var(--accent-rgb), 0.12);
         }
 
+        /* A verse's Open beside (the Library's Edit look, below), small at
+           the right of its reference's line (the reference is short; the
+           verse starts below it). The pointer's only: the box keeps
+           focus, and Alt+Enter is its key. */
+        .search-result:has(.search-beside) {
+            position: relative;
+        }
+
+        .search-result .search-beside {
+            position: absolute;
+            top: 0.3rem;
+            right: 0.4rem;
+            line-height: 1.3;
+            padding: 0.1rem 0.4rem;
+        }
+
         .search-ref {
             display: block;
             font-size: max(11px, calc(0.75rem * var(--ui-scale)));
@@ -2665,6 +2681,7 @@
         }
 
         .library-beside,
+        .search-beside,
         .note-list-edit,
         .note-list-copy {
             flex: 0 0 auto;
@@ -2679,6 +2696,7 @@
         }
 
         .library-beside:hover,
+        .search-beside:hover,
         .note-list-edit:hover,
         .note-list-copy:hover {
             color: var(--accent);
