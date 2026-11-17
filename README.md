@@ -437,6 +437,10 @@ Upgrading keeps your data.
   Backups and the notes export don't include them.
 - **Recent places** (the bar's ▾ list, the last 10) are kept in the app's
   web storage, on this computer only. Backups don't include them.
+- Split view's second side (whether two passages are open, and where the
+  right-hand one is) is kept in the app's web storage, on this computer
+  only. Backups don't include it: the reading position they keep is always
+  the left side's.
 - AI findings (see **Mark findings** under **Use with AI agents**) and the
   **Let AI agents save findings** switch are kept in the database. A backup
   includes them: one with findings, or with the switch on, is data format 4,
