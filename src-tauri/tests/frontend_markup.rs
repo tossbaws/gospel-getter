@@ -1560,7 +1560,7 @@ fn the_bar_s_history_and_chapter_controls_are_ghost_svg_buttons() {
         "the menu's Forward"
     );
     assert!(
-        nav.contains("reader::ask(Request::Jump {"),
+        nav.contains("reader::ask(\n        pane,\n        Request::Jump {"),
         "a recent place"
     );
     assert!(nav.contains("keyboard::turn_chapter(which)"), "‹ and ›");
@@ -3350,7 +3350,7 @@ fn the_reference_button_says_where_the_reader_is() {
         reference.contains(r#"label: format!("{place}, {spoken}. Choose a book and chapter"),"#)
     );
     // Updated whenever a chapter is put on screen.
-    let render = block_after(piece("reader.rs"), "fn render_current()");
+    let render = block_after(piece("reader.rs"), "fn render_current(pane: PaneId)");
     assert!(render.contains("update_reference(&here, compare.as_deref());"));
     assert!(render.contains("bridge::show_picker_current(here.book_id, here.chapter);"));
     // G opens the picker, in the keyboard dispatcher, which leaves keys

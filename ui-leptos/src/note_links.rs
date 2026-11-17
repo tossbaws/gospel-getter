@@ -86,6 +86,7 @@ fn go_to(link: &Element) {
     }
     match (number(link, "data-start"), number(link, "data-end")) {
         (Some(start), Some(end)) => crate::reader::open(
+            crate::pane::active(),
             &bridge::OpenPassage {
                 book_id,
                 chapter,
@@ -94,7 +95,7 @@ fn go_to(link: &Element) {
             },
             wasm_bindgen::JsValue::NULL,
         ),
-        _ => crate::reader::jump(book_id, chapter, true),
+        _ => crate::reader::jump(crate::pane::active(), book_id, chapter, true),
     }
 }
 

@@ -255,7 +255,7 @@ impl Picker {
             surfaces::close(true);
         }
         let shown = self.reading() == Some((book_id, chapter));
-        crate::reader::jump(book_id, chapter, !shown);
+        crate::reader::jump(crate::pane::active(), book_id, chapter, !shown);
     }
 
     fn random(self) {

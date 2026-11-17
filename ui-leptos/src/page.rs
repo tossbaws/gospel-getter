@@ -44,6 +44,7 @@ use crate::keyboard;
 use crate::library_text::List;
 use crate::page_text::{self as text, Saved};
 use crate::palette::{Choice, PaletteState};
+use crate::pane;
 use crate::reader::{self, Request};
 use crate::reader_text::Which;
 use crate::surfaces;
@@ -421,12 +422,15 @@ pub fn imported(position: Option<PositionPreview>, message: String) {
     // What comes first is asked within the event: the position's chapter,
     // or else the bookmarks.
     let first = match position {
-        Some(position) => Err(reader::ask(Request::Load {
-            book_id: position.book_id,
-            chapter: position.chapter,
-            translation_code: Some(position.translation_code),
-            top: false,
-        })),
+        Some(position) => Err(reader::ask(
+            pane::active(),
+            Request::Load {
+                book_id: position.book_id,
+                chapter: position.chapter,
+                translation_code: Some(position.translation_code),
+                top: false,
+            },
+        )),
         None => Ok(refresh_library(&["bookmarks"])),
     };
     spawn_local(async move {
@@ -449,9 +453,12 @@ pub fn imported(position: Option<PositionPreview>, message: String) {
         }
         card::refresh_notes().await;
         // Above the chapter (the reader's notice, shown within the ask).
-        let notice = reader::ask(Request::Notice {
-            message: message.clone(),
-        });
+        let notice = reader::ask(
+            pane::active(),
+            Request::Notice {
+                message: message.clone(),
+            },
+        );
         spawn_local(async move {
             notice.await;
         });
@@ -760,7 +767,7 @@ pub fn mount() {
     // this and searches again.
     if let Some(translations) = by_id("translation-select") {
         dom::on(&translations, "change", |_| {
-            let load = reader::ask(Request::Translation);
+            let load = reader::ask(pane::active(), Request::Translation);
             spawn_local(async move {
                 load.await;
             });

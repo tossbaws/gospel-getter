@@ -693,7 +693,7 @@ impl Search {
             verse_end: data_number(option, "data-verse-end"),
         };
         self.set_open(false);
-        crate::reader::open(&passage, JsValue::NULL);
+        crate::reader::open(crate::pane::active(), &passage, JsValue::NULL);
     }
 
     /// Runs an option: goes to its passage, or runs its command once the

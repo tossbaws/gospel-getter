@@ -25,6 +25,7 @@ use crate::card_text::Slot;
 use crate::dom::{self, closest};
 use crate::keyboard::SELECTABLE;
 use crate::page;
+use crate::pane;
 use crate::reader::{self, Request};
 
 /// Everything a click on which is never navigation, nor a click away from
@@ -70,12 +71,15 @@ fn jump_to(go: &Element) {
     let (Some(book_id), Some(chapter)) = (number(go, "book"), number(go, "chapter")) else {
         return;
     };
-    let load = reader::ask(Request::Jump {
-        book_id,
-        chapter,
-        start: number(go, "verse"),
-        end: number(go, "end-verse"),
-    });
+    let load = reader::ask(
+        pane::active(),
+        Request::Jump {
+            book_id,
+            chapter,
+            start: number(go, "verse"),
+            end: number(go, "end-verse"),
+        },
+    );
     spawn_local(async move {
         load.await;
     });

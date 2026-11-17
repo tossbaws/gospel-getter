@@ -606,6 +606,7 @@ impl Library {
     fn open(passage: PassageArgs, note: &JsValue) {
         surfaces::close(note.is_null());
         crate::reader::open(
+            crate::pane::active(),
             &bridge::OpenPassage {
                 book_id: passage.book_id,
                 chapter: passage.chapter,

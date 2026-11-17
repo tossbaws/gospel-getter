@@ -53,7 +53,7 @@ use crate::ipc;
 use crate::nav::{self, Facts};
 use crate::nav_text::RecentPlace;
 use crate::palette::PaletteState;
-use crate::pane::PaneId;
+use crate::pane::{self, PaneId, PerPane};
 use crate::reader_text::{self as text, Disclosure, History, Opened, Place, Which};
 use crate::surfaces;
 
@@ -73,6 +73,7 @@ struct Here {
     translation_code: String,
 }
 
+/// A pane's chapter, how it got there and where the reader has been in it.
 #[derive(Default)]
 struct State {
     /// The last `get_reading` and `get_compare` answers, so Compare going
@@ -112,22 +113,23 @@ struct State {
     /// The translation is being switched for a jump that follows at once
     /// ([`switch_for_jump`]): the chapter on screen isn't read again in it.
     jump_follows: bool,
-    /// Each bundled translation's credit, from boot, for About.
-    credits: Vec<String>,
     history: History,
 }
 
 thread_local! {
-    static STATE: RefCell<State> = RefCell::new(State::default());
-    /// What the scrolling's timer calls ([`save_place_soon`]): one
-    /// callback, made once (`dom::kept_callback`).
-    static SAVE_PLACE: js_sys::Function = dom::kept_callback(save_place);
+    static STATE: RefCell<PerPane<State>> = RefCell::new(PerPane::default());
+    /// Each bundled translation's credit, from boot, for About.
+    static CREDITS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// What each pane's scrolling timer calls ([`save_place_soon`]): one
+    /// callback a pane, made once (`dom::kept_callback`).
+    static SAVE_PLACE: PerPane<js_sys::Function> =
+        PerPane::new(|pane| dom::kept_callback(move || save_place(pane)));
 }
 
-/// The reader's state, never held while the page is told anything (its
+/// A pane's state, never held while the page is told anything (its
 /// listeners may ask the reader again).
-fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
-    STATE.with_borrow_mut(f)
+fn with<R>(pane: PaneId, f: impl FnOnce(&mut State) -> R) -> R {
+    STATE.with_borrow_mut(|panes| f(&mut panes[pane]))
 }
 
 // ---- The page's elements and settings.
@@ -169,8 +171,8 @@ fn compare_layout() -> String {
 }
 
 /// The notice above the chapter: `message`, or none.
-fn show_notice(message: &str) {
-    if let Some(notice) = PaneId::First.notice() {
+fn show_notice(pane: PaneId, message: &str) {
+    if let Some(notice) = pane.notice() {
         notice.set_text_content(Some(message));
         notice.set_hidden(message.is_empty());
     }
@@ -196,9 +198,9 @@ fn opened() -> Opened {
 /// closed is drawn without them (`reader_text::xref_summary`). From the
 /// chapter on screen, which the pane is always drawn from
 /// (`render_current`).
-fn fill_xref_rows(list: &Element) {
+fn fill_xref_rows(pane: PaneId, list: &Element) {
     if list.first_child().is_none()
-        && let Some(dto) = with(|s| s.last_dto.clone())
+        && let Some(dto) = with(pane, |s| s.last_dto.clone())
     {
         list.set_inner_html(&text::xref_rows(&dto));
     }
@@ -224,8 +226,11 @@ fn set_disclosure(kind: Disclosure, open: bool) {
             .get_attribute("aria-controls")
             .and_then(|id| by_id(&id))
         {
-            if open && kind == Disclosure::Xrefs {
-                fill_xref_rows(&body);
+            if open
+                && kind == Disclosure::Xrefs
+                && let Some(pane) = pane::of(&body)
+            {
+                fill_xref_rows(pane, &body);
             }
             body.set_hidden(!open);
         }
@@ -281,13 +286,13 @@ fn show_translations(home: &Home) {
     if !credits.is_empty() {
         crate::about::show_credits(credits.clone());
     }
-    with(|s| s.credits = credits);
+    CREDITS.set(credits);
 }
 
 /// Each bundled translation's credit, in order, from boot (none before):
 /// About takes them as it mounts.
 pub fn credits() -> Vec<String> {
-    with(|s| s.credits.clone())
+    CREDITS.with_borrow(Clone::clone)
 }
 
 // ---- Putting a chapter on screen.
@@ -295,11 +300,11 @@ pub fn credits() -> Vec<String> {
 /// Puts the last reading (and the comparison, while comparing and it's
 /// this chapter's in the translations wanted) on screen, then tells the
 /// selection card (`card::shown`).
-fn render_current() {
-    let Some(pane) = PaneId::First.root() else {
+fn render_current(pane: PaneId) {
+    let Some(root) = pane.root() else {
         return;
     };
-    let (dto, compare, here) = with(|s| {
+    let (dto, compare, here) = with(pane, |s| {
         (
             s.last_dto.clone(),
             s.last_compare.clone(),
@@ -314,7 +319,7 @@ fn render_current() {
         is_comparing()
             && text::compare_is_current(c, dto.current_book_id, dto.current_chapter, &codes)
     });
-    let compare_first = with(|s| {
+    let compare_first = with(pane, |s| {
         s.last_compare
             .as_ref()
             .and_then(|c| c.columns.first())
@@ -341,7 +346,7 @@ fn render_current() {
         (None, Beside::Notes) => text::Beside::Notes { name: &name },
         (None, _) => text::Beside::Nothing,
     };
-    pane.set_inner_html(&text::reading_pane(
+    root.set_inner_html(&text::reading_pane(
         &dto,
         beside,
         &here.translation_code,
@@ -349,7 +354,7 @@ fn render_current() {
     ));
     // The grid's column count goes through the CSSOM, not a style attribute
     // in the markup, which the Content Security Policy would block.
-    if let Some(grid) = pane
+    if let Some(grid) = root
         .query_selector(".compare-grid")
         .ok()
         .flatten()
@@ -358,22 +363,22 @@ fn render_current() {
         let count = grid.get_attribute("data-columns").unwrap_or_default();
         let _ = grid.style().set_property("--compare-columns", &count);
     }
-    with(|s| s.columns = columns);
+    with(pane, |s| s.columns = columns);
     update_reference(&here, compare.as_deref());
     bridge::show_picker_current(here.book_id, here.chapter);
-    show_nav();
-    card::shown(dto, compare, &here.translation_code, compare_first);
+    show_nav(pane);
+    card::shown(pane, dto, compare, &here.translation_code, compare_first);
 }
 
 /// Tells the bar's Back, Forward, Recent places, ‹ and › (`nav`) where the
 /// reader is and where each would go.
-fn show_nav() {
+fn show_nav(pane: PaneId) {
     // The chapters beside, as the pane was drawn with them (and ← and →
     // turn to): named from the reading already in hand.
     let side = |side: Option<&crate::dto::ChapterSide>| {
         side.map(|s| format!("{} {}", s.book_name, s.chapter))
     };
-    let facts = with(|s| Facts {
+    let facts = with(pane, |s| Facts {
         here: s.reading.as_ref().map(|r| (r.book_id, r.chapter)),
         back: s.history.toward(-1).cloned(),
         forward: s.history.toward(1).cloned(),
@@ -396,8 +401,8 @@ fn recent(place: &Place, translation_code: &str) -> RecentPlace {
 
 /// The place on screen, as the reader leaves it (after
 /// [`remember_leaving`]), as a recent place.
-fn recent_here() -> Option<RecentPlace> {
-    with(|s| {
+fn recent_here(pane: PaneId) -> Option<RecentPlace> {
+    with(pane, |s| {
         let code = &s.reading.as_ref()?.translation_code;
         s.history.here().map(|place| recent(place, code))
     })
@@ -405,11 +410,13 @@ fn recent_here() -> Option<RecentPlace> {
 
 /// A jump or a step has landed on `place`: it and the place left are the
 /// newest recent places, in that order.
-fn record_recent(leaving: Option<RecentPlace>, place: &Place) {
+fn record_recent(pane: PaneId, leaving: Option<RecentPlace>, place: &Place) {
     if let Some(leaving) = leaving {
         nav::record(leaving);
     }
-    if let Some(code) = with(|s| s.reading.as_ref().map(|r| r.translation_code.clone())) {
+    if let Some(code) = with(pane, |s| {
+        s.reading.as_ref().map(|r| r.translation_code.clone())
+    }) {
         nav::record(recent(place, &code));
     }
 }
@@ -442,8 +449,8 @@ fn load_compare(book_id: i64, chapter: i64) -> js_sys::Promise {
 /// something else), and the commands are sent before this returns. A
 /// chapter the Bible doesn't have changes nothing; one that couldn't be
 /// read says so, unless a newer load has begun since.
-fn load_reading(book_id: i64, chapter: i64) -> Load {
-    load_sent(book_id, chapter, None)
+fn load_reading(pane: PaneId, book_id: i64, chapter: i64) -> Load {
+    load_sent(pane, book_id, chapter, None)
 }
 
 /// Boot's `get_reading` for its chapter, sent before this module loaded:
@@ -464,21 +471,21 @@ enum Outcome {
 /// [`load_reading`], with its `get_reading` already sent, if `sent` is (boot
 /// asks for its chapter before this module has loaded). An answer already
 /// in is put on screen now, within the request.
-fn load_sent(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
+fn load_sent(pane: PaneId, book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
     // A navigation: a note's Edit still waiting for its own jump is let go
     // ([`open`]).
-    with(|s| s.edit.cancel());
-    send_load(book_id, chapter, sent)
+    with(pane, |s| s.edit.cancel());
+    send_load(pane, book_id, chapter, sent)
 }
 
 /// [`load_sent`]'s work: the commands sent, and the answers put on screen.
 /// Compare changing on the way asks again through here, as the same load
 /// (a note's Edit waiting for it still opens after).
-fn send_load(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
+fn send_load(pane: PaneId, book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
     // The reader has asked for something else: a verse put back where they
     // were at launch stays put no longer.
     surfaces::let_go_of_place();
-    let token = with(|s| {
+    let token = with(pane, |s| {
         s.load_token += 1;
         s.asked = Some((book_id, chapter));
         // A step's Try again is this load's now (see `retry`); a step's
@@ -486,7 +493,7 @@ fn send_load(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
         s.history.forget_failed();
         s.load_token
     });
-    card::loading();
+    card::loading(pane);
     let translation_code = bridge::translation_code();
     let layout = compare_layout();
     let reading = match sent {
@@ -502,9 +509,9 @@ fn send_load(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
     let compare = is_comparing().then(|| load_compare(book_id, chapter));
     if let (Ok(Sent::Answered(dto_raw)), None) = (&reading, &compare) {
         let answer = answered(
+            pane,
             token,
-            book_id,
-            chapter,
+            (book_id, chapter),
             translation_code,
             &layout,
             dto_raw.clone(),
@@ -512,7 +519,7 @@ fn send_load(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
         );
         return match answer {
             Outcome::Done(loaded) => Box::pin(async move { loaded }),
-            Outcome::Again => send_load(book_id, chapter, None),
+            Outcome::Again => send_load(pane, book_id, chapter, None),
         };
     }
     Box::pin(async move {
@@ -524,7 +531,7 @@ fn send_load(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
         let dto_raw = match answer {
             Ok(dto) => dto,
             Err(e) => {
-                failed(token, &e, book_id, chapter);
+                failed(pane, token, &e, book_id, chapter);
                 return false;
             }
         };
@@ -533,9 +540,9 @@ fn send_load(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
             None => JsValue::NULL,
         };
         let answer = answered(
+            pane,
             token,
-            book_id,
-            chapter,
+            (book_id, chapter),
             translation_code,
             &layout,
             dto_raw,
@@ -543,27 +550,28 @@ fn send_load(book_id: i64, chapter: i64, sent: Option<Sent>) -> Load {
         );
         match answer {
             Outcome::Done(loaded) => loaded,
-            Outcome::Again => send_load(book_id, chapter, None).await,
+            Outcome::Again => send_load(pane, book_id, chapter, None).await,
         }
     })
 }
 
-/// A load's answers (the reading, and the comparison or `null`), sent with
-/// `token` in the translation `translation_code` for the layout `layout`:
+/// A load's answers (the reading, and the comparison or `null`), sent for
+/// `pane` with `token` in the translation `translation_code` for the layout
+/// `layout`:
 /// put on screen, and the position saved, unless a newer load has begun,
 /// the chapter isn't there, or the translation or Compare changed on the
 /// way.
 fn answered(
+    pane: PaneId,
     token: u64,
-    book_id: i64,
-    chapter: i64,
+    (book_id, chapter): (i64, i64),
     translation_code: String,
     layout: &str,
     dto_raw: JsValue,
     compare_raw: JsValue,
 ) -> Outcome {
     // A newer load has begun: let it win.
-    if with(|s| s.load_token) != token {
+    if with(pane, |s| s.load_token) != token {
         return Outcome::Done(false);
     }
     // The translation was switched (`Request::Translation`), or Compare
@@ -572,14 +580,14 @@ fn answered(
     if bridge::translation_code() != translation_code || compare_layout() != layout {
         return Outcome::Again;
     }
-    with(|s| s.asked = None);
+    with(pane, |s| s.asked = None);
     if dto_raw.is_null() || dto_raw.is_undefined() {
         return Outcome::Done(false);
     }
     let dto: Reading = match serde_wasm_bindgen::from_value(dto_raw.clone()) {
         Ok(dto) => dto,
         Err(e) => {
-            failed(token, &JsValue::from(e.to_string()), book_id, chapter);
+            failed(pane, token, &JsValue::from(e.to_string()), book_id, chapter);
             return Outcome::Done(false);
         }
     };
@@ -601,38 +609,44 @@ fn answered(
         translation_code: translation_code.clone(),
     };
     let compared = compare.is_some();
-    with(|s| {
+    with(pane, |s| {
         s.last_dto = Some(Rc::new(dto));
         if let Some(compare) = compare {
             s.last_compare = Some(Rc::new(compare));
         }
         s.reading = Some(here.clone());
     });
-    show_notice(if is_comparing() && !compared {
-        text::COMPARE_FAILED
-    } else {
-        ""
-    });
-    render_current();
-    save_position(Position {
-        book_id: here.book_id,
-        chapter: here.chapter,
-        translation_code,
-        verse: None,
-        offset: None,
-    });
+    show_notice(
+        pane,
+        if is_comparing() && !compared {
+            text::COMPARE_FAILED
+        } else {
+            ""
+        },
+    );
+    render_current(pane);
+    save_position(
+        pane,
+        Position {
+            book_id: here.book_id,
+            chapter: here.chapter,
+            translation_code,
+            verse: None,
+            offset: None,
+        },
+    );
     // Then where in it the reader is, once the page is still: a chapter
     // turned by ← or → is shown at the scroll position the last one had.
-    save_place_soon();
+    save_place_soon(pane);
     Outcome::Done(true)
 }
 
 /// A load that failed: logged, and, unless a newer one has begun, said.
-fn failed(token: u64, error: &JsValue, book_id: i64, chapter: i64) {
+fn failed(pane: PaneId, token: u64, error: &JsValue, book_id: i64, chapter: i64) {
     ipc::log_error("Failed to load reading pane", error);
-    if with(|s| s.load_token) == token {
-        with(|s| s.asked = None);
-        show_failure(&ipc::error_text(error), book_id, chapter);
+    if with(pane, |s| s.load_token) == token {
+        with(pane, |s| s.asked = None);
+        show_failure(pane, &ipc::error_text(error), book_id, chapter);
     }
 }
 
@@ -640,10 +654,10 @@ fn failed(token: u64, error: &JsValue, book_id: i64, chapter: i64) {
 /// put on screen, with a Try again that asks for it once more (and starts
 /// the history, if it was the first chapter). The chapter on screen, if
 /// any, stays, and a toast says it too, however far down the reader is.
-fn show_failure(message: &str, book_id: i64, chapter: i64) {
-    show_notice(message);
-    with(|s| s.retry = Some((book_id, chapter)));
-    if let (Some(document), Some(notice)) = (bridge::document(), PaneId::First.notice())
+fn show_failure(pane: PaneId, message: &str, book_id: i64, chapter: i64) {
+    show_notice(pane, message);
+    with(pane, |s| s.retry = Some((book_id, chapter)));
+    if let (Some(document), Some(notice)) = (bridge::document(), pane.notice())
         && let Ok(retry) = document.create_element("button")
     {
         let _ = retry.set_attribute("type", "button");
@@ -652,29 +666,29 @@ fn show_failure(message: &str, book_id: i64, chapter: i64) {
         let _ = notice.append_with_str_1(" ");
         let _ = notice.append_with_node_1(&retry);
     }
-    if with(|s| s.last_dto.is_some()) {
+    if with(pane, |s| s.last_dto.is_some()) {
         bridge::toast(message, true);
     }
 }
 
 /// Try again: the chapter that couldn't be read.
-fn retry() {
-    let Some((book_id, chapter)) = with(|s| s.retry) else {
+fn retry(pane: PaneId) {
+    let Some((book_id, chapter)) = with(pane, |s| s.retry) else {
         return;
     };
     // After a step back or forward that couldn't be read, the step again.
-    if with(|s| s.history.can_retry(book_id, chapter)) {
-        remember_leaving();
-        let leaving = recent_here();
-        if let Some(going) = with(|s| s.history.begin_retry(book_id, chapter)) {
-            spawn(open_step(going, leaving));
+    if with(pane, |s| s.history.can_retry(book_id, chapter)) {
+        remember_leaving(pane);
+        let leaving = recent_here(pane);
+        if let Some(going) = with(pane, |s| s.history.begin_retry(book_id, chapter)) {
+            spawn(open_step(pane, going, leaving));
         }
         return;
     }
-    let load = load_reading(book_id, chapter);
+    let load = load_reading(pane, book_id, chapter);
     spawn_local(async move {
-        if load.await && !with(|s| s.history.started()) {
-            start_history();
+        if load.await && !with(pane, |s| s.history.started()) {
+            start_history(pane);
         }
     });
 }
@@ -684,8 +698,8 @@ fn retry() {
 /// its way at a time; a newer one waits, replacing any that waited before
 /// it, so they reach the backend in the order they were made and the last
 /// one wins. The first is sent now.
-fn save_position(position: Position) {
-    let first = with(|s| {
+fn save_position(pane: PaneId, position: Position) {
+    let first = with(pane, |s| {
         s.last_sent = Some(position.clone());
         s.waiting = Some(position);
         if s.saving {
@@ -707,20 +721,20 @@ fn save_position(position: Position) {
                 Err(e) => Err(e),
             };
             match answer {
-                Ok(_) => with(|s| s.saved = Some(sending)),
+                Ok(_) => with(pane, |s| s.saved = Some(sending)),
                 // The next chapter shown, or scroll, saves again.
                 Err(e) => {
                     ipc::log_error("Failed to save the reading position", &e);
-                    with(|s| s.last_sent = None);
+                    with(pane, |s| s.last_sent = None);
                 }
             }
-            let Some(next) = with(|s| s.waiting.take()) else {
+            let Some(next) = with(pane, |s| s.waiting.take()) else {
                 break;
             };
             sending = next;
             sent = send_position(&sending);
         }
-        with(|s| s.saving = false);
+        with(pane, |s| s.saving = false);
     });
 }
 
@@ -736,8 +750,8 @@ const PLACE_SAVE_MS: i32 = 400;
 /// top of the reading pane (`surfaces::top_verse`, the place the reading
 /// place logic keeps), if it's changed since the last save: so the next
 /// launch opens there. At the chapter's heading it's the chapter's top.
-fn save_place() {
-    with(|s| {
+fn save_place(pane: PaneId) {
+    with(pane, |s| {
         if let Some(timer) = s.place_timer.take()
             && let Some(window) = web_sys::window()
         {
@@ -746,7 +760,7 @@ fn save_place() {
     });
     // Nothing to say while the reader's own pane isn't there (the page's
     // plain-text fallback has taken its place).
-    let Some(here) = with(|s| s.reading.clone()).filter(|_| PaneId::First.inner().is_some()) else {
+    let Some(here) = with(pane, |s| s.reading.clone()).filter(|_| pane.inner().is_some()) else {
         return;
     };
     let top = surfaces::top_verse(&here.translation_code);
@@ -757,17 +771,24 @@ fn save_place() {
         verse: top.map(|(verse, _)| verse),
         offset: top.map(|(_, offset)| text::rounded_offset(offset)),
     };
-    if with(|s| s.last_sent.as_ref() == Some(&position)) {
+    if with(pane, |s| s.last_sent.as_ref() == Some(&position)) {
         return;
     }
-    save_position(position);
+    save_position(pane, position);
+}
+
+/// [`save_place`] for every pane on screen.
+fn save_places() {
+    for pane in pane::shown() {
+        save_place(pane);
+    }
 }
 
 /// A scroll: where the reader is is saved once the page has been still for
 /// [`PLACE_SAVE_MS`].
-fn save_place_soon() {
-    let timer = SAVE_PLACE.with(|save| dom::set_timeout(save, PLACE_SAVE_MS));
-    let replaced = with(|s| std::mem::replace(&mut s.place_timer, timer));
+fn save_place_soon(pane: PaneId) {
+    let timer = SAVE_PLACE.with(|save| dom::set_timeout(&save[pane], PLACE_SAVE_MS));
+    let replaced = with(pane, |s| std::mem::replace(&mut s.place_timer, timer));
     dom::clear_timeout(replaced);
 }
 
@@ -776,26 +797,27 @@ fn save_place_soon() {
 /// there as the page settles (`surfaces::hold_place`, the way the reading
 /// place logic puts one back). A verse the translation doesn't number
 /// leaves the chapter at its top.
-fn reopen_at(verse: i64, offset: Option<f64>) {
-    let Some(here) = with(|s| s.reading.clone()) else {
+fn reopen_at(pane: PaneId, verse: i64, offset: Option<f64>) {
+    let Some(here) = with(pane, |s| s.reading.clone()) else {
         return;
     };
-    if let Some(mark) = PaneId::First.query(&text::verse_selector(&here.translation_code, verse)) {
+    if let Some(mark) = pane.query(&text::verse_selector(&here.translation_code, verse)) {
         surfaces::hold_place(mark, offset.unwrap_or(0.0));
-        save_place();
+        save_place(pane);
     }
 }
 
 /// `window.gospelGetterPlace.saved()`: the last position the backend saved
-/// (`save_reading_position`'s arguments), or `null`. For the GUI checks,
-/// which wait for it before closing the app.
+/// (`save_reading_position`'s arguments), or `null`: the first pane's, the
+/// one the backend keeps. For the GUI checks, which wait for it before
+/// closing the app.
 fn export_place() {
     let Some(window) = web_sys::window() else {
         return;
     };
     let global = js_sys::Object::new();
     let saved = Closure::<dyn Fn() -> JsValue>::new(|| {
-        with(|s| s.saved.clone())
+        with(PaneId::First, |s| s.saved.clone())
             .and_then(|saved| ipc::args(&saved).ok())
             .unwrap_or(JsValue::NULL)
     });
@@ -809,34 +831,34 @@ fn export_place() {
 /// one there already. Its answer (or its failure's notice) shows only while
 /// it's still the comparison asked for: no newer change of Compare, no load
 /// begun since, and the same chapter, translations and layout on screen.
-fn on_compare_change() {
+fn on_compare_change(pane: PaneId) {
     // Whatever Compare is now, a fetch for what it was is no longer wanted.
-    let claim = with(|s| s.compare.claim());
-    let Some(dto) = with(|s| s.last_dto.clone()) else {
+    let claim = with(pane, |s| s.compare.claim());
+    let Some(dto) = with(pane, |s| s.last_dto.clone()) else {
         return;
     };
     if !is_comparing() {
-        show_notice("");
-        render_current();
+        show_notice(pane, "");
+        render_current(pane);
         return;
     }
     let codes = compare_codes();
-    let current = with(|s| {
+    let current = with(pane, |s| {
         s.last_compare.as_ref().is_some_and(|c| {
             text::compare_is_current(c, dto.current_book_id, dto.current_chapter, &codes)
         })
     });
     if current {
-        render_current();
+        render_current(pane);
         return;
     }
-    let token = with(|s| s.load_token);
+    let token = with(pane, |s| s.load_token);
     let layout = compare_layout();
     let (book_id, chapter) = (dto.current_book_id, dto.current_chapter);
     let compare = load_compare(book_id, chapter);
     spawn_local(async move {
         let compare_raw = JsFuture::from(compare).await.unwrap_or(JsValue::NULL);
-        let asked = with(|s| {
+        let asked = with(pane, |s| {
             s.compare.holds(claim)
                 && s.load_token == token
                 && s.last_dto
@@ -850,10 +872,10 @@ fn on_compare_change() {
             .then(|| serde_wasm_bindgen::from_value::<Compare>(compare_raw.clone()).ok())
             .flatten();
         match compare {
-            Some(compare) => with(|s| s.last_compare = Some(Rc::new(compare))),
-            None => show_notice(text::COMPARE_FAILED),
+            Some(compare) => with(pane, |s| s.last_compare = Some(Rc::new(compare))),
+            None => show_notice(pane, text::COMPARE_FAILED),
         }
-        render_current();
+        render_current(pane);
     });
 }
 
@@ -865,18 +887,24 @@ fn on_compare_change() {
 /// doesn't number them, the chapter opens and the notice says so, rather
 /// than selecting other verses. Whether it opened, and what the page then
 /// had selected.
-fn open_passage(book_id: i64, chapter: i64, start: Option<i64>, end: Option<i64>) -> OpenedPassage {
-    let load = load_reading(book_id, chapter);
+fn open_passage(
+    pane: PaneId,
+    book_id: i64,
+    chapter: i64,
+    start: Option<i64>,
+    end: Option<i64>,
+) -> OpenedPassage {
+    let load = load_reading(pane, book_id, chapter);
     Box::pin(async move {
         let loaded = load.await;
         let (true, Some(start)) = (loaded, start) else {
             return (loaded, None);
         };
         let end = end.unwrap_or(start);
-        let Some(here) = with(|s| s.reading.clone()) else {
+        let Some(here) = with(pane, |s| s.reading.clone()) else {
             return (loaded, None);
         };
-        let numbers = with(|s| {
+        let numbers = with(pane, |s| {
             s.columns
                 .iter()
                 .find(|(code, _)| *code == here.translation_code)
@@ -890,33 +918,36 @@ fn open_passage(book_id: i64, chapter: i64, start: Option<i64>, end: Option<i64>
         // Past the chapter's end in this translation, or a verse it leaves
         // out in mid-chapter (as the BSB does Matthew 17:21).
         let last = numbers.last().copied().unwrap_or(0);
-        show_notice(&text::not_numbered(
-            &here.book_name,
-            chapter,
-            start,
-            end,
-            &translation_name(&here.translation_code),
-            last,
-        ));
+        show_notice(
+            pane,
+            &text::not_numbered(
+                &here.book_name,
+                chapter,
+                start,
+                end,
+                &translation_name(&here.translation_code),
+                last,
+            ),
+        );
         (loaded, None)
     })
 }
 
 /// Starts the history over at the chapter being read.
-fn start_history() {
-    with(|s| {
+fn start_history(pane: PaneId) {
+    with(pane, |s| {
         if let Some(here) = &s.reading {
             let (book_id, chapter) = (here.book_id, here.chapter);
             s.history.start(book_id, chapter);
         }
     });
-    show_nav();
+    show_nav(pane);
 }
 
 /// The place on screen, brought up to date as the reader leaves it.
-fn remember_leaving() {
-    let y = PaneId::First.scroller().y().unwrap_or(0.0);
-    with(|s| {
+fn remember_leaving(pane: PaneId) {
+    let y = pane.scroller().y().unwrap_or(0.0);
+    with(pane, |s| {
         let here = s.reading.as_ref().map(|r| (r.book_id, r.chapter));
         s.history.remember_leaving(here, y);
     });
@@ -924,20 +955,27 @@ fn remember_leaving() {
 
 /// A jump: opens the chapter (selecting `start`–`end`, if given and
 /// numbered; from the top, with `top`) and records it in the history.
-fn jump_to(book_id: i64, chapter: i64, start: Option<i64>, end: Option<i64>, top: bool) -> Load {
-    remember_leaving();
-    let leaving = recent_here();
-    with(|s| s.history.begin_jump());
-    let open = open_passage(book_id, chapter, start, end);
+fn jump_to(
+    pane: PaneId,
+    book_id: i64,
+    chapter: i64,
+    start: Option<i64>,
+    end: Option<i64>,
+    top: bool,
+) -> Load {
+    remember_leaving(pane);
+    let leaving = recent_here(pane);
+    with(pane, |s| s.history.begin_jump());
+    let open = open_passage(pane, book_id, chapter, start, end);
     Box::pin(async move {
         let (loaded, selected) = open.await;
         let place = if loaded {
             if top {
-                PaneId::First.scroller().scroll_to(0.0);
+                pane.scroller().scroll_to(0.0);
             }
             let landed =
                 selected.filter(|&verses| start.is_some() && Some(verses) == start.zip(end));
-            with(|s| {
+            with(pane, |s| {
                 s.reading.as_ref().map(|here| Place {
                     start: landed.map(|v| v.0),
                     end: landed.map(|v| v.1),
@@ -948,10 +986,10 @@ fn jump_to(book_id: i64, chapter: i64, start: Option<i64>, end: Option<i64>, top
             None
         };
         if let Some(place) = &place {
-            record_recent(leaving, place);
+            record_recent(pane, leaving, place);
         }
-        with(|s| s.history.end_jump(place));
-        show_nav();
+        with(pane, |s| s.history.end_jump(place));
+        show_nav(pane);
         loaded
     })
 }
@@ -959,42 +997,42 @@ fn jump_to(book_id: i64, chapter: i64, start: Option<i64>, end: Option<i64>, top
 /// Back (-1) or forward (1): the place, its verses selected, and the page
 /// scrolled where the reader left it; at either end, a toast says there's
 /// nothing there. A newer step or jump takes over from one on its way.
-fn go_history(step: i32) -> Load {
-    if !with(|s| s.history.can_go(step)) {
+fn go_history(pane: PaneId, step: i32) -> Load {
+    if !with(pane, |s| s.history.can_go(step)) {
         bridge::toast(text::history_end(step), false);
         return Box::pin(async { false });
     }
-    remember_leaving();
-    let leaving = recent_here();
-    let Some(going) = with(|s| s.history.begin_go(step)) else {
+    remember_leaving(pane);
+    let leaving = recent_here(pane);
+    let Some(going) = with(pane, |s| s.history.begin_go(step)) else {
         return Box::pin(async { false });
     };
-    show_nav();
-    open_step(going, leaving)
+    show_nav(pane);
+    open_step(pane, going, leaving)
 }
 
 /// Opens the place a step back or forward (with its token) is going to.
 /// Only once it's read is it the place on screen; one that can't be read
 /// leaves the history as it was (`History::end_go`). Read, it and the place
 /// left (`leaving`) are the newest recent places.
-fn open_step((token, place): (u64, Place), leaving: Option<RecentPlace>) -> Load {
-    let open = open_passage(place.book_id, place.chapter, place.start, place.end);
+fn open_step(pane: PaneId, (token, place): (u64, Place), leaving: Option<RecentPlace>) -> Load {
+    let open = open_passage(pane, place.book_id, place.chapter, place.start, place.end);
     Box::pin(async move {
         let (loaded, _) = open.await;
-        if !with(|s| s.history.current(token)) {
+        if !with(pane, |s| s.history.current(token)) {
             return false;
         }
         if loaded {
-            let scroller = PaneId::First.scroller();
+            let scroller = pane.scroller();
             if let Some(y) = place.scroll_y {
                 scroller.scroll_to(y);
             } else if place.start.is_none() {
                 scroller.scroll_to(0.0);
             }
-            record_recent(leaving, &place);
+            record_recent(pane, leaving, &place);
         }
-        with(|s| s.history.end_go(token, loaded));
-        show_nav();
+        with(pane, |s| s.history.end_go(token, loaded));
+        show_nav(pane);
         loaded
     })
 }
@@ -1009,8 +1047,8 @@ fn spawn(load: Load) {
 /// Opens a chapter as a jump (recorded in the history): the welcome's
 /// places to start, a chapter chosen in the picker or Random chapter's;
 /// from the top, with `top`.
-pub fn jump(book_id: i64, chapter: i64, top: bool) {
-    spawn(jump_to(book_id, chapter, None, None, top));
+pub fn jump(pane: PaneId, book_id: i64, chapter: i64, top: bool) {
+    spawn(jump_to(pane, book_id, chapter, None, None, top));
 }
 
 /// A Library row or a search result opens its passage (the Library or the
@@ -1021,8 +1059,9 @@ pub fn jump(book_id: i64, chapter: i64, top: bool) {
 /// the way: a jump that failed or was overtaken, another navigation, or
 /// any note editor opening meanwhile (even one closed again) lets the Edit
 /// go, so it never opens over what the reader is doing now.
-pub fn open(passage: &bridge::OpenPassage, note: JsValue) {
+pub fn open(pane: PaneId, passage: &bridge::OpenPassage, note: JsValue) {
     let load = jump_to(
+        pane,
         passage.book_id,
         passage.chapter,
         passage.verse_start,
@@ -1035,28 +1074,29 @@ pub fn open(passage: &bridge::OpenPassage, note: JsValue) {
     }
     // After the jump's own load has begun (which cancels any Edit before
     // this one).
-    let edit = with(|s| s.edit.claim());
+    let edit = with(pane, |s| s.edit.claim());
     spawn_local(async move {
         let loaded = load.await;
-        if loaded && with(|s| s.edit.holds(edit) && s.reading.is_some()) {
+        if loaded && with(pane, |s| s.edit.holds(edit) && s.reading.is_some()) {
             card::edit_note(&note);
         }
     });
 }
 
-/// How many chapter loads have begun: a number that moves on with every
-/// navigation, so a late answer can tell whether the reader has gone
-/// anywhere since it was asked for (search's Enter, waiting for its
-/// search). Read only.
+/// How many chapter loads have begun, in every pane: a number that moves
+/// on with every navigation, so a late answer can tell whether the reader
+/// has gone anywhere since it was asked for (search's Enter, waiting for
+/// its search). Read only.
 pub fn loads() -> u64 {
-    with(|s| s.load_token)
+    pane::shown().map(|pane| with(pane, |s| s.load_token)).sum()
 }
 
 /// What the palette's commands need of the reader: the chapters (as the
-/// pane says, which ← and → go by) and books around the one on screen, and
-/// the history either way.
+/// active pane says, which ← and → go by) and books around the one on
+/// screen there, and its history either way.
 pub fn palette_facts(state: &mut PaletteState) {
-    let inner = PaneId::First.inner();
+    let pane = pane::active();
+    let inner = pane.inner();
     let has = |name| {
         inner
             .as_ref()
@@ -1064,7 +1104,7 @@ pub fn palette_facts(state: &mut PaletteState) {
     };
     state.next_chapter = has("data-next-book");
     state.previous_chapter = has("data-prev-book");
-    with(|s| {
+    with(pane, |s| {
         let dto = s.last_dto.as_ref();
         state.next_book = dto.is_some_and(|d| d.next_book.is_some());
         state.previous_book = dto.is_some_and(|d| d.prev_book.is_some());
@@ -1110,9 +1150,10 @@ pub enum Request {
 /// Boot's chapter: the translations from `home` (`get_home`'s answer), then
 /// the chapter the reader was on, whose `get_reading` boot may already have
 /// sent (`sent`: on its way, or answered, which is put on screen at once,
-/// within this call), then the history from there. Its end is the load's.
+/// within this call), then the history from there, in the first pane (the
+/// place the backend keeps is its). Its end is the load's.
 pub fn start(home: Home, sent: Option<Sent>) -> Load {
-    run(Request::Start { home }, sent)
+    run(PaneId::First, Request::Start { home }, sent)
 }
 
 /// Switches to translation `code` for a jump asked for straight after
@@ -1120,35 +1161,35 @@ pub fn start(home: Home, sent: Option<Sent>) -> Load {
 /// (the Library's previews, Aa, the search box), but the chapter on screen
 /// isn't read again in it first, as `Request::Load` with a translation
 /// doesn't; the jump reads its own (C-04).
-pub fn switch_for_jump(code: &str) {
-    with(|s| s.jump_follows = true);
+pub fn switch_for_jump(pane: PaneId, code: &str) {
+    with(pane, |s| s.jump_follows = true);
     aa::choose_translation(code);
-    with(|s| s.jump_follows = false);
+    with(pane, |s| s.jump_follows = false);
 }
 
 /// Starts what `request` asks for, now (anything it sends is sent within
 /// this call); its end is the load's: whether a chapter was put on screen.
-pub fn ask(request: Request) -> Load {
-    run(request, None)
+pub fn ask(pane: PaneId, request: Request) -> Load {
+    run(pane, request, None)
 }
 
 /// Starts what `request` asks for, now; its end is the load's. `sent` is
 /// boot's `get_reading`, already on its way, or answered.
-fn run(request: Request, sent: Option<Sent>) -> Load {
+fn run(pane: PaneId, request: Request, sent: Option<Sent>) -> Load {
     match request {
         Request::Start { home } => {
             show_translations(&home);
             let at = home
                 .current_verse
                 .map(|verse| (verse, home.current_verse_offset));
-            let load = load_sent(home.current_book_id, home.current_chapter, sent);
+            let load = load_sent(pane, home.current_book_id, home.current_chapter, sent);
             Box::pin(async move {
                 let loaded = load.await;
-                if with(|s| s.reading.is_some()) {
-                    start_history();
+                if with(pane, |s| s.reading.is_some()) {
+                    start_history(pane);
                 }
                 if let (true, Some((verse, offset))) = (loaded, at) {
-                    reopen_at(verse, offset);
+                    reopen_at(pane, verse, offset);
                 }
                 loaded
             })
@@ -1163,10 +1204,10 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
                 select.set_value(&code);
                 show_translation();
             }
-            from_top(load_reading(book_id, chapter), top)
+            from_top(pane, load_reading(pane, book_id, chapter), top)
         }
         Request::Book { which } => {
-            let found = with(|s| {
+            let found = with(pane, |s| {
                 let dto = s.last_dto.as_ref()?;
                 let here = s.reading.as_ref()?;
                 let book = match which {
@@ -1177,7 +1218,7 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
             });
             match found {
                 Some((Some((book_id, chapter)), _)) => {
-                    from_top(load_reading(book_id, chapter), true)
+                    from_top(pane, load_reading(pane, book_id, chapter), true)
                 }
                 Some((None, name)) => {
                     bridge::toast(&text::no_book(&name, which), false);
@@ -1192,17 +1233,17 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
             // on its way, which reads the chapter it asked for in it once
             // its answer is in (`answered`): that one, not the chapter
             // still on screen, and as its own jump or step (C2-02).
-            if with(|s| s.jump_follows || s.asked.is_some()) {
+            if with(pane, |s| s.jump_follows || s.asked.is_some()) {
                 return Box::pin(async { false });
             }
-            let inner = PaneId::First.inner();
+            let inner = pane.inner();
             let number = |name| {
                 inner
                     .as_ref()
                     .map_or(Some(1), |inner| data_number(inner, name))
             };
             match (number("data-current-book"), number("data-current-chapter")) {
-                (Some(book_id), Some(chapter)) => load_reading(book_id, chapter),
+                (Some(book_id), Some(chapter)) => load_reading(pane, book_id, chapter),
                 _ => Box::pin(async { false }),
             }
         }
@@ -1211,10 +1252,10 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
             chapter,
             start,
             end,
-        } => jump_to(book_id, chapter, start, end, false),
-        Request::History { step } => go_history(step),
+        } => jump_to(pane, book_id, chapter, start, end, false),
+        Request::History { step } => go_history(pane, step),
         Request::Notice { message } => {
-            show_notice(&message);
+            show_notice(pane, &message);
             Box::pin(async { true })
         }
     }
@@ -1222,14 +1263,14 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
 
 /// `load`, then the page scrolled to the top if it put a chapter there and
 /// `top` asks for that (the chapter's end and `[`/`]`).
-fn from_top(load: Load, top: bool) -> Load {
+fn from_top(pane: PaneId, load: Load, top: bool) -> Load {
     if !top {
         return load;
     }
     Box::pin(async move {
         let loaded = load.await;
         if loaded {
-            PaneId::First.scroller().scroll_to(0.0);
+            pane.scroller().scroll_to(0.0);
         }
         loaded
     })
@@ -1237,20 +1278,15 @@ fn from_top(load: Load, top: bool) -> Load {
 
 // ---- The pane's own controls.
 
-/// A click in the reading pane on one of the reader's controls. The click
-/// dispatcher (`clicks`, on the body too, registered first) has already
-/// done what any click does there (closing the search box and Copy as…)
-/// and left these alone.
+/// A click in a reading pane on one of the reader's controls, for that
+/// pane. The click dispatcher (`clicks`, on the body too, registered first)
+/// has already done what any click does there (closing the search box and
+/// Copy as…) and left these alone.
 fn on_click(event: &MouseEvent) {
-    let Some(target) = event
-        .target()
-        .and_then(|t| t.dyn_into::<Element>().ok())
-        .filter(|t| {
-            PaneId::First
-                .root()
-                .is_some_and(|pane| pane.contains(Some(t.as_ref())))
-        })
-    else {
+    let Some(target) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else {
+        return;
+    };
+    let Some(pane) = pane::of(&target) else {
         return;
     };
     // The cross references' credit links: the page never opens a browser
@@ -1278,7 +1314,7 @@ fn on_click(event: &MouseEvent) {
             data_number(&step, "data-book"),
             data_number(&step, "data-chapter"),
         ) {
-            spawn(from_top(load_reading(book_id, chapter), true));
+            spawn(from_top(pane, load_reading(pane, book_id, chapter), true));
         }
         return;
     }
@@ -1299,7 +1335,7 @@ fn on_click(event: &MouseEvent) {
             data_number(&heading, "data-book"),
             data_number(&heading, "data-chapter"),
         ) {
-            spawn(load_reading(book_id, chapter));
+            spawn(load_reading(pane, book_id, chapter));
         }
         return;
     }
@@ -1313,14 +1349,21 @@ fn on_click(event: &MouseEvent) {
         )
     {
         let end = data_number(&chip, "data-end-verse").unwrap_or(verse);
-        spawn(jump_to(book_id, chapter, Some(verse), Some(end), false));
+        spawn(jump_to(
+            pane,
+            book_id,
+            chapter,
+            Some(verse),
+            Some(end),
+            false,
+        ));
     }
 }
 
 /// Every piece has mounted (`lib`'s ready list): the picker, mounted after
 /// this, hears the chapter on screen again.
 pub fn on_ready() {
-    if let Some(here) = with(|s| s.reading.clone()) {
+    if let Some(here) = with(pane::active(), |s| s.reading.clone()) {
         bridge::show_picker_current(here.book_id, here.chapter);
     }
 }
@@ -1339,10 +1382,18 @@ pub fn mount() {
     let Some(document) = bridge::document() else {
         return;
     };
-    dom::on_document_event(aa::COMPARE_CHANGE_EVENT, |_| on_compare_change());
+    dom::on_document_event(aa::COMPARE_CHANGE_EVENT, |_| {
+        for pane in pane::shown() {
+            on_compare_change(pane);
+        }
+    });
     // Any note editor opening is newer than a note's Edit still waiting for
     // its jump ([`open`]).
-    dom::on_document_event(bridge::NOTE_EVENT, |_| with(|s| s.edit.cancel()));
+    dom::on_document_event(bridge::NOTE_EVENT, |_| {
+        for pane in pane::shown() {
+            with(pane, |s| s.edit.cancel());
+        }
+    });
     // After the click dispatcher on the body (`clicks`), which ignores
     // these.
     if let Some(body) = document.body() {
@@ -1352,26 +1403,31 @@ pub fn mount() {
             }
         });
     }
-    if let Some(notice) = PaneId::First.notice() {
-        dom::on(&notice, "click", |event| {
-            let on_retry = event
-                .target()
-                .and_then(|t| t.dyn_into::<Element>().ok())
-                .is_some_and(|t| closest(&t, ".reading-retry").is_some());
-            if on_retry {
-                retry();
-            }
-        });
+    for pane in pane::shown() {
+        if let Some(notice) = pane.notice() {
+            dom::on(&notice, "click", move |event| {
+                let on_retry = event
+                    .target()
+                    .and_then(|t| t.dyn_into::<Element>().ok())
+                    .is_some_and(|t| closest(&t, ".reading-retry").is_some());
+                if on_retry {
+                    retry(pane);
+                }
+            });
+        }
     }
     // Where the reader is, saved once they stop scrolling, and at once as
     // the window is hidden or loses focus, or the pointer leaves the page
     // (for the window's close button, say: a window closing destroys its
     // webview without a `pagehide`).
     if let Some(window) = web_sys::window() {
-        if let Some(target) = PaneId::First.scroller().target() {
+        for pane in pane::shown() {
+            let Some(target) = pane.scroller().target() else {
+                continue;
+            };
             let passive = web_sys::AddEventListenerOptions::new();
             passive.set_passive(true);
-            let scrolled = Closure::<dyn Fn()>::new(save_place_soon);
+            let scrolled = Closure::<dyn Fn()>::new(move || save_place_soon(pane));
             let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
                 "scroll",
                 scrolled.as_ref().unchecked_ref(),
@@ -1379,23 +1435,25 @@ pub fn mount() {
             );
             scrolled.forget();
         }
-        dom::on(&window, "pagehide", |_| save_place());
-        dom::on(&window, "blur", |_| save_place());
+        dom::on(&window, "pagehide", |_| save_places());
+        dom::on(&window, "blur", |_| save_places());
         // The print stylesheet prints both lists open, whatever they show
         // on screen, so a closed Cross references list is filled first.
         dom::on(&window, "beforeprint", |_| {
-            if let Some(list) = by_id("xref-summary-list") {
-                fill_xref_rows(&list);
+            for pane in pane::shown() {
+                if let Some(list) = pane.query("#xref-summary-list") {
+                    fill_xref_rows(pane, &list);
+                }
             }
         });
     }
     dom::on(&document, "visibilitychange", |_| {
         if bridge::document().is_some_and(|d| d.hidden()) {
-            save_place();
+            save_places();
         }
     });
     if let Some(html) = document.document_element() {
-        dom::on(&html, "mouseleave", |_| save_place());
+        dom::on(&html, "mouseleave", |_| save_places());
     }
     export_place();
     // A mouse's back and forward buttons; while a dialog is open, nothing
@@ -1414,7 +1472,7 @@ pub fn mount() {
             if crate::page::modal_open() {
                 return;
             }
-            spawn(go_history(step));
+            spawn(go_history(pane::active(), step));
         });
     }
 }

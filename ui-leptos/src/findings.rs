@@ -42,6 +42,7 @@ use crate::findings_text as text;
 use crate::intent::{Claim, Generation};
 use crate::ipc;
 use crate::margin;
+use crate::pane::{self, PaneId, PerPane};
 use crate::surfaces;
 
 /// How long a removal's Undo is offered, in milliseconds: as a note's.
@@ -50,8 +51,9 @@ const UNDO_MS: i32 = crate::card_text::UNDO_MS;
 /// The switch in Aa.
 const SWITCH_ID: &str = "ai-findings-toggle";
 
+/// The findings of one pane's chapter.
 #[derive(Default)]
-struct State {
+struct InPane {
     /// The chapter on screen (book, chapter).
     chapter: Option<(i64, i64)>,
     /// Its findings, once read, and the chapter they were read for.
@@ -59,6 +61,11 @@ struct State {
     of: Option<(i64, i64)>,
     /// Bumped by each read: only the latest is shown.
     token: u64,
+}
+
+#[derive(Default)]
+struct State {
+    panes: PerPane<InPane>,
     /// The switch's reads and changes: only the newest shows.
     switch: Generation,
     /// What the backend last said the switch is (read or saved).
@@ -75,6 +82,11 @@ thread_local! {
 
 fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with_borrow_mut(f)
+}
+
+/// [`with`], on `pane`'s findings.
+fn with_pane<R>(pane: PaneId, f: impl FnOnce(&mut InPane) -> R) -> R {
+    with(|s| f(&mut s.panes[pane]))
 }
 
 #[derive(Serialize)]
@@ -104,29 +116,38 @@ struct SwitchArgs {
     enabled: bool,
 }
 
-/// The reader has a chapter on screen (`book_id` `chapter`, its verses new):
-/// its findings are marked at once if they're known, and read again.
-pub fn chapter_shown(book_id: i64, chapter: i64) {
-    let known = with(|s| {
+/// The reader has a chapter on screen in `pane` (`book_id` `chapter`, its
+/// verses new): its findings are marked at once if they're known, and read
+/// again.
+pub fn chapter_shown(pane: PaneId, book_id: i64, chapter: i64) {
+    let known = with_pane(pane, |s| {
         s.chapter = Some((book_id, chapter));
         s.of == Some((book_id, chapter))
     });
     if known {
-        show();
+        show(pane);
     } else {
-        with(|s| s.findings.clear());
+        with_pane(pane, |s| s.findings.clear());
         margin::findings(book_id, chapter, Vec::new());
     }
-    spawn_local(refresh());
+    spawn_local(refresh_pane(pane));
 }
 
-/// Reads the chapter's findings again and shows them; only the latest read
-/// is shown.
+/// Reads every pane's chapter's findings again and shows them.
 pub async fn refresh() {
-    let Some((book_id, chapter)) = with(|s| s.chapter) else {
+    let panes: Vec<PaneId> = pane::shown().collect();
+    for pane in panes {
+        refresh_pane(pane).await;
+    }
+}
+
+/// Reads `pane`'s chapter's findings again and shows them; only the latest
+/// read is shown.
+async fn refresh_pane(pane: PaneId) {
+    let Some((book_id, chapter)) = with_pane(pane, |s| s.chapter) else {
         return;
     };
-    let token = with(|s| {
+    let token = with_pane(pane, |s| {
         s.token += 1;
         s.token
     });
@@ -134,16 +155,16 @@ pub async fn refresh() {
         Ok(args) => ipc::invoke::<Vec<Finding>>("list_findings", args).await,
         Err(e) => Err(e),
     };
-    if with(|s| s.token) != token {
+    if with_pane(pane, |s| s.token) != token {
         return;
     }
     match answer {
         Ok(findings) => {
-            with(|s| {
+            with_pane(pane, |s| {
                 s.findings = findings;
                 s.of = Some((book_id, chapter));
             });
-            show();
+            show(pane);
         }
         Err(e) => ipc::log_error("Failed to load the chapter\u{2019}s AI findings", &e),
     }
@@ -159,9 +180,9 @@ pub async fn refresh_everywhere() {
     }
 }
 
-/// Marks the flagged verses and hands the findings to the margin.
-fn show() {
-    let Some((book_id, chapter, findings)) = with(|s| {
+/// Marks `pane`'s flagged verses and hands the findings to the margin.
+fn show(pane: PaneId) {
+    let Some((book_id, chapter, findings)) = with_pane(pane, |s| {
         let (book_id, chapter) = s.chapter?;
         (s.of == Some((book_id, chapter))).then(|| (book_id, chapter, s.findings.clone()))
     }) else {
@@ -210,9 +231,12 @@ fn mark(findings: &[Finding]) {
     }
 }
 
-/// The finding with this id, of the chapter on screen.
+/// The finding with this id, of the chapter on screen in the active pane
+/// (where the margin is).
 fn finding(id: i64) -> Option<Finding> {
-    with(|s| s.findings.iter().find(|f| f.id == id).cloned())
+    with_pane(pane::active(), |s| {
+        s.findings.iter().find(|f| f.id == id).cloned()
+    })
 }
 
 fn target(event: &web_sys::Event) -> Option<Element> {

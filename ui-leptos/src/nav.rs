@@ -28,6 +28,7 @@ use crate::dom::{self, by_id, storage};
 use crate::ipc;
 use crate::keyboard;
 use crate::nav_text::{self as text, RecentPlace, RecentPlaces, Stored};
+use crate::pane;
 use crate::picker_text::Book;
 use crate::reader::{self, Request};
 use crate::reader_text::{Place, Which};
@@ -257,15 +258,19 @@ fn go_recent(index: usize) {
     let Some(place) = with(|s| s.recent.places().get(index).cloned()) else {
         return;
     };
+    let pane = pane::active();
     if place.translation != bridge::translation_code() {
-        reader::switch_for_jump(&place.translation);
+        reader::switch_for_jump(pane, &place.translation);
     }
-    let load = reader::ask(Request::Jump {
-        book_id: place.book_id,
-        chapter: place.chapter,
-        start: place.start,
-        end: place.end,
-    });
+    let load = reader::ask(
+        pane,
+        Request::Jump {
+            book_id: place.book_id,
+            chapter: place.chapter,
+            start: place.start,
+            end: place.end,
+        },
+    );
     spawn_local(async move {
         let _ = load.await;
     });

@@ -61,7 +61,7 @@ use crate::ipc;
 use crate::library_text::List;
 use crate::margin;
 use crate::palette::PaletteState;
-use crate::pane::PaneId;
+use crate::pane::{self, PaneId, PerPane};
 
 /// Every verse the reader can select: the chapter being read, in each
 /// translation column it's shown in. Neither the faded neighbors nor
@@ -182,9 +182,24 @@ struct NoteRow {
     raw: JsValue,
 }
 
+/// What the card knows of one pane's chapter.
+#[derive(Default)]
+struct InPane {
+    chapter: Option<Chapter>,
+    copy_chapter: Option<CopyEntry>,
+    /// The chapter's notes, each with the backend's own object for it (for
+    /// the margin, which may open one in the note editor).
+    chapter_notes: Vec<(SelectionNote, JsValue)>,
+    chapter_notes_token: u64,
+    /// The chapter (book, chapter) `chapter_notes` were last asked for,
+    /// and whether they could be read (if not, there are none).
+    chapter_notes_of: Option<(i64, i64)>,
+    chapter_notes_read: bool,
+}
+
 #[derive(Default)]
 struct State {
-    chapter: Option<Chapter>,
+    panes: PerPane<InPane>,
     selection: Option<Selection>,
     /// The verse the card belongs to (the last selected one), where focus
     /// goes back to when it closes.
@@ -200,7 +215,6 @@ struct State {
     /// shows one.
     undo: Option<JsValue>,
     copy_selection: Option<CopyEntry>,
-    copy_chapter: Option<CopyEntry>,
     /// Copy as… is open for this, from that button.
     menu_for: Option<Slot>,
     menu_opener: Option<HtmlElement>,
@@ -218,14 +232,6 @@ struct State {
     highlights_token: u64,
     /// Reloads of the highlights still on their way.
     highlights_reloading: u32,
-    /// The chapter's notes, each with the backend's own object for it (for
-    /// the margin, which may open one in the note editor).
-    chapter_notes: Vec<(SelectionNote, JsValue)>,
-    chapter_notes_token: u64,
-    /// The chapter (book, chapter) `chapter_notes` were last asked for,
-    /// and whether they could be read (if not, there are none).
-    chapter_notes_of: Option<(i64, i64)>,
-    chapter_notes_read: bool,
     selection_notes: Vec<NoteRow>,
     selection_notes_error: String,
     selection_notes_token: u64,
@@ -245,16 +251,22 @@ struct State {
 }
 
 impl State {
+    /// What the card knows of the pane it acts on, the active one (a
+    /// selection is made in it).
+    fn here(&self) -> &InPane {
+        &self.panes[pane::active()]
+    }
+
     fn copy(&mut self, slot: Slot) -> &mut Option<CopyEntry> {
         match slot {
             Slot::Selection => &mut self.copy_selection,
-            Slot::Chapter => &mut self.copy_chapter,
+            Slot::Chapter => &mut self.panes[pane::active()].copy_chapter,
         }
     }
 
     /// The selected verses, sorted, from the chapter (never from the DOM).
     fn selection_verses(&self) -> Vec<Verse> {
-        let (Some(chapter), Some(selection)) = (&self.chapter, &self.selection) else {
+        let (Some(chapter), Some(selection)) = (&self.here().chapter, &self.selection) else {
             return Vec::new();
         };
         let mut verses: Vec<Verse> = chapter
@@ -268,7 +280,7 @@ impl State {
     }
 
     fn citation(&self) -> Option<String> {
-        let (chapter, selection) = (self.chapter.as_ref()?, self.selection.as_ref()?);
+        let (chapter, selection) = (self.here().chapter.as_ref()?, self.selection.as_ref()?);
         Some(text::citation(
             &chapter.book_name,
             chapter.chapter,
@@ -280,7 +292,7 @@ impl State {
 
     /// The bookmark of exactly the selected verses, if there is one.
     fn selected_bookmark(&self) -> Option<Bookmark> {
-        let (chapter, selection) = (self.chapter.as_ref()?, self.selection.as_ref()?);
+        let (chapter, selection) = (self.here().chapter.as_ref()?, self.selection.as_ref()?);
         self.bookmarks
             .iter()
             .find(|b| {
@@ -294,7 +306,7 @@ impl State {
 
     /// The selected verses' colors (`None` where there's none).
     fn selected_colors(&self) -> Vec<Option<String>> {
-        let Some(chapter) = &self.chapter else {
+        let Some(chapter) = &self.here().chapter else {
             return Vec::new();
         };
         if self.selection.is_none() {
@@ -572,7 +584,7 @@ fn render_selection() {
     };
     with(|s| s.card_verse = Some(last.clone()));
     let copy = with(|s| {
-        let (chapter, selection) = (s.chapter.as_ref()?, s.selection.as_ref()?);
+        let (chapter, selection) = (s.here().chapter.as_ref()?, s.selection.as_ref()?);
         Some(CopyTextArgs {
             translation_code: selection.translation_code.clone(),
             book_id: chapter.book_id,
@@ -607,12 +619,13 @@ fn render_selection() {
 fn render_card_references(els: &Elements) {
     let (verses, range, chapter, xrefs) = with(|s| {
         let range = s.selection.as_ref().is_some_and(|sel| sel.start != sel.end);
-        let chapter = s.chapter.as_ref().map_or(0, |c| c.chapter);
+        let chapter = s.here().chapter.as_ref().map_or(0, |c| c.chapter);
         let verses = s.selection_verses();
         let xrefs: Vec<(i64, Vec<crate::dto::Xref>)> = verses
             .iter()
             .filter_map(|v| {
                 let found = s
+                    .here()
                     .chapter
                     .as_ref()?
                     .reading
@@ -672,7 +685,7 @@ fn apply(change: Change) {
 fn preview_translation() -> String {
     let comparing = crate::aa::beside() == crate::aa_text::Beside::Translations;
     with(|s| {
-        let chapter = s.chapter.as_ref();
+        let chapter = s.here().chapter.as_ref();
         chapter
             .and_then(|c| c.compare_first.clone())
             .filter(|_| comparing)
@@ -964,7 +977,8 @@ fn copy_text_in(
 /// card's status line for the selection, in the toast for the chapter.
 /// Must be called within the click or keydown that asked for it.
 fn copy_passage(slot: Slot, format: &str) {
-    let ready = with(|s| s.chapter.is_some() && (slot == Slot::Chapter || s.selection.is_some()));
+    let ready =
+        with(|s| s.here().chapter.is_some() && (slot == Slot::Chapter || s.selection.is_some()));
     if !ready {
         return;
     }
@@ -1039,7 +1053,7 @@ fn open_menu(slot: Slot, opener: Option<HtmlElement>) {
         return;
     };
     let what = with(|s| {
-        let chapter = s.chapter.as_ref()?;
+        let chapter = s.here().chapter.as_ref()?;
         match slot {
             Slot::Chapter => Some(format!("{} {}", chapter.book_name, chapter.chapter)),
             Slot::Selection => s.citation(),
@@ -1160,7 +1174,7 @@ fn update_bookmark_button() {
 /// (bookmarks belong to no one translation).
 fn apply_bookmark_markers() {
     let spans = with(|s| {
-        s.chapter.as_ref().map(|c| {
+        s.here().chapter.as_ref().map(|c| {
             s.bookmarks
                 .iter()
                 .filter(|b| b.book_id == c.book_id && b.chapter == c.chapter)
@@ -1199,7 +1213,8 @@ pub fn library_loaded(list: List, items: &JsValue) {
 }
 
 fn toggle_bookmark() -> Task {
-    let ready = with(|s| s.selection.is_some() && s.chapter.is_some() && !s.bookmark_pending);
+    let ready =
+        with(|s| s.selection.is_some() && s.here().chapter.is_some() && !s.bookmark_pending);
     if !ready {
         return Box::pin(async {});
     }
@@ -1207,6 +1222,7 @@ fn toggle_bookmark() -> Task {
         let attempt = s.attempt();
         let existing = s.selected_bookmark();
         let args = s
+            .here()
             .chapter
             .as_ref()
             .zip(s.selection.as_ref())
@@ -1301,7 +1317,7 @@ fn set_highlight_marker(el: &Element, color: Option<&str>) {
 fn apply_highlight_markers() {
     let (here, highlights) = with(|s| {
         (
-            s.chapter.as_ref().map(|c| (c.book_id, c.chapter)),
+            s.here().chapter.as_ref().map(|c| (c.book_id, c.chapter)),
             s.highlights.clone(),
         )
     });
@@ -1354,7 +1370,7 @@ fn update_highlight_controls() {
 /// had, or (with `None`) removes their highlights.
 fn highlight_selection(color: Option<String>) -> Task {
     let found = with(|s| {
-        let (chapter, selection) = (s.chapter.as_ref()?, s.selection.as_ref()?);
+        let (chapter, selection) = (s.here().chapter.as_ref()?, s.selection.as_ref()?);
         let found = (
             chapter.book_id,
             chapter.chapter,
@@ -1447,8 +1463,9 @@ fn highlight_selection(color: Option<String>) -> Task {
 /// notes" per verse.
 fn apply_note_markers() {
     let spans = with(|s| {
-        s.chapter.as_ref().map(|c| {
-            s.chapter_notes
+        let here = s.here();
+        here.chapter.as_ref().map(|c| {
+            here.chapter_notes
                 .iter()
                 .filter(|(n, _)| n.book_id == c.book_id && n.chapter == c.chapter)
                 .map(|(n, _)| (n.verse_start, n.verse_end))
@@ -1482,8 +1499,10 @@ fn apply_note_markers() {
     }
 }
 
-fn refresh_chapter_notes() -> Task {
+/// Reads the notes on `pane`'s chapter again.
+fn refresh_chapter_notes(pane: PaneId) -> Task {
     let (token, args) = with(|s| {
+        let s = &mut s.panes[pane];
         s.chapter_notes_token += 1;
         // Every note on the chapter, those past the last verse on screen
         // too (the margin shows them beside it).
@@ -1509,7 +1528,7 @@ fn refresh_chapter_notes() -> Task {
             let raw = js_sys::Array::from(&raw);
             Ok(notes.into_iter().zip(raw.iter()).collect::<Vec<_>>())
         });
-        if with(|s| s.chapter_notes_token) != token {
+        if with(|s| s.panes[pane].chapter_notes_token) != token {
             return;
         }
         let (notes, read) = match got {
@@ -1520,6 +1539,7 @@ fn refresh_chapter_notes() -> Task {
             }
         };
         with(|s| {
+            let s = &mut s.panes[pane];
             s.chapter_notes = notes;
             s.chapter_notes_of = Some(of);
             s.chapter_notes_read = read;
@@ -1539,9 +1559,11 @@ const PAST_EVERY_LAST_VERSE: i64 = 999;
 /// column only says a chapter has none when it hasn't.
 fn show_margin() {
     let found = with(|s| {
-        let c = s.chapter.as_ref()?;
-        let known = s.chapter_notes_read && s.chapter_notes_of == Some((c.book_id, c.chapter));
-        let notes = s
+        let here = s.here();
+        let c = here.chapter.as_ref()?;
+        let known =
+            here.chapter_notes_read && here.chapter_notes_of == Some((c.book_id, c.chapter));
+        let notes = here
             .chapter_notes
             .iter()
             .filter(|(n, _)| n.book_id == c.book_id && n.chapter == c.chapter)
@@ -1564,6 +1586,7 @@ fn refresh_selection_notes() -> Task {
     let (token, args) = with(|s| {
         s.selection_notes_token += 1;
         let args = s
+            .here()
             .chapter
             .as_ref()
             .zip(s.selection.as_ref())
@@ -1663,7 +1686,7 @@ fn render_notes_section() {
         return;
     };
     let shown = with(|s| {
-        let (chapter, selection) = (s.chapter.as_ref()?, s.selection.as_ref()?);
+        let (chapter, selection) = (s.here().chapter.as_ref()?, s.selection.as_ref()?);
         if s.selection_notes.is_empty() && s.selection_notes_error.is_empty() {
             return None;
         }
@@ -1727,7 +1750,11 @@ fn render_notes_section() {
 /// it), after any change to notes, wherever it came from; the commands are
 /// sent now, in that order, and this settles once all four have.
 pub fn refresh_notes() -> impl Future<Output = ()> + 'static {
-    let chapter = to_promise(refresh_chapter_notes());
+    let chapters = js_sys::Array::new();
+    for pane in pane::shown() {
+        chapters.push(&to_promise(refresh_chapter_notes(pane)));
+    }
+    let chapter = js_sys::Promise::all(&chapters);
     let selection = to_promise(refresh_selection_notes());
     let library = to_promise(refresh_library(&["notes"]));
     let findings = to_promise(Box::pin(crate::findings::refresh()));
@@ -1816,7 +1843,7 @@ fn open_note_editor(
 ) {
     let (book_id, chapter, start, end) = passage;
     let Some(verses) = with(|s| {
-        let here = s.chapter.as_ref()?;
+        let here = s.here().chapter.as_ref()?;
         let mut verses: Vec<Verse> = if here.book_id == book_id && here.chapter == chapter {
             here.column(code)
                 .iter()
@@ -1906,7 +1933,7 @@ fn edit(note: JsValue, code: &str, opener: Option<HtmlElement>) {
 /// + Add note, or N: a note on the selected verses.
 fn open_add_note(opener: Option<HtmlElement>) {
     let found = with(|s| {
-        let (chapter, selection) = (s.chapter.as_ref()?, s.selection.as_ref()?);
+        let (chapter, selection) = (s.here().chapter.as_ref()?, s.selection.as_ref()?);
         Some((
             (
                 chapter.book_id,
@@ -1935,7 +1962,7 @@ fn open_add_note(opener: Option<HtmlElement>) {
 /// reader's notes already on the verse are listed, and never changed.
 pub fn keep_finding(finding: &Finding, opener: Option<HtmlElement>) {
     let Some(code) = with(|s| {
-        let chapter = s.chapter.as_ref()?;
+        let chapter = s.here().chapter.as_ref()?;
         (chapter.book_id == finding.book_id && chapter.chapter == finding.chapter)
             .then(|| chapter.translation_code.clone())
     }) else {
@@ -1961,7 +1988,8 @@ pub fn keep_finding(finding: &Finding, opener: Option<HtmlElement>) {
 /// editor lists the others.
 fn chapter_others(finding: &Finding) -> Vec<Other> {
     with(|s| {
-        s.chapter_notes
+        s.here()
+            .chapter_notes
             .iter()
             .map(|(n, _)| n)
             .filter(|n| {
@@ -1986,7 +2014,7 @@ pub fn edit_note(note: &JsValue) {
         return;
     }
     let code = with(|s| {
-        let chapter = s.chapter.as_ref()?;
+        let chapter = s.here().chapter.as_ref()?;
         Some(s.selection.as_ref().map_or_else(
             || chapter.translation_code.clone(),
             |sel| sel.translation_code.clone(),
@@ -2280,18 +2308,22 @@ fn listen_capturing<E: JsCast + 'static>(
 
 // ---- What the reader tells this.
 
-/// The reader has asked for another chapter or translation: the selection
-/// goes now, not when the new text arrives, so nothing (Ctrl+C included)
-/// acts on it in the meantime.
-pub fn loading() {
-    clear_selection();
+/// The reader has asked for another chapter or translation in `pane`: the
+/// selection, made in the active pane, goes now if that's the one, not when
+/// the new text arrives, so nothing (Ctrl+C included) acts on it in the
+/// meantime.
+pub fn loading(pane: PaneId) {
+    if pane == pane::active() {
+        clear_selection();
+    }
 }
 
-/// The reader has put a chapter on screen (`#reading-pane-inner` is new):
-/// the chapter's copy text, the selection and the verses' marks follow.
-/// `compare` is the comparison on screen (while comparing), `compare_first`
-/// the first column of the last one fetched.
+/// The reader has put a chapter on screen in `pane` (its
+/// `#reading-pane-inner` is new): the chapter's copy text, the selection and
+/// the verses' marks follow. `compare` is the comparison on screen (while
+/// comparing), `compare_first` the first column of the last one fetched.
 pub fn shown(
+    pane: PaneId,
     reading: Rc<Reading>,
     compare: Option<Rc<Compare>>,
     translation_code: &str,
@@ -2317,11 +2349,12 @@ pub fn shown(
     };
     // The same answer drawn again (Compare on or off): see the end.
     let redrawn = with(|s| {
-        s.chapter
+        s.panes[pane]
+            .chapter
             .as_ref()
             .is_some_and(|c| Rc::ptr_eq(&c.reading, &chapter.reading))
     });
-    with(|s| s.chapter = Some(chapter));
+    with(|s| s.panes[pane].chapter = Some(chapter));
     close_menu(false);
     fetch_copy(Slot::Chapter, copy);
     with(|s| s.selection = None);
@@ -2330,8 +2363,13 @@ pub fn shown(
     apply_highlight_markers();
     apply_note_markers();
     show_margin();
-    if let Some((book_id, chapter)) = with(|s| s.chapter.as_ref().map(|c| (c.book_id, c.chapter))) {
-        crate::findings::chapter_shown(book_id, chapter);
+    if let Some((book_id, chapter)) = with(|s| {
+        s.panes[pane]
+            .chapter
+            .as_ref()
+            .map(|c| (c.book_id, c.chapter))
+    }) {
+        crate::findings::chapter_shown(pane, book_id, chapter);
     }
     // The same reading drawn again (Compare turned on or off) keeps the
     // notes already read for its chapter: every change to them through the
@@ -2340,13 +2378,14 @@ pub fn shown(
     // are asked again regardless: an agent may have saved some meanwhile.
     let read_already = redrawn
         && with(|s| {
+            let s = &s.panes[pane];
             s.chapter_notes_read
                 && s.chapter
                     .as_ref()
                     .is_some_and(|c| s.chapter_notes_of == Some((c.book_id, c.chapter)))
         });
     if !read_already {
-        spawn_local(refresh_chapter_notes());
+        spawn_local(refresh_chapter_notes(pane));
     }
 }
 
@@ -2376,7 +2415,7 @@ pub fn select_for_note(code: &str, start: i64, end: i64) {
 /// What the palette's commands need of this: the chapter's text is ready
 /// to copy.
 pub fn palette_facts(state: &mut PaletteState) {
-    state.chapter_copy = with(|s| s.copy_chapter.is_some());
+    state.chapter_copy = with(|s| s.here().copy_chapter.is_some());
 }
 
 // ---- What the click and keyboard dispatchers, boot, an import and the
@@ -2416,7 +2455,7 @@ pub struct SelectionFacts {
 /// fresh-install rule need.
 pub fn facts() -> Facts {
     with(|s| Facts {
-        chapter: s.chapter.as_ref().map(|c| ChapterFacts {
+        chapter: s.here().chapter.as_ref().map(|c| ChapterFacts {
             book_id: c.book_id,
             translation_code: c.translation_code.clone(),
             numbers: c
