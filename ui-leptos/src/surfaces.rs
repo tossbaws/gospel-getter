@@ -52,6 +52,7 @@ use crate::aa;
 use crate::bridge;
 use crate::dom::{self, by_id};
 use crate::nav;
+use crate::pane::PaneId;
 use crate::preferences;
 use crate::prefs;
 pub use crate::surfaces_text::Surface;
@@ -214,10 +215,7 @@ fn place_marks() -> Vec<HtmlElement> {
 }
 
 fn matching(selector: &str) -> Vec<HtmlElement> {
-    bridge::document()
-        .and_then(|document| document.query_selector_all(selector).ok())
-        .map(|found| dom::elements(&found))
-        .unwrap_or_default()
+    PaneId::First.query_all(selector)
 }
 
 /// Each element's top and bottom in the page, scrolled to `y`.
@@ -256,8 +254,7 @@ struct PaintedLayout {
 /// The reader's place as the page is laid out now, if anything of the
 /// chapter reaches below the bar.
 fn reading_place() -> Option<Place> {
-    let bar = by_id("top-bar")?;
-    let bar_bottom = bar.get_bounding_client_rect().bottom();
+    let bar_bottom = PaneId::First.scroller().view()?.top;
     let marks = place_marks();
     // Each mark's box is read once, up to the one kept.
     let mut top = 0.0;
@@ -285,16 +282,17 @@ fn note_painted_place() {
     }
     let noted = Closure::once_into_js(|| {
         LAYOUT_PENDING.set(false);
-        let (Some(window), Some(bar)) = (web_sys::window(), by_id("top-bar")) else {
-            return;
-        };
-        let y = window.scroll_y().unwrap_or(0.0);
+        let scroller = PaneId::First.scroller();
+        let y = scroller.y().unwrap_or(0.0);
         let marks = place_marks();
         let at = page_boxes(&marks, y);
         let row = matching(ROW_MARKS);
         let row_at = page_boxes(&row, y);
+        let Some(view) = scroller.view() else {
+            return;
+        };
         PAINTED_LAYOUT.set(Some(PaintedLayout {
-            bar_bottom: bar.get_bounding_client_rect().bottom(),
+            bar_bottom: view.top,
             marks,
             at,
             row,
@@ -332,7 +330,7 @@ fn painted_place_at(y: f64) -> Option<Place> {
 /// now (`surfaces_text::scroll_before_anchoring`). None with no layout
 /// painted, or no mark that fits.
 fn scroll_before_anchoring() -> Option<f64> {
-    let height = web_sys::window()?.inner_height().ok()?.as_f64()?;
+    let height = PaneId::First.scroller().view()?.bottom;
     PAINTED_LAYOUT.with_borrow(|layout| {
         let layout = layout.as_ref()?;
         let now: Vec<_> = layout
@@ -349,18 +347,6 @@ fn scroll_before_anchoring() -> Option<f64> {
     })
 }
 
-/// Whether the browser scrolls to keep a place of its own when the window
-/// is resized: Chromium's scroll anchoring does (WebView2, on Windows);
-/// WebKitGTK's doesn't. Both say they support `overflow-anchor`, so it's
-/// told by Chromium's own `window.chrome`. Its place needn't be the
-/// reader's: it can be a line of the faded chapter beside, which comes
-/// first in the page.
-fn anchors_on_resize() -> bool {
-    web_sys::window()
-        .and_then(|window| js_sys::Reflect::get(&window, &JsValue::from_str("chrome")).ok())
-        .is_some_and(|chrome| chrome.is_truthy())
-}
-
 /// Runs `change` (which reflows the page) keeping the reader's place: the
 /// first heading or verse of the chapter being read that reaches below the
 /// bar stays where it was on screen, or where `place` says it was.
@@ -370,9 +356,8 @@ pub fn keep_reading_place(change: impl FnOnce(), place: Option<Place>) {
     if let Some(place) = place
         && let Some(shift) =
             text::scroll_shift(place.top, place.mark.get_bounding_client_rect().top())
-        && let Some(window) = web_sys::window()
     {
-        window.scroll_by_with_x_and_y(0.0, shift);
+        PaneId::First.scroller().scroll_by(shift);
     }
     note_painted_place();
 }
@@ -385,16 +370,14 @@ pub fn keep_reading_place(change: impl FnOnce(), place: Option<Place>) {
 /// chapter's heading or a gap in Compare's columns (the chapter's top, as
 /// far as reopening goes), or nothing of the chapter reaches below the bar.
 pub fn top_verse(code: &str) -> Option<(i64, f64)> {
-    let y = web_sys::window()?.scroll_y().ok()?;
+    let scroller = PaneId::First.scroller();
+    let y = scroller.y()?;
     let painted = PAINTED_LAYOUT
         .with_borrow(|layout| layout.as_ref().map(|layout| layout.bar_bottom))
         .and_then(|bar_bottom| Some((painted_place_at(y)?, bar_bottom)));
     let (place, bar_bottom) = match painted {
         Some(found) => found,
-        None => (
-            reading_place()?,
-            by_id("top-bar")?.get_bounding_client_rect().bottom(),
-        ),
+        None => (reading_place()?, scroller.view()?.top),
     };
     if place.mark.get_attribute("data-translation").as_deref() != Some(code) {
         return None;
@@ -407,10 +390,10 @@ pub fn top_verse(code: &str) -> Option<(i64, f64)> {
 /// [`keep_reading_place`] puts a place back: to the nearest whole pixel
 /// (`surfaces_text::whole_pixel_top`), as the page can only scroll by one.
 fn put_place(mark: HtmlElement, offset: f64) {
-    let Some(bar) = by_id("top-bar") else {
+    let Some(view) = PaneId::First.scroller().view() else {
         return;
     };
-    let wanted = bar.get_bounding_client_rect().bottom() + offset;
+    let wanted = view.top + offset;
     let top = text::whole_pixel_top(mark.get_bounding_client_rect().top(), wanted);
     keep_reading_place(|| {}, Some(Place { mark, top }));
 }
@@ -432,7 +415,7 @@ struct Held {
 pub fn hold_place(mark: HtmlElement, offset: f64) {
     let_go_of_place();
     put_place(mark.clone(), offset);
-    let (Some(window), Some(pane)) = (web_sys::window(), by_id("reading-pane")) else {
+    let (Some(window), Some(pane)) = (web_sys::window(), PaneId::First.root()) else {
         return;
     };
     if !js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false) {
@@ -443,7 +426,7 @@ pub fn hold_place(mark: HtmlElement, offset: f64) {
         let Some((mark, offset, y)) = held else {
             return;
         };
-        if !mark.is_connected() || scroll_y() != Some(y) {
+        if !mark.is_connected() || PaneId::First.scroller().y() != Some(y) {
             let_go_of_place();
             return;
         }
@@ -458,7 +441,7 @@ pub fn hold_place(mark: HtmlElement, offset: f64) {
     HELD.set(Some(Held {
         mark,
         offset,
-        y: scroll_y().unwrap_or(0.0),
+        y: PaneId::First.scroller().y().unwrap_or(0.0),
         observer,
     }));
     LISTENING_FOR_HELD.with(|listening| {
@@ -466,7 +449,8 @@ pub fn hold_place(mark: HtmlElement, offset: f64) {
             return;
         }
         let scrolled = Closure::<dyn Fn()>::new(|| {
-            let moved = HELD.with_borrow(|held| held.as_ref().map(|h| h.y)) != scroll_y()
+            let moved = HELD.with_borrow(|held| held.as_ref().map(|h| h.y))
+                != PaneId::First.scroller().y()
                 && HELD.with_borrow(Option::is_some);
             if moved {
                 let_go_of_place();
@@ -474,18 +458,20 @@ pub fn hold_place(mark: HtmlElement, offset: f64) {
         });
         let passive = AddEventListenerOptions::new();
         passive.set_passive(true);
-        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
-            "scroll",
-            scrolled.as_ref().unchecked_ref(),
-            &passive,
-        );
+        if let Some(target) = PaneId::First.scroller().target() {
+            let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
+                "scroll",
+                scrolled.as_ref().unchecked_ref(),
+                &passive,
+            );
+        }
         scrolled.forget();
     });
 }
 
 /// The scroll position the held verse was put back at.
 fn note_held_scroll() {
-    let y = scroll_y();
+    let y = PaneId::First.scroller().y();
     HELD.with_borrow_mut(|held| {
         if let (Some(held), Some(y)) = (held.as_mut(), y) {
             held.y = y;
@@ -498,10 +484,6 @@ pub fn let_go_of_place() {
     if let Some(held) = HELD.take() {
         held.observer.disconnect();
     }
-}
-
-fn scroll_y() -> Option<f64> {
-    web_sys::window()?.scroll_y().ok()
 }
 
 /// Shows or hides the sidebar, and remembers it (the saved settings').
@@ -551,7 +533,9 @@ pub fn open_picker(toggle: bool) {
 /// so that's the one now: right even when the page was scrolled after the
 /// last frame, in the same one as the resize, which a place noted in that
 /// frame would miss. Chromium's anchoring has already scrolled to keep a
-/// place of its own ([`anchors_on_resize`]), as it laid the page out at
+/// place of its own
+/// ([`Scroller::anchors_on_resize`](crate::pane::Scroller::anchors_on_resize)),
+/// as it laid the page out at
 /// the new width (in WebView2 before the resize's event), so it's the one
 /// the page's last `scroll` event found as the resize's event came
 /// ([`SCROLL_BEFORE_RESIZE`]): the anchoring's own scroll event comes after
@@ -575,12 +559,13 @@ fn on_shape_change() {
     };
     let focus_was_inside = contains(&picker, active().as_deref());
     let before_resize = SCROLL_BEFORE_RESIZE.take();
-    let anchors = anchors_on_resize();
+    let scroller = PaneId::First.scroller();
+    let anchors = scroller.anchors_on_resize();
     let place = if anchors && SCROLLED_AFTER_RESIZE.replace(false) {
         scroll_before_anchoring().and_then(painted_place_at)
     } else {
-        web_sys::window()
-            .and_then(|window| window.scroll_y().ok())
+        scroller
+            .y()
             .map(|now| text::scroll_read_at(anchors, before_resize, now))
             .and_then(painted_place_at)
     };
@@ -861,32 +846,38 @@ fn export_surfaces() {
 /// a resize notes it as its event comes ([`SCROLL_BEFORE_RESIZE`]), and a
 /// scroll that ends after that, that it did ([`SCROLLED_AFTER_RESIZE`]).
 fn watch_painted_place() {
+    let scroller = PaneId::First.scroller();
     if let Some(window) = web_sys::window() {
-        SCROLL_SEEN.set(window.scroll_y().unwrap_or(0.0));
+        SCROLL_SEEN.set(scroller.y().unwrap_or(0.0));
         let scrolled = Closure::<dyn Fn()>::new(|| {
-            if let Some(y) = web_sys::window().and_then(|window| window.scroll_y().ok()) {
+            if let Some(y) = PaneId::First.scroller().y() {
                 SCROLL_SEEN.set(y);
             }
             note_painted_place();
         });
         let passive = AddEventListenerOptions::new();
         passive.set_passive(true);
-        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
-            "scroll",
-            scrolled.as_ref().unchecked_ref(),
-            &passive,
-        );
+        let target = scroller.target();
+        if let Some(target) = &target {
+            let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
+                "scroll",
+                scrolled.as_ref().unchecked_ref(),
+                &passive,
+            );
+        }
         scrolled.forget();
         let ended = Closure::<dyn Fn()>::new(|| {
             if SCROLL_BEFORE_RESIZE.get().is_some() {
                 SCROLLED_AFTER_RESIZE.set(true);
             }
         });
-        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
-            "scrollend",
-            ended.as_ref().unchecked_ref(),
-            &passive,
-        );
+        if let Some(target) = &target {
+            let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
+                "scrollend",
+                ended.as_ref().unchecked_ref(),
+                &passive,
+            );
+        }
         ended.forget();
         let resized = Closure::<dyn Fn()>::new(|| {
             SCROLL_BEFORE_RESIZE.set(Some(SCROLL_SEEN.get()));
@@ -898,7 +889,7 @@ fn watch_painted_place() {
         let noted = Closure::<dyn Fn()>::new(note_painted_place);
         if js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false)
             && let (Some(pane), Ok(observer)) = (
-                by_id("reading-pane"),
+                PaneId::First.root(),
                 ResizeObserver::new(noted.as_ref().unchecked_ref()),
             )
         {
