@@ -145,6 +145,7 @@ checks! {
     (73, SecondLaunch,        "second-launch",          Shipped,  Never),
     (74, StartupFailure,      "startup-failure",        Startup,  OnWindows),
     (75, SplitPanes,          "split-panes",            Shipped,  Never),
+    (76, SplitTabs,           "split-tabs",             Shipped,  Never),
 }
 
 // The table is numbered 1, 2, 3… in order, with no gap: results.txt and
@@ -605,7 +606,7 @@ mod tests {
 
     /// The groups are the table's, each by number, their lengths counted
     /// from it: 1 check failing to start (no array: nothing but `all` ever
-    /// needed one), 64 on the app as shipped, 5 started again, 5 on the
+    /// needed one), 65 on the app as shipped, 5 started again, 5 on the
     /// updater.
     #[test]
     fn the_groups_are_the_tables() {
@@ -627,7 +628,7 @@ mod tests {
                 Check::RELAUNCH.len(),
                 Check::UPDATER.len()
             ],
-            [64, 5, 5]
+            [65, 5, 5]
         );
         assert_eq!(
             Check::UPDATER,

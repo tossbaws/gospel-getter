@@ -184,9 +184,12 @@ fn mobile_breakpoint_hides_chapter_side_neighbors() {
 /// Regression guard for GH-6: printing a chapter should hide all page
 /// chrome (the top bar and its popovers, the Library, the dialogs and the
 /// toast, the book and chapter picker, neighboring chapter panes,
-/// nav hint, the chapter's end buttons, the selection card) but must
-/// never target the reading content itself — the chapter heading and
-/// verses are the whole point of printing the page.
+/// nav hint, the chapter's end buttons, the selection card, and with two
+/// panes open their bars, their tabs and the pane that isn't active) but
+/// must never target the reading content itself — the chapter heading and
+/// verses are the whole point of printing the page. The pane that prints
+/// prints whole: its column never scrolls on paper (a scrolling column
+/// prints as one clipped page).
 #[test]
 fn print_stylesheet_hides_chrome_but_not_reading_content() {
     let block = block_after(HTML, "@media print");
@@ -207,6 +210,8 @@ fn print_stylesheet_hides_chrome_but_not_reading_content() {
         ".nav-hint",
         ".chapter-end",
         ".selection-card",
+        ".pane-bar",
+        ".pane-tabs",
     ] {
         assert!(
             block.contains(chrome_selector),
@@ -222,6 +227,38 @@ fn print_stylesheet_hides_chrome_but_not_reading_content() {
              chapter heading and verses are exactly what should remain \
              visible when printed"
         );
+    }
+
+    let rules = rules();
+    let print = |selector: &str| {
+        rules
+            .iter()
+            .find(|r| r.at_rule.as_deref() == Some("@media print") && r.selector == selector)
+            .unwrap_or_else(|| panic!("print stylesheet should have a `{selector}` rule"))
+            .body
+            .clone()
+    };
+    assert_eq!(
+        print(r#".pane[data-pane-active="false"]"#),
+        "display: none !important;",
+        "only the active pane prints"
+    );
+    assert_eq!(
+        print(".pane"),
+        "overflow: visible !important; height: auto !important;",
+        "the pane that prints isn't a scroller on paper"
+    );
+    for rule in rules
+        .iter()
+        .filter(|r| r.at_rule.as_deref() == Some("@media print"))
+    {
+        for selector in selectors(rule) {
+            assert!(
+                !(selector.contains(r#"data-pane-active="true""#)
+                    && rule.body.contains("display: none")),
+                "print stylesheet must not hide the active pane (`{selector}`)"
+            );
+        }
     }
 }
 
