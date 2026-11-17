@@ -86,6 +86,7 @@ The header, the Library and search:
 The reader, the selection card and notes:
 
 - `reader`: the chapter on screen, how it gets there, and the passage history.
+- `pane`: the reading pane's elements (its root, `#reading-pane-inner` and its notice), which the reading view's queries run on, and its `Scroller`, the one way the reading view's scroll position and the band in view are read and set.
 - `reader_text`: the chapter's markup, byte for byte `fixtures/genesis-1.html` (which a test compares), Compare's rows, the reference, and the passage history's bookkeeping.
 - `card`: the selection card: the verse selection, Copy and Copy as…, the card's bookmark, highlight and notes, the verses' marks and the Shift ghost.
 - `card_text`: the card's markup and placement.

@@ -10,8 +10,8 @@
 //! The selection card, the picker, search, the dialogs and the card's own
 //! scrolling aren't the reading view's: they scroll themselves.
 
-use wasm_bindgen::JsValue;
-use web_sys::{EventTarget, HtmlElement};
+use wasm_bindgen::{JsCast, JsValue};
+use web_sys::{Element, EventTarget, HtmlElement};
 
 use crate::dom::{self, by_id};
 
@@ -29,6 +29,33 @@ impl PaneId {
         match self {
             Self::First => by_id("reading-pane"),
         }
+    }
+
+    /// The pane's `#reading-pane-inner`, which says which chapter is on
+    /// screen and which are around it (`data-current-*`, `data-prev-*`,
+    /// `data-next-*`).
+    pub fn inner(self) -> Option<Element> {
+        self.root()?
+            .query_selector("#reading-pane-inner")
+            .ok()
+            .flatten()
+    }
+
+    /// The notice above the pane's chapter (a chapter that couldn't be read,
+    /// a verse the translation doesn't number).
+    pub fn notice(self) -> Option<HtmlElement> {
+        match self {
+            Self::First => by_id("reader-notice"),
+        }
+    }
+
+    /// The first element in the pane matching `selector`.
+    pub fn query(self, selector: &str) -> Option<HtmlElement> {
+        self.root()?
+            .query_selector(selector)
+            .ok()??
+            .dyn_into::<HtmlElement>()
+            .ok()
     }
 
     /// Every element in the pane matching `selector`, in page order.
@@ -67,6 +94,17 @@ impl Scroller {
     pub fn y(&self) -> Option<f64> {
         match self {
             Self::Window => web_sys::window()?.scroll_y().ok(),
+        }
+    }
+
+    /// Scrolls it to `y`.
+    pub fn scroll_to(&self, y: f64) {
+        match self {
+            Self::Window => {
+                if let Some(window) = web_sys::window() {
+                    window.scroll_to_with_x_and_y(0.0, y);
+                }
+            }
         }
     }
 

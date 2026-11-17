@@ -53,6 +53,7 @@ use crate::ipc;
 use crate::nav::{self, Facts};
 use crate::nav_text::RecentPlace;
 use crate::palette::PaletteState;
+use crate::pane::PaneId;
 use crate::reader_text::{self as text, Disclosure, History, Opened, Place, Which};
 use crate::surfaces;
 
@@ -131,13 +132,6 @@ fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
 
 // ---- The page's elements and settings.
 
-/// The pane's `#reading-pane-inner`, which says which chapter is on screen
-/// and which are around it (`data-current-*`, `data-prev-*`,
-/// `data-next-*`), as the keys read it (`keyboard`).
-fn pane_inner() -> Option<Element> {
-    bridge::document()?.get_element_by_id("reading-pane-inner")
-}
-
 fn translation_select() -> Option<HtmlSelectElement> {
     bridge::document()?
         .get_element_by_id("translation-select")?
@@ -174,21 +168,9 @@ fn compare_layout() -> String {
     text::compare_layout(aa::beside(), &compare_codes())
 }
 
-fn scroll_y() -> f64 {
-    web_sys::window()
-        .and_then(|w| w.scroll_y().ok())
-        .unwrap_or(0.0)
-}
-
-fn scroll_to(y: f64) {
-    if let Some(window) = web_sys::window() {
-        window.scroll_to_with_x_and_y(0.0, y);
-    }
-}
-
 /// The notice above the chapter: `message`, or none.
 fn show_notice(message: &str) {
-    if let Some(notice) = by_id("reader-notice") {
+    if let Some(notice) = PaneId::First.notice() {
         notice.set_text_content(Some(message));
         notice.set_hidden(message.is_empty());
     }
@@ -320,7 +302,7 @@ struct Credits<'a> {
 /// this chapter's in the translations wanted) on screen, then tells the
 /// selection card (`card::shown`).
 fn render_current() {
-    let Some(pane) = by_id("reading-pane") else {
+    let Some(pane) = PaneId::First.root() else {
         return;
     };
     let (dto, compare, here) = with(|s| {
@@ -667,7 +649,7 @@ fn failed(token: u64, error: &JsValue, book_id: i64, chapter: i64) {
 fn show_failure(message: &str, book_id: i64, chapter: i64) {
     show_notice(message);
     with(|s| s.retry = Some((book_id, chapter)));
-    if let (Some(document), Some(notice)) = (bridge::document(), by_id("reader-notice"))
+    if let (Some(document), Some(notice)) = (bridge::document(), PaneId::First.notice())
         && let Ok(retry) = document.create_element("button")
     {
         let _ = retry.set_attribute("type", "button");
@@ -770,7 +752,7 @@ fn save_place() {
     });
     // Nothing to say while the reader's own pane isn't there (the page's
     // plain-text fallback has taken its place).
-    let Some(here) = with(|s| s.reading.clone()).filter(|_| pane_inner().is_some()) else {
+    let Some(here) = with(|s| s.reading.clone()).filter(|_| PaneId::First.inner().is_some()) else {
         return;
     };
     let top = surfaces::top_verse(&here.translation_code);
@@ -804,14 +786,7 @@ fn reopen_at(verse: i64, offset: Option<f64>) {
     let Some(here) = with(|s| s.reading.clone()) else {
         return;
     };
-    let mark = bridge::document()
-        .and_then(|d| {
-            d.query_selector(&text::verse_selector(&here.translation_code, verse))
-                .ok()
-                .flatten()
-        })
-        .and_then(|el| el.dyn_into::<HtmlElement>().ok());
-    if let Some(mark) = mark {
+    if let Some(mark) = PaneId::First.query(&text::verse_selector(&here.translation_code, verse)) {
         surfaces::hold_place(mark, offset.unwrap_or(0.0));
         save_place();
     }
@@ -946,7 +921,7 @@ fn start_history() {
 
 /// The place on screen, brought up to date as the reader leaves it.
 fn remember_leaving() {
-    let y = scroll_y();
+    let y = PaneId::First.scroller().y().unwrap_or(0.0);
     with(|s| {
         let here = s.reading.as_ref().map(|r| (r.book_id, r.chapter));
         s.history.remember_leaving(here, y);
@@ -964,7 +939,7 @@ fn jump_to(book_id: i64, chapter: i64, start: Option<i64>, end: Option<i64>, top
         let (loaded, selected) = open.await;
         let place = if loaded {
             if top {
-                scroll_to(0.0);
+                PaneId::First.scroller().scroll_to(0.0);
             }
             let landed =
                 selected.filter(|&verses| start.is_some() && Some(verses) == start.zip(end));
@@ -1016,10 +991,11 @@ fn open_step((token, place): (u64, Place), leaving: Option<RecentPlace>) -> Load
             return false;
         }
         if loaded {
+            let scroller = PaneId::First.scroller();
             if let Some(y) = place.scroll_y {
-                scroll_to(y);
+                scroller.scroll_to(y);
             } else if place.start.is_none() {
-                scroll_to(0.0);
+                scroller.scroll_to(0.0);
             }
             record_recent(leaving, &place);
         }
@@ -1086,7 +1062,7 @@ pub fn loads() -> u64 {
 /// pane says, which ← and → go by) and books around the one on screen, and
 /// the history either way.
 pub fn palette_facts(state: &mut PaletteState) {
-    let inner = pane_inner();
+    let inner = PaneId::First.inner();
     let has = |name| {
         inner
             .as_ref()
@@ -1225,7 +1201,7 @@ fn run(request: Request, sent: Option<Sent>) -> Load {
             if with(|s| s.jump_follows || s.asked.is_some()) {
                 return Box::pin(async { false });
             }
-            let inner = pane_inner();
+            let inner = PaneId::First.inner();
             let number = |name| {
                 inner
                     .as_ref()
@@ -1259,7 +1235,7 @@ fn from_top(load: Load, top: bool) -> Load {
     Box::pin(async move {
         let loaded = load.await;
         if loaded {
-            scroll_to(0.0);
+            PaneId::First.scroller().scroll_to(0.0);
         }
         loaded
     })
@@ -1275,7 +1251,11 @@ fn on_click(event: &MouseEvent) {
     let Some(target) = event
         .target()
         .and_then(|t| t.dyn_into::<Element>().ok())
-        .filter(|t| closest(t, "#reading-pane").is_some())
+        .filter(|t| {
+            PaneId::First
+                .root()
+                .is_some_and(|pane| pane.contains(Some(t.as_ref())))
+        })
     else {
         return;
     };
@@ -1379,7 +1359,7 @@ pub fn mount() {
             }
         });
     }
-    if let Some(notice) = by_id("reader-notice") {
+    if let Some(notice) = PaneId::First.notice() {
         dom::on(&notice, "click", |event| {
             let on_retry = event
                 .target()
@@ -1395,15 +1375,17 @@ pub fn mount() {
     // (for the window's close button, say: a window closing destroys its
     // webview without a `pagehide`).
     if let Some(window) = web_sys::window() {
-        let passive = web_sys::AddEventListenerOptions::new();
-        passive.set_passive(true);
-        let scrolled = Closure::<dyn Fn()>::new(save_place_soon);
-        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
-            "scroll",
-            scrolled.as_ref().unchecked_ref(),
-            &passive,
-        );
-        scrolled.forget();
+        if let Some(target) = PaneId::First.scroller().target() {
+            let passive = web_sys::AddEventListenerOptions::new();
+            passive.set_passive(true);
+            let scrolled = Closure::<dyn Fn()>::new(save_place_soon);
+            let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
+                "scroll",
+                scrolled.as_ref().unchecked_ref(),
+                &passive,
+            );
+            scrolled.forget();
+        }
         dom::on(&window, "pagehide", |_| save_place());
         dom::on(&window, "blur", |_| save_place());
         // The print stylesheet prints both lists open, whatever they show

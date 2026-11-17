@@ -52,7 +52,7 @@ use web_sys::{CustomEvent, Element, HtmlElement, KeyboardEvent};
 
 use crate::bridge;
 use crate::card_text::{self as text, Change, Room, Selection, Side, Slot};
-use crate::dom::{self, by_id, closest, data_number, window_height};
+use crate::dom::{self, by_id, closest, data_number};
 use crate::dto::{
     Bookmark, Compare, CopyText, CopyTextArgs, Finding, Highlight, PassageArgs, PassageText,
     PassageTextArgs, Reading, RemoveBookmarkArgs, SelectionNote, SetHighlightArgs, Verse,
@@ -60,6 +60,7 @@ use crate::dto::{
 use crate::ipc;
 use crate::margin;
 use crate::palette::PaletteState;
+use crate::pane::PaneId;
 
 /// Every verse the reader can select: the chapter being read, in each
 /// translation column it's shown in. Neither the faded neighbors nor
@@ -836,7 +837,7 @@ fn place_card() {
     let column_rect = rect(&column);
     let first_rect = line_rect(&first, true);
     let last_rect = line_rect(&card_verse, false);
-    let bar = by_id("top-bar").map_or(0.0, |b| b.get_bounding_client_rect().bottom());
+    let view = PaneId::First.scroller().view().unwrap_or_default();
     let (width, left) = text::card_box(column_rect, first_rect, flowing);
     let _ = card.class_list().remove_2("is-docked", "is-above");
     set_style(card, "max-height", "");
@@ -858,8 +859,8 @@ fn place_card() {
     };
     let room = Room {
         wanted: f64::from(card.scroll_height()).min(cap),
-        window: window_height(),
-        bar,
+        window: view.bottom,
+        bar: view.top,
         first: first_rect,
         last: last_rect,
     };

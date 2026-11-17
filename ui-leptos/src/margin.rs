@@ -59,6 +59,7 @@ use crate::dom;
 use crate::dto::SelectionNote;
 use crate::findings_text::{self, FindingGroup};
 use crate::margin_text::{self as text, Anchor, Entry};
+use crate::pane::PaneId;
 use crate::preferences;
 use crate::prefs;
 use crate::surfaces;
@@ -207,7 +208,7 @@ fn now() -> f64 {
 /// screen.
 fn column() -> Option<HtmlElement> {
     let (book_id, chapter, _) = with(|s| s.chapter.clone())?;
-    let inner = bridge::document()?.get_element_by_id("reading-pane-inner")?;
+    let inner = PaneId::First.inner()?;
     let number = |name: &str| inner.get_attribute(name)?.parse::<i64>().ok();
     if number("data-current-book") != Some(book_id)
         || number("data-current-chapter") != Some(chapter)
@@ -831,7 +832,7 @@ pub fn mount() {
     let changed = Closure::<dyn Fn()>::new(schedule);
     if js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false)
         && let (Some(pane), Ok(observer)) = (
-            bridge::document().and_then(|d| d.get_element_by_id("reading-pane")),
+            PaneId::First.root(),
             web_sys::ResizeObserver::new(changed.as_ref().unchecked_ref()),
         )
     {
