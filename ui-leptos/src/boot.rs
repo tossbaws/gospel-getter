@@ -1,7 +1,10 @@
 //! Boot: the translations, the chapter the reader was on, the history from
-//! there, then the Library's lists, the card's highlights, the welcome's
-//! startup question and the launch check for updates. One code path for
-//! putting a chapter on screen, at startup or afterward: the reader's.
+//! there, the second pane if the panes were split as the app last closed
+//! (opened before the first pane's chapter is drawn, its chapter read after
+//! it: `pane::reopen`), then the Library's lists, the card's highlights,
+//! the welcome's startup question and the launch check for updates. One
+//! code path for putting a chapter on screen, at startup or afterward: the
+//! reader's.
 //!
 //! Boot's first two commands don't wait for this module: the page's
 //! prefetch script, in `<head>`, sends `get_home` as the page loads and,
@@ -20,6 +23,9 @@ use crate::card;
 use crate::dto::Home;
 use crate::ipc;
 use crate::page;
+use crate::pane;
+use crate::pane_text::SecondPlace;
+use crate::picker_text::Book;
 use crate::reader::{self, Load, Sent};
 
 /// What boot has to go on: `get_home`'s answer, and the chapter's
@@ -42,10 +48,14 @@ fn answered(prefetch: &Prefetch) -> Option<Result<Answered, JsValue>> {
     }))
 }
 
-/// Boot's books for the picker, its places to start for the welcome, then
-/// the reader's start: the translations and the chapter (drawn now, within
-/// this call, if its answer is in).
-fn start_reader(answered: &Answered, reading: Option<Sent>) -> Result<Load, JsValue> {
+/// Boot's books for the picker, its places to start for the welcome, the
+/// second pane opened if it's to be (with where it reopens), then the
+/// reader's start: the translations and the chapter (drawn now, within this
+/// call, if its answer is in).
+fn start_reader(
+    answered: &Answered,
+    reading: Option<Sent>,
+) -> Result<(Load, Option<SecondPlace>), JsValue> {
     let home = &answered.home;
     let get = |key: &str| js_sys::Reflect::get(home, &JsValue::from_str(key));
     let books = js_sys::Object::new();
@@ -56,14 +66,30 @@ fn start_reader(answered: &Answered, reading: Option<Sent>) -> Result<Load, JsVa
     page::set_start_here(get("startHere")?);
     let parsed: Home = serde_wasm_bindgen::from_value(home.clone())
         .map_err(|e| JsValue::from(js_sys::Error::new(&e.to_string())))?;
-    Ok(reader::start(parsed, reading))
+    let books: Vec<Book> = parsed
+        .ot_books
+        .iter()
+        .chain(&parsed.nt_books)
+        .cloned()
+        .collect();
+    let codes: Vec<String> = parsed.translations.iter().map(|t| t.code.clone()).collect();
+    let beside = pane::reopen(&books, &codes);
+    Ok((reader::start(parsed, reading), beside))
 }
 
-/// The rest of boot, after the reader's start: the Library's bookmarks, the
-/// card's highlights then the Library's, the Library's notes, any lists
-/// asked again once the Library mounted, then the welcome's question.
-async fn after_reader(home: JsValue, load: Load) -> Result<(), JsValue> {
+/// The rest of boot, after the reader's start: the second pane's chapter
+/// (`beside`), the Library's bookmarks, the card's highlights then the
+/// Library's, the Library's notes, any lists asked again once the Library
+/// mounted, then the welcome's question.
+async fn after_reader(
+    home: JsValue,
+    load: Load,
+    beside: Option<SecondPlace>,
+) -> Result<(), JsValue> {
     load.await;
+    if let Some(place) = beside {
+        reader::reopen_beside(place).await;
+    }
     JsFuture::from(page::refresh_library(&["bookmarks"])).await?;
     card::refresh_highlights().await;
     JsFuture::from(page::refresh_library(&["highlights"])).await?;
@@ -79,12 +105,12 @@ async fn after_reader(home: JsValue, load: Load) -> Result<(), JsValue> {
 fn boot_from(answered: Result<Answered, JsValue>) {
     let started = answered.and_then(|mut answered| {
         let reading = answered.reading.take();
-        let load = start_reader(&answered, reading)?;
-        Ok((answered.home, load))
+        let (load, beside) = start_reader(&answered, reading)?;
+        Ok((answered.home, load, beside))
     });
     spawn_local(async move {
         let booted = match started {
-            Ok((home, load)) => after_reader(home, load).await,
+            Ok((home, load, beside)) => after_reader(home, load, beside).await,
             Err(e) => Err(e),
         };
         if let Err(e) = booted {

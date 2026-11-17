@@ -43,7 +43,9 @@
 //! and the chapter's lists as left (45), at the verse the first session
 //! left at the top (59, `place`), a second session, which quits with a
 //! note being typed, offered back as a draft when the app is started once
-//! more (65, `notes`); and, in a last session on the GUI checks' test
+//! more (65, `notes`); two passages side by side as the app quits, both
+//! where they were when it's started again (77, `split`, in two sessions of
+//! its own); and, in a last session on the GUI checks' test
 //! build, the updater (9 to 13, `updates`). Before any of it, with no
 //! session, the app started on a database it can't open, saying why in a
 //! native message and its log, and exiting with code 1 (74, `startup`).
@@ -433,6 +435,7 @@ async fn shipped(
             checked!(SingleKeys, single_key_switch),
         ];
         if let Some(check) = config.repeat.map(Repeat::check)
+            && !split::repeats_itself(check)
             && !ran.iter().any(|(c, _)| *c == check)
         {
             run.ui.log(&format!(

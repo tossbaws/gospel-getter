@@ -346,8 +346,24 @@ pub const SINGLE_KEY_SHORTCUTS: Preference = Preference {
     file_name: None,
 };
 
+/// Two passages open side by side (`ui-leptos/src/pane.rs`), so the next
+/// launch lays the page out for them before the first frame and opens the
+/// second where it was (S9). Only the second pane's opening and closing
+/// set it. A setting of this computer's, like the margin's: no backup
+/// carries it, nor the second pane's place, which isn't a setting
+/// (`pane_text::SECOND_PANE_KEY`).
+pub const SPLIT: Preference = Preference {
+    name: "split",
+    key: "gospel-getter-split",
+    fallback: "off",
+    values: ON_OFF,
+    renamed: &[],
+    select: None,
+    file_name: None,
+};
+
 /// Every saved setting, in the order they're applied (and exported).
-pub const PREFERENCES: [Preference; 13] = [
+pub const PREFERENCES: [Preference; 14] = [
     THEME,
     TEXT_SIZE,
     LINE_SPACING,
@@ -361,6 +377,7 @@ pub const PREFERENCES: [Preference; 13] = [
     MARGIN_NOTES,
     COMPARE_NOTES,
     SINGLE_KEY_SHORTCUTS,
+    SPLIT,
 ];
 
 /// The setting the page calls `name`.

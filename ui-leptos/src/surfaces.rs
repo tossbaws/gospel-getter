@@ -46,8 +46,8 @@ use std::cell::{Cell, RefCell};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
-    AddEventListenerOptions, Element, HtmlElement, KeyboardEvent, MediaQueryList, Node,
-    ResizeObserver,
+    AddEventListenerOptions, Element, EventTarget, HtmlElement, KeyboardEvent, MediaQueryList,
+    Node, ResizeObserver,
 };
 
 use crate::aa;
@@ -81,11 +81,12 @@ thread_local! {
     static LAYOUT_PENDING: Cell<bool> = const { Cell::new(false) };
     /// The scroll position the page's last `scroll` event found.
     static SCROLL_SEEN: Cell<f64> = const { Cell::new(0.0) };
-    /// A verse put back where the reader was ([`hold_place`]), kept there
-    /// as the page settles until the reader scrolls.
-    static HELD: RefCell<Option<Held>> = const { RefCell::new(None) };
-    /// [`hold_place`]'s scroll listener is there (it stays, idle, after).
-    static LISTENING_FOR_HELD: Cell<bool> = const { Cell::new(false) };
+    /// Each pane's verse put back where the reader was ([`hold_place`]),
+    /// kept there as the page settles until the reader scrolls.
+    static HELD: RefCell<PerPane<Option<Held>>> = RefCell::new(PerPane::default());
+    /// The scrollers [`hold_place`]'s scroll listener is on (each stays,
+    /// idle, after): the window, or a pane's column.
+    static LISTENING_FOR_HELD: RefCell<Vec<EventTarget>> = const { RefCell::new(Vec::new()) };
     /// [`SCROLL_SEEN`] as the last resize's event came, before the scroll
     /// event of anything that scrolled for it ([`on_shape_change`]).
     static SCROLL_BEFORE_RESIZE: Cell<Option<f64>> = const { Cell::new(None) };
@@ -463,6 +464,7 @@ fn put_parked(pane: PaneId, parked: Parked) {
 
 /// Forgets `pane`'s place (the second pane closing).
 pub fn forget(pane: PaneId) {
+    let_go_of_place(pane);
     PARKED.with_borrow_mut(|all| all[pane] = None);
     PAINTED_LAYOUT.with_borrow_mut(|layouts| layouts[pane] = None);
 }
@@ -538,7 +540,8 @@ pub fn move_place(pane: PaneId, code: &str, change: impl FnOnce()) {
 }
 
 /// A verse put back where the reader was ([`hold_place`]): the scroll
-/// position that left it there, and what sees the reading pane change size.
+/// position of its pane that left it there, and what sees the pane change
+/// size.
 struct Held {
     mark: HtmlElement,
     offset: f64,
@@ -546,81 +549,100 @@ struct Held {
     observer: ResizeObserver,
 }
 
-/// Puts `mark` (a verse) `offset` px below the bar ([`put_place`]) and keeps
-/// it there as the page settles, the fonts arriving or the verses' marks
-/// changing their lines: whenever the reading pane changes size, as long
-/// as the page is still where this left it. The reader scrolling, or
-/// another chapter drawn ([`let_go_of_place`]), ends it.
-pub fn hold_place(mark: HtmlElement, offset: f64) {
-    let_go_of_place();
-    put_place(PaneId::First, mark.clone(), offset);
-    let (Some(window), Some(pane)) = (web_sys::window(), PaneId::First.root()) else {
+/// Puts `mark` (a verse in `pane`) `offset` px below the bar
+/// ([`put_place`]) and keeps it there as the page settles, the fonts
+/// arriving or the verses' marks changing their lines: whenever the pane
+/// changes size, as long as it's still scrolled where this left it. The
+/// reader scrolling it, or another chapter drawn in it
+/// ([`let_go_of_place`]), ends it. Each pane holds its own: at a launch
+/// with the panes split, the second pane's chapter is drawn while the
+/// first's verse is still settling. A pane out of view (the tabs, reading
+/// mode) has its place parked instead, put back as it comes into view, as
+/// [`keep_reading_place`] parks one going out of view.
+pub fn hold_place(pane: PaneId, mark: HtmlElement, offset: f64) {
+    let_go_of_place(pane);
+    if !pane::in_view().any(|shown| shown == pane) {
+        PARKED.with_borrow_mut(|all| all[pane] = Some(Parked { mark, offset }));
+        return;
+    }
+    put_place(pane, mark.clone(), offset);
+    let (Some(window), Some(root)) = (web_sys::window(), pane.root()) else {
         return;
     };
     if !js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false) {
         return;
     }
-    let resized = Closure::<dyn Fn()>::new(|| {
-        let held = HELD.with_borrow(|held| held.as_ref().map(|h| (h.mark.clone(), h.offset, h.y)));
+    let resized = Closure::<dyn Fn()>::new(move || {
+        let held =
+            HELD.with_borrow(|held| held[pane].as_ref().map(|h| (h.mark.clone(), h.offset, h.y)));
         let Some((mark, offset, y)) = held else {
             return;
         };
-        if !mark.is_connected() || PaneId::First.scroller().y() != Some(y) {
-            let_go_of_place();
+        if !mark.is_connected() || pane.scroller().y() != Some(y) {
+            let_go_of_place(pane);
             return;
         }
-        put_place(PaneId::First, mark, offset);
-        note_held_scroll();
+        put_place(pane, mark, offset);
+        note_held_scroll(pane);
     });
     let Ok(observer) = ResizeObserver::new(resized.as_ref().unchecked_ref()) else {
         return;
     };
     resized.forget();
-    observer.observe(&pane);
-    HELD.set(Some(Held {
-        mark,
-        offset,
-        y: PaneId::First.scroller().y().unwrap_or(0.0),
-        observer,
-    }));
-    LISTENING_FOR_HELD.with(|listening| {
-        if listening.replace(true) {
-            return;
-        }
-        let scrolled = Closure::<dyn Fn()>::new(|| {
-            let moved = HELD.with_borrow(|held| held.as_ref().map(|h| h.y))
-                != PaneId::First.scroller().y()
-                && HELD.with_borrow(Option::is_some);
-            if moved {
-                let_go_of_place();
-            }
+    observer.observe(&root);
+    let scroller = pane.scroller();
+    HELD.with_borrow_mut(|held| {
+        held[pane] = Some(Held {
+            mark,
+            offset,
+            y: scroller.y().unwrap_or(0.0),
+            observer,
         });
-        let passive = AddEventListenerOptions::new();
-        passive.set_passive(true);
-        if let Some(target) = PaneId::First.scroller().target() {
-            let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
-                "scroll",
-                scrolled.as_ref().unchecked_ref(),
-                &passive,
-            );
-        }
-        scrolled.forget();
     });
+    let Some(target) = scroller.target() else {
+        return;
+    };
+    let listening = LISTENING_FOR_HELD.with_borrow_mut(|on| {
+        let listening = on.contains(&target);
+        if !listening {
+            on.push(target.clone());
+        }
+        listening
+    });
+    if listening {
+        return;
+    }
+    let scrolled = Closure::<dyn Fn()>::new(|| {
+        for pane in [PaneId::First, PaneId::Second] {
+            let y = HELD.with_borrow(|held| held[pane].as_ref().map(|h| h.y));
+            if y.is_some_and(|y| pane.scroller().y() != Some(y)) {
+                let_go_of_place(pane);
+            }
+        }
+    });
+    let passive = AddEventListenerOptions::new();
+    passive.set_passive(true);
+    let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
+        "scroll",
+        scrolled.as_ref().unchecked_ref(),
+        &passive,
+    );
+    scrolled.forget();
 }
 
-/// The scroll position the held verse was put back at.
-fn note_held_scroll() {
-    let y = PaneId::First.scroller().y();
+/// The scroll position `pane`'s held verse was put back at.
+fn note_held_scroll(pane: PaneId) {
+    let y = pane.scroller().y();
     HELD.with_borrow_mut(|held| {
-        if let (Some(held), Some(y)) = (held.as_mut(), y) {
+        if let (Some(held), Some(y)) = (held[pane].as_mut(), y) {
             held.y = y;
         }
     });
 }
 
-/// Stops keeping a verse in place ([`hold_place`]).
-pub fn let_go_of_place() {
-    if let Some(held) = HELD.take() {
+/// Stops keeping a verse in place in `pane` ([`hold_place`]).
+pub fn let_go_of_place(pane: PaneId) {
+    if let Some(held) = HELD.with_borrow_mut(|held| held[pane].take()) {
         held.observer.disconnect();
     }
 }

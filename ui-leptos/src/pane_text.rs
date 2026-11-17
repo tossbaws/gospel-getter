@@ -5,7 +5,14 @@
 //! Compare says while two panes are open, and how far the keys that scroll
 //! a page scroll a pane's own column, which the keyboard dispatcher does
 //! itself while the panes are split (no webview can be trusted to pick the
-//! right one of two scrolling columns when focus is on the page itself).
+//! right one of two scrolling columns when focus is on the page itself);
+//! and the second pane's place as this computer keeps it for the next
+//! launch ([`SECOND_PANE_KEY`]).
+
+use serde::{Deserialize, Serialize};
+
+use crate::nav_text::MAX_VERSE;
+use crate::picker_text::Book;
 
 /// While two panes are open, at least this wide, they sit side by side,
 /// each with its bar; narrower, they're tabs (S7). The stylesheet doesn't
@@ -153,6 +160,53 @@ pub fn scroll_move(key: ScrollKey, height: f64) -> ScrollMove {
     }
 }
 
+/// The second pane's place's key in local storage: kept on this computer
+/// only, as Recent places are (`nav_text::RECENT_KEY`), and in no backup or
+/// export (S9). It isn't one of the saved settings (`preferences`): the
+/// pre-paint script writes each of those to `<html>`, and checks it against
+/// a list of values, which a place isn't. `preferences::SPLIT` says whether
+/// the panes were split; this says where the second one was.
+pub const SECOND_PANE_KEY: &str = "gospel-getter-second-pane";
+
+/// Where the second pane is: its chapter, in its translation (by code,
+/// "kjv"), and, once the reader has a place in it, the verse at the top of
+/// its view and how far that verse's top is below its bar, as the backend
+/// keeps the first pane's (S15: the second's never goes there).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecondPlace {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub translation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verse: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<f64>,
+}
+
+/// The longest kept place read back, in UTF-16 code units (one is under
+/// 120): a longer value isn't this app's, and isn't read.
+pub const PLACE_MAX: u32 = 512;
+
+impl SecondPlace {
+    /// Whether this can be a place at all, by the books there are (`books`)
+    /// and the bundled translations (`codes`), as a recent place is checked
+    /// (`nav_text`): a book there is, one of its chapters, a translation
+    /// that's bundled, a verse that could be in it, and an offset that's a
+    /// number. Anything else, and the second pane isn't opened again.
+    pub fn is_valid(&self, books: &[Book], codes: &[String]) -> bool {
+        let chapter_ok = books
+            .iter()
+            .find(|b| b.id == self.book_id)
+            .is_some_and(|b| (1..=b.chapter_count).contains(&self.chapter));
+        let verse_ok = self
+            .verse
+            .is_none_or(|verse| (1..=MAX_VERSE).contains(&verse));
+        let offset_ok = self.offset.is_none_or(f64::is_finite);
+        chapter_ok && verse_ok && offset_ok && codes.contains(&self.translation)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,6 +320,120 @@ mod tests {
             assert_eq!(tab_key(key, 0, 2), None, "{key:?}");
         }
         assert_eq!(tab_key("ArrowRight", 0, 0), None);
+    }
+
+    fn books() -> Vec<Book> {
+        vec![
+            Book {
+                id: 19,
+                name: "Psalms".into(),
+                chapter_count: 150,
+            },
+            Book {
+                id: 45,
+                name: "Romans".into(),
+                chapter_count: 16,
+            },
+        ]
+    }
+
+    fn codes() -> Vec<String> {
+        vec!["kjv".into(), "bsb".into()]
+    }
+
+    /// The place kept as `json`, read back and checked, as `pane::reopen`
+    /// reads it.
+    fn read(json: &str) -> Option<SecondPlace> {
+        serde_json::from_str::<SecondPlace>(json)
+            .ok()
+            .filter(|place| place.is_valid(&books(), &codes()))
+    }
+
+    fn romans(verse: Option<i64>, offset: Option<f64>) -> SecondPlace {
+        SecondPlace {
+            book_id: 45,
+            chapter: 5,
+            translation: "bsb".into(),
+            verse,
+            offset,
+        }
+    }
+
+    #[test]
+    fn a_kept_place_is_read_back_as_it_was_kept() {
+        let place = romans(Some(3), Some(-12.5));
+        let json = serde_json::to_string(&place).unwrap();
+        assert_eq!(
+            json,
+            r#"{"bookId":45,"chapter":5,"translation":"bsb","verse":3,"offset":-12.5}"#
+        );
+        assert_eq!(read(&json), Some(place));
+        // At the chapter's top: no verse, no offset.
+        let top = romans(None, None);
+        let json = serde_json::to_string(&top).unwrap();
+        assert_eq!(json, r#"{"bookId":45,"chapter":5,"translation":"bsb"}"#);
+        assert_eq!(read(&json), Some(top));
+        assert_eq!(
+            read(r#"{"bookId":19,"chapter":119,"translation":"kjv","verse":176,"offset":null}"#),
+            Some(SecondPlace {
+                book_id: 19,
+                chapter: 119,
+                translation: "kjv".into(),
+                verse: Some(176),
+                offset: None,
+            })
+        );
+    }
+
+    #[test]
+    fn an_unknown_book_or_translation_is_no_place() {
+        for json in [
+            r#"{"bookId":99,"chapter":1,"translation":"kjv"}"#,
+            r#"{"bookId":0,"chapter":1,"translation":"kjv"}"#,
+            r#"{"bookId":45,"chapter":5,"translation":"esv"}"#,
+            // Codes are lowercase, as the translation button's record has them.
+            r#"{"bookId":45,"chapter":5,"translation":"BSB"}"#,
+            r#"{"bookId":45,"chapter":5,"translation":""}"#,
+        ] {
+            assert_eq!(read(json), None, "{json}");
+        }
+    }
+
+    #[test]
+    fn a_chapter_or_verse_out_of_range_is_no_place() {
+        for json in [
+            r#"{"bookId":45,"chapter":17,"translation":"bsb"}"#,
+            r#"{"bookId":45,"chapter":0,"translation":"bsb"}"#,
+            r#"{"bookId":45,"chapter":-1,"translation":"bsb"}"#,
+            r#"{"bookId":45,"chapter":5,"translation":"bsb","verse":0}"#,
+            r#"{"bookId":45,"chapter":5,"translation":"bsb","verse":177}"#,
+        ] {
+            assert_eq!(read(json), None, "{json}");
+        }
+        // An offset that isn't a number a page can scroll by (JSON can't
+        // say one, but JavaScript's parse makes 1e400 Infinity).
+        assert!(!romans(Some(3), Some(f64::INFINITY)).is_valid(&books(), &codes()));
+        assert!(!romans(Some(3), Some(f64::NAN)).is_valid(&books(), &codes()));
+        assert!(romans(Some(3), Some(0.0)).is_valid(&books(), &codes()));
+    }
+
+    #[test]
+    fn missing_fields_or_garbage_are_no_place() {
+        for json in [
+            r#"{"chapter":5,"translation":"bsb"}"#,
+            r#"{"bookId":45,"translation":"bsb"}"#,
+            r#"{"bookId":45,"chapter":5}"#,
+            r#"{"bookId":"45","chapter":5,"translation":"bsb"}"#,
+            r#"{"bookId":45,"chapter":5.5,"translation":"bsb"}"#,
+            r#"{"bookId":45,"chapter":5,"translation":"bsb","verse":"3"}"#,
+            r#"[45,5]"#,
+            "null",
+            "",
+            "on",
+            "{",
+        ] {
+            assert_eq!(read(json), None, "{json:?}");
+        }
     }
 
     #[test]

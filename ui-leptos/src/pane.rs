@@ -43,6 +43,7 @@ use std::cell::{Cell, RefCell};
 use std::ops::{Index, IndexMut};
 use std::rc::Rc;
 
+use serde::Serialize;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
@@ -54,7 +55,8 @@ use crate::bridge;
 use crate::dom::{self, by_id};
 use crate::keyboard;
 use crate::nav_text;
-use crate::pane_text::{self as text, ScrollMove, Shape};
+use crate::pane_text::{self as text, ScrollMove, SecondPlace, Shape};
+use crate::picker_text::Book;
 use crate::preferences;
 use crate::prefs;
 use crate::reader::{self, OpenPassage};
@@ -67,7 +69,8 @@ pub enum PaneId {
     /// The page's reading pane: the one the reader opens, whose place the
     /// backend saves.
     First,
-    /// The pane opened beside it. Its place is never saved (S15).
+    /// The pane opened beside it. Its place is never the backend's (S15):
+    /// this computer keeps it for the next launch ([`keep_place`]).
     Second,
 }
 
@@ -550,7 +553,7 @@ pub fn sync_shape() {
 /// pane's column scrolls below the top bar, and the first pane's place
 /// moves into its column with it, the same verse at the same height
 /// (`surfaces::move_place`). The faded neighbors give way (D7), and Compare
-/// pauses (S14).
+/// pauses (S14). The next launch opens it again ([`reopen`]).
 pub fn open_second() {
     if split() {
         return;
@@ -564,7 +567,7 @@ pub fn open_second() {
     let Some(main) = root.parent_element() else {
         return;
     };
-    surfaces::let_go_of_place();
+    surfaces::let_go_of_place(PaneId::First);
     CODES.with_borrow_mut(|codes| codes[PaneId::Second] = String::new());
     let code = code(PaneId::First);
     surfaces::move_place(PaneId::First, &code, || {
@@ -574,9 +577,7 @@ pub fn open_second() {
         let _ = first.append_with_node_2(&notice, &root);
         let _ = main.append_with_node_1(&made.columns[PaneId::Second]);
         SPLIT.set(true);
-        if let Some(html) = bridge::document().and_then(|d| d.document_element()) {
-            let _ = html.set_attribute("data-split", "on");
-        }
+        prefs::set(&preferences::SPLIT, "on");
         sync_shape();
         reader::redraw(PaneId::First);
     });
@@ -586,7 +587,8 @@ pub fn open_second() {
 /// Closes the second pane: the page is as it was before it opened, the
 /// first pane active, its place moved back to the window (the same verse
 /// at the same height), and focus on its reference button. Nothing of the
-/// second pane is kept.
+/// second pane is kept, here or for the next launch: `preferences::SPLIT`
+/// and its place ([`keep_place`]) are forgotten.
 pub fn close_second() {
     if !split() {
         return;
@@ -617,9 +619,9 @@ pub fn close_second() {
         made.notice.set_text_content(None);
         made.notice.set_hidden(true);
         SPLIT.set(false);
-        if let Some(html) = bridge::document().and_then(|d| d.document_element()) {
-            let _ = html.remove_attribute("data-split");
-        }
+        prefs::apply(&preferences::SPLIT, preferences::SPLIT.fallback);
+        prefs::forget(&preferences::SPLIT);
+        forget_place();
         sync_shape();
         surfaces::forget(PaneId::Second);
         reader::forget(PaneId::Second);
@@ -631,6 +633,72 @@ pub fn close_second() {
     if let Some(reference) = by_id("ref-btn") {
         dom::focus(&reference);
     }
+}
+
+// ---- The second pane's place, for the next launch.
+
+/// Keeps `place` as the second pane's for the next launch, on this computer
+/// only (`pane_text::SECOND_PANE_KEY`); quietly not, if local storage can't
+/// be written, as a setting isn't (`prefs::store`).
+pub fn keep_place(place: &SecondPlace) {
+    let Some(storage) = dom::storage() else {
+        return;
+    };
+    let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+    if let Ok(json) = place
+        .serialize(&serializer)
+        .map_err(JsValue::from)
+        .and_then(|value| js_sys::JSON::stringify(&value))
+    {
+        let _ = storage.set_item(text::SECOND_PANE_KEY, &String::from(json));
+    }
+}
+
+/// Forgets the second pane's place: it's closed.
+fn forget_place() {
+    if let Some(storage) = dom::storage() {
+        let _ = storage.remove_item(text::SECOND_PANE_KEY);
+    }
+}
+
+/// The second pane's place as this computer kept it, read back: `None` if
+/// there's none, it can't be read, or it isn't a place's shape.
+fn kept_place() -> Option<SecondPlace> {
+    let value = dom::storage()?.get_item(text::SECOND_PANE_KEY).ok()??;
+    let length = u32::try_from(value.encode_utf16().count()).ok()?;
+    if length > text::PLACE_MAX {
+        return None;
+    }
+    let parsed = js_sys::JSON::parse(&value).ok()?;
+    serde_wasm_bindgen::from_value(parsed).ok()
+}
+
+/// Boot's start, before the first pane's chapter is drawn (`boot`): if the
+/// panes were split as the app last closed (`preferences::SPLIT`, which
+/// the pre-paint script has laid the page out for), and the second pane's
+/// kept place is one there can be, by the books there are (`books`) and
+/// the bundled translations (`codes`), the second pane opens now, empty, so
+/// the first pane's chapter is drawn into its own column and its place put
+/// back there; the second's chapter follows the first's
+/// (`reader::reopen_beside`). Opened after, the first pane would have been
+/// drawn into a page that doesn't scroll (the split's), and its place lost
+/// on the way to its column. Split with no place to open the second pane
+/// at, or with one that can't be, closes, and both keys go: the page is
+/// laid out for one pane (a rare reflow, before any chapter is drawn).
+pub fn reopen(books: &[Book], codes: &[String]) -> Option<SecondPlace> {
+    if !prefs::on(&preferences::SPLIT) {
+        return None;
+    }
+    if let Some(place) = kept_place().filter(|place| place.is_valid(books, codes)) {
+        open_second();
+        if split() {
+            return Some(place);
+        }
+    }
+    prefs::apply(&preferences::SPLIT, preferences::SPLIT.fallback);
+    prefs::forget(&preferences::SPLIT);
+    forget_place();
+    None
 }
 
 // ---- The columns and their bars.
