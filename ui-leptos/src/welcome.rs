@@ -84,7 +84,7 @@ impl Welcome {
     }
 
     fn show(self, start_here: Vec<StartRow>, return_to: Option<HtmlElement>) {
-        bridge::modal_opening(true);
+        crate::page::modal_opening(true);
         self.return_to.set_value(return_to);
         self.start_here.set(start_here);
         self.theme.set(bridge::theme());

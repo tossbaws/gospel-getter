@@ -503,7 +503,7 @@ impl Editor {
     fn open(self, request: NoteRequest, note: JsValue, return_to: Option<HtmlElement>) {
         // Never over unsaved text, whatever asked: the open note stays.
         if self.holds_unsaved() {
-            bridge::toast(note_text::STILL_WRITING, true);
+            crate::page::set_data_status(note_text::STILL_WRITING, true);
             return;
         }
         let id = self.next_id.get_value() + 1;

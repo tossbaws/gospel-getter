@@ -87,7 +87,7 @@ fn go_to(link: &Element) {
     match (number(link, "data-start"), number(link, "data-end")) {
         (Some(start), Some(end)) => crate::reader::open(
             crate::pane::active(),
-            &bridge::OpenPassage {
+            &crate::reader::OpenPassage {
                 book_id,
                 chapter,
                 verse_start: Some(start),
@@ -110,7 +110,7 @@ fn open_web_link(url: &str) {
         };
         if let Err(e) = answer {
             ipc::log_error("Failed to open a note's link", &e);
-            bridge::toast(&ipc::error_text(&e), true);
+            crate::page::set_data_status(&ipc::error_text(&e), true);
         }
     });
 }

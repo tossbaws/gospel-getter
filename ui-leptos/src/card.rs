@@ -1022,7 +1022,7 @@ fn copy_passage(slot: Slot, format: &str) {
         },
     };
     let report = move |message: String, is_error: bool| match slot {
-        Slot::Chapter => bridge::toast(&message, is_error),
+        Slot::Chapter => crate::page::set_data_status(&message, is_error),
         Slot::Selection => status_for(attempt, message, is_error),
     };
     spawn_local(async move {
@@ -1803,7 +1803,7 @@ fn open_note_editor(
     }) else {
         return;
     };
-    bridge::modal_opening(true);
+    crate::page::modal_opening(true);
     // The verses as this translation numbers and shows them (KJV supplied
     // words in italics, no note markers); any it doesn't number are said to
     // be missing.
@@ -1847,7 +1847,7 @@ fn open_note_editor(
         }),
     };
     if !note_editor::open(request, note.unwrap_or(JsValue::NULL), opener) {
-        bridge::toast(text::EDITOR_UNAVAILABLE, true);
+        crate::page::set_data_status(text::EDITOR_UNAVAILABLE, true);
     }
 }
 
@@ -2001,13 +2001,14 @@ pub fn note_done(done: NoteDone) {
 /// timed Undo, which restores it the same way and says how that went there.
 fn deleted_elsewhere(note: JsValue) {
     let message = text::note_deleted_elsewhere(&js_text(&get(&note, "reference")));
-    let Some(undo) = bridge::toast_with_action(&message, "Undo", text::UNDO_MS) else {
+    let Some(undo) = crate::page::set_data_status_with_action(&message, "Undo", text::UNDO_MS)
+    else {
         return;
     };
     dom::on_click(&undo, move |_| {
-        bridge::toast("", false);
+        crate::page::set_data_status("", false);
         spawn_local(restore_note(note.clone(), |message, is_error| {
-            bridge::toast(&message, is_error);
+            crate::page::set_data_status(&message, is_error);
         }));
     });
 }

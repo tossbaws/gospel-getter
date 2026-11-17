@@ -342,7 +342,10 @@ impl Dialog {
                 Ok(options) => options,
                 Err(e) => {
                     ipc::log_error("Failed to prepare the notes export", &e);
-                    bridge::toast(&format!("Export failed: {}", ipc::error_text(&e)), true);
+                    crate::page::set_data_status(
+                        &format!("Export failed: {}", ipc::error_text(&e)),
+                        true,
+                    );
                     return;
                 }
             };
@@ -466,7 +469,7 @@ impl Dialog {
             match result {
                 Ok(ExportOutcome::Saved { path, notes }) => {
                     let on = book.map(|name| format!(" on {name}")).unwrap_or_default();
-                    bridge::toast(
+                    crate::page::set_data_status(
                         &format!("Exported {}{on} to {path}.", plural(notes, "note")),
                         false,
                     );
@@ -474,7 +477,10 @@ impl Dialog {
                 Ok(ExportOutcome::Cancelled) => {}
                 Err(e) => {
                     ipc::log_error("Notes export failed", &e);
-                    bridge::toast(&format!("Export failed: {}", ipc::error_text(&e)), true);
+                    crate::page::set_data_status(
+                        &format!("Export failed: {}", ipc::error_text(&e)),
+                        true,
+                    );
                 }
             }
             self.busy.update_value(|b| b.exporting = false);
@@ -579,13 +585,16 @@ impl Dialog {
             }
             Ok(FolderOutcome::Saved { folder, files, .. }) => {
                 self.close();
-                bridge::toast(&saved_files(files, &folder), false);
+                crate::page::set_data_status(&saved_files(files, &folder), false);
             }
             Ok(FolderOutcome::Cancelled) => self.close(),
             Err(e) => {
                 ipc::log_error("Notes export by book failed", &e);
                 self.close();
-                bridge::toast(&format!("Export failed: {}", ipc::error_text(&e)), true);
+                crate::page::set_data_status(
+                    &format!("Export failed: {}", ipc::error_text(&e)),
+                    true,
+                );
             }
         }
         self.busy.update_value(|b| b.exporting = false);

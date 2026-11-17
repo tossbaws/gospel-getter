@@ -331,7 +331,7 @@ async fn remove_one(found: Finding) {
         }
         Err(e) => {
             ipc::log_error("Failed to remove the finding", &e);
-            bridge::toast(
+            crate::page::set_data_status(
                 &format!("The finding wasn\u{2019}t removed: {}", ipc::error_text(&e)),
                 true,
             );
@@ -365,11 +365,11 @@ pub async fn remove_request(request: String) -> Result<(), String> {
 /// Says `message` in the toast, with an Undo that brings `gone` back as
 /// they were.
 fn offer_undo(message: &str, gone: Vec<Finding>) {
-    let Some(undo) = bridge::toast_with_action(message, "Undo", UNDO_MS) else {
+    let Some(undo) = crate::page::set_data_status_with_action(message, "Undo", UNDO_MS) else {
         return;
     };
     dom::on_click(&undo, move |_| {
-        bridge::toast("", false);
+        crate::page::set_data_status("", false);
         let gone = gone.clone();
         spawn_local(async move {
             let restored = match ipc::args(&RestoreArgs { findings: &gone }) {
@@ -379,11 +379,11 @@ fn offer_undo(message: &str, gone: Vec<Finding>) {
             match restored {
                 Ok(count) => {
                     refresh_everywhere().await;
-                    bridge::toast(&text::restored(count), false);
+                    crate::page::set_data_status(&text::restored(count), false);
                 }
                 Err(e) => {
                     ipc::log_error("Failed to restore findings", &e);
-                    bridge::toast(&ipc::error_text(&e), true);
+                    crate::page::set_data_status(&ipc::error_text(&e), true);
                 }
             }
         });
@@ -475,7 +475,7 @@ async fn save_switch(first: (bool, Claim)) {
                     switch.set_checked(stored.unwrap_or(!on));
                 }
                 if !newer {
-                    bridge::toast(text::SWITCH_FAILED, true);
+                    crate::page::set_data_status(text::SWITCH_FAILED, true);
                 }
             }
         }

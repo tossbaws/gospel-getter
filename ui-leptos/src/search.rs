@@ -490,7 +490,7 @@ impl Search {
             return;
         };
         let query = self.query();
-        let commands = palette::shown(&query, palette::commands(&bridge::palette_state()));
+        let commands = palette::shown(&query, palette::commands(&crate::page::palette_state()));
         let shown = if query.searches() {
             self.state.with_value(|s| s.shown.clone())
         } else {
@@ -686,7 +686,7 @@ impl Search {
         ) else {
             return;
         };
-        let passage = bridge::OpenPassage {
+        let passage = crate::reader::OpenPassage {
             book_id,
             chapter,
             verse_start: data_number(option, "data-verse-start"),
@@ -706,7 +706,7 @@ impl Search {
             self.open_result(option);
             return;
         };
-        let command = palette::commands(&bridge::palette_state())
+        let command = palette::commands(&crate::page::palette_state())
             .into_iter()
             .find(|c| c.id == id);
         let command = match command {
@@ -954,7 +954,7 @@ fn run(action: &Run) {
         Run::Translation(code) => aa::choose_translation(code),
         Run::CompareWith(code) => aa::compare_with(code),
         Run::CompareNotes => aa::compare_with_notes(),
-        Run::Page(command) => bridge::page_command(command),
+        Run::Page(command) => crate::page::run_command(command),
     }
 }
 

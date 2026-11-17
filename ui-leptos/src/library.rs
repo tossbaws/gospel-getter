@@ -467,7 +467,7 @@ impl Library {
             };
             spawn_local(async move {
                 if let Err(message) = crate::findings::remove_request(request.clone()).await {
-                    bridge::toast(
+                    crate::page::set_data_status(
                         &format!(
                             "The findings for \u{201c}{request}\u{201d} weren\u{2019}t removed: \
                              {message}"
@@ -607,7 +607,7 @@ impl Library {
         surfaces::close(note.is_null());
         crate::reader::open(
             crate::pane::active(),
-            &bridge::OpenPassage {
+            &crate::reader::OpenPassage {
                 book_id: passage.book_id,
                 chapter: passage.chapter,
                 verse_start: Some(passage.verse_start),
@@ -771,7 +771,7 @@ impl Library {
         if closest(&target, ".note-list-copy").is_some() {
             if let Some(NoteRow { note, .. }) = self.note_row(&target) {
                 crate::note_copy::copy(&(&note).into(), note.reference, |message, is_error| {
-                    bridge::toast(&message, is_error);
+                    crate::page::set_data_status(&message, is_error);
                 });
             }
             return;

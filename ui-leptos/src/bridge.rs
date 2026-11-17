@@ -1,6 +1,6 @@
-//! The custom events the pieces send each other, the globals they set for
-//! the tests, the page markup they use, and the two events that cross to
-//! the page's own scripts, in one place.
+//! What crosses between this crate and the page's own scripts, the globals
+//! the pieces set for the tests, and the page's markup and local storage
+//! they use as a reader would, in one place.
 //!
 //! The page's own scripts (the pre-paint script, boot's prefetch, the
 //! loader and the plain-text fallback) read none of this crate's
@@ -8,6 +8,8 @@
 //! ("Building and running"). Only two events cross: [`BOOT_EVENT`] (page to
 //! Rust, [`boot_prefetch`]) and `gospel-getter:pieces-failed` (loader to
 //! fallback, on `document`, no `detail`; nothing in this crate hears it).
+//! The pieces call each other directly; one that mounts after the first
+//! chapter keeps a handle to itself from its mount (see `page`).
 //!
 //! Globals this crate sets for the frontend tests and the GUI checks (the
 //! page reads none of them): `window.gospelGetterShortcuts`, the table of
@@ -16,25 +18,6 @@
 //! settings an export carries, and `apply(values)`; and
 //! `window.gospelGetterSurfaces` (`surfaces`): `current()`, the open
 //! header surface's name or `null`.
-//!
-//! Within this crate, the pieces send each other custom events on
-//! `document` (a `detail` snapshot each), and a piece mounted later hears
-//! what it missed from `lib`'s ready list. Each `_EVENT` constant below
-//! says what it carries and who hears it. A request to open is cancelable:
-//! the piece cancels it to say it has it, and if nothing does (it hasn't
-//! mounted yet), the asker says it isn't available (`page`).
-//!
-//! Direct calls between the pieces: the toast ([`toast`], `page`), a modal
-//! opening ([`modal_opening`]) or getting ready to
-//! ([`page::modal_claim`](crate::page::modal_claim),
-//! [`page::modal_holds`](crate::page::modal_holds)), an export or import
-//! running ([`page::set_data_busy`](crate::page::set_data_busy)), an
-//! import's reloads ([`imported`]), the chooser's two choices
-//! ([`page::export_data`](crate::page::export_data),
-//! [`page::open_export_notes`](crate::page::open_export_notes)), what the
-//! palette's commands need ([`palette_state`]) and the commands `page` runs
-//! ([`page_command`]); and the reader's and the card's own `reader::ask`
-//! and `card::ask`.
 //!
 //! Page markup this crate uses as a reader would: `#theme-select`, read and
 //! changed (with a `change` event, as Aa does) for the welcome's looks
@@ -70,25 +53,10 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use web_sys::{CustomEvent, CustomEventInit, Document, HtmlElement};
 
-use crate::palette::PaletteState;
-
 /// The page's document, when there is one (there always is in the webview;
 /// this crate never assumes it).
 pub fn document() -> Option<Document> {
     web_sys::window().and_then(|w| w.document())
-}
-
-/// Says `message` in the page's toast (`#data-status`, `page`); an error
-/// stays longer and is red.
-pub fn toast(message: &str, is_error: bool) {
-    crate::page::set_data_status(message, is_error);
-}
-
-/// [`toast`] with a button after the message, `label`, for `duration` ms
-/// (`page::set_data_status_with_action`): the button, for the caller to
-/// answer.
-pub fn toast_with_action(message: &str, label: &str, duration: i32) -> Option<HtmlElement> {
-    crate::page::set_data_status_with_action(message, label, duration)
 }
 
 /// Where focus goes when what had it is gone: Aa in reading mode (which
@@ -124,13 +92,6 @@ pub fn export_shortcuts() {
     if let Ok(table) = crate::shortcut_table::SHORTCUTS.serialize(&serializer) {
         let _ = js_sys::Reflect::set(&window, &JsValue::from_str("gospelGetterShortcuts"), &table);
     }
-}
-
-/// A modal of this crate is about to open: the header's popovers and panels
-/// go (focus left alone) and, with `close_search`, the search box; at once,
-/// before the modal takes focus (`page`).
-pub fn modal_opening(close_search: bool) {
-    crate::page::modal_opening(close_search);
 }
 
 /// Aa's record of the theme: `#theme-select`, a hidden `<select>`. The
@@ -191,14 +152,6 @@ pub fn welcome_seen() {
     }
 }
 
-/// An import has changed the reader's data: what's shown of it is reloaded,
-/// in order: the chapter at `position` (or none, to stay put), then the
-/// bookmarks, highlights and notes; then `message` is said above the
-/// chapter and in the toast (`page`).
-pub fn imported(position: Option<&crate::dto::PositionPreview>, message: &str) {
-    crate::page::imported(position.cloned(), message.to_owned());
-}
-
 /// Whether the launch check is on: `html[data-update-check]` isn't `off`
 /// (the pre-paint script applies the stored setting there before the page
 /// draws, and `aa` keeps it).
@@ -206,16 +159,6 @@ pub fn launch_check_on() -> bool {
     document()
         .and_then(|d| d.document_element())
         .is_none_or(|html| html.get_attribute("data-update-check").as_deref() != Some("off"))
-}
-
-/// A passage to open: a chapter, and its verses if not all of it (a
-/// Library row or a search result, opened through `reader::open`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OpenPassage {
-    pub book_id: i64,
-    pub chapter: i64,
-    pub verse_start: Option<i64>,
-    pub verse_end: Option<i64>,
 }
 
 /// The translation chosen with the translation button
@@ -227,27 +170,6 @@ pub fn translation_code() -> String {
         .and_then(|el| el.dyn_into::<web_sys::HtmlSelectElement>().ok())
         .map(|select| select.value())
         .unwrap_or_default()
-}
-
-/// What the palette's commands need now: the page's settings and controls
-/// (`page`), the reader's chapters and history, and whether the card has the
-/// chapter's text ready to copy.
-pub fn palette_state() -> PaletteState {
-    let mut state = crate::page::palette_state();
-    crate::reader::palette_facts(&mut state);
-    crate::card::palette_facts(&mut state);
-    state
-}
-
-/// Runs a palette command `page` runs (`palette::Run::Page`):
-/// `copy-chapter`, `copy-chapter-as`, `next-chapter`, `previous-chapter`,
-/// `next-book`, `previous-book`, `back`, `forward`, `shortcuts`,
-/// `export-notes` (the Export notes dialog) and `export-data` (the backup;
-/// neither by way of ☰'s chooser), within
-/// the click or key that chose it (the clipboard needs that), after the box
-/// has closed and focus has gone back (`page`).
-pub fn page_command(command: &str) {
-    crate::page::run_command(command);
 }
 
 /// Boot's prefetch is asked for what it has sent (`boot`): a cancelable

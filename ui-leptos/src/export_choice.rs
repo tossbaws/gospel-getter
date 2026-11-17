@@ -119,7 +119,7 @@ impl Chooser {
         if self.open.get_untracked() {
             return;
         }
-        bridge::modal_opening(true);
+        crate::page::modal_opening(true);
         self.return_to.set_value(return_to);
         self.facts.set(facts);
         self.open.set(true);

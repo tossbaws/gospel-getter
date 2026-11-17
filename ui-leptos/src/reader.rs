@@ -667,7 +667,7 @@ fn show_failure(pane: PaneId, message: &str, book_id: i64, chapter: i64) {
         let _ = notice.append_with_node_1(&retry);
     }
     if with(pane, |s| s.last_dto.is_some()) {
-        bridge::toast(message, true);
+        crate::page::set_data_status(message, true);
     }
 }
 
@@ -1016,7 +1016,7 @@ fn jump_to(
 /// nothing there. A newer step or jump takes over from one on its way.
 fn go_history(pane: PaneId, step: i32) -> Load {
     if !with(pane, |s| s.history.can_go(step)) {
-        bridge::toast(text::history_end(step), false);
+        crate::page::set_data_status(text::history_end(step), false);
         return Box::pin(async { false });
     }
     remember_leaving(pane);
@@ -1061,6 +1061,16 @@ fn spawn(load: Load) {
     });
 }
 
+/// A passage to open: a chapter, and its verses if not all of it (a
+/// Library row or a search result, opened through [`open`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenPassage {
+    pub book_id: i64,
+    pub chapter: i64,
+    pub verse_start: Option<i64>,
+    pub verse_end: Option<i64>,
+}
+
 /// Opens a chapter as a jump (recorded in the history): the welcome's
 /// places to start, a chapter chosen in the picker or Random chapter's;
 /// from the top, with `top`.
@@ -1076,7 +1086,7 @@ pub fn jump(pane: PaneId, book_id: i64, chapter: i64, top: bool) {
 /// the way: a jump that failed or was overtaken, another navigation, or
 /// any note editor opening meanwhile (even one closed again) lets the Edit
 /// go, so it never opens over what the reader is doing now.
-pub fn open(pane: PaneId, passage: &bridge::OpenPassage, note: JsValue) {
+pub fn open(pane: PaneId, passage: &OpenPassage, note: JsValue) {
     let load = jump_to(
         pane,
         passage.book_id,
@@ -1238,7 +1248,7 @@ fn run(pane: PaneId, request: Request, sent: Option<Sent>) -> Load {
                     from_top(pane, load_reading(pane, book_id, chapter), true)
                 }
                 Some((None, name)) => {
-                    bridge::toast(&text::no_book(&name, which), false);
+                    crate::page::set_data_status(&text::no_book(&name, which), false);
                     Box::pin(async { false })
                 }
                 None => Box::pin(async { false }),
@@ -1320,7 +1330,7 @@ fn on_click(event: &MouseEvent) {
                 Err(e) => Err(e),
             };
             if let Err(e) = answer {
-                bridge::toast(&ipc::error_text(&e), true);
+                crate::page::set_data_status(&ipc::error_text(&e), true);
             }
         });
         return;

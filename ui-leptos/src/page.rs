@@ -662,11 +662,12 @@ fn disabled(id: &str) -> bool {
     button(id).is_some_and(|b| b.disabled())
 }
 
-/// Aa's settings, comparing, the shape, the translations, a busy export:
-/// what the palette's commands need of the page now (the reader's and the
-/// card's facts are added by `bridge::palette_state`).
+/// What the palette's commands need now: Aa's settings, comparing, the
+/// shape, the translations and a busy export (the page's), the reader's
+/// chapters and history, and whether the card has the chapter's text ready
+/// to copy.
 pub fn palette_state() -> PaletteState {
-    PaletteState {
+    let mut state = PaletteState {
         comparing: is_comparing(),
         partner: crate::aa::partner(),
         compare_notes: crate::prefs::on(&crate::preferences::COMPARE_NOTES),
@@ -689,12 +690,19 @@ pub fn palette_state() -> PaletteState {
         checking: disabled("update-check-btn"),
         chapter_shown: dom::query(".chapter-copy-btn").is_some(),
         ..PaletteState::default()
-    }
+    };
+    reader::palette_facts(&mut state);
+    card::palette_facts(&mut state);
+    state
 }
 
 /// Runs `command`, one of the palette's commands that `page` runs (see
-/// `palette::Run::Page`), within the click or key that chose it (copying
-/// needs that).
+/// `palette::Run::Page`): `copy-chapter`, `copy-chapter-as`,
+/// `next-chapter`, `previous-chapter`, `next-book`, `previous-book`,
+/// `back`, `forward`, `shortcuts`, `export-notes` (the Export notes dialog)
+/// and `export-data` (the backup; neither by way of ☰'s chooser), within
+/// the click or key that chose it (copying needs that), after the box has
+/// closed and focus has gone back.
 pub fn run_command(command: &str) {
     match command {
         "copy-chapter" => {

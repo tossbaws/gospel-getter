@@ -8,7 +8,7 @@
 //! capturing `keydown` on `window`, stopping every other handler), Escape
 //! cancels, Tab stays inside, and closing gives focus to the page's focus
 //! home (☰, where Import data… was chosen). After an import what's shown of
-//! the reader's data is reloaded (`bridge::imported`, `page`).
+//! the reader's data is reloaded (`page::imported`).
 //!
 //! Once Import is pressed the import can't be cancelled: the backend may
 //! already have committed it, so "Nothing was changed" could be untrue.
@@ -115,7 +115,7 @@ impl Import {
         }
         self.choosing.set_value(true);
         page::set_data_busy(true);
-        bridge::toast("Choose a file to import…", false);
+        crate::page::set_data_status("Choose a file to import…", false);
         spawn_local(async move {
             let answer = ipc::invoke_value("choose_import_file", JsValue::UNDEFINED).await;
             let choice = answer.and_then(|answer| {
@@ -130,7 +130,7 @@ impl Import {
             });
             match choice {
                 Ok((ImportChoice::Cancelled, _)) => {
-                    bridge::toast("Import cancelled. Nothing was changed.", false);
+                    crate::page::set_data_status("Import cancelled. Nothing was changed.", false);
                 }
                 Ok((
                     ImportChoice::Invalid {
@@ -140,16 +140,16 @@ impl Import {
                     },
                     _,
                 )) => {
-                    bridge::toast("", false);
+                    crate::page::set_data_status("", false);
                     self.show_problems(file_name, message, problems);
                 }
                 Ok((ImportChoice::Ready { preview }, raw_prefs)) => {
-                    bridge::toast("", false);
+                    crate::page::set_data_status("", false);
                     self.show_preview(*preview, raw_prefs);
                 }
                 Err(e) => {
                     ipc::log_error("Import failed", &e);
-                    bridge::toast(
+                    crate::page::set_data_status(
                         &format!(
                             "Import failed: {} Nothing was changed.",
                             ipc::error_text(&e)
@@ -226,7 +226,7 @@ impl Import {
 
     /// Shows the dialog, focus on `button` once it's there.
     fn reveal(self, button: NodeRef<html::Button>) {
-        bridge::modal_opening(false);
+        crate::page::modal_opening(false);
         self.open.set(true);
         spawn_local(async move {
             tick().await;
@@ -300,7 +300,7 @@ impl Import {
                     ipc::log_error("Failed to discard import", &e);
                 }
             });
-            bridge::toast("Import cancelled. Nothing was changed.", false);
+            crate::page::set_data_status("Import cancelled. Nothing was changed.", false);
         }
         self.close();
         bridge::focus_home();
@@ -385,7 +385,7 @@ impl Import {
                 });
                 parts.push(import_text::preferences_part(applied));
             }
-            bridge::imported(result.position.as_ref(), &import_text::complete(&parts));
+            page::imported(result.position.clone(), import_text::complete(&parts));
         });
     }
 
