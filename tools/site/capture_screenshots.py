@@ -18,8 +18,9 @@ Usage, from the repository root:
     PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py --readme OUT_DIR [--theme NAME] [SCENE ...]
 
 --theme sets the theme of the feature screenshots (the site's reading,
-search, compare and select, or the README's); it defaults to chi-rho, the
-app's default theme. The theme-* scenes are always in their own themes.
+search, compare, select and split-view, or the README's); it defaults to
+chi-rho, the app's default theme. The theme-* scenes are always in their
+own themes.
 Naming scenes captures only those. The first-run welcome is marked as seen
 and no highlights are set, and a capture fails if either is on screen.
 
@@ -36,8 +37,8 @@ the left, and narrower it's a popover from the reference button, closed.
 The README's margin-notes scene is in reading mode, which shows no picker.
 The verses are one to a line (Verses, the default), except in the README's
 flowing scene, which sets Flowing under Aa. Scenes read the KJV or the WEB,
-except the README's bsb scene; the compare scenes read the KJV, compared with
-the WEB.
+except the README's bsb scene and the split-view scenes' second side, which
+read the BSB; the compare scenes read the KJV, compared with the WEB.
 Needs PyGObject with WebKit2 4.1 and a display (it never shows a window).
 """
 
@@ -301,6 +302,38 @@ SELECT = """
                 await __gg.until(() => document.querySelector('#selection-card .verse-actions'), 'the card');
 """
 
+# Split view, reached as a reader reaches it: John 3:16 selected in the
+# KJV, its Romans 5:8 cross-reference previewed, then Open beside. The
+# second side opens in the first side's translation, so its own
+# translation button then sets the BSB. Esc closes the popover, then
+# clears Romans 5:8's selection (and its card), leaving the right side
+# active. Each side is its own scroller (.pane), put at its heading, as
+# Open beside leaves Romans 5 at verse 8.
+SPLIT = """
+                __gg.click(__gg.verse(16));
+                const chip = () => [...document.querySelectorAll('#selection-card .xref-citation')]
+                    .find((b) => b.textContent.trim() === 'Romans 5:8');
+                await __gg.until(chip, 'the Romans 5:8 chip');
+                __gg.click(chip());
+                await __gg.until(() => document.querySelector('#xref-preview .xref-preview-beside'), 'Open beside');
+                __gg.click(document.querySelector('#xref-preview .xref-preview-beside'));
+                const second = () => document.querySelector('.pane[data-pane="second"]');
+                await __gg.until(() => window.gospelGetterPanes.active() === 'second'
+                    && /^Romans 5/.test((document.querySelector('#reading-pane-2 .chapter-main .chapter-heading') || {}).textContent || ''),
+                    'Romans 5 beside');
+                __gg.click(second().querySelector('.pane-bar .translation-toggle'));
+                await __gg.until(() => !document.getElementById('translation-popover').hidden, 'the translations');
+                __gg.click(document.querySelector('#translation-choices [data-value="bsb"]'));
+                await __gg.until(() => document.querySelector('#reading-pane-2 .chapter-main .verse[data-translation="bsb"]')
+                    && !document.querySelector('#reading-pane-2 .chapter-main .verse[data-translation="kjv"]'), 'Romans 5 in the BSB');
+                __gg.key('Escape');
+                await __gg.until(() => document.getElementById('translation-popover').hidden, 'the popover closed');
+                __gg.key('Escape');
+                await __gg.until(() => !document.querySelector('.verse-selected'), 'no selection');
+                if (window.gospelGetterPanes.active() !== 'second') throw new Error('the right side is not active');
+                for (const pane of document.querySelectorAll('.pane')) pane.scrollTop = 0;
+"""
+
 
 def feature_scenes(theme):
     """The site's feature screenshots, in `theme`."""
@@ -337,6 +370,10 @@ def feature_scenes(theme):
              steps=SCROLL_TO % ("__gg.verse(4)", 8) + SELECT % (4, 7)
              + "await __gg.until(() => document.querySelector('#selection-card .verse-notes'),"
                " 'the notes on it');"),
+        # Two passages side by side: John 3 in the KJV, and Romans 5 in the
+        # BSB beside it, active.
+        dict(name="split-view", size=(1280, 800), prefs=look, position=("John", 3, "kjv"),
+             steps=SPLIT),
     ]
 
 
@@ -411,6 +448,9 @@ def readme_scenes(theme):
              steps="""
                 await __gg.until(() => document.querySelector('.compare-grid'), 'compare grid');
              """ + SCROLL_TO % ("__gg.verse(21, 'kjv')", 16)),
+        # John 3 in the KJV, and Romans 5 in the BSB beside it, active.
+        dict(name="split-view", size=(1280, 850), prefs=look, position=("John", 3, "kjv"),
+             steps=SPLIT),
         # John 3:16-18 selected, its card under it with the actions,
         # citation and cross-references.
         dict(name="copy-verse-range", size=(1280, 850), prefs=look, position=("John", 3, "web"),

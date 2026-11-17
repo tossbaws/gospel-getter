@@ -73,11 +73,11 @@ same rule.
   "Brand" below.
 - The screenshots are the real app (`ui/index.html`) showing the real
   bundled KJV, BSB and WEB text, in WebKitGTK, the engine the Linux app uses.
-  The feature screenshots (hero, search, copy, bookmark and note, compare, and
-  `og-image.jpg`) are in Chi Rho, the app's default theme, in a 1280×800
-  window, where the book and chapter picker is a sidebar; the theme tiles on
-  the guide page show every theme but System, which is Chi Rho or Vellum as
-  the computer is set. The README's screenshots (`screenshots/`) come from
+  The feature screenshots (hero, search, copy, bookmark and note, compare,
+  split view, and `og-image.jpg`) are in Chi Rho, the app's default theme,
+  in a 1280×800 window, where the book and chapter picker is a sidebar; the
+  theme tiles on the guide page show every theme but System, which is Chi
+  Rho or Vellum as the computer is set. The README's screenshots (`screenshots/`) come from
   the same script with `--readme`, at their final sizes.
   `tools/site/capture_screenshots.py` loads the page offscreen and answers
   its Tauri calls with the app's real command code, through the frontend
@@ -99,7 +99,7 @@ same rule.
 
   ```bash
   PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py /tmp/gg-raw            # the site's, raw
-  PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py /tmp/gg-raw reading search compare select
+  PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py /tmp/gg-raw reading search compare select split-view
   tools/site/build_images.sh /tmp/gg-raw
   PYTHONDONTWRITEBYTECODE=1 python3 tools/site/capture_screenshots.py --readme screenshots   # the README's, in place
   ```

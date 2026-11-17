@@ -19,6 +19,9 @@ for name in compare select; do
     webp "$raw/$name.png" "$out/$name-800.webp" -resize 800x
 done
 
+# Split view: the guide's only, so at 800 px wide alone.
+webp "$raw/split-view.png" "$out/split-view-800.webp" -resize 800x
+
 # Search: the search panel, with a little of the page behind it.
 webp "$raw/search.png" "$out/search-1440.webp" -crop 1440x1300+560+0 +repage
 webp "$raw/search.png" "$out/search-720.webp" -crop 1440x1300+560+0 +repage -resize 720x
