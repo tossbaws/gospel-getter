@@ -5293,6 +5293,64 @@ fn every_handled_key_is_in_the_shortcuts_table() {
     assert!(sheet.contains("shortcut_table::in_group(group)"));
 }
 
+/// Every Open beside goes the one way `gospelGetterPanes.openBeside` goes,
+/// `reader::open_beside` (S8): the card's cross-reference preview
+/// (`clicks`), a Library row, a search result, a note's link and the card's
+/// note row (`note_links`), and the palette (`reader::open_here_beside`).
+/// Nothing else opens the second pane but that and the launch that opens
+/// it again where it was (`pane::reopen`). Each new button takes the focus
+/// ring of the control it sits beside.
+#[test]
+fn every_open_beside_goes_one_way() {
+    for file in [
+        "clicks.rs",
+        "library.rs",
+        "search.rs",
+        "note_links.rs",
+        "pane.rs",
+    ] {
+        assert!(
+            piece(file).contains("reader::open_beside("),
+            "{file} opens beside through reader::open_beside"
+        );
+    }
+    assert!(
+        block_after(piece("reader.rs"), "pub fn open_here_beside(")
+            .contains("open_beside(&passage, None)")
+    );
+    assert!(
+        block_after(piece("reader.rs"), "pub fn open_beside(").contains("pane::open_second();")
+    );
+    assert!(block_after(piece("pane.rs"), "pub fn reopen(").contains("open_second();"));
+    for (file, source) in PIECES.iter() {
+        let calls = source.matches("open_second()").count();
+        let expected = match *file {
+            // Its definition, and `reopen`'s call.
+            "pane.rs" => 2,
+            "reader.rs" => 1,
+            _ => 0,
+        };
+        assert_eq!(calls, expected, "{file} opens the second pane");
+    }
+
+    let rules = rules();
+    for control in [".xref-preview-beside", ".library-beside"] {
+        let focus = format!("{control}:focus-visible");
+        assert!(
+            rules.iter().any(|r| r.at_rule.is_none()
+                && selectors(r).any(|s| s == focus)
+                && r.body.contains("outline: 2px solid var(--accent)")),
+            "{control} has the shared focus ring"
+        );
+    }
+    assert!(
+        screen_rule(&rules, ".xref-preview-beside")
+            .body
+            .contains("color: var(--accent-2)"),
+        "Open beside is Go to's color"
+    );
+}
+
 /// The shortcuts sheet is a modal dialog named by its heading, reached
 /// from ☰ (a menu item that says its key), with a labelled close button
 /// and a body that scrolls by keyboard too. Its rows are `--text` and its

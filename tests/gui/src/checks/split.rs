@@ -56,6 +56,23 @@
 //!
 //! Whatever happens, each session closes the second pane before it ends,
 //! which forgets both keys: no other session starts split.
+//!
+//! Check 78: Open beside, the reader's way in (S8), from a real
+//! cross-reference preview: John 3:16 selected in the first pane, its
+//! Romans 5:8 chip, then Open beside (a pointer's click):
+//!
+//! - Two panes, side by side and both in view: John 3 in the first,
+//!   Romans 5 in the second, in the first pane's translation (D9), verse 8
+//!   selected there, the second pane active (S13).
+//! - F6 makes the first pane active, focus on its bar's reference button;
+//!   Shift+F6 the second again (D10). Whether the webview hands F6 to the
+//!   page at all is said either way (the design's §4.5 left it
+//!   unverified): if it doesn't, the palette's Switch pane (F6) does the
+//!   same, and the check says F6 never arrived rather than failing.
+//! - × closes the second pane: one pane, focus on its reference button.
+//!
+//! Whatever happens, the second pane is closed after, and the window's
+//! width and the first pane's chapter put back.
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
@@ -442,6 +459,205 @@ impl Run<'_> {
         Ok(said.join("; "))
     }
 
+    /// Check 78.
+    pub(super) async fn open_beside(&mut self) -> Result<String> {
+        self.plain_reading().await?;
+        let width = self.split_window_width().await?;
+        let was = self
+            .ui
+            .js(
+                "const inner = document.getElementById('reading-pane-inner');
+                 const h = document.querySelector('.chapter-main .chapter-heading');
+                 return { book: Number(inner.dataset.currentBook), chapter: Number(inner.dataset.currentChapter),
+                          heading: h.textContent.trim() };",
+                Vec::new(),
+            )
+            .await?;
+        let checked = self.open_beside_steps().await;
+        let heard = self.ui.js(F6_UNHEARD_JS, Vec::new()).await;
+        let put_back = self.split_clean_up(width, &was).await;
+        let said = checked?;
+        heard?;
+        put_back?;
+        Ok(said)
+    }
+
+    /// Presses F6 (`shift`: Shift+F6), and waits for `to` to be the active
+    /// pane, focus on its bar's reference button; or, if the page never
+    /// heard the key (the webview kept it), says so, and switches through
+    /// the palette's Switch pane (F6) instead.
+    async fn press_f6(&self, shift: bool, to: &str) -> Result<String> {
+        let name = if shift { "Shift+F6" } else { "F6" };
+        if shift {
+            self.chord(&format!("press {name}"), &[Key::Shift], Key::F6)
+                .await?;
+        } else {
+            self.ui.press(&format!("press {name}"), Key::F6).await?;
+        }
+        let heard = self
+            .ui
+            .wait_within(
+                &format!("{name} to reach the page"),
+                "return [window.__gospelGetterF6.length > 0, window.__gospelGetterF6];",
+                Vec::new(),
+                Some(std::time::Duration::from_secs(3)),
+            )
+            .await;
+        let switched = format!(
+            "{PANES_JS_FOCUS} return [window.gospelGetterPanes.active() === arguments[0]
+                 && focusedRef === arguments[0], {{ active: window.gospelGetterPanes.active(), focusedRef }}];"
+        );
+        match heard {
+            Ok(events) => {
+                self.ui
+                    .js(
+                        "window.__gospelGetterF6.length = 0; return null;",
+                        Vec::new(),
+                    )
+                    .await?;
+                let seen = self
+                    .ui
+                    .wait_with(
+                        &format!(
+                            "{name} to make the {to} pane active, focus on its reference button"
+                        ),
+                        &switched,
+                        vec![json!(to)],
+                    )
+                    .await?;
+                Ok(format!("{name} reached the page ({events}): {seen}"))
+            }
+            Err(_) => {
+                self.open_search_by_key().await?;
+                self.type_in_box(">switch pane").await?;
+                self.ui
+                    .wait(
+                        "Switch pane (F6) to be offered",
+                        "const o = document.querySelector('#search-results .search-command[data-command=\"switch-pane\"]');
+                         return [!!o, o && o.textContent];",
+                    )
+                    .await?;
+                self.ui
+                    .press("press Enter (Switch pane)", Key::Enter)
+                    .await?;
+                let seen = self
+                    .ui
+                    .wait_with(
+                        &format!("Switch pane to make the {to} pane active"),
+                        &switched,
+                        vec![json!(to)],
+                    )
+                    .await?;
+                Ok(format!(
+                    "{name} never reached the page (the webview kept it); the palette's Switch pane did: {seen}"
+                ))
+            }
+        }
+    }
+
+    async fn open_beside_steps(&mut self) -> Result<String> {
+        let ui = &self.ui;
+        let mut said = Vec::new();
+        self.go_to("John 3", "John 3").await?;
+        self.plain_reading().await?;
+        let code = ui
+            .js(
+                "return document.getElementById('translation-select').value;",
+                Vec::new(),
+            )
+            .await?;
+        ui.click(
+            "click verse 16",
+            "#reading-pane .chapter-main .verse[data-translation][data-verse=\"16\"]",
+        )
+        .await?;
+        ui.wait(
+            "the card on verse 16, with its cross references",
+            "return [!!document.querySelector('#selection-card .xref-citation'), null];",
+        )
+        .await?;
+        ui.step("click the Romans 5:8 chip", async {
+            ui.driver()
+                .find(By::XPath(
+                    "//*[@id='selection-card']//button[contains(@class, 'xref-citation') and normalize-space(.)='Romans 5:8']",
+                ))
+                .await
+                .context("no Romans 5:8 chip on John 3:16")?
+                .click()
+                .await?;
+            Ok(())
+        })
+        .await?;
+        let beside = ui
+            .wait(
+                "the preview, with Go to and Open beside",
+                "const b = document.querySelector('#xref-preview .xref-preview-beside');
+                 const r = b && b.getBoundingClientRect();
+                 return [!!b && r.width > 0 && b.previousElementSibling.classList.contains('xref-preview-go'),
+                     b && { text: b.textContent, name: b.getAttribute('aria-label') }];",
+            )
+            .await?;
+        ensure!(
+            beside["text"] == "Open beside" && beside["name"] == "Open Romans 5:8 beside",
+            "the preview's Open beside: {beside}"
+        );
+        ui.click("click Open beside", "#xref-preview .xref-preview-beside")
+            .await?;
+        let opened = ui
+            .wait_with(
+                "two panes side by side: John 3, and Romans 5 beside it, active, verse 8 selected",
+                "const col = (n) => document.querySelector(`.pane[data-pane=\"${n}\"]`);
+                 const rect = (n) => col(n) && !col(n).hidden ? col(n).getBoundingClientRect() : null;
+                 const [a, b] = [rect('first'), rect('second')];
+                 const heading = (id) => (document.querySelector(`#${id} .chapter-main .chapter-heading`) || {}).textContent || null;
+                 const selected = [...document.querySelectorAll('#reading-pane-2 .verse-selected[data-translation]')]
+                     .map((v) => [Number(v.dataset.verse), v.dataset.translation]);
+                 const seen = { split: !!document.documentElement.dataset.split, active: window.gospelGetterPanes.active(),
+                     first: heading('reading-pane'), second: heading('reading-pane-2'), selected,
+                     first_box: a && [Math.round(a.left), Math.round(a.right)], second_box: b && [Math.round(b.left), Math.round(b.right)] };
+                 return [seen.split && seen.active === 'second' && seen.first === 'John 3' && seen.second === 'Romans 5'
+                     && JSON.stringify(selected) === JSON.stringify([[8, arguments[0]]])
+                     && !!a && !!b && a.width > 200 && b.width > 200 && a.right <= b.left + 1, seen];",
+                vec![code.clone()],
+            )
+            .await?;
+        said.push(format!("Open beside: {opened}"));
+        ui.settled("the panes to settle").await?;
+
+        // F6 and Shift+F6. A listener of the check's own, first on the
+        // window, says whether the key reached the page at all.
+        ui.js(
+            "window.__gospelGetterF6 = [];
+             window.__gospelGetterF6Listener = (e) => { if (e.key === 'F6') window.__gospelGetterF6.push(e.shiftKey ? 'Shift+F6' : 'F6'); };
+             window.addEventListener('keydown', window.__gospelGetterF6Listener, true);
+             if (document.activeElement) document.activeElement.blur();
+             return null;",
+            Vec::new(),
+        )
+        .await?;
+        said.push(self.press_f6(false, "first").await?);
+        said.push(self.press_f6(true, "second").await?);
+
+        // × closes it.
+        self.ui
+            .click(
+                "click × (close the second pane)",
+                ".pane[data-pane=\"second\"] .pane-close",
+            )
+            .await?;
+        let closed = self
+            .panes_are(
+                "one pane, focus on its reference button",
+                "!seen.split && seen.active === 'first' && seen.focus === 'ref-btn'",
+            )
+            .await?;
+        said.push(format!(
+            "× closed it: {}",
+            json!({ "split": closed["split"], "focus": closed["focus"] })
+        ));
+        Ok(said.join("; "))
+    }
+
     /// Check 76.
     pub(super) async fn split_tabs(&mut self) -> Result<String> {
         self.plain_reading().await?;
@@ -660,6 +876,20 @@ impl Run<'_> {
         Ok(())
     }
 }
+
+/// Which pane's bar's reference button has focus (`focusedRef`: "first",
+/// "second" or null), for check 78's F6.
+const PANES_JS_FOCUS: &str =
+    "const ref = document.activeElement && document.activeElement.closest('.pane-bar .ref-btn');
+    const focusedRef = ref ? ref.closest('.pane').dataset.pane : null;";
+
+/// Takes check 78's F6 listener off the window again.
+const F6_UNHEARD_JS: &str = "if (window.__gospelGetterF6Listener) {
+        window.removeEventListener('keydown', window.__gospelGetterF6Listener, true);
+        delete window.__gospelGetterF6Listener;
+        delete window.__gospelGetterF6;
+    }
+    return null;";
 
 /// Check 77's verse in the second pane (Psalm 119 in the WEB), and how far
 /// above the pane's bar its top is left.
