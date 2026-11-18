@@ -80,16 +80,26 @@ impl Xvfb {
         Ok(())
     }
 
-    /// Runs xdotool on this display, and only this display.
-    pub async fn xdotool(&self, args: &[&str]) -> Result<String> {
-        self.confirm()?;
-        let output = Command::new("xdotool")
-            .args(args)
+    /// `program`, to run on this display: with an emptied environment
+    /// holding nothing but its `DISPLAY` and `PATH`, no stdin, and killed if
+    /// the check stops waiting for it. Call [`Xvfb::confirm`] first.
+    fn command(&self, program: &str) -> Command {
+        let mut command = Command::new(program);
+        command
             .env_clear()
             .env("DISPLAY", &self.display)
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .stdin(Stdio::null())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+        command
+    }
+
+    /// Runs xdotool on this display, and only this display.
+    pub async fn xdotool(&self, args: &[&str]) -> Result<String> {
+        self.confirm()?;
+        let output = self
+            .command("xdotool")
+            .args(args)
             .output()
             .await
             .context("running xdotool")?;
@@ -114,13 +124,9 @@ impl Xvfb {
     /// `(id, name)`; none is not an error.
     pub async fn windows_named(&self, fragment: &str) -> Result<Vec<(String, String)>> {
         self.confirm()?;
-        let output = Command::new("xdotool")
+        let output = self
+            .command("xdotool")
             .args(["search", "--onlyvisible", "--name", &regex_escape(fragment)])
-            .env_clear()
-            .env("DISPLAY", &self.display)
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
             .output()
             .await
             .context("running xdotool")?;
@@ -157,13 +163,9 @@ impl Xvfb {
     pub async fn screenshot_root(&self, path: &Path) -> Result<()> {
         self.confirm()?;
         let path = path.to_str().context("the path is not UTF-8")?;
-        let output = Command::new("import")
+        let output = self
+            .command("import")
             .args(["-window", "root", &format!("png:{path}")])
-            .env_clear()
-            .env("DISPLAY", &self.display)
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
             .output()
             .await
             .context("running ImageMagick's import (not installed?)")?;
@@ -266,6 +268,26 @@ fn regex_escape(text: &str) -> String {
     escaped
 }
 
+/// Windows: runs the PowerShell script file `script` with `args` (its
+/// parameters), no profile and no stdin, and waits for its output.
+async fn powershell(script: &str, args: &[&str]) -> Result<std::process::Output> {
+    Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            script,
+        ])
+        .args(args)
+        .stdin(Stdio::null())
+        .kill_on_drop(true)
+        .output()
+        .await
+        .context("running PowerShell")
+}
+
 /// Windows: waits up to `within` for a window named `title` (the save
 /// dialog) through UI Automation, then closes it. Returns its class name.
 /// The PowerShell script is written to `work_dir` and run with `-File`, so
@@ -300,24 +322,7 @@ Write-Output $class
         .with_context(|| format!("writing {}", script.display()))?;
     let script = script.to_str().context("the script path is not UTF-8")?;
     let millis = within.as_millis().to_string();
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            script,
-            "-Title",
-            title,
-            "-Millis",
-            &millis,
-        ])
-        .stdin(Stdio::null())
-        .kill_on_drop(true)
-        .output()
-        .await
-        .context("running PowerShell")?;
+    let output = powershell(script, &["-Title", title, "-Millis", &millis]).await?;
     if !output.status.success() {
         bail!(
             "UI Automation found no save dialog: {}",
@@ -344,20 +349,7 @@ if ($null -eq $text) { $text = '' }
         .await
         .with_context(|| format!("writing {}", script.display()))?;
     let script = script.to_str().context("the script path is not UTF-8")?;
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            script,
-        ])
-        .stdin(Stdio::null())
-        .kill_on_drop(true)
-        .output()
-        .await
-        .context("running PowerShell")?;
+    let output = powershell(script, &[]).await?;
     if !output.status.success() {
         bail!(
             "Get-Clipboard failed: {}",
