@@ -38,51 +38,6 @@ async function readsAsPlainText(app, book, chapter) {
     assert.equal(app.heading(), `${book} ${chapter}`);
 }
 
-test('a fresh install whose pieces load after boot still opens the welcome', () =>
-    withApp({ fresh: true, leptos: 'late' }, async (app) => {
-        await app.idle();
-        await settle();
-        assert.equal($(app, 'welcome-overlay'), null, 'not loaded yet');
-        await app.loadPieces();
-        await app.until(() => $(app, 'welcome-overlay') && !$(app, 'welcome-overlay').hidden, 'the welcome');
-        assert.equal(app.document.activeElement, $(app, 'welcome-panel'));
-        assert.equal(app.heading(), 'Genesis 1');
-        assert.deepEqual(app.consoleErrors, []);
-    }));
-
-test('pieces that load after boot on an install that isn’t fresh open nothing', () =>
-    withApp({ leptos: 'late' }, async (app) => {
-        await app.idle();
-        await app.loadPieces();
-        assert.equal($(app, 'welcome-overlay').hidden, true);
-        assert.deepEqual(app.consoleErrors, []);
-    }));
-
-test('without the pieces, no dialog answers or says anything, and the chapter shows as plain text', () =>
-    withApp({ book: 'John', chapter: 3, leptos: false }, async (app) => {
-        await app.idle();
-        for (const id of ['shortcuts-overlay', 'welcome-overlay', 'import-overlay', 'note-overlay', 'export-notes-overlay']) {
-            assert.equal($(app, id), null, id);
-        }
-
-        app.key('?', { shiftKey: true });
-        assert.deepEqual(toast(app), NOTHING);
-        assert.equal(app.searchPanel().hidden, true, '? still never opens search');
-
-        app.open('menu');
-        app.click($(app, 'welcome-btn'));
-        assert.deepEqual(toast(app), NOTHING);
-
-        const before = app.calls.length;
-        app.open('menu');
-        app.click($(app, 'import-data-btn'));
-        assert.deepEqual(toast(app), NOTHING);
-        assert.deepEqual(app.calls.slice(before).map((c) => c.cmd), [], 'no file dialog');
-
-        await readsAsPlainText(app, 'John', 3);
-        assert.deepEqual(app.consoleErrors, []);
-    }));
-
 // The page's rules that make a verse look clickable: the pointer, and a
 // wash under it (each `:hover` rule, as if the pointer were there).
 function clickableRules(app) {
@@ -135,42 +90,6 @@ const VERSION = JSON.parse(
 ).version;
 const UPDATE = { version: '2.6.0', notes: 'Notes.', date: '2026-10-20', canSelfUpdate: true };
 
-test('pieces that load after boot run the launch check then, and fill About', () =>
-    withApp({ leptos: 'late', update: { check: UPDATE } }, async (app) => {
-        await app.idle();
-        assert.equal(checks(app), 0, 'nothing to check with yet');
-        assert.equal($(app, 'update-banner'), null);
-        await app.loadPieces();
-        await app.idle();
-        assert.equal(checks(app), 1, 'the launch check, once');
-        assert.equal($(app, 'update-banner').hidden, false);
-        assert.equal($(app, 'update-title').textContent, 'Gospel Getter 2.6.0 is available');
-
-        app.open('about');
-        assert.equal(app.surface('about').hidden, false);
-        assert.equal($(app, 'app-version').textContent, `Version ${VERSION}`);
-        const credits = [...$(app, 'about-credits').querySelectorAll('li')].map((li) => li.textContent);
-        assert.ok(credits.length > 1, 'the bundled texts, from boot');
-        assert.equal(credits.at(-1), 'Cross-references from OpenBible.info, CC BY 4.0');
-        assert.deepEqual(app.consoleErrors, []);
-    }));
-
-test('without the pieces, About doesn’t open or say anything, no update is looked for, and the chapter shows as plain text', () =>
-    withApp({ book: 'John', chapter: 3, leptos: false, update: { check: UPDATE } }, async (app) => {
-        await app.idle();
-        assert.equal($(app, 'about-overlay'), null);
-        assert.equal($(app, 'update-banner'), null);
-        assert.equal(checks(app), 0);
-
-        app.open('menu');
-        app.click($(app, 'about-btn'));
-        assert.deepEqual(toast(app), NOTHING);
-        assert.equal(app.surface('menu').hidden, true, 'the menu closes as after any item');
-
-        await readsAsPlainText(app, 'John', 3);
-        assert.deepEqual(app.consoleErrors, []);
-    }));
-
 const JOHN = bookId('John');
 
 /** One bookmark (John 3:16) and one highlight (John 3:3), kept for the app. */
@@ -182,30 +101,61 @@ async function seedLibrary() {
 
 const listCalls = (app) => app.calls.filter((c) => ['list_bookmarks', 'list_highlight_passages', 'list_all_notes'].includes(c.cmd));
 
-test('pieces that load after boot fill the Library then, and mark the bookmarks', async () => {
-    await seedLibrary();
-    await withApp({ book: 'John', chapter: 3, keepBookmarks: true, leptos: 'late' }, async (app) => {
-        await app.idle();
-        assert.equal($(app, 'bookmark-list'), null, 'no Library yet');
-        assert.deepEqual(listCalls(app), [], 'its lists wait for it');
-        assert.deepEqual(app.bookmarkedVerseNumbers(), []);
-        assert.equal($(app, 'reading-pane-inner'), null, 'so does the chapter, the reader being one of them');
+const SAVED_LOOK = {
+    'gospel-getter-theme': 'vellum',
+    'gospel-getter-text-size': 'large',
+    'gospel-getter-layout': 'flowing',
+    'gospel-getter-compare': 'on',
+    'gospel-getter-compare-with': 'bsb',
+};
 
-        await app.loadPieces();
-        await app.idle();
-        assert.equal(app.verse(3).dataset.highlight, 'green', 'the reader’s own highlights, once it’s there');
-        assert.deepEqual(listCalls(app).map((c) => c.cmd).sort(), ['list_all_notes', 'list_bookmarks', 'list_highlight_passages']);
-        assert.deepEqual(app.bookmarkItems().map((i) => i.reference), ['John 3:16']);
-        assert.deepEqual(app.bookmarkedVerseNumbers(), [16]);
-        assert.equal($(app, 'highlight-count').textContent, '1');
-        assert.deepEqual(app.consoleErrors, []);
-    });
-});
+/** Runs one row of a table, its failure naming the row. */
+async function row(what, body) {
+    try {
+        await body();
+    } catch (error) {
+        error.message = `${what}: ${error.message}`;
+        error.stack = `${what}: ${error.stack}`;
+        throw error;
+    }
+}
 
-test('without the pieces, the Library doesn’t open or say anything, and the chapter shows as plain text', async () => {
-    await seedLibrary();
-    await withApp({ book: 'John', chapter: 3, keepBookmarks: true, leptos: false }, async (app) => {
-        await app.idle();
+// Without the pieces, what each row asks for doesn't open or say anything,
+// and after each the chapter still shows as plain text. One page serves
+// every row, set up as each needs (the Library seeded, an update to find,
+// the saved look, reading mode), since nothing answers any of them.
+const SEEDED = [...Object.keys(SAVED_LOOK), 'gospel-getter-reader-mode'].sort();
+const WITHOUT = [
+    ['no dialog answers', async (app) => {
+        for (const id of ['shortcuts-overlay', 'welcome-overlay', 'import-overlay', 'note-overlay', 'export-notes-overlay']) {
+            assert.equal($(app, id), null, id);
+        }
+
+        app.key('?', { shiftKey: true });
+        assert.deepEqual(toast(app), NOTHING);
+        assert.equal(app.searchPanel().hidden, true, '? still never opens search');
+
+        app.open('menu');
+        app.click($(app, 'welcome-btn'));
+        assert.deepEqual(toast(app), NOTHING);
+
+        const before = app.calls.length;
+        app.open('menu');
+        app.click($(app, 'import-data-btn'));
+        assert.deepEqual(toast(app), NOTHING);
+        assert.deepEqual(app.calls.slice(before).map((c) => c.cmd), [], 'no file dialog');
+    }],
+    ['About doesn’t open and no update is looked for', async (app) => {
+        assert.equal($(app, 'about-overlay'), null);
+        assert.equal($(app, 'update-banner'), null);
+        assert.equal(checks(app), 0);
+
+        app.open('menu');
+        app.click($(app, 'about-btn'));
+        assert.deepEqual(toast(app), NOTHING);
+        assert.equal(app.surface('menu').hidden, true, 'the menu closes as after any item');
+    }],
+    ['the Library doesn’t open', async (app) => {
         assert.deepEqual(listCalls(app), []);
         assert.equal(app.document.querySelector('.chapter-main .verse[data-highlight]'), null, 'plain text, unmarked');
 
@@ -214,14 +164,8 @@ test('without the pieces, the Library doesn’t open or say anything, and the ch
         assert.deepEqual(toast(app), NOTHING);
 
         app.key('Escape');
-        await readsAsPlainText(app, 'John', 3);
-        assert.deepEqual(app.consoleErrors, []);
-    });
-});
-
-test('without the pieces, search doesn’t open or say anything, and the chapter shows as plain text', () =>
-    withApp({ book: 'John', chapter: 3, leptos: false }, async (app) => {
-        await app.idle();
+    }],
+    ['search doesn’t open', async (app) => {
         assert.equal(app.searchInput(), null, 'the box is the pieces’');
         assert.equal(app.window.gospelGetterShortcuts, undefined, 'so is the table of shortcuts');
 
@@ -231,40 +175,31 @@ test('without the pieces, search doesn’t open or say anything, and the chapter
         app.click($(app, 'search-toggle'));
         assert.deepEqual(toast(app), NOTHING);
         assert.equal(app.searchPanel().hidden, true);
+    }],
+    ['☰, the sidebar’s button and reading mode’s exit don’t answer', async (app) => {
+        assert.equal(app.window.gospelGetterSurfaces, undefined);
+        const root = app.document.documentElement.dataset;
+        assert.equal(root.readerMode, 'on', 'the saved look, from the first frame');
 
-        await readsAsPlainText(app, 'John', 3);
-        assert.deepEqual(app.consoleErrors, []);
-    }));
+        app.click($(app, 'reader-exit'));
+        assert.deepEqual(toast(app), NOTHING);
+        app.toast().textContent = '';
+        app.document.body.focus();
+        app.key('Escape');
+        assert.deepEqual(toast(app), NOTHING);
+        assert.equal(root.readerMode, 'on', 'still reading');
 
-test('pieces that load after boot bring search, and the table of shortcuts, with them', () =>
-    withApp({ book: 'John', chapter: 3, leptos: 'late' }, async (app) => {
-        await app.idle();
-        app.key('/');
-        assert.equal(app.searchPanel().hidden, true, 'not loaded yet');
+        app.click($(app, 'menu-toggle'));
+        assert.deepEqual(toast(app), NOTHING);
+        assert.equal(app.surface('menu').hidden, true);
+        assert.equal($(app, 'menu-toggle').getAttribute('aria-expanded'), 'false');
+        app.click($(app, 'sidebar-toggle'));
+        assert.deepEqual(toast(app), NOTHING);
 
-        await app.loadPieces();
-        assert.ok(app.window.gospelGetterShortcuts.some((s) => s.id === 'search'));
-        await app.search('rev 22:21');
-        assert.equal(app.searchStatus(), 'Press Enter to go there.');
-        const before = app.calls.length;
-        app.key('Enter', {}, app.searchInput());
-        await app.idle(before, 'get_reading');
-        assert.equal(app.heading(), 'Revelation 22');
-        assert.equal(app.searchPanel().hidden, true);
-        assert.deepEqual(app.consoleErrors, []);
-    }));
-
-const SAVED_LOOK = {
-    'gospel-getter-theme': 'vellum',
-    'gospel-getter-text-size': 'large',
-    'gospel-getter-layout': 'flowing',
-    'gospel-getter-compare': 'on',
-    'gospel-getter-compare-with': 'bsb',
-};
-
-test('without the pieces, Aa, the translations and the picker don’t open or say anything; the Bible text shows in the saved look, as plain text', () =>
-    withApp({ book: 'John', chapter: 3, translation: 'kjv', leptos: false, storage: SAVED_LOOK }, async (app) => {
-        await app.idle();
+        assert.deepEqual(Object.keys(app.storage()).sort(), SEEDED, 'nothing was saved');
+    }],
+    // Last, as it narrows the window.
+    ['Aa, the translations and the picker don’t open; the Bible text shows in the saved look', async (app) => {
         const root = app.document.documentElement.dataset;
         assert.deepEqual([root.theme, root.textSize, root.layout, root.compare, root.compareWith], ['vellum', 'large', 'flowing', 'on', 'bsb']);
         assert.deepEqual(app.compareColumns(), [], 'plain text: one translation, not compared');
@@ -290,73 +225,40 @@ test('without the pieces, Aa, the translations and the picker don’t open or sa
         assert.deepEqual(toast(app), NOTHING);
         app.key('Escape', {}, app.document.activeElement);
 
-        // Nothing was saved, and the chapter shows as plain text.
-        assert.deepEqual(Object.keys(app.storage()).sort(), Object.keys(SAVED_LOOK).sort());
-        await readsAsPlainText(app, 'John', 3);
-        assert.deepEqual(app.consoleErrors, []);
-    }));
+        assert.deepEqual(Object.keys(app.storage()).sort(), SEEDED, 'nothing was saved');
+    }],
+];
 
-test('pieces that load after boot bring Aa and the translations, with the saved settings', () =>
-    withApp({ book: 'John', chapter: 3, translation: 'kjv', leptos: 'late', storage: { 'gospel-getter-theme': 'monster-hunter', 'gospel-getter-text-size': 'small' } }, async (app) => {
+test('without the pieces, nothing opens or says anything, and the chapter shows as plain text', async () => {
+    await seedLibrary();
+    const options = { book: 'John', chapter: 3, translation: 'kjv', leptos: false, keepBookmarks: true, readerMode: true, storage: SAVED_LOOK, update: { check: UPDATE } };
+    await withApp(options, async (app) => {
         await app.idle();
-        const root = app.document.documentElement.dataset;
-        assert.equal(root.theme, 'beast-slayer', 'the renamed theme, from the first frame');
-        assert.equal(root.textSize, 'small');
-        app.click($(app, 'aa-toggle'));
-        assert.deepEqual(toast(app), NOTHING);
-        app.key('Escape', {}, app.document.activeElement);
+        for (const [what, ask] of WITHOUT) {
+            await row(what, async () => {
+                await ask(app);
+                await readsAsPlainText(app, 'John', 3);
+                assert.deepEqual(app.consoleErrors, []);
+            });
+        }
+    });
+});
 
-        await app.loadPieces();
-        assert.equal(app.storage()['gospel-getter-theme'], 'beast-slayer', 'saved under its new name');
-        app.click($(app, 'aa-toggle'));
-        assert.equal(app.surface('aa').hidden, false);
-        const pressed = (id) => [...$(app, id).querySelectorAll('[aria-pressed="true"]')].map((b) => b.dataset.value);
-        assert.deepEqual(pressed('theme-choices'), ['beast-slayer']);
-        assert.equal($(app, 'text-size-value').textContent, 'Small');
-        assert.equal(app.document.activeElement, $(app, 'text-size-up'), 'A− is disabled at Small');
-        app.key('Escape', {}, app.document.activeElement);
-        app.click($(app, 'translation-toggle'));
-        assert.equal(app.document.activeElement, app.document.querySelector('#translation-choices [data-value="kjv"]'));
-        assert.deepEqual(app.window.gospelGetterPreferences.current().theme, 'beast-slayer');
-        assert.deepEqual(app.consoleErrors, []);
-    }));
-
-test('without the pieces, ☰, the sidebar’s button and reading mode’s exit don’t answer or say anything', () =>
-    withApp({ book: 'John', chapter: 3, leptos: false, readerMode: true }, async (app) => {
-        await app.idle();
-        assert.equal(app.window.gospelGetterSurfaces, undefined);
-        const root = app.document.documentElement.dataset;
-        assert.equal(root.readerMode, 'on', 'the saved look, from the first frame');
-
-        app.click($(app, 'reader-exit'));
-        assert.deepEqual(toast(app), NOTHING);
-        app.toast().textContent = '';
-        app.document.body.focus();
-        app.key('Escape');
-        assert.deepEqual(toast(app), NOTHING);
-        assert.equal(root.readerMode, 'on', 'still reading');
-
-        app.click($(app, 'menu-toggle'));
-        assert.deepEqual(toast(app), NOTHING);
-        assert.equal(app.surface('menu').hidden, true);
-        assert.equal($(app, 'menu-toggle').getAttribute('aria-expanded'), 'false');
-        app.click($(app, 'sidebar-toggle'));
-        assert.deepEqual(toast(app), NOTHING);
-
-        // Nothing was saved, and the chapter shows as plain text.
-        assert.deepEqual(Object.keys(app.storage()), ['gospel-getter-reader-mode']);
-        await readsAsPlainText(app, 'John', 3);
-        assert.deepEqual(app.consoleErrors, []);
-    }));
-
-test('pieces that load after boot open the ☰ menu and the picker from then on', () =>
-    withApp({ book: 'John', chapter: 3, leptos: 'late', width: 900 }, async (app) => {
-        await app.idle();
+// Pieces that load after boot: each row is what it asks for, its "not yet"
+// before they come, and what they bring once they have. A fresh install
+// has a page of its own (the welcome); the other rows share one, set up as
+// each needs, in an order that leaves each the page it expects: nothing
+// open (each row closes what it opened), the chapter still John 3, and
+// search, which turns it, last.
+const LATE = [
+    ['an install that isn’t fresh opens nothing', null, (app) => {
+        assert.equal($(app, 'welcome-overlay').hidden, true);
+    }],
+    ['the ☰ menu and the picker open from then on', (app) => {
         app.click($(app, 'menu-toggle'));
         assert.deepEqual(toast(app), NOTHING);
         assert.equal(app.surface('picker').hidden, true);
-
-        await app.loadPieces();
+    }, (app) => {
         assert.equal(app.window.gospelGetterSurfaces.current(), null);
         app.click($(app, 'menu-toggle'));
         assert.equal(app.surface('menu').hidden, false);
@@ -368,5 +270,99 @@ test('pieces that load after boot open the ☰ menu and the picker from then on'
         assert.equal(app.surface('picker').hidden, false);
         assert.equal($(app, 'picker').getAttribute('role'), 'dialog');
         assert.equal(app.document.activeElement, app.document.querySelector('#picker .chapter-btn[aria-current="page"]'));
-        assert.deepEqual(app.consoleErrors, []);
-    }));
+        app.key('Escape', {}, app.document.activeElement);
+    }],
+    ['the Library, filled then, marks the bookmarks', (app) => {
+        assert.equal($(app, 'bookmark-list'), null, 'no Library yet');
+        assert.deepEqual(listCalls(app), [], 'its lists wait for it');
+        assert.deepEqual(app.bookmarkedVerseNumbers(), []);
+        assert.equal($(app, 'reading-pane-inner'), null, 'so does the chapter, the reader being one of them');
+    }, (app) => {
+        assert.equal(app.verse(3).dataset.highlight, 'green', 'the reader’s own highlights, once it’s there');
+        assert.deepEqual(listCalls(app).map((c) => c.cmd).sort(), ['list_all_notes', 'list_bookmarks', 'list_highlight_passages']);
+        assert.deepEqual(app.bookmarkItems().map((i) => i.reference), ['John 3:16']);
+        assert.deepEqual(app.bookmarkedVerseNumbers(), [16]);
+        assert.equal($(app, 'highlight-count').textContent, '1');
+    }],
+    ['the launch check runs then, and About is filled', (app) => {
+        assert.equal(checks(app), 0, 'nothing to check with yet');
+        assert.equal($(app, 'update-banner'), null);
+    }, (app) => {
+        assert.equal(checks(app), 1, 'the launch check, once');
+        assert.equal($(app, 'update-banner').hidden, false);
+        assert.equal($(app, 'update-title').textContent, 'Gospel Getter 2.6.0 is available');
+
+        app.open('about');
+        assert.equal(app.surface('about').hidden, false);
+        assert.equal($(app, 'app-version').textContent, `Version ${VERSION}`);
+        const credits = [...$(app, 'about-credits').querySelectorAll('li')].map((li) => li.textContent);
+        assert.ok(credits.length > 1, 'the bundled texts, from boot');
+        assert.equal(credits.at(-1), 'Cross-references from OpenBible.info, CC BY 4.0');
+        app.key('Escape', {}, app.document.activeElement);
+    }],
+    ['Aa and the translations come, with the saved settings', (app) => {
+        const root = app.document.documentElement.dataset;
+        assert.equal(root.theme, 'beast-slayer', 'the renamed theme, from the first frame');
+        assert.equal(root.textSize, 'small');
+        app.click($(app, 'aa-toggle'));
+        assert.deepEqual(toast(app), NOTHING);
+        app.key('Escape', {}, app.document.activeElement);
+    }, (app) => {
+        assert.equal(app.storage()['gospel-getter-theme'], 'beast-slayer', 'saved under its new name');
+        app.click($(app, 'aa-toggle'));
+        assert.equal(app.surface('aa').hidden, false);
+        const pressed = (id) => [...$(app, id).querySelectorAll('[aria-pressed="true"]')].map((b) => b.dataset.value);
+        assert.deepEqual(pressed('theme-choices'), ['beast-slayer']);
+        assert.equal($(app, 'text-size-value').textContent, 'Small');
+        assert.equal(app.document.activeElement, $(app, 'text-size-up'), 'A− is disabled at Small');
+        app.key('Escape', {}, app.document.activeElement);
+        app.click($(app, 'translation-toggle'));
+        assert.equal(app.document.activeElement, app.document.querySelector('#translation-choices [data-value="kjv"]'));
+        assert.deepEqual(app.window.gospelGetterPreferences.current().theme, 'beast-slayer');
+        app.key('Escape', {}, app.document.activeElement);
+    }],
+    ['search comes, and the table of shortcuts with it', (app) => {
+        app.key('/');
+        assert.equal(app.searchPanel().hidden, true, 'not loaded yet');
+    }, async (app) => {
+        assert.ok(app.window.gospelGetterShortcuts.some((s) => s.id === 'search'));
+        await app.search('rev 22:21');
+        assert.equal(app.searchStatus(), 'Press Enter to go there.');
+        const before = app.calls.length;
+        app.key('Enter', {}, app.searchInput());
+        await app.idle(before, 'get_reading');
+        assert.equal(app.heading(), 'Revelation 22');
+        assert.equal(app.searchPanel().hidden, true);
+    }],
+];
+
+test('pieces that load after boot bring what they hold then, and open nothing by themselves', async () => {
+    await withApp({ fresh: true, leptos: 'late' }, async (app) => {
+        await row('a fresh install still opens the welcome', async () => {
+            await app.idle();
+            await settle();
+            assert.equal($(app, 'welcome-overlay'), null, 'not loaded yet');
+            await app.loadPieces();
+            await app.until(() => $(app, 'welcome-overlay') && !$(app, 'welcome-overlay').hidden, 'the welcome');
+            assert.equal(app.document.activeElement, $(app, 'welcome-panel'));
+            assert.equal(app.heading(), 'Genesis 1');
+            assert.deepEqual(app.consoleErrors, []);
+        });
+    });
+
+    await seedLibrary();
+    const storage = { 'gospel-getter-theme': 'monster-hunter', 'gospel-getter-text-size': 'small' };
+    const options = { book: 'John', chapter: 3, translation: 'kjv', keepBookmarks: true, leptos: 'late', update: { check: UPDATE }, storage, width: 900 };
+    await withApp(options, async (app) => {
+        await app.idle();
+        for (const [what, before] of LATE) await row(what, async () => before?.(app));
+        await app.loadPieces();
+        await app.idle();
+        for (const [what, , now] of LATE) {
+            await row(what, async () => {
+                await now(app);
+                assert.deepEqual(app.consoleErrors, []);
+            });
+        }
+    });
+});

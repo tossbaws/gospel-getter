@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use super::{AppState, SimpleVerseDto};
+use super::{AppState, SimpleVerseDto, place};
 use crate::db;
 use crate::domain::passage::numbering_notice;
 use crate::passage_copy::{self, CopyFormat};
@@ -61,19 +61,7 @@ pub async fn passage_text(
     start: i64,
     end: i64,
 ) -> Result<PassageDto, String> {
-    let translation = state
-        .translations
-        .iter()
-        .find(|t| t.code == translation_code)
-        .ok_or_else(|| format!("There's no translation \"{translation_code}\"."))?;
-    let book = state
-        .books
-        .iter()
-        .find(|b| b.id == book_id)
-        .ok_or_else(|| format!("There's no book {book_id}."))?;
-    if !(1..=book.chapter_count).contains(&chapter) {
-        return Err(format!("{} has no chapter {chapter}.", book.name));
-    }
+    let (translation, book) = place(state, translation_code, book_id, chapter)?;
     if start < 1 || end < start {
         return Err(format!("Verses {start} to {end} aren't a passage."));
     }
@@ -158,19 +146,7 @@ pub async fn copy_text(
     start: Option<i64>,
     end: Option<i64>,
 ) -> Result<CopyTextDto, String> {
-    let translation = state
-        .translations
-        .iter()
-        .find(|t| t.code == translation_code)
-        .ok_or_else(|| format!("There's no translation \"{translation_code}\"."))?;
-    let book = state
-        .books
-        .iter()
-        .find(|b| b.id == book_id)
-        .ok_or_else(|| format!("There's no book {book_id}."))?;
-    if !(1..=book.chapter_count).contains(&chapter) {
-        return Err(format!("{} has no chapter {chapter}.", book.name));
-    }
+    let (translation, book) = place(state, translation_code, book_id, chapter)?;
     let range = match (start, end) {
         (None, None) => None,
         (Some(start), Some(end)) if start >= 1 && end >= start => Some((start, end)),

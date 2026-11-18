@@ -9,13 +9,14 @@
 //!   `HighlightPassage` (whose color is a string here), `Note`,
 //!   `SelectionNote`, `Home`, `UpdateInfo`, `PositionPreview`,
 //!   `PassageText` and `CopyText`.
-//! - Counts as `u64` where the backend's are `usize`: `NotedBook` (so
-//!   `ExportOptions`), `ExportOutcome`, `FolderOutcome`, `ImportResult`,
-//!   `DownloadEvent`, and `ImportPreview` (so `ImportChoice`), which also
-//!   leaves out `skippedPreferences`.
+//! - The import's answers, whose counts are `u64` here and `usize` there,
+//!   and which hold a `PositionPreview`: `ImportResult` (whose counts are
+//!   the backend's `ImportCounts`, flattened), and `ImportPreview` (so
+//!   `ImportChoice`), which also leaves out `skippedPreferences` and holds
+//!   `Preferences`.
 //! - Dates as `YYYY-MM-DD` strings where the backend has `NaiveDate`s:
-//!   `DaySpan`, `DatePresets` and `Filter` (which also has no
-//!   `deny_unknown_fields` and no defaults here).
+//!   `DaySpan`, `DatePresets` (so `ExportOptions`) and `Filter` (which also
+//!   has no `deny_unknown_fields` and no defaults here).
 //! - `Preferences`, whose enums are their kebab-case names here, and
 //!   `Highlight`, whose color is a string.
 //! - One `Verse` for both of the backend's (`VerseDto`, and
@@ -32,31 +33,15 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::wire::{
     BibleEdgeDto as Edge, Block as NoteBlock, BookStartDto as BookStart, Commentary,
-    CopyFormatsDto as CopyFormats, FindingDto as Finding, FindingRequestDto as FindingRequest,
-    GoToDto as GoTo, NoteLinkDto as NoteLink, SearchDto as SearchAnswer,
-    SearchResultDto as SearchVerse, Span as NoteSpan, TranslationDto as Translation,
-    XrefDto as Xref,
+    CopyFormatsDto as CopyFormats, DownloadEvent, FindingDto as Finding,
+    FindingRequestDto as FindingRequest, GoToDto as GoTo, NoteLinkDto as NoteLink, NotedBook,
+    NotesExportOutcome as ExportOutcome, NotesFolderOutcome as FolderOutcome,
+    SearchDto as SearchAnswer, SearchResultDto as SearchVerse, Span as NoteSpan,
+    TranslationDto as Translation, XrefDto as Xref,
 };
 // A commentary's parts, which only `text`'s tests build.
 #[cfg(test)]
 pub use crate::wire::{CommentaryBook, CommentaryChapter, CommentaryNote};
-
-/// A book with notes, for the checklist (`notes_export::NotedBook`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NotedBook {
-    pub id: i64,
-    pub name: String,
-    /// How many notes it has.
-    pub notes: u64,
-    /// Its first and last chapter with notes.
-    pub first_chapter: i64,
-    pub last_chapter: i64,
-    /// How many of its chapters have notes.
-    pub noted_chapters: u64,
-    /// How many chapters it has.
-    pub chapter_count: i64,
-}
 
 /// A span of local days, each end as `YYYY-MM-DD` (`notes_export::DaySpan`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -127,47 +112,6 @@ pub struct ExportArgs<'a> {
 #[derive(Debug, Serialize)]
 pub struct CommentaryArgs<'a> {
     pub filter: &'a Filter,
-}
-
-/// `export_notes`'s answer (`commands::NotesExportOutcome`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(
-    tag = "status",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum ExportOutcome {
-    /// The reader closed the save dialog; no file was written.
-    Cancelled,
-    /// The file was completely written.
-    Saved { path: String, notes: u64 },
-}
-
-/// `export_notes_by_book`'s and `confirm_notes_export_by_book`'s answer
-/// (`commands::NotesFolderOutcome`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(
-    tag = "status",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum FolderOutcome {
-    /// The reader closed the folder dialog, or chose not to replace the
-    /// files already there; nothing was written.
-    Cancelled,
-    /// Some of the files are already in the folder; nothing is written
-    /// until the reader answers, with `token`.
-    Exists {
-        token: u64,
-        folder: String,
-        existing: Vec<String>,
-    },
-    /// Every file was completely written.
-    Saved {
-        folder: String,
-        files: u64,
-        notes: u64,
-    },
 }
 
 /// `confirm_notes_export_by_book`'s arguments: the export waiting, and the
@@ -344,19 +288,6 @@ pub struct UpdateInfo {
     pub note_blocks: Vec<NoteBlock>,
     /// Whether this build can install it (else it links to it).
     pub can_self_update: bool,
-}
-
-/// What `install_update` reports on its channel as the update downloads
-/// (`updater::DownloadEvent`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "event", content = "data")]
-pub enum DownloadEvent {
-    #[serde(rename_all = "camelCase")]
-    Started { content_length: Option<u64> },
-    #[serde(rename_all = "camelCase")]
-    Progress { chunk_length: u64 },
-    /// Downloaded and verified; installing, then restarting.
-    Finished,
 }
 
 /// A bookmark, as `list_bookmarks` answers (`commands::BookmarkDto`; the

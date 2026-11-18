@@ -38,7 +38,7 @@ use web_sys::{
 
 use crate::aa_text::{self as text, Beside, Press};
 use crate::bridge;
-use crate::dom::{self, by_id};
+use crate::dom::{self, button, by_id, select};
 use crate::preferences::{self, Preference, Values};
 use crate::prefs::{self, Raw};
 use crate::surfaces::{self, Surface};
@@ -64,20 +64,6 @@ thread_local! {
 }
 
 // ---- The page's elements.
-
-fn select(id: &str) -> Option<HtmlSelectElement> {
-    bridge::document()?
-        .get_element_by_id(id)?
-        .dyn_into::<HtmlSelectElement>()
-        .ok()
-}
-
-fn button(id: &str) -> Option<HtmlButtonElement> {
-    bridge::document()?
-        .get_element_by_id(id)?
-        .dyn_into::<HtmlButtonElement>()
-        .ok()
-}
 
 fn translation_select() -> Option<HtmlSelectElement> {
     select("translation-select")

@@ -176,24 +176,6 @@ fn target_of(event: &web_sys::Event) -> Option<Element> {
     event.target()?.dyn_into::<Element>().ok()
 }
 
-/// `el.scrollIntoView({ block: 'nearest' })`, where there is one (jsdom has
-/// none).
-fn scroll_into_view(el: &Element) {
-    let Ok(scroll) = js_sys::Reflect::get(el, &JsValue::from_str("scrollIntoView")) else {
-        return;
-    };
-    let Ok(scroll) = scroll.dyn_into::<js_sys::Function>() else {
-        return;
-    };
-    let options = js_sys::Object::new();
-    let _ = js_sys::Reflect::set(
-        &options,
-        &JsValue::from_str("block"),
-        &JsValue::from_str("nearest"),
-    );
-    let _ = scroll.call1(el, &options);
-}
-
 impl Search {
     fn new() -> Self {
         Self {
@@ -666,7 +648,7 @@ impl Search {
         match option {
             Some(option) => {
                 let _ = input.set_attribute("aria-activedescendant", &option.id());
-                scroll_into_view(option);
+                dom::scroll_into_view(option, "nearest");
             }
             None => {
                 let _ = input.remove_attribute("aria-activedescendant");

@@ -43,11 +43,12 @@ use serde::{Deserialize, Serialize};
 use crate::db::notes::{NotePlace, grouped, in_bible_order};
 use crate::db::{Book, Note, Verse};
 use crate::passage_copy::{self, CopyFormat};
+use crate::passage_reference::passage_reference;
 // The escapes live in `markdown`, which Copy as… shares; named here too, as
 // they always have been.
 pub use crate::markdown::{escape_block, escape_inline};
 // Shared with the page, which reads them whole (see shared/wire.rs).
-pub use crate::wire::{Commentary, CommentaryBook, CommentaryChapter, CommentaryNote};
+pub use crate::wire::{Commentary, CommentaryBook, CommentaryChapter, CommentaryNote, NotedBook};
 
 /// Which notes an export holds. Each part narrows it; the default (no
 /// part set) is every note.
@@ -448,8 +449,7 @@ impl NotesExport<'_> {
         let reference = passage_reference(
             self.book_name(note.book_id),
             note.chapter,
-            note.verse_start,
-            note.verse_end,
+            Some((note.verse_start, note.verse_end)),
         );
         let _ = writeln!(out, "{}", escape_inline(&reference));
 
@@ -519,7 +519,11 @@ pub fn note_markdown(
     chapter_verses: &[Verse],
     translation_code: &str,
 ) -> String {
-    let reference = passage_reference(book_name, note.chapter, note.verse_start, note.verse_end);
+    let reference = passage_reference(
+        book_name,
+        note.chapter,
+        Some((note.verse_start, note.verse_end)),
+    );
     let quoted: Vec<Verse> = chapter_verses
         .iter()
         .filter(|v| (note.verse_start..=note.verse_end).contains(&v.verse))
@@ -567,15 +571,6 @@ pub fn book_file_name(book_id: i64, book_name: &str) -> String {
         })
         .collect();
     format!("{book_id:02} {}.md", name.trim())
-}
-
-/// "John 3:16" or "John 3:16–18", as the app writes a passage.
-fn passage_reference(book_name: &str, chapter: i64, first: i64, last: i64) -> String {
-    if first == last {
-        format!("{book_name} {chapter}:{first}")
-    } else {
-        format!("{book_name} {chapter}:{first}\u{2013}{last}")
-    }
 }
 
 /// The calendar date `at` falls on in `tz`.
@@ -649,25 +644,6 @@ pub fn date_presets(today: NaiveDate) -> DatePresets {
             to: today,
         },
     }
-}
-
-/// A book with notes, as the export dialog lists it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NotedBook {
-    pub id: i64,
-    pub name: String,
-    /// How many notes it has.
-    pub notes: usize,
-    /// The first and last chapters with notes: the chapter range's
-    /// starting values.
-    pub first_chapter: i64,
-    pub last_chapter: i64,
-    /// How many chapters have notes. With only one there's no range to
-    /// choose, so the dialog doesn't offer one.
-    pub noted_chapters: usize,
-    /// The range's limits are 1 and this.
-    pub chapter_count: i64,
 }
 
 /// What the filter and the dialog's choices read of a note: where it is and

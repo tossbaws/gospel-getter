@@ -4,6 +4,7 @@
 //! the search index — is never written here.
 
 use anyhow::Context;
+use serde::Serialize;
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 
@@ -265,8 +266,10 @@ async fn notes_after_import<'a>(
     Ok((adding, totals))
 }
 
-/// What an import changed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What an import changed. `apply_import`'s answer carries it as it is
+/// (`commands::ImportResultDto`), so these are its JSON's names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportCounts {
     pub added: usize,
     pub already_present: usize,

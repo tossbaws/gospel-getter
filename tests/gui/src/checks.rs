@@ -1373,38 +1373,10 @@ impl Run<'_> {
     /// Check 4's second half: switch to Vellum through the Aa panel, then
     /// the reading view, the dialog and the Library's lists again.
     async fn vellum_screenshots(&mut self) -> Result<()> {
+        // Back to plain reading, and no toast.
+        self.plain_reading().await?;
         {
             let ui = &self.ui;
-            // Back to plain reading: no Library, no selection, no toast.
-            let library_open = ui
-                .js(
-                    "return !document.getElementById('library-panel').hidden;",
-                    Vec::new(),
-                )
-                .await?;
-            if library_open == Value::Bool(true) {
-                ui.click("close the Library", "#library-close").await?;
-                ui.wait(
-                    "the Library to close",
-                    "return [document.getElementById('library-panel').hidden, null];",
-                )
-                .await?;
-            }
-            let selected = ui
-                .js(
-                    "return !!document.querySelector('.verse-selected');",
-                    Vec::new(),
-                )
-                .await?;
-            if selected == Value::Bool(true) {
-                ui.press("press Escape (clear the verse selection)", Key::Escape)
-                    .await?;
-                ui.wait(
-                    "the verse selection to clear",
-                    "return [!document.querySelector('.verse-selected'), null];",
-                )
-                .await?;
-            }
             ui.toast_gone().await?;
 
             ui.click("open Aa", "#aa-toggle").await?;

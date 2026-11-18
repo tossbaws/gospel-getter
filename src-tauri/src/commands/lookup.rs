@@ -1,8 +1,9 @@
 //! What the commands look up the same way: a book's name, a translation's
-//! id or code, and `failed`, which turns a failure into the sentence the
-//! reader is shown.
+//! id or code, a passage's translation, book and chapter, and `failed`,
+//! which turns a failure into the sentence the reader is shown.
 
 use super::AppState;
+use crate::db::{Book, Translation};
 
 pub(super) fn book_name(state: &AppState, book_id: i64) -> Option<&str> {
     state
@@ -30,6 +31,31 @@ pub(super) fn resolve_translation(state: &AppState, code: Option<&str>) -> i64 {
         .or(state.translations.first())
         .map(|t| t.id)
         .unwrap_or(1)
+}
+
+/// The translation `translation_code` and the book `book_id`, checking that
+/// it has a chapter `chapter`: an error, as a sentence for the reader, for
+/// any of the three that isn't there.
+pub(super) fn place<'a>(
+    state: &'a AppState,
+    translation_code: &str,
+    book_id: i64,
+    chapter: i64,
+) -> Result<(&'a Translation, &'a Book), String> {
+    let translation = state
+        .translations
+        .iter()
+        .find(|t| t.code == translation_code)
+        .ok_or_else(|| format!("There's no translation \"{translation_code}\"."))?;
+    let book = state
+        .books
+        .iter()
+        .find(|b| b.id == book_id)
+        .ok_or_else(|| format!("There's no book {book_id}."))?;
+    if !(1..=book.chapter_count).contains(&chapter) {
+        return Err(format!("{} has no chapter {chapter}.", book.name));
+    }
+    Ok((translation, book))
 }
 
 /// For `map_err` on a command's failure: logs the error with its causes

@@ -6,7 +6,7 @@ use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
 
-use super::{AppState, book_name, code_of, failed, resolve_translation};
+use super::{AppState, book_name, code_of, failed, place, resolve_translation};
 use crate::db::{self, Book, TopVerse, Translation};
 use crate::domain::bible::{self, ChapterRef};
 use crate::domain::kjv_markup::{PartKind, VerseText};
@@ -506,19 +506,7 @@ pub async fn remember_place(
     verse: Option<i64>,
     offset: Option<f64>,
 ) -> Result<(), String> {
-    let translation = state
-        .translations
-        .iter()
-        .find(|t| t.code == translation_code)
-        .ok_or_else(|| format!("There's no translation \"{translation_code}\"."))?;
-    let book = state
-        .books
-        .iter()
-        .find(|b| b.id == book_id)
-        .ok_or_else(|| format!("There's no book {book_id}."))?;
-    if !(1..=book.chapter_count).contains(&chapter) {
-        return Err(format!("{} has no chapter {chapter}.", book.name));
-    }
+    let (translation, book) = place(state, translation_code, book_id, chapter)?;
     let at = match verse {
         Some(verse) => {
             let last = state

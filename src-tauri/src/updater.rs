@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_updater::{Error, Update, UpdaterExt};
@@ -143,18 +143,8 @@ impl UpdateInfo {
     }
 }
 
-/// Download progress, sent to the banner while an update downloads. (The
-/// frontend tests' bridge reads the progress it scripts as these too.)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "event", content = "data")]
-pub enum DownloadEvent {
-    #[serde(rename_all = "camelCase")]
-    Started { content_length: Option<u64> },
-    #[serde(rename_all = "camelCase")]
-    Progress { chunk_length: usize },
-    /// Downloaded and verified; installing, then restarting.
-    Finished,
-}
+// Shared with the page, which reads them whole (see shared/wire.rs).
+pub use crate::wire::DownloadEvent;
 
 /// The messages the reader sees. The frontend tests use these too, through
 /// the test bridge, so the wording is checked in one place.
@@ -532,7 +522,9 @@ pub async fn install_update<R: Runtime>(
                     started = true;
                     let _ = progress.send(DownloadEvent::Started { content_length });
                 }
-                let _ = progress.send(DownloadEvent::Progress { chunk_length });
+                let _ = progress.send(DownloadEvent::Progress {
+                    chunk_length: chunk_length as u64,
+                });
             },
             || {},
         )
