@@ -3,7 +3,7 @@
 
 use anyhow::Context;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use super::{BridgeScript, PendingImport, PendingNotesFolder};
 use crate::db::{self, Book, Translation};
@@ -84,6 +84,13 @@ impl AppState {
             None => open::that_detached(url),
         }
     }
+}
+
+/// `mutex`, locked, poisoned or not: what `AppState`'s mutexes hold (an
+/// import or an export waiting on the reader) is only ever replaced or
+/// taken whole, so a panic can't leave it half-changed.
+pub(super) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Whether the search index is ready to use.

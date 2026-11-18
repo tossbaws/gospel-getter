@@ -69,42 +69,27 @@ impl FromStr for HighlightColor {
     }
 }
 
+/// For reading a stored color (`Highlight`'s `#[sqlx(try_from)]`).
+impl TryFrom<String> for HighlightColor {
+    type Error = UnknownColor;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
 /// One highlighted verse.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct Highlight {
     pub book_id: i64,
     pub chapter: i64,
     pub verse: i64,
+    #[sqlx(try_from = "String")]
     pub color: HighlightColor,
     /// UTC, ISO 8601 with milliseconds: when the verse was first highlighted.
     pub created_at: String,
     /// When its color was last set.
     pub updated_at: String,
-}
-
-#[derive(FromRow)]
-struct HighlightRow {
-    book_id: i64,
-    chapter: i64,
-    verse: i64,
-    color: String,
-    created_at: String,
-    updated_at: String,
-}
-
-impl TryFrom<HighlightRow> for Highlight {
-    type Error = anyhow::Error;
-
-    fn try_from(row: HighlightRow) -> anyhow::Result<Self> {
-        Ok(Self {
-            book_id: row.book_id,
-            chapter: row.chapter,
-            verse: row.verse,
-            color: row.color.parse()?,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        })
-    }
 }
 
 /// Highlight every verse in a passage in `color`, replacing any color
@@ -169,14 +154,13 @@ pub async fn remove_highlights(
 
 /// Every highlight, in Bible order.
 pub async fn list_highlights(pool: &SqlitePool) -> anyhow::Result<Vec<Highlight>> {
-    let rows = sqlx::query_as::<_, HighlightRow>(
+    sqlx::query_as::<_, Highlight>(
         "SELECT book_id, chapter, verse, color, created_at, updated_at FROM highlights \
          ORDER BY book_id, chapter, verse",
     )
     .fetch_all(pool)
     .await
-    .context("Failed to read highlights")?;
-    rows.into_iter().map(Highlight::try_from).collect()
+    .context("Failed to read highlights")
 }
 
 /// A run of highlighted verses: consecutive verses of one chapter, all in

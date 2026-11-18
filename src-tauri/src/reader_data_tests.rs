@@ -188,7 +188,11 @@ async fn export_round_trips_into_a_fresh_install() {
         .await
         .unwrap();
     assert_eq!(
-        (result.added, result.already_present, result.removed),
+        (
+            result.counts.added,
+            result.counts.already_present,
+            result.counts.removed
+        ),
         (3, 0, 0)
     );
     assert_eq!(personal(&b).await, before);
@@ -229,7 +233,11 @@ async fn merge_deduplicates_keeps_dates_and_reimporting_changes_nothing() {
         .await
         .unwrap();
     assert_eq!(
-        (first.added, first.already_present, first.removed),
+        (
+            first.counts.added,
+            first.counts.already_present,
+            first.counts.removed
+        ),
         (2, 1, 0)
     );
 
@@ -246,7 +254,11 @@ async fn merge_deduplicates_keeps_dates_and_reimporting_changes_nothing() {
     let after_first = personal(&state).await;
     let again = import(&state, &path, false).await;
     assert_eq!(
-        (again.added, again.already_present, again.removed),
+        (
+            again.counts.added,
+            again.counts.already_present,
+            again.counts.removed
+        ),
         (0, 3, 0)
     );
     assert_eq!(personal(&state).await, after_first);
@@ -284,7 +296,7 @@ async fn replace_swaps_bookmarks_and_an_earlier_export_undoes_it() {
     let result = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap();
-    assert_eq!((result.added, result.removed), (1, 3));
+    assert_eq!((result.counts.added, result.counts.removed), (1, 3));
     let (bookmarks, position) = personal(&state).await;
     assert_eq!(bookmarks.len(), 1);
     assert_eq!((bookmarks[0].0, bookmarks[0].1), (1, 1));
@@ -295,7 +307,7 @@ async fn replace_swaps_bookmarks_and_an_earlier_export_undoes_it() {
 
     // Replacing again from the backup restores everything exactly.
     let restored = import(&state, &backup, true).await;
-    assert_eq!((restored.added, restored.removed), (3, 1));
+    assert_eq!((restored.counts.added, restored.counts.removed), (3, 1));
     assert_eq!(personal(&state).await, original);
 }
 
@@ -423,7 +435,7 @@ async fn unknown_preferences_are_skipped_and_everything_else_imports() {
     let result = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap();
-    assert_eq!(result.added, 1);
+    assert_eq!(result.counts.added, 1);
     let (bookmarks, position) = personal(&state).await;
     let coordinates: Vec<_> = bookmarks.iter().map(|b| (b.0, b.1, b.2, b.3)).collect();
     assert_eq!(coordinates, [(43, 3, 16, 16)]);
@@ -624,7 +636,7 @@ async fn an_empty_export_imports_cleanly() {
     let result = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap();
-    assert_eq!((result.added, result.removed), (0, 0));
+    assert_eq!((result.counts.added, result.counts.removed), (0, 0));
     assert_eq!(personal(&state).await, (Vec::new(), None));
 }
 
@@ -679,7 +691,7 @@ async fn a_failed_import_rolls_back_completely() {
     let retry = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap();
-    assert_eq!((retry.added, retry.removed), (2, 2));
+    assert_eq!((retry.counts.added, retry.counts.removed), (2, 2));
 }
 
 #[tokio::test]
@@ -800,7 +812,7 @@ async fn only_the_previewed_import_can_be_applied() {
     let result = commands::apply_pending_import(&state, third.token, false, true, false)
         .await
         .unwrap();
-    assert_eq!(result.added, 1);
+    assert_eq!(result.counts.added, 1);
     // Applied once; the same token can't be applied twice.
     assert!(
         commands::apply_pending_import(&state, third.token, false, true, false)
@@ -1116,9 +1128,9 @@ async fn highlights_round_trip_in_a_format_2_export() {
         .unwrap();
     assert_eq!(
         (
-            result.highlights_added,
-            result.highlights_already_present,
-            result.highlights_removed
+            result.counts.highlights_added,
+            result.counts.highlights_already_present,
+            result.counts.highlights_removed
         ),
         (5, 0, 0)
     );
@@ -1160,9 +1172,9 @@ async fn merging_highlights_keeps_the_readers_colors_and_reimporting_changes_not
         .unwrap();
     assert_eq!(
         (
-            first.highlights_added,
-            first.highlights_already_present,
-            first.highlights_removed
+            first.counts.highlights_added,
+            first.counts.highlights_already_present,
+            first.counts.highlights_removed
         ),
         (2, 1, 0)
     );
@@ -1186,7 +1198,10 @@ async fn merging_highlights_keeps_the_readers_colors_and_reimporting_changes_not
     let after_first = highlight_rows(&state).await;
     let again = import(&state, &path, false).await;
     assert_eq!(
-        (again.highlights_added, again.highlights_already_present),
+        (
+            again.counts.highlights_added,
+            again.counts.highlights_already_present
+        ),
         (0, 3)
     );
     assert_eq!(highlight_rows(&state).await, after_first);
@@ -1221,7 +1236,11 @@ async fn replace_swaps_highlights_for_format_2_but_format_1_leaves_them_alone() 
         .await
         .unwrap();
     assert_eq!(
-        (result.added, result.removed, result.highlights_removed),
+        (
+            result.counts.added,
+            result.counts.removed,
+            result.counts.highlights_removed
+        ),
         (1, 1, 0)
     );
     assert_eq!(highlight_rows(&state).await, original);
@@ -1244,7 +1263,13 @@ async fn replace_swaps_highlights_for_format_2_but_format_1_leaves_them_alone() 
     let result = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap();
-    assert_eq!((result.highlights_added, result.highlights_removed), (1, 3));
+    assert_eq!(
+        (
+            result.counts.highlights_added,
+            result.counts.highlights_removed
+        ),
+        (1, 3)
+    );
     assert_eq!(colors(&state).await, vec![(19, 23, 4, "green".to_string())]);
 }
 
@@ -1535,9 +1560,9 @@ async fn notes_round_trip_in_a_format_3_export() {
         .unwrap();
     assert_eq!(
         (
-            result.notes_added,
-            result.notes_already_present,
-            result.notes_removed
+            result.counts.notes_added,
+            result.counts.notes_already_present,
+            result.counts.notes_removed
         ),
         (4, 0, 0)
     );
@@ -1585,9 +1610,9 @@ async fn merging_notes_skips_ones_already_here_and_reimporting_changes_nothing()
         .unwrap();
     assert_eq!(
         (
-            first.notes_added,
-            first.notes_already_present,
-            first.notes_removed
+            first.counts.notes_added,
+            first.counts.notes_already_present,
+            first.counts.notes_removed
         ),
         (3, 1, 0)
     );
@@ -1612,7 +1637,10 @@ async fn merging_notes_skips_ones_already_here_and_reimporting_changes_nothing()
 
     let after_first = note_rows(&state).await;
     let again = import(&state, &path, false).await;
-    assert_eq!((again.notes_added, again.notes_already_present), (0, 4));
+    assert_eq!(
+        (again.counts.notes_added, again.counts.notes_already_present),
+        (0, 4)
+    );
     assert_eq!(note_rows(&state).await, after_first);
 }
 
@@ -1658,7 +1686,13 @@ async fn notes_with_the_same_text_on_one_passage_all_restore() {
     let result = commands::apply_pending_import(&b, p.token, false, true, false)
         .await
         .unwrap();
-    assert_eq!((result.notes_added, result.notes_already_present), (4, 0));
+    assert_eq!(
+        (
+            result.counts.notes_added,
+            result.counts.notes_already_present
+        ),
+        (4, 0)
+    );
     assert_eq!(note_rows(&b).await, before);
 
     // Replacing the same four with the export: all four again.
@@ -1676,7 +1710,10 @@ async fn notes_with_the_same_text_on_one_passage_all_restore() {
     let result = commands::apply_pending_import(&a, p.token, true, true, false)
         .await
         .unwrap();
-    assert_eq!((result.notes_added, result.notes_removed), (4, 4));
+    assert_eq!(
+        (result.counts.notes_added, result.counts.notes_removed),
+        (4, 4)
+    );
     assert_eq!(note_rows(&a).await, before);
 
     // Replacing other notes with it, likewise.
@@ -1686,7 +1723,10 @@ async fn notes_with_the_same_text_on_one_passage_all_restore() {
         .await
         .unwrap();
     let result = import(&c, &path, true).await;
-    assert_eq!((result.notes_added, result.notes_removed), (4, 2));
+    assert_eq!(
+        (result.counts.notes_added, result.counts.notes_removed),
+        (4, 2)
+    );
     assert_eq!(note_rows(&c).await, before);
 }
 
@@ -1728,7 +1768,10 @@ async fn merging_adds_the_copies_not_here_yet_and_merging_again_adds_nothing() {
     let first = commands::apply_pending_import(&b, p.token, false, true, false)
         .await
         .unwrap();
-    assert_eq!((first.notes_added, first.notes_already_present), (2, 2));
+    assert_eq!(
+        (first.counts.notes_added, first.counts.notes_already_present),
+        (2, 2)
+    );
     let dated: Vec<(String, String)> = note_rows(&b)
         .await
         .into_iter()
@@ -1756,7 +1799,10 @@ async fn merging_adds_the_copies_not_here_yet_and_merging_again_adds_nothing() {
     let again = commands::apply_pending_import(&b, p.token, false, true, false)
         .await
         .unwrap();
-    assert_eq!((again.notes_added, again.notes_already_present), (0, 4));
+    assert_eq!(
+        (again.counts.notes_added, again.counts.notes_already_present),
+        (0, 4)
+    );
     assert_eq!(note_rows(&b).await, after_first);
 }
 
@@ -1795,7 +1841,10 @@ async fn notes_without_dates_match_by_passage_and_text_as_before() {
     let first = commands::apply_pending_import(&state, p.token, false, true, false)
         .await
         .unwrap();
-    assert_eq!((first.notes_added, first.notes_already_present), (2, 1));
+    assert_eq!(
+        (first.counts.notes_added, first.counts.notes_already_present),
+        (2, 1)
+    );
     let rows = note_rows(&state).await;
     assert_eq!(
         rows.iter()
@@ -1806,7 +1855,10 @@ async fn notes_without_dates_match_by_passage_and_text_as_before() {
     assert_eq!(rows[2].5, "2026-10-05T09:00:00.000Z");
 
     let again = import(&state, &path, false).await;
-    assert_eq!((again.notes_added, again.notes_already_present), (0, 3));
+    assert_eq!(
+        (again.counts.notes_added, again.counts.notes_already_present),
+        (0, 3)
+    );
     assert_eq!(note_rows(&state).await, rows);
 }
 
@@ -1856,11 +1908,11 @@ async fn replace_swaps_notes_for_format_3_but_formats_1_and_2_leave_them_alone()
             .unwrap();
         assert_eq!(
             (
-                result.added,
-                result.removed,
-                result.highlights_removed,
-                result.notes_added,
-                result.notes_removed
+                result.counts.added,
+                result.counts.removed,
+                result.counts.highlights_removed,
+                result.counts.notes_added,
+                result.counts.notes_removed
             ),
             (1, 1, highlights_removed, 0, 0),
             "{}",
@@ -1889,7 +1941,10 @@ async fn replace_swaps_notes_for_format_3_but_formats_1_and_2_leave_them_alone()
     let result = commands::apply_pending_import(&state, p.token, true, true, false)
         .await
         .unwrap();
-    assert_eq!((result.notes_added, result.notes_removed), (1, 2));
+    assert_eq!(
+        (result.counts.notes_added, result.counts.notes_removed),
+        (1, 2)
+    );
     assert_eq!(
         note_texts(&state).await,
         vec![(19, 23, 1, 6, "The file's.".to_string())]
@@ -1899,7 +1954,7 @@ async fn replace_swaps_notes_for_format_3_but_formats_1_and_2_leave_them_alone()
     let empty = file(&db, "v3-empty.gospel-getter.json");
     std::fs::write(&empty, v3_file_with("")).unwrap();
     let result = import(&state, &empty, true).await;
-    assert_eq!(result.notes_removed, 1);
+    assert_eq!(result.counts.notes_removed, 1);
     assert_eq!(note_rows(&state).await, vec![]);
 }
 
@@ -2106,7 +2161,7 @@ async fn an_import_that_would_pass_a_note_limit_changes_nothing() {
     // Replacing leaves just the file's two, which is fine.
     let result = import(&state, &path, true).await;
     assert_eq!(
-        (result.notes_added, result.notes_removed),
+        (result.counts.notes_added, result.counts.notes_removed),
         (2, MAX_NOTES - 1)
     );
 
@@ -2148,7 +2203,10 @@ async fn an_import_that_would_pass_a_note_limit_changes_nothing() {
     export_to(&state, &own, Preferences::default()).await;
     let result = import(&state, &own, false).await;
     assert_eq!(
-        (result.notes_added, result.notes_already_present),
+        (
+            result.counts.notes_added,
+            result.counts.notes_already_present
+        ),
         (0, MAX_TOTAL_NOTE_CHARS / MAX_NOTE_CHARS)
     );
 }
@@ -2210,7 +2268,7 @@ async fn an_export_at_both_note_limits_imports_again() {
     let result = commands::apply_pending_import(&b, p.token, true, true, false)
         .await
         .unwrap();
-    assert_eq!(result.notes_added, MAX_NOTES);
+    assert_eq!(result.counts.notes_added, MAX_NOTES);
     assert_eq!(note_rows(&b).await, before);
 }
 
@@ -2341,8 +2399,8 @@ async fn an_export_of_more_than_10000_bookmarks_imports_again() {
     std::fs::write(&first, file_with(&records[..10_000].join(","), "null")).unwrap();
     let second = file(&db, "second.gospel-getter.json");
     std::fs::write(&second, file_with(&records[10_000..].join(","), "null")).unwrap();
-    assert_eq!(import(&a, &first, false).await.added, 10_000);
-    assert_eq!(import(&a, &second, false).await.added, 1);
+    assert_eq!(import(&a, &first, false).await.counts.added, 10_000);
+    assert_eq!(import(&a, &second, false).await.counts.added, 1);
     let before = personal(&a).await;
     assert_eq!(before.0.len(), 10_001);
 
@@ -2363,14 +2421,20 @@ async fn an_export_of_more_than_10000_bookmarks_imports_again() {
     let result = commands::apply_pending_import(&b, p.token, false, true, false)
         .await
         .unwrap();
-    assert_eq!((result.added, result.already_present), (10_001, 0));
+    assert_eq!(
+        (result.counts.added, result.counts.already_present),
+        (10_001, 0)
+    );
     assert_eq!(personal(&b).await, before, "every bookmark, with its date");
 
     // Past 10,000, adding stays idempotent and merging counts truly: the
     // same file again adds nothing; bookmarking a passage that's already
     // bookmarked returns that bookmark; a new one is one more.
     let again = import(&b, &backup, false).await;
-    assert_eq!((again.added, again.already_present), (0, 10_001));
+    assert_eq!(
+        (again.counts.added, again.counts.already_present),
+        (0, 10_001)
+    );
     let genesis_1_1 = b.store.all_bookmarks().await.unwrap()[0].clone();
     assert_eq!(
         (
@@ -2410,7 +2474,7 @@ async fn an_export_of_more_than_10000_bookmarks_imports_again() {
         (3, 1, 1, 2, 10_002)
     );
     let result = import(&b, &mixed, false).await;
-    assert_eq!((result.added, result.already_present), (1, 2));
+    assert_eq!((result.counts.added, result.counts.already_present), (1, 2));
     assert_eq!(personal(&b).await.0.len(), 10_003);
 
     // A file too large to be an export is still refused, as it always was.
@@ -2560,7 +2624,13 @@ async fn findings_and_the_switch_round_trip_and_older_files_leave_them_alone() {
     let done = commands::apply_pending_import(&b, p.token, false, true, true)
         .await
         .unwrap();
-    assert_eq!((done.findings_added, done.findings_already_present), (3, 0));
+    assert_eq!(
+        (
+            done.counts.findings_added,
+            done.counts.findings_already_present
+        ),
+        (3, 0)
+    );
     assert_eq!(done.findings_permission, Some(true));
     assert_eq!(finding_rows(&b).await, finding_rows(&a).await, "dates kept");
     assert!(commands::findings_switch(&b).await.unwrap());
@@ -2569,7 +2639,10 @@ async fn findings_and_the_switch_round_trip_and_older_files_leave_them_alone() {
     assert!(p.current_ai_findings_enabled);
     let again = import(&b, &path, false).await;
     assert_eq!(
-        (again.findings_added, again.findings_already_present),
+        (
+            again.counts.findings_added,
+            again.counts.findings_already_present
+        ),
         (0, 3)
     );
     assert_eq!(again.findings_permission, None, "not asked: left alone");
@@ -2579,14 +2652,20 @@ async fn findings_and_the_switch_round_trip_and_older_files_leave_them_alone() {
     std::fs::write(&v3, v3_file_with("")).unwrap();
     assert!(!preview(&b, &v3).await.has_findings);
     let replaced = import(&b, &v3, true).await;
-    assert_eq!(replaced.findings_removed, 0);
+    assert_eq!(replaced.counts.findings_removed, 0);
     assert_eq!(finding_rows(&b).await.len(), 3);
     assert!(commands::findings_switch(&b).await.unwrap());
 
     // A format 4 file replacing: its findings only.
     add_finding(&b, 3, 16, "love").await;
     let replaced = import(&b, &path, true).await;
-    assert_eq!((replaced.findings_removed, replaced.findings_added), (4, 3));
+    assert_eq!(
+        (
+            replaced.counts.findings_removed,
+            replaced.counts.findings_added
+        ),
+        (4, 3)
+    );
     assert_eq!(finding_rows(&b).await, finding_rows(&a).await);
 }
 
@@ -2750,7 +2829,10 @@ async fn the_preview_counts_the_findings_merging_adds() {
         .await
         .unwrap();
     assert_eq!(
-        (done.findings_added, done.findings_already_present),
+        (
+            done.counts.findings_added,
+            done.counts.findings_already_present
+        ),
         (p.new_findings, p.findings_already_present),
         "as previewed"
     );
@@ -2901,18 +2983,24 @@ async fn an_import_past_the_findings_limit_changes_nothing() {
     let two = file(&db, "two-more.gospel-getter.json");
     std::fs::write(&two, v4_file_with_findings(2)).unwrap();
     let merged = import(&state, &two, false).await;
-    assert_eq!(merged.findings_added, 2);
+    assert_eq!(merged.counts.findings_added, 2);
     assert_eq!(finding_rows(&state).await.len(), MAX_FINDINGS);
     let again = import(&state, &two, false).await;
     assert_eq!(
-        (again.findings_added, again.findings_already_present),
+        (
+            again.counts.findings_added,
+            again.counts.findings_already_present
+        ),
         (0, 2)
     );
 
     // Replacing leaves just the file's three.
     let replaced = import(&state, &three, true).await;
     assert_eq!(
-        (replaced.findings_added, replaced.findings_removed),
+        (
+            replaced.counts.findings_added,
+            replaced.counts.findings_removed
+        ),
         (3, MAX_FINDINGS)
     );
 
@@ -2930,7 +3018,7 @@ async fn an_import_past_the_findings_limit_changes_nothing() {
     let at = file(&db, "at-the-limit.gospel-getter.json");
     std::fs::write(&at, v4_file_with_findings(MAX_FINDINGS)).unwrap();
     let full = import(&state, &at, true).await;
-    assert_eq!(full.findings_added, MAX_FINDINGS);
+    assert_eq!(full.counts.findings_added, MAX_FINDINGS);
     assert_eq!(finding_rows(&state).await.len(), MAX_FINDINGS);
 }
 
@@ -3077,7 +3165,7 @@ async fn records_on_verses_the_kjv_numbered_until_2_29_2_still_import() {
     let result = commands::apply_pending_import(&a, p.token, false, true, false)
         .await
         .unwrap();
-    assert_eq!(result.added, 2);
+    assert_eq!(result.counts.added, 2);
     // A highlight and a note on the other two, saved again as an undo would.
     commands::highlight_passage(&a, 66, 12, 18, 18, "pink")
         .await
@@ -3112,7 +3200,11 @@ async fn records_on_verses_the_kjv_numbered_until_2_29_2_still_import() {
         .await
         .unwrap();
     assert_eq!(
-        (result.added, result.highlights_added, result.notes_added),
+        (
+            result.counts.added,
+            result.counts.highlights_added,
+            result.counts.notes_added
+        ),
         (2, 1, 1)
     );
     assert_eq!(

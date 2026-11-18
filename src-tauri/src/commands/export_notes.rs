@@ -7,10 +7,9 @@ use anyhow::Context;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
-use super::{AppState, failed, over_main_window, run_dialog, write_atomically};
+use super::{AppState, failed, lock, over_main_window, run_dialog, write_atomically};
 use crate::db::{self, Note};
 use crate::notes_export::{BookFile, Commentary, NotesExport, NotesFilter, NotesLayout};
 
@@ -341,12 +340,6 @@ pub struct PendingNotesFolder {
     token: u64,
     folder: PathBuf,
     files: Vec<BookFile>,
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// The reader chose `folder` for `files`: they're written, unless any is

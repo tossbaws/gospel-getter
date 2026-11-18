@@ -5,14 +5,13 @@
 use anyhow::Context;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
 use super::{
-    AppState, app_version, book_name, failed, over_main_window, run_dialog, write_atomically,
+    AppState, app_version, book_name, failed, lock, over_main_window, run_dialog, write_atomically,
 };
 use crate::db::notes::grouped;
-use crate::db::reader_data::{ApplyImportError, FindingsImport};
+use crate::db::reader_data::{ApplyImportError, FindingsImport, ImportCounts};
 use crate::db::{self, NoteLimit};
 use crate::passage_reference::passage_reference;
 use crate::reader_data::{
@@ -189,18 +188,8 @@ pub enum ImportChoice {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportResultDto {
-    pub added: usize,
-    pub already_present: usize,
-    pub removed: usize,
-    pub highlights_added: usize,
-    pub highlights_already_present: usize,
-    pub highlights_removed: usize,
-    pub notes_added: usize,
-    pub notes_already_present: usize,
-    pub notes_removed: usize,
-    pub findings_added: usize,
-    pub findings_already_present: usize,
-    pub findings_removed: usize,
+    #[serde(flatten)]
+    pub counts: ImportCounts,
     /// "Let AI agents save findings" as the import set it, when the reader
     /// chose to restore the file's (`restore_findings_permission`) and it
     /// has one; `None` when the switch was left as it was.
@@ -493,12 +482,6 @@ pub async fn prepare_import(state: &AppState, path: &Path) -> anyhow::Result<Imp
     })
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
 /// Apply the pending import the reader previewed (`token`), in one
 /// database transaction. `replace` swaps every current bookmark (and, for
 /// a file that can hold them, every highlight, note and AI finding) for the
@@ -559,18 +542,7 @@ pub async fn apply_pending_import(
         })?;
     discard_pending_import(state, token);
     Ok(ImportResultDto {
-        added: counts.added,
-        already_present: counts.already_present,
-        removed: counts.removed,
-        highlights_added: counts.highlights_added,
-        highlights_already_present: counts.highlights_already_present,
-        highlights_removed: counts.highlights_removed,
-        notes_added: counts.notes_added,
-        notes_already_present: counts.notes_already_present,
-        notes_removed: counts.notes_removed,
-        findings_added: counts.findings_added,
-        findings_already_present: counts.findings_already_present,
-        findings_removed: counts.findings_removed,
+        counts,
         findings_permission,
         position: position.map(PositionPreviewDto::from),
     })

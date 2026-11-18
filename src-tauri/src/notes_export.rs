@@ -43,6 +43,7 @@ use serde::{Deserialize, Serialize};
 use crate::db::notes::{NotePlace, grouped, in_bible_order};
 use crate::db::{Book, Note, Verse};
 use crate::passage_copy::{self, CopyFormat};
+use crate::passage_reference::passage_reference;
 // The escapes live in `markdown`, which Copy as… shares; named here too, as
 // they always have been.
 pub use crate::markdown::{escape_block, escape_inline};
@@ -448,8 +449,7 @@ impl NotesExport<'_> {
         let reference = passage_reference(
             self.book_name(note.book_id),
             note.chapter,
-            note.verse_start,
-            note.verse_end,
+            Some((note.verse_start, note.verse_end)),
         );
         let _ = writeln!(out, "{}", escape_inline(&reference));
 
@@ -519,7 +519,11 @@ pub fn note_markdown(
     chapter_verses: &[Verse],
     translation_code: &str,
 ) -> String {
-    let reference = passage_reference(book_name, note.chapter, note.verse_start, note.verse_end);
+    let reference = passage_reference(
+        book_name,
+        note.chapter,
+        Some((note.verse_start, note.verse_end)),
+    );
     let quoted: Vec<Verse> = chapter_verses
         .iter()
         .filter(|v| (note.verse_start..=note.verse_end).contains(&v.verse))
@@ -567,15 +571,6 @@ pub fn book_file_name(book_id: i64, book_name: &str) -> String {
         })
         .collect();
     format!("{book_id:02} {}.md", name.trim())
-}
-
-/// "John 3:16" or "John 3:16–18", as the app writes a passage.
-fn passage_reference(book_name: &str, chapter: i64, first: i64, last: i64) -> String {
-    if first == last {
-        format!("{book_name} {chapter}:{first}")
-    } else {
-        format!("{book_name} {chapter}:{first}\u{2013}{last}")
-    }
 }
 
 /// The calendar date `at` falls on in `tz`.
