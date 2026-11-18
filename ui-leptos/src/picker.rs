@@ -30,7 +30,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Element, HtmlElement, KeyboardEvent};
 
 use crate::bridge;
-use crate::dom::{self, by_id, closest, data_number};
+use crate::dom::{self, by_id, closest, data_number, query_all};
 use crate::pane::{self, PaneId};
 use crate::picker_text::{self as text, Book, FromChapter, FromItem, Key};
 use crate::surfaces::{self, Surface};
@@ -89,13 +89,6 @@ struct Picker {
 
 fn picker() -> Option<HtmlElement> {
     by_id("picker")
-}
-
-/// The elements `selector` finds in `root`, in order.
-fn all(root: &Element, selector: &str) -> Vec<HtmlElement> {
-    root.query_selector_all(selector)
-        .map(|found| dom::elements(&found))
-        .unwrap_or_default()
 }
 
 /// The book's button, by its id.
@@ -192,7 +185,7 @@ impl Picker {
         if let Some(shown) = bridge::document().and_then(|d| d.get_element_by_id(CHAPTERS_ID)) {
             shown.remove();
         }
-        for book in all(&picker, ".book-item[aria-expanded=\"true\"]") {
+        for book in query_all(&picker, ".book-item[aria-expanded=\"true\"]") {
             let _ = book.set_attribute("aria-expanded", "false");
             let _ = book.remove_attribute("aria-controls");
         }
@@ -257,7 +250,7 @@ impl Picker {
         let Some(picker) = picker() else {
             return;
         };
-        for book in all(&picker, ".book-item[aria-current]") {
+        for book in query_all(&picker, ".book-item[aria-current]") {
             let _ = book.remove_attribute("aria-current");
         }
         if let Some(book) = book_button(book_id) {
@@ -266,7 +259,7 @@ impl Picker {
         if self.state.with_value(|s| s.open) != Some(book_id) {
             self.show_chapters(Some(book_id));
         } else {
-            for button in all(&picker, ".chapter-btn") {
+            for button in query_all(&picker, ".chapter-btn") {
                 if data_number(&button, "data-chapter") == Some(chapter) {
                     let _ = button.set_attribute("aria-current", "page");
                 } else {
@@ -351,14 +344,14 @@ impl Picker {
             return;
         };
         let mut items: Vec<HtmlElement> = by_id("random-chapter-btn").into_iter().collect();
-        items.extend(all(&picker, ".book-item"));
+        items.extend(query_all(&picker, ".book-item"));
         let place = |el: &Element| items.iter().position(|item| dom::same(Some(item), el));
 
         let next = if let Some(chapter) = closest(&target, ".chapter-btn") {
             let Some(grid) = closest(&chapter, ".chapter-grid") else {
                 return;
             };
-            let buttons = all(&grid, ".chapter-btn");
+            let buttons = query_all(&grid, ".chapter-btn");
             let Some(i) = buttons.iter().position(|b| dom::same(Some(b), &chapter)) else {
                 return;
             };
@@ -390,7 +383,7 @@ impl Picker {
                 items
                     .get(j)
                     .and_then(|book| grid_after(book))
-                    .map(|grid| all(&grid, ".chapter-btn"))
+                    .map(|grid| query_all(&grid, ".chapter-btn"))
                     .unwrap_or_default()
             };
             match text::from_item(key, i, items.len(), open, is_book) {

@@ -58,7 +58,7 @@ use web_sys::{Element, HtmlElement, KeyboardEvent};
 
 use crate::bridge;
 use crate::card_text::{self as text, Change, Room, Selection, Side, Slot};
-use crate::dom::{self, by_id, closest, data_number};
+use crate::dom::{self, by_id, closest, data_number, overlay_open, query_all, scroll_into_view};
 use crate::dto::{
     Bookmark, Compare, CopyText, CopyTextArgs, Finding, Highlight, PassageArgs, PassageText,
     PassageTextArgs, Reading, RemoveBookmarkArgs, SelectionNote, SetHighlightArgs, Verse,
@@ -339,12 +339,6 @@ impl State {
 
 // ---- The page's elements.
 
-fn query_all(root: &Element, selector: &str) -> Vec<HtmlElement> {
-    root.query_selector_all(selector)
-        .map(|found| dom::elements(&found))
-        .unwrap_or_default()
-}
-
 /// Every selectable verse in `pane`.
 fn selectable(pane: PaneId) -> Vec<HtmlElement> {
     pane.query_all(SELECTABLE)
@@ -390,23 +384,6 @@ fn number_property(el: &Element, name: &str) -> f64 {
 
 fn set_number_property(el: &Element, name: &str, value: f64) {
     let _ = js_sys::Reflect::set(el, &JsValue::from_str(name), &JsValue::from_f64(value));
-}
-
-/// `el.scrollIntoView({ block })`, where there is one (jsdom has none).
-fn scroll_into_view(el: &Element, block: &str) {
-    let Ok(scroll) = js_sys::Reflect::get(el, &JsValue::from_str("scrollIntoView")) else {
-        return;
-    };
-    let Some(scroll) = scroll.dyn_ref::<js_sys::Function>() else {
-        return;
-    };
-    let options = js_sys::Object::new();
-    let _ = js_sys::Reflect::set(
-        &options,
-        &JsValue::from_str("block"),
-        &JsValue::from_str(block),
-    );
-    let _ = scroll.call1(el, &options);
 }
 
 fn rect(el: &Element) -> text::Rect {
@@ -1199,7 +1176,7 @@ fn apply_bookmark_markers() {
             })
         });
         for el in selectable(pane) {
-            let number = data_number(&el, "data-verse");
+            let number = data_number::<i64>(&el, "data-verse");
             let marked = spans.as_ref().is_some_and(|spans| {
                 number.is_some_and(|n| spans.iter().any(|&(start, end)| n >= start && n <= end))
             });
@@ -1493,7 +1470,7 @@ fn apply_note_markers(pane: PaneId) {
         return;
     };
     for el in selectable(pane) {
-        let number = data_number(&el, "data-verse");
+        let number = data_number::<i64>(&el, "data-verse");
         let noted = spans.as_ref().is_some_and(|spans| {
             number.is_some_and(|n| spans.iter().any(|&(start, end)| n >= start && n <= end))
         });
@@ -2110,11 +2087,6 @@ pub fn on_ready() {
 // Wayland with an input method), and let go of on blur, focus or when the
 // window is hidden. It's only visual: the card stays in the accessibility
 // tree and focus doesn't move.
-
-/// Whether an overlay of the page's pieces is open (looked up by id).
-fn overlay_open(id: &str) -> bool {
-    by_id(id).is_some_and(|overlay| !overlay.hidden())
-}
 
 /// Whether Shift may ghost the card now. Not while Shift is for something
 /// else: typing in a field, the search box or palette, a dialog or sheet,

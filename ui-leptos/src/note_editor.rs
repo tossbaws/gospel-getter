@@ -834,23 +834,7 @@ impl Editor {
             return;
         };
         let stops = dom::focusable(&panel, "textarea, button, summary");
-        let (Some(first), Some(last)) = (stops.first(), stops.last()) else {
-            return;
-        };
-        let active = dom::active_element();
-        let inside = active
-            .as_ref()
-            .is_some_and(|active| panel.contains(Some(active)));
-        if !inside {
-            event.prevent_default();
-            let _ = if event.shift_key() { last } else { first }.focus();
-        } else if event.shift_key() && dom::same(active.as_ref(), first) {
-            event.prevent_default();
-            let _ = last.focus();
-        } else if !event.shift_key() && dom::same(active.as_ref(), last) {
-            event.prevent_default();
-            let _ = first.focus();
-        }
+        dom::trap_tab_plain(event, &panel, &stops, false);
     }
 
     fn listen(self) {

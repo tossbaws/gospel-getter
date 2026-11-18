@@ -37,7 +37,7 @@ The root and what the pieces share:
 - `bridge`: what crosses to the page's own scripts, the globals set for the tests and the GUI checks, and the page controls and local storage the pieces use.
 - `ipc`: Tauri commands through the global the page uses, `window.__TAURI__.core.invoke` (a `wasm_bindgen` extern plus `serde-wasm-bindgen`), with the same command names and argument objects.
 - `dto`: the shapes the commands exchange that the page declares for itself, with the names the JSON carries, and the shared ones (`wire`) under the page's names (see "What stays mirrored").
-- `dom`: the DOM helpers the pieces share (focus that never scrolls, the modals' Tab trap, listening, timers).
+- `dom`: the DOM helpers the pieces share (finding elements, focus that never scrolls, the modals' Tab trap, listening, timers).
 - `intent`: whose an answer is once it's back, after the reader has done something newer.
 
 The page's glue:

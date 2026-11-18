@@ -29,12 +29,12 @@ use std::cell::RefCell;
 use serde::Deserialize;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
-use web_sys::{HtmlButtonElement, HtmlElement, HtmlOptionElement, HtmlSelectElement};
+use web_sys::{HtmlElement, HtmlOptionElement};
 
 use crate::bridge;
 use crate::card::{self, Ask};
 use crate::card_text::Slot;
-use crate::dom::{self, by_id};
+use crate::dom::{self, button, by_id, overlay_open, select};
 use crate::dto::PositionPreview;
 use crate::export_choice::{self, ExportFacts};
 use crate::export_notes::{self, OpenRequest};
@@ -92,22 +92,8 @@ fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with_borrow_mut(f)
 }
 
-fn button(id: &str) -> Option<HtmlButtonElement> {
-    by_id(id)?.dyn_into::<HtmlButtonElement>().ok()
-}
-
-fn select(id: &str) -> Option<HtmlSelectElement> {
-    by_id(id)?.dyn_into::<HtmlSelectElement>().ok()
-}
-
 fn html_data(name: &str) -> Option<String> {
     bridge::document()?.document_element()?.get_attribute(name)
-}
-
-/// Whether an overlay of the pieces' is open (looked up by id when asked:
-/// it's made when its piece mounts).
-fn overlay_open(id: &str) -> bool {
-    by_id(id).is_some_and(|overlay| !overlay.hidden())
 }
 
 /// The import preview is open.

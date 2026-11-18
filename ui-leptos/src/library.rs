@@ -57,7 +57,7 @@ use web_sys::{Element, HtmlElement, KeyboardEvent, MouseEvent};
 use crate::bridge;
 use crate::card;
 use crate::card_text::{OPEN_BESIDE, beside_label};
-use crate::dom::{self, closest};
+use crate::dom::{self, closest, data_number};
 use crate::dto::{
     Bookmark, FindingRequest, HighlightPassage, Note, PassageArgs, RemoveBookmarkArgs,
     TranslationArgs,
@@ -219,11 +219,6 @@ fn target_of(event: &web_sys::Event) -> Option<Element> {
 /// A plain `focus()`.
 fn focus_plain(el: &HtmlElement) {
     let _ = el.focus();
-}
-
-/// A `data-*` id or index on a row's button.
-fn data_number<T: std::str::FromStr>(el: &Element, name: &str) -> Option<T> {
-    el.get_attribute(name)?.parse().ok()
 }
 
 impl Library {

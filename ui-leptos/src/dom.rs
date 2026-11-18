@@ -1,11 +1,15 @@
-//! Small DOM helpers the pieces share: focus that never scrolls the page,
+//! Small DOM helpers the pieces share: finding the page's elements (by id,
+//! by selector, their `data-*` numbers), focus that never scrolls the page,
 //! "is this element usable", the Tab trap's arithmetic, listening for an
 //! element's events and the keyboard, and timers.
 
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::Closure;
-use web_sys::{Element, FocusOptions, HtmlElement, KeyboardEvent, NodeList};
+use web_sys::{
+    Element, FocusOptions, HtmlButtonElement, HtmlElement, HtmlSelectElement, KeyboardEvent,
+    NodeList,
+};
 
 use crate::bridge;
 
@@ -58,13 +62,53 @@ pub(crate) fn by_id(id: &str) -> Option<HtmlElement> {
         .ok()
 }
 
+/// The page's `<button>` `id`.
+pub(crate) fn button(id: &str) -> Option<HtmlButtonElement> {
+    by_id(id)?.dyn_into::<HtmlButtonElement>().ok()
+}
+
+/// The page's `<select>` `id`.
+pub(crate) fn select(id: &str) -> Option<HtmlSelectElement> {
+    by_id(id)?.dyn_into::<HtmlSelectElement>().ok()
+}
+
+/// Whether an overlay of the pieces' is open (looked up by id when asked:
+/// it's made when its piece mounts).
+pub(crate) fn overlay_open(id: &str) -> bool {
+    by_id(id).is_some_and(|overlay| !overlay.hidden())
+}
+
+/// The elements `selector` finds in `root`, in order.
+pub(crate) fn query_all(root: &Element, selector: &str) -> Vec<HtmlElement> {
+    root.query_selector_all(selector)
+        .map(|found| elements(&found))
+        .unwrap_or_default()
+}
+
+/// `el.scrollIntoView({ block })`, where there is one (jsdom has none).
+pub(crate) fn scroll_into_view(el: &Element, block: &str) {
+    let Ok(scroll) = js_sys::Reflect::get(el, &JsValue::from_str("scrollIntoView")) else {
+        return;
+    };
+    let Some(scroll) = scroll.dyn_ref::<js_sys::Function>() else {
+        return;
+    };
+    let options = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &options,
+        &JsValue::from_str("block"),
+        &JsValue::from_str(block),
+    );
+    let _ = scroll.call1(el, &options);
+}
+
 /// `el.closest(selector)`, if any.
 pub(crate) fn closest(el: &Element, selector: &str) -> Option<Element> {
     el.closest(selector).ok().flatten()
 }
 
-/// A `data-*` number of `el`.
-pub(crate) fn data_number(el: &Element, name: &str) -> Option<i64> {
+/// A `data-*` number of `el` (an id or an index).
+pub(crate) fn data_number<T: std::str::FromStr>(el: &Element, name: &str) -> Option<T> {
     el.get_attribute(name)?.parse().ok()
 }
 
@@ -105,22 +149,47 @@ pub fn tab_stops(root: &Element, selector: &str) -> Vec<HtmlElement> {
 /// first and back, and focus that got outside `panel` comes back to the
 /// first (or, with Shift, the last). In between, Tab does what it does.
 pub fn trap_tab(event: &KeyboardEvent, panel: &Element, stops: &[HtmlElement]) {
+    wrap_tab(event, panel, stops, false, focus);
+}
+
+/// As [`trap_tab`], but focus moves with a plain `el.focus()`, which may
+/// scroll, and with `from_panel`, Shift+Tab on `panel` itself goes to the
+/// last stop: the note editor's and the welcome card's trap.
+pub fn trap_tab_plain(
+    event: &KeyboardEvent,
+    panel: &Element,
+    stops: &[HtmlElement],
+    from_panel: bool,
+) {
+    wrap_tab(event, panel, stops, from_panel, |el| {
+        let _ = el.focus();
+    });
+}
+
+fn wrap_tab(
+    event: &KeyboardEvent,
+    panel: &Element,
+    stops: &[HtmlElement],
+    from_panel: bool,
+    move_to: fn(&HtmlElement),
+) {
     let (Some(first), Some(last)) = (stops.first(), stops.last()) else {
         return;
     };
     let active = active_element();
+    let on_panel = from_panel && same(active.as_ref(), panel);
     let inside = active
         .as_ref()
         .is_some_and(|active| panel.contains(Some(active)));
-    if !inside {
+    if !inside || (on_panel && event.shift_key()) {
         event.prevent_default();
-        focus(if event.shift_key() { last } else { first });
+        move_to(if event.shift_key() { last } else { first });
     } else if event.shift_key() && same(active.as_ref(), first) {
         event.prevent_default();
-        focus(last);
+        move_to(last);
     } else if !event.shift_key() && same(active.as_ref(), last) {
         event.prevent_default();
-        focus(first);
+        move_to(first);
     }
 }
 
