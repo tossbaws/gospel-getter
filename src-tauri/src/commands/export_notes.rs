@@ -12,23 +12,11 @@ use std::sync::atomic::Ordering;
 use super::{AppState, failed, lock, over_main_window, run_dialog, write_atomically};
 use crate::db::{self, Note};
 use crate::notes_export::{BookFile, Commentary, NotesExport, NotesFilter, NotesLayout};
+// Shared with the page, which reads them whole (see shared/wire.rs).
+pub use crate::wire::{NotesExportOutcome, NotesFolderOutcome};
 
 // ---- Export notes as Markdown: readable, for a notes app or printing,
 // never imported back (see `notes_export`).
-
-/// How exporting notes ended.
-#[derive(Debug, Serialize)]
-#[serde(
-    tag = "status",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum NotesExportOutcome {
-    /// The reader closed the save dialog; no file was written.
-    Cancelled,
-    /// The file was completely written.
-    Saved { path: String, notes: usize },
-}
 
 /// A notes export, ready to save.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,33 +294,6 @@ pub async fn build_notes_export_by_book<Tz: chrono::TimeZone>(
 
 // ---- One file per book, in a folder the reader chooses.
 
-/// How exporting notes as one file per book ended (or paused).
-#[derive(Debug, Serialize)]
-#[serde(
-    tag = "status",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum NotesFolderOutcome {
-    /// The reader closed the folder dialog, or chose not to replace the
-    /// files already there; nothing was written.
-    Cancelled,
-    /// Some of the files (`existing`, by name) are already in `folder`:
-    /// nothing is written until the reader says whether to replace them
-    /// (`confirm_notes_export_by_book` with `token`).
-    Exists {
-        token: u64,
-        folder: String,
-        existing: Vec<String>,
-    },
-    /// Every file was completely written.
-    Saved {
-        folder: String,
-        files: usize,
-        notes: usize,
-    },
-}
-
 /// An export as one file per book waiting for the reader to say whether
 /// to replace the files of it already in the folder they chose. Only one
 /// at a time; another export replaces it.
@@ -398,8 +359,8 @@ async fn save_notes_folder(
     files: &[BookFile],
     folder: &Path,
 ) -> Result<NotesFolderOutcome, String> {
-    let total = files.len();
-    let notes = files.iter().map(|f| f.notes).sum();
+    let total = files.len() as u64;
+    let notes = files.iter().map(|f| f.notes as u64).sum();
     let shown = folder.display().to_string();
     let (to_write, target) = (files.to_vec(), folder.to_path_buf());
     let written = tokio::task::spawn_blocking(move || {
@@ -503,7 +464,7 @@ pub async fn save_notes_export(
         .context("The save was interrupted")??;
     Ok(NotesExportOutcome::Saved {
         path: path.display().to_string(),
-        notes: file.notes,
+        notes: file.notes as u64,
     })
 }
 
@@ -732,7 +693,7 @@ mod tests {
             let markdown = std::fs::read_to_string(&path).unwrap();
             assert!(markdown.contains("Before the dialog"), "{markdown}");
             assert!(markdown.contains(&written), "{markdown}");
-            assert_eq!(notes, state.store.notes().await.unwrap().len());
+            assert_eq!(notes, state.store.notes().await.unwrap().len() as u64);
         }
 
         // One file per book: a note in a new book while the folder dialog
@@ -764,7 +725,7 @@ mod tests {
             panic!("saved: {outcome:?}");
         };
         assert_eq!(files, 2, "John and Romans");
-        assert_eq!(notes, state.store.notes().await.unwrap().len());
+        assert_eq!(notes, state.store.notes().await.unwrap().len() as u64);
         let romans_file = std::fs::read_dir(&by_book)
             .unwrap()
             .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())

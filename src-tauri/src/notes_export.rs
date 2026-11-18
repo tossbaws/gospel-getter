@@ -48,7 +48,7 @@ use crate::passage_reference::passage_reference;
 // they always have been.
 pub use crate::markdown::{escape_block, escape_inline};
 // Shared with the page, which reads them whole (see shared/wire.rs).
-pub use crate::wire::{Commentary, CommentaryBook, CommentaryChapter, CommentaryNote};
+pub use crate::wire::{Commentary, CommentaryBook, CommentaryChapter, CommentaryNote, NotedBook};
 
 /// Which notes an export holds. Each part narrows it; the default (no
 /// part set) is every note.
@@ -644,25 +644,6 @@ pub fn date_presets(today: NaiveDate) -> DatePresets {
             to: today,
         },
     }
-}
-
-/// A book with notes, as the export dialog lists it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NotedBook {
-    pub id: i64,
-    pub name: String,
-    /// How many notes it has.
-    pub notes: usize,
-    /// The first and last chapters with notes: the chapter range's
-    /// starting values.
-    pub first_chapter: i64,
-    pub last_chapter: i64,
-    /// How many chapters have notes. With only one there's no range to
-    /// choose, so the dialog doesn't offer one.
-    pub noted_chapters: usize,
-    /// The range's limits are 1 and this.
-    pub chapter_count: i64,
 }
 
 /// What the filter and the dialog's choices read of a note: where it is and

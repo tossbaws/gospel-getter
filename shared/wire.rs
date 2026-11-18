@@ -20,10 +20,13 @@ mod notes;
 mod reader;
 #[path = "wire/release_notes.rs"]
 mod release_notes;
+#[path = "wire/updates.rs"]
+mod updates;
 
 pub use notes::*;
 pub use reader::*;
 pub use release_notes::*;
+pub use updates::*;
 
 /// `value` is written as `json`, byte for byte, and `json` reads back as
 /// `value`. The literals are the JSON the commands sent before these
