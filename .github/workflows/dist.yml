@@ -111,6 +111,13 @@ name: Distribution Artifacts
 # for its target as Tauri asks. The app never runs it. An AppImage's sidecar
 # can't be reached from a shell, so it's also uploaded on its own, as an
 # artifact (gospel-getter-cli-*) that a release attaches.
+#
+# The app's builds name the app's package (-p gospel_getter, after `--` for
+# `cargo tauri build`), since the CLI is a default member of the workspace
+# and a plain build would compile it a second time. The installers and the
+# test app all name it, so the test app is the build that ships: one
+# package's build unifies features differently from the workspace's.
+# default-members stays as it is, so the local gates still cover the CLI.
 
 on:
   push:
@@ -325,7 +332,7 @@ jobs:
         env:
           GOSPEL_GETTER_SELF_UPDATE: "1"
         run: |
-          cargo tauri build --bundles appimage,deb --config tauri.sidecar.conf.json --config tauri.updater.conf.json --no-sign
+          cargo tauri build --bundles appimage,deb --config tauri.sidecar.conf.json --config tauri.updater.conf.json --no-sign -- -p gospel_getter
 
       - name: Check the build fetched no tools itself
         working-directory: .
@@ -534,7 +541,7 @@ jobs:
       - name: Build the GUI-check test app
         run: |
           set -euo pipefail
-          cargo build --release --locked --features gui-test-updater
+          cargo build --release --locked -p gospel_getter --features gui-test-updater
           mkdir -p "$RUNNER_TEMP/gui-check-test-app"
           cp target/release/gospel_getter "$RUNNER_TEMP/gui-check-test-app/"
 
@@ -652,7 +659,7 @@ jobs:
         env:
           GOSPEL_GETTER_SELF_UPDATE: "1"
         run: |
-          cargo tauri build --config tauri.sidecar.conf.json --config tauri.updater.conf.json --no-sign
+          cargo tauri build --config tauri.sidecar.conf.json --config tauri.updater.conf.json --no-sign -- -p gospel_getter
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Check the build fetched no tools itself
@@ -880,7 +887,7 @@ jobs:
       - name: Build the GUI-check test app
         shell: pwsh
         run: |
-          cargo build --release --locked --features gui-test-updater
+          cargo build --release --locked -p gospel_getter --features gui-test-updater
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/gui-check-test-app" | Out-Null
           Copy-Item target/release/gospel_getter.exe "$env:RUNNER_TEMP/gui-check-test-app/"
