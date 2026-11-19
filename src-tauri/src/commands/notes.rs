@@ -138,22 +138,32 @@ pub async fn note_add(state: &AppState, passage: Passage, body: &str) -> Result<
         .map_err(|e| note_error_message(state, e))
 }
 
-/// Change a note's text, or say why not.
-pub async fn note_update(state: &AppState, id: i64, body: &str) -> Result<NoteDto, String> {
+/// Change the text of the note with `id` and `created_at`, or say why not
+/// (`db::notes::update_note` says why both).
+pub async fn note_update(
+    state: &AppState,
+    id: i64,
+    created_at: &str,
+    body: &str,
+) -> Result<NoteDto, String> {
     state
         .store
-        .update_note(id, body)
+        .update_note(id, created_at, body)
         .await
         .map(|n| note_dto(state, n))
         .map_err(|e| note_error_message(state, e))
 }
 
-/// Delete a note, returning it as it was (to undo with `note_restore`), or
-/// `None` if it was already gone.
-pub async fn note_delete(state: &AppState, id: i64) -> Result<Option<NoteDto>, String> {
+/// Delete the note with `id` and `created_at`, returning it as it was (to
+/// undo with `note_restore`), or `None` if it was already gone.
+pub async fn note_delete(
+    state: &AppState,
+    id: i64,
+    created_at: &str,
+) -> Result<Option<NoteDto>, String> {
     state
         .store
-        .delete_note(id)
+        .delete_note(id, created_at)
         .await
         .map(|n| n.map(|n| note_dto(state, n)))
         .with_context(|| format!("Failed to delete note {id}"))
@@ -275,17 +285,19 @@ pub async fn add_note(
 pub async fn update_note(
     state: tauri::State<'_, AppState>,
     id: i64,
+    created_at: String,
     body: String,
 ) -> Result<NoteDto, String> {
-    note_update(&state, id, &body).await
+    note_update(&state, id, &created_at, &body).await
 }
 
 #[tauri::command]
 pub async fn delete_note(
     state: tauri::State<'_, AppState>,
     id: i64,
+    created_at: String,
 ) -> Result<Option<NoteDto>, String> {
-    note_delete(&state, id).await
+    note_delete(&state, id, &created_at).await
 }
 
 #[tauri::command]
@@ -390,15 +402,25 @@ mod tests {
             "4\u{2013}2 isn't a verse range."
         );
 
-        let edited = note_update(&state, note.id, "Edited.").await.unwrap();
+        let edited = note_update(&state, note.id, &note.created_at, "Edited.")
+            .await
+            .unwrap();
         assert_eq!(edited.body, "Edited.");
-        let deleted = note_delete(&state, note.id).await.unwrap().unwrap();
+        let deleted = note_delete(&state, note.id, &note.created_at)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
-            note_delete(&state, note.id).await.unwrap().map(|n| n.id),
+            note_delete(&state, note.id, &note.created_at)
+                .await
+                .unwrap()
+                .map(|n| n.id),
             None
         );
         assert_eq!(
-            note_update(&state, note.id, "Too late.").await.unwrap_err(),
+            note_update(&state, note.id, &note.created_at, "Too late.")
+                .await
+                .unwrap_err(),
             "That note no longer exists; it may have been deleted."
         );
         let restored = note_restore(
@@ -517,7 +539,9 @@ mod tests {
                 .unwrap_err(),
             "There's no translation \u{201c}niv\u{201d}."
         );
-        note_delete(&state, note.id).await.unwrap();
+        note_delete(&state, note.id, &note.created_at)
+            .await
+            .unwrap();
         assert_eq!(
             note_markdown_text(&state, note.id, "kjv")
                 .await

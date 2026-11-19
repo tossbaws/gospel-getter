@@ -382,20 +382,39 @@ pub(crate) async fn insert_note(
     Ok(note)
 }
 
-/// Change a note's text. Only its text and `updated_at` change, and
-/// `updated_at` only if the text did. Text that grows must keep all the
-/// notes within `MAX_TOTAL_NOTE_CHARS`; text that doesn't grow is always
-/// allowed, so a note can be shortened even past the limit.
-pub async fn update_note(writer: &WritePool, id: i64, body: &str) -> Result<Note, NoteError> {
+/// Change the text of the note with `id` and `created_at`. Only its text
+/// and `updated_at` change, and `updated_at` only if the text did. Text that
+/// grows must keep all the notes within `MAX_TOTAL_NOTE_CHARS`; text that
+/// doesn't grow is always allowed, so a note can be shortened even past the
+/// limit.
+///
+/// A note is the one asked for only if its `created_at` (as stored, which
+/// the frontend gets back unchanged) matches too, and one that doesn't is
+/// [`NoteError::NotFound`], as a deleted one is. Row ids aren't
+/// AUTOINCREMENT, so when the newest note (or finding) is deleted the next
+/// one gets its id, and an edit, delete, Keep as mine or remove from a view
+/// still holding the old record would land on the new one (GG-06).
+/// [`delete_note`], [`super::findings::remove_finding`] and
+/// [`super::findings::keep_as_mine`] match the same way. No `updated_at`
+/// check: two edits of one note can't overlap (the editor is one modal, the
+/// app one instance, and the CLI can't write notes).
+pub async fn update_note(
+    writer: &WritePool,
+    id: i64,
+    created_at: &str,
+    body: &str,
+) -> Result<Note, NoteError> {
     let body = normalize_body(body)?;
     let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start note transaction")?;
-    let old_chars: Option<i64> = sqlx::query_scalar("SELECT length(body) FROM notes WHERE id = $1")
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .context("Failed to read note")?;
+    let old_chars: Option<i64> =
+        sqlx::query_scalar("SELECT length(body) FROM notes WHERE id = $1 AND created_at = $2")
+            .bind(id)
+            .bind(created_at)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("Failed to read note")?;
     let old_chars = old_chars.ok_or(NoteError::NotFound { id })?;
     let chars = body.chars().count();
     if i64::try_from(chars).is_ok_and(|c| c > old_chars) {
@@ -424,14 +443,20 @@ pub async fn update_note(writer: &WritePool, id: i64, body: &str) -> Result<Note
     Ok(note)
 }
 
-/// Delete a note, returning it as it was (so it can be restored with
-/// `add_note`), or `None` if there was no such note.
-pub async fn delete_note(writer: &WritePool, id: i64) -> anyhow::Result<Option<Note>> {
+/// Delete the note with `id` and `created_at` (see [`update_note`] for why
+/// both), returning it as it was (so it can be restored with `add_note`),
+/// or `None` if there was no such note.
+pub async fn delete_note(
+    writer: &WritePool,
+    id: i64,
+    created_at: &str,
+) -> anyhow::Result<Option<Note>> {
     sqlx::query_as::<_, Note>(concat!(
-        "DELETE FROM notes WHERE id = $1 RETURNING ",
+        "DELETE FROM notes WHERE id = $1 AND created_at = $2 RETURNING ",
         note_columns!()
     ))
     .bind(id)
+    .bind(created_at)
     .fetch_optional(writer.pool())
     .await
     .context("Failed to delete note")

@@ -108,12 +108,16 @@ pub async fn finding_requests(state: &AppState) -> Result<Vec<FindingRequestDto>
     Ok(groups.into_iter().map(|g| request_dto(state, g)).collect())
 }
 
-/// Remove one finding, returning it as it was (for Undo), or `None` if it
-/// was already gone.
-pub async fn finding_remove(state: &AppState, id: i64) -> Result<Option<FindingDto>, String> {
+/// Remove the finding with `id` and `created_at` (`db::findings::remove_finding`),
+/// returning it as it was (for Undo), or `None` if it was already gone.
+pub async fn finding_remove(
+    state: &AppState,
+    id: i64,
+    created_at: &str,
+) -> Result<Option<FindingDto>, String> {
     state
         .store
-        .remove_finding(id)
+        .remove_finding(id, created_at)
         .await
         .map(|f| f.map(|f| finding_dto(state, f)))
         .with_context(|| format!("Failed to remove finding {id}"))
@@ -168,10 +172,16 @@ pub async fn findings_restore(
     }
 }
 
-/// "Keep as mine" (C10): `body` saved as the reader's own note on the
-/// finding's verses, and the finding removed, in one transaction.
-pub async fn finding_keep(state: &AppState, id: i64, body: &str) -> Result<NoteDto, String> {
-    match state.store.keep_finding_as_note(id, body).await {
+/// "Keep as mine" (C10): `body` saved as the reader's own note on the verses
+/// of the finding with `id` and `created_at` (`db::findings::keep_as_mine`),
+/// and the finding removed, in one transaction.
+pub async fn finding_keep(
+    state: &AppState,
+    id: i64,
+    created_at: &str,
+    body: &str,
+) -> Result<NoteDto, String> {
+    match state.store.keep_finding_as_note(id, created_at, body).await {
         Ok(note) => Ok(note_dto(state, note)),
         Err(KeepError::FindingGone) => {
             Err("That finding is no longer there; it may have been removed.".to_string())
@@ -221,8 +231,9 @@ pub async fn list_finding_requests(
 pub async fn remove_finding(
     state: tauri::State<'_, AppState>,
     id: i64,
+    created_at: String,
 ) -> Result<Option<FindingDto>, String> {
-    finding_remove(&state, id).await
+    finding_remove(&state, id, &created_at).await
 }
 
 #[tauri::command]
@@ -245,9 +256,10 @@ pub async fn restore_findings(
 pub async fn keep_finding_as_note(
     state: tauri::State<'_, AppState>,
     id: i64,
+    created_at: String,
     body: String,
 ) -> Result<NoteDto, String> {
-    finding_keep(&state, id, &body).await
+    finding_keep(&state, id, &created_at, &body).await
 }
 
 #[tauri::command]
@@ -307,7 +319,7 @@ mod tests {
             ("Claude", 2)
         );
 
-        let note = finding_keep(&state, shown[1].id, "  Mine now. ")
+        let note = finding_keep(&state, shown[1].id, &shown[1].created_at, "  Mine now. ")
             .await
             .unwrap();
         assert_eq!(
@@ -316,13 +328,15 @@ mod tests {
         );
         assert_eq!(chapter_findings(&state, 43, 11).await.unwrap().len(), 1);
         assert_eq!(
-            finding_keep(&state, shown[1].id, "Again.")
+            finding_keep(&state, shown[1].id, &shown[1].created_at, "Again.")
                 .await
                 .unwrap_err(),
             "That finding is no longer there; it may have been removed."
         );
         assert_eq!(
-            finding_keep(&state, shown[0].id, "  ").await.unwrap_err(),
+            finding_keep(&state, shown[0].id, &shown[0].created_at, "  ")
+                .await
+                .unwrap_err(),
             "A note can't be empty."
         );
 

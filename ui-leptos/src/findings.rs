@@ -96,9 +96,12 @@ struct ChapterArgs {
     chapter: i64,
 }
 
+/// `remove_finding`'s arguments: the finding's id and `created_at`.
 #[derive(Serialize)]
-struct IdArgs {
+#[serde(rename_all = "camelCase")]
+struct FindingArgs<'a> {
     id: i64,
+    created_at: &'a str,
 }
 
 #[derive(Serialize)]
@@ -335,7 +338,10 @@ fn toggle_open(toggle: &Element) {
 
 /// "Remove" on one finding: it's removed, and the toast offers Undo.
 async fn remove_one(found: Finding) {
-    let removed = match ipc::args(&IdArgs { id: found.id }) {
+    let removed = match ipc::args(&FindingArgs {
+        id: found.id,
+        created_at: &found.created_at,
+    }) {
         Ok(args) => ipc::invoke::<Option<Finding>>("remove_finding", args).await,
         Err(e) => Err(e),
     };

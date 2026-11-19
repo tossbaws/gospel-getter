@@ -303,7 +303,7 @@ test('a draft whose note was deleted is dropped, here or anywhere', async () => 
     });
     // Deleted elsewhere (here, by the backend before a restart): the
     // Library's list no longer has it, and its draft goes.
-    await backend('delete_note', { id: second.id });
+    await backend('delete_note', { id: second.id, createdAt: second.createdAt });
     await withApp({ storage }, async (app) => {
         assert.deepEqual(keptTexts(app), []);
     });

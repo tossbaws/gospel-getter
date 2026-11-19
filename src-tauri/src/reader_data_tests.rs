@@ -2173,7 +2173,7 @@ async fn an_import_that_would_pass_a_note_limit_changes_nothing() {
     )
     .await;
     let first = state.store.notes().await.unwrap()[0].clone();
-    commands::note_update(&state, first.id, "Short now.")
+    commands::note_update(&state, first.id, &first.created_at, "Short now.")
         .await
         .unwrap();
     let before = everything(&state).await;

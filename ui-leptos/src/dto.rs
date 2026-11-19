@@ -262,17 +262,22 @@ pub struct AddNoteArgs<'a> {
     pub body: &'a str,
 }
 
-/// `update_note`'s arguments.
+/// `update_note`'s arguments: the note as the editor opened it (its id and
+/// `created_at`: `db::notes::update_note` says why both), and its new text.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateNoteArgs<'a> {
     pub id: i64,
+    pub created_at: &'a str,
     pub body: &'a str,
 }
 
-/// `delete_note`'s arguments.
+/// `delete_note`'s arguments: the note's id and `created_at`.
 #[derive(Debug, Serialize)]
-pub struct DeleteNoteArgs {
+#[serde(rename_all = "camelCase")]
+pub struct DeleteNoteArgs<'a> {
     pub id: i64,
+    pub created_at: &'a str,
 }
 
 /// An available update, as `check_for_update` answers
@@ -530,10 +535,13 @@ pub struct SelectionNote {
     pub links: Vec<NoteLink>,
 }
 
-/// `keep_finding_as_note`'s arguments: the finding, and the note's text.
+/// `keep_finding_as_note`'s arguments: the finding (its id and
+/// `created_at`), and the note's text.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct KeepFindingArgs<'a> {
     pub id: i64,
+    pub created_at: &'a str,
     pub body: &'a str,
 }
 

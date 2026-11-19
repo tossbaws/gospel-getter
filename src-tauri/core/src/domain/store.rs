@@ -180,14 +180,21 @@ impl Store {
         db::notes::add_note(self.db.write(), passage, body, dates).await
     }
 
-    /// Change a note's text.
-    pub async fn update_note(&self, id: i64, body: &str) -> Result<Note, NoteError> {
-        db::notes::update_note(self.db.write(), id, body).await
+    /// Change the text of the note with `id` and `created_at`
+    /// (`db::notes::update_note` says why both).
+    pub async fn update_note(
+        &self,
+        id: i64,
+        created_at: &str,
+        body: &str,
+    ) -> Result<Note, NoteError> {
+        db::notes::update_note(self.db.write(), id, created_at, body).await
     }
 
-    /// Delete a note, returning it as it was, if it existed.
-    pub async fn delete_note(&self, id: i64) -> anyhow::Result<Option<Note>> {
-        db::notes::delete_note(self.db.write(), id).await
+    /// Delete the note with `id` and `created_at`, returning it as it was,
+    /// if it existed.
+    pub async fn delete_note(&self, id: i64, created_at: &str) -> anyhow::Result<Option<Note>> {
+        db::notes::delete_note(self.db.write(), id, created_at).await
     }
 
     /// Note `id`, if there is one.
@@ -238,9 +245,14 @@ impl Store {
         db::findings::add_findings(self.db.write(), findings).await
     }
 
-    /// Remove one finding, returning it as it was, if it existed.
-    pub async fn remove_finding(&self, id: i64) -> anyhow::Result<Option<Finding>> {
-        db::findings::remove_finding(self.db.write(), id).await
+    /// Remove the finding with `id` and `created_at`, returning it as it
+    /// was, if it existed.
+    pub async fn remove_finding(
+        &self,
+        id: i64,
+        created_at: &str,
+    ) -> anyhow::Result<Option<Finding>> {
+        db::findings::remove_finding(self.db.write(), id, created_at).await
     }
 
     /// Remove every finding of one request, returning them as they were.
@@ -250,8 +262,13 @@ impl Store {
 
     /// "Keep as mine": the reader's note on a finding's verses, and the
     /// finding gone, in one transaction (`db::findings::keep_as_mine`).
-    pub async fn keep_finding_as_note(&self, id: i64, body: &str) -> Result<Note, KeepError> {
-        db::findings::keep_as_mine(self.db.write(), id, body).await
+    pub async fn keep_finding_as_note(
+        &self,
+        id: i64,
+        created_at: &str,
+        body: &str,
+    ) -> Result<Note, KeepError> {
+        db::findings::keep_as_mine(self.db.write(), id, created_at, body).await
     }
 
     /// Whether "Let AI agents save findings" is on.

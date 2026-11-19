@@ -200,6 +200,14 @@ test('a note is added, edited, deleted and restored, and every view keeps up', (
         assert.deepEqual(cards(app).map((c) => c.body), ['Belief, judgment and light.']);
         assert.deepEqual(notedVerses(app), [16, 17, 18]);
         assert.equal(el(app, 'note-count').textContent, '1');
+
+        // The restored note is the same note: it can be edited again.
+        app.click(section(app).querySelector('.note-edit'));
+        await typeNote(app, 'Belief, judgment, light and life.');
+        await clickAndWait(app, el(app, 'note-save'), 'list_all_notes');
+        assert.ok(!panelOpen(app));
+        assert.equal(statusText(app), 'Note saved');
+        assert.deepEqual((await allNotes()).map((n) => n.body), ['Belief, judgment, light and life.']);
     }));
 
 test('Escape and Cancel close at once when nothing changed, and ask first when it did', () =>
@@ -783,3 +791,32 @@ test('a note deleted with no card has the same timed Undo, in the toast', () =>
         assert.equal(toast.querySelector('.toast-action'), null);
         assert.deepEqual(await allNotes(), []);
     }));
+
+// GG-06: note ids are reused (the newest note's, once it's deleted), so a
+// Save from an editor still holding a deleted note must not land on the note
+// that took its id.
+test('a Save from an editor whose note was deleted elsewhere leaves the newer note that took its id', async () => {
+    const [old] = await seed([[16, 16, 'First thoughts.']]);
+    // Written well before the note that takes its id.
+    await backend('__note_written', { body: 'First thoughts.', createdAt: '2026-01-01T00:00:00.000Z' });
+    const app = await openApp({ book: 'John', chapter: 3, keepBookmarks: true });
+    try {
+        await select(app, 16);
+        app.click(section(app).querySelector('.note-edit'));
+        await typeNote(app, 'Second thoughts.');
+        // Meanwhile, elsewhere: the note is deleted and another written, on
+        // another verse, which gets its id.
+        const [stale] = await allNotes();
+        await backend('delete_note', { id: stale.id, createdAt: stale.createdAt });
+        const newer = await backend('add_note', { bookId: JOHN, chapter: 3, verseStart: 18, verseEnd: 18, body: 'Someone else’s.' });
+        assert.equal(newer.id, old.id, 'the newer note has the old one’s id');
+
+        await clickAndWait(app, el(app, 'note-save'), 'update_note');
+        assert.ok(panelOpen(app));
+        assert.equal(el(app, 'note-input').value, 'Second thoughts.');
+        assert.equal(el(app, 'note-error').textContent, 'The note wasn’t saved: That note no longer exists; it may have been deleted. Your text is still here.');
+        assert.deepEqual(await allNotes(), [newer], 'the newer note is unchanged');
+    } finally {
+        app.close();
+    }
+});
