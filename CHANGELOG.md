@@ -4,6 +4,22 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.32.1] - 2026-11-18
+
+Safer, with nothing else changed from 2.32.0. The app now uses a newer
+SQLite, the database engine it keeps your data in, which fixes a flaw in
+the old one: it could hand back leftover memory when it opened a database
+beside a journal file of a different page size that someone less trusted
+had written. No normal use put such a file in front of the app, which
+opens only its own database in its data folder. And an edit, a delete,
+**Keep as mine** or a remove, made from a view that still showed a note
+or finding that's gone, can no longer change a newer one: if you deleted
+your newest note and wrote another, an editor still open on the old one
+could save over the new one, and now it says the note no longer exists
+and keeps your text in the box. No verse changes. Backups are unchanged,
+in the same data formats. Updating keeps your bookmarks, highlights,
+notes, findings, reading position and settings.
+
 ## [2.32.0] - 2026-11-17
 
 Four more keys. Press `B` to bookmark the verses you've selected, and
