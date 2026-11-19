@@ -38,7 +38,7 @@ pub const AI_FINDING: &str = "ai_finding";
 #[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SaveFindingsArgs {
-    /// The reader's topic in a few words, as they asked it: "grief" or "the sun". A short label: at most 60 characters, with no colon, semicolon, dash (— or –) or line break. The app shows it with each finding.
+    /// The reader's topic in a few words, as they asked it: "grief" or "the sun". A short label: at most 60 characters, with no colon, semicolon, dash (— or –), line break or character that can't be seen. The app shows it with each finding.
     #[arg(long)]
     pub request: String,
     /// The verses found, as references the app's Go to reads: "John 11:35", "Job 2:11-13" or "Psalm 6". Each verse is one finding. At most 500 verses in all.
