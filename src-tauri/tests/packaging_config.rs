@@ -424,6 +424,9 @@ fn the_release_overlay_leaves_the_csp_alone() {
 /// never installs; see `src/updater/test_hook.rs`).
 const TEST_FEATURE: &str = "gui-test-updater";
 
+/// The app's own package, which dist.yml's app builds name.
+const APP_PACKAGE: &str = "gospel_getter";
+
 /// What builds the test app in dist.yml, and the artifacts it goes into.
 const TEST_BUILD_STEP: &str = "Build the GUI-check test app";
 const TEST_ARTIFACT: &str = "gui-check-test-app-";
@@ -620,7 +623,7 @@ fn no_release_or_packaging_build_enables_the_gui_test_updater() {
     for build in builds {
         assert!(
             build.text.contains(&format!(
-                "cargo build --release --locked --features {TEST_FEATURE}"
+                "cargo build --release --locked -p {APP_PACKAGE} --features {TEST_FEATURE}"
             )),
             "{build:#?}"
         );
@@ -899,6 +902,50 @@ fn every_installer_build_carries_the_sidecar() {
             }
         }
         assert!(installer_builds > 0, "job {job} builds no installers");
+    }
+}
+
+/// The app's four builds in dist.yml (both installers and both test apps)
+/// build the app's package alone, after the sidecar step built the CLI: all
+/// four, so the test app is the same build variant as the installers (see
+/// dist.yml's header).
+#[test]
+fn every_app_build_builds_only_the_app() {
+    let steps = dist_steps();
+    let mut installers = Vec::new();
+    let mut test_apps = Vec::new();
+    for step in &steps {
+        for line in step.text.lines().map(str::trim_start) {
+            let line = line.strip_prefix("run: ").unwrap_or(line);
+            if line.starts_with("cargo tauri build") {
+                installers.push((step.job.as_str(), line));
+            } else if step.name == TEST_BUILD_STEP && line.starts_with("cargo build") {
+                test_apps.push((step.job.as_str(), line));
+            }
+        }
+    }
+    assert_eq!(
+        installers.iter().map(|(job, _)| *job).collect::<Vec<_>>(),
+        ["linux", "windows"],
+        "{installers:#?}"
+    );
+    assert_eq!(
+        test_apps.iter().map(|(job, _)| *job).collect::<Vec<_>>(),
+        [LINUX_TEST_APP_JOB, WINDOWS_TEST_APP_JOB],
+        "{test_apps:#?}"
+    );
+    let package = format!(" -p {APP_PACKAGE}");
+    for (job, line) in installers {
+        assert!(
+            line.ends_with(&format!(" --{package}")),
+            "job {job}: an installer build that doesn't name the app's package: {line}"
+        );
+    }
+    for (job, line) in test_apps {
+        assert!(
+            line.contains(&format!("{package} ")),
+            "job {job}: a test-app build that doesn't name the app's package: {line}"
+        );
     }
 }
 
@@ -1960,8 +2007,11 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
         "both jobs' installer builds: {builds:#?}"
     );
     for build in builds {
+        // What follows `--` goes to cargo, not to the Tauri CLI.
+        let tauri_args = build.split_once(" -- ").map_or(build, |(tauri, _)| tauri);
         assert!(
-            build.contains("--config tauri.updater.conf.json") && build.ends_with(" --no-sign"),
+            tauri_args.contains("--config tauri.updater.conf.json")
+                && tauri_args.ends_with(" --no-sign"),
             "an installer build that isn't the release's, unsigned: {build}"
         );
     }

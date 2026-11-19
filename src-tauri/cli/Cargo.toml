@@ -22,7 +22,7 @@ rmcp = { version = "3.9", default-features = false, features = ["server", "macro
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite"] }
+sqlx = { version = "0.9.1", default-features = false, features = ["runtime-tokio", "sqlite"] }
 tokio = { version = "1", features = ["rt", "macros"] }
 # Logs of the MCP server, on stderr: stdout carries only its protocol.
 tracing-subscriber = "0.3"
