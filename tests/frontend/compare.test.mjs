@@ -77,7 +77,7 @@ test('Compare on and off on a chapter in hand reads only its findings again; loa
         assert.equal(app.heading(), 'John 3');
         assert.ok(app.calls.slice(before).some((c) => c.cmd === 'list_notes'));
         assert.ok(noted());
-        await backend('delete_note', { id: note.id });
+        await backend('delete_note', { id: note.id, createdAt: note.createdAt });
     }));
 
 test('C toggles compare, and the mode is remembered across restarts', () =>

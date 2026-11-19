@@ -436,7 +436,7 @@ test('N-U-01: a note under a deleted note’s id copies its own passage from the
         assert.equal(markdownAsked(app, old.id).length, 1);
         // Deleted and written again on John 3:17 behind the page's back,
         // so only the note itself can tell the two apart.
-        await backend('delete_note', { id: old.id });
+        await backend('delete_note', { id: old.id, createdAt: old.createdAt });
         const added = await backend('add_note', { bookId: JOHN, chapter: 3, verseStart: 17, verseEnd: 17, body: AMEN });
         assert.equal(added.id, old.id, 'fixture: SQLite gave it the deleted note’s id');
         // A note added in the card reloads the Library's list.

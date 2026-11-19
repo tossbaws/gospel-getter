@@ -210,7 +210,7 @@ async fn keep_as_mine_makes_a_note_and_removes_the_finding_together() {
 
     // Nothing to keep: nothing changes.
     for empty in ["", "  \n "] {
-        let result = keep_as_mine(pool.write(), grief.id, empty).await;
+        let result = keep_as_mine(pool.write(), grief.id, &grief.created_at, empty).await;
         assert!(
             matches!(
                 result,
@@ -223,7 +223,7 @@ async fn keep_as_mine_makes_a_note_and_removes_the_finding_together() {
     assert_eq!(list_notes(pool.read()).await.unwrap(), before);
 
     // Kept unchanged, the text still says who found it; it's the reader's.
-    let note = keep_as_mine(pool.write(), grief.id, &grief.text())
+    let note = keep_as_mine(pool.write(), grief.id, &grief.created_at, &grief.text())
         .await
         .expect("keep");
     assert_eq!(
@@ -242,7 +242,7 @@ async fn keep_as_mine_makes_a_note_and_removes_the_finding_together() {
     assert_eq!(requests, ["tears"], "only that one finding went");
 
     // Gone already: no note.
-    let again = keep_as_mine(pool.write(), grief.id, "Mine.").await;
+    let again = keep_as_mine(pool.write(), grief.id, &grief.created_at, "Mine.").await;
     assert!(matches!(again, Err(KeepError::FindingGone)), "{again:?}");
     assert_eq!(list_notes(pool.read()).await.unwrap(), after);
 }
@@ -257,7 +257,7 @@ async fn a_kept_note_that_cant_be_saved_leaves_the_finding() {
         .expect("save");
     fill_notes(pool.write(), MAX_NOTES, 7).await;
     let found = list_findings(pool.read(), JOHN, 11).await.unwrap();
-    let result = keep_as_mine(pool.write(), found[0].id, "Mine.").await;
+    let result = keep_as_mine(pool.write(), found[0].id, &found[0].created_at, "Mine.").await;
     assert!(
         matches!(
             result,
@@ -313,15 +313,20 @@ async fn a_request_is_removed_alone_and_comes_back_with_its_dates() {
     let was: Vec<&str> = removed.iter().map(|f| f.created_at.as_str()).collect();
     assert_eq!(dates, was);
 
-    let one = grief.findings[0].id;
+    let one = &grief.findings[0];
     assert_eq!(
-        remove_finding(pool.write(), one)
+        remove_finding(pool.write(), one.id, &one.created_at)
             .await
             .unwrap()
             .map(|f| f.id),
-        Some(one)
+        Some(one.id)
     );
-    assert_eq!(remove_finding(pool.write(), one).await.unwrap(), None);
+    assert_eq!(
+        remove_finding(pool.write(), one.id, &one.created_at)
+            .await
+            .unwrap(),
+        None
+    );
 }
 
 #[tokio::test]
@@ -537,4 +542,78 @@ async fn the_writer_waits_for_the_apps_write() {
         .expect("join")
         .expect("saved once the app's write is done");
     assert_eq!(saved.saved, [verse(3, 16)]);
+}
+
+/// A finding saved well before the one that takes its id.
+const LONG_AGO: &str = "2026-01-01T00:00:00.000Z";
+
+/// Finding A on John 11:35, removed, then finding B on John 11:33, which
+/// gets A's id (GG-06): (A as it was, B).
+async fn reused_finding_id(pool: &Db) -> (super::findings::Finding, super::findings::Finding) {
+    let mut first = new(verse(11, 35), "grief");
+    first.created_at = Some(LONG_AGO.to_string());
+    add_findings(pool.write(), &[first]).await.expect("save A");
+    let a = all_findings(pool.read()).await.expect("list").remove(0);
+    remove_finding(pool.write(), a.id, &a.created_at)
+        .await
+        .expect("remove A")
+        .expect("A was there");
+    add_findings(pool.write(), &[new(verse(11, 33), "tears")])
+        .await
+        .expect("save B");
+    let b = all_findings(pool.read()).await.expect("list").remove(0);
+    assert_eq!(b.id, a.id, "B gets A's id");
+    assert_ne!(b.created_at, a.created_at);
+    (a, b)
+}
+
+/// GG-06: Keep as mine from a view still holding finding A doesn't turn
+/// finding B, which took A's id and is on another verse, into a note; it's
+/// refused as A's would be, A being gone. With B's own `created_at` it
+/// keeps B.
+#[tokio::test]
+async fn a_stale_keep_leaves_the_finding_that_took_its_id() {
+    let (_db, pool) = fresh_database("findings_stale_keep").await;
+    let (a, b) = reused_finding_id(&pool).await;
+    let stale = keep_as_mine(pool.write(), a.id, &a.created_at, "Mine.").await;
+    assert!(matches!(stale, Err(KeepError::FindingGone)), "{stale:?}");
+    assert!(list_notes(pool.read()).await.unwrap().is_empty());
+    assert_eq!(
+        all_findings(pool.read()).await.unwrap(),
+        std::slice::from_ref(&b)
+    );
+
+    let note = keep_as_mine(pool.write(), b.id, &b.created_at, "Mine.")
+        .await
+        .expect("keep B");
+    assert_eq!(note.passage(), b.passage());
+    assert_eq!(list_notes(pool.read()).await.unwrap(), [note]);
+    assert!(all_findings(pool.read()).await.unwrap().is_empty());
+}
+
+/// GG-06: Remove from a view still holding finding A leaves finding B,
+/// which took A's id, and answers as for a finding already gone. With B's
+/// own `created_at` it removes B.
+#[tokio::test]
+async fn a_stale_remove_leaves_the_finding_that_took_its_id() {
+    let (_db, pool) = fresh_database("findings_stale_remove").await;
+    let (a, b) = reused_finding_id(&pool).await;
+    assert_eq!(
+        remove_finding(pool.write(), a.id, &a.created_at)
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        all_findings(pool.read()).await.unwrap(),
+        std::slice::from_ref(&b)
+    );
+
+    assert_eq!(
+        remove_finding(pool.write(), b.id, &b.created_at)
+            .await
+            .unwrap(),
+        Some(b)
+    );
+    assert!(all_findings(pool.read()).await.unwrap().is_empty());
 }

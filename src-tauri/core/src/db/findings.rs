@@ -634,14 +634,20 @@ fn verses_marked(findings: &[Finding]) -> i64 {
     count
 }
 
-/// Remove one finding, returning it as it was (to bring back with
-/// [`add_findings`]), or `None` if it was already gone.
-pub async fn remove_finding(writer: &WritePool, id: i64) -> anyhow::Result<Option<Finding>> {
+/// Remove the finding with `id` and `created_at` (see
+/// [`super::notes::update_note`] for why both), returning it as it was (to
+/// bring back with [`add_findings`]), or `None` if it was already gone.
+pub async fn remove_finding(
+    writer: &WritePool,
+    id: i64,
+    created_at: &str,
+) -> anyhow::Result<Option<Finding>> {
     sqlx::query_as::<_, Finding>(concat!(
-        "DELETE FROM ai_findings WHERE id = $1 RETURNING ",
+        "DELETE FROM ai_findings WHERE id = $1 AND created_at = $2 RETURNING ",
         finding_columns!()
     ))
     .bind(id)
+    .bind(created_at)
     .fetch_optional(writer.pool())
     .await
     .context("Failed to remove the finding")
@@ -717,12 +723,18 @@ impl From<anyhow::Error> for KeepError {
     }
 }
 
-/// "Keep as mine" (C10): the reader's note `body` on finding `id`'s verses,
-/// saved as any note is (the same checks, the same limits, no mark of the
-/// AI's), and the finding removed, in one transaction: the finding goes only
-/// if the note is saved. A verse that already has notes gets another one;
-/// none is ever changed.
-pub async fn keep_as_mine(writer: &WritePool, id: i64, body: &str) -> Result<Note, KeepError> {
+/// "Keep as mine" (C10): the reader's note `body` on the verses of the
+/// finding with `id` and `created_at` (see [`super::notes::update_note`] for
+/// why both), saved as any note is (the same checks, the same limits, no
+/// mark of the AI's), and the finding removed, in one transaction: the
+/// finding goes only if the note is saved. A verse that already has notes
+/// gets another one; none is ever changed.
+pub async fn keep_as_mine(
+    writer: &WritePool,
+    id: i64,
+    created_at: &str,
+    body: &str,
+) -> Result<Note, KeepError> {
     let body = normalize_body(body)?;
     let mut tx = crate::db::begin_write(writer)
         .await
@@ -730,9 +742,10 @@ pub async fn keep_as_mine(writer: &WritePool, id: i64, body: &str) -> Result<Not
     let finding = sqlx::query_as::<_, Finding>(concat!(
         "SELECT ",
         finding_columns!(),
-        " FROM ai_findings WHERE id = $1"
+        " FROM ai_findings WHERE id = $1 AND created_at = $2"
     ))
     .bind(id)
+    .bind(created_at)
     .fetch_optional(&mut *tx)
     .await
     .context("Failed to read the finding")?

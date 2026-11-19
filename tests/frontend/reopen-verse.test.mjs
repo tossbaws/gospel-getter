@@ -8,6 +8,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { isDeepStrictEqual } from 'node:util';
 import { backend, bookId, closeBridge, openApp } from './harness.mjs';
 
 after(closeBridge);
@@ -65,6 +66,23 @@ async function savedBecomes(app, want) {
     assert.deepEqual(await saved(), want);
 }
 
+/**
+ * The page's own record of the backend's place (`gospelGetterPlace.saved()`),
+ * as plain data. The page sets it only once `save_reading_position`'s answer
+ * has come back, so it can lag the backend (which `savedBecomes` reads): wait
+ * for it the same way before asserting on it.
+ */
+function pageSaved(app) {
+    return JSON.parse(JSON.stringify(app.window.gospelGetterPlace.saved()));
+}
+
+async function pageSavedBecomes(app, want) {
+    for (let i = 0; i < 100; i++) {
+        if (isDeepStrictEqual(pageSaved(app), want)) return;
+        await new Promise((r) => setTimeout(r, 20));
+    }
+}
+
 /** The reader scrolls the page to `y` and stops. */
 function scrollTo(app, at, y) {
     at.y = y;
@@ -82,9 +100,9 @@ test('the verse read last is where the next launch opens, at the same place unde
         // the bar's bottom.
         scrollTo(app, first, 900);
         await savedBecomes(app, ['kjv', JOHN, 3, 15, -14]);
-        assert.deepEqual(JSON.parse(JSON.stringify(app.window.gospelGetterPlace.saved())), {
-            bookId: JOHN, chapter: 3, translationCode: 'kjv', verse: 15, offset: -14,
-        });
+        const place = { bookId: JOHN, chapter: 3, translationCode: 'kjv', verse: 15, offset: -14 };
+        await pageSavedBecomes(app, place);
+        assert.deepEqual(pageSaved(app), place);
         const sent = app.calls.filter((c) => c.cmd === 'save_reading_position');
         assert.deepEqual(JSON.parse(JSON.stringify(sent.map((c) => c.args))), [
             { bookId: JOHN, chapter: 3, translationCode: 'kjv' },

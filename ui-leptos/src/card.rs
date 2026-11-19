@@ -1835,6 +1835,7 @@ fn open_note_editor(
         },
         keep: keep.map(|f| KeepRef {
             id: f.id,
+            created_at: f.created_at.clone(),
             text: f.text.clone(),
         }),
     };

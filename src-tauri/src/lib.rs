@@ -714,7 +714,7 @@ mod ipc_tests {
         let edited = invoke(
             &webview,
             "update_note",
-            json!({ "id": note["id"], "body": "Edited." }),
+            json!({ "id": note["id"], "createdAt": note["createdAt"], "body": "Edited." }),
         )
         .unwrap();
         assert_eq!(edited["body"], "Edited.");
@@ -722,11 +722,16 @@ mod ipc_tests {
             invoke(
                 &webview,
                 "update_note",
-                json!({ "id": note["id"], "body": "  " }),
+                json!({ "id": note["id"], "createdAt": note["createdAt"], "body": "  " }),
             ),
             Err(json!("A note can't be empty."))
         );
-        let deleted = invoke(&webview, "delete_note", json!({ "id": note["id"] })).unwrap();
+        let deleted = invoke(
+            &webview,
+            "delete_note",
+            json!({ "id": note["id"], "createdAt": note["createdAt"] }),
+        )
+        .unwrap();
         assert_eq!(deleted["body"], "Edited.");
         let restored = invoke(
             &webview,
@@ -741,7 +746,12 @@ mod ipc_tests {
         .unwrap();
         assert_eq!(restored["createdAt"], deleted["createdAt"]);
         assert_eq!(
-            invoke(&webview, "delete_note", json!({ "id": 999_999 })).unwrap(),
+            invoke(
+                &webview,
+                "delete_note",
+                json!({ "id": 999_999, "createdAt": deleted["createdAt"] }),
+            )
+            .unwrap(),
             Value::Null
         );
 

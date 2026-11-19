@@ -866,7 +866,10 @@ async fn a_record_on_a_verse_the_kjv_numbered_until_2_29_2_can_be_saved_again() 
     )
     .await
     .unwrap();
-    let deleted = delete_note(pool.write(), note.id).await.unwrap().unwrap();
+    let deleted = delete_note(pool.write(), note.id, &note.created_at)
+        .await
+        .unwrap()
+        .unwrap();
     let passage = Passage {
         book_id: deleted.book_id,
         chapter: deleted.chapter,
@@ -1947,9 +1950,14 @@ async fn notes_are_added_edited_listed_and_deleted() {
 
     // Editing changes the text and updated_at only.
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    let edited = update_note(pool.write(), range.id, "Belief, judgment, light.")
-        .await
-        .unwrap();
+    let edited = update_note(
+        pool.write(),
+        range.id,
+        &range.created_at,
+        "Belief, judgment, light.",
+    )
+    .await
+    .unwrap();
     assert_eq!(edited.body, "Belief, judgment, light.");
     assert_eq!(
         (
@@ -1962,9 +1970,14 @@ async fn notes_are_added_edited_listed_and_deleted() {
     assert!(edited.updated_at > range.updated_at);
     // Saving the same text again leaves it as it was.
     assert_eq!(
-        update_note(pool.write(), range.id, " Belief, judgment, light. ")
-            .await
-            .unwrap(),
+        update_note(
+            pool.write(),
+            range.id,
+            &range.created_at,
+            " Belief, judgment, light. ",
+        )
+        .await
+        .unwrap(),
         edited
     );
 
@@ -1972,11 +1985,19 @@ async fn notes_are_added_edited_listed_and_deleted() {
 
     // Deleting returns the note as it was; adding it back with its dates
     // restores the same passage, text and created_at.
-    let deleted = delete_note(pool.write(), edited.id).await.unwrap().unwrap();
+    let deleted = delete_note(pool.write(), edited.id, &edited.created_at)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(deleted, edited);
-    assert_eq!(delete_note(pool.write(), edited.id).await.unwrap(), None);
+    assert_eq!(
+        delete_note(pool.write(), edited.id, &edited.created_at)
+            .await
+            .unwrap(),
+        None
+    );
     assert!(matches!(
-        update_note(pool.write(), edited.id, "gone").await,
+        update_note(pool.write(), edited.id, &edited.created_at, "gone").await,
         Err(NoteError::NotFound { .. })
     ));
     let restored = add_note(
@@ -2074,9 +2095,9 @@ async fn invalid_notes_are_refused_and_change_nothing() {
         add_note(pool.write(), &john_3(16, 40), "x", None).await,
         Err(NoteError::Passage(BookmarkError::NoSuchVerse { .. }))
     ));
-    let id = list_notes(pool.read()).await.unwrap()[0].id;
+    let first = list_notes(pool.read()).await.unwrap()[0].clone();
     assert!(matches!(
-        update_note(pool.write(), id, " ").await,
+        update_note(pool.write(), first.id, &first.created_at, " ").await,
         Err(NoteError::Body(NoteBodyError::Empty))
     ));
     assert_eq!(note_rows(pool.read()).await, before);
@@ -2222,7 +2243,9 @@ async fn no_note_is_added_past_the_count_limit() {
     }
     assert_eq!(note_totals(pool.read()).await.0, MAX_NOTES as i64);
     // Room again once one goes.
-    delete_note(pool.write(), last.id).await.unwrap();
+    delete_note(pool.write(), last.id, &last.created_at)
+        .await
+        .unwrap();
     add_note(pool.write(), &john_3(17, 17), "Fits again.", None)
         .await
         .unwrap();
@@ -2252,9 +2275,14 @@ async fn notes_stay_within_their_total_size() {
     // Shortening is always allowed, even at the limit; the room it makes
     // can be used again.
     let first = list_notes(pool.read()).await.unwrap()[0].clone();
-    update_note(pool.write(), first.id, &"s".repeat(9_000))
-        .await
-        .unwrap();
+    update_note(
+        pool.write(),
+        first.id,
+        &first.created_at,
+        &"s".repeat(9_000),
+    )
+    .await
+    .unwrap();
     let used = add_note(pool.write(), &john_3(16, 16), &"y".repeat(1_000), None)
         .await
         .unwrap();
@@ -2264,19 +2292,31 @@ async fn notes_stay_within_their_total_size() {
     );
     // Growing a note past the total isn't, and changes nothing.
     let before = note_rows(pool.read()).await;
-    let error = update_note(pool.write(), first.id, &"s".repeat(9_001))
-        .await
-        .unwrap_err();
+    let error = update_note(
+        pool.write(),
+        first.id,
+        &first.created_at,
+        &"s".repeat(9_001),
+    )
+    .await
+    .unwrap_err();
     assert!(
         matches!(error, NoteError::Limit(NoteLimit::TotalText)),
         "{error:?}"
     );
     assert_eq!(note_rows(pool.read()).await, before);
     // The same length, or shorter, is fine.
-    update_note(pool.write(), first.id, &"t".repeat(9_000))
+    update_note(
+        pool.write(),
+        first.id,
+        &first.created_at,
+        &"t".repeat(9_000),
+    )
+    .await
+    .unwrap();
+    update_note(pool.write(), used.id, &used.created_at, "z")
         .await
         .unwrap();
-    update_note(pool.write(), used.id, "z").await.unwrap();
     assert_eq!(
         note_totals(pool.read()).await.1,
         (MAX_TOTAL_NOTE_CHARS - 999) as i64
@@ -2612,4 +2652,109 @@ async fn note_places_are_each_notes_book_chapter_and_date() {
         })
         .collect();
     assert_eq!(note_places(pool.read()).await.unwrap(), expected);
+}
+
+/// A note written well before the one that takes its id (`reused_note_id`).
+const LONG_AGO: &str = "2026-01-01T00:00:00.000Z";
+
+/// Note A on John 3:16, deleted, then note B on John 3:18, which gets A's
+/// id (GG-06): (A as it was, B).
+async fn reused_note_id(pool: &Db) -> (super::Note, super::Note) {
+    let a = add_note(
+        pool.write(),
+        &john_3(16, 16),
+        "A.",
+        Some((LONG_AGO, LONG_AGO)),
+    )
+    .await
+    .unwrap();
+    delete_note(pool.write(), a.id, &a.created_at)
+        .await
+        .unwrap()
+        .unwrap();
+    let b = add_note(pool.write(), &john_3(18, 18), "B.", None)
+        .await
+        .unwrap();
+    assert_eq!(b.id, a.id, "B gets A's id");
+    assert_ne!(b.created_at, a.created_at);
+    (a, b)
+}
+
+/// GG-06: a save from an editor still holding note A doesn't change note B,
+/// which took A's id; it's refused as A's would be, A being gone. With B's
+/// own `created_at` it changes B.
+#[tokio::test]
+async fn a_stale_edit_leaves_the_note_that_took_its_id() {
+    let (_db, pool) = fresh_database("notes_stale_edit").await;
+    let (a, b) = reused_note_id(&pool).await;
+    assert!(matches!(
+        update_note(pool.write(), a.id, &a.created_at, "Stale.").await,
+        Err(NoteError::NotFound { .. })
+    ));
+    assert_eq!(
+        list_notes(pool.read()).await.unwrap(),
+        std::slice::from_ref(&b)
+    );
+
+    let edited = update_note(pool.write(), b.id, &b.created_at, "B, edited.")
+        .await
+        .unwrap();
+    assert_eq!(
+        (edited.id, edited.body.as_str(), edited.passage()),
+        (b.id, "B, edited.", b.passage())
+    );
+    assert_eq!(list_notes(pool.read()).await.unwrap(), [edited]);
+}
+
+/// GG-06: a delete from a view still holding note A leaves note B, which
+/// took A's id, and answers as for a note already gone. With B's own
+/// `created_at` it deletes B.
+#[tokio::test]
+async fn a_stale_delete_leaves_the_note_that_took_its_id() {
+    let (_db, pool) = fresh_database("notes_stale_delete").await;
+    let (a, b) = reused_note_id(&pool).await;
+    assert_eq!(
+        delete_note(pool.write(), a.id, &a.created_at)
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        list_notes(pool.read()).await.unwrap(),
+        std::slice::from_ref(&b)
+    );
+
+    assert_eq!(
+        delete_note(pool.write(), b.id, &b.created_at)
+            .await
+            .unwrap(),
+        Some(b)
+    );
+    assert!(list_notes(pool.read()).await.unwrap().is_empty());
+}
+
+/// Undo after a delete brings the note back with its `created_at`, so an
+/// edit from the editor that had it open lands on it again.
+#[tokio::test]
+async fn a_restored_note_can_be_edited_as_it_was() {
+    let (_db, pool) = fresh_database("notes_restore_edit").await;
+    let note = add_note(pool.write(), &john_3(16, 16), "Mine.", None)
+        .await
+        .unwrap();
+    let deleted = delete_note(pool.write(), note.id, &note.created_at)
+        .await
+        .unwrap()
+        .unwrap();
+    let restored = add_note(
+        pool.write(),
+        &deleted.passage(),
+        &deleted.body,
+        Some((&deleted.created_at, &deleted.updated_at)),
+    )
+    .await
+    .unwrap();
+    let edited = update_note(pool.write(), restored.id, &note.created_at, "Mine, edited.")
+        .await
+        .unwrap();
+    assert_eq!(edited.body, "Mine, edited.");
 }

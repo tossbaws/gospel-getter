@@ -88,19 +88,24 @@ pub struct NoteRequest {
     pub keep: Option<KeepRef>,
 }
 
-/// The AI finding "Keep as mine" makes a note of: its id, and its words,
-/// which the editor opens with, all selected.
+/// The AI finding "Keep as mine" makes a note of: its id and `created_at`
+/// (which Keep sends back), and its words, which the editor opens with, all
+/// selected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeepRef {
     pub id: i64,
+    pub created_at: String,
     pub text: String,
 }
 
-/// The note being edited: its id and text (the rest stays the card's), as
-/// read from the backend's note.
+/// The note being edited: its id, `created_at` (which Save and Delete send
+/// back) and text (the rest stays the card's), as read from the backend's
+/// note.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NoteRef {
     pub id: i64,
+    pub created_at: String,
     pub body: String,
 }
 
@@ -684,10 +689,14 @@ impl Editor {
         self.error.set(String::new());
         self.set_busy(true);
         spawn_local(async move {
-            let result = match (&session.request.note, session.request.mode.as_str()) {
-                _ if session.request.keep.is_some() => {
-                    let id = session.request.keep.as_ref().map_or(0, |k| k.id);
-                    match ipc::args(&KeepFindingArgs { id, body: &body }) {
+            let request = &session.request;
+            let result = match (&request.keep, &request.note, request.mode.as_str()) {
+                (Some(keep), _, _) => {
+                    match ipc::args(&KeepFindingArgs {
+                        id: keep.id,
+                        created_at: &keep.created_at,
+                        body: &body,
+                    }) {
                         Ok(args) => {
                             ipc::invoke::<serde::de::IgnoredAny>("keep_finding_as_note", args)
                                 .await
@@ -696,8 +705,9 @@ impl Editor {
                         Err(e) => Err(e),
                     }
                 }
-                (Some(note), "edit") => match ipc::args(&UpdateNoteArgs {
+                (None, Some(note), "edit") => match ipc::args(&UpdateNoteArgs {
                     id: note.id,
+                    created_at: &note.created_at,
                     body: &body,
                 }) {
                     Ok(args) => ipc::invoke::<serde::de::IgnoredAny>("update_note", args)
@@ -706,7 +716,7 @@ impl Editor {
                     Err(e) => Err(e),
                 },
                 _ => {
-                    let passage = &session.request.passage;
+                    let passage = &request.passage;
                     let args = AddNoteArgs {
                         book_id: passage.book_id,
                         chapter: passage.chapter,
@@ -757,7 +767,12 @@ impl Editor {
         let Some(session) = self.session.get_value() else {
             return;
         };
-        let Some(id) = session.request.note.as_ref().map(|n| n.id) else {
+        let Some((id, created_at)) = session
+            .request
+            .note
+            .as_ref()
+            .map(|n| (n.id, n.created_at.clone()))
+        else {
             return;
         };
         if session.request.mode != "edit" || self.busy.get_value() {
@@ -766,7 +781,10 @@ impl Editor {
         self.error.set(String::new());
         self.set_busy(true);
         spawn_local(async move {
-            let result = match ipc::args(&DeleteNoteArgs { id }) {
+            let result = match ipc::args(&DeleteNoteArgs {
+                id,
+                created_at: &created_at,
+            }) {
                 Ok(args) => ipc::invoke_value("delete_note", args).await,
                 Err(e) => Err(e),
             };

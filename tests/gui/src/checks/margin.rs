@@ -86,12 +86,15 @@ const ADD_NOTES_JS: &str =
     return null;";
 
 /// Starts deleting the notes `arguments[0]` (ids) through the page's own
-/// IPC, as [`ADD_NOTES_JS`] adds them.
+/// IPC, as [`ADD_NOTES_JS`] adds them. `delete_note` takes the note's
+/// `created_at` too, read from the list (a note already gone matches none).
 const DELETE_NOTES_JS: &str =
     "const s = window.__guiCheckNotes = { done: false, ids: [], error: null };
     (async () => {
+        const all = await window.__TAURI__.core.invoke('list_all_notes', {});
+        const written = new Map(all.map((n) => [n.id, n.createdAt]));
         for (const id of arguments[0]) {
-            await window.__TAURI__.core.invoke('delete_note', { id });
+            await window.__TAURI__.core.invoke('delete_note', { id, createdAt: written.get(id) ?? '' });
             s.ids.push(id);
         }
     })().then(() => { s.done = true; }, (e) => { s.error = String(e); s.done = true; });
