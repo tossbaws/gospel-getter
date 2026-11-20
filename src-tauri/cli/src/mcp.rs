@@ -2,8 +2,9 @@
 //! subcommands, the same JSON in a text block; one prompt, for summarising
 //! the reader's own notes; and each chapter as a resource. Only rmcp writes to
 //! stdout, and all logging goes to stderr. Each call opens the database and
-//! closes it again, so a call always reads what the app has saved, and nothing
-//! here holds the database open while the app runs.
+//! closes it again, so a call always reads what the app has saved, nothing
+//! here holds the database open while the app runs, and an install that
+//! isn't ready yet is each call's answer rather than the server's end.
 //!
 //! The standing rule (no AI middleman) holds here: tools return the exact
 //! text and say where it is; nothing asks an agent to summarise, paraphrase or
@@ -26,9 +27,9 @@ use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt, tool, tool_handler,
 use std::path::PathBuf;
 
 use crate::query::{
-    self, CompareArgs, GetCrossReferencesArgs, GetPassageArgs, GetPassagesArgs, Library,
-    ListBookmarksArgs, ListFindingsArgs, ListHighlightsArgs, ListNotesArgs, Request,
-    SaveFindingsArgs, SearchArgs, VerifyQuoteArgs,
+    self, CompareArgs, GetCrossReferencesArgs, GetPassageArgs, GetPassagesArgs, ListBookmarksArgs,
+    ListFindingsArgs, ListHighlightsArgs, ListNotesArgs, Request, SaveFindingsArgs, SearchArgs,
+    VerifyQuoteArgs,
 };
 
 /// What the client's model is told about this server. Its last sentences are
@@ -410,15 +411,16 @@ impl ServerHandler for Server {
     }
 }
 
-/// Serve until the client goes away. A database that can't be read yet stops
-/// here, with the same message as a subcommand, before any protocol starts.
+/// Serve until the client goes away. A database that can't be read yet
+/// doesn't stop the server: each call answers with what a subcommand says
+/// (open the app once first), so the agent can tell the reader, and the
+/// first call after the app has made it reads it, with no restart (C-07).
 pub async fn serve(database: PathBuf) -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .with_max_level(tracing_subscriber::filter::LevelFilter::WARN)
         .init();
-    Library::open(&database).await?.close().await;
     let service = Server::new(database)
         .serve(rmcp::transport::stdio())
         .await

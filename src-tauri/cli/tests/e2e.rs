@@ -984,39 +984,39 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
     });
 }
 
-/// A database that can't be read: the server says so on stderr and stops
-/// before any protocol, so a client's log shows why.
+/// An install that isn't ready doesn't stop the server (C-07): it starts,
+/// lists its tools, and each call answers with what a subcommand says, so
+/// the agent can tell the reader to open the app. Nothing is made; once the
+/// app has made the database, the next call reads it, with no restart.
 #[tokio::test]
-async fn the_mcp_server_refuses_to_start_on_an_install_not_ready() {
+async fn the_mcp_server_starts_on_an_install_not_ready() {
     let db = TempDb::new("e2e_mcp_missing");
-    let mut child = command(&db.path(), &["mcp"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("start the server");
-    let stdout = child.stdout.take().expect("stdout");
-    let (sender, finished) = mpsc::channel();
-    std::thread::spawn(move || {
-        let output = child.wait_with_output();
-        let _ = sender.send(output);
-    });
-    let output = finished
-        .recv_timeout(ANSWER_TIMEOUT)
-        .expect("it stops")
-        .expect("its output");
-    assert_eq!(output.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("Open Gospel Getter once first"),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        BufReader::new(stdout).lines().count(),
-        0,
-        "nothing on stdout"
-    );
-    assert!(!db.path().exists());
+    let path = db.path();
+    let mut mcp = Mcp::start(&path);
+    mcp.initialize();
+    let tools = mcp.ask(2, "tools/list", json!({}));
+    assert_eq!(tools["tools"].as_array().map(Vec::len), Some(13), "{tools}");
+    let says = refusal(&path, &["list_translations"]);
+    assert!(says.contains("Open Gospel Getter once first"), "{says}");
+    for (id, tool, arguments) in [
+        (3, "list_translations", json!({})),
+        (
+            4,
+            "save_findings",
+            json!({"request": "grief", "references": ["John 11:35"]}),
+        ),
+    ] {
+        let (is_error, text) = mcp.call(id, tool, arguments);
+        assert!(is_error, "{tool}");
+        assert_eq!(format!("{text}\n"), says, "{tool}");
+    }
+    assert!(!path.exists(), "nothing made");
+
+    let installed = closed_install("e2e_mcp_now_ready").await;
+    std::fs::copy(installed.path(), &path).expect("the app makes the database");
+    let translations = mcp.call_for_json(5, "list_translations", json!({}));
+    assert_eq!(translations, answer(&path, &["list_translations"]));
+    mcp.finish();
 }
 
 // ---- AI-flagged findings: the one thing either front end writes.
