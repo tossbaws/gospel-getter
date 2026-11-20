@@ -345,13 +345,16 @@ test('C-03: Bookmark pressed while a newer reload of the bookmarks is on its way
         assert.deepEqual(app.bookmarkItems(), []);
     }));
 
-// GG32-04: SQLite gives a removed bookmark's id to the next one made. The
-// Library still lists bookmark A (John 3:16), removed meanwhile (from
-// another window, say), when bookmark B (John 3:18) takes its id; pressing
-// A's Remove sends A's id and when A was made, so B stays.
+// GG32-04: at schema 1, SQLite gives a removed bookmark's id to the next
+// one made (schema 2 never does; `__forget_used_ids` stands in for a
+// database still at 1). The Library still lists bookmark A (John 3:16),
+// removed meanwhile (from another window, say), when bookmark B (John 3:18)
+// takes its id; pressing A's Remove sends A's id and when A was made, so B
+// stays.
 test('GG32-04: Remove on a stale Library row leaves the newer bookmark that took its id', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
         const JOHN = bookId('John');
+        await backend('__forget_used_ids');
         app.click(app.verse(16));
         let before = app.calls.length;
         app.click(app.bookmarkButton());
@@ -366,6 +369,7 @@ test('GG32-04: Remove on a stale Library row leaves the newer bookmark that took
         assert.equal(await backend('remove_bookmark', { id: a, createdAt: aStored.createdAt }), true);
         // B a moment later, so its date isn't A's.
         await new Promise((r) => setTimeout(r, 5));
+        await backend('__forget_used_ids');
         const b = await backend('add_bookmark', { bookId: JOHN, chapter: 3, verseStart: 18, verseEnd: 18 });
         assert.equal(b, a, 'B gets A’s id');
 

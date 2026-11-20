@@ -400,6 +400,7 @@ pub async fn web_index_count(pool: &SqlitePool) -> Option<i64> {
 /// like every other, as 2.29.0's seed and index build left them. A database
 /// the 2.29.1 app hasn't opened yet, or whose upgrade step failed, is this.
 pub async fn as_2_29_0_left_it(pool: &Db) {
+    record_schema_version(pool, 1).await;
     let web: i64 = sqlx::query_scalar("SELECT id FROM translations WHERE code = 'web'")
         .fetch_one(pool.read())
         .await
@@ -506,6 +507,7 @@ pub fn kjv_2_29_1_verses() -> Vec<(i64, i64, i64, String)> {
 /// as 2.29.1's seed and index build left them. A database the 2.29.2 app
 /// hasn't opened yet, or whose upgrade step failed, is this.
 pub async fn as_2_29_1_left_it(pool: &Db) {
+    record_schema_version(pool, 1).await;
     let kjv: i64 = sqlx::query_scalar("SELECT id FROM translations WHERE code = 'kjv'")
         .fetch_one(pool.read())
         .await
@@ -790,6 +792,20 @@ pub async fn other_tables_snapshot(pool: &SqlitePool) -> Vec<String> {
         rows.extend(found.into_iter().map(|(r,)| r));
     }
     rows
+}
+
+/// Record `version` as the database's schema version, as the release a
+/// test makes a database stand in for recorded it: 0 before 2.18.0, which
+/// recorded none, 1 from 2.18.0 to 2.32.x. Its tables stay this version's;
+/// only `migrate`'s starting point changes (see `migrate_tests` for
+/// databases with version 1's own tables).
+pub async fn record_schema_version(pool: &Db, version: i64) {
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "PRAGMA user_version = {version}"
+    )))
+    .execute(pool.write().pool())
+    .await
+    .expect("record the schema version");
 }
 
 /// The names of every table and virtual table in the database.

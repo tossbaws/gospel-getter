@@ -44,8 +44,9 @@
 //!
 //! The other hooks set up what the app's commands can't: `__reset` starts a
 //! test (or a restart) afresh, `__note_written` backdates a note,
-//! `__save_findings` saves findings as an agent does, and `__verse_text`
-//! shows a verse by the app's own rule.
+//! `__forget_used_ids` has the next record take a deleted one's id, as a
+//! database still at schema 1 gives it, `__save_findings` saves findings as
+//! an agent does, and `__verse_text` shows a verse by the app's own rule.
 //!
 //! Requests are answered one at a time, in order:
 //! the next is read once the last has answered, or, for an install that
@@ -379,6 +380,19 @@ async fn hook(
             if done.rows_affected() == 0 {
                 bail!("no note says {body:?}");
             }
+            Value::Null
+        }
+        // SQLite's record of the ids each table has handed out
+        // (`sqlite_sequence`) cleared, so the next record a table gets
+        // takes its largest id plus one, as at schema 1: after a deleted
+        // newest record, its id. Schema 2 never hands an id out twice; this
+        // is for the tests of the `(id, created_at)` match that stays as a
+        // second guard, which ask for it before they make their records and
+        // again before the one that's to take a deleted record's id.
+        "__forget_used_ids" => {
+            sqlx::query("DELETE FROM sqlite_sequence")
+                .execute(writer.pool())
+                .await?;
             Value::Null
         }
         // The answer the next file dialog gives.

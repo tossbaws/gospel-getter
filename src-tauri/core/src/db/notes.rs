@@ -3,7 +3,7 @@
 //! chapter, inclusive verse range) and to no translation, so it shows in
 //! every translation that numbers those verses. A passage can have any
 //! number of notes, kept in the order they were written; see the `notes`
-//! table in `migrate.rs`.
+//! table in `migrate/schema_2.rs`.
 
 use anyhow::Context;
 use sqlx::{FromRow, SqlitePool};
@@ -14,8 +14,8 @@ use super::bookmarks::check_passage;
 use super::{BookmarkError, WritePool};
 
 /// The most characters (Unicode scalar values, as SQLite's `length()`
-/// counts them) one note may hold, after trimming. The `notes` table's
-/// CHECK says the same.
+/// counts them) one note may hold, after trimming. Rust's alone: the
+/// `notes` table doesn't check it (schema 2).
 pub const MAX_NOTE_CHARS: usize = 10_000;
 
 /// The most notes the reader can keep. An export holds them all, and an
@@ -390,11 +390,13 @@ pub(crate) async fn insert_note(
 ///
 /// A note is the one asked for only if its `created_at` (as stored, which
 /// the frontend gets back unchanged) matches too, and one that doesn't is
-/// [`NoteError::NotFound`], as a deleted one is. Row ids aren't
-/// AUTOINCREMENT, so when the newest note (or finding) is deleted the next
-/// one gets its id, and an edit, delete, Keep as mine or remove from a view
-/// still holding the old record would land on the new one (GG-06).
-/// [`delete_note`], [`note`], [`super::findings::remove_finding`],
+/// [`NoteError::NotFound`], as a deleted one is. A second guard: since
+/// schema 2 an id is never handed out twice (AUTOINCREMENT, see
+/// `migrate/schema_2.rs`), but in a database still at version 1 (one whose
+/// step hasn't run yet, or one 2.32.x made) deleting the newest note (or
+/// finding) gives the next one its id, and an edit, delete, Keep as mine or
+/// remove from a view still holding the old record would land on the new
+/// one (GG-06). [`delete_note`], [`note`], [`super::findings::remove_finding`],
 /// [`super::findings::keep_as_mine`] and
 /// [`super::bookmarks::remove_bookmark`] match the same way. No `updated_at`
 /// check: two edits of one note can't overlap (the editor is one modal, the
@@ -716,18 +718,6 @@ mod tests {
         assert_eq!(
             NoteBodyError::TooLong { chars: 10_214 }.to_string(),
             "A note can hold up to 10,000 characters; this one has 10,214."
-        );
-    }
-
-    /// The limit here is the one the table's CHECK enforces.
-    #[test]
-    fn the_length_limit_matches_the_table() {
-        let migrate = include_str!("migrate.rs");
-        assert!(
-            migrate.contains(&format!(
-                "CHECK (length(body) BETWEEN 1 AND {MAX_NOTE_CHARS})"
-            )),
-            "the notes table's CHECK should allow 1 to {MAX_NOTE_CHARS} characters"
         );
     }
 }

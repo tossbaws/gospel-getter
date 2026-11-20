@@ -5,12 +5,19 @@
 
 use sqlx::SqlitePool;
 
+use super::bookmarks::{add_bookmark, remove_bookmark};
+use super::findings::{
+    FindingsError, MAX_REQUEST_CHARS, MAX_STORED_AGENT_CHARS, NewFinding, RemovedFinding,
+    RequestError, add_findings, all_findings, remove_finding, restore_findings,
+};
+use super::highlights::set_highlights;
 use super::migrate::{
     OLDEST_READABLE_SCHEMA_VERSION, Rebuild, SCHEMA_VERSION, Step, complete_schema_1, migrate,
     migrate_with, schema_1,
 };
-use super::test_support::{TempDb, insert_old_rule_findings, schema_1_database};
-use super::{Db, prepare};
+use super::notes::{MAX_NOTE_CHARS, NoteBodyError, NoteError, Passage, add_note, delete_note};
+use super::test_support::{TempDb, fresh_database, insert_old_rule_findings, schema_1_database};
+use super::{Db, HighlightColor, open_read_only, prepare};
 
 /// Each object in `sqlite_master` (type, name, table, SQL), by type and
 /// name.
@@ -371,6 +378,7 @@ async fn a_step_that_fails_part_way_changes_nothing() {
     let before = snapshot(pool.read()).await;
     let fails = [Step {
         to: 2,
+        keep_copy: false,
         rebuilds: &FAILS_PART_WAY,
     }];
     migrate_with(pool.write(), &fails).await.unwrap();
@@ -386,4 +394,360 @@ async fn a_step_that_fails_part_way_changes_nothing() {
     pool.close().await;
     let pool = db.connect().await;
     assert_eq!(snapshot(pool.read()).await, before);
+}
+
+/// John 3:`verse`.
+fn john_3(verse: i64) -> Passage {
+    Passage {
+        book_id: 43,
+        chapter: 3,
+        verse_start: verse,
+        verse_end: verse,
+    }
+}
+
+/// `table`'s next-id record (`sqlite_sequence`), if it has one.
+async fn sequence(pool: &SqlitePool, table: &str) -> Option<i64> {
+    sqlx::query_scalar("SELECT seq FROM sqlite_sequence WHERE name = $1")
+        .bind(table)
+        .fetch_optional(pool)
+        .await
+        .expect("read sqlite_sequence")
+}
+
+/// Where `migrate` keeps the copy of the database at `path` from before
+/// schema 2.
+fn copy_before_schema_2(path: &std::path::Path) -> std::path::PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".before-schema-2");
+    name.into()
+}
+
+/// Schema 2 on a version-1 database: every row of the reader's, byte for
+/// byte (ids, dates and the hidden rowids of highlights included), every
+/// bundled row too, nothing a foreign key or `integrity_check` would
+/// object to, each table's next id past the largest it holds, and, beside
+/// the database, a copy of it as it was, at version 1, which the next
+/// launch leaves alone.
+#[tokio::test]
+async fn schema_2_keeps_every_row_and_a_copy_of_the_database_before_it() {
+    let (db, pool) = schema_1_database("schema_2_rows").await;
+    readers_records(&pool).await;
+    let before = snapshot(pool.read()).await;
+    let copy = copy_before_schema_2(&db.path());
+    assert!(!copy.exists());
+
+    migrate(pool.write()).await.unwrap();
+    assert_eq!(user_version(pool.read()).await, 2);
+    let after = snapshot(pool.read()).await;
+    let changed = [
+        "bookmarks",
+        "highlights",
+        "notes",
+        "ai_findings",
+        "sqlite_sequence",
+    ];
+    for (table, rows) in &before.2 {
+        let now = after.2.iter().find(|(t, _)| t == table).map(|(_, r)| r);
+        assert_eq!(now, Some(rows), "{table}");
+    }
+    // The only table that's new is SQLite's record of the next ids.
+    let tables = |snapshot: &(_, _, Vec<(String, Vec<String>)>)| -> Vec<String> {
+        snapshot.2.iter().map(|(t, _)| t.clone()).collect()
+    };
+    let mut expected = tables(&before);
+    expected.push("sqlite_sequence".to_string());
+    expected.sort();
+    assert_eq!(tables(&after), expected);
+    // Every object but the four tables is as it was, SQL and all.
+    let unchanged = |schema: &Vec<(String, String, String, Option<String>)>| {
+        schema
+            .iter()
+            .filter(|(kind, name, ..)| !(kind == "table" && changed.contains(&name.as_str())))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(unchanged(&after.0), unchanged(&before.0));
+
+    for (table, largest) in [("bookmarks", 3), ("notes", 3), ("ai_findings", 10)] {
+        assert_eq!(sequence(pool.read(), table).await, Some(largest), "{table}");
+    }
+    let broken: Vec<(String, Option<i64>, String, i64)> =
+        sqlx::query_as("SELECT * FROM pragma_foreign_key_check")
+            .fetch_all(pool.read())
+            .await
+            .unwrap();
+    assert_eq!(broken, []);
+    let integrity: Vec<String> = sqlx::query_scalar("PRAGMA integrity_check")
+        .fetch_all(pool.read())
+        .await
+        .unwrap();
+    assert_eq!(integrity, ["ok"]);
+
+    // The copy is the database as it was: version 1, every row.
+    let copied = open_read_only(&copy).await.unwrap();
+    assert_eq!(snapshot(&copied).await, before);
+    copied.close().await;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&copy).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    let mut partial = copy.as_os_str().to_owned();
+    partial.push(".partial");
+    assert!(!std::path::Path::new(&partial).exists());
+
+    let written = std::fs::metadata(&copy).unwrap().modified().unwrap();
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(snapshot(pool.read()).await, after);
+    assert_eq!(
+        std::fs::metadata(&copy).unwrap().modified().unwrap(),
+        written
+    );
+}
+
+/// A copy an earlier launch kept (its step then failed) is the database as
+/// it was before; it's never written over.
+#[tokio::test]
+async fn a_copy_already_there_is_kept() {
+    let (db, pool) = schema_1_database("schema_2_copy_there").await;
+    let copy = copy_before_schema_2(&db.path());
+    std::fs::write(&copy, b"an earlier launch's copy").unwrap();
+    migrate(pool.write()).await.unwrap();
+    assert_eq!(user_version(pool.read()).await, 2);
+    assert_eq!(std::fs::read(&copy).unwrap(), b"an earlier launch's copy");
+}
+
+/// The collision GG32-08 describes, after schema 2: the newest note,
+/// bookmark and finding deleted, then one added, gets an id of its own,
+/// never the deleted one's, on a database upgraded from version 1 and on a
+/// new one alike.
+#[tokio::test]
+async fn an_id_is_never_handed_out_twice() {
+    let (_v1, upgraded) = schema_1_database("schema_2_ids_upgraded").await;
+    readers_records(&upgraded).await;
+    migrate(upgraded.write()).await.unwrap();
+    let (_new, new) = fresh_database("schema_2_ids_new").await;
+    for pool in [&upgraded, &new] {
+        let a = add_note(pool.write(), &john_3(20), "A.", None)
+            .await
+            .unwrap();
+        delete_note(pool.write(), a.id, &a.created_at)
+            .await
+            .unwrap()
+            .unwrap();
+        let b = add_note(pool.write(), &john_3(21), "B.", None)
+            .await
+            .unwrap();
+        assert!(b.id > a.id, "note B {} after A {}", b.id, a.id);
+
+        let a = add_bookmark(pool.write(), 43, 3, 20, 20).await.unwrap();
+        assert!(
+            remove_bookmark(pool.write(), a.id, &a.created_at)
+                .await
+                .unwrap()
+        );
+        let b = add_bookmark(pool.write(), 43, 3, 21, 21).await.unwrap();
+        assert!(b.id > a.id, "bookmark B {} after A {}", b.id, a.id);
+
+        let finding = |verse, request: &str| NewFinding {
+            passage: john_3(verse),
+            agent: "Claude".to_string(),
+            request: request.to_string(),
+            created_at: None,
+        };
+        add_findings(pool.write(), &[finding(20, "love")])
+            .await
+            .unwrap();
+        let a = all_findings(pool.read())
+            .await
+            .unwrap()
+            .into_iter()
+            .max_by_key(|f| f.id)
+            .unwrap();
+        remove_finding(pool.write(), a.id, &a.created_at)
+            .await
+            .unwrap()
+            .unwrap();
+        add_findings(pool.write(), &[finding(21, "light")])
+            .await
+            .unwrap();
+        let b = all_findings(pool.read())
+            .await
+            .unwrap()
+            .into_iter()
+            .max_by_key(|f| f.id)
+            .unwrap();
+        assert!(b.id > a.id, "finding B {} after A {}", b.id, a.id);
+        assert_eq!(b.request, "light");
+    }
+}
+
+/// The product's limits are Rust's on a database upgraded from version 1:
+/// its tables hold no CHECK for them (SQL alone takes a 10,001-character
+/// note, an unknown color and a 61-character request), and the app refuses
+/// each before any SQL, while taking everything up to the limit.
+#[tokio::test]
+async fn the_limits_are_rusts_on_an_upgraded_database() {
+    let (_db, pool) = schema_1_database("schema_2_limits").await;
+    migrate(pool.write()).await.unwrap();
+    for (table, gone) in [
+        ("notes", "length(body)"),
+        ("highlights", "color IN"),
+        ("ai_findings", "length(agent)"),
+        ("ai_findings", "length(request)"),
+    ] {
+        let sql: String = sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE name = $1")
+            .bind(table)
+            .fetch_one(pool.read())
+            .await
+            .unwrap();
+        assert!(!sql.contains(gone), "{table}: {sql}");
+    }
+    let mut tx = pool.write().pool().begin().await.unwrap();
+    for sql in [
+        "INSERT INTO notes (book_id, chapter, verse_start, verse_end, body) \
+         VALUES (43, 3, 16, 16, substr(hex(zeroblob(5001)), 1, 10001))",
+        "INSERT INTO highlights (book_id, chapter, verse, color) VALUES (43, 3, 16, 'orange')",
+        "INSERT INTO ai_findings (book_id, chapter, verse_start, verse_end, agent, request) \
+         VALUES (43, 3, 16, 16, 'Claude', substr(hex(zeroblob(31)), 1, 61))",
+    ] {
+        sqlx::query(sql).execute(&mut *tx).await.unwrap();
+    }
+    tx.rollback().await.unwrap();
+
+    let longest = "\u{1d11e}".repeat(MAX_NOTE_CHARS);
+    assert!(matches!(
+        add_note(pool.write(), &john_3(16), &format!("{longest}x"), None).await,
+        Err(NoteError::Body(NoteBodyError::TooLong { chars })) if chars == MAX_NOTE_CHARS + 1
+    ));
+    add_note(pool.write(), &john_3(16), &longest, None)
+        .await
+        .unwrap();
+
+    assert!("orange".parse::<HighlightColor>().is_err());
+    for color in HighlightColor::ALL {
+        set_highlights(pool.write(), 43, 3, 16, 16, color)
+            .await
+            .unwrap();
+    }
+
+    let request = |chars| NewFinding {
+        passage: john_3(16),
+        agent: "Claude".to_string(),
+        request: "r".repeat(chars),
+        created_at: None,
+    };
+    assert!(matches!(
+        add_findings(pool.write(), &[request(MAX_REQUEST_CHARS + 1)]).await,
+        Err(FindingsError::Request(RequestError::TooLong { chars })) if chars == MAX_REQUEST_CHARS + 1
+    ));
+    add_findings(pool.write(), &[request(MAX_REQUEST_CHARS)])
+        .await
+        .unwrap();
+    // An Undo puts back a stored record without today's label rule, but
+    // never one longer than any stored record can be.
+    let removed = |agent: usize, request: usize| RemovedFinding {
+        passage: john_3(17),
+        agent: "a".repeat(agent),
+        request: "r".repeat(request),
+        created_at: "2026-01-02T03:04:05.006Z".to_string(),
+    };
+    for (agent, request) in [
+        (MAX_STORED_AGENT_CHARS + 1, 5),
+        (5, MAX_REQUEST_CHARS + 1),
+        (0, 5),
+        (5, 0),
+    ] {
+        assert!(
+            restore_findings(pool.write(), &[removed(agent, request)])
+                .await
+                .is_err(),
+            "{agent}, {request}"
+        );
+    }
+    assert_eq!(
+        restore_findings(
+            pool.write(),
+            &[removed(MAX_STORED_AGENT_CHARS, MAX_REQUEST_CHARS)]
+        )
+        .await
+        .unwrap(),
+        1
+    );
+}
+
+/// An import that replaces everything (`reader_data::apply_import`) brings
+/// back no old id: the file's records are new ones, numbered past every
+/// record the database has held, even with the same passages and dates.
+#[tokio::test]
+async fn an_import_that_replaces_everything_brings_back_no_old_id() {
+    use super::reader_data::{FindingsImport, NewBookmark, NewNote, apply_import};
+    let (_v1, pool) = schema_1_database("schema_2_replace").await;
+    readers_records(&pool).await;
+    migrate(pool.write()).await.unwrap();
+    let largest = |table: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+                "SELECT MAX(id) FROM {table}"
+            )))
+            .fetch_one(pool.read())
+            .await
+            .unwrap()
+        }
+    };
+    let before = (
+        largest("bookmarks").await,
+        largest("notes").await,
+        largest("ai_findings").await,
+    );
+    let at = Some("2026-01-02T03:04:05.006Z".to_string());
+    let bookmarks = [NewBookmark {
+        book_id: 43,
+        chapter: 3,
+        verse_start: 16,
+        verse_end: 16,
+        created_at: at.clone(),
+    }];
+    let notes = [NewNote {
+        book_id: 43,
+        chapter: 3,
+        verse_start: 16,
+        verse_end: 16,
+        body: "For God so loved.".to_string(),
+        created_at: at.clone(),
+        updated_at: at.clone(),
+    }];
+    let findings = [NewFinding {
+        passage: john_3(16),
+        agent: "Claude".to_string(),
+        request: "love".to_string(),
+        created_at: at,
+    }];
+    apply_import(
+        pool.write(),
+        &bookmarks,
+        Some(&[]),
+        Some(&notes),
+        Some(FindingsImport {
+            findings: &findings,
+            enabled: None,
+        }),
+        true,
+        None,
+    )
+    .await
+    .unwrap();
+    let after = (
+        largest("bookmarks").await,
+        largest("notes").await,
+        largest("ai_findings").await,
+    );
+    assert_eq!(
+        (after.0 - before.0, after.1 - before.1, after.2 - before.2),
+        (1, 1, 1),
+        "{after:?} after {before:?}"
+    );
 }

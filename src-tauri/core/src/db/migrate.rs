@@ -45,14 +45,18 @@
 //! safe: this version and every earlier one write a database of any higher
 //! version) and raise [`OLDEST_READABLE_SCHEMA_VERSION`] with it.
 
+use std::path::PathBuf;
+
 use anyhow::{Context, bail, ensure};
 use sqlx::{AssertSqlSafe, Connection, SqliteConnection};
 
 use crate::db::{WritePool, begin_write};
 
+mod schema_2;
+
 /// The schema `migrate` brings a database to, kept in SQLite's
 /// `PRAGMA user_version` (see the module's doc).
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// The oldest schema this version of the app and the CLI can use: the
 /// version a database is left at if a step past it fails is still read
@@ -65,7 +69,7 @@ const SCHEMA_1: &str = include_str!("migrate/schema_1.sql");
 
 /// The steps past version 1, in order: `STEPS[i]` brings a database from
 /// version `i + 1` to `i + 2`.
-pub(crate) const STEPS: &[Step] = &[];
+pub(crate) const STEPS: &[Step] = &[schema_2::STEP];
 
 /// One step: what brings a database from version `to - 1` to `to`, in one
 /// write transaction with its `user_version` write. Its tables' foreign
@@ -76,6 +80,10 @@ pub(crate) const STEPS: &[Step] = &[];
 pub(crate) struct Step {
     /// The version it brings a database to.
     pub(crate) to: i64,
+    /// Whether a whole copy of the database is kept beside it before the
+    /// step runs, `<database>.before-schema-<to>` (see
+    /// [`keep_copy_before`]), so the step can be undone by hand.
+    pub(crate) keep_copy: bool,
     /// The tables it rebuilds, in order.
     pub(crate) rebuilds: &'static [Rebuild],
 }
@@ -190,55 +198,20 @@ const CURRENT: [(&str, &str); 21] = [
     ),
     // The reader's bookmarks. A bookmark is a passage's coordinates —
     // book, chapter and an inclusive verse range — with no translation, so
-    // it opens in whichever translation is selected. The CHECKs and the
-    // UNIQUE constraint back up the validation in `db::bookmarks`.
-    (
-        "bookmarks table",
-        "CREATE TABLE bookmarks (
-            id INTEGER PRIMARY KEY,
-            book_id INTEGER NOT NULL REFERENCES books(id),
-            chapter INTEGER NOT NULL CHECK (chapter >= 1),
-            verse_start INTEGER NOT NULL CHECK (verse_start >= 1),
-            verse_end INTEGER NOT NULL CHECK (verse_end >= verse_start),
-            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            UNIQUE (book_id, chapter, verse_start, verse_end)
-        )",
-    ),
+    // it opens in whichever translation is selected. Schema 2's (see
+    // `migrate/schema_2.rs`).
+    ("bookmarks table", schema_2::BOOKMARKS),
     // The reader's highlights: one color per verse, like a highlighter
     // pen in a paper Bible. Keyed by translation-independent coordinates,
     // like bookmarks, so a highlight shows in whichever translation numbers
-    // that verse. The CHECKs back up the validation in `db::highlights`;
-    // `updated_at` changes when a verse's color does.
-    (
-        "highlights table",
-        "CREATE TABLE highlights (
-            book_id INTEGER NOT NULL REFERENCES books(id),
-            chapter INTEGER NOT NULL CHECK (chapter >= 1),
-            verse INTEGER NOT NULL CHECK (verse >= 1),
-            color TEXT NOT NULL CHECK (color IN ('yellow', 'green', 'blue', 'pink')),
-            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            PRIMARY KEY (book_id, chapter, verse)
-        )",
-    ),
+    // that verse; `updated_at` changes when a verse's color does. Schema
+    // 2's.
+    ("highlights table", schema_2::HIGHLIGHTS),
     // The reader's notes: their own words on a passage within one
     // chapter. Like bookmarks they have no translation, but a passage can
-    // have any number of them. The CHECKs back up the validation in
-    // `db::notes` (`MAX_NOTE_CHARS`); `updated_at` changes when the text
-    // does. Notes are looked up a chapter at a time, hence the index.
-    (
-        "notes table",
-        "CREATE TABLE notes (
-            id INTEGER PRIMARY KEY,
-            book_id INTEGER NOT NULL REFERENCES books(id),
-            chapter INTEGER NOT NULL CHECK (chapter >= 1),
-            verse_start INTEGER NOT NULL CHECK (verse_start >= 1),
-            verse_end INTEGER NOT NULL CHECK (verse_end >= verse_start),
-            body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 10000),
-            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        )",
-    ),
+    // have any number of them; `updated_at` changes when the text does.
+    // Notes are looked up a chapter at a time, hence the index. Schema 2's.
+    ("notes table", schema_2::NOTES),
     (
         "notes index",
         "CREATE INDEX idx_notes_chapter ON notes (book_id, chapter)",
@@ -250,24 +223,10 @@ const CURRENT: [(&str, &str); 21] = [
     // is built from `agent` and `request` alone ("Found by Claude for your
     // request “grief”."), two short labels held to one rule in Rust
     // (`db::findings::normalize_agent`), so neither can carry commentary.
-    // The passage's CHECKs are the notes'; the lengths back up
-    // `db::findings::{MAX_STORED_AGENT_CHARS, MAX_REQUEST_CHARS}`. Saving
-    // the same verse for the same request again is a no-op (the UNIQUE
-    // index); they're looked up a chapter at a time and a request at a
-    // time, hence the other two.
-    (
-        "ai_findings table",
-        "CREATE TABLE ai_findings (
-            id INTEGER PRIMARY KEY,
-            book_id INTEGER NOT NULL REFERENCES books(id),
-            chapter INTEGER NOT NULL CHECK (chapter >= 1),
-            verse_start INTEGER NOT NULL CHECK (verse_start >= 1),
-            verse_end INTEGER NOT NULL CHECK (verse_end >= verse_start),
-            agent TEXT NOT NULL CHECK (length(agent) BETWEEN 1 AND 60),
-            request TEXT NOT NULL CHECK (length(request) BETWEEN 1 AND 60),
-            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        )",
-    ),
+    // Saving the same verse for the same request again is a no-op (the
+    // UNIQUE index); they're looked up a chapter at a time and a request at
+    // a time, hence the other two. Schema 2's.
+    ("ai_findings table", schema_2::AI_FINDINGS),
     (
         "ai_findings unique index",
         "CREATE UNIQUE INDEX idx_ai_findings_unique \
@@ -514,6 +473,9 @@ fn if_not_exists(sql: &str) -> anyhow::Result<String> {
 /// before the connection goes back to the pool, or it's closed (a new one
 /// has them on, as every connection `create_pool` makes does).
 async fn run_step(writer: &WritePool, step: &Step) -> anyhow::Result<()> {
+    if step.keep_copy {
+        keep_copy_before(writer, step.to).await?;
+    }
     let mut conn = writer
         .pool()
         .acquire()
@@ -532,6 +494,87 @@ async fn run_step(writer: &WritePool, step: &Step) -> anyhow::Result<()> {
         conn.close_on_drop();
     }
     outcome
+}
+
+/// Write a whole copy of the database beside it, `<file>.before-schema-<to>`,
+/// before step `to` runs, unless one is there already (an earlier launch's,
+/// whose step then failed: it's the database as it was before, too), and
+/// log where it is. Nothing here ever deletes it. It's written under a
+/// `.partial` name and renamed once it's whole and on disk, so a copy cut
+/// short (a crash, a full disk) is never taken for one; on Unix it's the
+/// reader's alone (mode 0600), as the database is. A database with no file
+/// (in memory) gets none.
+async fn keep_copy_before(writer: &WritePool, to: i64) -> anyhow::Result<()> {
+    let file: String =
+        sqlx::query_scalar("SELECT file FROM pragma_database_list WHERE name = 'main'")
+            .fetch_one(writer.pool())
+            .await
+            .context("Failed to find the database's file")?;
+    if file.is_empty() {
+        return Ok(());
+    }
+    let copy = PathBuf::from(format!("{file}.before-schema-{to}"));
+    if copy
+        .try_exists()
+        .with_context(|| format!("Failed to look for {}", copy.display()))?
+    {
+        tracing::info!(
+            "The copy of the database from before schema {to} is still at {}",
+            copy.display()
+        );
+        return Ok(());
+    }
+    let partial = PathBuf::from(format!("{file}.before-schema-{to}.partial"));
+    match std::fs::remove_file(&partial) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(e).with_context(|| format!("Failed to remove {}", partial.display()));
+        }
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options
+        .open(&partial)
+        .with_context(|| format!("Failed to create {}", partial.display()))?;
+    let written = write_copy(writer, &partial, &copy).await;
+    if written.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    written?;
+    tracing::info!(
+        "Kept a copy of the database as it was before schema {to}, at {}; it can be deleted \
+         once this version has been used for a while",
+        copy.display()
+    );
+    Ok(())
+}
+
+/// [`keep_copy_before`]'s copy: the database into the empty file at
+/// `partial` (`VACUUM INTO` writes into an empty file, keeping its mode),
+/// synced to disk, then renamed to `copy`.
+async fn write_copy(
+    writer: &WritePool,
+    partial: &std::path::Path,
+    copy: &std::path::Path,
+) -> anyhow::Result<()> {
+    let target = partial
+        .to_str()
+        .with_context(|| format!("{} isn't valid UTF-8", partial.display()))?;
+    sqlx::query("VACUUM INTO $1")
+        .bind(target)
+        .execute(writer.pool())
+        .await
+        .with_context(|| format!("Failed to write a copy of the database to {target}"))?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(partial)
+        .and_then(|file| file.sync_all())
+        .with_context(|| format!("Failed to write {target} to disk"))?;
+    std::fs::rename(partial, copy)
+        .with_context(|| format!("Failed to rename {target} to {}", copy.display()))
 }
 
 /// [`run_step`]'s transaction: the step's changes, the check that they

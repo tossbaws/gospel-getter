@@ -33,13 +33,12 @@ pub const MAX_AGENT_CHARS: usize = 40;
 
 /// The most characters a stored agent's name can have: versions before
 /// 2.33.0 kept up to 60, and a stored name is shown and exported as it is,
-/// so this, not [`MAX_AGENT_CHARS`], bounds what a backup holds. The
-/// `ai_findings` table's CHECK says the same.
+/// so this, not [`MAX_AGENT_CHARS`], bounds what a backup holds, and what
+/// [`restore_findings`] puts back.
 pub const MAX_STORED_AGENT_CHARS: usize = 60;
 
 /// The most characters a request may have: a short topic label ("grief", "the
-/// sun"), never room for words about a verse (C3). The `ai_findings` table's
-/// CHECK says the same.
+/// sun"), never room for words about a verse (C3).
 pub const MAX_REQUEST_CHARS: usize = 60;
 
 /// What a request or an agent's name can't hold, besides line breaks and
@@ -740,14 +739,30 @@ impl From<Finding> for RemovedFinding {
 /// Undo puts back a record, it doesn't make a new one, so none of a new
 /// write's rules apply: not today's label rule, which a finding saved under
 /// an older rule may break (decision AF1; see [`recover_request`]), and not
-/// [`MAX_FINDINGS`], which an agent may have reached meanwhile. Only the
-/// table's own constraints do. It takes a [`WritePool`], which only the app
+/// [`MAX_FINDINGS`], which an agent may have reached meanwhile. Only what
+/// any stored finding is held to does: an agent's name and a request of 1
+/// to [`MAX_STORED_AGENT_CHARS`] and [`MAX_REQUEST_CHARS`] characters
+/// (Rust's limits, which the table doesn't check since schema 2), else
+/// nothing comes back. It takes a [`WritePool`], which only the app
 /// has: nothing outside it can write a finding this way (see
 /// [`FindingsWriter`]).
 pub async fn restore_findings(
     writer: &WritePool,
     findings: &[RemovedFinding],
 ) -> anyhow::Result<usize> {
+    for f in findings {
+        for (what, label, max) in [
+            ("agent's name", &f.agent, MAX_STORED_AGENT_CHARS),
+            ("request", &f.request, MAX_REQUEST_CHARS),
+        ] {
+            let chars = label.chars().count();
+            anyhow::ensure!(
+                (1..=max).contains(&chars),
+                "A finding's {what} has {chars} characters, not 1 to {max}, so it can't be \
+                 restored"
+            );
+        }
+    }
     let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start restoring findings")?;
@@ -1524,18 +1539,6 @@ mod tests {
             );
             assert_eq!(name.adjusted, normalize_agent(&raw).is_err(), "{raw:?}");
             assert_eq!(recover_agent(&raw), name, "{raw:?}");
-        }
-    }
-
-    /// The limits on what's stored are the ones the table's CHECKs enforce.
-    #[test]
-    fn the_length_limits_match_the_table() {
-        let migrate = include_str!("migrate.rs");
-        for check in [
-            format!("CHECK (length(agent) BETWEEN 1 AND {MAX_STORED_AGENT_CHARS})"),
-            format!("CHECK (length(request) BETWEEN 1 AND {MAX_REQUEST_CHARS})"),
-        ] {
-            assert!(migrate.contains(&check), "{check}");
         }
     }
 
