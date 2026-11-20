@@ -571,6 +571,10 @@ for an agent quoting scripture or finding every place on a topic:
   (`"John 3:16, 18; Rom 5:8"`), and answers as `get_passages` does. A part of
   only numbers goes on from the reference before it: `"John 3:16, 18"` is John
   3:18, and after a range across chapters, `"John 3:16-4:2, 5"` is John 4:5.
+- `search` gives at most 200 verses at a time, in Bible order: `offset`
+  reads on past them, and `next_offset` is the next page's while more match.
+  Only a query's first 12 words count, and its `notice` says when more were
+  left out.
 
 **Mark findings.** Ask your agent something like *"note every verse that
 deals with grief so I can read them"*, and it can mark each verse it finds in

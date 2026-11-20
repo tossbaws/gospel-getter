@@ -39,6 +39,7 @@ fn search_for(query: &str, translation: Option<&str>, book: Option<&str>) -> Sea
         translation: translation.map(str::to_string),
         book: book.map(str::to_string),
         limit: None,
+        offset: None,
     }
 }
 
@@ -1083,6 +1084,141 @@ async fn search_caps_its_results() {
     assert_eq!(count_for(Some(200)).await, (200, json!(200)));
     assert_eq!(count_for(Some(100_000)).await, (200, json!(200)));
     assert_eq!(count_for(Some(0)).await, (1, json!(1)));
+    pool.close().await;
+}
+
+/// A search with more than 200 matches reads in pages with offset: Bible
+/// order, no verse twice and none left out, the pages adding up to the
+/// total, and next_offset only while more remain. An offset past the end is
+/// an empty page.
+#[tokio::test]
+async fn search_pages_past_200_with_offset() {
+    let (db, pool) = fresh_database("cli_search_pages").await;
+    let kjv = translation_id(&pool, "kjv").await;
+    let psalms = 19;
+    let (total, every) = db::search::search_verses_in_book(
+        pool.read(),
+        kjv,
+        psalms,
+        &query::search_query("lord"),
+        10_000,
+        0,
+    )
+    .await
+    .unwrap();
+    assert!(total > 400, "fixture: \"lord\" is in {total} psalms");
+    let every: Vec<(i64, i64)> = every.iter().map(|h| (h.chapter, h.verse)).collect();
+
+    let mut read = Vec::new();
+    let mut offset = Some(0);
+    let mut pages = 0;
+    while let Some(at) = offset {
+        let mut args = search_for("lord", Some("kjv"), Some("Psalms"));
+        args.limit = Some(200);
+        args.offset = Some(u32::try_from(at).unwrap());
+        let page = ask(&db, Request::Search(args)).await;
+        assert_eq!(page["total"], total);
+        assert_eq!(page["offset"], at);
+        let results = page["results"].as_array().unwrap();
+        assert!(!results.is_empty() && results.len() <= 200, "{page}");
+        read.extend(
+            results
+                .iter()
+                .map(|r| (r["chapter"].as_i64().unwrap(), r["verse"].as_i64().unwrap())),
+        );
+        offset = page.get("next_offset").map(|n| n.as_i64().unwrap());
+        if let Some(next) = offset {
+            assert_eq!(next, at + 200);
+        }
+        pages += 1;
+    }
+    assert_eq!(pages, (total + 199) / 200);
+    assert_eq!(i64::try_from(read.len()).unwrap(), total);
+    assert_eq!(read, every, "Bible order, no repeats and no gaps");
+
+    let mut past = search_for("lord", Some("kjv"), Some("Psalms"));
+    past.offset = Some(u32::MAX);
+    let past = ask(&db, Request::Search(past)).await;
+    assert_eq!(past["results"], json!([]));
+    assert_eq!(past["total"], total);
+    assert!(past.get("next_offset").is_none());
+    // Fewer than a page: no next_offset either.
+    let few = ask(
+        &db,
+        Request::Search(search_for("grace", Some("kjv"), Some("Romans"))),
+    )
+    .await;
+    assert!(few.get("next_offset").is_none(), "{few}");
+    pool.close().await;
+}
+
+/// Only the first 12 words are searched for, and the answer says so, naming
+/// them; 12 or fewer, it says nothing.
+#[tokio::test]
+async fn search_says_when_words_past_12_were_left_out() {
+    let (db, pool) = fresh_database("cli_search_twelve").await;
+    let fourteen = "in the beginning was the word and the word was with god and the word was god \
+                    all things were made by him";
+    let answer = ask(
+        &db,
+        Request::Search(search_for(fourteen, Some("kjv"), None)),
+    )
+    .await;
+    let terms: Vec<&str> = answer["terms"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_str().unwrap())
+        .collect();
+    assert_eq!(terms.len(), 12, "{answer}");
+    assert_eq!(
+        answer["notice"],
+        format!(
+            "Only the first 12 words are searched for: {}.",
+            terms.join(", ")
+        )
+    );
+    let twelve = ask(
+        &db,
+        Request::Search(search_for(
+            "in the beginning was the word and the word was with god",
+            Some("kjv"),
+            None,
+        )),
+    )
+    .await;
+    assert!(twelve.get("notice").is_none(), "{twelve}");
+    pool.close().await;
+}
+
+/// "John 3:99" is refused with the app's search box's own words, not
+/// answered as a passage to go to.
+#[tokio::test]
+async fn search_refuses_a_verse_past_the_chapter_as_the_app_does() {
+    let (db, pool) = fresh_database("cli_search_no_verse").await;
+    assert_eq!(
+        refused(
+            &db,
+            Request::Search(search_for("John 3:99", Some("kjv"), None))
+        )
+        .await,
+        "No such chapter or verse: John 3:99. John 3 has 36 verses in the King James Version."
+    );
+    // Romans 14:24 is numbered in the WEB only.
+    assert_eq!(
+        refused(
+            &db,
+            Request::Search(search_for("Romans 14:24", Some("kjv"), None))
+        )
+        .await,
+        "No such chapter or verse: Romans 14:24. Romans 14 has 23 verses in the King James Version."
+    );
+    let web = ask(
+        &db,
+        Request::Search(search_for("Romans 14:24", Some("web"), None)),
+    )
+    .await;
+    assert_eq!(web["go_to"], "Romans 14:24");
     pool.close().await;
 }
 

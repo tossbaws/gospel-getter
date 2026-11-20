@@ -5,6 +5,7 @@ use anyhow::Context;
 
 use super::{AppState, book_name, code_of, failed, resolve_translation};
 use crate::domain::kjv_markup::VerseText;
+use crate::domain::passage::no_such_verse;
 use crate::domain::query::{self, Interpretation, SearchQuery};
 use crate::passage_reference::passage_reference;
 // Shared with the page, which reads them whole (see shared/wire.rs).
@@ -37,21 +38,17 @@ pub async fn run_search(
         Interpretation::InvalidReference(message) => Ok(SearchDto::Invalid { message }),
         Interpretation::Passage(p) => {
             let name = book_name(state, p.book_id).unwrap_or("?");
-            if let Some((_, last)) = p.verses {
-                let verses = state
+            if let Some(verses) = p.verses {
+                let chapter = state
                     .store
                     .chapter_verses(translation_id, p.book_id, p.chapter)
                     .await?;
-                let verse_count = verses.last().map_or(0, |v| v.verse);
-                if last > verse_count {
-                    return Ok(SearchDto::Invalid {
-                        message: format!(
-                            "No such chapter or verse: {}. {name} {} has {verse_count} verses in the {}.",
-                            passage_reference(name, p.chapter, p.verses),
-                            p.chapter,
-                            translation_name(state, translation_id),
-                        ),
-                    });
+                let verse_count = chapter.last().map_or(0, |v| v.verse);
+                let translation = translation_name(state, translation_id);
+                if let Some(message) =
+                    no_such_verse(name, translation, p.chapter, verses, verse_count)
+                {
+                    return Ok(SearchDto::Invalid { message });
                 }
             }
             Ok(SearchDto::Passage {

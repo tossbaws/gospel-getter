@@ -10,7 +10,8 @@ use crate::db::Book;
 
 /// The most words one text search will match on, a phrase's words each
 /// counted; anything past this is ignored rather than building an
-/// ever-larger FTS query.
+/// ever-larger FTS query. An answer that can't show what was searched for
+/// says when words were left out ([`search_query_drops_words`]).
 pub const MAX_SEARCH_TERMS: usize = 12;
 
 /// What opens and closes a phrase: a straight double quote, or a curly one
@@ -156,6 +157,17 @@ fn words_of(text: &str) -> impl Iterator<Item = String> + '_ {
 /// [`MAX_SEARCH_TERMS`] words in all, in the order typed: a phrase that
 /// would go past it keeps the words that fit.
 pub fn search_query(input: &str) -> SearchQuery {
+    search_query_of_at_most(input, MAX_SEARCH_TERMS)
+}
+
+/// Whether [`search_query`] leaves out any of `input`'s words: it has more
+/// than [`MAX_SEARCH_TERMS`], repeats not counted.
+pub fn search_query_drops_words(input: &str) -> bool {
+    search_query_of_at_most(input, usize::MAX).len() > MAX_SEARCH_TERMS
+}
+
+/// [`search_query`], keeping at most `max` words.
+fn search_query_of_at_most(input: &str, max: usize) -> SearchQuery {
     let parts: Vec<&str> = input.split(QUOTES).collect();
     // Split at every quote, the odd parts are inside a pair; the last part
     // of an odd number of quotes (an even count of parts) isn't closed.
@@ -166,7 +178,7 @@ pub fn search_query(input: &str) -> SearchQuery {
     };
     let mut query = SearchQuery::default();
     for (i, part) in parts.iter().enumerate() {
-        let room = MAX_SEARCH_TERMS - query.len();
+        let room = max - query.len();
         if room == 0 {
             break;
         }
@@ -180,7 +192,7 @@ pub fn search_query(input: &str) -> SearchQuery {
             }
         } else {
             for word in words_of(part) {
-                if query.len() == MAX_SEARCH_TERMS {
+                if query.len() == max {
                     break;
                 }
                 push_word(&mut query.words, &word);
@@ -1079,6 +1091,16 @@ mod tests {
         let full = search_query(&format!("{} \"love one\"", many.join(" ")));
         assert_eq!(full.len(), MAX_SEARCH_TERMS);
         assert!(full.phrases.is_empty());
+
+        // Whether words were left out: past 12, repeats not counted.
+        assert!(search_query_drops_words(&many.join(" ")));
+        assert!(!search_query_drops_words(&many[..12].join(" ")));
+        let repeated = format!("{} {}", many[..12].join(" "), many[..12].join(" "));
+        assert!(!search_query_drops_words(&repeated));
+        assert!(search_query_drops_words(&format!(
+            "{} \"love one\"",
+            many[..11].join(" ")
+        )));
     }
 
     fn phrase(words: &[&str]) -> Vec<String> {

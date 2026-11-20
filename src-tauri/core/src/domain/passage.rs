@@ -28,6 +28,26 @@ pub fn translations_named<'a>(
     Ok(named)
 }
 
+/// What the search box says of a reference to verses past the end of their
+/// chapter in the translation searched, `None` when they're within it:
+/// e.g. "No such chapter or verse: John 3:99. John 3 has 36 verses in the
+/// King James Version." `verse_count` is the chapter's last verse in that
+/// translation. The app's search and `gospel-getter-cli`'s say the same.
+pub fn no_such_verse(
+    book_name: &str,
+    translation_name: &str,
+    chapter: i64,
+    (first, last): (i64, i64),
+    verse_count: i64,
+) -> Option<String> {
+    (last > verse_count).then(|| {
+        format!(
+            "No such chapter or verse: {}. {book_name} {chapter} has {verse_count} verses in the {translation_name}.",
+            passage_reference(book_name, chapter, Some((first, last))),
+        )
+    })
+}
+
 /// What to say about the verses from `start` to `end` of a chapter that the
 /// translation doesn't number, `None` when it numbers them all. `numbered` is
 /// those it does number, `last` the chapter's last verse in this translation

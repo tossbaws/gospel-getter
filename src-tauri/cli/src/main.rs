@@ -50,7 +50,7 @@ enum Command {
     /// Many passages in one call, all in one translation.
     #[command(name = "get_passages", visible_aliases = ["passages", "get-passages"])]
     GetPassages(GetPassagesArgs),
-    /// Search the text of one translation, in Bible order.
+    /// Search the text of one translation, in Bible order. Only the first 12 words count; --offset pages on, as next_offset says.
     #[command(name = "search")]
     Search(SearchArgs),
     /// A passage in several translations, each numbered its own way.

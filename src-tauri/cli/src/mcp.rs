@@ -157,7 +157,7 @@ impl Server {
 
     #[tool(
         name = "search",
-        description = "Search one translation's text, in Bible order. Every word must appear; words in double quotes must appear side by side. At most 200 verses.",
+        description = "Search one translation's text, in Bible order. Every word must appear; words in double quotes must appear side by side. Only the first 12 words count, and notice says when more were left out. At most 200 verses at a time: offset skips that many, and next_offset, while more match, is the next page's.",
         annotations(read_only_hint = true)
     )]
     async fn search(
