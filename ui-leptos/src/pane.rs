@@ -785,7 +785,7 @@ fn make() -> Option<Rc<Made>> {
         root,
     });
     MADE.set(Some(made.clone()));
-    reader::listen_to_notice(PaneId::Second);
+    reader::listen_to_notice(PaneId::Second, &made.notice);
     Some(made)
 }
 

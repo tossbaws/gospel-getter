@@ -1456,20 +1456,21 @@ fn on_click(event: &MouseEvent) {
     }
 }
 
-/// Listens for Try again in `pane`'s notice (the second pane's, as it's
-/// made).
-pub fn listen_to_notice(pane: PaneId) {
-    if let Some(notice) = pane.notice() {
-        dom::on(&notice, "click", move |event| {
-            let on_retry = event
-                .target()
-                .and_then(|t| t.dyn_into::<Element>().ok())
-                .is_some_and(|t| closest(&t, ".reading-retry").is_some());
-            if on_retry {
-                retry(pane);
-            }
-        });
-    }
+/// Listens for Try again in `notice`, `pane`'s notice. Given the element,
+/// not looked up by id: the second pane's is made (`pane::make`) before its
+/// column is in the document, where an id finds nothing (GG32-03). Once per
+/// notice, or one press would ask twice: the first pane's at boot
+/// ([`mount`]), the second's as it's made.
+pub fn listen_to_notice(pane: PaneId, notice: &HtmlElement) {
+    dom::on(notice, "click", move |event| {
+        let on_retry = event
+            .target()
+            .and_then(|t| t.dyn_into::<Element>().ok())
+            .is_some_and(|t| closest(&t, ".reading-retry").is_some());
+        if on_retry {
+            retry(pane);
+        }
+    });
 }
 
 /// `pane`'s own column scrolled (two panes open): where the reader is is
@@ -1655,8 +1656,8 @@ pub fn mount() {
             }
         });
     }
-    for pane in pane::shown() {
-        listen_to_notice(pane);
+    if let Some(notice) = PaneId::First.notice() {
+        listen_to_notice(PaneId::First, &notice);
     }
     // Where the reader is, saved once they stop scrolling, and at once as
     // the window is hidden or loses focus, or the pointer leaves the page
