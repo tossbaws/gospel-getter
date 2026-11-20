@@ -127,7 +127,7 @@ test('a cross-reference’s Go to and a chapter-end cross-reference record; Back
 
         const toggle = app.document.querySelector('.xref-summary .disclosure-toggle');
         if (toggle.getAttribute('aria-expanded') !== 'true') app.click(toggle);
-        const listed = [...app.document.querySelectorAll('.xref-summary-chip')].find((c) => c.textContent === '1 John 4:9-10');
+        const listed = [...app.document.querySelectorAll('.xref-summary-chip')].find((c) => c.textContent === '1 John 4:9–10');
         await waitFor(app, () => app.click(listed));
         assert.deepEqual(where(app), ['1 John 4', [9, 10]]);
         await back(app);

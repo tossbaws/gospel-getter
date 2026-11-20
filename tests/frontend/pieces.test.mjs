@@ -297,7 +297,7 @@ const LATE = [
         assert.equal($(app, 'app-version').textContent, `Version ${VERSION}`);
         const credits = [...$(app, 'about-credits').querySelectorAll('li')].map((li) => li.textContent);
         assert.ok(credits.length > 1, 'the bundled texts, from boot');
-        assert.equal(credits.at(-1), 'Cross-references from OpenBible.info, CC BY 4.0');
+        assert.equal(credits.at(-1), 'Cross-references from OpenBible.info, selected and reformatted, CC BY 4.0');
         app.key('Escape', {}, app.document.activeElement);
     }],
     ['Aa and the translations come, with the saved settings', (app) => {

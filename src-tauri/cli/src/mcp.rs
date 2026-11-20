@@ -181,7 +181,7 @@ impl Server {
 
     #[tool(
         name = "get_cross_references",
-        description = "The cross-references of a verse, a range or a chapter, most relevant first for each verse. At most 500.",
+        description = "The cross-references of a verse, a range or a chapter, most relevant first for each verse. At most 500. A range the data can't give in full is its first verse, marked range_unavailable.",
         annotations(read_only_hint = true)
     )]
     async fn get_cross_references(

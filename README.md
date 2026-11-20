@@ -135,7 +135,10 @@ needed.
   card. Click one to read it right there in the card, a whole range at
   once, in the translation you're reading; click it again to close it, and
   **Go to** opens it. Only one shows at a time. The Cross references list
-  at the end of each chapter links straight to each passage, selected.
+  at the end of each chapter links straight to each passage, selected. The
+  data gives a range's ending verse but not its ending chapter, so a range
+  that doesn't fit its chapter (Genesis 14:18's "Hebrews 6:20–3") shows
+  its first verse, "(full range not available)", and opens that verse.
 - **Footnotes (KJV and BSB).** In the KJV, translator-supplied words are
   in italics, as in printed KJVs, and the margin notes are moved out of
   the text into lettered footnotes. The BSB's translators' footnotes are
@@ -765,7 +768,10 @@ stored exactly as its source provides it.
   and fails on any difference.
 
 Cross-references are from [OpenBible.info](https://www.openbible.info/labs/cross-references/)
-under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), selected (each
+verse's five highest-scored) and reformatted: see
+[`sources/cross_references/`](sources/cross_references/README.md), which also
+says what isn't known about the file.
 
 ## Support
 

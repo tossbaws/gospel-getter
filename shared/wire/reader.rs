@@ -42,17 +42,24 @@ pub struct StartHereDto {
     pub line: String,
 }
 
-/// A verse's cross-reference: the passage, and its citation as shown
-/// ("Romans 8:28", "Romans 8:28-30").
+/// A verse's cross-reference: the passage it opens, and its citation as
+/// shown ("Romans 8:28", "Romans 8:28–30"), both from core's
+/// `domain::cross_reference`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct XrefDto {
     pub book_id: i64,
     pub chapter: i64,
     pub verse: i64,
+    /// Set only for a range.
     #[serde(default)]
     pub end_verse: Option<i64>,
     pub citation: String,
+    /// The data gives a range that can't be shown, so this opens and names
+    /// its start verse alone, and the reader says `RANGE_UNAVAILABLE`
+    /// beside it.
+    #[serde(default)]
+    pub range_unavailable: bool,
 }
 
 /// A quiet card in a neighbor's place, where there's no neighboring
@@ -282,21 +289,35 @@ mod tests {
             verse: 8,
             end_verse: None,
             citation: "Rom 5:8".into(),
+            range_unavailable: false,
         };
         pin(
             &verse,
-            r#"{"bookId":45,"chapter":5,"verse":8,"endVerse":null,"citation":"Rom 5:8"}"#,
+            r#"{"bookId":45,"chapter":5,"verse":8,"endVerse":null,"citation":"Rom 5:8","rangeUnavailable":false}"#,
         );
         let range = XrefDto {
             book_id: 62,
             chapter: 4,
             verse: 9,
             end_verse: Some(10),
-            citation: "1 John 4:9-10".into(),
+            citation: "1 John 4:9–10".into(),
+            range_unavailable: false,
         };
         pin(
             &range,
-            r#"{"bookId":62,"chapter":4,"verse":9,"endVerse":10,"citation":"1 John 4:9-10"}"#,
+            r#"{"bookId":62,"chapter":4,"verse":9,"endVerse":10,"citation":"1 John 4:9–10","rangeUnavailable":false}"#,
+        );
+        let unavailable = XrefDto {
+            book_id: 58,
+            chapter: 6,
+            verse: 20,
+            end_verse: None,
+            citation: "Hebrews 6:20".into(),
+            range_unavailable: true,
+        };
+        pin(
+            &unavailable,
+            r#"{"bookId":58,"chapter":6,"verse":20,"endVerse":null,"citation":"Hebrews 6:20","rangeUnavailable":true}"#,
         );
     }
 

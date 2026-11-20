@@ -1183,8 +1183,9 @@ async fn cross_references_are_the_passages_own() {
     for (out, row) in found.iter().zip(&in_verse) {
         assert_eq!(out["from_verse"], 16);
         assert_eq!(out["chapter"], row.ref_chapter);
-        assert_eq!(out["verse_start"], row.ref_verse);
-        assert_eq!(out["verse_end"], row.ref_end_verse.unwrap_or(row.ref_verse));
+        let target = row.target();
+        assert_eq!(out["verse_start"], target.verse_start);
+        assert_eq!(out["verse_end"], target.verse_end);
         assert!(
             out["reference"]
                 .as_str()
@@ -1221,6 +1222,62 @@ async fn cross_references_are_the_passages_own() {
     assert_eq!(
         (&none["total"], &none["cross_references"]),
         (&json!(0), &json!([]))
+    );
+    pool.close().await;
+}
+
+/// The CLI names and opens a cross-reference by the app's one rule: a
+/// range with an en dash, a single verse, and a range the data can't give
+/// in full as its start verse, marked, saying so.
+#[tokio::test]
+async fn a_cross_reference_shows_a_range_only_when_it_fits_its_chapter() {
+    let (db, pool) = fresh_database("cli_xref_ranges").await;
+    let cited = async |from: &str, to: &str| {
+        let answer = ask(
+            &db,
+            Request::GetCrossReferences(GetCrossReferencesArgs {
+                reference: from.to_string(),
+            }),
+        )
+        .await;
+        answer["cross_references"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["reference"] == to)
+            .cloned()
+            .unwrap_or_else(|| panic!("fixture: {from} cites {to}: {answer}"))
+    };
+    assert_eq!(
+        cited("Genesis 1:1", "John 1:1\u{2013}3").await,
+        json!({
+            "from_verse": 1, "reference": "John 1:1\u{2013}3", "book": "John",
+            "chapter": 1, "verse_start": 1, "verse_end": 3,
+        })
+    );
+    assert_eq!(
+        cited("Genesis 1:1", "Hebrews 11:3").await,
+        json!({
+            "from_verse": 1, "reference": "Hebrews 11:3", "book": "Hebrews",
+            "chapter": 11, "verse_start": 3, "verse_end": 3,
+        })
+    );
+    // The data says "Hebrews 6:20–3" and "Job 40:15–34" (Job 40 ends at 24).
+    assert_eq!(
+        cited("Genesis 14:18", "Hebrews 6:20").await,
+        json!({
+            "from_verse": 18, "reference": "Hebrews 6:20", "book": "Hebrews",
+            "chapter": 6, "verse_start": 20, "verse_end": 20,
+            "range_unavailable": true, "note": "full range not available",
+        })
+    );
+    assert_eq!(
+        cited("Psalm 8:8", "Job 40:15").await,
+        json!({
+            "from_verse": 8, "reference": "Job 40:15", "book": "Job",
+            "chapter": 40, "verse_start": 15, "verse_end": 15,
+            "range_unavailable": true, "note": "full range not available",
+        })
     );
     pool.close().await;
 }

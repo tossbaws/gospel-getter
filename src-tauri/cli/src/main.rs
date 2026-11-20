@@ -56,7 +56,7 @@ enum Command {
     /// A passage in several translations, each numbered its own way.
     #[command(name = "compare")]
     Compare(CompareArgs),
-    /// The cross-references of a verse, a range or a chapter.
+    /// The cross-references of a verse, a range or a chapter. A range the data can't give in full is its first verse, marked range_unavailable.
     #[command(
         name = "get_cross_references",
         visible_aliases = ["cross_references", "get-cross-references", "cross-references"]

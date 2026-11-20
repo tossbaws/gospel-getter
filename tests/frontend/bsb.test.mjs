@@ -359,7 +359,7 @@ test('About credits every bundled text, and the cross-references', () =>
             'King James Version (KJV), public domain, from the thiagobodruk/bible dataset and eBible.org',
             'Berean Standard Bible (BSB), public domain, berean.bible',
             'World English Bible (WEB), public domain, from TehShrike/world-english-bible (via ebible.org)',
-            'Cross-references from OpenBible.info, CC BY 4.0',
+            'Cross-references from OpenBible.info, selected and reformatted, CC BY 4.0',
         ]);
         assert.ok(el(app, 'about-panel').contains(el(app, 'about-credits')));
         assert.equal(el(app, 'credits-label').textContent, 'Texts');

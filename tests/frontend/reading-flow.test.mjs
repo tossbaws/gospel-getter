@@ -122,7 +122,8 @@ const escaped = (text) => text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': 
 const xrefRows = (dto) => dto.currentVerses.filter((v) => v.xrefs.length > 0).map((v) => {
     const chips = v.xrefs.map((x) => {
         const end = x.endVerse == null ? '' : ` data-end-verse="${x.endVerse}"`;
-        return `<span class="xref-summary-item"><button type="button" class="xref-summary-chip" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${end}>${escaped(x.citation)}</button></span>`;
+        const note = x.rangeUnavailable ? ' <span class="xref-range-note">(full range not available)</span>' : '';
+        return `<span class="xref-summary-item"><button type="button" class="xref-summary-chip" data-book="${x.bookId}" data-chapter="${x.chapter}" data-verse="${x.verse}"${end}>${escaped(x.citation)}</button>${note}</span>`;
     }).join('');
     return `<div class="xref-summary-row">\n${' '.repeat(28)}<span class="xref-summary-verse">${dto.currentChapter}:${v.number}</span>\n${' '.repeat(28)}<span class="xref-summary-chips">${chips}</span>\n${' '.repeat(24)}</div>`;
 }).join('');

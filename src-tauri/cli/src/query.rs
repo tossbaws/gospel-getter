@@ -17,6 +17,7 @@ use anyhow::{Context, anyhow, bail};
 use clap::Args;
 use gospel_getter_core::db::migrate::SCHEMA_VERSION;
 use gospel_getter_core::db::{self, Book, HighlightColor, Translation};
+use gospel_getter_core::domain::cross_reference;
 use gospel_getter_core::domain::kjv_markup::{KJV, VerseText};
 use gospel_getter_core::domain::passage::{numbering_notice, translations_named};
 use gospel_getter_core::domain::query::{self, Interpretation, PassageRef, SearchQuery};
@@ -345,7 +346,8 @@ pub struct CrossReferencesOut {
     pub cross_references: Vec<CrossReferenceOut>,
 }
 
-/// A cross-reference: which verse it's from, and the passage it names.
+/// A cross-reference: which verse it's from, and the passage it names, as
+/// the app names and opens it (core's `domain::cross_reference`).
 #[derive(Debug, Serialize)]
 pub struct CrossReferenceOut {
     pub from_verse: i64,
@@ -354,6 +356,12 @@ pub struct CrossReferenceOut {
     pub chapter: i64,
     pub verse_start: i64,
     pub verse_end: i64,
+    /// Only when the data's range can't be shown: `true`, and `note` says
+    /// "full range not available"; the passage is its start verse.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub range_unavailable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<&'static str>,
 }
 
 /// The answer of `get_reading_place`. Only `saved` when there's no saved place.
@@ -906,18 +914,18 @@ impl Library {
             .take(MAX_CROSS_REFERENCES)
             .map(|r| {
                 let name = &self.book(r.ref_book_id)?.name;
-                let verse_end = r.ref_end_verse.unwrap_or(r.ref_verse);
+                let target = r.target();
                 Ok(CrossReferenceOut {
                     from_verse: r.verse,
-                    reference: passage_reference(
-                        name,
-                        r.ref_chapter,
-                        Some((r.ref_verse, verse_end)),
-                    ),
+                    reference: cross_reference::label(name, r.ref_chapter, target),
                     book: name.clone(),
                     chapter: r.ref_chapter,
-                    verse_start: r.ref_verse,
-                    verse_end,
+                    verse_start: target.verse_start,
+                    verse_end: target.verse_end,
+                    range_unavailable: target.range_unavailable,
+                    note: target
+                        .range_unavailable
+                        .then_some(cross_reference::RANGE_UNAVAILABLE),
                 })
             })
             .collect::<anyhow::Result<Vec<_>>>()?;

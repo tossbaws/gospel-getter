@@ -49,8 +49,10 @@ pub struct Translation {
     pub name: String,
 }
 
-/// A cross-reference from one verse to another passage. `ref_end_verse` is
-/// set when the reference is to a verse range rather than a single verse.
+/// A cross-reference from one verse to another passage, as the bundled data
+/// gives it. `ref_end_verse` is set when the reference is to a verse range
+/// rather than a single verse; what it opens is its
+/// [`target`](Self::target).
 #[derive(Debug, Clone, FromRow)]
 pub struct CrossReference {
     pub verse: i64,
@@ -60,4 +62,19 @@ pub struct CrossReference {
     pub ref_end_verse: Option<i64>,
     #[allow(dead_code)] // only used by the SQL ORDER BY, not read in Rust
     pub score: i64,
+    /// The last verse of the passage's chapter (`chapter_last_verse`).
+    pub ref_chapter_last_verse: i64,
+}
+
+impl CrossReference {
+    /// The verses it opens (see [`cross_reference::target`]).
+    ///
+    /// [`cross_reference::target`]: crate::domain::cross_reference::target
+    pub fn target(&self) -> crate::domain::cross_reference::Target {
+        crate::domain::cross_reference::target(
+            self.ref_verse,
+            self.ref_end_verse,
+            self.ref_chapter_last_verse,
+        )
+    }
 }
