@@ -185,8 +185,8 @@ test('Copy as Markdown copies the note’s reference, its verses in the translat
         assert.equal(copy.textContent, 'Copy as Markdown');
         assert.equal(copy.getAttribute('aria-label'), 'Copy the note on John 3:16–17 as Markdown');
         // Asked for when the card showed it, so the copy is within the click.
-        assert.ok(app.calls.some((c) => c.cmd === 'get_note_markdown' && c.args.id === note.id && c.args.translationCode === 'kjv'));
-        const expected = await backend('get_note_markdown', { id: note.id, translationCode: 'kjv' });
+        assert.ok(app.calls.some((c) => c.cmd === 'get_note_markdown' && c.args.id === note.id && c.args.createdAt === note.createdAt && c.args.translationCode === 'kjv'));
+        const expected = await backend('get_note_markdown', { id: note.id, createdAt: note.createdAt, translationCode: 'kjv' });
         assert.ok(expected.startsWith('## John 3:16–17\n\n> **16** '), expected);
         assert.ok(expected.includes('\n>\n> — John 3:16–17 (KJV)\n\nSee **Rom 5:8**.\n- one'), expected);
         await clickAndWait(app, copy, null);
@@ -342,7 +342,7 @@ test('AUD-08: only the notes pointed at most recently keep their Markdown; one p
         assert.equal(asked(firstId), 2, 'asked again');
         app.click(first.querySelector('.note-list-copy'));
         await app.until(() => app.clipboardWrites.length === 1, 'the copy');
-        assert.equal(app.clipboardWrites[0], await backend('get_note_markdown', { id: firstId, translationCode: 'kjv' }));
+        assert.equal(app.clipboardWrites[0], await backend('get_note_markdown', { id: firstId, createdAt: notes.find((n) => n.id === firstId).createdAt, translationCode: 'kjv' }));
     });
 });
 
@@ -507,6 +507,7 @@ test('N-U-03: with more notes on a passage than are kept, and the Library pointe
         ...Array.from({ length: 35 }, (_, i) => [JOHN, 3, 16, 16, `Note ${i + 1} on 3:16.`]),
         ...Array.from({ length: 40 }, (_, i) => [PSALMS, i + 1, 1, 1, `Psalm ${i + 1}, noted.`]),
     ], 'web');
+    const createdAt = new Map((await backend('list_all_notes')).map((n) => [n.id, n.createdAt]));
     await withApp({ translation: 'web', clipboard: 'gesture' }, async (app) => {
         await select(app, 16);
         await app.idle();
@@ -521,7 +522,7 @@ test('N-U-03: with more notes on a passage than are kept, and the Library pointe
         app.click(firstCopy());
         await app.until(() => /^(Copied|Couldn’t copy) the note/.test(app.status().textContent), 'the copy');
         assert.equal(app.status().textContent, 'Copied the note on John 3:16 as Markdown.');
-        assert.deepEqual(app.clipboardWrites, [await backend('get_note_markdown', { id: firstId, translationCode: 'web' })]);
+        assert.deepEqual(app.clipboardWrites, [await backend('get_note_markdown', { id: firstId, createdAt: createdAt.get(firstId), translationCode: 'web' })]);
         assert.ok(app.clipboardWrites[0].includes(`> **16** ${VERSE_16}\n`), 'the verse exactly as stored');
 
         // Still bounded: the Psalm pointed at first is asked for again.
@@ -529,5 +530,36 @@ test('N-U-03: with more notes on a passage than are kept, and the Library pointe
         assert.equal(markdownAsked(app, longAgo).length, 1);
         await pointAtRow(app, longAgo);
         assert.equal(markdownAsked(app, longAgo).length, 2, 'asked again');
+    });
+});
+
+// GG32-05: the card still shows note A, deleted meanwhile (by another
+// window's editor, say) and its id given to note B on another verse. Its
+// Markdown wasn't kept (asking for it failed), so Copy as Markdown asks the
+// backend again, with A's id and when A was written: the backend answers
+// for A alone, which is gone, so the copy fails as for a deleted note and
+// nothing of B's reaches the clipboard.
+test('GG32-05: Copy as Markdown on a note deleted meanwhile never copies the newer note that took its id', async () => {
+    const [a] = await seed([[JOHN, 3, 16, 16, 'A’s words.']]);
+    await withApp({}, async (app) => {
+        app.failCommand('get_note_markdown');
+        await select(app, 16);
+        await app.idle();
+        assert.equal(markdownAsked(app, a.id).length, 1, 'asked for as the card showed it, and failed');
+        app.failCommand('get_note_markdown', null);
+
+        await backend('delete_note', { id: a.id, createdAt: a.createdAt });
+        const b = await backend('add_note', { bookId: JOHN, chapter: 3, verseStart: 18, verseEnd: 18, body: 'B’s own words.' });
+        assert.equal(b.id, a.id, 'B gets A’s id');
+        assert.notEqual(b.createdAt, a.createdAt);
+
+        const copy = app.document.querySelector('.verse-notes .note-copy');
+        assert.equal(Number(copy.dataset.noteId), a.id, 'the card still holds A');
+        app.click(copy);
+        await app.until(() => app.status().textContent.startsWith('Couldn’t copy the note') || app.status().textContent.startsWith('Copied'), 'the copy');
+        const asked = markdownAsked(app, a.id).at(-1).args;
+        assert.equal(asked.createdAt, a.createdAt, 'asked for A as it was');
+        assert.equal(app.status().textContent, 'Couldn’t copy the note: That note no longer exists; it may have been deleted.');
+        assert.deepEqual(app.clipboardWrites, [], 'nothing copied, nothing of B’s');
     });
 });

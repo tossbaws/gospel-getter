@@ -194,6 +194,9 @@ pub struct ImportResultDto {
     /// chose to restore the file's (`restore_findings_permission`) and it
     /// has one; `None` when the switch was left as it was.
     pub findings_permission: Option<bool>,
+    /// How many of the file's AI findings had a request label this version's
+    /// rule refuses, so it was cleaned (`reader_data::validate_findings`).
+    pub findings_tidied: usize,
     /// The reading position saved, if the reader chose to restore it.
     pub position: Option<PositionPreviewDto>,
 }
@@ -530,11 +533,6 @@ pub async fn apply_pending_import(
         .await
         .map_err(|e| match e {
             ApplyImportError::NoteLimit(limit) => import_limit_message(limit),
-            ApplyImportError::FindingLimit => format!(
-                "Importing this file would give you more than {} AI findings, the most Gospel \
-                 Getter keeps, so nothing was changed.",
-                grouped(db::findings::MAX_FINDINGS)
-            ),
             ApplyImportError::Database(e) => {
                 tracing::error!("Import failed: {e:#}");
                 "The import failed, so nothing was changed.".to_string()
@@ -544,6 +542,10 @@ pub async fn apply_pending_import(
     Ok(ImportResultDto {
         counts,
         findings_permission,
+        findings_tidied: import
+            .findings
+            .as_ref()
+            .map_or(0, |_| import.findings_tidied),
         position: position.map(PositionPreviewDto::from),
     })
 }

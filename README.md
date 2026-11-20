@@ -452,7 +452,9 @@ Upgrading keeps your data.
   their "made by a newer version" message; a backup with neither is format 3,
   as before, and any version since 2.8.0 restores it in full. A format 4
   backup says whether the switch was on or off (2.26 and 2.27 wrote it only
-  when it was on).
+  when it was on). A finding whose request label an older version allowed
+  and this one doesn't (2.26.0 to 2.29.2 allowed invisible characters)
+  still restores: its label is tidied up, and the import says how many were.
 - The window's size and place are kept in `window-state.json`, beside the
   database, and aren't exported either.
 - The app's log (what it did and anything that went wrong, never your notes

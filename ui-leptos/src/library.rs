@@ -676,7 +676,11 @@ impl Library {
         }
         let claim = self.focus.try_update_value(Generation::claim);
         spawn_local(async move {
-            let removed = match ipc::args(&RemoveBookmarkArgs { id }) {
+            let args = RemoveBookmarkArgs {
+                id,
+                created_at: &bookmark.created_at,
+            };
+            let removed = match ipc::args(&args) {
                 Ok(args) => ipc::invoke_value("remove_bookmark", args).await,
                 Err(e) => Err(e),
             };

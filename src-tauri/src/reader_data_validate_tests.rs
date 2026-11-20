@@ -116,8 +116,6 @@ fn position(translation: &str, book: i64, chapter: i64) -> Value {
 }
 
 const BAD_DATE: &str = "its date isn't a valid UTC time like 2026-10-04T12:30:00Z.";
-const A_REQUEST_IS: &str =
-    "The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}";
 
 #[tokio::test]
 async fn every_bookmark_problem_is_listed_in_the_files_order() {
@@ -266,11 +264,13 @@ async fn every_finding_problem_is_listed_after_the_notes() {
                 finding(john(22, 1, 1), "grief"),
                 finding(john(11, 0, 0), "grief"),
                 finding(john(11, 58, 58), "grief"),
+                // A request label today's rule refuses is no problem: it's
+                // cleaned (`db::findings::recover_request`).
                 finding(john(11, 35, 35), "   "),
                 finding(john(11, 35, 35), "grief: here He weeps"),
                 finding(john(11, 35, 35), &"r".repeat(61)),
                 with(finding(john(11, 35, 36), "grief"), json!({"created_at": "today"})),
-                // The request is checked before the date.
+                // One cleaned to nothing still has its date checked.
                 with(finding(john(11, 35, 35), ""), json!({"created_at": "today"})),
             ],
             "notes": [note(john(3, 1, 1), "")],
@@ -285,18 +285,8 @@ async fn every_finding_problem_is_listed_after_the_notes() {
             "AI finding 4: there's no John 22 (John has 21 chapters).".to_string(),
             "AI finding 5: John 11:0 isn't a valid verse range.".to_string(),
             "AI finding 6: there's no John 11:58; John 11 ends at verse 57.".to_string(),
-            format!("AI finding 7 (John 11:35): {A_REQUEST_IS}; this one is empty."),
-            format!(
-                "AI finding 8 (John 11:35): {A_REQUEST_IS}, so it can't have a colon, a \
-                 semicolon, a dash (\u{2014} or \u{2013}), a line break or a character that \
-                 can't be seen."
-            ),
-            format!(
-                "AI finding 9 (John 11:35): {A_REQUEST_IS}: at most 60 characters, and this one \
-                 has 61."
-            ),
             format!("AI finding 10 (John 11:35\u{2013}36): {BAD_DATE}"),
-            format!("AI finding 11 (John 11:35): {A_REQUEST_IS}; this one is empty."),
+            format!("AI finding 11 (John 11:35): {BAD_DATE}"),
         ]
     );
 }
@@ -514,10 +504,11 @@ async fn twelve_problems_are_listed_and_the_rest_counted() {
     assert_eq!(install.problems(&one_bad), [position]);
 }
 
-/// Too many notes, or AI findings, refuses the file with that alone:
-/// nothing else in it is checked. Notes are counted first.
+/// Too many notes refuses the file with that alone: nothing else in it is
+/// checked. However many AI findings it holds, each is checked as any
+/// record is: their count never refuses a backup (`db::findings::MAX_FINDINGS`).
 #[tokio::test]
-async fn the_count_limits_refuse_a_file_before_anything_else() {
+async fn the_note_count_limit_refuses_a_file_before_anything_else() {
     let install = Install::new("rdv_counts").await;
     let base = || {
         let fields = json!({
@@ -551,17 +542,9 @@ async fn the_count_limits_refuse_a_file_before_anything_else() {
         "It has {} notes; the most one file can hold is {MAX_NOTES}.",
         MAX_NOTES + 1
     );
-    let too_many_findings = format!(
-        "It has {} AI findings; the most one file can hold is {MAX_FINDINGS}.",
-        MAX_FINDINGS + 1
-    );
     assert_eq!(
         too_many_notes,
         "It has 10001 notes; the most one file can hold is 10000."
-    );
-    assert_eq!(
-        too_many_findings,
-        "It has 10001 AI findings; the most one file can hold is 10000."
     );
 
     let mut data = base();
@@ -576,19 +559,15 @@ async fn the_count_limits_refuse_a_file_before_anything_else() {
     data.notes = vec![bad_note.clone(); MAX_NOTES + 1];
     assert_eq!(invalid(install.validate(data)), [too_many_notes]);
 
-    let mut data = base();
-    data.notes = vec![bad_note.clone(); MAX_NOTES];
-    data.findings = vec![bad_finding.clone(); MAX_FINDINGS + 1];
-    assert_eq!(invalid(install.validate(data)), [too_many_findings]);
-
-    // At the limits, every record is checked: the first twelve problems
-    // are the bookmark's and eleven of the notes'.
+    // At the notes' limit, and past the agents' limit on findings, every
+    // record is checked: the first twelve problems are the bookmark's and
+    // eleven of the notes'.
     let mut data = base();
     data.notes = vec![bad_note; MAX_NOTES];
-    data.findings = vec![bad_finding; MAX_FINDINGS];
+    data.findings = vec![bad_finding; MAX_FINDINGS + 1];
     let mut expected = vec!["Bookmark 1: there's no book number 99.".to_string()];
     expected.extend((1..=11).map(|i| format!("Note {i}: there's no book number 99.")));
-    expected.push(format!("…and {} more.", MAX_NOTES - 11 + MAX_FINDINGS + 1));
+    expected.push(format!("…and {} more.", MAX_NOTES - 11 + MAX_FINDINGS + 2));
     assert_eq!(invalid(install.validate(data)), expected);
 }
 
@@ -781,6 +760,7 @@ async fn a_valid_file_imports_whole_with_each_kinds_rule_for_repeats() {
                     created_at: None,
                 },
             ]),
+            findings_tidied: 0,
             ai_findings_enabled: Some(false),
             position: Some(NewPosition {
                 translation_id: bsb.id,
@@ -817,6 +797,7 @@ async fn each_format_imports_only_the_kinds_it_can_hold() {
         notes,
         note_duplicates_in_file: 0,
         findings,
+        findings_tidied: 0,
         ai_findings_enabled: None,
         position: None,
         preferences: Preferences::default(),

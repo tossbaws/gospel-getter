@@ -1501,8 +1501,16 @@ async fn bookmarks_are_validated_deduplicated_and_survive_a_restart() {
     );
 
     // Removing.
-    assert!(remove_bookmark(pool.write(), genesis.id).await.unwrap());
-    assert!(!remove_bookmark(pool.write(), genesis.id).await.unwrap());
+    assert!(
+        remove_bookmark(pool.write(), genesis.id, &genesis.created_at)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !remove_bookmark(pool.write(), genesis.id, &genesis.created_at)
+            .await
+            .unwrap()
+    );
     let ids: Vec<i64> = list_bookmarks(pool.read(), KJV)
         .await
         .unwrap()
@@ -2731,6 +2739,43 @@ async fn a_stale_delete_leaves_the_note_that_took_its_id() {
         Some(b)
     );
     assert!(list_notes(pool.read()).await.unwrap().is_empty());
+}
+
+/// GG32-04: a removal from a view still holding bookmark A (on John 3:16,
+/// removed meanwhile) leaves bookmark B (John 3:18), which took A's id, and
+/// answers as for a bookmark already gone. With B's own `created_at` it
+/// removes B.
+#[tokio::test]
+async fn a_stale_bookmark_removal_leaves_the_bookmark_that_took_its_id() {
+    let (_db, pool) = fresh_database("bookmarks_stale_remove").await;
+    let a = add_bookmark(pool.write(), 43, 3, 16, 16).await.unwrap();
+    // Made well before B, as a view's old bookmark would have been.
+    sqlx::query("UPDATE bookmarks SET created_at = $1 WHERE id = $2")
+        .bind(LONG_AGO)
+        .bind(a.id)
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+    assert!(remove_bookmark(pool.write(), a.id, LONG_AGO).await.unwrap());
+    let b = add_bookmark(pool.write(), 43, 3, 18, 18).await.unwrap();
+    assert_eq!(b.id, a.id, "B gets A's id");
+    assert_ne!(b.created_at, LONG_AGO);
+
+    assert!(!remove_bookmark(pool.write(), a.id, LONG_AGO).await.unwrap());
+    let left: Vec<_> = list_bookmarks(pool.read(), KJV)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|b| b.bookmark)
+        .collect();
+    assert_eq!(left, std::slice::from_ref(&b));
+
+    assert!(
+        remove_bookmark(pool.write(), b.id, &b.created_at)
+            .await
+            .unwrap()
+    );
+    assert!(list_bookmarks(pool.read(), KJV).await.unwrap().is_empty());
 }
 
 /// Undo after a delete brings the note back with its `created_at`, so an

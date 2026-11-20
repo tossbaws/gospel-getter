@@ -2839,7 +2839,7 @@ async fn the_preview_counts_the_findings_merging_adds() {
 }
 
 #[tokio::test]
-async fn invalid_findings_reject_the_whole_file_and_change_nothing() {
+async fn invalid_findings_reject_the_whole_file_but_a_refused_label_is_cleaned() {
     let (db, state) = app("rd_findings_invalid").await;
     add_finding(&state, 11, 35, "grief").await;
     let before = (everything(&state).await, finding_rows(&state).await);
@@ -2862,26 +2862,6 @@ async fn invalid_findings_reject_the_whole_file_and_change_nothing() {
                 r#"{"book": 43, "chapter": 11, "verse_start": 58, "verse_end": 58, "agent": "Claude", "request": "grief"}"#,
             ),
             "AI finding 1: there's no John 11:58",
-        ),
-        (
-            "empty request",
-            finding(r#""agent": "Claude", "request": "  ""#),
-            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}; this one is empty.",
-        ),
-        (
-            "a request with commentary",
-            finding(r#""agent": "Claude", "request": "grief: here Jesus shows his sorrow""#),
-            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon, a semicolon, a dash (\u{2014} or \u{2013}), a line break or a character that can't be seen.",
-        ),
-        (
-            "a request with an invisible character",
-            finding(r#""agent": "Claude", "request": "grief\u200b""#),
-            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon, a semicolon, a dash (\u{2014} or \u{2013}), a line break or a character that can't be seen.",
-        ),
-        (
-            "a request with a line separator",
-            finding(r#""agent": "Claude", "request": "grief\u2028Jesus weeps here""#),
-            "AI finding 1 (John 11:35): The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}, so it can't have a colon, a semicolon, a dash (\u{2014} or \u{2013}), a line break or a character that can't be seen.",
         ),
         (
             "a body",
@@ -2915,6 +2895,47 @@ async fn invalid_findings_reject_the_whole_file_and_change_nothing() {
             (everything(&state).await, finding_rows(&state).await),
             before,
             "{label} changed something"
+        );
+    }
+
+    // A request label today's rule refuses never refuses the file: it's
+    // cleaned (`db::findings::recover_request`), and the result says so.
+    for (label, fields, cleaned) in [
+        (
+            "empty request",
+            r#""agent": "Claude", "request": "  ""#,
+            "Earlier request",
+        ),
+        (
+            "a request with commentary",
+            r#""agent": "Claude", "request": "grief: here Jesus shows his sorrow""#,
+            "grief here Jesus shows his sorrow",
+        ),
+        (
+            "a request with an invisible character",
+            r#""agent": "Claude", "request": "tears\u200b""#,
+            "tears",
+        ),
+        (
+            "a request with a line separator",
+            r#""agent": "Claude", "request": "weeping\u2028Jesus weeps here""#,
+            "weeping Jesus weeps here",
+        ),
+    ] {
+        let path = file(
+            &db,
+            &format!("{}.gospel-getter.json", label.replace(' ', "-")),
+        );
+        std::fs::write(&path, finding(fields)).unwrap();
+        let result = import(&state, &path, false).await;
+        assert_eq!(
+            (result.counts.findings_added, result.findings_tidied),
+            (1, 1),
+            "{label}"
+        );
+        assert!(
+            finding_rows(&state).await.iter().any(|f| f.5 == cleaned),
+            "{label}"
         );
     }
 }
@@ -2951,75 +2972,189 @@ fn v4_file_with_findings(count: usize) -> String {
     )
 }
 
-/// An import that would leave more than `MAX_FINDINGS` findings (merged
-/// with the reader's) changes nothing and says why, as one past the notes'
-/// limit does; one that fits merges as usual, and replacing is fine. A file
-/// with more findings than anyone can keep is refused before anything else.
+/// A backup is never refused for how many AI findings it holds, nor is an
+/// import for how many it would leave: the limit is on what agents save
+/// (`db::findings::MAX_FINDINGS`), and an install from before it may hold
+/// more. A file with one more than the limit imports in full, merging or
+/// replacing; an agent's save afterwards is refused at the limit as ever.
 #[tokio::test]
-async fn an_import_past_the_findings_limit_changes_nothing() {
+async fn an_import_past_the_findings_limit_restores_in_full() {
     assert_eq!(MAX_FINDINGS, crate::db::findings::MAX_FINDINGS);
     // Two short of the limit; the file has three new ones.
     let (db, state) = app_with_findings("rd_findings_limit", MAX_FINDINGS - 2).await;
-    let before = (everything(&state).await, finding_rows(&state).await);
     let three = file(&db, "three-more.gospel-getter.json");
     std::fs::write(&three, v4_file_with_findings(3)).unwrap();
-    let p = preview(&state, &three).await;
-    assert_eq!(p.findings_in_file, 3);
-    let error = commands::apply_pending_import(&state, p.token, false, true, false)
-        .await
-        .unwrap_err();
-    assert_eq!(
-        error,
-        "Importing this file would give you more than 10,000 AI findings, the most Gospel \
-         Getter keeps, so nothing was changed."
-    );
-    assert_eq!(
-        (everything(&state).await, finding_rows(&state).await),
-        before,
-        "not even the bookmark"
-    );
+    let merged = import(&state, &three, false).await;
+    assert_eq!((merged.counts.added, merged.counts.findings_added), (1, 3));
+    assert_eq!(finding_rows(&state).await.len(), MAX_FINDINGS + 1);
 
-    // Two fit, merged: the limit exactly. The same file again adds nothing.
-    let two = file(&db, "two-more.gospel-getter.json");
-    std::fs::write(&two, v4_file_with_findings(2)).unwrap();
-    let merged = import(&state, &two, false).await;
-    assert_eq!(merged.counts.findings_added, 2);
-    assert_eq!(finding_rows(&state).await.len(), MAX_FINDINGS);
-    let again = import(&state, &two, false).await;
-    assert_eq!(
-        (
-            again.counts.findings_added,
-            again.counts.findings_already_present
-        ),
-        (0, 2)
-    );
-
-    // Replacing leaves just the file's three.
-    let replaced = import(&state, &three, true).await;
+    // A file of one more than the limit, replacing or merging into a
+    // fresh profile: every finding comes back.
+    let over = file(&db, "past-the-limit.gospel-getter.json");
+    std::fs::write(&over, v4_file_with_findings(MAX_FINDINGS + 1)).unwrap();
+    let replaced = import(&state, &over, true).await;
     assert_eq!(
         (
             replaced.counts.findings_added,
             replaced.counts.findings_removed
         ),
-        (3, MAX_FINDINGS)
+        (MAX_FINDINGS + 1, MAX_FINDINGS + 1)
     );
+    assert_eq!(finding_rows(&state).await.len(), MAX_FINDINGS + 1);
+    let (_fresh_db, fresh) = app("rd_findings_limit_fresh").await;
+    let into_fresh = import(&fresh, &over, false).await;
+    assert_eq!(into_fresh.counts.findings_added, MAX_FINDINGS + 1);
+    assert_eq!(finding_rows(&fresh).await.len(), MAX_FINDINGS + 1);
 
-    // One more than the limit in a file: refused outright, nothing read
-    // further; at the limit, a file imports.
-    let before = finding_rows(&state).await;
-    let over = file(&db, "too-many.gospel-getter.json");
-    std::fs::write(&over, v4_file_with_findings(MAX_FINDINGS + 1)).unwrap();
-    let (_, problems) = invalid(&state, &over).await;
+    // An agent's save is still held to the limit.
+    let more = state
+        .store
+        .add_findings(&[crate::db::NewFinding {
+            passage: Passage {
+                book_id: 43,
+                chapter: 11,
+                verse_start: 33,
+                verse_end: 33,
+            },
+            agent: "Claude".to_string(),
+            request: "grief".to_string(),
+            created_at: None,
+        }])
+        .await;
     assert_eq!(
-        problems,
-        ["It has 10001 AI findings; the most one file can hold is 10000."]
+        more.unwrap_err().to_string(),
+        "Gospel Getter holds at most 10,000 AI findings; remove some in the Library first."
     );
-    assert_eq!(finding_rows(&state).await, before);
-    let at = file(&db, "at-the-limit.gospel-getter.json");
-    std::fs::write(&at, v4_file_with_findings(MAX_FINDINGS)).unwrap();
-    let full = import(&state, &at, true).await;
-    assert_eq!(full.counts.findings_added, MAX_FINDINGS);
-    assert_eq!(finding_rows(&state).await.len(), MAX_FINDINGS);
+    assert_eq!(finding_rows(&state).await.len(), MAX_FINDINGS + 1);
+}
+
+/// A reader's backup always restores (GG32-01, AF1). Findings saved under
+/// the request-label rule of 2.26.0 to 2.29.2, which today's refuses, stored
+/// as those versions stored them, go out in the export unchanged; restored
+/// on another profile, merging or replacing, the note comes back, every
+/// finding comes back with its label cleaned (and its passage, agent and
+/// date as they were), and the result says how many labels were cleaned.
+#[tokio::test]
+async fn a_backup_with_findings_an_older_rule_saved_always_restores() {
+    use crate::db::test_support::{OLD_RULE_REQUESTS, insert_old_rule_findings};
+    let (db, pool) = fresh_database("rd_old_rule").await;
+    let dates = insert_old_rule_findings(pool.write()).await;
+    let state = AppState::load(pool).await.expect("load state");
+    restore_on_john_3_16(&state, "For God so loved.", "2026-10-01T09:00:00.000Z").await;
+    let path = file(&db, "old-rule.gospel-getter.json");
+    let saved =
+        serde_json::to_value(export_to(&state, &path, Preferences::default()).await).unwrap();
+    assert_eq!(
+        (&saved["status"], &saved["notes"], &saved["findings"]),
+        (
+            &Value::from("saved"),
+            &Value::from(1),
+            &Value::from(OLD_RULE_REQUESTS.len())
+        ),
+        "{saved}"
+    );
+    let written = std::fs::read_to_string(&path).unwrap();
+    for (request, _) in OLD_RULE_REQUESTS {
+        assert!(
+            written.contains(&serde_json::to_string(request).unwrap()),
+            "the export keeps {request:?} as it was"
+        );
+    }
+
+    let mut expected: Vec<_> = OLD_RULE_REQUESTS
+        .iter()
+        .zip(&dates)
+        .enumerate()
+        .map(|(i, ((_, cleaned), date))| {
+            let verse = i as i64 + 1;
+            (
+                43,
+                11,
+                verse,
+                verse,
+                "Claude".to_string(),
+                cleaned.to_string(),
+                date.clone(),
+            )
+        })
+        .collect();
+    expected.sort();
+    for replace in [false, true] {
+        let (_other_db, other) = app(&format!("rd_old_rule_into_{replace}")).await;
+        let p = preview(&other, &path).await;
+        assert_eq!(
+            (p.findings_in_file, p.new_findings, p.notes_in_file),
+            (OLD_RULE_REQUESTS.len(), OLD_RULE_REQUESTS.len(), 1)
+        );
+        let result = commands::apply_pending_import(&other, p.token, replace, true, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                result.counts.notes_added,
+                result.counts.findings_added,
+                result.findings_tidied
+            ),
+            (1, OLD_RULE_REQUESTS.len(), OLD_RULE_REQUESTS.len()),
+            "replace: {replace}"
+        );
+        assert_eq!(
+            serde_json::to_value(&result).unwrap()["findingsTidied"],
+            Value::from(OLD_RULE_REQUESTS.len())
+        );
+        assert_eq!(
+            note_texts(&other).await,
+            [(43, 3, 16, 16, "For God so loved.".to_string())]
+        );
+        let mut rows = finding_rows(&other).await;
+        rows.sort();
+        assert_eq!(rows, expected, "replace: {replace}");
+    }
+}
+
+/// Two of a file's findings on one passage whose labels clean to the same
+/// request are one finding, as two alike always were; a file whose labels
+/// all pass today's rule says nothing was tidied.
+#[tokio::test]
+async fn findings_alike_once_cleaned_are_one() {
+    let (db, state) = app("rd_old_rule_alike").await;
+    let path = file(&db, "alike.gospel-getter.json");
+    let finding = |request: &str| {
+        format!(
+            r#"{{"book": 43, "chapter": 11, "verse_start": 35, "verse_end": 35, "agent": "Claude", "request": {}}}"#,
+            serde_json::to_string(request).unwrap()
+        )
+    };
+    let contents = |findings: &[&str]| {
+        format!(
+            r#"{{"format": "gospel-getter-reader-data", "format_version": 4,
+                "exported_at": "2026-11-07T00:00:00.000Z", "app_version": "2.29.2",
+                "reading_position": null, "findings": [{}]}}"#,
+            findings.join(", ")
+        )
+    };
+    std::fs::write(
+        &path,
+        contents(&[
+            &finding("grief\u{200B}"),
+            &finding("grief"),
+            &finding("\u{FEFF}grief"),
+        ]),
+    )
+    .unwrap();
+    let result = import(&state, &path, false).await;
+    assert_eq!(
+        (
+            result.counts.findings_added,
+            result.counts.findings_already_present,
+            result.findings_tidied
+        ),
+        (1, 2, 2)
+    );
+    assert_eq!(finding_rows(&state).await[0].5, "grief");
+
+    std::fs::write(&path, contents(&[&finding("tears")])).unwrap();
+    assert_eq!(import(&state, &path, false).await.findings_tidied, 0);
 }
 
 /// A backup's answer counts its AI findings, and says when the file holds

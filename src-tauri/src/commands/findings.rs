@@ -15,7 +15,7 @@ use serde::Deserialize;
 
 use super::notes::{NoteDto, note_dto, note_error_message};
 use super::{AppState, book_name, failed};
-use crate::db::{Finding, FindingRequest, FindingsError, KeepError, NewFinding, Passage};
+use crate::db::{Finding, FindingRequest, KeepError, Passage, RemovedFinding};
 use crate::passage_reference::passage_reference;
 use crate::reader_data;
 // Shared with the page, which reads them whole (see shared/wire.rs).
@@ -138,18 +138,21 @@ pub async fn finding_request_remove(
         .map_err(failed("The findings couldn't be removed."))
 }
 
-/// Bring back removed findings (Undo): the same verses, agent, request and
-/// dates. How many came back.
+/// Bring back removed findings (Undo), exactly as they were
+/// (`db::findings::restore_findings`, which says why no new write's rule
+/// applies), each date kept as it was given. How many came back. One that
+/// isn't a date at all can't be one the database removed, so it's refused
+/// and nothing comes back.
 pub async fn findings_restore(
     state: &AppState,
     findings: Vec<RestoredFinding>,
 ) -> Result<usize, String> {
     let mut back = Vec::with_capacity(findings.len());
     for f in findings {
-        let Some(created_at) = reader_data::normalize_timestamp(&f.created_at) else {
+        if reader_data::normalize_timestamp(&f.created_at).is_none() {
             return Err("That finding's date isn't valid, so it couldn't be restored.".to_string());
-        };
-        back.push(NewFinding {
+        }
+        back.push(RemovedFinding {
             passage: Passage {
                 book_id: f.book_id,
                 chapter: f.chapter,
@@ -158,18 +161,15 @@ pub async fn findings_restore(
             },
             agent: f.agent,
             request: f.request,
-            created_at: Some(created_at),
+            created_at: f.created_at,
         });
     }
-    match state.store.add_findings(&back).await {
-        Ok(saved) => Ok(saved.saved.len()),
-        // An agent saved more meanwhile, up to the limit: said plainly.
-        Err(e @ FindingsError::Limit) => Err(e.to_string()),
-        Err(e) => {
-            tracing::error!("Failed to restore findings: {e}");
-            Err("The findings couldn't be restored.".to_string())
-        }
-    }
+    state
+        .store
+        .restore_findings(&back)
+        .await
+        .context("Failed to restore findings")
+        .map_err(failed("The findings couldn't be restored."))
 }
 
 /// "Keep as mine" (C10): `body` saved as the reader's own note on the verses
@@ -279,6 +279,7 @@ pub async fn set_ai_findings_enabled(
 mod tests {
     use super::*;
     use crate::commands::tests::app_state;
+    use crate::db::NewFinding;
 
     #[test]
     fn several_agents_are_named_in_a_list() {

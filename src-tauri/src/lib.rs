@@ -607,7 +607,12 @@ mod ipc_tests {
         assert_eq!(list[0]["id"], id);
         assert_eq!(list[0]["reference"], "John 3:16\u{2013}18");
         assert_eq!(
-            invoke(&webview, "remove_bookmark", json!({ "id": id })).unwrap(),
+            invoke(
+                &webview,
+                "remove_bookmark",
+                json!({ "id": id, "createdAt": list[0]["createdAt"] })
+            )
+            .unwrap(),
             true
         );
         // A command error reaches the frontend as the rejection value.

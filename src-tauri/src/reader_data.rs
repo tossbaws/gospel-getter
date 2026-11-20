@@ -43,7 +43,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use crate::db::findings::{normalize_agent, normalize_request};
+use crate::db::findings::{normalize_agent, recover_request};
 use crate::db::notes::normalize_body;
 // The rows an import writes are the database's (`db::reader_data`); named
 // here too, as validating a file makes them.
@@ -82,7 +82,9 @@ pub const FILE_SUFFIX: &str = ".gospel-getter.json";
 pub const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
 /// The most notes one file may hold: as many as the reader can keep.
 pub const MAX_NOTES: usize = crate::db::notes::MAX_NOTES;
-/// The most AI findings one file may hold: as many as the reader can keep.
+/// The most AI findings agents can save, which `MAX_FILE_BYTES` is sized
+/// for. A file isn't refused for holding more (an install from before the
+/// cap may have them): see `db::findings::MAX_FINDINGS`.
 pub const MAX_FINDINGS: usize = crate::db::findings::MAX_FINDINGS;
 /// The most characters the notes in one file may hold together: as many
 /// as the reader's notes can.
@@ -600,6 +602,9 @@ pub struct ValidatedImport {
     /// In the file's order. `None` for a format 1 to 3 file, which can't
     /// hold findings, so importing it leaves them alone.
     pub findings: Option<Vec<NewFinding>>,
+    /// How many of them had a request label today's rule refuses, so it was
+    /// cleaned (`db::findings::recover_request`).
+    pub findings_tidied: usize,
     /// The file's "Let AI agents save findings", if it has one.
     pub ai_findings_enabled: Option<bool>,
     pub position: Option<NewPosition>,
@@ -785,12 +790,6 @@ pub fn validate(
             data.notes.len()
         )]));
     }
-    if data.findings.len() > MAX_FINDINGS {
-        return Err(ImportError::Invalid(vec![format!(
-            "It has {} AI findings; the most one file can hold is {MAX_FINDINGS}.",
-            data.findings.len()
-        )]));
-    }
 
     let mut problems = Vec::new();
     let (bookmarks, duplicates_in_file) =
@@ -799,7 +798,8 @@ pub fn validate(
         validate_highlights(data.highlights, books, last_verses, &mut problems);
     let (notes, note_duplicates_in_file) =
         validate_notes(data.notes, books, last_verses, &mut problems);
-    let findings = validate_findings(data.findings, books, last_verses, &mut problems);
+    let (findings, findings_tidied) =
+        validate_findings(data.findings, books, last_verses, &mut problems);
     let position = validate_position(data.reading_position, books, translations, &mut problems);
 
     if !problems.is_empty() {
@@ -821,6 +821,7 @@ pub fn validate(
         notes: (data.format_version >= FORMAT_VERSION_3).then_some(notes),
         note_duplicates_in_file,
         findings: (data.format_version >= FORMAT_VERSION).then_some(findings),
+        findings_tidied,
         ai_findings_enabled: data.ai_findings_enabled,
         position,
         preferences: data.preferences,
@@ -968,17 +969,18 @@ fn validate_notes(
     (notes, note_duplicates_in_file)
 }
 
-/// A file's AI findings: each a passage this install has and a request
-/// that's a short topic label (`normalize_request`), with a valid date if
-/// it has one. Repeats are all kept here: merging keeps one per passage
-/// and request (`new_findings`).
+/// A file's AI findings: each a passage this install has, with a valid date
+/// if it has one, and its request label as today's rule allows it
+/// (`recover_request`: cleaned, never refused). Returns them, and how many
+/// labels were cleaned. Repeats are all kept here: merging keeps one per
+/// passage and request (`new_findings`).
 fn validate_findings(
     records: Vec<FindingRecord>,
     books: &[Book],
     last_verses: &HashMap<(i64, i64), i64>,
     problems: &mut Vec<String>,
-) -> Vec<NewFinding> {
-    valid_records(records, problems, |i, f: FindingRecord| {
+) -> (Vec<NewFinding>, usize) {
+    let checked = valid_records(records, problems, |i, f: FindingRecord| {
         let label = format!("AI finding {}", i + 1);
         let (found, reference) = check_passage_record(
             &label,
@@ -986,9 +988,8 @@ fn validate_findings(
             books,
             last_verses,
         )?;
-        let request =
-            normalize_request(&f.request).map_err(|e| record_problem(&label, &reference, e))?;
-        Ok(NewFinding {
+        let request = recover_request(&f.request);
+        let finding = NewFinding {
             passage: Passage {
                 book_id: found.id,
                 chapter: f.chapter,
@@ -996,10 +997,13 @@ fn validate_findings(
                 verse_end: f.verse_end,
             },
             agent: normalize_agent(&f.agent),
-            request,
+            request: request.label,
             created_at: checked_date(&label, &reference, f.created_at.as_deref())?,
-        })
-    })
+        };
+        Ok((finding, request.adjusted))
+    });
+    let tidied = checked.iter().filter(|(_, adjusted)| *adjusted).count();
+    (checked.into_iter().map(|(f, _)| f).collect(), tidied)
 }
 
 /// A file's reading position, if it has one: a translation this install
@@ -1089,6 +1093,7 @@ pub fn normalize_timestamp(input: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::findings::normalize_request;
 
     fn names<T: Serialize>(values: &[T]) -> Vec<String> {
         values
@@ -1856,20 +1861,14 @@ mod tests {
             request: "love".to_string(),
             created_at: None,
         };
-        assert_eq!(
-            refused(ReaderData {
-                findings: vec![finding.clone(); MAX_FINDINGS + 1],
-                ..empty()
-            })
-            .problems(),
-            ["It has 10001 AI findings; the most one file can hold is 10000."]
-        );
-        let at_limit = refused(ReaderData {
-            findings: vec![finding; MAX_FINDINGS],
+        // Past the agents' limit, a file's findings are still each checked:
+        // the count alone never refuses a backup.
+        let past_limit = refused(ReaderData {
+            findings: vec![finding; MAX_FINDINGS + 1],
             ..empty()
         });
         assert_eq!(
-            at_limit.problems()[0],
+            past_limit.problems()[0],
             "AI finding 1: there's no book number 43."
         );
     }

@@ -4,7 +4,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeBridge, openApp, settle, storedVerse, withApp } from './harness.mjs';
+import { backend, bookId, closeBridge, openApp, settle, storedVerse, withApp } from './harness.mjs';
 
 after(closeBridge);
 
@@ -343,4 +343,38 @@ test('C-03: Bookmark pressed while a newer reload of the bookmarks is on its way
         assert.equal(sent(before, 'add_bookmark'), 0);
         assert.equal(app.bookmarkButton().textContent, '★ Bookmark');
         assert.deepEqual(app.bookmarkItems(), []);
+    }));
+
+// GG32-04: SQLite gives a removed bookmark's id to the next one made. The
+// Library still lists bookmark A (John 3:16), removed meanwhile (from
+// another window, say), when bookmark B (John 3:18) takes its id; pressing
+// A's Remove sends A's id and when A was made, so B stays.
+test('GG32-04: Remove on a stale Library row leaves the newer bookmark that took its id', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        const JOHN = bookId('John');
+        app.click(app.verse(16));
+        let before = app.calls.length;
+        app.click(app.bookmarkButton());
+        await app.idle(before, 'list_bookmarks');
+        app.openLibrary('bookmarks');
+        await app.until(() => app.bookmarkItems().length === 1, 'A listed');
+        const [aRow] = app.bookmarkItems();
+        assert.equal(aRow.reference, 'John 3:16');
+
+        const [aStored] = await backend('list_bookmarks', { translationCode: 'kjv' });
+        const a = aStored.id;
+        assert.equal(await backend('remove_bookmark', { id: a, createdAt: aStored.createdAt }), true);
+        // B a moment later, so its date isn't A's.
+        await new Promise((r) => setTimeout(r, 5));
+        const b = await backend('add_bookmark', { bookId: JOHN, chapter: 3, verseStart: 18, verseEnd: 18 });
+        assert.equal(b, a, 'B gets A’s id');
+
+        before = app.calls.length;
+        app.click(aRow.remove);
+        await app.idle(before, 'list_bookmarks');
+        const sent = app.calls.slice(before).find((c) => c.cmd === 'remove_bookmark');
+        assert.deepEqual(JSON.parse(JSON.stringify(sent.args)), { id: a, createdAt: aStored.createdAt });
+        const left = (await backend('list_bookmarks', { translationCode: 'kjv' })).map((x) => x.reference);
+        assert.deepEqual(left, ['John 3:18'], 'B is still there');
+        assert.deepEqual(app.bookmarkItems().map((x) => x.reference), ['John 3:18'], 'and listed');
     }));

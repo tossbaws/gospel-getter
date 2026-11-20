@@ -8,8 +8,8 @@ use crate::db::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
 use crate::db::{
     self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Db, Finding,
     FindingRequest, FindingsError, Highlight, HighlightColor, HighlightPassageInTranslation,
-    KeepError, NewFinding, Note, NoteError, Passage, ReadingPlace, SavedFindings, SearchHit,
-    TopVerse, Verse,
+    KeepError, NewFinding, Note, NoteError, Passage, ReadingPlace, RemovedFinding, SavedFindings,
+    SearchHit, TopVerse, Verse,
 };
 use crate::domain::query::SearchQuery;
 
@@ -111,9 +111,10 @@ impl Store {
         db::bookmarks::list_bookmarks(self.db.read(), translation_id).await
     }
 
-    /// Remove a bookmark; returns whether it existed.
-    pub async fn remove_bookmark(&self, id: i64) -> anyhow::Result<bool> {
-        db::bookmarks::remove_bookmark(self.db.write(), id).await
+    /// Remove the bookmark with `id` and `created_at`; returns whether it
+    /// existed.
+    pub async fn remove_bookmark(&self, id: i64, created_at: &str) -> anyhow::Result<bool> {
+        db::bookmarks::remove_bookmark(self.db.write(), id, created_at).await
     }
 
     /// Highlight every verse of a passage in `color` (see
@@ -197,9 +198,9 @@ impl Store {
         db::notes::delete_note(self.db.write(), id, created_at).await
     }
 
-    /// Note `id`, if there is one.
-    pub async fn note(&self, id: i64) -> anyhow::Result<Option<Note>> {
-        db::notes::note(self.db.read(), id).await
+    /// The note with `id` and `created_at`, if there is one.
+    pub async fn note(&self, id: i64, created_at: &str) -> anyhow::Result<Option<Note>> {
+        db::notes::note(self.db.read(), id, created_at).await
     }
 
     /// Every note overlapping a passage, in the order they're shown.
@@ -237,12 +238,19 @@ impl Store {
         db::findings::list_requests(self.db.read()).await
     }
 
-    /// Save findings (bringing back removed ones), all or none.
+    /// Save findings as an agent's save does, all or none
+    /// (`db::findings::add_findings`).
     pub async fn add_findings(
         &self,
         findings: &[NewFinding],
     ) -> Result<SavedFindings, FindingsError> {
         db::findings::add_findings(self.db.write(), findings).await
+    }
+
+    /// Put back removed findings exactly as they were (Undo), all or none;
+    /// how many came back (`db::findings::restore_findings`).
+    pub async fn restore_findings(&self, findings: &[RemovedFinding]) -> anyhow::Result<usize> {
+        db::findings::restore_findings(self.db.write(), findings).await
     }
 
     /// Remove the finding with `id` and `created_at`, returning it as it

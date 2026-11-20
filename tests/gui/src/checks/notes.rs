@@ -481,10 +481,18 @@ const MARKDOWN_JS: &str = "const body = document.querySelector(arguments[0]);
 
 /// Starts asking for note `arguments[0]` as Markdown in the translation
 /// being read, through the page's own IPC, kept in
-/// `window.__guiCheckMarkdown` for [`MARKDOWN_DONE_JS`].
+/// `window.__guiCheckMarkdown` for [`MARKDOWN_DONE_JS`]. The command takes
+/// the note's `createdAt` with its id, read from the note list first.
 const MARKDOWN_ASK_JS: &str = "const s = window.__guiCheckMarkdown = { done: false, text: null, error: null };
+    const id = arguments[0];
     const code = document.querySelector('.chapter-main .verse[data-translation]').dataset.translation;
-    window.__TAURI__.core.invoke('get_note_markdown', { id: arguments[0], translationCode: code })
+    const invoke = window.__TAURI__.core.invoke;
+    invoke('list_all_notes')
+        .then((notes) => {
+            const note = notes.find((n) => n.id === id);
+            if (!note) throw new Error(`no note ${id}`);
+            return invoke('get_note_markdown', { id, createdAt: note.createdAt, translationCode: code });
+        })
         .then((text) => { s.text = text; }, (e) => { s.error = String(e); })
         .finally(() => { s.done = true; });
     return null;";

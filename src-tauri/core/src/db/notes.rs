@@ -394,8 +394,9 @@ pub(crate) async fn insert_note(
 /// AUTOINCREMENT, so when the newest note (or finding) is deleted the next
 /// one gets its id, and an edit, delete, Keep as mine or remove from a view
 /// still holding the old record would land on the new one (GG-06).
-/// [`delete_note`], [`super::findings::remove_finding`] and
-/// [`super::findings::keep_as_mine`] match the same way. No `updated_at`
+/// [`delete_note`], [`note`], [`super::findings::remove_finding`],
+/// [`super::findings::keep_as_mine`] and
+/// [`super::bookmarks::remove_bookmark`] match the same way. No `updated_at`
 /// check: two edits of one note can't overlap (the editor is one modal, the
 /// app one instance, and the CLI can't write notes).
 pub async fn update_note(
@@ -462,14 +463,17 @@ pub async fn delete_note(
     .context("Failed to delete note")
 }
 
-/// Note `id`, if there is one.
-pub async fn note(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<Note>> {
+/// The note with `id` and `created_at` (see [`update_note`] for why both),
+/// if there is one: Copy as Markdown, asked for a note a view still holds,
+/// never gets the text of a newer one given its id (GG32-05).
+pub async fn note(pool: &SqlitePool, id: i64, created_at: &str) -> anyhow::Result<Option<Note>> {
     sqlx::query_as::<_, Note>(concat!(
         "SELECT ",
         note_columns!(),
-        " FROM notes WHERE id = $1"
+        " FROM notes WHERE id = $1 AND created_at = $2"
     ))
     .bind(id)
+    .bind(created_at)
     .fetch_optional(pool)
     .await
     .context("Failed to read the note")

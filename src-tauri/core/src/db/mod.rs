@@ -23,7 +23,8 @@ pub use connect::{
     begin_write, create_pool, create_private_dir, open_read_only, read_only_once_more_if_changed,
 };
 pub use findings::{
-    Finding, FindingRequest, FindingsError, FindingsWriter, KeepError, NewFinding, SavedFindings,
+    Finding, FindingRequest, FindingsError, FindingsWriter, KeepError, NewFinding, RemovedFinding,
+    SavedFindings,
 };
 pub use highlights::{Highlight, HighlightColor, HighlightPassage, HighlightPassageInTranslation};
 pub use legacy::migrate_legacy_db_if_needed;

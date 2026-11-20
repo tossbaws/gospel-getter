@@ -771,3 +771,56 @@ pub async fn fill_findings(writer: &WritePool, count: usize) {
     .await
     .expect("fill findings");
 }
+
+/// Request labels 2.26.0 to 2.29.2 saved and today's rule refuses, one for
+/// each kind of character 2.29.3's rule (`findings::normalize_request`)
+/// added to what a request can't hold, each with the label a restore gives
+/// it (`findings::recover_request`). The last cleans to nothing.
+pub const OLD_RULE_REQUESTS: [(&str, &str); 11] = [
+    // A line separator (Zl).
+    ("grief\u{2028}loss", "grief loss"),
+    // A paragraph separator (Zp).
+    ("grief\u{2029}loss", "grief loss"),
+    // Format characters (Cf): a zero width space, a zero width no-break
+    // space, a word joiner, a bidi override, a soft hyphen, a tag character.
+    ("comfort\u{200B}", "comfort"),
+    ("\u{FEFF}hope", "hope"),
+    ("word\u{2060}joiner", "word joiner"),
+    ("rtl\u{202E}text", "rtl text"),
+    ("soft\u{AD}hyphen", "soft hyphen"),
+    ("tag\u{E0041}", "tag"),
+    // A joiner beside an ASCII letter, and a non-joiner at the end of a
+    // Persian word: neither joins anything.
+    ("a\u{200D}b", "a b"),
+    ("\u{645}\u{6CC}\u{200C}", "\u{645}\u{6CC}"),
+    // Nothing visible at all.
+    (
+        "\u{200B}\u{2028}\u{FEFF}",
+        crate::db::findings::EARLIER_REQUEST,
+    ),
+];
+
+/// One AI finding by "Claude" for each of [`OLD_RULE_REQUESTS`], on John
+/// 11:1, 11:2… in that order, dated a second apart from
+/// 2026-11-01T09:00:00.000Z, inserted with SQL as 2.26.0 to 2.29.2 stored
+/// them (today's rule would refuse them). Their dates, in order.
+pub async fn insert_old_rule_findings(writer: &WritePool) -> Vec<String> {
+    let mut dates = Vec::new();
+    for (i, (request, _)) in OLD_RULE_REQUESTS.iter().enumerate() {
+        let date = format!("2026-11-01T09:00:{i:02}.000Z");
+        let verse = i as i64 + 1;
+        sqlx::query(
+            "INSERT INTO ai_findings \
+                 (book_id, chapter, verse_start, verse_end, agent, request, created_at) \
+             VALUES (43, 11, $1, $1, 'Claude', $2, $3)",
+        )
+        .bind(verse)
+        .bind(request)
+        .bind(&date)
+        .execute(writer.pool())
+        .await
+        .expect("insert an old-rule finding");
+        dates.push(date);
+    }
+    dates
+}

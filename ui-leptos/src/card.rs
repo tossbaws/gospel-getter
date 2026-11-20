@@ -1230,7 +1230,13 @@ fn toggle_bookmark() -> Task {
     });
     let removing = existing.is_some();
     let sent = match (&existing, args) {
-        (Some(existing), _) => send("remove_bookmark", &RemoveBookmarkArgs { id: existing.id }),
+        (Some(existing), _) => send(
+            "remove_bookmark",
+            &RemoveBookmarkArgs {
+                id: existing.id,
+                created_at: &existing.created_at,
+            },
+        ),
         (None, Some(args)) => send("add_bookmark", &args),
         (None, None) => return Box::pin(async {}),
     };
@@ -2347,6 +2353,29 @@ pub fn shown(
 pub fn pane_switching() {
     close_menu(false);
     clear_selection();
+}
+
+/// The active pane's selection, to put back with [`reselect`] once its
+/// chapter is drawn again as it was: the second pane closing redraws the
+/// first (`pane::close_second`), and drawing a chapter clears the selection
+/// ([`shown`]), but closing the other pane isn't the reader leaving these
+/// verses (GG32-14).
+pub fn held_selection() -> Option<Selection> {
+    with(|s| s.selection.clone())
+}
+
+/// Puts back `held` ([`held_selection`]), with its card, if its verses are
+/// on screen in the active pane.
+pub fn reselect(held: Option<Selection>) {
+    let Some(held) = held else {
+        return;
+    };
+    if verse_element(&held.translation_code, held.start).is_none() {
+        return;
+    }
+    with(|s| s.selection = Some(held));
+    render_selection();
+    place_card();
 }
 
 /// Another pane is the active one: the margin shows its notes.

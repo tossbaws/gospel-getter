@@ -192,11 +192,13 @@ pub async fn note_restore(
         .map_err(|e| note_error_message(state, e))
 }
 
-/// Note `id` as Markdown, for Copy as Markdown, its verses quoted in the
-/// translation `translation_code` (see `notes_export::note_markdown`).
+/// The note with `id` and `created_at` (`db::notes::note`) as Markdown, for
+/// Copy as Markdown, its verses quoted in the translation `translation_code`
+/// (see `notes_export::note_markdown`).
 pub async fn note_markdown_text(
     state: &AppState,
     id: i64,
+    created_at: &str,
     translation_code: &str,
 ) -> Result<String, String> {
     let translation = state
@@ -206,7 +208,7 @@ pub async fn note_markdown_text(
         .ok_or_else(|| format!("There's no translation \u{201c}{translation_code}\u{201d}."))?;
     let note = state
         .store
-        .note(id)
+        .note(id, created_at)
         .await
         .with_context(|| format!("Failed to read note {id}"))
         .map_err(failed("The note couldn't be read."))?
@@ -253,15 +255,16 @@ pub async fn list_all_notes(state: tauri::State<'_, AppState>) -> Result<Vec<Not
         .map_err(failed("Notes couldn't be loaded."))
 }
 
-/// Note `id` as Markdown (Copy as Markdown), quoting its verses in
-/// `translation_code`.
+/// The note with `id` and `created_at` as Markdown (Copy as Markdown),
+/// quoting its verses in `translation_code`.
 #[tauri::command]
 pub async fn get_note_markdown(
     state: tauri::State<'_, AppState>,
     id: i64,
+    created_at: String,
     translation_code: String,
 ) -> Result<String, String> {
-    note_markdown_text(&state, id, &translation_code).await
+    note_markdown_text(&state, id, &created_at, &translation_code).await
 }
 
 #[tauri::command]
@@ -523,7 +526,9 @@ mod tests {
         for code in ["kjv", "web"] {
             let upper = code.to_uppercase();
             assert_eq!(
-                note_markdown_text(&state, note.id, code).await.unwrap(),
+                note_markdown_text(&state, note.id, &note.created_at, code)
+                    .await
+                    .unwrap(),
                 format!(
                     "## John 3:16\u{2013}17\n\n> **16** {} **17** {}\n>\n> \u{2014} John 3:16\u{2013}17 ({upper})\n\n\
                      **Loved**, see Rom 5:8.\n- the world",
@@ -534,7 +539,7 @@ mod tests {
             );
         }
         assert_eq!(
-            note_markdown_text(&state, note.id, "niv")
+            note_markdown_text(&state, note.id, &note.created_at, "niv")
                 .await
                 .unwrap_err(),
             "There's no translation \u{201c}niv\u{201d}."
@@ -543,10 +548,44 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            note_markdown_text(&state, note.id, "kjv")
+            note_markdown_text(&state, note.id, &note.created_at, "kjv")
                 .await
                 .unwrap_err(),
             "That note no longer exists; it may have been deleted."
         );
+    }
+
+    /// GG32-05: Copy as Markdown from a view still holding note A never
+    /// copies note B, which took A's id: it's answered as for a note
+    /// that's gone, with nothing of B's. B's own `created_at` gets B's.
+    #[tokio::test]
+    async fn copy_as_markdown_of_a_stale_note_never_copies_the_note_that_took_its_id() {
+        let (_db, state) = app_state("cmd_note_markdown_stale").await;
+        let at = |verse| Passage {
+            book_id: 43,
+            chapter: 3,
+            verse_start: verse,
+            verse_end: verse,
+        };
+        let long_ago = "2026-01-01T00:00:00.000Z";
+        let a = state
+            .store
+            .add_note(&at(16), "A's words.", Some((long_ago, long_ago)))
+            .await
+            .unwrap();
+        note_delete(&state, a.id, &a.created_at).await.unwrap();
+        let b = note_add(&state, at(18), "B's own words.").await.unwrap();
+        assert_eq!(b.id, a.id, "B gets A's id");
+
+        let stale = note_markdown_text(&state, a.id, &a.created_at, "kjv").await;
+        assert_eq!(
+            stale,
+            Err("That note no longer exists; it may have been deleted.".to_string())
+        );
+        let b_text = note_markdown_text(&state, b.id, &b.created_at, "kjv")
+            .await
+            .unwrap();
+        assert!(b_text.ends_with("B's own words."), "{b_text}");
+        assert!(b_text.starts_with("## John 3:18"), "{b_text}");
     }
 }

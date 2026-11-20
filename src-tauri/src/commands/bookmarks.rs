@@ -151,12 +151,17 @@ pub async fn add_bookmark(
     bookmark_passage(&state, book_id, chapter, verse_start, verse_end).await
 }
 
-/// Remove a bookmark; `false` if it was already gone.
+/// Remove the bookmark with `id` and `created_at`
+/// (`db::bookmarks::remove_bookmark`); `false` if it was already gone.
 #[tauri::command]
-pub async fn remove_bookmark(state: tauri::State<'_, AppState>, id: i64) -> Result<bool, String> {
+pub async fn remove_bookmark(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+    created_at: String,
+) -> Result<bool, String> {
     state
         .store
-        .remove_bookmark(id)
+        .remove_bookmark(id, &created_at)
         .await
         .with_context(|| format!("Failed to remove bookmark {id}"))
         .map_err(failed("The bookmark couldn't be removed."))

@@ -44,6 +44,18 @@ async function press(app, el) {
     await app.click(el);
 }
 
+/** A mouse's whole press of `el`, as the webview sends it: pointerdown, mousedown, pointerup, mouseup, click. */
+async function pressFully(app, el) {
+    const init = { bubbles: true, cancelable: true, button: 0 };
+    const Pointer = app.window.PointerEvent ?? app.window.MouseEvent;
+    el.dispatchEvent(new Pointer('pointerdown', init));
+    el.dispatchEvent(new app.window.MouseEvent('mousedown', init));
+    el.dispatchEvent(new Pointer('pointerup', init));
+    el.dispatchEvent(new app.window.MouseEvent('mouseup', init));
+    el.dispatchEvent(new app.window.MouseEvent('click', init));
+    await app.idle();
+}
+
 test('two panes: each chapter is its own get_reading, in its own translation, through the same markup', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
         assert.deepEqual([...panes(app).shown()], ['first']);
@@ -302,6 +314,40 @@ test('× puts the page back exactly as it was, the first pane active and its ref
         panes(app).close();
         await app.idle();
         assert.deepEqual(snapshot(), was);
+    }));
+
+test('pressing the second pane’s × keeps the first pane’s selection, and Copy as… for it (GG32-14)', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        await openBeside(app, { bookId: ROMANS, chapter: 5, translation: 'bsb' });
+        await press(app, verseIn(app, 1, 16));
+        assert.equal(panes(app).active(), 'first');
+        assert.deepEqual(marked(app, 1, 'verse-selected'), [16]);
+        const copyAs = () => app.document.querySelector('.verse-actions .verse-copy-as-btn');
+        assert.ok(copyAs(), 'Copy as… is offered for it');
+
+        await pressFully(app, bar(app, 'second').querySelector('.pane-close'));
+        assert.deepEqual([...panes(app).shown()], ['first']);
+        assert.equal(panes(app).active(), 'first');
+        assert.deepEqual(marked(app, 1, 'verse-selected'), [16], 'the selection is still there');
+        assert.ok(copyAs(), 'Copy as… is still offered');
+        assert.equal(copyAs().textContent, 'Copy as…');
+
+        // X, the key, likewise.
+        await openBeside(app, { bookId: ROMANS, chapter: 5, translation: 'bsb' });
+        await press(app, verseIn(app, 1, 16));
+        await app.key('x');
+        await app.idle();
+        assert.deepEqual([...panes(app).shown()], ['first']);
+        assert.deepEqual(marked(app, 1, 'verse-selected'), [16]);
+
+        // Any other control in the second pane's bar still makes it active,
+        // and the selection goes with the pane left (D3).
+        await openBeside(app, { bookId: ROMANS, chapter: 5, translation: 'bsb' });
+        await press(app, verseIn(app, 1, 16));
+        assert.equal(panes(app).active(), 'first');
+        await pressFully(app, bar(app, 'second').querySelector('.translation-toggle'));
+        assert.equal(panes(app).active(), 'second');
+        assert.deepEqual(marked(app, 1, 'verse-selected'), []);
     }));
 
 test('reading mode shows the active pane alone, the top bar acting on it, and leaving it brings the split back (D6)', () =>
