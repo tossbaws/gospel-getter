@@ -163,6 +163,9 @@ thread_local! {
 #[serde(rename_all = "camelCase")]
 struct NoteMarkdownArgs<'a> {
     id: i64,
+    /// With the id, so the backend answers only for this note, never for a
+    /// newer one given its id (GG32-05; `db::notes::note`).
+    created_at: &'a str,
     translation_code: &'a str,
 }
 
@@ -180,6 +183,7 @@ pub fn prefetch(note: &Copyable) {
     }
     let sent = ipc::args(&NoteMarkdownArgs {
         id: note.id,
+        created_at: &note.created_at,
         translation_code: &code,
     })
     .and_then(|args| ipc::send("get_note_markdown", args));

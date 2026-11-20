@@ -197,9 +197,9 @@ impl Store {
         db::notes::delete_note(self.db.write(), id, created_at).await
     }
 
-    /// Note `id`, if there is one.
-    pub async fn note(&self, id: i64) -> anyhow::Result<Option<Note>> {
-        db::notes::note(self.db.read(), id).await
+    /// The note with `id` and `created_at`, if there is one.
+    pub async fn note(&self, id: i64, created_at: &str) -> anyhow::Result<Option<Note>> {
+        db::notes::note(self.db.read(), id, created_at).await
     }
 
     /// Every note overlapping a passage, in the order they're shown.
