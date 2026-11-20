@@ -22,9 +22,7 @@ use rmcp::model::{
     ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
-use rmcp::{
-    ErrorData, Peer, RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router,
-};
+use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use std::path::PathBuf;
 
 use crate::query::{
@@ -260,15 +258,18 @@ impl Server {
     )]
     async fn save_findings(
         &self,
-        peer: Peer<RoleServer>,
+        context: RequestContext<RoleServer>,
         Parameters(args): Parameters<SaveFindingsArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        // The agent's name, when it gives none, is the client's own, from the
-        // initialize handshake (`findings::client_agent` picks title or name).
-        let client = peer.peer_info().map(|info| {
-            let client = &info.client_info;
-            client_agent(client.title.as_deref(), &client.name)
-        });
+        // The agent's name, when it gives none, is the client's own, read from
+        // this request (`findings::client_agent` picks title or name). Never
+        // `Peer::peer_info` alone: only the initialize handshake fills it, the
+        // stateless protocol (2026-07-28) has none, and there every finding
+        // would read "AI agent" (C-02). `client_info` reads the request's
+        // `_meta` first, then the handshake (rmcp-3.9.0 src/service.rs:1248).
+        let client = context
+            .client_info()
+            .map(|info| client_agent(info.title.as_deref(), &info.name));
         self.answer(Request::SaveFindings { args, client }).await
     }
 
