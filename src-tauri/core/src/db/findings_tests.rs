@@ -5,12 +5,14 @@
 use std::time::Duration;
 
 use super::findings::{
-    DEFAULT_AGENT, FindingsWriter, KeepError, MAX_FINDINGS, NewFinding, add_findings, all_findings,
-    findings_enabled, keep_as_mine, list_findings, list_requests, remove_finding, remove_request,
-    set_findings_enabled,
+    DEFAULT_AGENT, Finding, FindingsWriter, KeepError, MAX_FINDINGS, NewFinding, RemovedFinding,
+    add_findings, all_findings, findings_enabled, keep_as_mine, list_findings, list_requests,
+    remove_finding, remove_request, restore_findings, set_findings_enabled,
 };
 use super::notes::{MAX_NOTES, NoteLimit, Passage, add_note, list_notes};
-use super::test_support::{TempDb, fill_findings, fill_notes, fresh_database};
+use super::test_support::{
+    OLD_RULE_REQUESTS, TempDb, fill_findings, fill_notes, fresh_database, insert_old_rule_findings,
+};
 use super::{
     Db, FindingsError, HighlightColor, NoteBodyError, NoteError, begin_write, bookmarks, highlights,
 };
@@ -293,16 +295,13 @@ async fn a_request_is_removed_alone_and_comes_back_with_its_dates() {
     assert_eq!(left[0].request, "tears");
 
     // Undo brings them back as they were, but for their ids.
-    let back: Vec<NewFinding> = removed
-        .iter()
-        .map(|f| NewFinding {
-            passage: f.passage(),
-            agent: f.agent.clone(),
-            request: f.request.clone(),
-            created_at: Some(f.created_at.clone()),
-        })
-        .collect();
-    add_findings(pool.write(), &back).await.expect("restore");
+    let back: Vec<RemovedFinding> = removed.iter().cloned().map(RemovedFinding::from).collect();
+    assert_eq!(
+        restore_findings(pool.write(), &back)
+            .await
+            .expect("restore"),
+        2
+    );
     let restored = list_requests(pool.read()).await.unwrap();
     let grief = restored.iter().find(|g| g.request == "grief").unwrap();
     let dates: Vec<&str> = grief
@@ -405,8 +404,9 @@ async fn finding_count(pool: &Db) -> usize {
 /// A save that would make more saves none of its findings (all or none,
 /// as a passage that isn't there stops them all), and says so plainly;
 /// one that only finds its verses already saved adds nothing, so it's
-/// answered as before even at the limit. Undo's re-add (`add_findings`)
-/// and an agent's save (the writer) obey it alike.
+/// answered as before even at the limit. An agent's save through the writer
+/// and `add_findings` (the same save through the app's connection) obey it
+/// alike; Undo doesn't (`undo_puts_back_past_the_limit`).
 #[tokio::test]
 async fn findings_stop_at_the_limit_all_or_none() {
     assert_eq!(MAX_FINDINGS, 10_000);
@@ -481,6 +481,111 @@ async fn findings_stop_at_the_limit_all_or_none() {
     writer.close().await;
     assert_eq!(saved.saved.len(), 2);
     assert_eq!(finding_count(&pool).await, MAX_FINDINGS);
+}
+
+/// Every finding, as its columns are stored, but for its id.
+async fn stored(pool: &Db) -> Vec<(i64, i64, i64, i64, String, String, String)> {
+    sqlx::query_as(
+        "SELECT book_id, chapter, verse_start, verse_end, agent, request, created_at \
+         FROM ai_findings ORDER BY book_id, chapter, verse_start, request",
+    )
+    .fetch_all(pool.read())
+    .await
+    .expect("read the findings")
+}
+
+/// Undo puts back exactly what was removed, a finding whose label an older
+/// rule saved and today's refuses included: its agent, request and date byte
+/// for byte, one finding or a whole request (GG32-01, AF1).
+#[tokio::test]
+async fn undo_puts_back_a_finding_an_older_rule_saved_exactly() {
+    let (_db, pool) = fresh_database("findings_undo_old_rule").await;
+    insert_old_rule_findings(pool.write()).await;
+    let before = stored(&pool).await;
+    assert_eq!(before.len(), OLD_RULE_REQUESTS.len());
+
+    for found in all_findings(pool.read()).await.unwrap() {
+        let removed: Finding = remove_finding(pool.write(), found.id, &found.created_at)
+            .await
+            .unwrap()
+            .expect("removed");
+        assert_eq!(stored(&pool).await.len(), before.len() - 1);
+        let back = restore_findings(pool.write(), &[removed.into()])
+            .await
+            .expect("Undo");
+        assert_eq!(back, 1, "{:?}", found.request);
+        assert_eq!(stored(&pool).await, before, "{:?}", found.request);
+    }
+
+    for (request, _) in OLD_RULE_REQUESTS {
+        let removed = remove_request(pool.write(), request).await.unwrap();
+        assert_eq!(removed.len(), 1, "{request:?}");
+        let back: Vec<RemovedFinding> = removed.into_iter().map(RemovedFinding::from).collect();
+        assert_eq!(restore_findings(pool.write(), &back).await.unwrap(), 1);
+        assert_eq!(stored(&pool).await, before, "{request:?}");
+    }
+}
+
+/// Undo isn't an agent's save: it puts back what was removed even when
+/// agents have since filled the findings to the limit. An agent's save
+/// afterwards is still refused at the limit, as ever.
+#[tokio::test]
+async fn undo_puts_back_past_the_limit() {
+    let (db, pool) = fresh_database("findings_undo_limit").await;
+    add_findings(pool.write(), &[new(verse(11, 33), "grief")])
+        .await
+        .expect("save");
+    let found = all_findings(pool.read()).await.unwrap().remove(0);
+    let removed = remove_finding(pool.write(), found.id, &found.created_at)
+        .await
+        .unwrap()
+        .expect("removed");
+    fill_findings(pool.write(), MAX_FINDINGS).await;
+
+    assert_eq!(
+        restore_findings(pool.write(), &[removed.into()])
+            .await
+            .expect("Undo past the limit"),
+        1
+    );
+    assert_eq!(finding_count(&pool).await, MAX_FINDINGS + 1);
+    assert!(all_findings(pool.read()).await.unwrap().iter().any(|f| {
+        (f.request.as_str(), f.created_at.as_str()) == ("grief", found.created_at.as_str())
+    }));
+
+    set_findings_enabled(pool.write(), true).await.expect("on");
+    let writer = FindingsWriter::open(&db.path()).await.expect("open");
+    let agent = writer.add("Claude", "tears", &[verse(11, 35)]).await;
+    writer.close().await;
+    assert!(matches!(agent, Err(FindingsError::Limit)), "{agent:?}");
+    assert_eq!(
+        agent.unwrap_err().to_string(),
+        "Gospel Getter holds at most 10,000 AI findings; remove some in the Library first."
+    );
+}
+
+/// A new agent save keeps today's rule: a label an older rule allowed is
+/// refused with today's words, and nothing is saved.
+#[tokio::test]
+async fn an_agent_save_with_a_label_an_older_rule_allowed_is_still_refused() {
+    let (db, pool) = fresh_database("findings_old_rule_agent").await;
+    set_findings_enabled(pool.write(), true).await.expect("on");
+    let writer = FindingsWriter::open(&db.path()).await.expect("open");
+    for (request, _) in OLD_RULE_REQUESTS {
+        let result = writer.add("Claude", request, &[verse(11, 35)]).await;
+        let Err(e @ FindingsError::Request(_)) = result else {
+            panic!("{request:?}: {result:?}");
+        };
+        assert_eq!(
+            e.to_string(),
+            "The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the \
+             sun\u{201d}, so it can't have a colon, a semicolon, a dash (\u{2014} or \u{2013}), \
+             a line break or a character that can't be seen.",
+            "{request:?}"
+        );
+    }
+    writer.close().await;
+    assert_eq!(finding_count(&pool).await, 0);
 }
 
 /// A database the app hasn't opened since 2.25.x has no tables for

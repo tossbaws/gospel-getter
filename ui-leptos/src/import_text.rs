@@ -393,6 +393,9 @@ pub fn result_parts(preview: &ImportPreview, replace: bool, result: &ImportResul
             )
         });
     }
+    if result.findings_tidied > 0 {
+        parts.push(tidied(result.findings_tidied));
+    }
     if let Some(on) = result.findings_permission {
         parts.push(format!(
             "Turned {} “Let AI agents save findings”.",
@@ -408,6 +411,20 @@ pub fn result_parts(preview: &ImportPreview, replace: bool, result: &ImportResul
         parts.push(notice.clone());
     }
     parts
+}
+
+/// That `count` of the file's AI findings had a label this version doesn't
+/// allow (one saved under an older rule), so the import cleaned it instead
+/// of refusing the file.
+fn tidied(count: u64) -> String {
+    if count == 1 {
+        "1 AI finding had a label this version doesn’t allow, so it was tidied up.".to_string()
+    } else {
+        format!(
+            "{} had labels this version doesn’t allow, so they were tidied up.",
+            plural(count, "AI finding")
+        )
+    }
 }
 
 /// What applying the file's display settings came to.
@@ -717,6 +734,42 @@ mod tests {
         // Left alone: nothing said about the switch.
         let untouched = result_parts(&with_findings(), false, &ImportResult::default());
         assert!(!untouched.iter().any(|p| p.contains("Let AI agents")));
+    }
+
+    /// Findings whose labels were cleaned (GG32-01) are said in one sentence
+    /// after the findings', one or many; none, nothing is said.
+    #[test]
+    fn tidied_labels_are_said_once_and_only_when_there_were_some() {
+        let said = |tidied: u64| {
+            let result = ImportResult {
+                findings_added: 3,
+                findings_tidied: tidied,
+                ..ImportResult::default()
+            };
+            result_parts(&with_findings(), false, &result)
+        };
+        assert!(!said(0).iter().any(|p| p.contains("tidied")));
+        let one = said(1);
+        let at = one
+            .iter()
+            .position(|p| p == "Added 3 AI findings.")
+            .unwrap();
+        assert_eq!(
+            one[at + 1],
+            "1 AI finding had a label this version doesn’t allow, so it was tidied up."
+        );
+        assert!(
+            said(3).contains(
+                &"3 AI findings had labels this version doesn’t allow, so they were tidied up."
+                    .to_string()
+            )
+        );
+        assert!(
+            said(1200).contains(
+                &"1,200 AI findings had labels this version doesn’t allow, so they were tidied up."
+                    .to_string()
+            )
+        );
     }
 
     #[test]

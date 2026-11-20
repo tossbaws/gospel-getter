@@ -369,3 +369,39 @@ test('after a failure, Cancel cancels again and says nothing was changed', () =>
         assert.equal(app.toast().textContent, 'Import cancelled. Nothing was changed.');
         assert.deepEqual(await findingsHere(), []);
     }));
+
+// A backup always restores (GG32-01): findings 2.26.0 to 2.29.2 saved with a
+// request label today's rule refuses (a line separator, a zero width space)
+// come back with the label tidied up, the note beside them too, and the
+// result says how many were tidied.
+const NOTE = {
+    book: 43, book_name: 'John', chapter: 3, verse_start: 16, verse_end: 16,
+    body: 'For God so loved.', created_at: '2026-10-01T09:00:00.000Z', updated_at: '2026-10-01T09:00:00.000Z',
+};
+const notesHere = async () => (await backend('list_all_notes')).map((n) => `${n.reference} ${n.body}`);
+
+test('a backup with AI findings an older version saved restores, their labels tidied up, the note too', () =>
+    withApp({}, async (app) => {
+        await preview(app, v4({ notes: [NOTE], findings: [finding(16, 'grief loss'), finding(17, 'comfort​')] }));
+        assert.ok(summary(app).includes('2 AI findings: 2 new, 0 you already have.'), summary(app).join(' | '));
+        await confirm(app);
+        assert.equal(
+            app.notice(),
+            'Import complete. Added 2 bookmarks. Added 1 note. Added 2 AI findings. 2 AI findings had labels this version doesn’t allow, so they were tidied up.',
+        );
+        assert.deepEqual(await findingsHere(), ['comfort 17', 'grief loss 16']);
+        assert.deepEqual(await notesHere(), ['John 3:16 For God so loved.']);
+    }));
+
+test('replacing with a backup holding one such finding says it in the singular', () =>
+    withApp({}, async (app) => {
+        await preview(app, v4({ notes: [NOTE], findings: [finding(16, '﻿hope'), finding(17)] }));
+        choose(app, 'replace');
+        await confirm(app);
+        assert.equal(
+            app.notice(),
+            'Import complete. Replaced 0 bookmarks with the file’s 2 bookmarks. Replaced 0 notes with the file’s 1 note. Replaced 0 AI findings with the file’s 2 AI findings. 1 AI finding had a label this version doesn’t allow, so it was tidied up.',
+        );
+        assert.deepEqual(await findingsHere(), ['hope 16', 'love 17']);
+        assert.deepEqual(await notesHere(), ['John 3:16 For God so loved.']);
+    }));

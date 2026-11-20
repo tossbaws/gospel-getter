@@ -89,10 +89,11 @@ const A_REQUEST_IS: &str =
 
 /// The most AI findings Gospel Getter keeps, every request's together, as
 /// [`MAX_NOTES`](super::notes::MAX_NOTES) is for notes: a backup holds them
-/// all and an import accepts no more, so every backup imports again, and it
-/// bounds a backup's size (`reader_data::MAX_FILE_BYTES` in the app).
-/// Enforced where every finding is saved (`insert_findings`): an agent's
-/// save, the app's Undo and an import.
+/// all, and it bounds a backup's size (`reader_data::MAX_FILE_BYTES` in the
+/// app). Enforced where an agent's save is (`insert_findings`), and only
+/// there: the app's Undo ([`restore_findings`]) and an import put back the
+/// reader's own records, which a cap must never refuse (decision AF1), and
+/// an install from before the cap (2.26.0) may hold more.
 pub const MAX_FINDINGS: usize = 10_000;
 
 /// Who a finding is said to be by when its agent gives no name.
@@ -218,6 +219,97 @@ pub fn normalize_agent(raw: &str) -> String {
         DEFAULT_AGENT.to_string()
     } else {
         agent.to_string()
+    }
+}
+
+/// The label a finding from a backup gets when nothing of its own label is
+/// left that today's rule allows ([`recover_request`]).
+pub const EARLIER_REQUEST: &str = "Earlier request";
+
+/// A label read back from the reader's own records, as it's stored now, and
+/// whether it had to be tidied up to get there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recovered {
+    pub label: String,
+    /// It broke today's rule, so it isn't the label the record held.
+    pub adjusted: bool,
+}
+
+/// A request label from a backup, as today's rule ([`normalize_request`])
+/// allows it: unchanged if the rule accepts it, otherwise cleaned
+/// (`recover_label`), or [`EARLIER_REQUEST`] if nothing is left.
+///
+/// A restore cleans a label instead of refusing it (decision AF1 of the
+/// 2026-11-19 audit fix chain): the reader's own backup must always
+/// restore, and a finding saved under an older, looser rule (2.26.0 to
+/// 2.29.2 let a request hold a line or paragraph separator and invisible
+/// format characters, which 2.29.3 refused) would otherwise make the whole
+/// file, notes and all, refuse to import. A new agent write never comes
+/// through here: it keeps the strict rule and its refusal
+/// ([`FindingsWriter::add`]). Two findings of the same passage whose labels
+/// clean to the same request are then one finding, as two alike in a file
+/// always were: the database keeps one per passage and request, and the
+/// import counts the rest as repeats.
+pub fn recover_request(raw: &str) -> Recovered {
+    recover_label(
+        raw,
+        &NOT_IN_A_REQUEST,
+        MAX_REQUEST_CHARS,
+        normalize_request,
+        EARLIER_REQUEST,
+    )
+}
+
+/// `raw` as `rule` stores it, if `rule` accepts it; otherwise cleaned until
+/// `rule` does: each character it can't hold (one of `refused`, or one that
+/// breaks the line or can't be seen, `hidden_chars`) as a space, runs of
+/// spaces as one, trimmed, cut to `max_chars` without ending in a space or a
+/// joiner. Cleaning again until nothing changes, since a space put in can
+/// leave a joiner beside it that no longer joins. `fallback` if that leaves
+/// nothing `rule` accepts. Deterministic, and never a label `rule` refuses
+/// unless `fallback` is one. The one shape for every label restored from
+/// the reader's records, so each kind's rule is the only thing that differs.
+fn recover_label<E>(
+    raw: &str,
+    refused: &[char],
+    max_chars: usize,
+    rule: impl Fn(&str) -> Result<String, E>,
+    fallback: &str,
+) -> Recovered {
+    if let Ok(label) = rule(raw) {
+        return Recovered {
+            label,
+            adjusted: false,
+        };
+    }
+    let mut label = raw.to_string();
+    let label = loop {
+        let mut cleaned = String::with_capacity(label.len());
+        for (c, hidden) in hidden_chars(&label) {
+            let c = if hidden || refused.contains(&c) {
+                ' '
+            } else {
+                c
+            };
+            if !(c == ' ' && cleaned.ends_with(' ')) {
+                cleaned.push(c);
+            }
+        }
+        let cut: String = cleaned.trim().chars().take(max_chars).collect();
+        let cut = cut
+            .trim_end_matches(|c: char| c.is_whitespace() || JOINERS.contains(&c))
+            .to_string();
+        if let Ok(accepted) = rule(&cut) {
+            break accepted;
+        }
+        if cut == label || cut.is_empty() {
+            break fallback.to_string();
+        }
+        label = cut;
+    };
+    Recovered {
+        label,
+        adjusted: true,
     }
 }
 
@@ -388,19 +480,24 @@ async fn finding_count(conn: &mut SqliteConnection) -> anyhow::Result<usize> {
 /// Each finding's passage checked, and the finding saved unless the same
 /// verses are already saved for the same request, all on `conn`, which is in
 /// a transaction that writes. One that can't be saved stops them all, and so
-/// does one that would make more than [`MAX_FINDINGS`] in all
-/// ([`FindingsError::Limit`]): all or none, as every caller rolls its
-/// transaction back on an error, so a save that would pass the limit saves
-/// nothing. One already saved for its request adds nothing, so it never
-/// counts against the limit: at the limit, saving the same verses again
-/// still answers that they're already saved.
+/// does one that would make more than `cap` in all ([`FindingsError::Limit`]):
+/// all or none, as every caller rolls its transaction back on an error, so a
+/// save that would pass the limit saves nothing. One already saved for its
+/// request adds nothing, so it never counts against the limit: at the limit,
+/// saving the same verses again still answers that they're already saved.
+/// `cap` is `Some(MAX_FINDINGS)` for what an agent saves and `None` for an
+/// import (see [`MAX_FINDINGS`]).
 pub(crate) async fn insert_findings(
     conn: &mut SqliteConnection,
     findings: &[NewFinding],
+    cap: Option<usize>,
 ) -> Result<SavedFindings, FindingsError> {
     let mut checked: HashMap<(i64, i64), (i64, i64)> = HashMap::new();
     let mut saved = SavedFindings::default();
-    let mut count = finding_count(&mut *conn).await?;
+    let mut count = match cap {
+        Some(_) => finding_count(&mut *conn).await?,
+        None => 0,
+    };
     for finding in findings {
         let request = normalize_request(&finding.request)?;
         let agent = normalize_agent(&finding.agent);
@@ -426,7 +523,7 @@ pub(crate) async fn insert_findings(
         .rows_affected();
         if inserted > 0 {
             count += 1;
-            if count > MAX_FINDINGS {
+            if cap.is_some_and(|cap| count > cap) {
                 return Err(FindingsError::Limit);
             }
             saved.saved.push(p);
@@ -487,9 +584,11 @@ async fn check_finding_passage(
     Ok(())
 }
 
-/// Save findings from the app itself (Undo after a removal brings them back
-/// with their own dates), all or none. The reader's own action, so it
-/// doesn't ask the switch, which is about agents.
+/// Save findings as an agent's save does ([`FindingsWriter::add`]'s rules
+/// and its [`MAX_FINDINGS`] limit), all or none, but through the app's own
+/// connection and without asking the switch: the test bridges seed findings
+/// with it. The app's Undo puts back what it removed with
+/// [`restore_findings`] instead.
 pub async fn add_findings(
     writer: &WritePool,
     findings: &[NewFinding],
@@ -497,9 +596,75 @@ pub async fn add_findings(
     let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start saving findings")?;
-    let saved = insert_findings(&mut tx, findings).await?;
+    let saved = insert_findings(&mut tx, findings, Some(MAX_FINDINGS)).await?;
     tx.commit().await.context("Failed to save findings")?;
     Ok(saved)
+}
+
+/// A removed finding to put back as it was ([`restore_findings`]): its
+/// passage, agent, request and date, but not its id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemovedFinding {
+    pub passage: Passage,
+    pub agent: String,
+    pub request: String,
+    pub created_at: String,
+}
+
+impl From<Finding> for RemovedFinding {
+    fn from(f: Finding) -> Self {
+        Self {
+            passage: f.passage(),
+            agent: f.agent,
+            request: f.request,
+            created_at: f.created_at,
+        }
+    }
+}
+
+/// Put back findings the reader removed (the app's Undo of
+/// [`remove_finding`] or [`remove_request`]), each exactly as it was: its
+/// agent, request and date byte for byte, all or none. How many came back;
+/// one whose passage and request an agent saved again meanwhile is already
+/// there and is left as it is.
+///
+/// Undo puts back a record, it doesn't make a new one, so none of a new
+/// write's rules apply: not today's label rule, which a finding saved under
+/// an older rule may break (decision AF1; see [`recover_request`]), and not
+/// [`MAX_FINDINGS`], which an agent may have reached meanwhile. Only the
+/// table's own constraints do. It takes a [`WritePool`], which only the app
+/// has: nothing outside it can write a finding this way (see
+/// [`FindingsWriter`]).
+pub async fn restore_findings(
+    writer: &WritePool,
+    findings: &[RemovedFinding],
+) -> anyhow::Result<usize> {
+    let mut tx = crate::db::begin_write(writer)
+        .await
+        .context("Failed to start restoring findings")?;
+    let mut restored = 0;
+    for f in findings {
+        let p = f.passage;
+        restored += sqlx::query(
+            "INSERT INTO ai_findings \
+                 (book_id, chapter, verse_start, verse_end, agent, request, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             ON CONFLICT (book_id, chapter, verse_start, verse_end, request) DO NOTHING",
+        )
+        .bind(p.book_id)
+        .bind(p.chapter)
+        .bind(p.verse_start)
+        .bind(p.verse_end)
+        .bind(&f.agent)
+        .bind(&f.request)
+        .bind(&f.created_at)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to restore a finding")?
+        .rows_affected();
+    }
+    tx.commit().await.context("Failed to restore findings")?;
+    usize::try_from(restored).context("restored count out of range")
 }
 
 /// The findings on one chapter, in the order they're shown.
@@ -636,7 +801,7 @@ fn verses_marked(findings: &[Finding]) -> i64 {
 
 /// Remove the finding with `id` and `created_at` (see
 /// [`super::notes::update_note`] for why both), returning it as it was (to
-/// bring back with [`add_findings`]), or `None` if it was already gone.
+/// bring back with [`restore_findings`]), or `None` if it was already gone.
 pub async fn remove_finding(
     writer: &WritePool,
     id: i64,
@@ -653,8 +818,8 @@ pub async fn remove_finding(
     .context("Failed to remove the finding")
 }
 
-/// Remove every finding of one request (C4), returning them as they were,
-/// in Bible order.
+/// Remove every finding of one request (C4), returning them as they were
+/// (to bring back with [`restore_findings`]), in Bible order.
 pub async fn remove_request(writer: &WritePool, request: &str) -> anyhow::Result<Vec<Finding>> {
     let mut removed = sqlx::query_as::<_, Finding>(concat!(
         "DELETE FROM ai_findings WHERE request = $1 RETURNING ",
@@ -849,7 +1014,7 @@ impl FindingsWriter {
         if !enabled_on(&mut tx).await? {
             return Err(FindingsError::Off);
         }
-        let saved = insert_findings(&mut tx, &findings).await?;
+        let saved = insert_findings(&mut tx, &findings, Some(MAX_FINDINGS)).await?;
         tx.commit().await.context("Failed to save findings")?;
         Ok(saved)
     }
@@ -1061,6 +1226,138 @@ mod tests {
                  a line break or a character that can't be seen."
             )
         );
+    }
+
+    /// A label that older versions saved and today's rule refuses comes back
+    /// cleaned, one fixture per kind of character the rule came to refuse
+    /// (GG32-01, AF1).
+    #[test]
+    fn a_label_an_older_rule_saved_is_cleaned_not_refused() {
+        for (stored, cleaned) in crate::db::test_support::OLD_RULE_REQUESTS {
+            assert!(normalize_request(stored).is_err(), "{stored:?}");
+            assert_eq!(
+                recover_request(stored),
+                Recovered {
+                    label: cleaned.to_string(),
+                    adjusted: true
+                },
+                "{stored:?}"
+            );
+        }
+    }
+
+    /// A label today's rule accepts is kept exactly, joiners in words and
+    /// emoji included, and isn't counted as tidied.
+    #[test]
+    fn a_label_the_rule_accepts_is_unchanged() {
+        for label in [
+            "grief",
+            "  the sun ",
+            "\u{645}\u{6CC}\u{200C}\u{62E}\u{648}\u{627}\u{647}\u{645}",
+            "👨\u{200D}👩\u{200D}👧",
+            &"\u{1d11e}".repeat(MAX_REQUEST_CHARS),
+        ] {
+            assert_eq!(
+                recover_request(label),
+                Recovered {
+                    label: label.trim().to_string(),
+                    adjusted: false
+                }
+            );
+        }
+    }
+
+    /// Whatever a label held, what's left is cleaned of it: the rule's own
+    /// punctuation, runs of spaces, the length, a joiner left beside a space
+    /// put in, and nothing left at all.
+    #[test]
+    fn cleaning_keeps_what_the_rule_allows() {
+        let tidied = |raw: &str| {
+            let recovered = recover_request(raw);
+            assert!(recovered.adjusted, "{raw:?}");
+            recovered.label
+        };
+        assert_eq!(tidied("grief: here Jesus wept"), "grief here Jesus wept");
+        assert_eq!(tidied("a ;\u{2014}\u{2013} b"), "a b");
+        assert_eq!(tidied(&"x".repeat(MAX_REQUEST_CHARS + 5)), "x".repeat(60));
+        let long = format!("{}\u{200B}{}", "a".repeat(58), "b".repeat(10));
+        assert_eq!(tidied(&long), format!("{} b", "a".repeat(58)));
+        // A space at the cut is dropped, not kept at the end.
+        let spaced = format!("{}:b", "a".repeat(MAX_REQUEST_CHARS - 1));
+        assert_eq!(tidied(&spaced), "a".repeat(MAX_REQUEST_CHARS - 1));
+        // The non-joiner joined Persian letter and dash; once the dash is a
+        // space, it joins nothing, and goes too.
+        assert_eq!(tidied("\u{628}\u{200C}\u{2014}x"), "\u{628} x");
+        for nothing in ["", "   ", ":", "\u{200B}", "\u{2014} ; \u{2028}\t"] {
+            assert_eq!(tidied(nothing), EARLIER_REQUEST, "{nothing:?}");
+        }
+        assert_eq!(
+            normalize_request(EARLIER_REQUEST).as_deref(),
+            Ok(EARLIER_REQUEST)
+        );
+    }
+
+    /// Whatever a label holds, recovering it gives a label today's rule
+    /// accepts as it is, and the same one every time: labels made of the
+    /// characters that matter here, at random from a fixed seed.
+    #[test]
+    fn a_recovered_label_always_passes_the_rule() {
+        let palette = [
+            'a',
+            'Z',
+            '7',
+            ' ',
+            ' ',
+            '\t',
+            '\n',
+            ':',
+            ';',
+            '\u{2014}',
+            '\u{2013}',
+            '\u{200B}',
+            '\u{200C}',
+            '\u{200D}',
+            '\u{2060}',
+            '\u{FEFF}',
+            '\u{202E}',
+            '\u{AD}',
+            '\u{2028}',
+            '\u{2029}',
+            '\u{E0041}',
+            '\u{A0}',
+            '\u{3000}',
+            '\u{628}',
+            '\u{645}',
+            '👨',
+            '👩',
+            '\u{1d11e}',
+            '\u{0301}',
+            '\u{7f}',
+            '\u{85}',
+        ];
+        let mut seed: u64 = 0x2026_1119;
+        let mut next = |below: usize| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) as usize % below
+        };
+        for _ in 0..20_000 {
+            let len = next(90);
+            let raw: String = (0..len).map(|_| palette[next(palette.len())]).collect();
+            let recovered = recover_request(&raw);
+            assert_eq!(
+                normalize_request(&recovered.label).as_deref(),
+                Ok(recovered.label.as_str()),
+                "{raw:?}"
+            );
+            assert_eq!(
+                recovered.adjusted,
+                normalize_request(&raw).is_err(),
+                "{raw:?}"
+            );
+            assert_eq!(recover_request(&raw), recovered, "{raw:?}");
+        }
     }
 
     /// The limits here are the ones the table's CHECKs enforce.

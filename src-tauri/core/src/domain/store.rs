@@ -8,8 +8,8 @@ use crate::db::reader_data::{NewBookmark, NewHighlight, NewNote, NewPosition};
 use crate::db::{
     self, Bookmark, BookmarkError, BookmarkInTranslation, CrossReference, Db, Finding,
     FindingRequest, FindingsError, Highlight, HighlightColor, HighlightPassageInTranslation,
-    KeepError, NewFinding, Note, NoteError, Passage, ReadingPlace, SavedFindings, SearchHit,
-    TopVerse, Verse,
+    KeepError, NewFinding, Note, NoteError, Passage, ReadingPlace, RemovedFinding, SavedFindings,
+    SearchHit, TopVerse, Verse,
 };
 use crate::domain::query::SearchQuery;
 
@@ -237,12 +237,19 @@ impl Store {
         db::findings::list_requests(self.db.read()).await
     }
 
-    /// Save findings (bringing back removed ones), all or none.
+    /// Save findings as an agent's save does, all or none
+    /// (`db::findings::add_findings`).
     pub async fn add_findings(
         &self,
         findings: &[NewFinding],
     ) -> Result<SavedFindings, FindingsError> {
         db::findings::add_findings(self.db.write(), findings).await
+    }
+
+    /// Put back removed findings exactly as they were (Undo), all or none;
+    /// how many came back (`db::findings::restore_findings`).
+    pub async fn restore_findings(&self, findings: &[RemovedFinding]) -> anyhow::Result<usize> {
+        db::findings::restore_findings(self.db.write(), findings).await
     }
 
     /// Remove the finding with `id` and `created_at`, returning it as it
