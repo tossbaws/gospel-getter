@@ -45,7 +45,7 @@ function layOut(width) {
         window.HTMLElement.prototype.getBoundingClientRect = function () {
             const box = (top, height, left = 420, right = 1180) => ({ top, bottom: top + height, left, right, width: right - left, height, x: left, y: top });
             if (this.id === 'top-bar') return box(0, 54, 0, width);
-            if (this.matches('#reading-pane-inner .chapter-main')) return box(100, 5000);
+            if (this.matches('#reading-pane-inner .chapter-main, #reading-pane-2-inner .chapter-main')) return box(100, 5000);
             if (this.matches('.chapter-main .verse[data-verse]')) return box(100 + 60 * Number(this.dataset.verse), 50);
             if (this.matches('.chapter-main .verse-num')) {
                 return box(102 + 60 * Number(this.closest('.verse').dataset.verse), 12);
@@ -289,6 +289,34 @@ test('Keep as mine opens the note editor with the finding’s words, all selecte
         assert.deepEqual(left.map((f) => f.request), ['tears']);
         assert.equal(head(app, 35).querySelector('.ai-badge').textContent, 'AI', 'the badge counts one now');
         assert.equal($$(app, '.margin-notes .margin-note').length, 2);
+    }));
+
+// D-05: when the editor closes and what opened it is gone (here, taken
+// away while it's open, as a margin drawn again takes it), focus falls back to a heading: the active
+// pane's, not the first pane's, hidden in reading mode, which focusing
+// would make active.
+test('the note editor, closed once its opener is gone, leaves focus on the active pane’s heading, the second pane in reading mode', () =>
+    withFindings({ seed: () => save({ request: 'grief', verses: [35] }) }, async (app) => {
+        const panes = app.window.gospelGetterPanes;
+        const before = app.calls.length;
+        await panes.openBeside({ bookId: JOHN, chapter: 11 });
+        await app.idle(before);
+        await frame(app);
+        assert.equal(panes.active(), 'second');
+        const second = app.document.getElementById('reading-pane-2');
+        const found = second.querySelector('.margin-notes .margin-finding[data-finding-key="35-35"]');
+        app.click(found.querySelector('.margin-finding-head'));
+        await frame(app);
+        const keep = found.querySelector('.finding-keep');
+        app.click(keep);
+        await settle();
+        assert.ok(!app.document.getElementById('note-overlay').hidden);
+        keep.remove();
+        app.click(app.document.getElementById('note-cancel'));
+        await settle();
+        assert.ok(app.document.getElementById('note-overlay').hidden);
+        assert.equal(app.document.activeElement, second.querySelector('.chapter-main .chapter-heading'));
+        assert.equal(panes.active(), 'second');
     }));
 
 test('Keep as mine saved unchanged keeps who found it, as the reader’s note', () =>

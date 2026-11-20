@@ -621,8 +621,11 @@ impl Editor {
         if target.is_none() {
             target = dom::query(".verse-actions .verse-note-btn").filter(|el| dom::usable(el));
         }
+        // Last, the active pane's heading: the first pane's may be hidden
+        // (reading mode shows the active pane alone), and focusing it would
+        // make that pane active (D-05).
         if target.is_none() {
-            target = dom::query(".chapter-main .chapter-heading");
+            target = crate::pane::active().query(".chapter-main .chapter-heading");
             if let Some(heading) = &target {
                 heading.set_tab_index(-1);
             }
