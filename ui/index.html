@@ -126,6 +126,9 @@
             --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            /* The reading column's backing: none, in every theme but
+               Vaporwave (see there). */
+            --column-scrim: rgba(0, 0, 0, 0);
             --glow: none;
             /* Highlighter colors (behind highlighted verse text), one set
                per theme: muted on the dark themes, pastel on the light
@@ -164,6 +167,7 @@
             --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            --column-scrim: rgba(0, 0, 0, 0);
             --glow: none;
             --hl-yellow: #fbe78a;
             --hl-green: #c6ecbd;
@@ -191,6 +195,7 @@
                 --verse-num-color: var(--accent-2);
                 --verse-num-outline: none;
                 --verse-num-outline-faded: none;
+                --column-scrim: rgba(0, 0, 0, 0);
                 --glow: none;
                 --hl-yellow: #fbe78a;
                 --hl-green: #c6ecbd;
@@ -242,6 +247,16 @@
             --verse-num-outline-faded:
                 0 -1px 0 rgba(20, 8, 44, 0.6), -1px 0 0 rgba(20, 8, 44, 0.6),
                 1px 0 0 rgba(20, 8, 44, 0.6), 0 1px 0 rgba(20, 8, 44, 0.6);
+            /* The gradient is fixed to the window, so the last lines on
+               screen always sit on its orange foot, where no text color of
+               this theme is AA. The reading column and the margin's notes
+               sit on this backing instead (`.chapter-main`'s): the bar's
+               purple, as faint as still keeps every text color there AA
+               on every stop, the aqua (the tightest) included (see
+               src-tauri/tests/frontend_markup.rs,
+               reading_text_is_aa_on_every_ground_it_sits_on). The sunset
+               still shows through it, and all around the column. */
+            --column-scrim: rgba(20, 8, 44, 0.8);
             --glow: 0 0 14px rgba(4, 163, 174, 0.5);
             --hl-yellow: #6a5310;
             --hl-green: #1e5541;
@@ -268,6 +283,7 @@
             --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            --column-scrim: rgba(0, 0, 0, 0);
             --glow: none;
             --hl-yellow: #5a4d12;
             --hl-green: #224f2f;
@@ -294,6 +310,7 @@
             --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            --column-scrim: rgba(0, 0, 0, 0);
             --glow: none;
             --hl-yellow: #fbe78a;
             --hl-green: #c6ecbd;
@@ -320,6 +337,7 @@
             --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            --column-scrim: rgba(0, 0, 0, 0);
             --glow: 0 0 14px rgba(0, 255, 65, 0.5);
             --hl-yellow: #664e00;
             --hl-green: #11521f;
@@ -352,6 +370,7 @@
             --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            --column-scrim: rgba(0, 0, 0, 0);
             --glow: none;
             --hl-yellow: #6b5310;
             --hl-green: #31512a;
@@ -387,6 +406,7 @@
             --verse-num-color: var(--accent-2);
             --verse-num-outline: none;
             --verse-num-outline-faded: none;
+            --column-scrim: rgba(0, 0, 0, 0);
             --glow: 0 0 14px rgba(255, 63, 164, 0.5);
             --hl-yellow: #614c0f;
             --hl-green: #1f5038;
@@ -3218,7 +3238,8 @@
             }
 
             /* Quiet by its italic, not by a dimmer color: --text-dim
-               falls below AA on Vaporwave's page where --text doesn't. */
+               falls below AA at the foot of Beast Slayer's page, where
+               --text doesn't. */
             .notes-column-empty {
                 margin: 0.15rem 0 0;
                 padding-left: 1.05rem;
@@ -3631,6 +3652,17 @@
 
         .reading-row.is-comparing .chapter-main {
             max-width: none;
+        }
+
+        /* What the reading column's text sits on, and the margin's notes'
+           (reading mode): --column-scrim, clear in every theme but
+           Vaporwave. The spread carries it past the text's edges without
+           moving anything. */
+        .chapter-main,
+        .margin-notes .margin-note,
+        .margin-notes .margin-finding {
+            background: var(--column-scrim);
+            box-shadow: 0 0 0 1rem var(--column-scrim);
         }
 
         /* The chapter being read sits in the wide center column. The chapter
@@ -5124,6 +5156,7 @@
                 --verse-num-color: #000000 !important;
                 --verse-num-outline: none !important;
                 --verse-num-outline-faded: none !important;
+                --column-scrim: transparent !important;
                 --option-bg: #ffffff !important;
                 --on-accent: #ffffff !important;
                 /* Highlights aren't printed. */

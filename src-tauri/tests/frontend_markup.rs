@@ -2833,6 +2833,72 @@ fn backgrounds(props: &[(String, String)]) -> Vec<String> {
         .collect()
 }
 
+/// What the reading column's text sits on (and the margin's notes'): each
+/// of [`backgrounds`] under the theme's `--column-scrim`.
+fn reading_grounds(props: &[(String, String)]) -> Vec<String> {
+    let scrim = property(props, "--column-scrim");
+    backgrounds(props)
+        .iter()
+        .map(|bg| composite(scrim, bg))
+        .collect()
+}
+
+/// WCAG AA for the text the reader reads: every text color of a theme is
+/// 4.5:1 on every ground the reading column puts it on (each stop of a
+/// gradient page, under the column's `--column-scrim`), and its accent,
+/// as the chapter headings, the chevrons and the focus rings, 3:1. The
+/// page's gradient is fixed to the window, so any line can sit on any stop.
+/// Vaporwave's gradient leaves no color AA over all of it
+/// (`no_plain_color_is_aa_over_all_of_vaporwave`), so its column and the
+/// margin's notes sit on a scrim of the bar's purple, as faint as passes:
+/// the ratios here are computed from its tokens, so a scrim made fainter,
+/// or a stop or a color moved, falls out. What's below AA is pinned, so
+/// any other falls out too.
+#[test]
+fn reading_text_is_aa_on_every_ground_it_sits_on() {
+    let rules = rules();
+    let backing = screen_rule(
+        &rules,
+        ".chapter-main,\n        .margin-notes .margin-note,\n        .margin-notes .margin-finding",
+    );
+    assert!(backing.body.contains("background: var(--column-scrim)"));
+    assert!(
+        backing
+            .body
+            .contains("box-shadow: 0 0 0 1rem var(--column-scrim)")
+    );
+    let mut below = Vec::new();
+    for (theme, props) in theme_palettes(&rules) {
+        let scrim = property(&props, "--column-scrim");
+        if theme != "vaporwave" {
+            assert_eq!(scrim, "rgba(0, 0, 0, 0)", "theme `{theme}` has no scrim");
+        }
+        for ground in reading_grounds(&props) {
+            for (token, least) in [
+                ("--text", 4.5),
+                ("--text-dim", 4.5),
+                ("--accent", 3.0),
+                ("--accent-2", 4.5),
+                ("--ai", 4.5),
+            ] {
+                let ratio = contrast_ratio(property(&props, token), &ground);
+                if ratio < least {
+                    below.push(format!("{theme}: {token} on {ground} {ratio:.2}"));
+                }
+            }
+        }
+    }
+    // Beast Slayer's deepest stop (the very bottom of the window), which
+    // its own scrim could lift.
+    assert_eq!(
+        below,
+        [
+            "beast-slayer: --text-dim on #6b3a1f 4.00",
+            "beast-slayer: --accent-2 on #6b3a1f 3.93",
+        ]
+    );
+}
+
 /// New installs, and everyone who never chose a theme, get Chi Rho: it's
 /// the preferences script's fallback, so with nothing saved no
 /// `data-theme` is set, and its palette is the bare `:root` block. Anyone
@@ -3871,13 +3937,12 @@ fn footnotes_and_cross_references_are_disclosures_closed_by_default() {
 /// --text-dim, its keys as caps of --text-dim on their own opaque
 /// --option-bg (the arrows drawn, not a fallback font's).
 ///
-/// Over the page itself, --text-dim is AA on every stop of every theme's
-/// background but two, which every other --text-dim line on the page shares
-/// and the palette test (--option-bg only) doesn't see: Vaporwave's
-/// gradient, where no plain color is AA (see
-/// `no_plain_color_is_aa_over_all_of_vaporwave`), and the deepest stop of
-/// Beast Slayer's, 4.00:1 at the very bottom of the window (the gradient is
-/// fixed to it). Pinned here, so any other falls out.
+/// On the reading column (`reading_grounds`), --text-dim is AA on every
+/// stop of every theme's background but one, which every other --text-dim
+/// line on the page shares and the palette test (--option-bg only) doesn't
+/// see: the deepest stop of Beast Slayer's, 4.00:1 at the very bottom of
+/// the window (the gradient is fixed to it). Pinned here, so any other
+/// falls out.
 #[test]
 fn the_chapter_end_uses_tested_theme_colors() {
     let rules = rules();
@@ -3912,12 +3977,7 @@ fn the_chapter_end_uses_tested_theme_colors() {
         let dim = property(&props, "--text-dim");
         let key = contrast_ratio(dim, &option);
         assert!(key >= 4.5, "theme `{theme}`: a hint key is {key:.2}:1");
-        let grounds = if theme == "vaporwave" {
-            vec![option.clone()]
-        } else {
-            backgrounds(&props)
-        };
-        for bg in grounds {
+        for bg in reading_grounds(&props) {
             for (what, fg, under) in [
                 (
                     "a chapter button",
@@ -4509,9 +4569,7 @@ fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
 /// In Flowing, a verse shows where it starts and ends without boxes
 /// breaking up the text: a faint wash under the pointer and the selection
 /// tint, each on the verse's own lines. Over both, --text stays AA on every
-/// theme's background (each stop of a gradient one), and never less legible
-/// than on the bare page: Vaporwave's two lowest stops are under AA for its
-/// text already (3.93:1 on #bf5349), and the wash raises that.
+/// ground the reading column has, in every theme (`reading_grounds`).
 #[test]
 fn flowing_verses_wash_and_select_at_aa_in_every_theme() {
     let rules = rules();
@@ -4541,16 +4599,13 @@ fn flowing_verses_wash_and_select_at_aa_in_every_theme() {
     assert!(runs.body.contains("box-decoration-break: clone"));
     for (theme, props) in theme_palettes(&rules) {
         let accent_rgb = property(&props, "--accent-rgb");
-        for bg in backgrounds(&props) {
+        for bg in reading_grounds(&props) {
             for alpha in ["0.06", "0.12"] {
                 let under = composite(&format!("rgba({accent_rgb}, {alpha})"), &bg);
-                let text = property(&props, "--text");
-                let ratio = contrast_ratio(text, &under);
-                let bare = contrast_ratio(text, &bg);
+                let ratio = contrast_ratio(property(&props, "--text"), &under);
                 assert!(
-                    ratio >= 4.5_f64.min(bare),
-                    "theme `{theme}`: verse text over a {alpha} wash on {bg} is {ratio:.2}:1 \
-                     (on the bare page, {bare:.2}:1)"
+                    ratio >= 4.5,
+                    "theme `{theme}`: verse text over a {alpha} wash on {bg} is {ratio:.2}:1"
                 );
             }
         }
