@@ -87,7 +87,6 @@ test('the BSB reads as Berean has it: the reference, the text, the faded chapter
             el(app, 'ref-btn').getAttribute('aria-label'),
             'Psalms 23, Berean Standard Bible. Choose a book and chapter',
         );
-        assert.equal(app.document.title, 'Psalms 23 · BSB — Gospel Getter');
         for (let n = 1; n <= 6; n++) {
             assert.equal(verseText(app.verse(n, 'bsb')), storedVerse('bsb', 'Psalms', 23, n));
         }

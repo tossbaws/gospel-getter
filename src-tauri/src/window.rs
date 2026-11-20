@@ -9,11 +9,12 @@
 //! and at least its minimum size, and only then shows it, so it never
 //! flashes at the default size first.
 //!
-//! The title is the page's: the frontend sets `document.title` ("John 3 ·
-//! KJV — Gospel Getter") with the reference button, and the webview's own
-//! title-changed event (WebKitGTK's `notify::title`, WebView2's
-//! `DocumentTitleChanged`) copies it to the native window. So the webview
-//! needs no window permission.
+//! The title is "Gospel Getter", `tauri.conf.json`'s, for the whole
+//! session, as the page's own `<title>` is. It's fixed by choice (D24, the
+//! Captain, 2026-11-19), so the title bar, the taskbar and Alt-Tab don't
+//! change as the reader moves; the reference button says where the reader
+//! is. Nothing sets a title after, so the webview needs no window
+//! permission (`packaging_config` checks both).
 
 use anyhow::Context;
 use tauri::{LogicalSize, PhysicalPosition, PhysicalSize, WebviewWindowBuilder};
@@ -205,11 +206,6 @@ pub fn create_main_window(app: &tauri::App) -> anyhow::Result<()> {
         .context("tauri.conf.json has no main window")?
         .clone();
     let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
-        .on_document_title_changed(|window, title| {
-            if let Err(e) = window.set_title(&title) {
-                tracing::warn!("Failed to set the window title: {e}");
-            }
-        })
         .build()
         .context("Failed to create the main window")?;
 

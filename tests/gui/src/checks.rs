@@ -115,6 +115,9 @@ const NOTE_TEXT: &str = "gui-check smoke note: In the beginning";
 /// Where the exported file goes, in the run's own folder.
 const EXPORT_FILE: &str = "gui-check-notes.md";
 
+/// The window's title, all session (D24; `src-tauri/src/window.rs`).
+const TITLE: &str = "Gospel Getter";
+
 /// The save dialog's title (`commands::export_notes`).
 const SAVE_DIALOG_TITLE: &str = "Export notes";
 
@@ -758,54 +761,27 @@ impl Run<'_> {
         }
     }
 
-    /// Check 1: the page booted: the chapter heading is shown, the window
-    /// title carries the reference (on Linux, the native X window's too),
-    /// and boot ran to the end (a fresh install's welcome is up; check 5
-    /// takes it from there).
+    /// Check 1: the page booted: the chapter heading is shown, the
+    /// reference button says it, the window is titled "Gospel Getter" (on
+    /// Linux, the native X window too), and boot ran to the end (a fresh
+    /// install's welcome is up; check 5 takes it from there).
     async fn boot(&self) -> Result<String> {
         let ui = &self.ui;
         let seen = ui
             .wait(
-                "the chapter heading, and the reference in the title",
-                "const heading = document.querySelector('.chapter-main .chapter-heading');
-                 const reference = (document.getElementById('ref-text') || {}).textContent || '';
-                 const text = heading ? heading.textContent.trim() : '';
-                 const ok = !!text && !!reference && reference.startsWith(text)
-                     && document.title === `${reference} — Gospel Getter`;
-                 return [ok, { heading: text, reference, title: document.title, href: String(location.href) }];",
+                "the chapter heading, the reference, and the app's name as the title",
+                &format!(
+                    "const heading = document.querySelector('.chapter-main .chapter-heading');
+                     const reference = (document.getElementById('ref-text') || {{}}).textContent || '';
+                     const text = heading ? heading.textContent.trim() : '';
+                     const ok = !!text && !!reference && reference.startsWith(text)
+                         && document.title === '{TITLE}';
+                     return [ok, {{ heading: text, reference, title: document.title, href: String(location.href) }}];"
+                ),
             )
             .await?;
-        let title = seen["title"].as_str().unwrap_or_default().to_owned();
         let heading = seen["heading"].as_str().unwrap_or_default().to_owned();
-
-        let window = match &self.config.xvfb {
-            Some(xvfb) => {
-                let xvfb = xvfb.clone();
-                let wanted = title.clone();
-                ui.step(
-                    "the native window's title says the same (on the private display)",
-                    async move {
-                        loop {
-                            let windows = xvfb.windows_named("Gospel Getter").await?;
-                            if windows.iter().any(|(_, name)| *name == wanted) {
-                                return Ok(format!("X window \"{wanted}\" on {}", xvfb.display()));
-                            }
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                        }
-                    },
-                )
-                .await?
-            }
-            None => {
-                let driver_title = ui.driver().title().await?;
-                if driver_title != title {
-                    bail!("WebDriver's title {driver_title:?} is not the page's {title:?}");
-                }
-                format!(
-                    "title \"{driver_title}\" (WebDriver; the native window title isn't read on Windows)"
-                )
-            }
-        };
+        let window = self.window_titled().await?;
 
         // The welcome is the Rust pieces' (ui-leptos), which may load just
         // after the page: its overlay may not exist yet.
@@ -823,6 +799,41 @@ impl Run<'_> {
             "session on {}; heading \"{heading}\"; {window}; boot finished (the first-run welcome is up)",
             seen["href"].as_str().unwrap_or("?")
         ))
+    }
+
+    /// The native window is titled [`TITLE`]: on Linux, the X window on
+    /// the private display (waited for: it's mapped just after the page
+    /// boots); on Windows, WebDriver's title, as the native one isn't read
+    /// there.
+    async fn window_titled(&self) -> Result<String> {
+        let ui = &self.ui;
+        match &self.config.xvfb {
+            Some(xvfb) => {
+                let xvfb = xvfb.clone();
+                ui.step(
+                    "the native window to be titled \"Gospel Getter\" (on the private display)",
+                    async move {
+                        loop {
+                            let windows = xvfb.windows_named(TITLE).await?;
+                            if windows.iter().any(|(_, name)| name == TITLE) {
+                                return Ok(format!("X window \"{TITLE}\" on {}", xvfb.display()));
+                            }
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                    },
+                )
+                .await
+            }
+            None => {
+                let driver_title = ui.driver().title().await?;
+                if driver_title != TITLE {
+                    bail!("WebDriver's title is {driver_title:?}, not {TITLE:?}");
+                }
+                Ok(format!(
+                    "title \"{driver_title}\" (WebDriver; the native window title isn't read on Windows)"
+                ))
+            }
+        }
     }
 
     /// Check 2's first half: the Leptos pieces mounted their dialogs (all

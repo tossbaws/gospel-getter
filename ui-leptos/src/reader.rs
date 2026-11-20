@@ -3,7 +3,7 @@
 //! while comparing), draws it into the page's `#reading-pane` (the verses,
 //! the faded neighbors or the Bible's edge cards, Compare's grid, the
 //! chapter's end and its Footnotes and Cross references), says where the
-//! reader is on the reference button and in the window's title, keeps the
+//! reader is on the reference button, keeps the
 //! reading position for the next launch, says when a chapter couldn't be
 //! read (with Try again), and keeps the passage history (Back and Forward,
 //! with the mouse's back and forward buttons and the bar's, `nav`, which
@@ -276,9 +276,8 @@ fn show_bar_reference(pane: PaneId, here: &Here, compare: Option<&Compare>) {
     pane::show_reference(pane, &reference_of(here, compare));
 }
 
-/// The reference button and the window title (which the backend copies to
-/// the window) say where the reader is in the active pane (D13): the
-/// chapter, in each translation on screen.
+/// The reference button says where the reader is in the active pane (D13):
+/// the chapter, in each translation on screen.
 fn update_reference(here: &Here, compare: Option<&Compare>) {
     let reference = reference_of(here, compare);
     if let Some(ref_text) = by_id("ref-text") {
@@ -288,9 +287,6 @@ fn update_reference(here: &Here, compare: Option<&Compare>) {
     }
     if let Some(button) = by_id("ref-btn") {
         let _ = button.set_attribute("aria-label", &reference.label);
-    }
-    if let Some(document) = bridge::document() {
-        document.set_title(&reference.title);
     }
 }
 
@@ -395,7 +391,7 @@ fn render_current(pane: PaneId) {
     }
     with(pane, |s| s.columns = columns);
     show_bar_reference(pane, &here, compare.as_deref());
-    // The top bar and the window's title say the active pane's (D13).
+    // The top bar says the active pane's (D13).
     if pane == pane::active() {
         update_reference(&here, compare.as_deref());
     }
@@ -1589,8 +1585,7 @@ pub fn reopen_beside(place: SecondPlace) -> Load {
 }
 
 /// `pane` is the active one now (`pane::set_active`): the header, the
-/// window's title, the picker, Back and Forward and the translation button
-/// say its place.
+/// picker, Back and Forward and the translation button say its place.
 pub fn activated(pane: PaneId) {
     show_translation();
     let (here, compare) = with(pane, |s| (s.reading.clone(), s.last_compare.clone()));

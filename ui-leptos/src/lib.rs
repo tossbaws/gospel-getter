@@ -121,8 +121,8 @@ pub fn start() {
     bridge::export_shortcuts();
     // The overlays' one list, for the tests (`window.gospelGetterOverlays`).
     overlays::export();
-    // The rest in a task of its own, so the chapter is shown (painted, and
-    // the window titled) before they mount.
+    // The rest in a task of its own, so the chapter is shown (painted)
+    // before they mount.
     let rest = Closure::once_into_js(mount_the_rest);
     if web_sys::window()
         .and_then(|w| w.set_timeout_with_callback(rest.unchecked_ref()).ok())

@@ -133,9 +133,12 @@ test('choosing Notes shows the chapter’s notes in a “My notes” column besi
         assert.equal(app.document.querySelectorAll('.chapter-side').length, 0);
         assert.equal(column(app).tagName, 'SECTION');
         assert.equal(column(app).getAttribute('aria-label'), 'My notes', 'a labelled region');
-        // The reference and the title name the translation alone.
+        // The reference and its label name the translation alone.
         assert.equal(app.document.getElementById('ref-text').textContent, 'John 3 · KJV');
-        assert.equal(app.document.title, 'John 3 · KJV — Gospel Getter');
+        assert.equal(
+            app.document.getElementById('ref-btn').getAttribute('aria-label'),
+            'John 3, King James Version. Choose a book and chapter',
+        );
 
         // Each note beside its first verse (verse 3 at 280px, the column at
         // 140px), labelled with its verses; 4's, which would overlap 3–5's,

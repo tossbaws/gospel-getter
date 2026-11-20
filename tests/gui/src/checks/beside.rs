@@ -385,12 +385,7 @@ impl Run<'_> {
             "the column heads: {seen}"
         );
         ensure!(seen["reference"] == "John 3 · KJV", "the reference: {seen}");
-        ensure!(
-            seen["title"]
-                .as_str()
-                .is_some_and(|t| t.starts_with("John 3 · KJV — ")),
-            "the title: {seen}"
-        );
+        ensure!(seen["title"] == "Gospel Getter", "the title: {seen}");
         let num = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
         let (text_right, column_left) = (num(&seen["text"]["right"]), num(&seen["column"]["left"]));
         ensure!(
