@@ -394,8 +394,9 @@ pub(crate) async fn insert_note(
 /// AUTOINCREMENT, so when the newest note (or finding) is deleted the next
 /// one gets its id, and an edit, delete, Keep as mine or remove from a view
 /// still holding the old record would land on the new one (GG-06).
-/// [`delete_note`], [`note`], [`super::findings::remove_finding`] and
-/// [`super::findings::keep_as_mine`] match the same way. No `updated_at`
+/// [`delete_note`], [`note`], [`super::findings::remove_finding`],
+/// [`super::findings::keep_as_mine`] and
+/// [`super::bookmarks::remove_bookmark`] match the same way. No `updated_at`
 /// check: two edits of one note can't overlap (the editor is one modal, the
 /// app one instance, and the CLI can't write notes).
 pub async fn update_note(

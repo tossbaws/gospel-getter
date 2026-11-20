@@ -242,10 +242,19 @@ pub async fn bookmarks_newest_first(pool: &SqlitePool) -> anyhow::Result<Vec<Boo
     .context("Failed to fetch bookmarks")
 }
 
-/// Remove a bookmark. Returns whether there was one to remove.
-pub async fn remove_bookmark(writer: &WritePool, id: i64) -> anyhow::Result<bool> {
-    let result = sqlx::query("DELETE FROM bookmarks WHERE id = $1")
+/// Remove the bookmark with `id` and `created_at`. Returns whether there was
+/// one to remove. Both, as for notes (see [`super::notes::update_note`]): a
+/// bookmark's id is reused once the newest is removed, so a removal from a
+/// view still holding the old bookmark (the Library's list, the card) would
+/// otherwise remove the new one (GG32-04).
+pub async fn remove_bookmark(
+    writer: &WritePool,
+    id: i64,
+    created_at: &str,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query("DELETE FROM bookmarks WHERE id = $1 AND created_at = $2")
         .bind(id)
+        .bind(created_at)
         .execute(writer.pool())
         .await
         .context("Failed to delete bookmark")?;

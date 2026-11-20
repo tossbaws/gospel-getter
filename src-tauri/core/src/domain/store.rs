@@ -111,9 +111,10 @@ impl Store {
         db::bookmarks::list_bookmarks(self.db.read(), translation_id).await
     }
 
-    /// Remove a bookmark; returns whether it existed.
-    pub async fn remove_bookmark(&self, id: i64) -> anyhow::Result<bool> {
-        db::bookmarks::remove_bookmark(self.db.write(), id).await
+    /// Remove the bookmark with `id` and `created_at`; returns whether it
+    /// existed.
+    pub async fn remove_bookmark(&self, id: i64, created_at: &str) -> anyhow::Result<bool> {
+        db::bookmarks::remove_bookmark(self.db.write(), id, created_at).await
     }
 
     /// Highlight every verse of a passage in `color` (see

@@ -1230,7 +1230,13 @@ fn toggle_bookmark() -> Task {
     });
     let removing = existing.is_some();
     let sent = match (&existing, args) {
-        (Some(existing), _) => send("remove_bookmark", &RemoveBookmarkArgs { id: existing.id }),
+        (Some(existing), _) => send(
+            "remove_bookmark",
+            &RemoveBookmarkArgs {
+                id: existing.id,
+                created_at: &existing.created_at,
+            },
+        ),
         (None, Some(args)) => send("add_bookmark", &args),
         (None, None) => return Box::pin(async {}),
     };

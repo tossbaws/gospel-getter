@@ -315,6 +315,8 @@ pub struct Bookmark {
     pub preview: Option<String>,
     /// Whether that translation numbers every verse of it.
     pub complete: bool,
+    /// As the backend stores it, sent back with the id to remove it.
+    pub created_at: String,
 }
 
 /// A highlighted passage, as `list_highlight_passages` answers
@@ -364,10 +366,13 @@ pub struct TranslationArgs<'a> {
     pub translation_code: &'a str,
 }
 
-/// `remove_bookmark`'s arguments.
+/// `remove_bookmark`'s arguments: the bookmark's id, and when it was made,
+/// so a stale view can't remove a newer bookmark given its id (GG32-04).
 #[derive(Debug, Serialize)]
-pub struct RemoveBookmarkArgs {
+#[serde(rename_all = "camelCase")]
+pub struct RemoveBookmarkArgs<'a> {
     pub id: i64,
+    pub created_at: &'a str,
 }
 
 /// A passage's verses: the arguments of `remove_highlight`, `add_bookmark`
