@@ -620,6 +620,12 @@ pub fn close_second() {
     let Some(made) = made() else {
         return;
     };
+    // The first pane's selection, if it's the active one, stays through its
+    // chapter being drawn again below (`card::held_selection`); the second's
+    // goes with it.
+    let held = (active() == PaneId::First)
+        .then(crate::card::held_selection)
+        .flatten();
     set_active(PaneId::First);
     // The translation popover, opened from a bar that's going.
     if surfaces::current() == Some(Surface::Translation) {
@@ -652,6 +658,7 @@ pub fn close_second() {
         crate::card::forget(PaneId::Second);
         crate::findings::forget(PaneId::Second);
         reader::redraw(PaneId::First);
+        crate::card::reselect(held);
     });
     crate::aa::split_changed();
     if let Some(reference) = by_id("ref-btn") {
@@ -1223,17 +1230,24 @@ fn export_panes() {
 
 /// Makes a pane active as a pointer is pressed or focus moves into it
 /// (D8), and puts `window.gospelGetterPanes` where the tests read it.
+///
+/// Not on the second pane's ×: making it active clears the first pane's
+/// selection (`card`), before the click it's pressing for closes the
+/// second pane anyway (GG32-14). Every other control in a pane's bar makes
+/// it active, as the reader acts on that pane.
 pub fn mount() {
     let Some(document) = bridge::document() else {
         return;
     };
     for name in ["pointerdown", "focusin"] {
         dom::on(&document, name, |event| {
-            if let Some(pane) = event
-                .target()
-                .and_then(|t| t.dyn_into::<Element>().ok())
-                .and_then(|el| of(&el))
-            {
+            let Some(el) = event.target().and_then(|t| t.dyn_into::<Element>().ok()) else {
+                return;
+            };
+            if el.closest(".pane-close").ok().flatten().is_some() {
+                return;
+            }
+            if let Some(pane) = of(&el) {
                 set_active(pane);
             }
         });
