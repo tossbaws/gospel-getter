@@ -12,8 +12,8 @@ use super::findings::{
 };
 use super::highlights::set_highlights;
 use super::migrate::{
-    OLDEST_READABLE_SCHEMA_VERSION, Rebuild, SCHEMA_VERSION, Step, complete_schema_1, migrate,
-    migrate_with, schema_1,
+    OLDEST_READABLE_SCHEMA_VERSION, Rebuild, SCHEMA_VERSION, Step, complete_schema_1,
+    if_not_exists, migrate, migrate_with, schema_1,
 };
 use super::notes::{MAX_NOTE_CHARS, NoteBodyError, NoteError, Passage, add_note, delete_note};
 use super::test_support::{TempDb, fresh_database, insert_old_rule_findings, schema_1_database};
@@ -750,4 +750,360 @@ async fn an_import_that_replaces_everything_brings_back_no_old_id() {
         (1, 1, 1),
         "{after:?} after {before:?}"
     );
+}
+
+/// 2.32.2's own statements on the reader's tables, verbatim from its source
+/// (git 4024a26: `db/bookmarks.rs`, `notes.rs`, `highlights.rs`,
+/// `findings.rs` and `reader_data.rs`, each `note_columns!()` and
+/// `finding_columns!()` written out), with the parameters a test gives
+/// them. What an app or CLI of 2.32.x runs on a database this version has
+/// brought to schema 2.
+mod as_2_32_2 {
+    pub const ADD_BOOKMARK: &str = "INSERT INTO bookmarks (book_id, chapter, verse_start, verse_end) VALUES ($1, $2, $3, $4) ON CONFLICT (book_id, chapter, verse_start, verse_end) DO NOTHING";
+    pub const FIND_BOOKMARK: &str = "SELECT id, book_id, chapter, verse_start, verse_end, created_at FROM bookmarks WHERE book_id = $1 AND chapter = $2 AND verse_start = $3 AND verse_end = $4";
+    pub const LIST_BOOKMARKS: &str = "SELECT id, book_id, chapter, verse_start, verse_end, created_at FROM bookmarks ORDER BY created_at DESC, id DESC";
+    pub const REMOVE_BOOKMARK: &str = "DELETE FROM bookmarks WHERE id = $1 AND created_at = $2";
+    pub const NOTE_TOTALS: &str =
+        "SELECT COUNT(*), COALESCE(SUM(length(body)), 0) FROM notes WHERE $1 IS NULL OR id <> $1";
+    pub const ADD_NOTE: &str = "INSERT INTO notes (book_id, chapter, verse_start, verse_end, body, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, COALESCE($6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE($7, $6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))) RETURNING id, book_id, chapter, verse_start, verse_end, body, created_at, updated_at";
+    pub const NOTE_LENGTH: &str =
+        "SELECT length(body) FROM notes WHERE id = $1 AND created_at = $2";
+    pub const UPDATE_NOTE: &str = "UPDATE notes SET updated_at = CASE WHEN body = $2 THEN updated_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END, body = $2 WHERE id = $1 RETURNING id, book_id, chapter, verse_start, verse_end, body, created_at, updated_at";
+    pub const DELETE_NOTE: &str = "DELETE FROM notes WHERE id = $1 AND created_at = $2 RETURNING id, book_id, chapter, verse_start, verse_end, body, created_at, updated_at";
+    pub const NOTE: &str = "SELECT id, book_id, chapter, verse_start, verse_end, body, created_at, updated_at FROM notes WHERE id = $1 AND created_at = $2";
+    pub const CHAPTER_NOTES: &str = "SELECT id, book_id, chapter, verse_start, verse_end, body, created_at, updated_at FROM notes WHERE book_id = $1 AND chapter = $2";
+    pub const NOTE_PLACES: &str =
+        "SELECT book_id, chapter, created_at FROM notes ORDER BY book_id, chapter, id";
+    pub const SET_HIGHLIGHT: &str = "INSERT INTO highlights (book_id, chapter, verse, color) VALUES ($1, $2, $3, $4) ON CONFLICT (book_id, chapter, verse) DO UPDATE SET color = excluded.color, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE highlights.color <> excluded.color";
+    pub const REMOVE_HIGHLIGHTS: &str =
+        "DELETE FROM highlights WHERE book_id = $1 AND chapter = $2 AND verse BETWEEN $3 AND $4";
+    pub const LIST_HIGHLIGHTS: &str = "SELECT book_id, chapter, verse, color, created_at, updated_at FROM highlights ORDER BY book_id, chapter, verse";
+    pub const FINDINGS_READY: &str = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('ai_findings', 'app_settings')";
+    pub const SET_ENABLED: &str = "INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value";
+    pub const FINDING_COUNT: &str = "SELECT COUNT(*) FROM ai_findings";
+    pub const ADD_FINDING: &str = "INSERT INTO ai_findings (book_id, chapter, verse_start, verse_end, agent, request, created_at) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))) ON CONFLICT (book_id, chapter, verse_start, verse_end, request) DO NOTHING";
+    pub const RESTORE_FINDING: &str = "INSERT INTO ai_findings (book_id, chapter, verse_start, verse_end, agent, request, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (book_id, chapter, verse_start, verse_end, request) DO NOTHING";
+    pub const ALL_FINDINGS: &str = "SELECT id, book_id, chapter, verse_start, verse_end, agent, request, created_at FROM ai_findings ORDER BY book_id, chapter, verse_start, verse_end, created_at, id";
+    pub const REMOVE_FINDING: &str = "DELETE FROM ai_findings WHERE id = $1 AND created_at = $2 RETURNING id, book_id, chapter, verse_start, verse_end, agent, request, created_at";
+    pub const REMOVE_REQUEST: &str = "DELETE FROM ai_findings WHERE request = $1 RETURNING id, book_id, chapter, verse_start, verse_end, agent, request, created_at";
+    pub const REPLACE_BOOKMARKS: &str = "DELETE FROM bookmarks";
+    pub const IMPORT_BOOKMARK: &str = "INSERT INTO bookmarks (book_id, chapter, verse_start, verse_end, created_at) VALUES ($1, $2, $3, $4, COALESCE($5, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))) ON CONFLICT (book_id, chapter, verse_start, verse_end) DO NOTHING";
+    pub const REPLACE_HIGHLIGHTS: &str = "DELETE FROM highlights";
+    pub const IMPORT_HIGHLIGHT: &str = "INSERT INTO highlights (book_id, chapter, verse, color, created_at, updated_at) VALUES ($1, $2, $3, $4, COALESCE($5, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE($6, $5, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))) ON CONFLICT (book_id, chapter, verse) DO NOTHING";
+    pub const REPLACE_NOTES: &str = "DELETE FROM notes";
+    pub const IMPORT_NOTE: &str = "INSERT INTO notes (book_id, chapter, verse_start, verse_end, body, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, COALESCE($6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE($7, $6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))";
+    pub const REPLACE_FINDINGS: &str = "DELETE FROM ai_findings";
+}
+
+/// 2.32.x on a database this version brought to schema 2 (AF8), with its
+/// own SQL ([`as_2_32_2`]): its `migrate` (version 1's statements, each `IF
+/// NOT EXISTS`, and the version written only below 1) changes nothing; it
+/// reads every record; it adds, changes and removes bookmarks, notes,
+/// highlights, findings and the switch; an import that replaces everything
+/// works; and the ids it's given are new ones. Then this version opens the
+/// database again and finds everything 2.32.2 left, as it left it.
+#[tokio::test]
+async fn version_2_32_2_reads_and_writes_an_upgraded_database() {
+    use as_2_32_2::*;
+    // A note's columns, or a finding's: five numbers, then three strings.
+    type Row = (i64, i64, i64, i64, i64, String, String, String);
+    let (db, pool) = schema_1_database("compat_2_32_2").await;
+    readers_records(&pool).await;
+    migrate(pool.write()).await.unwrap();
+    pool.close().await;
+
+    // 2.32.2 starts: its `migrate`.
+    let old = db.connect().await;
+    let w = old.write().pool();
+    let upgraded = snapshot(old.read()).await;
+    for sql in schema_1() {
+        sqlx::query(sqlx::AssertSqlSafe(if_not_exists(sql).unwrap()))
+            .execute(w)
+            .await
+            .unwrap();
+    }
+    // It writes the version only when it's below 1.
+    assert!(user_version(old.read()).await >= 1);
+    assert_eq!(snapshot(old.read()).await, upgraded);
+    assert_eq!(user_version(old.read()).await, 2);
+
+    // Its reads.
+    let bookmarks: Vec<(i64, i64, i64, i64, i64, String)> =
+        sqlx::query_as(LIST_BOOKMARKS).fetch_all(w).await.unwrap();
+    assert_eq!(bookmarks.iter().map(|b| b.0).collect::<Vec<_>>(), [3, 1]);
+    let highlights: Vec<(i64, i64, i64, String, String, String)> =
+        sqlx::query_as(LIST_HIGHLIGHTS).fetch_all(w).await.unwrap();
+    assert_eq!(highlights.len(), 2);
+    let places: Vec<(i64, i64, String)> = sqlx::query_as(NOTE_PLACES).fetch_all(w).await.unwrap();
+    assert_eq!(places.len(), 2);
+    let ready: i64 = sqlx::query_scalar(FINDINGS_READY)
+        .fetch_one(w)
+        .await
+        .unwrap();
+    assert_eq!(ready, 2);
+    let findings: Vec<Row> = sqlx::query_as(ALL_FINDINGS).fetch_all(w).await.unwrap();
+    assert_eq!(findings.len(), 10);
+    let count: i64 = sqlx::query_scalar(FINDING_COUNT)
+        .fetch_one(w)
+        .await
+        .unwrap();
+    assert_eq!(count, 10);
+
+    // Its writes. A bookmark added, found, listed and removed; another kept.
+    for verse in [19, 20] {
+        let added = sqlx::query(ADD_BOOKMARK)
+            .bind(43)
+            .bind(3)
+            .bind(verse)
+            .bind(verse)
+            .execute(w)
+            .await
+            .unwrap();
+        assert_eq!(added.rows_affected(), 1);
+    }
+    let found: (i64, i64, i64, i64, i64, String) = sqlx::query_as(FIND_BOOKMARK)
+        .bind(43)
+        .bind(3)
+        .bind(19)
+        .bind(19)
+        .fetch_one(w)
+        .await
+        .unwrap();
+    assert!(found.0 > 3, "a new id: {}", found.0);
+    let removed = sqlx::query(REMOVE_BOOKMARK)
+        .bind(found.0)
+        .bind(&found.5)
+        .execute(w)
+        .await
+        .unwrap();
+    assert_eq!(removed.rows_affected(), 1);
+
+    // A note added, read, changed and deleted; another kept.
+    let totals: (i64, i64) = sqlx::query_as(NOTE_TOTALS)
+        .bind(None::<i64>)
+        .fetch_one(w)
+        .await
+        .unwrap();
+    assert_eq!(totals.0, 2);
+    let mut added: Vec<Row> = Vec::new();
+    for body in ["2.32.2's note.", "2.32.2's other note."] {
+        added.push(
+            sqlx::query_as(ADD_NOTE)
+                .bind(43)
+                .bind(3)
+                .bind(19)
+                .bind(19)
+                .bind(body)
+                .bind(None::<String>)
+                .bind(None::<String>)
+                .fetch_one(w)
+                .await
+                .unwrap(),
+        );
+    }
+    // Past the largest id there (3): 4 was deleted before the upgrade,
+    // which no view still open can hold.
+    assert!(added[0].0 > 3 && added[1].0 > added[0].0, "{added:?}");
+    let (id, created_at) = (added[0].0, added[0].6.clone());
+    let length: i64 = sqlx::query_scalar(NOTE_LENGTH)
+        .bind(id)
+        .bind(&created_at)
+        .fetch_one(w)
+        .await
+        .unwrap();
+    assert_eq!(length, 14);
+    let changed: Row = sqlx::query_as(UPDATE_NOTE)
+        .bind(id)
+        .bind("2.32.2's note, changed.")
+        .fetch_one(w)
+        .await
+        .unwrap();
+    assert_eq!(changed.5, "2.32.2's note, changed.");
+    let one: Option<Row> = sqlx::query_as(NOTE)
+        .bind(id)
+        .bind(&created_at)
+        .fetch_optional(w)
+        .await
+        .unwrap();
+    assert_eq!(one, Some(changed.clone()));
+    let deleted: Row = sqlx::query_as(DELETE_NOTE)
+        .bind(id)
+        .bind(&created_at)
+        .fetch_one(w)
+        .await
+        .unwrap();
+    assert_eq!(deleted, changed);
+    let chapter: Vec<Row> = sqlx::query_as(CHAPTER_NOTES)
+        .bind(43)
+        .bind(3)
+        .fetch_all(w)
+        .await
+        .unwrap();
+    assert_eq!(chapter.len(), 2);
+
+    // Highlights set, recolored and removed.
+    for (verse, color) in [(19, "green"), (19, "blue"), (20, "yellow")] {
+        sqlx::query(SET_HIGHLIGHT)
+            .bind(43)
+            .bind(3)
+            .bind(verse)
+            .bind(color)
+            .execute(w)
+            .await
+            .unwrap();
+    }
+    let removed = sqlx::query(REMOVE_HIGHLIGHTS)
+        .bind(43)
+        .bind(3)
+        .bind(20)
+        .bind(20)
+        .execute(w)
+        .await
+        .unwrap();
+    assert_eq!(removed.rows_affected(), 1);
+
+    // Findings: the switch, a save, a removal, its Undo, a request removed.
+    sqlx::query(SET_ENABLED)
+        .bind("ai_findings_enabled")
+        .bind("on")
+        .execute(w)
+        .await
+        .unwrap();
+    for (verse, request) in [(19, "light"), (20, "light"), (21, "darkness")] {
+        let saved = sqlx::query(ADD_FINDING)
+            .bind(43)
+            .bind(3)
+            .bind(verse)
+            .bind(verse)
+            .bind("Claude")
+            .bind(request)
+            .bind(None::<String>)
+            .execute(w)
+            .await
+            .unwrap();
+        assert_eq!(saved.rows_affected(), 1);
+    }
+    let all: Vec<Row> = sqlx::query_as(ALL_FINDINGS).fetch_all(w).await.unwrap();
+    let newest = all.iter().max_by_key(|f| f.0).unwrap().clone();
+    assert!(newest.0 > 10, "a new id: {}", newest.0);
+    let gone: Row = sqlx::query_as(REMOVE_FINDING)
+        .bind(newest.0)
+        .bind(&newest.7)
+        .fetch_one(w)
+        .await
+        .unwrap();
+    assert_eq!(gone, newest);
+    let back = sqlx::query(RESTORE_FINDING)
+        .bind(gone.1)
+        .bind(gone.2)
+        .bind(gone.3)
+        .bind(gone.4)
+        .bind(&gone.5)
+        .bind(&gone.6)
+        .bind(&gone.7)
+        .execute(w)
+        .await
+        .unwrap();
+    assert_eq!(back.rows_affected(), 1);
+    let light: Vec<Row> = sqlx::query_as(REMOVE_REQUEST)
+        .bind("light")
+        .fetch_all(w)
+        .await
+        .unwrap();
+    assert_eq!(light.len(), 2);
+    old.close().await;
+
+    // This version opens it again: everything 2.32.2 left, as it left it,
+    // and still at schema 2.
+    let pool = db.connect().await;
+    let left = readers_rows(pool.read()).await;
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(user_version(pool.read()).await, 2);
+    assert_eq!(readers_rows(pool.read()).await, left);
+    let restored = all_findings(pool.read()).await.unwrap();
+    assert!(
+        restored
+            .iter()
+            .any(|f| f.request == "darkness" && f.id > newest.0)
+    );
+    pool.close().await;
+
+    // 2.32.2 again: an import that replaces everything, then this version.
+    let old = db.connect().await;
+    let w = old.write().pool();
+    let largest: (i64, i64, i64) = sqlx::query_as(
+        "SELECT (SELECT MAX(id) FROM bookmarks), (SELECT MAX(id) FROM notes), \
+         (SELECT MAX(id) FROM ai_findings)",
+    )
+    .fetch_one(w)
+    .await
+    .unwrap();
+    let mut tx = w.begin().await.unwrap();
+    for sql in [
+        REPLACE_BOOKMARKS,
+        REPLACE_HIGHLIGHTS,
+        REPLACE_NOTES,
+        REPLACE_FINDINGS,
+    ] {
+        sqlx::query(sql).execute(&mut *tx).await.unwrap();
+    }
+    sqlx::query(IMPORT_BOOKMARK)
+        .bind(1)
+        .bind(1)
+        .bind(1)
+        .bind(1)
+        .bind("2026-01-01T00:00:00.000Z")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query(IMPORT_HIGHLIGHT)
+        .bind(1)
+        .bind(1)
+        .bind(1)
+        .bind("pink")
+        .bind("2026-01-01T00:00:00.000Z")
+        .bind(None::<String>)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query(IMPORT_NOTE)
+        .bind(1)
+        .bind(1)
+        .bind(1)
+        .bind(1)
+        .bind("In the beginning.")
+        .bind("2026-01-01T00:00:00.000Z")
+        .bind(None::<String>)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query(ADD_FINDING)
+        .bind(1)
+        .bind(1)
+        .bind(1)
+        .bind(1)
+        .bind("Claude")
+        .bind("creation")
+        .bind("2026-01-01T00:00:00.000Z")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let ids: (i64, i64, i64) = sqlx::query_as(
+        "SELECT (SELECT id FROM bookmarks), (SELECT id FROM notes), (SELECT id FROM ai_findings)",
+    )
+    .fetch_one(w)
+    .await
+    .unwrap();
+    assert!(
+        ids.0 > largest.0 && ids.1 > largest.1 && ids.2 > largest.2,
+        "{ids:?} after {largest:?}: a replace brings back no old id"
+    );
+    let left = readers_rows(old.read()).await;
+    old.close().await;
+
+    let pool = db.connect().await;
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(readers_rows(pool.read()).await, left);
+    assert_eq!(user_version(pool.read()).await, 2);
 }

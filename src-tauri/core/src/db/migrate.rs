@@ -450,7 +450,7 @@ pub(crate) fn schema_1() -> impl Iterator<Item = &'static str> {
 /// for an object that's already there. SQLite keeps the statement without
 /// the `IF NOT EXISTS`, so what it keeps for an object made this way is
 /// `sql` itself.
-fn if_not_exists(sql: &str) -> anyhow::Result<String> {
+pub(crate) fn if_not_exists(sql: &str) -> anyhow::Result<String> {
     for kind in [
         "CREATE TABLE ",
         "CREATE VIRTUAL TABLE ",
