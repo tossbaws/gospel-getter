@@ -40,6 +40,8 @@ mod contention_tests;
 #[cfg(test)]
 mod findings_tests;
 #[cfg(test)]
+mod migrate_tests;
+#[cfg(test)]
 mod path_tests;
 #[cfg(test)]
 mod read_only_tests;
@@ -50,10 +52,10 @@ pub mod test_support;
 #[cfg(test)]
 mod tests;
 
-/// Bring a database up to date: create any missing tables (including ones
-/// added since the database was created), seed whatever bundled data
-/// is missing, and bring translations seeded by an earlier version up to
-/// date (`upgrade_bundled_data`). Safe to run on every launch, against a
+/// Bring a database up to date: bring its schema to the current version
+/// (`migrate`), seed whatever bundled data is missing, and bring
+/// translations seeded by an earlier version up to date
+/// (`upgrade_bundled_data`). Safe to run on every launch, against a
 /// fresh database or one from any earlier version. The search index is
 /// built separately (`ensure_search_index`), in the background.
 ///

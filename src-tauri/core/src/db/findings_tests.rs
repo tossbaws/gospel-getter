@@ -113,7 +113,8 @@ async fn saving_a_verse_again_for_the_same_request_is_a_no_op() {
 }
 
 /// The table has no column for free text (C3), and its CHECKs back up the
-/// rules for each field.
+/// passage's rules. The labels' limits are Rust's alone
+/// (`migrate_tests::the_limits_are_rusts_on_an_upgraded_database`).
 #[tokio::test]
 async fn the_table_holds_only_a_marker_and_checks_it() {
     let (_db, pool) = fresh_database("findings_checks").await;
@@ -156,22 +157,6 @@ async fn the_table_holds_only_a_marker_and_checks_it() {
         ("chapter 0", (0, 1, 1), ok()),
         ("verse 0", (11, 0, 1), ok()),
         ("a range that ends first", (11, 5, 4), ok()),
-        ("no agent", (11, 1, 1), (String::new(), "grief".to_string())),
-        (
-            "a long agent",
-            (11, 1, 1),
-            ("a".repeat(61), "grief".to_string()),
-        ),
-        (
-            "no request",
-            (11, 1, 1),
-            ("Claude".to_string(), String::new()),
-        ),
-        (
-            "a long request",
-            (11, 1, 1),
-            ("Claude".to_string(), "r".repeat(61)),
-        ),
     ] {
         let result = insert(chapter, start, end, agent, request).await;
         let message = format!("{:?}", result.expect_err(what));
@@ -179,7 +164,7 @@ async fn the_table_holds_only_a_marker_and_checks_it() {
     }
     insert(11, 1, 1, "a".repeat(60), "r".repeat(60))
         .await
-        .expect("the longest of each is allowed");
+        .expect("a finding on a real passage is allowed");
 }
 
 #[tokio::test]
@@ -666,8 +651,10 @@ async fn the_writer_waits_for_the_apps_write() {
 /// A finding saved well before the one that takes its id.
 const LONG_AGO: &str = "2026-01-01T00:00:00.000Z";
 
-/// Finding A on John 11:35, removed, then finding B on John 11:33, which
-/// gets A's id (GG-06): (A as it was, B).
+/// Finding A on John 11:35, removed, then finding B on John 11:33, with
+/// A's id (GG-06): (A as it was, B). Schema 2 gives B an id of its own; B
+/// is moved to A's, as a database still at version 1 would have given it,
+/// for the second guard.
 async fn reused_finding_id(pool: &Db) -> (super::findings::Finding, super::findings::Finding) {
     let mut first = new(verse(11, 35), "grief");
     first.created_at = Some(LONG_AGO.to_string());
@@ -680,8 +667,15 @@ async fn reused_finding_id(pool: &Db) -> (super::findings::Finding, super::findi
     add_findings(pool.write(), &[new(verse(11, 33), "tears")])
         .await
         .expect("save B");
-    let b = all_findings(pool.read()).await.expect("list").remove(0);
-    assert_eq!(b.id, a.id, "B gets A's id");
+    let mut b = all_findings(pool.read()).await.expect("list").remove(0);
+    assert_ne!(b.id, a.id, "schema 2 never hands out A's id again");
+    sqlx::query("UPDATE ai_findings SET id = $1 WHERE id = $2")
+        .bind(a.id)
+        .bind(b.id)
+        .execute(pool.write().pool())
+        .await
+        .expect("give B A's id");
+    b.id = a.id;
     assert_ne!(b.created_at, a.created_at);
     (a, b)
 }

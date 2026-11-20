@@ -9,7 +9,7 @@ use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 
 use crate::db::findings::{insert_findings, set_enabled_on};
-use crate::db::notes::{NoteLimit, NoteTotals, note_totals};
+use crate::db::notes::{MAX_NOTE_CHARS, NoteLimit, NoteTotals, note_totals};
 use crate::db::{Bookmark, HighlightColor, NewFinding, WritePool};
 
 /// A bookmark ready to insert, after validation.
@@ -317,6 +317,17 @@ pub async fn apply_import(
     replace: bool,
     position: Option<&NewPosition>,
 ) -> Result<ImportCounts, ApplyImportError> {
+    // The app's checks gave every note 1 to MAX_NOTE_CHARS characters;
+    // since schema 2 nothing after this would refuse one that hasn't.
+    for note in notes.unwrap_or_default() {
+        let chars = note.body.chars().count();
+        if !(1..=MAX_NOTE_CHARS).contains(&chars) {
+            return Err(anyhow::anyhow!(
+                "A note to import has {chars} characters, not 1 to {MAX_NOTE_CHARS}"
+            )
+            .into());
+        }
+    }
     let mut tx = crate::db::begin_write(writer)
         .await
         .context("Failed to start the import")?;

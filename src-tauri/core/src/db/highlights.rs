@@ -1,7 +1,7 @@
 //! Highlights: verses the reader has marked in a color, like a highlighter
 //! pen in a paper Bible. One color per verse, stored by translation-
 //! independent coordinates (book, chapter, verse); see the `highlights`
-//! table in `migrate.rs`.
+//! table in `migrate/schema_2.rs`.
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -12,8 +12,9 @@ use std::str::FromStr;
 use super::bookmarks::{check_passage, passage_preview_sql};
 use super::{BookmarkError, WritePool};
 
-/// The highlighter colors. The database's CHECK and the frontend's
-/// swatches list the same four.
+/// The highlighter colors, which the frontend's swatches list too. The
+/// table doesn't check a color (schema 2), so this type is what keeps any
+/// other out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HighlightColor {
@@ -385,19 +386,14 @@ mod tests {
         );
     }
 
-    /// The four colors are the same everywhere: here, the table's CHECK and
-    /// the frontend's swatches.
+    /// The four colors are the same here and in the frontend's swatches.
+    /// (That the database holds no others is `migrate_tests`', on an
+    /// upgraded database.)
     #[test]
-    fn colors_match_the_table_and_the_frontend() {
+    fn colors_match_the_frontend() {
         let names: Vec<&str> = HighlightColor::ALL.iter().map(|c| c.as_str()).collect();
         assert_eq!(names, ["yellow", "green", "blue", "pink"]);
 
-        let quoted: Vec<String> = names.iter().map(|n| format!("'{n}'")).collect();
-        let migrate = include_str!("migrate.rs");
-        assert!(
-            migrate.contains(&format!("color IN ({})", quoted.join(", "))),
-            "the highlights table's CHECK should list exactly these colors"
-        );
         // The swatches are the selection card's (ui-leptos/src/card_text.rs).
         let card = include_str!("../../../../ui-leptos/src/card_text.rs");
         let double_quoted: Vec<String> = names.iter().map(|n| format!("\"{n}\"")).collect();

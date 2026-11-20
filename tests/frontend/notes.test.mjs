@@ -792,10 +792,12 @@ test('a note deleted with no card has the same timed Undo, in the toast', () =>
         assert.deepEqual(await allNotes(), []);
     }));
 
-// GG-06: note ids are reused (the newest note's, once it's deleted), so a
-// Save from an editor still holding a deleted note must not land on the note
-// that took its id.
+// GG-06: at schema 1 note ids are reused (the newest note's, once it's
+// deleted; schema 2 never does, and `__forget_used_ids` stands in for a
+// database still at 1), so a Save from an editor still holding a deleted
+// note must not land on the note that took its id.
 test('a Save from an editor whose note was deleted elsewhere leaves the newer note that took its id', async () => {
+    await backend('__forget_used_ids');
     const [old] = await seed([[16, 16, 'First thoughts.']]);
     // Written well before the note that takes its id.
     await backend('__note_written', { body: 'First thoughts.', createdAt: '2026-01-01T00:00:00.000Z' });
@@ -808,6 +810,7 @@ test('a Save from an editor whose note was deleted elsewhere leaves the newer no
         // another verse, which gets its id.
         const [stale] = await allNotes();
         await backend('delete_note', { id: stale.id, createdAt: stale.createdAt });
+        await backend('__forget_used_ids');
         const newer = await backend('add_note', { bookId: JOHN, chapter: 3, verseStart: 18, verseEnd: 18, body: 'Someone else’s.' });
         assert.equal(newer.id, old.id, 'the newer note has the old one’s id');
 

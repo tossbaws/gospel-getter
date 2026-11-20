@@ -432,8 +432,14 @@ Upgrading keeps your data.
   [Data provenance](#data-provenance-and-textual-integrity)), and builds
   the KJV's search index again; every other verse is left as it was, and
   your records there stay on the verse numbers they had. 2.33.0 builds the
-  search index again once, so `caesar` finds "Cæsar". Moving back to an
-  older version after upgrading hasn't been tested.
+  search index again once, so `caesar` finds "Cæsar", and rebuilds the
+  tables of your bookmarks, highlights, notes and AI findings once, every
+  record copied as it is, so that a record's number is never given to
+  another after it's deleted. Before that rebuild it saves a copy of the
+  whole database beside it, `gospel_getter.db.before-schema-2`, which it
+  never deletes; once you've used 2.33 for a while you can delete it.
+  2.32.x still reads and writes the rebuilt database. Moving back to an
+  older version than that after upgrading hasn't been tested.
 - Theme, text size, line spacing, width, layout, compare (and which
   translation it compares with) and reading mode are
   display settings stored in the app's web storage, not the database, as

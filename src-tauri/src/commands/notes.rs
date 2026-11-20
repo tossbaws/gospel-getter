@@ -556,11 +556,13 @@ mod tests {
     }
 
     /// GG32-05: Copy as Markdown from a view still holding note A never
-    /// copies note B, which took A's id: it's answered as for a note
-    /// that's gone, with nothing of B's. B's own `created_at` gets B's.
+    /// copies note B, which has A's id: it's answered as for a note that's
+    /// gone, with nothing of B's. B's own `created_at` gets B's. Schema 2
+    /// gives B an id of its own; B is moved to A's, as a database still at
+    /// version 1 would have given it, for the second guard.
     #[tokio::test]
     async fn copy_as_markdown_of_a_stale_note_never_copies_the_note_that_took_its_id() {
-        let (_db, state) = app_state("cmd_note_markdown_stale").await;
+        let (db, state) = app_state("cmd_note_markdown_stale").await;
         let at = |verse| Passage {
             book_id: 43,
             chapter: 3,
@@ -574,8 +576,17 @@ mod tests {
             .await
             .unwrap();
         note_delete(&state, a.id, &a.created_at).await.unwrap();
-        let b = note_add(&state, at(18), "B's own words.").await.unwrap();
-        assert_eq!(b.id, a.id, "B gets A's id");
+        let mut b = note_add(&state, at(18), "B's own words.").await.unwrap();
+        assert_ne!(b.id, a.id, "schema 2 never hands out A's id again");
+        let other = db.connect().await;
+        sqlx::query("UPDATE notes SET id = $1 WHERE id = $2")
+            .bind(a.id)
+            .bind(b.id)
+            .execute(other.write().pool())
+            .await
+            .unwrap();
+        other.close().await;
+        b.id = a.id;
 
         let stale = note_markdown_text(&state, a.id, &a.created_at, "kjv").await;
         assert_eq!(

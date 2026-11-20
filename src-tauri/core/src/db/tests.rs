@@ -17,8 +17,8 @@ use super::search::{SEARCH_CONTENT_VERSION, search_verses};
 use super::test_support::{
     KJV_TAKEN_VERSE, TempDb, WEB_UNNUMBERED, as_2_29_0_left_it, as_2_29_1_left_it, bundled,
     bundled_bsb, empty_web_verses, fill_notes, fresh_database, indexed_web_unnumbered,
-    other_tables_snapshot, prepared_database, table_names, verses_snapshot, web_index_count,
-    write_v2_1_0_database,
+    other_tables_snapshot, prepared_database, record_schema_version, table_names, verses_snapshot,
+    web_index_count, write_v2_1_0_database,
 };
 use super::{
     BookmarkError, Db, HighlightColor, NoteBodyError, NoteError, ReadingPlace, TopVerse, Verse,
@@ -910,27 +910,6 @@ async fn a_record_on_a_verse_the_kjv_numbered_until_2_29_2_can_be_saved_again() 
     }
 }
 
-/// `migrate` records the schema's version, which `SCHEMA_VERSION` names,
-/// and leaves a newer one (from a later app) as it is.
-#[tokio::test]
-async fn the_schema_version_is_recorded_and_never_lowered() {
-    let db = TempDb::new("schema_version");
-    let pool = db.connect().await;
-    assert_eq!(user_version(pool.read()).await, 0);
-    migrate(pool.write()).await.unwrap();
-    assert_eq!(SCHEMA_VERSION, 1);
-    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
-    migrate(pool.write()).await.unwrap();
-    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
-
-    sqlx::query("PRAGMA user_version = 7")
-        .execute(pool.write().pool())
-        .await
-        .unwrap();
-    migrate(pool.write()).await.unwrap();
-    assert_eq!(user_version(pool.read()).await, 7);
-}
-
 #[tokio::test]
 async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_search() {
     let db = TempDb::new("upgrade");
@@ -1377,7 +1356,8 @@ async fn an_index_of_stored_text_is_rebuilt_once() {
     let verses_before = verses_snapshot(pool.read()).await;
 
     // As 2.9.1 left it: no version table, and the KJV indexed as stored,
-    // so its margin notes' words find their verses.
+    // so its margin notes' words find their verses; no schema version.
+    record_schema_version(&pool, 0).await;
     sqlx::query("DROP TABLE search_index_version")
         .execute(pool.write().pool())
         .await
@@ -1794,14 +1774,8 @@ async fn highlights_are_set_recolored_and_removed_over_ranges() {
         Err(BookmarkError::NoSuchVerse { last_verse: 36, .. })
     ));
     assert_eq!(highlight_colors(pool.read()).await, kept);
-
-    // The table itself refuses a color that isn't one of the four.
-    let bad = sqlx::query(
-        "INSERT INTO highlights (book_id, chapter, verse, color) VALUES (1, 1, 1, 'purple')",
-    )
-    .execute(pool.write().pool())
-    .await;
-    assert!(bad.is_err(), "the CHECK should refuse purple");
+    // No other color can be named (`HighlightColor`); the table holds no
+    // list of them (`migrate_tests::the_limits_are_rusts_on_an_upgraded_database`).
 
     // And highlights survive a restart.
     pool.close().await;
@@ -1815,6 +1789,7 @@ async fn the_highlights_table_is_added_to_an_existing_database() {
     // A database from before highlights: everything else, with a reader's
     // bookmark and position, but no highlights table.
     let (db, pool) = fresh_database("add_highlights").await;
+    record_schema_version(&pool, 0).await;
     add_bookmark(pool.write(), 43, 3, 16, 16).await.unwrap();
     super::save_reading_position(pool.write(), 2, 45, 8)
         .await
@@ -2177,13 +2152,10 @@ async fn invalid_notes_are_refused_and_change_nothing() {
         .await
         .unwrap();
 
-    // The table enforces the same rules if anything gets past them.
-    for (body, verse_start, verse_end) in [
-        (String::new(), 1, 1),
-        ("x".repeat(MAX_NOTE_CHARS + 1), 1, 1),
-        ("x".to_string(), 2, 1),
-        ("x".to_string(), 0, 0),
-    ] {
+    // The table enforces the passage's rules if anything gets past them;
+    // the body's are Rust's alone
+    // (`migrate_tests::the_limits_are_rusts_on_an_upgraded_database`).
+    for (body, verse_start, verse_end) in [("x".to_string(), 2, 1), ("x".to_string(), 0, 0)] {
         let inserted = sqlx::query(
             "INSERT INTO notes (book_id, chapter, verse_start, verse_end, body) \
              VALUES (43, 3, $1, $2, $3)",
@@ -2221,6 +2193,7 @@ async fn the_notes_table_is_added_to_an_existing_database() {
     // A database as v2.7.0 left it: the current schema without notes, with
     // a reader's bookmarks, highlights and position in it.
     let (db, pool) = fresh_database("add_notes").await;
+    record_schema_version(&pool, 0).await;
     add_bookmark(pool.write(), 43, 3, 16, 18).await.unwrap();
     add_bookmark(pool.write(), 19, 23, 1, 1).await.unwrap();
     set_highlights(pool.write(), 43, 3, 16, 17, HighlightColor::Yellow)
@@ -2499,7 +2472,7 @@ async fn a_place_for_another_chapter_or_translation_is_never_used() {
 
 /// 2.19.1 opening a database this version saved a place in: its schema is
 /// there as it knows it (the new table is one more, and the version stays
-/// 1, so its `migrate` changes nothing), it reads and saves the position as
+/// this one's, higher than 1, so its `migrate` changes nothing), it reads and saves the position as
 /// it always has, and this version then opens its chapter at the top.
 #[tokio::test]
 async fn an_older_app_opens_and_saves_a_database_with_a_place_in_it() {
@@ -2522,8 +2495,7 @@ async fn an_older_app_opens_and_saves_a_database_with_a_place_in_it() {
     // and it writes the version only when it's below 1), then its read and
     // its save.
     let pool = db.connect().await;
-    assert_eq!(user_version(pool.read()).await, 1);
-    assert_eq!(SCHEMA_VERSION, 1);
+    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
     let read: Option<(i64, i64, i64)> = sqlx::query_as(
         "SELECT translation_id, book_id, chapter FROM reading_position WHERE id = 1",
     )
@@ -2726,8 +2698,10 @@ async fn note_places_are_each_notes_book_chapter_and_date() {
 /// A note written well before the one that takes its id (`reused_note_id`).
 const LONG_AGO: &str = "2026-01-01T00:00:00.000Z";
 
-/// Note A on John 3:16, deleted, then note B on John 3:18, which gets A's
-/// id (GG-06): (A as it was, B).
+/// Note A on John 3:16, deleted, then note B on John 3:18, with A's id
+/// (GG-06): (A as it was, B). Schema 2 gives B an id of its own; B is moved
+/// to A's, as a database still at version 1 would have given it, for the
+/// second guard (`update_note`'s doc).
 async fn reused_note_id(pool: &Db) -> (super::Note, super::Note) {
     let a = add_note(
         pool.write(),
@@ -2741,10 +2715,17 @@ async fn reused_note_id(pool: &Db) -> (super::Note, super::Note) {
         .await
         .unwrap()
         .unwrap();
-    let b = add_note(pool.write(), &john_3(18, 18), "B.", None)
+    let mut b = add_note(pool.write(), &john_3(18, 18), "B.", None)
         .await
         .unwrap();
-    assert_eq!(b.id, a.id, "B gets A's id");
+    assert_ne!(b.id, a.id, "schema 2 never hands out A's id again");
+    sqlx::query("UPDATE notes SET id = $1 WHERE id = $2")
+        .bind(a.id)
+        .bind(b.id)
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+    b.id = a.id;
     assert_ne!(b.created_at, a.created_at);
     (a, b)
 }
@@ -2803,9 +2784,10 @@ async fn a_stale_delete_leaves_the_note_that_took_its_id() {
 }
 
 /// GG32-04: a removal from a view still holding bookmark A (on John 3:16,
-/// removed meanwhile) leaves bookmark B (John 3:18), which took A's id, and
+/// removed meanwhile) leaves bookmark B (John 3:18), which has A's id, and
 /// answers as for a bookmark already gone. With B's own `created_at` it
-/// removes B.
+/// removes B. Schema 2 gives B an id of its own; B is moved to A's, as a
+/// database still at version 1 would have given it, for the second guard.
 #[tokio::test]
 async fn a_stale_bookmark_removal_leaves_the_bookmark_that_took_its_id() {
     let (_db, pool) = fresh_database("bookmarks_stale_remove").await;
@@ -2818,8 +2800,15 @@ async fn a_stale_bookmark_removal_leaves_the_bookmark_that_took_its_id() {
         .await
         .unwrap();
     assert!(remove_bookmark(pool.write(), a.id, LONG_AGO).await.unwrap());
-    let b = add_bookmark(pool.write(), 43, 3, 18, 18).await.unwrap();
-    assert_eq!(b.id, a.id, "B gets A's id");
+    let mut b = add_bookmark(pool.write(), 43, 3, 18, 18).await.unwrap();
+    assert_ne!(b.id, a.id, "schema 2 never hands out A's id again");
+    sqlx::query("UPDATE bookmarks SET id = $1 WHERE id = $2")
+        .bind(a.id)
+        .bind(b.id)
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+    b.id = a.id;
     assert_ne!(b.created_at, LONG_AGO);
 
     assert!(!remove_bookmark(pool.write(), a.id, LONG_AGO).await.unwrap());

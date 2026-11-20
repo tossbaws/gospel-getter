@@ -346,7 +346,9 @@ test('AUD-08: only the notes pointed at most recently keep their Markdown; one p
     });
 });
 
-// N-U-01: SQLite gives a deleted note's id to the next note added. The
+// N-U-01: at schema 1, SQLite gives a deleted note's id to the next note
+// added (schema 2 never does; `__forget_used_ids` stands in for a database
+// still at 1). The
 // Markdown asked for ahead of Copy as Markdown is for the note as it was
 // shown (its passage, and when it was written), so a new note under a
 // deleted note's id (here the same words, on John 3:17) copies its own
@@ -404,6 +406,7 @@ async function copyFromRow(app, id) {
 }
 
 test('N-U-01: deleted in the editor and written again on another verse under its id, a note copies its own passage (the card)', async () => {
+    await backend('__forget_used_ids');
     const [old] = await seed([[JOHN, 3, 16, 16, AMEN]], 'web');
     await withApp({ translation: 'web', clipboard: 'gesture' }, async (app) => {
         await select(app, 16);
@@ -413,6 +416,8 @@ test('N-U-01: deleted in the editor and written again on another verse under its
         await clickAndWait(app, app.document.querySelector('.verse-notes .note-edit'), null);
         await clickAndWait(app, el(app, 'note-delete'), 'list_all_notes');
         assert.deepEqual(await backend('list_all_notes'), []);
+        // As at schema 1, where the next note takes the deleted one's id.
+        await backend('__forget_used_ids');
         // The same words on John 3:17.
         await select(app, 17);
         app.click(app.actions().querySelector('.verse-note-btn'));
@@ -428,6 +433,7 @@ test('N-U-01: deleted in the editor and written again on another verse under its
 });
 
 test('N-U-01: a note under a deleted note’s id copies its own passage from the Library, whatever the page was told', async () => {
+    await backend('__forget_used_ids');
     const [old] = await seed([[JOHN, 3, 16, 16, AMEN]], 'web');
     await withApp({ translation: 'web', clipboard: 'gesture' }, async (app) => {
         app.openLibrary('notes');
@@ -437,6 +443,8 @@ test('N-U-01: a note under a deleted note’s id copies its own passage from the
         // Deleted and written again on John 3:17 behind the page's back,
         // so only the note itself can tell the two apart.
         await backend('delete_note', { id: old.id, createdAt: old.createdAt });
+        // As at schema 1, where the next note takes the deleted one's id.
+        await backend('__forget_used_ids');
         const added = await backend('add_note', { bookId: JOHN, chapter: 3, verseStart: 17, verseEnd: 17, body: AMEN });
         assert.equal(added.id, old.id, 'fixture: SQLite gave it the deleted note’s id');
         // A note added in the card reloads the Library's list.
@@ -454,6 +462,7 @@ test('N-U-01: a note under a deleted note’s id copies its own passage from the
 });
 
 test('N-U-01: after an import replaces every note, one under an old note’s id copies its own passage (the card and the Library)', async () => {
+    await backend('__forget_used_ids');
     const [old] = await seed([[JOHN, 3, 16, 16, AMEN]], 'web');
     await withApp({ translation: 'web', clipboard: 'gesture' }, async (app) => {
         await select(app, 16);
@@ -474,6 +483,9 @@ test('N-U-01: after an import replaces every note, one under an old note’s id 
             notes: [{ book: JOHN, book_name: 'John', chapter: 3, verse_start: 17, verse_end: 17, body: AMEN }],
         }));
         await app.pick(path);
+        // As at schema 1, where the imported note takes the replaced one's
+        // id.
+        await backend('__forget_used_ids');
         app.open('menu');
         let before = app.calls.length;
         app.click(el(app, 'import-data-btn'));
@@ -540,6 +552,7 @@ test('N-U-03: with more notes on a passage than are kept, and the Library pointe
 // for A alone, which is gone, so the copy fails as for a deleted note and
 // nothing of B's reaches the clipboard.
 test('GG32-05: Copy as Markdown on a note deleted meanwhile never copies the newer note that took its id', async () => {
+    await backend('__forget_used_ids');
     const [a] = await seed([[JOHN, 3, 16, 16, 'A’s words.']]);
     await withApp({}, async (app) => {
         app.failCommand('get_note_markdown');
@@ -549,6 +562,8 @@ test('GG32-05: Copy as Markdown on a note deleted meanwhile never copies the new
         app.failCommand('get_note_markdown', null);
 
         await backend('delete_note', { id: a.id, createdAt: a.createdAt });
+        // As at schema 1, where B takes A's id.
+        await backend('__forget_used_ids');
         const b = await backend('add_note', { bookId: JOHN, chapter: 3, verseStart: 18, verseEnd: 18, body: 'B’s own words.' });
         assert.equal(b.id, a.id, 'B gets A’s id');
         assert.notEqual(b.createdAt, a.createdAt);

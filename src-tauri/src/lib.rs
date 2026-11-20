@@ -317,9 +317,11 @@ async fn init_state(db_path: &std::path::Path) -> anyhow::Result<AppState> {
     Ok(state)
 }
 
-/// The pauses before the search index build is tried again, if it fails
-/// (each time it picks up where it stopped: finished translations stay
-/// done). Only the last try's failure leaves search unavailable.
+/// The pauses before the search index build is tried again, if the
+/// database was busy (`retry::with_retries`; any other failure is the
+/// answer at once). Each try picks up where the last stopped: finished
+/// translations stay done. Only the last try's failure leaves search
+/// unavailable.
 const SEARCH_INDEX_RETRIES: [std::time::Duration; 3] = [
     std::time::Duration::from_secs(1),
     std::time::Duration::from_secs(2),

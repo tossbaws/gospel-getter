@@ -1,6 +1,6 @@
 //! Bookmarks: the reader's saved passages. Stored as translation-independent
 //! coordinates (book, chapter, inclusive verse range); see the `bookmarks`
-//! table in `migrate.rs`.
+//! table in `migrate/schema_2.rs`.
 
 use anyhow::Context;
 use sqlx::{FromRow, SqlitePool};
@@ -243,7 +243,8 @@ pub async fn bookmarks_newest_first(pool: &SqlitePool) -> anyhow::Result<Vec<Boo
 }
 
 /// Remove the bookmark with `id` and `created_at`. Returns whether there was
-/// one to remove. Both, as for notes (see [`super::notes::update_note`]): a
+/// one to remove. Both, as for notes, a second guard (see
+/// [`super::notes::update_note`]): in a database still at version 1 a
 /// bookmark's id is reused once the newest is removed, so a removal from a
 /// view still holding the old bookmark (the Library's list, the card) would
 /// otherwise remove the new one (GG32-04).
