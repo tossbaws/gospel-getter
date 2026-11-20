@@ -79,6 +79,10 @@ test('Aa’s Single-key shortcuts: a switch, on by default, saved as it changes'
         assert.match(note.textContent, /G, \/ and \? work pressed on their own/);
         assert.match(note.textContent, /speech input or a screen reader/);
         assert.match(note.textContent, /Ctrl\+K/);
+        // The keys that still work, as the sheet names them while it's off.
+        for (const keys of ['Ctrl or Alt', 'the arrow keys', 'F6 and Esc still work']) {
+            assert.ok(note.textContent.includes(keys) && OFF_TEXT.includes(keys), keys);
+        }
         assert.equal(sw.closest('.aa-section').querySelector('.section-label').textContent, 'Keyboard');
 
         sw.click();
