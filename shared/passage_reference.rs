@@ -7,6 +7,12 @@
 //! This one file is compiled into both crates, as their `passage_reference`
 //! module (`#[path]`), so the rule is written once.
 
+/// Said beside a cross-reference whose data gives a range that can't be
+/// shown, named by its start verse alone (see core's
+/// `domain::cross_reference::target`): in the reader's lists, after the
+/// citation in brackets, and in `gospel-getter-cli`'s answer.
+pub const RANGE_UNAVAILABLE: &str = "full range not available";
+
 /// "16", or "16–18" for a range.
 pub fn verse_range(first: i64, last: i64) -> String {
     if first == last {

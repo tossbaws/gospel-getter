@@ -581,7 +581,10 @@ fn pretty_json_line<T: Serialize + ?Sized>(value: &T) -> Result<String, serde_js
 /// A file that has passed every check against this install.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedImport {
+    /// When the file says it was written, in the database's form, or empty
+    /// when that isn't a timestamp ([`normalize_timestamp`]).
     pub exported_at: String,
+    /// The version the file says wrote it ([`shown_app_version`]), or empty.
     pub app_version: String,
     /// De-duplicated, in the file's order.
     pub bookmarks: Vec<NewBookmark>,
@@ -813,8 +816,8 @@ pub fn validate(
     }
 
     Ok(ValidatedImport {
-        exported_at: data.exported_at,
-        app_version: data.app_version,
+        exported_at: normalize_timestamp(&data.exported_at).unwrap_or_default(),
+        app_version: shown_app_version(&data.app_version),
         bookmarks,
         duplicates_in_file,
         highlights: (data.format_version != FORMAT_VERSION_1).then_some(highlights),
@@ -1044,6 +1047,28 @@ fn validate_position(
             problems.push(problem);
             None
         }
+    }
+}
+
+/// The longest version the import preview names.
+const MAX_SHOWN_APP_VERSION_CHARS: usize = 32;
+
+/// A file's `app_version` as the import preview names it, inside the app's
+/// own sentence ("exported … by Gospel Getter 2.2.0"): only numbers joined
+/// by dots, at most `MAX_SHOWN_APP_VERSION_CHARS`; anything else is empty,
+/// and the sentence leaves the version out. Both fields are informational,
+/// so a file isn't refused for them, but a shared file mustn't make the
+/// app's sentence say whatever it likes, at any length (B-03).
+pub fn shown_app_version(claimed: &str) -> String {
+    let dotted_numbers = claimed.len() <= MAX_SHOWN_APP_VERSION_CHARS
+        && claimed.split('.').count() >= 2
+        && claimed
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
+    if dotted_numbers {
+        claimed.to_string()
+    } else {
+        String::new()
     }
 }
 

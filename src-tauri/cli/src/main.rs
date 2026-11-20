@@ -50,13 +50,13 @@ enum Command {
     /// Many passages in one call, all in one translation.
     #[command(name = "get_passages", visible_aliases = ["passages", "get-passages"])]
     GetPassages(GetPassagesArgs),
-    /// Search the text of one translation, in Bible order.
+    /// Search the text of one translation, in Bible order. Only the first 12 words count; --offset pages on, as next_offset says.
     #[command(name = "search")]
     Search(SearchArgs),
     /// A passage in several translations, each numbered its own way.
     #[command(name = "compare")]
     Compare(CompareArgs),
-    /// The cross-references of a verse, a range or a chapter.
+    /// The cross-references of a verse, a range or a chapter. A range the data can't give in full is its first verse, marked range_unavailable.
     #[command(
         name = "get_cross_references",
         visible_aliases = ["cross_references", "get-cross-references", "cross-references"]

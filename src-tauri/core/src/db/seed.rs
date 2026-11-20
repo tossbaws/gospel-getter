@@ -26,7 +26,8 @@ pub struct TranslationSource {
 /// the translation doesn't number is `null` (or `""`, see `numbered`),
 /// and footnotes kept apart from
 /// the text go in each book's `footnotes`, as in `data/bsb.json`), then add
-/// one entry here and one in `TEXTS`. Only include translations you have the right to
+/// one entry here, one in `TEXTS`, and its code at the end of `SEED_ORDER`
+/// (which a test checks hold the same codes). Only include translations you have the right to
 /// redistribute (public domain, or under a license that permits
 /// bulk/offline copies) — see the README for why NIV and ESV aren't bundled
 /// this way.
@@ -73,7 +74,8 @@ static TEXTS: [(&str, &str); 3] = [
     ("web", include_str!("../../../data/web.json")),
 ];
 
-/// The order translations are seeded in: each new one at the end.
+/// The order translations are seeded in: each new one at the end. Only a
+/// translation listed here is ever seeded.
 const SEED_ORDER: [&str; 3] = ["kjv", "web", "bsb"];
 
 /// Where `code` comes in [`TRANSLATIONS`] (unknown codes last).
@@ -125,7 +127,7 @@ struct RawFootnote {
 /// translations — but only whatever is actually missing. This is what
 /// makes the app self-initializing on a fresh checkout *and* lets an
 /// already-running install pick up a newly-added translation after a
-/// rebuild: each translation in `TRANSLATIONS` is seeded independently, on
+/// rebuild: each translation in `SEED_ORDER` (every one in `TRANSLATIONS`) is seeded independently, on
 /// its own presence check (`SELECT id FROM translations WHERE code = ...`),
 /// not gated by a single "is the database empty" flag. This only fills in
 /// what's absent: a change to a translation that's already seeded is a
@@ -730,6 +732,26 @@ async fn seed_cross_references(
 mod tests {
     use super::*;
     use crate::db::test_support::prepared_database;
+
+    /// Adding a translation is an entry in each of the three lists; one
+    /// left out of `SEED_ORDER` would never be seeded, and one left out of
+    /// `TEXTS` would have no text (A-05).
+    #[test]
+    fn the_translations_the_texts_and_the_seed_order_name_the_same_codes() {
+        fn sorted(mut codes: Vec<&str>) -> Vec<&str> {
+            codes.sort_unstable();
+            codes
+        }
+        let listed = sorted(TRANSLATIONS.iter().map(|t| t.code).collect());
+        assert_eq!(
+            sorted(TEXTS.iter().map(|(code, _)| *code).collect()),
+            listed
+        );
+        assert_eq!(sorted(SEED_ORDER.to_vec()), listed);
+        let mut once = listed.clone();
+        once.dedup();
+        assert_eq!(once, listed, "each code once");
+    }
 
     async fn count(writer: &WritePool) -> i64 {
         sqlx::query_scalar("SELECT COUNT(*) FROM cross_references")

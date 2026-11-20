@@ -15,7 +15,7 @@
 
 use crate::dto::{ChapterSide, Compare, Edge, Reading, Translation, Verse, Xref};
 use crate::margin_text;
-use crate::passage_reference::verse_range;
+use crate::passage_reference::{RANGE_UNAVAILABLE, verse_range};
 use crate::verse_parts::{Footnote, PartKind, SegmentKind};
 
 // ---- Text as markup.
@@ -394,6 +394,17 @@ fn end_verse(xref: &Xref) -> String {
         .unwrap_or_default()
 }
 
+/// What follows a cross-reference's chip, outside it: for one whose range
+/// isn't available, "(full range not available)", muted. Outside, so the
+/// chip's text stays the passage's name.
+pub fn range_note(xref: &Xref) -> String {
+    if xref.range_unavailable {
+        format!(r#" <span class="xref-range-note">({RANGE_UNAVAILABLE})</span>"#)
+    } else {
+        String::new()
+    }
+}
+
 /// The cross-references' credit, with its links (which the backend opens).
 const XREF_CREDIT: &str = r#"<p class="xref-credit">Cross-reference data from <a class="credit-link" data-link="openbible" href="https://www.openbible.info/labs/cross-references/">OpenBible.info</a>, licensed under <a class="credit-link" data-link="cc-by" href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>"#;
 
@@ -438,12 +449,13 @@ pub fn xref_rows(dto: &Reading) -> String {
                 .iter()
                 .map(|x| {
                     format!(
-                        r#"<span class="xref-summary-item"><button type="button" class="xref-summary-chip" data-book="{}" data-chapter="{}" data-verse="{}"{}>{}</button></span>"#,
+                        r#"<span class="xref-summary-item"><button type="button" class="xref-summary-chip" data-book="{}" data-chapter="{}" data-verse="{}"{}>{}</button>{}</span>"#,
                         x.book_id,
                         x.chapter,
                         x.verse,
                         end_verse(x),
                         escape_html(&x.citation),
+                        range_note(x),
                     )
                 })
                 .collect();
@@ -1210,6 +1222,7 @@ mod tests {
             verse: 1,
             end_verse: Some(3),
             citation: "John 1:1-3".into(),
+            range_unavailable: false,
         }];
         v1.footnotes = vec![Footnote {
             label: "a".into(),
@@ -1787,5 +1800,23 @@ mod tests {
         assert_eq!(rounded_offset(-12.504), -12.5);
         assert_eq!(rounded_offset(0.004), 0.0);
         assert_eq!(rounded_offset(33.336), 33.34);
+    }
+
+    #[test]
+    fn a_listed_citation_whose_range_isnt_available_says_so_after_it() {
+        let mut dto = reading();
+        dto.current_verses[0].xrefs[0] = Xref {
+            book_id: 58,
+            chapter: 6,
+            verse: 20,
+            end_verse: None,
+            citation: "Hebrews 6:20".into(),
+            range_unavailable: true,
+        };
+        let rows = xref_rows(&dto);
+        assert!(
+            rows.contains(r#"data-verse="20">Hebrews 6:20</button> <span class="xref-range-note">(full range not available)</span></span>"#),
+            "{rows}"
+        );
     }
 }

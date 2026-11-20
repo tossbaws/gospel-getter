@@ -17,9 +17,14 @@ use anyhow::{Context, anyhow, bail};
 use clap::Args;
 use gospel_getter_core::db::migrate::SCHEMA_VERSION;
 use gospel_getter_core::db::{self, Book, HighlightColor, Translation};
+use gospel_getter_core::domain::cross_reference;
 use gospel_getter_core::domain::kjv_markup::{KJV, VerseText};
-use gospel_getter_core::domain::passage::{numbering_notice, translations_named};
-use gospel_getter_core::domain::query::{self, Interpretation, PassageRef, SearchQuery};
+use gospel_getter_core::domain::passage::{
+    chapter_numbering_notice, no_such_verse, numbering_notice, translations_named,
+};
+use gospel_getter_core::domain::query::{
+    self, Interpretation, MAX_SEARCH_TERMS, PassageRef, SearchQuery,
+};
 use gospel_getter_core::passage_reference::passage_reference;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -39,8 +44,6 @@ pub use verify::{VerifyQuoteArgs, VerifyQuoteOut};
 /// What every refusal to read an install that isn't ready ends with.
 const OPEN_THE_APP: &str = "Open Gospel Getter once first, then try again.";
 
-/// The most verses of a passage returned at once: more than any chapter has.
-const MAX_PASSAGE_VERSES: usize = 200;
 /// How many search results come back unless asked otherwise, and the most.
 const DEFAULT_SEARCH_LIMIT: u32 = 50;
 const MAX_SEARCH_LIMIT: u32 = 200;
@@ -84,7 +87,7 @@ pub struct GetPassagesArgs {
 #[derive(Debug, Clone, Args, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchArgs {
-    /// Words a verse must have; words in double quotes must be side by side.
+    /// Words a verse must have; words in double quotes must be side by side. Only the first 12 words count.
     pub query: String,
     /// A translation's code, such as kjv, bsb or web. Default: the one the reader last read.
     #[arg(long)]
@@ -95,6 +98,9 @@ pub struct SearchArgs {
     /// How many verses to return: 50 unless given, at most 200.
     #[arg(long)]
     pub limit: Option<u32>,
+    /// How many matching verses to skip, in Bible order: 0 unless given. The answer's next_offset is the next page's.
+    #[arg(long)]
+    pub offset: Option<u32>,
 }
 
 /// Arguments of `compare`.
@@ -297,10 +303,18 @@ pub struct SearchOut {
     pub book: Option<String>,
     /// What was searched for: each phrase in curly quotes, then each word.
     pub terms: Vec<String>,
-    /// How many verses match, of which `results` are the first `limit`.
+    /// Only when the query had more words than are searched for: which were.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    /// How many verses match, of which `results` are at most `limit`,
+    /// starting after the first `offset`.
     pub total: i64,
     pub limit: u32,
+    pub offset: u32,
     pub results: Vec<SearchResultOut>,
+    /// The `offset` of the next page, while more verses match.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<i64>,
     /// The passage the query also names, as the app's search box offers it:
     /// `get_passage` reads it. Alone, when the query is only a reference.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -345,7 +359,8 @@ pub struct CrossReferencesOut {
     pub cross_references: Vec<CrossReferenceOut>,
 }
 
-/// A cross-reference: which verse it's from, and the passage it names.
+/// A cross-reference: which verse it's from, and the passage it names, as
+/// the app names and opens it (core's `domain::cross_reference`).
 #[derive(Debug, Serialize)]
 pub struct CrossReferenceOut {
     pub from_verse: i64,
@@ -354,6 +369,12 @@ pub struct CrossReferenceOut {
     pub chapter: i64,
     pub verse_start: i64,
     pub verse_end: i64,
+    /// Only when the data's range can't be shown: `true`, and `note` says
+    /// "full range not available"; the passage is its start verse.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub range_unavailable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<&'static str>,
 }
 
 /// The answer of `get_reading_place`. Only `saved` when there's no saved place.
@@ -620,7 +641,8 @@ impl Library {
     }
 
     /// The verses of a passage this translation numbers, as the app shows
-    /// them, and a sentence on any it doesn't.
+    /// them, and a sentence on any it doesn't: for a whole chapter, those
+    /// another installed translation numbers there.
     async fn read(
         &self,
         translation: &Translation,
@@ -655,9 +677,22 @@ impl Library {
                     last_anywhere,
                 )
             }
-            None => None,
+            None => {
+                let anywhere =
+                    db::get_chapter_verses_numbered_anywhere(&self.pool, book.id, passage.chapter)
+                        .await?;
+                let numbered: Vec<i64> = verses.iter().map(|v| v.verse).collect();
+                chapter_numbering_notice(
+                    &book.name,
+                    &translation.name,
+                    passage.chapter,
+                    &numbered,
+                    &anywhere,
+                    last,
+                )
+            }
         };
-        Ok(capped_passage(verses, notice))
+        Ok((verses, notice))
     }
 
     async fn list_translations(&self) -> anyhow::Result<TranslationsOut> {
@@ -790,6 +825,9 @@ impl Library {
             .map(|name| self.book_named(name))
             .transpose()?;
         let limit = capped(args.limit, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
+        // An offset is a u32, so a negative one is refused as the argument is
+        // read; one past the end is an empty page.
+        let offset = args.offset.unwrap_or(0);
         if !db::search::search_index_is_current(&self.pool, translation.id).await? {
             bail!("The search index isn't built yet. {OPEN_THE_APP}");
         }
@@ -800,10 +838,39 @@ impl Library {
         let (terms, go_to) = match query::interpret(&args.query, &self.books) {
             Interpretation::Empty => bail!("There's nothing to search for."),
             Interpretation::InvalidReference(message) => bail!(message),
-            Interpretation::Passage(passage) => (SearchQuery::default(), Some(named(passage)?)),
+            Interpretation::Passage(passage) => {
+                if let Some(verses) = passage.verses {
+                    let name = &self.book(passage.book_id)?.name;
+                    let chapter = db::get_chapter_verses(
+                        &self.pool,
+                        translation.id,
+                        passage.book_id,
+                        passage.chapter,
+                    )
+                    .await?;
+                    let verse_count = chapter.last().map_or(0, |v| v.verse);
+                    if let Some(message) = no_such_verse(
+                        name,
+                        &translation.name,
+                        passage.chapter,
+                        verses,
+                        verse_count,
+                    ) {
+                        bail!(message);
+                    }
+                }
+                (SearchQuery::default(), Some(named(passage)?))
+            }
             Interpretation::Text(terms) => (terms, None),
             Interpretation::TextOrBook(terms, passage) => (terms, Some(named(passage)?)),
         };
+        let notice =
+            (!terms.is_empty() && query::search_query_drops_words(&args.query)).then(|| {
+                format!(
+                    "Only the first {MAX_SEARCH_TERMS} words are searched for: {}.",
+                    terms.labels().join(", ")
+                )
+            });
         let (total, hits) = match book {
             Some(book) => {
                 db::search::search_verses_in_book(
@@ -812,15 +879,23 @@ impl Library {
                     book.id,
                     &terms,
                     i64::from(limit),
-                    0,
+                    i64::from(offset),
                 )
                 .await?
             }
             None => {
-                db::search::search_verses(&self.pool, translation.id, &terms, i64::from(limit), 0)
-                    .await?
+                db::search::search_verses(
+                    &self.pool,
+                    translation.id,
+                    &terms,
+                    i64::from(limit),
+                    i64::from(offset),
+                )
+                .await?
             }
         };
+        let read_to = i64::from(offset) + i64::try_from(hits.len()).context("Too many results")?;
+        let next_offset = (!hits.is_empty() && read_to < total).then_some(read_to);
         let results = hits
             .into_iter()
             .map(|hit| {
@@ -839,9 +914,12 @@ impl Library {
             translation: translation.code.clone(),
             book: book.map(|b| b.name.clone()),
             terms: terms.labels(),
+            notice,
             total,
             limit,
+            offset,
             results,
+            next_offset,
             go_to,
         })
     }
@@ -906,18 +984,18 @@ impl Library {
             .take(MAX_CROSS_REFERENCES)
             .map(|r| {
                 let name = &self.book(r.ref_book_id)?.name;
-                let verse_end = r.ref_end_verse.unwrap_or(r.ref_verse);
+                let target = r.target();
                 Ok(CrossReferenceOut {
                     from_verse: r.verse,
-                    reference: passage_reference(
-                        name,
-                        r.ref_chapter,
-                        Some((r.ref_verse, verse_end)),
-                    ),
+                    reference: cross_reference::label(name, r.ref_chapter, target),
                     book: name.clone(),
                     chapter: r.ref_chapter,
-                    verse_start: r.ref_verse,
-                    verse_end,
+                    verse_start: target.verse_start,
+                    verse_end: target.verse_end,
+                    range_unavailable: target.range_unavailable,
+                    note: target
+                        .range_unavailable
+                        .then_some(cross_reference::RANGE_UNAVAILABLE),
                 })
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
@@ -1160,9 +1238,8 @@ fn is_only_numbers(part: &str) -> bool {
 /// The reference that the numbers `part` make, going on from `previous`, which
 /// has a book's name to go on from, or `None`. It's in the same book. It's in the
 /// chapter `previous` ends in too if it names no chapter, and `previous` named
-/// verses: "John 3:16, 18" is John 3:18, and after a range across chapters,
-/// "John 3:16-4:2, 5" is John 4:5; but "John 3:16, 4:2" is John 4:2 and "Psalm
-/// 23, 24" is Psalm 24.
+/// verses: "John 3:16, 18" is John 3:18 and "John 3:16-18, 20" is John 3:20;
+/// but "John 3:16, 4:2" is John 4:2 and "Psalm 23, 24" is Psalm 24.
 fn continued(previous: &str, part: &str) -> Option<String> {
     let (at, last_letter) = previous.char_indices().rfind(|(_, c)| c.is_alphabetic())?;
     let (book, numbers) = previous.split_at(at + last_letter.len_utf8());
@@ -1197,24 +1274,6 @@ fn verse_out(verse: i64, shown: VerseText) -> VerseOut {
             })
             .collect(),
     }
-}
-
-/// At most `MAX_PASSAGE_VERSES` verses, saying so if there were more.
-fn capped_passage(
-    mut verses: Vec<VerseOut>,
-    notice: Option<String>,
-) -> (Vec<VerseOut>, Option<String>) {
-    if verses.len() <= MAX_PASSAGE_VERSES {
-        return (verses, notice);
-    }
-    let total = verses.len();
-    verses.truncate(MAX_PASSAGE_VERSES);
-    let capped = format!("Only the first {MAX_PASSAGE_VERSES} of {total} verses are here.");
-    let notice = match notice {
-        Some(notice) => format!("{notice} {capped}"),
-        None => capped,
-    };
-    (verses, Some(notice))
 }
 
 /// The limit asked for, `default` if none, between 1 and `max`.

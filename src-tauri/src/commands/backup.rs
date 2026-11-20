@@ -90,6 +90,8 @@ pub enum ExportOutcome {
 pub struct ImportPreviewDto {
     pub token: u64,
     pub file_name: String,
+    /// Empty when the file's isn't well formed (see `ValidatedImport`), as
+    /// is `app_version`.
     pub exported_at: String,
     pub app_version: String,
     /// Distinct bookmarks in the file.

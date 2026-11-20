@@ -35,7 +35,8 @@ fn release_notes_page(version: &str) -> String {
 }
 
 /// The cross-references' credit, after the bundled texts'.
-const CROSS_REFERENCES_CREDIT: &str = "Cross-references from OpenBible.info, CC BY 4.0";
+const CROSS_REFERENCES_CREDIT: &str =
+    "Cross-references from OpenBible.info, selected and reformatted, CC BY 4.0";
 
 /// Escape closes About. Everything else passes (Tab is [`trap_tab`]'s).
 fn on_keydown(event: &KeyboardEvent) {

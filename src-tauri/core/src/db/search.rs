@@ -7,7 +7,9 @@
 //! What's indexed is each verse's plain text as the app shows it (see
 //! `domain::kjv_markup::VerseText`): in the KJV, supplied words without
 //! their braces and no margin notes, so a note's words don't find the
-//! verse. Every other translation's text is indexed as stored.
+//! verse; every other translation's text as stored. Each is folded for
+//! search first (`domain::query::search_folded`, which says why only search
+//! folds).
 //!
 //! Each indexed row's rowid encodes the verse's coordinates —
 //! `translation * 10^8 + book * 10^6 + chapter * 10^3 + verse` — so one
@@ -19,13 +21,14 @@ use sqlx::{FromRow, SqliteConnection, SqlitePool};
 
 use crate::db::Db;
 use crate::domain::kjv_markup::{KJV, VerseText};
-use crate::domain::query::SearchQuery;
+use crate::domain::query::{SearchQuery, search_folded};
 
 /// What `verse_search` holds, recorded in `search_index_version`. A
 /// database with any other version (or none: 2.9.1 and older indexed the
-/// KJV's stored text, braces and notes included) has its whole index
-/// rebuilt once. Change it whenever what's indexed changes.
-pub const SEARCH_CONTENT_VERSION: i64 = 1;
+/// KJV's stored text, braces and notes included; 1, up to 2.32, the text
+/// unfolded, so "caesar" missed "Cæsar") has its whole index rebuilt once.
+/// Change it whenever what's indexed changes.
+pub const SEARCH_CONTENT_VERSION: i64 = 2;
 
 const TRANSLATION_STRIDE: i64 = 100_000_000;
 const BOOK_STRIDE: i64 = 1_000_000;
@@ -329,31 +332,30 @@ impl TranslationBuild {
 
     /// Replace one book's rows in the index with its verses' text, in one
     /// transaction that starts with the write lock (see `begin_write`: a
-    /// write into the full-text table reads before it writes). The KJV's
-    /// text as the app shows it (see `VerseText`) is made first, on the read
-    /// pool, so the writer isn't held for it.
+    /// write into the full-text table reads before it writes). The text as
+    /// the app shows it (see `VerseText`), folded for search, is made first,
+    /// on the read pool, so the writer isn't held for it.
     pub(super) async fn index_book(&self, db: &Db, book_id: i64) -> anyhow::Result<()> {
-        let shown = if self.code == KJV {
-            let verses: Vec<(i64, i64, String)> = sqlx::query_as(
-                "SELECT chapter, verse, text FROM verses \
-                 WHERE translation_id = $1 AND book_id = $2 ORDER BY chapter, verse",
-            )
-            .bind(self.translation_id)
-            .bind(book_id)
-            .fetch_all(db.read())
-            .await?;
-            Some(
-                verses
-                    .into_iter()
-                    .map(|(chapter, verse, stored)| {
-                        let rowid = verse_rowid(self.translation_id, (book_id, chapter, verse));
-                        (rowid, VerseText::new(KJV, &stored).text)
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        } else {
-            None
-        };
+        let verses: Vec<(i64, i64, String)> = sqlx::query_as(
+            "SELECT chapter, verse, text FROM verses \
+             WHERE translation_id = $1 AND book_id = $2 ORDER BY chapter, verse",
+        )
+        .bind(self.translation_id)
+        .bind(book_id)
+        .fetch_all(db.read())
+        .await?;
+        let indexed: Vec<(i64, String)> = verses
+            .into_iter()
+            .map(|(chapter, verse, stored)| {
+                let rowid = verse_rowid(self.translation_id, (book_id, chapter, verse));
+                let shown = if self.code == KJV {
+                    VerseText::new(KJV, &stored).text
+                } else {
+                    stored
+                };
+                (rowid, search_folded(&shown))
+            })
+            .collect();
 
         let mut tx = crate::db::begin_write(db.write()).await?;
         ensure_current_content(&mut tx).await?;
@@ -363,39 +365,21 @@ impl TranslationBuild {
             .bind(hi)
             .execute(&mut *tx)
             .await?;
-        match shown {
-            Some(verses) => {
-                super::seed::insert_rows(
-                    &mut tx,
-                    "INSERT INTO verse_search (rowid, text) ",
-                    &verses,
-                    |mut row, (rowid, text)| {
-                        row.push_bind(*rowid).push_bind(text.as_str());
-                    },
-                    |chunk| {
-                        format!(
-                            "{} verses of book {book_id} into the search index",
-                            chunk.len()
-                        )
-                    },
+        super::seed::insert_rows(
+            &mut tx,
+            "INSERT INTO verse_search (rowid, text) ",
+            &indexed,
+            |mut row, (rowid, text)| {
+                row.push_bind(*rowid).push_bind(text.as_str());
+            },
+            |chunk| {
+                format!(
+                    "{} verses of book {book_id} into the search index",
+                    chunk.len()
                 )
-                .await?;
-            }
-            None => {
-                sqlx::query(
-                    "INSERT INTO verse_search (rowid, text) \
-                     SELECT translation_id * $3 + book_id * $4 + chapter * $5 + verse, text \
-                     FROM verses WHERE translation_id = $1 AND book_id = $2",
-                )
-                .bind(self.translation_id)
-                .bind(book_id)
-                .bind(TRANSLATION_STRIDE)
-                .bind(BOOK_STRIDE)
-                .bind(CHAPTER_STRIDE)
-                .execute(&mut *tx)
-                .await?;
-            }
-        }
+            },
+        )
+        .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -543,10 +527,11 @@ impl Coverage {
 /// (implicit AND). Each is one FTS5 string, in double quotes (any inside
 /// doubled), so nothing typed is read as FTS syntax: a word's string
 /// matches it anywhere; a phrase's, its words separated by spaces, matches
-/// them in order, side by side (FTS5's phrase), the tokenizer folding case
-/// and accents for both as it did for the text.
+/// them in order, side by side (FTS5's phrase). Each is folded for search
+/// ([`search_folded`]) as the indexed text was, and the tokenizer folds
+/// case for both.
 fn match_expression(query: &SearchQuery) -> String {
-    let string = |text: &str| format!("\"{}\"", text.replace('"', "\"\""));
+    let string = |text: &str| format!("\"{}\"", search_folded(text).replace('"', "\"\""));
     query
         .phrases
         .iter()

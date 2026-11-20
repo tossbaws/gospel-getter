@@ -849,3 +849,37 @@ async fn each_format_imports_only_the_kinds_it_can_hold() {
         Ok(expected)
     );
 }
+
+/// A file's own date and version are named in the import preview only when
+/// they're well formed, a timestamp and a version of dotted numbers of at
+/// most 32 characters; otherwise left out (empty), and the file still
+/// imports (B-03).
+#[tokio::test]
+async fn a_files_date_and_version_are_shown_only_when_well_formed() {
+    let install = Install::new("validate_shown_claims").await;
+    let shown = |exported_at: &str, app_version: &str| {
+        let mut f = file(1, json!({}));
+        f["exported_at"] = json!(exported_at);
+        f["app_version"] = json!(app_version);
+        let checked = install.check(&f).expect("a file that imports");
+        (checked.exported_at, checked.app_version)
+    };
+    assert_eq!(
+        shown("2026-11-14T08:00:00Z", "2.29.3"),
+        ("2026-11-14T08:00:00.000Z".to_string(), "2.29.3".to_string())
+    );
+    // 10,000 characters of dotted numbers: well formed but too long.
+    let long = format!("2.{}", "0".repeat(9_998));
+    assert_eq!(shown("x", &long), (String::new(), String::new()));
+    let line_break = "2.29.3\nand the rest of a sentence";
+    assert_eq!(
+        shown("2026-11-14\n08:00", line_break),
+        (String::new(), String::new())
+    );
+    for refused in ["2", "2..3", "v2.29.3", "2.29.3-beta", " 2.29.3", ""] {
+        assert_eq!(reader_data::shown_app_version(refused), "", "{refused:?}");
+    }
+    let at_most = format!("1.{}", "0".repeat(30));
+    assert_eq!(reader_data::shown_app_version(&at_most), at_most);
+    assert_eq!(reader_data::shown_app_version(&format!("{at_most}0")), "");
+}

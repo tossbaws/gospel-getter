@@ -13,7 +13,7 @@
 use crate::dto::{SelectionNote, Verse, Xref};
 use crate::note_markdown::{Layout, drawn_links, note_html};
 use crate::passage_reference::passage_reference;
-use crate::reader_text::{escape_html, footnote_html, verse_html};
+use crate::reader_text::{escape_html, footnote_html, range_note, verse_html};
 use crate::verse_parts::Footnote;
 
 /// The highlighter colors, in the order the swatches show them. The
@@ -177,11 +177,12 @@ pub fn xrefs_html(rows: &[(i64, &[Xref])], chapter: i64, range: bool) -> String 
                         .map(|end| format!(r#" data-end-verse="{end}""#))
                         .unwrap_or_default();
                     format!(
-                        r#"<li><button type="button" class="xref-citation" data-book="{}" data-chapter="{}" data-verse="{}"{end} aria-expanded="false" aria-controls="xref-preview">{}</button></li>"#,
+                        r#"<li><button type="button" class="xref-citation" data-book="{}" data-chapter="{}" data-verse="{}"{end} aria-expanded="false" aria-controls="xref-preview">{}</button>{}</li>"#,
                         x.book_id,
                         x.chapter,
                         x.verse,
                         escape_html(&x.citation),
+                        range_note(x),
                     )
                 })
                 .collect();
@@ -195,29 +196,11 @@ pub fn xrefs_html(rows: &[(i64, &[Xref])], chapter: i64, range: bool) -> String 
     )
 }
 
-/// A chip's citation as a passage's name, for when the backend couldn't
-/// name it: its first hyphen between two digits as an en dash ("1 John
-/// 4:9-10" → "1 John 4:9–10").
-pub fn chip_reference(citation: &str) -> String {
-    let chars: Vec<char> = citation.chars().collect();
-    let at = chars
-        .windows(3)
-        .position(|w| w[0].is_ascii_digit() && w[1] == '-' && w[2].is_ascii_digit());
-    match at {
-        Some(i) => chars
-            .iter()
-            .enumerate()
-            .map(|(j, &c)| if j == i + 1 { '\u{2013}' } else { c })
-            .collect(),
-        None => citation.to_string(),
-    }
-}
-
 /// A cross-reference read in place: what `get_passage` answered for it, or
 /// why it couldn't.
 #[derive(Debug, Clone, Copy)]
 pub struct Preview<'a> {
-    /// The passage's name: the backend's, or the chip's ([`chip_reference`]).
+    /// The passage's name: the backend's, or the chip's citation.
     pub reference: &'a str,
     /// The translation its text is in.
     pub code: &'a str,
@@ -879,6 +862,7 @@ mod tests {
             verse,
             end_verse: end,
             citation: citation.to_string(),
+            range_unavailable: false,
         }
     }
 
@@ -979,11 +963,14 @@ mod tests {
     }
 
     #[test]
-    fn a_chips_citation_gets_its_dash() {
-        assert_eq!(chip_reference("1 John 4:9-10"), "1 John 4:9–10");
-        assert_eq!(chip_reference("Gen 1:1-2, 3-4"), "Gen 1:1–2, 3-4");
-        assert_eq!(chip_reference("Jude 1:3"), "Jude 1:3");
-        assert_eq!(chip_reference("A-B 1-"), "A-B 1-");
+    fn a_chip_whose_range_isnt_available_says_so_after_it() {
+        let mut x = xref(58, 6, 20, None, "Hebrews 6:20");
+        x.range_unavailable = true;
+        let html = xrefs_html(&[(18, std::slice::from_ref(&x))], 14, false);
+        assert!(
+            html.contains(r#"aria-controls="xref-preview">Hebrews 6:20</button> <span class="xref-range-note">(full range not available)</span></li>"#),
+            "{html}"
+        );
     }
 
     #[test]

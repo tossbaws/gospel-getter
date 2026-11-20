@@ -12,7 +12,10 @@ pub const TITLE: &str = "Import bookmarks, highlights, notes and settings";
 /// Its title for one that can't.
 pub const INVALID_TITLE: &str = "This file can’t be imported";
 
-/// "bookmarks.json — exported 2026-10-04 by Gospel Getter 2.2.0".
+/// "bookmarks.json — exported 2026-10-04 by Gospel Getter 2.2.0". The
+/// backend sends the date and version only when they're well formed
+/// (`reader_data::shown_app_version`), and either left out is left out
+/// here.
 pub fn file_line(preview: &ImportPreview) -> String {
     let exported: String = preview.exported_at.chars().take(10).collect();
     let exported = if exported.is_empty() {
@@ -20,10 +23,12 @@ pub fn file_line(preview: &ImportPreview) -> String {
     } else {
         exported
     };
-    format!(
-        "{} — exported {exported} by Gospel Getter {}",
-        preview.file_name, preview.app_version
-    )
+    let by = if preview.app_version.is_empty() {
+        String::new()
+    } else {
+        format!(" by Gospel Getter {}", preview.app_version)
+    };
+    format!("{} — exported {exported}{by}", preview.file_name)
 }
 
 fn repeated(n: u64) -> String {
@@ -495,6 +500,11 @@ mod tests {
             ..bookmarks_only()
         };
         assert!(file_line(&unknown).contains("exported at an unknown time by"));
+        let no_version = ImportPreview {
+            app_version: String::new(),
+            ..bookmarks_only()
+        };
+        assert_eq!(file_line(&no_version), "data.json — exported 2026-10-04");
     }
 
     #[test]

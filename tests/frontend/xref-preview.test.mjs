@@ -59,7 +59,7 @@ test('a chip shows its passage in the card, under its row, and stays in the chap
 test('a range previews every verse in it, each with its number, as prose', () =>
     withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
         await clickAndWait(app, app.verse(16), 'list_notes');
-        await clickAndWait(app, chip(app, '1 John 4:9-10'), 'get_passage');
+        await clickAndWait(app, chip(app, '1 John 4:9–10'), 'get_passage');
         assert.deepEqual(shown(app), {
             title: '1 John 4:9–10 (WEB)',
             numbers: [9, 10],
@@ -102,7 +102,7 @@ test('one preview at a time, across rows, and the same chip closes it', () =>
 test('Go to opens the passage, selected, and Back returns', () =>
     withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
         await clickAndWait(app, app.verse(16), 'list_notes');
-        await clickAndWait(app, chip(app, '1 John 4:9-10'), 'get_passage');
+        await clickAndWait(app, chip(app, '1 John 4:9–10'), 'get_passage');
         await clickAndWait(app, preview(app).querySelector('.xref-preview-go'), 'get_reading');
         assert.deepEqual(where(app), ['1 John 4', [9, 10]]);
         assert.equal(card(app).previousElementSibling, app.verse(10));
@@ -190,7 +190,7 @@ test('a KJV preview has the italics for supplied words and no footnote markers',
 test('a failed read says so in the preview and still offers Go to', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv', failing: { get_passage: 'no database' } }, async (app) => {
         await clickAndWait(app, app.verse(16), 'list_notes');
-        await clickAndWait(app, chip(app, '1 John 4:9-10'), 'get_passage');
+        await clickAndWait(app, chip(app, '1 John 4:9–10'), 'get_passage');
         assert.deepEqual(shown(app), {
             title: '1 John 4:9–10 (KJV)',
             numbers: [],
@@ -267,7 +267,7 @@ test('opening a preview puts nothing into the chapter’s flow', () =>
         const children = [...text.children];
         const verses = () => [...text.children].filter((el) => el !== card(app)).map((el) => el.outerHTML);
         const html = verses();
-        await clickAndWait(app, chip(app, '1 John 4:9-10'), 'get_passage');
+        await clickAndWait(app, chip(app, '1 John 4:9–10'), 'get_passage');
         assert.deepEqual([...text.children], children, 'nothing added or moved: the card was already there');
         assert.deepEqual(verses(), html, 'the verses are untouched');
         assert.ok(card(app).contains(preview(app)));
@@ -306,8 +306,8 @@ const openList = (app) => app.click(app.document.querySelector('.disclosure-togg
 test('a citation in the chapter’s Cross references opens its passage, selected', () =>
     withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
         openList(app);
-        const range = listed(app).find((c) => c.textContent === '1 John 4:9-10');
-        assert.ok(range, 'fixture: John 3 lists 1 John 4:9-10');
+        const range = listed(app).find((c) => c.textContent === '1 John 4:9–10');
+        assert.ok(range, 'fixture: John 3 lists 1 John 4:9–10');
         assert.equal(range.tagName, 'BUTTON');
         assert.equal(range.type, 'button');
         assert.equal(range.tabIndex, 0);
@@ -327,6 +327,32 @@ test('a citation in the chapter’s Cross references opens its passage, selected
         assert.deepEqual(where(app), ['Romans 5', [8]]);
     }));
 
+test('a range the data can\u2019t give in full is its start verse, said so, in the list and the card', () =>
+    withApp({ book: 'Genesis', chapter: 14, translation: 'kjv' }, async (app) => {
+        // Genesis 14:18's data says "Hebrews 6:20\u20133".
+        openList(app);
+        const listedChip = listed(app).find((c) => c.textContent === 'Hebrews 6:20');
+        assert.ok(listedChip, 'fixture: Genesis 14 lists Hebrews 6:20');
+        assert.equal(listedChip.dataset.endVerse, undefined);
+        assert.equal(listedChip.nextElementSibling.className, 'xref-range-note');
+        assert.equal(listedChip.nextElementSibling.textContent, '(full range not available)');
+
+        await clickAndWait(app, app.verse(18), 'list_notes');
+        const inCard = chip(app, 'Hebrews 6:20');
+        assert.equal(inCard.nextElementSibling.textContent, '(full range not available)');
+        await clickAndWait(app, inCard, 'get_passage');
+        assert.deepEqual(shown(app), {
+            title: 'Hebrews 6:20 (KJV)',
+            numbers: [20],
+            notice: null,
+            go: 'Go to Hebrews 6:20 \u2192',
+        });
+        const before = app.calls.length;
+        preview(app).querySelector('.xref-preview-go').click();
+        await app.idle(before, 'get_reading');
+        assert.deepEqual(where(app), ['Hebrews 6', [20]]);
+    }));
+
 test('every citation in the list is a button named by its reference', () =>
     withApp({ book: 'Psalms', chapter: 23, translation: 'kjv' }, async (app) => {
         openList(app);
@@ -335,7 +361,7 @@ test('every citation in the list is a button named by its reference', () =>
         assert.equal(all.length, count);
         for (const el of all) {
             assert.equal(el.tagName, 'BUTTON');
-            assert.match(el.textContent, /^(\d )?[A-Z][A-Za-z ]+ \d+:\d+(-\d+)?$/);
+            assert.match(el.textContent, /^(\d )?[A-Z][A-Za-z ]+ \d+:\d+(\u2013\d+)?$/);
             assert.equal(el.getAttribute('aria-label'), null, 'its name is its text');
             assert.ok(el.dataset.book && el.dataset.chapter && el.dataset.verse);
         }

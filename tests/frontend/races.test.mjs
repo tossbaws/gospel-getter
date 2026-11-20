@@ -118,7 +118,7 @@ test('a cross-reference that fails with no error text still says it failed', () 
         app.click(app.verse(16));
         await app.idle(before, 'list_notes');
         const chip = [...app.document.querySelectorAll('#selection-card .xref-citation')]
-            .find((c) => c.textContent === '1 John 4:9-10');
+            .find((c) => c.textContent === '1 John 4:9–10');
         before = app.calls.length;
         app.click(chip);
         await app.idle(before, 'get_passage');

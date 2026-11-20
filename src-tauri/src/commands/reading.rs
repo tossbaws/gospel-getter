@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use super::{AppState, book_name, code_of, failed, place, resolve_translation};
 use crate::db::{self, Book, TopVerse, Translation};
 use crate::domain::bible::{self, ChapterRef};
+use crate::domain::cross_reference;
 use crate::domain::kjv_markup::{PartKind, VerseText};
 use crate::start_here::{StartHereDto, start_here};
 // Shared with the page, which reads them whole (see shared/wire.rs).
@@ -178,22 +179,6 @@ pub struct ReadingPaneDto {
     pub has_chapter_xrefs: bool,
 }
 
-/// Render a cross-reference's target passage as a human-readable citation,
-/// e.g. "Romans 8:28" or "Romans 8:28-30" for a verse range.
-fn build_citation(
-    state: &AppState,
-    ref_book_id: i64,
-    ref_chapter: i64,
-    ref_verse: i64,
-    ref_end_verse: Option<i64>,
-) -> String {
-    let name = book_name(state, ref_book_id).unwrap_or("?");
-    match ref_end_verse {
-        Some(end) if end != ref_verse => format!("{name} {ref_chapter}:{ref_verse}-{end}"),
-        _ => format!("{name} {ref_chapter}:{ref_verse}"),
-    }
-}
-
 /// Build the chapter grid for one book, optionally marking one chapter
 /// active. Shared by `get_home`'s initial position and the `get_chapters`
 /// command, so there's one source of truth instead of the two drifting
@@ -291,18 +276,15 @@ async fn build_reading_pane_dto(
         .await?;
     let mut xrefs_by_verse: HashMap<i64, Vec<XrefDto>> = HashMap::new();
     for r in cross_refs {
+        let target = r.target();
+        let name = book_name(state, r.ref_book_id).unwrap_or("?");
         xrefs_by_verse.entry(r.verse).or_default().push(XrefDto {
             book_id: r.ref_book_id,
             chapter: r.ref_chapter,
-            verse: r.ref_verse,
-            end_verse: r.ref_end_verse,
-            citation: build_citation(
-                state,
-                r.ref_book_id,
-                r.ref_chapter,
-                r.ref_verse,
-                r.ref_end_verse,
-            ),
+            verse: target.verse_start,
+            end_verse: (target.verse_end != target.verse_start).then_some(target.verse_end),
+            citation: cross_reference::label(name, r.ref_chapter, target),
+            range_unavailable: target.range_unavailable,
         });
     }
     let has_chapter_xrefs = !xrefs_by_verse.is_empty();
@@ -560,6 +542,63 @@ mod tests {
                 row.title
             );
         }
+    }
+
+    /// A cross-reference is named and opened by core's one rule: a range
+    /// with an en dash when it fits its chapter, a single verse as one, and
+    /// one whose data can't be shown in full (an end before its start, or
+    /// past its chapter's last verse) as its start verse, marked, with no
+    /// end for the preview or Go to to open.
+    #[tokio::test]
+    async fn a_cross_reference_shows_a_range_only_when_it_fits_its_chapter() {
+        let (_db, state) = app_state("cmd_reading_xrefs").await;
+        let xrefs = async |book: i64, chapter: i64, verse: i64| {
+            let dto = reading(&state, book, chapter, Some("kjv"))
+                .await
+                .unwrap()
+                .unwrap();
+            dto.current_verses
+                .into_iter()
+                .find(|v| v.number == verse)
+                .unwrap()
+                .xrefs
+        };
+        let find = |xrefs: &[XrefDto], book: i64, chapter: i64, verse: i64| {
+            xrefs
+                .iter()
+                .find(|x| (x.book_id, x.chapter, x.verse) == (book, chapter, verse))
+                .cloned()
+                .unwrap_or_else(|| panic!("fixture: {book} {chapter}:{verse} is cited"))
+        };
+        let x = |book_id, chapter, verse, end_verse, citation: &str, range_unavailable| XrefDto {
+            book_id,
+            chapter,
+            verse,
+            end_verse,
+            citation: citation.to_string(),
+            range_unavailable,
+        };
+
+        // Genesis 1:1: John 1:1–3, and Hebrews 11:3.
+        let genesis_1_1 = xrefs(1, 1, 1).await;
+        assert_eq!(
+            find(&genesis_1_1, 43, 1, 1),
+            x(43, 1, 1, Some(3), "John 1:1\u{2013}3", false)
+        );
+        assert_eq!(
+            find(&genesis_1_1, 58, 11, 3),
+            x(58, 11, 3, None, "Hebrews 11:3", false)
+        );
+        // Genesis 14:18's data says "Hebrews 6:20–3".
+        assert_eq!(
+            find(&xrefs(1, 14, 18).await, 58, 6, 20),
+            x(58, 6, 20, None, "Hebrews 6:20", true)
+        );
+        // Psalm 8:8's says "Job 40:15–34"; Job 40 ends at 24.
+        assert_eq!(
+            find(&xrefs(19, 8, 8).await, 18, 40, 15),
+            x(18, 40, 15, None, "Job 40:15", true)
+        );
     }
 
     /// A chapter the Bible doesn't have is no chapter (the page stays where

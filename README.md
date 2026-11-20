@@ -135,7 +135,10 @@ needed.
   card. Click one to read it right there in the card, a whole range at
   once, in the translation you're reading; click it again to close it, and
   **Go to** opens it. Only one shows at a time. The Cross references list
-  at the end of each chapter links straight to each passage, selected.
+  at the end of each chapter links straight to each passage, selected. The
+  data gives a range's ending verse but not its ending chapter, so a range
+  that doesn't fit its chapter (Genesis 14:18's "Hebrews 6:20–3") shows
+  its first verse, "(full range not available)", and opens that verse.
 - **Footnotes (KJV and BSB).** In the KJV, translator-supplied words are
   in italics, as in printed KJVs, and the margin notes are moved out of
   the text into lettered footnotes. The BSB's translators' footnotes are
@@ -245,7 +248,9 @@ sidebar. The other eight themes are under **Aa**.
 
 **Search the text, or jump straight to a reference.** Matching words are
 highlighted, and clicking a result opens and selects that verse. Words in
-quotes, as here, are found as a phrase, together and in that order. Type a
+quotes, as here, are found as a phrase, together and in that order. Case,
+accents and the letters æ and œ don't matter (`caesar` finds the KJV's
+"Cæsar"), though a hyphen does (`bethlehem` doesn't find "Beth-lehem"). Type a
 book's name, like `Psalms` or `1 John`, to go straight to its first
 chapter, with the verses that mention it listed below.
 
@@ -426,7 +431,8 @@ Upgrading keeps your data.
   KJV's ten misnumbered chapters again, once, from the text it bundles (see
   [Data provenance](#data-provenance-and-textual-integrity)), and builds
   the KJV's search index again; every other verse is left as it was, and
-  your records there stay on the verse numbers they had. Moving back to an
+  your records there stay on the verse numbers they had. 2.33.0 builds the
+  search index again once, so `caesar` finds "Cæsar". Moving back to an
   older version after upgrading hasn't been tested.
 - Theme, text size, line spacing, width, layout, compare (and which
   translation it compares with) and reading mode are
@@ -555,14 +561,20 @@ for an agent quoting scripture or finding every place on a topic:
   and the true reference if a phrase search finds it; where two characters only
   look alike (a no-break space, a curly apostrophe), it says so. Given a
   reference with verses the translation doesn't number, it checks the verses it
-  does and says which it doesn't (`notice`), as `get_passage` does;
-  `save_findings` lists such references in `notices`.
+  does and says which it doesn't (`notice`), as `get_passage` does (for a
+  whole chapter, the verses another installed translation numbers there:
+  Romans 16 in the WEB ends at verse 24); `save_findings` lists such
+  references in `notices`.
 - `get_passages` gives many passages in one call: at most 50 references and 500
   verses, and a reference that fails doesn't stop the rest.
 - `get_passage` takes several references separated by commas or semicolons
   (`"John 3:16, 18; Rom 5:8"`), and answers as `get_passages` does. A part of
   only numbers goes on from the reference before it: `"John 3:16, 18"` is John
-  3:18, and after a range across chapters, `"John 3:16-4:2, 5"` is John 4:5.
+  3:18, and `"John 3:16-18, 20"` is John 3:20.
+- `search` gives at most 200 verses at a time, in Bible order: `offset`
+  reads on past them, and `next_offset` is the next page's while more match.
+  Only a query's first 12 words count, and its `notice` says when more were
+  left out.
 
 **Mark findings.** Ask your agent something like *"note every verse that
 deals with grief so I can read them"*, and it can mark each verse it finds in
@@ -645,7 +657,9 @@ one would need a licence that permits an offline copy.
    read the same way, as in `web.json`). Footnotes kept apart from the
    text go in each book's `footnotes`, as in `bsb.json`.
 2. Add an entry to `TRANSLATIONS` and to `TEXTS` in
-   `src-tauri/core/src/db/seed.rs`.
+   `src-tauri/core/src/db/seed.rs`, and its code at the end of
+   `SEED_ORDER` there, which is what's seeded (a test checks the three
+   agree).
 
 Existing installs seed only translations they don't already have. A
 change to one they've already seeded is a step in `DATA_STEPS` (in the
@@ -670,8 +684,9 @@ verses and its row in `translations`), or the whole database.
   `domain/query.rs` decides whether search input is a reference or words.
 - **Search:** uses an SQLite FTS5 index derived from `verses`. It's never
   written back. It indexes each verse's text as the reader shows it
-  (without the KJV's margin notes or the BSB's footnotes), and results
-  show that text.
+  (without the KJV's margin notes or the BSB's footnotes), folded for
+  search only (accents dropped, æ and œ as two letters), and results show
+  the text as the reader does, its own letters marked.
 - **Database:** every connection uses SQLite's write-ahead logging, so
   reads and a write don't wait for each other, and the first launch's
   search index build, in the background, doesn't hold up the page. Every
@@ -765,7 +780,10 @@ stored exactly as its source provides it.
   and fails on any difference.
 
 Cross-references are from [OpenBible.info](https://www.openbible.info/labs/cross-references/)
-under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), selected (each
+verse's five highest-scored) and reformatted: see
+[`sources/cross_references/`](sources/cross_references/README.md), which also
+says what isn't known about the file.
 
 ## Support
 

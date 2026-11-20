@@ -39,6 +39,7 @@ fn search_for(query: &str, translation: Option<&str>, book: Option<&str>) -> Sea
         translation: translation.map(str::to_string),
         book: book.map(str::to_string),
         limit: None,
+        offset: None,
     }
 }
 
@@ -538,6 +539,71 @@ async fn saving_and_verifying_say_what_is_not_numbered() {
     );
 }
 
+/// A whole chapter says, as a range does, which verses this translation
+/// doesn't number that another installed translation does: Romans 16 has
+/// 27 verses in the KJV, 26 in the BSB (not 24) and 24 in the WEB (not
+/// 25-27). get_passage, compare and verify_quote say the same. A chapter
+/// all three number alike says nothing.
+#[tokio::test]
+async fn a_whole_chapter_names_the_verses_a_translation_doesnt_number() {
+    let (db, pool) = fresh_database("cli_chapter_notice").await;
+    pool.close().await;
+    let expected = [
+        ("kjv", 27, None),
+        (
+            "bsb",
+            26,
+            Some("In Romans 16, verse 24 isn't numbered in the Berean Standard Bible."),
+        ),
+        (
+            "web",
+            24,
+            Some(
+                "Romans 16:25\u{2013}27 isn't numbered in the World English Bible \u{2014} \
+                 Romans 16 ends at verse 24 there.",
+            ),
+        ),
+    ];
+    let compared = ask(
+        &db,
+        Request::Compare(CompareArgs {
+            reference: "Romans 16".to_string(),
+            translations: None,
+        }),
+    )
+    .await;
+    for (code, count, notice) in expected {
+        let read = ask(&db, passage_of("Romans 16", Some(code))).await;
+        assert_eq!(read["verses"].as_array().unwrap().len(), count, "{code}");
+        assert_eq!(read["notice"].as_str(), notice, "{code}: {read}");
+        let column = compared["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["translation"] == code)
+            .unwrap();
+        assert_eq!(column["verses"].as_array().unwrap().len(), count, "{code}");
+        assert_eq!(column["notice"].as_str(), notice, "{code}: {column}");
+        let verified = ask(
+            &db,
+            Request::VerifyQuote(VerifyQuoteArgs {
+                text: read["verses"][0]["text"].as_str().unwrap().to_string(),
+                reference: Some("Romans 16".to_string()),
+                translation: Some(code.to_string()),
+            }),
+        )
+        .await;
+        assert_eq!(verified["status"], "exact_part", "{code}: {verified}");
+        assert_eq!(verified["notice"].as_str(), notice, "{code}: {verified}");
+    }
+
+    for code in ["kjv", "bsb", "web"] {
+        let read = ask(&db, passage_of("John 3", Some(code))).await;
+        assert_eq!(read["verses"].as_array().unwrap().len(), 36, "{code}");
+        assert_eq!(read["notice"], Value::Null, "{code}: {read}");
+    }
+}
+
 /// A reference the translation numbers throughout: no notice in either
 /// answer, which has exactly the fields it always had.
 #[tokio::test]
@@ -619,31 +685,6 @@ async fn get_passage_refuses_what_is_not_there() {
     let message = refused(&db, passage_of("John 3:16", Some("niv"))).await;
     assert!(message.contains("niv") && message.contains("kjv, bsb, web"));
     pool.close().await;
-}
-
-/// No more verses than the cap, and the notice says so; a cap reached with a
-/// notice already there keeps it.
-#[test]
-fn a_passage_is_capped_and_says_so() {
-    let verses = |n: i64| -> Vec<VerseOut> {
-        (1..=n)
-            .map(|verse| VerseOut {
-                verse,
-                text: String::new(),
-                footnotes: Vec::new(),
-            })
-            .collect()
-    };
-    let (under, notice) = capped_passage(verses(176), None);
-    assert_eq!((under.len(), notice), (176, None));
-    let (at, notice) = capped_passage(verses(200), Some("Gap.".to_string()));
-    assert_eq!((at.len(), notice.as_deref()), (200, Some("Gap.")));
-    let (over, notice) = capped_passage(verses(201), Some("Gap.".to_string()));
-    assert_eq!(over.len(), 200);
-    assert_eq!(
-        notice.as_deref(),
-        Some("Gap. Only the first 200 of 201 verses are here.")
-    );
 }
 
 fn passages_of(references: &[&str], translation: Option<&str>) -> Request {
@@ -807,11 +848,6 @@ fn a_list_of_references_is_split_at_commas_and_semicolons() {
         ("John 3:16, 4:2", &["John 3:16", "John 4:2"]),
         ("John 3:16, 18-20", &["John 3:16", "John 3:18-20"]),
         ("John 3:16-18, 20", &["John 3:16-18", "John 3:20"]),
-        // After a range across chapters, the chapter it ends in.
-        ("John 3:16-4:2, 5", &["John 3:16-4:2", "John 4:5"]),
-        ("John 3:16 - 4:2, 5-7", &["John 3:16 - 4:2", "John 4:5-7"]),
-        ("John 3.16-4.2, 5", &["John 3.16-4.2", "John 4:5"]),
-        ("John 3:16-4:2, 5:1", &["John 3:16-4:2", "John 5:1"]),
         (
             "John 3:16\u{2013}18, 20\u{2013}22",
             &["John 3:16\u{2013}18", "John 3:20\u{2013}22"],
@@ -888,6 +924,16 @@ async fn get_passage_takes_several_references() {
         .map(|p| p["reference"].as_str().unwrap())
         .collect();
     assert_eq!(names, ["John 3:16", "John 3:18", "Romans 5:8"]);
+    // The README's other example: after a range, the next verse in its chapter.
+    let answer = ask(&db, passage_of("John 3:16-18, 20", Some("kjv"))).await;
+    let names: Vec<&str> = answer["passages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["reference"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["John 3:16\u{2013}18", "John 3:20"]);
+    assert_eq!(answer["verse_count"], 4);
 
     // A part that fails is that entry's answer, named by what it went on to be.
     let answer = ask(&db, passage_of("John 3:16, 99; Hezekiah 1", Some("kjv"))).await;
@@ -1018,6 +1064,141 @@ async fn search_caps_its_results() {
     assert_eq!(count_for(Some(200)).await, (200, json!(200)));
     assert_eq!(count_for(Some(100_000)).await, (200, json!(200)));
     assert_eq!(count_for(Some(0)).await, (1, json!(1)));
+    pool.close().await;
+}
+
+/// A search with more than 200 matches reads in pages with offset: Bible
+/// order, no verse twice and none left out, the pages adding up to the
+/// total, and next_offset only while more remain. An offset past the end is
+/// an empty page.
+#[tokio::test]
+async fn search_pages_past_200_with_offset() {
+    let (db, pool) = fresh_database("cli_search_pages").await;
+    let kjv = translation_id(&pool, "kjv").await;
+    let psalms = 19;
+    let (total, every) = db::search::search_verses_in_book(
+        pool.read(),
+        kjv,
+        psalms,
+        &query::search_query("lord"),
+        10_000,
+        0,
+    )
+    .await
+    .unwrap();
+    assert!(total > 400, "fixture: \"lord\" is in {total} psalms");
+    let every: Vec<(i64, i64)> = every.iter().map(|h| (h.chapter, h.verse)).collect();
+
+    let mut read = Vec::new();
+    let mut offset = Some(0);
+    let mut pages = 0;
+    while let Some(at) = offset {
+        let mut args = search_for("lord", Some("kjv"), Some("Psalms"));
+        args.limit = Some(200);
+        args.offset = Some(u32::try_from(at).unwrap());
+        let page = ask(&db, Request::Search(args)).await;
+        assert_eq!(page["total"], total);
+        assert_eq!(page["offset"], at);
+        let results = page["results"].as_array().unwrap();
+        assert!(!results.is_empty() && results.len() <= 200, "{page}");
+        read.extend(
+            results
+                .iter()
+                .map(|r| (r["chapter"].as_i64().unwrap(), r["verse"].as_i64().unwrap())),
+        );
+        offset = page.get("next_offset").map(|n| n.as_i64().unwrap());
+        if let Some(next) = offset {
+            assert_eq!(next, at + 200);
+        }
+        pages += 1;
+    }
+    assert_eq!(pages, (total + 199) / 200);
+    assert_eq!(i64::try_from(read.len()).unwrap(), total);
+    assert_eq!(read, every, "Bible order, no repeats and no gaps");
+
+    let mut past = search_for("lord", Some("kjv"), Some("Psalms"));
+    past.offset = Some(u32::MAX);
+    let past = ask(&db, Request::Search(past)).await;
+    assert_eq!(past["results"], json!([]));
+    assert_eq!(past["total"], total);
+    assert!(past.get("next_offset").is_none());
+    // Fewer than a page: no next_offset either.
+    let few = ask(
+        &db,
+        Request::Search(search_for("grace", Some("kjv"), Some("Romans"))),
+    )
+    .await;
+    assert!(few.get("next_offset").is_none(), "{few}");
+    pool.close().await;
+}
+
+/// Only the first 12 words are searched for, and the answer says so, naming
+/// them; 12 or fewer, it says nothing.
+#[tokio::test]
+async fn search_says_when_words_past_12_were_left_out() {
+    let (db, pool) = fresh_database("cli_search_twelve").await;
+    let fourteen = "in the beginning was the word and the word was with god and the word was god \
+                    all things were made by him";
+    let answer = ask(
+        &db,
+        Request::Search(search_for(fourteen, Some("kjv"), None)),
+    )
+    .await;
+    let terms: Vec<&str> = answer["terms"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_str().unwrap())
+        .collect();
+    assert_eq!(terms.len(), 12, "{answer}");
+    assert_eq!(
+        answer["notice"],
+        format!(
+            "Only the first 12 words are searched for: {}.",
+            terms.join(", ")
+        )
+    );
+    let twelve = ask(
+        &db,
+        Request::Search(search_for(
+            "in the beginning was the word and the word was with god",
+            Some("kjv"),
+            None,
+        )),
+    )
+    .await;
+    assert!(twelve.get("notice").is_none(), "{twelve}");
+    pool.close().await;
+}
+
+/// "John 3:99" is refused with the app's search box's own words, not
+/// answered as a passage to go to.
+#[tokio::test]
+async fn search_refuses_a_verse_past_the_chapter_as_the_app_does() {
+    let (db, pool) = fresh_database("cli_search_no_verse").await;
+    assert_eq!(
+        refused(
+            &db,
+            Request::Search(search_for("John 3:99", Some("kjv"), None))
+        )
+        .await,
+        "No such chapter or verse: John 3:99. John 3 has 36 verses in the King James Version."
+    );
+    // Romans 14:24 is numbered in the WEB only.
+    assert_eq!(
+        refused(
+            &db,
+            Request::Search(search_for("Romans 14:24", Some("kjv"), None))
+        )
+        .await,
+        "No such chapter or verse: Romans 14:24. Romans 14 has 23 verses in the King James Version."
+    );
+    let web = ask(
+        &db,
+        Request::Search(search_for("Romans 14:24", Some("web"), None)),
+    )
+    .await;
+    assert_eq!(web["go_to"], "Romans 14:24");
     pool.close().await;
 }
 
@@ -1183,8 +1364,9 @@ async fn cross_references_are_the_passages_own() {
     for (out, row) in found.iter().zip(&in_verse) {
         assert_eq!(out["from_verse"], 16);
         assert_eq!(out["chapter"], row.ref_chapter);
-        assert_eq!(out["verse_start"], row.ref_verse);
-        assert_eq!(out["verse_end"], row.ref_end_verse.unwrap_or(row.ref_verse));
+        let target = row.target();
+        assert_eq!(out["verse_start"], target.verse_start);
+        assert_eq!(out["verse_end"], target.verse_end);
         assert!(
             out["reference"]
                 .as_str()
@@ -1221,6 +1403,62 @@ async fn cross_references_are_the_passages_own() {
     assert_eq!(
         (&none["total"], &none["cross_references"]),
         (&json!(0), &json!([]))
+    );
+    pool.close().await;
+}
+
+/// The CLI names and opens a cross-reference by the app's one rule: a
+/// range with an en dash, a single verse, and a range the data can't give
+/// in full as its start verse, marked, saying so.
+#[tokio::test]
+async fn a_cross_reference_shows_a_range_only_when_it_fits_its_chapter() {
+    let (db, pool) = fresh_database("cli_xref_ranges").await;
+    let cited = async |from: &str, to: &str| {
+        let answer = ask(
+            &db,
+            Request::GetCrossReferences(GetCrossReferencesArgs {
+                reference: from.to_string(),
+            }),
+        )
+        .await;
+        answer["cross_references"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["reference"] == to)
+            .cloned()
+            .unwrap_or_else(|| panic!("fixture: {from} cites {to}: {answer}"))
+    };
+    assert_eq!(
+        cited("Genesis 1:1", "John 1:1\u{2013}3").await,
+        json!({
+            "from_verse": 1, "reference": "John 1:1\u{2013}3", "book": "John",
+            "chapter": 1, "verse_start": 1, "verse_end": 3,
+        })
+    );
+    assert_eq!(
+        cited("Genesis 1:1", "Hebrews 11:3").await,
+        json!({
+            "from_verse": 1, "reference": "Hebrews 11:3", "book": "Hebrews",
+            "chapter": 11, "verse_start": 3, "verse_end": 3,
+        })
+    );
+    // The data says "Hebrews 6:20–3" and "Job 40:15–34" (Job 40 ends at 24).
+    assert_eq!(
+        cited("Genesis 14:18", "Hebrews 6:20").await,
+        json!({
+            "from_verse": 18, "reference": "Hebrews 6:20", "book": "Hebrews",
+            "chapter": 6, "verse_start": 20, "verse_end": 20,
+            "range_unavailable": true, "note": "full range not available",
+        })
+    );
+    assert_eq!(
+        cited("Psalm 8:8", "Job 40:15").await,
+        json!({
+            "from_verse": 8, "reference": "Job 40:15", "book": "Job",
+            "chapter": 40, "verse_start": 15, "verse_end": 15,
+            "range_unavailable": true, "note": "full range not available",
+        })
     );
     pool.close().await;
 }

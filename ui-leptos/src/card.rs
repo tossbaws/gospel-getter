@@ -751,12 +751,12 @@ fn toggle_preview(chip: HtmlElement) {
         if with(|s| s.preview_token) != token {
             return;
         }
-        // "1 John 4:9–10", as the backend names it (or, if it couldn't, the
-        // chip's citation with its dash).
+        // "1 John 4:9–10", as the backend names it (or, if it couldn't, as
+        // the chip's citation does: the same rule's name).
         let passage = passage.ok();
         let reference = match &passage {
             Some(p) => p.reference.clone(),
-            None => text::chip_reference(&chip.text_content().unwrap_or_default()),
+            None => chip.text_content().unwrap_or_default(),
         };
         let notice = match &passage {
             Some(p) => p.notice.clone().unwrap_or_default(),

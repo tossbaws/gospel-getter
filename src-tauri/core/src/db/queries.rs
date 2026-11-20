@@ -87,6 +87,30 @@ where
     Ok(last.unwrap_or(0).max(retired.unwrap_or(0)))
 }
 
+/// The verse numbers any installed translation numbers in one chapter, in
+/// order, each once: what a whole chapter is checked against
+/// (`passage::chapter_numbering_notice`). Unlike `chapter_last_verse`, no
+/// verse a step took away (`seed::RETIRED_VERSES`) counts: no translation
+/// numbers it.
+pub async fn get_chapter_verses_numbered_anywhere(
+    pool: &SqlitePool,
+    book_id: i64,
+    chapter: i64,
+) -> anyhow::Result<Vec<i64>> {
+    // Translations first, so each is one seek into the verses' index (see
+    // CHAPTER_LAST_VERSE_SQL).
+    sqlx::query_scalar(
+        "SELECT DISTINCT v.verse FROM translations t CROSS JOIN verses v \
+         WHERE v.translation_id = t.id AND v.book_id = $1 AND v.chapter = $2 \
+         AND v.text <> '' ORDER BY v.verse",
+    )
+    .bind(book_id)
+    .bind(chapter)
+    .fetch_all(pool)
+    .await
+    .context("Failed to read the chapter's verse numbers")
+}
+
 /// Get every verse in one chapter of one translation, in verse order.
 pub async fn get_chapter_verses(
     pool: &SqlitePool,
@@ -260,22 +284,34 @@ pub async fn save_reading_position_at(
 }
 
 /// Cross-references for every verse in one chapter, ordered by verse then
-/// descending relevance score.
+/// descending relevance score, each with its passage's chapter's last verse
+/// (`chapter_last_verse`'s, asked as `CHAPTER_LAST_VERSE_SQL` asks it,
+/// one seek per translation: change the two together).
 pub async fn get_chapter_cross_references(
     pool: &SqlitePool,
     book_id: i64,
     chapter: i64,
 ) -> anyhow::Result<Vec<CrossReference>> {
-    sqlx::query_as::<_, CrossReference>(
-        "SELECT verse, ref_book_id, ref_chapter, ref_verse, ref_end_verse, score \
-         FROM cross_references WHERE book_id = $1 AND chapter = $2 \
-         ORDER BY verse, score DESC",
+    let mut found = sqlx::query_as::<_, CrossReference>(
+        "SELECT x.verse, x.ref_book_id, x.ref_chapter, x.ref_verse, x.ref_end_verse, x.score, \
+         COALESCE((SELECT MAX(( \
+             SELECT MAX(v.verse) FROM verses v \
+             WHERE v.translation_id = t.id AND v.book_id = x.ref_book_id \
+             AND v.chapter = x.ref_chapter \
+         )) FROM translations t), 0) AS ref_chapter_last_verse \
+         FROM cross_references x WHERE x.book_id = $1 AND x.chapter = $2 \
+         ORDER BY x.verse, x.score DESC",
     )
     .bind(book_id)
     .bind(chapter)
     .fetch_all(pool)
     .await
-    .context("Failed to fetch cross references")
+    .context("Failed to fetch cross references")?;
+    for r in &mut found {
+        let retired = crate::db::seed::last_retired_verse(r.ref_book_id, r.ref_chapter);
+        r.ref_chapter_last_verse = r.ref_chapter_last_verse.max(retired.unwrap_or(0));
+    }
+    Ok(found)
 }
 
 /// [`verses_of_passages`]'s query. `CROSS JOIN` keeps the passages the
