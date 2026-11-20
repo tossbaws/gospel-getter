@@ -15,7 +15,7 @@
 
 use anyhow::{Context, anyhow, bail};
 use clap::Args;
-use gospel_getter_core::db::migrate::SCHEMA_VERSION;
+use gospel_getter_core::db::migrate::OLDEST_READABLE_SCHEMA_VERSION;
 use gospel_getter_core::db::{self, Book, HighlightColor, Translation};
 use gospel_getter_core::domain::cross_reference;
 use gospel_getter_core::domain::kjv_markup::{KJV, VerseText};
@@ -540,10 +540,10 @@ impl Library {
             .fetch_one(&pool)
             .await
             .context("Failed to read the schema version")?;
-        if version < SCHEMA_VERSION {
+        if version < OLDEST_READABLE_SCHEMA_VERSION {
             bail!(
                 "This database is from an older Gospel Getter (schema {version}; this program \
-                 reads {SCHEMA_VERSION}). {OPEN_THE_APP}"
+                 reads {OLDEST_READABLE_SCHEMA_VERSION}). {OPEN_THE_APP}"
             );
         }
         let books = db::get_all_books(&pool).await?;

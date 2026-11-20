@@ -71,6 +71,12 @@ pub async fn prepared_database(label: &str) -> (TempDb, Db) {
     copy_of(Template::Prepared, label).await
 }
 
+/// A database at schema version 1, as 2.32.2 prepared a new one, before
+/// the search index is built: a copy of the `Template::Schema1` template.
+pub async fn schema_1_database(label: &str) -> (TempDb, Db) {
+    copy_of(Template::Schema1, label).await
+}
+
 /// The template databases, each a stage of what the app does to a new
 /// database at startup. `db/tests.rs` checks a copy of each against a
 /// database prepared then and there, so they can't drift from it.
@@ -81,12 +87,18 @@ enum Template {
     Prepared,
     /// After `prepare` and `ensure_search_index`.
     Indexed,
+    /// Version 1's schema, made from its frozen copy (`migrate/schema_1.sql`)
+    /// rather than by old code, at version 1, with `Prepared`'s bundled
+    /// rows (every table's but the search index's, which is empty there):
+    /// what 2.32.2's startup made of a new database.
+    Schema1,
 }
 
 /// The template databases, built once per test binary.
 struct Templates {
     prepared: PathBuf,
     indexed: PathBuf,
+    schema_1: PathBuf,
     /// Locked for as long as this process runs, telling a later run's
     /// sweep (see [`claim_templates_dir`]) that these files are in use.
     _in_use: File,
@@ -97,6 +109,7 @@ impl Templates {
         match template {
             Template::Prepared => &self.prepared,
             Template::Indexed => &self.indexed,
+            Template::Schema1 => &self.schema_1,
         }
     }
 }
@@ -137,7 +150,9 @@ fn build_templates() -> Templates {
     let (dir, in_use) = claim_templates_dir(&templates_root());
     let prepared = dir.join("prepared.db");
     let indexed = dir.join("indexed.db");
+    let schema_1 = dir.join("schema_1.db");
     let work = dir.join("work.db");
+    let work_1 = dir.join("work_1.db");
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -155,15 +170,62 @@ fn build_templates() -> Templates {
             .expect("build the template's search index");
         vacuum_into(&db, &indexed).await;
         db.close().await;
+
+        let db = create_pool(&work_1)
+            .await
+            .expect("create the schema 1 template database");
+        build_schema_1(&db, &prepared).await;
+        vacuum_into(&db, &schema_1).await;
+        db.close().await;
     });
-    for name in ["work.db", "work.db-wal", "work.db-shm"] {
-        let _ = std::fs::remove_file(dir.join(name));
+    for work in ["work", "work_1"] {
+        for suffix in [".db", ".db-wal", ".db-shm"] {
+            let _ = std::fs::remove_file(dir.join(format!("{work}{suffix}")));
+        }
     }
     Templates {
         prepared,
         indexed,
+        schema_1,
         _in_use: in_use,
     }
+}
+
+/// Make the empty database `db` the `Schema1` template: version 1's schema
+/// from its frozen copy, then every row of `prepared`'s tables, in the
+/// order the schema makes them (so a verse's book and translation come
+/// first), but for the search index's.
+async fn build_schema_1(db: &Db, prepared: &Path) {
+    crate::db::migrate::complete_schema_1(db.write())
+        .await
+        .expect("make schema 1");
+    let mut conn = db.write().pool().acquire().await.expect("the writer");
+    sqlx::query("ATTACH DATABASE $1 AS prepared")
+        .bind(prepared.to_str().expect("a UTF-8 path"))
+        .execute(&mut *conn)
+        .await
+        .expect("attach the prepared template");
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM main.sqlite_master WHERE type = 'table' \
+         AND sql NOT LIKE 'CREATE VIRTUAL TABLE%' AND name NOT LIKE 'verse\\_search\\_%' ESCAPE '\\' \
+         ORDER BY rowid",
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .expect("list schema 1's tables");
+    for table in tables {
+        // Names from `sqlite_master` just above.
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "INSERT INTO main.\"{table}\" SELECT * FROM prepared.\"{table}\""
+        )))
+        .execute(&mut *conn)
+        .await
+        .unwrap_or_else(|e| panic!("copy {table}'s rows: {e}"));
+    }
+    sqlx::query("DETACH DATABASE prepared")
+        .execute(&mut *conn)
+        .await
+        .expect("detach the prepared template");
 }
 
 /// Write a template database to `path`, panicking if it can't (see

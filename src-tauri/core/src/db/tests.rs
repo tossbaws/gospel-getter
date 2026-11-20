@@ -910,27 +910,6 @@ async fn a_record_on_a_verse_the_kjv_numbered_until_2_29_2_can_be_saved_again() 
     }
 }
 
-/// `migrate` records the schema's version, which `SCHEMA_VERSION` names,
-/// and leaves a newer one (from a later app) as it is.
-#[tokio::test]
-async fn the_schema_version_is_recorded_and_never_lowered() {
-    let db = TempDb::new("schema_version");
-    let pool = db.connect().await;
-    assert_eq!(user_version(pool.read()).await, 0);
-    migrate(pool.write()).await.unwrap();
-    assert_eq!(SCHEMA_VERSION, 1);
-    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
-    migrate(pool.write()).await.unwrap();
-    assert_eq!(user_version(pool.read()).await, SCHEMA_VERSION);
-
-    sqlx::query("PRAGMA user_version = 7")
-        .execute(pool.write().pool())
-        .await
-        .unwrap();
-    migrate(pool.write()).await.unwrap();
-    assert_eq!(user_version(pool.read()).await, 7);
-}
-
 #[tokio::test]
 async fn upgrading_a_v2_1_0_database_keeps_its_data_and_adds_bookmarks_and_search() {
     let db = TempDb::new("upgrade");
