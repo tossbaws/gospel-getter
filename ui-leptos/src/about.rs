@@ -7,10 +7,9 @@
 //! About is one of the page's surfaces: `surfaces` opens and closes it,
 //! keeps one surface open at a time, puts focus on its close button and
 //! back on ☰ when it closes, and tells the updater (`updates`). This
-//! renders it, fills it, and has its keys: Escape closes it, on the
-//! overlay, and Tab stays inside it, bringing back focus that got outside
-//! it, as the other modals' Tab does; the reader's shortcuts wait meanwhile
-//! (the keyboard dispatcher, `keyboard`, looks the overlay up). Its
+//! renders it, fills it, and has the keyboard while it's open, as every
+//! modal does (`overlays`): Escape closes it, Tab stays inside it, bringing
+//! back focus that got outside it, and no other handler hears a key. Its
 //! `hidden` is `surfaces`' alone.
 
 use std::cell::Cell;
@@ -24,6 +23,7 @@ use web_sys::{HtmlElement, KeyboardEvent, MouseEvent};
 use crate::bridge;
 use crate::dom;
 use crate::ipc;
+use crate::overlays::Overlay;
 use crate::surfaces;
 use crate::update_text;
 use crate::updates::{UpdateBanner, Updates, UpdatesSection};
@@ -38,28 +38,33 @@ fn release_notes_page(version: &str) -> String {
 const CROSS_REFERENCES_CREDIT: &str =
     "Cross-references from OpenBible.info, selected and reformatted, CC BY 4.0";
 
-/// Escape closes About. Everything else passes (Tab is [`trap_tab`]'s).
-fn on_keydown(event: &KeyboardEvent) {
-    if event.key() == "Escape" {
-        event.prevent_default();
-        surfaces::close(true);
-    }
-}
-
-/// While About is open, Tab and Shift+Tab wrap between its first and last
-/// control, and focus that got outside it (a click on its backdrop) comes
-/// back to the first (or, with Shift, the last), as in the other modals
-/// (`dom::trap_tab`, D2-02). On `window`, so a key from outside About
-/// reaches it.
-fn trap_tab(panel: NodeRef<html::Div>, event: &KeyboardEvent) {
-    if event.key() != "Tab" || !crate::page::about_open() {
+/// While About is open, every key is its own: on `window`, capturing, so a
+/// key from outside About reaches it first, and stopped there, so the
+/// reader's shortcuts and Aa's text-size keys never hear it (one Escape
+/// closes About and does nothing else). A key's default still happens
+/// (Enter or Space on a link or button). Escape closes it. Tab and
+/// Shift+Tab wrap between its first and last control, and focus that got
+/// outside it (a click on its backdrop) comes back to the first (or, with
+/// Shift, the last), as in the other modals (`dom::trap_tab`, D2-02).
+fn on_keydown(panel: NodeRef<html::Div>, event: &KeyboardEvent) {
+    if !Overlay::About.is_open() {
         return;
     }
-    let Some(panel) = panel.get_untracked() else {
-        return;
-    };
-    let stops = dom::focusable(&panel, "input, button, a[href]");
-    dom::trap_tab(event, &panel, &stops);
+    event.stop_propagation();
+    match event.key().as_str() {
+        "Escape" => {
+            event.prevent_default();
+            surfaces::close(true);
+        }
+        "Tab" => {
+            let Some(panel) = panel.get_untracked() else {
+                return;
+            };
+            let stops = dom::focusable(&panel, "input, button, a[href]");
+            dom::trap_tab(event, &panel, &stops);
+        }
+        _ => {}
+    }
 }
 
 thread_local! {
@@ -98,7 +103,7 @@ pub fn AboutAndUpdates() -> impl IntoView {
     let notes_status = RwSignal::new(String::new());
     let support_status = RwSignal::new(String::new());
     let panel = NodeRef::<html::Div>::new();
-    dom::on_window_keydown(move |event: KeyboardEvent| trap_tab(panel, &event));
+    dom::on_window_keydown(move |event: KeyboardEvent| on_keydown(panel, &event));
 
     let known_version = move || version.get().flatten();
     let open_release_notes = move |event: MouseEvent| {
@@ -129,7 +134,6 @@ pub fn AboutAndUpdates() -> impl IntoView {
             id="about-overlay"
             class="import-overlay"
             hidden
-            on:keydown=move |event: KeyboardEvent| on_keydown(&event)
         >
             <div
                 id="about-panel"

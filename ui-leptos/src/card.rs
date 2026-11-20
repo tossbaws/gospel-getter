@@ -58,7 +58,7 @@ use web_sys::{Element, HtmlElement, KeyboardEvent};
 
 use crate::bridge;
 use crate::card_text::{self as text, Change, Room, Selection, Side, Slot};
-use crate::dom::{self, by_id, closest, data_number, overlay_open, query_all, scroll_into_view};
+use crate::dom::{self, by_id, closest, data_number, query_all, scroll_into_view};
 use crate::dto::{
     Bookmark, Compare, CopyText, CopyTextArgs, Finding, Highlight, PassageArgs, PassageText,
     PassageTextArgs, Reading, RemoveBookmarkArgs, SelectionNote, SetHighlightArgs, Verse,
@@ -2103,19 +2103,7 @@ fn ghost_allowed(els: &Elements) -> bool {
     if !els.card.is_connected() {
         return false;
     }
-    let overlays = [
-        "import-overlay",
-        "about-overlay",
-        "note-overlay",
-        "export-choice-overlay",
-        "export-notes-overlay",
-        "shortcuts-overlay",
-        "welcome-overlay",
-    ];
-    if overlays.iter().any(|id| overlay_open(id)) {
-        return false;
-    }
-    if by_id("search-panel").is_some_and(|p| !p.hidden()) || !els.menu.hidden() {
+    if crate::overlays::any_open() || !els.menu.hidden() {
         return false;
     }
     let body = bridge::document().and_then(|d| d.body());

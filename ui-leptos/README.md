@@ -48,6 +48,7 @@ The page's glue:
 - `keyboard`: the keyboard dispatcher, on `document`.
 - `keyboard_text`: which key does what, j and k's steps, and how far a verse is scrolled into view.
 - `clicks`: the click dispatcher, on the body.
+- `overlays`: the one list of the page's overlays (the dialogs and the search box), each by its element's id and whether it's modal, which every "is a dialog open?" reads.
 
 The dialogs:
 

@@ -34,7 +34,7 @@ use web_sys::{HtmlElement, HtmlOptionElement};
 use crate::bridge;
 use crate::card::{self, Ask};
 use crate::card_text::Slot;
-use crate::dom::{self, button, by_id, overlay_open, select};
+use crate::dom::{self, button, by_id, select};
 use crate::dto::PositionPreview;
 use crate::export_choice::{self, ExportFacts};
 use crate::export_notes::{self, OpenRequest};
@@ -42,6 +42,7 @@ use crate::intent::{Claim, Generation};
 use crate::ipc;
 use crate::keyboard;
 use crate::library_text::List;
+use crate::overlays::Overlay;
 use crate::page_text::{self as text, Saved};
 use crate::palette::{Choice, PaletteState};
 use crate::pane::{self, PaneId};
@@ -96,52 +97,9 @@ fn html_data(name: &str) -> Option<String> {
     bridge::document()?.document_element()?.get_attribute(name)
 }
 
-/// The import preview is open.
-pub fn import_open() -> bool {
-    overlay_open("import-overlay")
-}
-
-/// About is open.
-pub fn about_open() -> bool {
-    overlay_open("about-overlay")
-}
-
-/// The note editor is open.
-pub fn note_open() -> bool {
-    overlay_open("note-overlay")
-}
-
-/// ☰ → Export data…'s chooser is open.
-pub fn export_choice_open() -> bool {
-    overlay_open("export-choice-overlay")
-}
-
-/// Export notes' dialog is open.
-pub fn export_notes_open() -> bool {
-    overlay_open("export-notes-overlay")
-}
-
-/// The keyboard shortcuts sheet is open.
-pub fn shortcuts_open() -> bool {
-    overlay_open("shortcuts-overlay")
-}
-
-/// A dialog is open: the import preview, About, the note editor, Export
-/// data…'s chooser, Export notes or the shortcuts sheet. The reader's own
-/// keys (`keyboard`) and a mouse's back and forward buttons (`reader`)
-/// wait meanwhile, so nothing moves behind it (C2-01).
-pub fn modal_open() -> bool {
-    import_open()
-        || about_open()
-        || note_open()
-        || export_choice_open()
-        || export_notes_open()
-        || shortcuts_open()
-}
-
 /// The search box is open (`#search-panel` shown).
 pub fn search_shown() -> bool {
-    by_id("search-panel").is_some_and(|panel| !panel.hidden())
+    Overlay::Search.is_open()
 }
 
 /// Compare is on (`html[data-compare]`), with a translation or the notes.
@@ -601,7 +559,7 @@ fn send_picker_books() {
 /// unless it's open; focus goes back to `opener`, or to what had it. A
 /// modal, as the others: one still getting ready to open won't now (D2-01).
 pub fn open_shortcuts(opener: Option<HtmlElement>) {
-    if shortcuts_open() {
+    if Overlay::Shortcuts.is_open() {
         return;
     }
     let return_focus = opener.or_else(focused);
@@ -794,7 +752,7 @@ pub fn mount() {
     }
     // Without the pieces there is no About to open.
     on_click("about-btn", || {
-        if by_id("about-overlay").is_none() {
+        if by_id(Overlay::About.id()).is_none() {
             set_data_status(text::ABOUT_UNAVAILABLE, true);
         }
     });

@@ -942,7 +942,8 @@ fn on_menu_toggle_key(surface: Surface, event: &KeyboardEvent) {
 /// whichever popover or panel is open, then a verse selection, then reading
 /// mode. The keyboard dispatcher (`keyboard`) runs first (it's registered
 /// before this) and marks an Escape that closed search or cleared a verse
-/// selection as handled; About's own Escape is handled on it.
+/// selection as handled. About's Escape never comes here: About has the
+/// keyboard while it's open (`about`).
 fn on_escape(event: &KeyboardEvent) {
     if event.key() != "Escape" || event.default_prevented() {
         return;

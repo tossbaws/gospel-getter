@@ -768,7 +768,8 @@ fn on_translation_key(event: &KeyboardEvent) {
 /// through the text sizes, and Ctrl+0 goes back to Medium, through Aa's own
 /// control, so Aa stays in step. They're never the webview's page zoom:
 /// the app turns that off (`zoomHotkeysEnabled`), and these keys' default
-/// is prevented besides. While typing in a field they do nothing.
+/// is prevented besides. While typing in a field, or with a dialog open
+/// (`overlays`), they do nothing.
 fn on_size_key(event: &KeyboardEvent) {
     let key = event.key();
     let code = event.code();
@@ -790,7 +791,7 @@ fn on_size_key(event: &KeyboardEvent) {
             matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
                 || el.is_content_editable()
         });
-    if !typing {
+    if !typing && !crate::overlays::modal_open() {
         text_size_shortcut(step);
     }
 }
