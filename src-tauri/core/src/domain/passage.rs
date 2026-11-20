@@ -45,28 +45,68 @@ pub fn numbering_notice(
     last_anywhere: i64,
 ) -> Option<String> {
     let missing = missing_runs(numbered, start, end, last_anywhere);
-    (!missing.is_empty()).then(|| {
-        let what = passage_reference(book_name, chapter, Some((start, end)));
-        let (first_missing, _) = missing[0];
-        let (_, last_missing) = missing[missing.len() - 1];
-        if first_missing > last {
-            let missing =
-                passage_reference(book_name, chapter, Some((first_missing, last_missing)));
-            format!(
-                "{missing} isn't numbered in the {translation_name} \u{2014} {book_name} {chapter} ends at verse {last} there."
-            )
-        } else {
-            let (noun, verb) = if first_missing == last_missing {
-                ("verse", "isn't")
-            } else {
-                ("verses", "aren't")
-            };
-            format!(
-                "In {what}, {noun} {} {verb} numbered in the {translation_name}.",
-                verse_list(&missing),
-            )
+    let what = passage_reference(book_name, chapter, Some((start, end)));
+    say_missing(&what, book_name, translation_name, chapter, &missing, last)
+}
+
+/// What to say about a whole chapter's verses that the translation doesn't
+/// number and another installed translation does, `None` when there are
+/// none, in [`numbering_notice`]'s words: e.g. "In Romans 16, verse 24
+/// isn't numbered in the Berean Standard Bible." `numbered` is those it
+/// numbers, `numbered_anywhere` those any installed translation numbers
+/// (`db::get_chapter_verses_numbered_anywhere`) and `last` its last. A
+/// verse no translation numbers isn't named. `None` too when it numbers
+/// none of them: then the chapter isn't there at all, which the caller
+/// says.
+pub fn chapter_numbering_notice(
+    book_name: &str,
+    translation_name: &str,
+    chapter: i64,
+    numbered: &[i64],
+    numbered_anywhere: &[i64],
+    last: i64,
+) -> Option<String> {
+    if numbered.is_empty() {
+        return None;
+    }
+    let mut missing: Vec<(i64, i64)> = Vec::new();
+    for &n in numbered_anywhere.iter().filter(|n| !numbered.contains(n)) {
+        match missing.last_mut() {
+            Some((_, run_end)) if *run_end + 1 == n => *run_end = n,
+            _ => missing.push((n, n)),
         }
-    })
+    }
+    let what = passage_reference(book_name, chapter, None);
+    say_missing(&what, book_name, translation_name, chapter, &missing, last)
+}
+
+/// The notice on `missing` (runs, in order) of `what`: all after the
+/// translation's `last` verse, or some within it.
+fn say_missing(
+    what: &str,
+    book_name: &str,
+    translation_name: &str,
+    chapter: i64,
+    missing: &[(i64, i64)],
+    last: i64,
+) -> Option<String> {
+    let (&(first_missing, _), &(_, last_missing)) = (missing.first()?, missing.last()?);
+    if first_missing > last {
+        let missing = passage_reference(book_name, chapter, Some((first_missing, last_missing)));
+        Some(format!(
+            "{missing} isn't numbered in the {translation_name} \u{2014} {book_name} {chapter} ends at verse {last} there."
+        ))
+    } else {
+        let (noun, verb) = if first_missing == last_missing {
+            ("verse", "isn't")
+        } else {
+            ("verses", "aren't")
+        };
+        Some(format!(
+            "In {what}, {noun} {} {verb} numbered in the {translation_name}.",
+            verse_list(missing),
+        ))
+    }
 }
 
 /// The verses from `start` to `end` that aren't in `numbered`, in order, as
@@ -136,5 +176,32 @@ mod tests {
                 "In Mark 9:43\u{2013}48, verses 44, 46 aren't numbered in the Berean Standard Bible."
             )
         );
+    }
+
+    /// A whole chapter names only the verses another translation numbers:
+    /// a number none has is no gap, and runs merge only where they meet.
+    #[test]
+    fn a_whole_chapter_names_what_another_translation_numbers() {
+        let notice = |numbered: &[i64], anywhere: &[i64], last| {
+            chapter_numbering_notice("Mark", "Berean Standard Bible", 9, numbered, anywhere, last)
+        };
+        let anywhere: Vec<i64> = (1..=50).collect();
+        let numbered: Vec<i64> = (1..=50).filter(|n| ![44, 46].contains(n)).collect();
+        assert_eq!(
+            notice(&numbered, &anywhere, 50).as_deref(),
+            Some("In Mark 9, verses 44, 46 aren't numbered in the Berean Standard Bible.")
+        );
+        // Verse 51 is numbered nowhere, so it isn't named.
+        assert_eq!(notice(&anywhere, &anywhere, 50), None);
+        let short: Vec<i64> = (1..=47).collect();
+        assert_eq!(
+            notice(&short, &anywhere, 47).as_deref(),
+            Some(
+                "Mark 9:48\u{2013}50 isn't numbered in the Berean Standard Bible \u{2014} \
+                 Mark 9 ends at verse 47 there."
+            )
+        );
+        // None numbered: the chapter isn't there, which the caller says.
+        assert_eq!(notice(&[], &anywhere, 0), None);
     }
 }

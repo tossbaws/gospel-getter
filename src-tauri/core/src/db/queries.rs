@@ -87,6 +87,30 @@ where
     Ok(last.unwrap_or(0).max(retired.unwrap_or(0)))
 }
 
+/// The verse numbers any installed translation numbers in one chapter, in
+/// order, each once: what a whole chapter is checked against
+/// (`passage::chapter_numbering_notice`). Unlike `chapter_last_verse`, no
+/// verse a step took away (`seed::RETIRED_VERSES`) counts: no translation
+/// numbers it.
+pub async fn get_chapter_verses_numbered_anywhere(
+    pool: &SqlitePool,
+    book_id: i64,
+    chapter: i64,
+) -> anyhow::Result<Vec<i64>> {
+    // Translations first, so each is one seek into the verses' index (see
+    // CHAPTER_LAST_VERSE_SQL).
+    sqlx::query_scalar(
+        "SELECT DISTINCT v.verse FROM translations t CROSS JOIN verses v \
+         WHERE v.translation_id = t.id AND v.book_id = $1 AND v.chapter = $2 \
+         AND v.text <> '' ORDER BY v.verse",
+    )
+    .bind(book_id)
+    .bind(chapter)
+    .fetch_all(pool)
+    .await
+    .context("Failed to read the chapter's verse numbers")
+}
+
 /// Get every verse in one chapter of one translation, in verse order.
 pub async fn get_chapter_verses(
     pool: &SqlitePool,

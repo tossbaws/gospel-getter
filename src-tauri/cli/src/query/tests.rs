@@ -538,6 +538,71 @@ async fn saving_and_verifying_say_what_is_not_numbered() {
     );
 }
 
+/// A whole chapter says, as a range does, which verses this translation
+/// doesn't number that another installed translation does: Romans 16 has
+/// 27 verses in the KJV, 26 in the BSB (not 24) and 24 in the WEB (not
+/// 25-27). get_passage, compare and verify_quote say the same. A chapter
+/// all three number alike says nothing.
+#[tokio::test]
+async fn a_whole_chapter_names_the_verses_a_translation_doesnt_number() {
+    let (db, pool) = fresh_database("cli_chapter_notice").await;
+    pool.close().await;
+    let expected = [
+        ("kjv", 27, None),
+        (
+            "bsb",
+            26,
+            Some("In Romans 16, verse 24 isn't numbered in the Berean Standard Bible."),
+        ),
+        (
+            "web",
+            24,
+            Some(
+                "Romans 16:25\u{2013}27 isn't numbered in the World English Bible \u{2014} \
+                 Romans 16 ends at verse 24 there.",
+            ),
+        ),
+    ];
+    let compared = ask(
+        &db,
+        Request::Compare(CompareArgs {
+            reference: "Romans 16".to_string(),
+            translations: None,
+        }),
+    )
+    .await;
+    for (code, count, notice) in expected {
+        let read = ask(&db, passage_of("Romans 16", Some(code))).await;
+        assert_eq!(read["verses"].as_array().unwrap().len(), count, "{code}");
+        assert_eq!(read["notice"].as_str(), notice, "{code}: {read}");
+        let column = compared["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["translation"] == code)
+            .unwrap();
+        assert_eq!(column["verses"].as_array().unwrap().len(), count, "{code}");
+        assert_eq!(column["notice"].as_str(), notice, "{code}: {column}");
+        let verified = ask(
+            &db,
+            Request::VerifyQuote(VerifyQuoteArgs {
+                text: read["verses"][0]["text"].as_str().unwrap().to_string(),
+                reference: Some("Romans 16".to_string()),
+                translation: Some(code.to_string()),
+            }),
+        )
+        .await;
+        assert_eq!(verified["status"], "exact_part", "{code}: {verified}");
+        assert_eq!(verified["notice"].as_str(), notice, "{code}: {verified}");
+    }
+
+    for code in ["kjv", "bsb", "web"] {
+        let read = ask(&db, passage_of("John 3", Some(code))).await;
+        assert_eq!(read["verses"].as_array().unwrap().len(), 36, "{code}");
+        assert_eq!(read["notice"], Value::Null, "{code}: {read}");
+    }
+}
+
 /// A reference the translation numbers throughout: no notice in either
 /// answer, which has exactly the fields it always had.
 #[tokio::test]

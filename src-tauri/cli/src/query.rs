@@ -19,7 +19,9 @@ use gospel_getter_core::db::migrate::SCHEMA_VERSION;
 use gospel_getter_core::db::{self, Book, HighlightColor, Translation};
 use gospel_getter_core::domain::cross_reference;
 use gospel_getter_core::domain::kjv_markup::{KJV, VerseText};
-use gospel_getter_core::domain::passage::{numbering_notice, translations_named};
+use gospel_getter_core::domain::passage::{
+    chapter_numbering_notice, numbering_notice, translations_named,
+};
 use gospel_getter_core::domain::query::{self, Interpretation, PassageRef, SearchQuery};
 use gospel_getter_core::passage_reference::passage_reference;
 use schemars::JsonSchema;
@@ -628,7 +630,8 @@ impl Library {
     }
 
     /// The verses of a passage this translation numbers, as the app shows
-    /// them, and a sentence on any it doesn't.
+    /// them, and a sentence on any it doesn't: for a whole chapter, those
+    /// another installed translation numbers there.
     async fn read(
         &self,
         translation: &Translation,
@@ -663,7 +666,20 @@ impl Library {
                     last_anywhere,
                 )
             }
-            None => None,
+            None => {
+                let anywhere =
+                    db::get_chapter_verses_numbered_anywhere(&self.pool, book.id, passage.chapter)
+                        .await?;
+                let numbered: Vec<i64> = verses.iter().map(|v| v.verse).collect();
+                chapter_numbering_notice(
+                    &book.name,
+                    &translation.name,
+                    passage.chapter,
+                    &numbered,
+                    &anywhere,
+                    last,
+                )
+            }
         };
         Ok(capped_passage(verses, notice))
     }
