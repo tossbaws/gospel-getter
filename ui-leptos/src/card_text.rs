@@ -112,6 +112,21 @@ pub fn bookmark_label(bookmarked: bool) -> &'static str {
     }
 }
 
+// The words a screen reader hears after a verse's number for what's drawn
+// on it (its pencil, star or color): visually hidden, one per mark, as a
+// footnote's (`reader_text`) and a finding's (`findings`) are.
+
+/// A verse a note covers.
+pub const NOTE_CUE: &str = "(has notes) ";
+
+/// A bookmarked verse.
+pub const BOOKMARK_CUE: &str = "(bookmarked) ";
+
+/// A verse highlighted in `color` (as the backend names it: "yellow").
+pub fn highlight_cue(color: &str) -> String {
+    format!("(highlighted {color}) ")
+}
+
 /// Copy as…'s items, one per format.
 pub fn copy_menu_html() -> String {
     COPY_FORMATS
@@ -1370,5 +1385,13 @@ mod tests {
         assert_eq!(px(-0.0), "0px");
         assert_eq!(px(-3.25), "-3.25px");
         assert_eq!(px(0.1 + 0.2), "0.30000000000000004px");
+    }
+
+    #[test]
+    fn a_highlight_cue_names_its_color_as_the_others_are_worded() {
+        assert_eq!(highlight_cue("yellow"), "(highlighted yellow) ");
+        for cue in [NOTE_CUE, BOOKMARK_CUE, &highlight_cue("pink")] {
+            assert!(cue.starts_with('(') && cue.ends_with(") "), "{cue:?}");
+        }
     }
 }

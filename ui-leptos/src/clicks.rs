@@ -29,12 +29,12 @@ use crate::pane;
 use crate::reader::{self, Request};
 
 /// Everything a click on which is never navigation, nor a click away from
-/// a verse selection: the top bar (the translation, Aa, the ☰ menu, the
-/// reading-mode exit), the picker, the Library, About, the search panel,
-/// the dialogs and the toast, which answer their own, and the second pane's
+/// a verse selection, besides the overlays (`overlays::holds`): the top bar
+/// (the translation, Aa, the ☰ menu, the reading-mode exit), the picker,
+/// the Library and the toast, which answer their own, and the second pane's
 /// × (`pane::close_second`, which keeps the first pane's selection,
 /// GG32-14).
-const NOT_THE_READERS: &str = "#top-bar, #picker, #library-panel, #about-overlay, #search-panel, #import-overlay, #welcome-overlay, #note-overlay, #export-choice-overlay, #export-notes-overlay, #shortcuts-overlay, #data-status, .pane-close";
+const NOT_THE_READERS: &str = "#top-bar, #picker, #library-panel, #data-status, .pane-close";
 
 /// The reader's own controls in the pane (the chapter's Cross references,
 /// its steps, a neighbor's heading, the lists' disclosures), which it
@@ -138,7 +138,7 @@ fn on_click(event: &MouseEvent) {
     if page::search_shown() && closest(&target, "#search-panel, #search-toggle").is_none() {
         page::set_search_open(false);
     }
-    if closest(&target, NOT_THE_READERS).is_some() {
+    if closest(&target, NOT_THE_READERS).is_some() || crate::overlays::holds(&target) {
         return;
     }
 

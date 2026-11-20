@@ -18,9 +18,10 @@
 //! settings an export carries, and `apply(values)`;
 //! `window.gospelGetterSurfaces` (`surfaces`): `current()`, the open
 //! header surface's name or `null`; `window.gospelGetterLibrary`
-//! (`library`): `refresh(lists)`, the Library's lists reloaded; and
+//! (`library`): `refresh(lists)`, the Library's lists reloaded;
 //! `window.gospelGetterPanes` (`pane`): a second pane opened beside and
-//! closed, and which panes show and which is active.
+//! closed, and which panes show and which is active; and
+//! `window.gospelGetterOverlays` (`overlays`), the overlays' one list.
 //!
 //! Page markup this crate uses as a reader would: `#theme-select`, read and
 //! changed (with a `change` event, as Aa does) for the welcome's looks
@@ -36,14 +37,7 @@
 //! or a `[data-value]` choice in `#layout-choices`, `#width-choices` or
 //! `#theme-choices`.
 //!
-//! The pieces' overlays (`#export-choice-overlay`, `#export-notes-overlay`,
-//! `#shortcuts-overlay`,
-//! `#welcome-overlay`, `#import-overlay`, `#note-overlay`, `#about-overlay`)
-//! keep their `hidden` truthful: the keyboard dispatcher (`keyboard`) and
-//! the card's Shift ghost read them, looked up by id when asked, to know a
-//! modal is open. Each piece has the keyboard while it's open: a capturing
-//! `keydown` on `window` that stops every other handler, and so runs
-//! before the keyboard dispatcher (on `document`).
+//! The pieces' overlays and how they're read: `overlays`.
 //!
 //! Local storage: the saved settings' keys are this crate's to write
 //! (`prefs`), as the one table says (`preferences`); the pre-paint script

@@ -58,7 +58,7 @@ use web_sys::{Element, HtmlElement, KeyboardEvent};
 
 use crate::bridge;
 use crate::card_text::{self as text, Change, Room, Selection, Side, Slot};
-use crate::dom::{self, by_id, closest, data_number, overlay_open, query_all, scroll_into_view};
+use crate::dom::{self, by_id, closest, data_number, query_all, scroll_into_view};
 use crate::dto::{
     Bookmark, Compare, CopyText, CopyTextArgs, Finding, Highlight, PassageArgs, PassageText,
     PassageTextArgs, Reading, RemoveBookmarkArgs, SelectionNote, SetHighlightArgs, Verse,
@@ -1163,7 +1163,8 @@ fn update_bookmark_button() {
 }
 
 /// Marks every bookmarked verse of the chapter on screen, in every column
-/// and every pane (bookmarks belong to no one translation, nor pane).
+/// and every pane (bookmarks belong to no one translation, nor pane), with
+/// the star (CSS) and, for screen readers, its cue.
 fn apply_bookmark_markers() {
     for pane in pane::shown() {
         let spans = with(|s| {
@@ -1181,6 +1182,7 @@ fn apply_bookmark_markers() {
                 number.is_some_and(|n| spans.iter().any(|&(start, end)| n >= start && n <= end))
             });
             toggle_class(&el, "is-bookmarked", marked);
+            set_cue(&el, "bookmark-cue", marked.then_some(text::BOOKMARK_CUE));
         }
     }
 }
@@ -1309,6 +1311,40 @@ fn set_highlight_marker(el: &Element, color: Option<&str>) {
         None => {
             let _ = el.remove_attribute("data-highlight");
         }
+    }
+    set_cue(
+        el,
+        "highlight-cue",
+        color.map(text::highlight_cue).as_deref(),
+    );
+}
+
+/// Puts the visually hidden cue `class` after `verse`'s number, saying
+/// `said`, or takes it away (`None`): what a screen reader hears for a mark
+/// drawn on the verse (`card_text::NOTE_CUE` and the rest). One per class.
+fn set_cue(verse: &Element, class: &str, said: Option<&str>) {
+    let cue = verse
+        .query_selector(&format!(":scope > .{class}"))
+        .ok()
+        .flatten();
+    match (cue, said) {
+        (Some(cue), None) => cue.remove(),
+        (Some(cue), Some(said)) => {
+            if cue.text_content().as_deref() != Some(said) {
+                cue.set_text_content(Some(said));
+            }
+        }
+        (None, Some(said)) => {
+            if let (Some(document), Ok(Some(number))) =
+                (bridge::document(), verse.query_selector(".verse-num"))
+                && let Ok(added) = document.create_element("span")
+            {
+                added.set_class_name(&format!("{class} visually-hidden"));
+                added.set_text_content(Some(said));
+                let _ = number.after_with_node_1(&added);
+            }
+        }
+        (None, None) => {}
     }
 }
 
@@ -1459,8 +1495,7 @@ fn highlight_selection(color: Option<String>) -> Task {
 // goes stale.
 
 /// Marks every verse of `pane`'s chapter that a note covers, in every
-/// column, with the pencil (CSS) and, for screen readers, one hidden "has
-/// notes" per verse.
+/// column, with the pencil (CSS) and, for screen readers, its cue.
 fn apply_note_markers(pane: PaneId) {
     let spans = with(|s| {
         let here = &s.panes[pane];
@@ -1472,30 +1507,13 @@ fn apply_note_markers(pane: PaneId) {
                 .collect::<Vec<_>>()
         })
     });
-    let Some(document) = bridge::document() else {
-        return;
-    };
     for el in selectable(pane) {
         let number = data_number::<i64>(&el, "data-verse");
         let noted = spans.as_ref().is_some_and(|spans| {
             number.is_some_and(|n| spans.iter().any(|&(start, end)| n >= start && n <= end))
         });
         toggle_class(&el, "has-notes", noted);
-        let cue = el.query_selector(":scope > .note-cue").ok().flatten();
-        match cue {
-            None if noted => {
-                if let (Ok(added), Some(number)) = (
-                    document.create_element("span"),
-                    el.query_selector(".verse-num").ok().flatten(),
-                ) {
-                    added.set_class_name("note-cue visually-hidden");
-                    added.set_text_content(Some("(has notes) "));
-                    let _ = number.after_with_node_1(&added);
-                }
-            }
-            Some(cue) if !noted => cue.remove(),
-            _ => {}
-        }
+        set_cue(&el, "note-cue", noted.then_some(text::NOTE_CUE));
     }
 }
 
@@ -1760,18 +1778,27 @@ struct NotePassage {
     verse_end: i64,
 }
 
+/// Where the note editor quotes its passage from: a pane's chapter, in
+/// one of the translations it shows. The pane that asked, which may not be
+/// the active one by the time a note's Edit lands (D-06).
+#[derive(Clone, Copy)]
+struct Quoted<'a> {
+    pane: PaneId,
+    code: &'a str,
+}
+
 /// Opens the note editor: adding a note on `passage` (`note` is `None`), or
-/// editing `note` (as the backend gave it), with `code` the translation whose
-/// text is quoted, and focus going back to `opener` when it closes.
+/// editing `note` (as the backend gave it), its text `quoted`, and focus
+/// going back to `opener` when it closes.
 fn open_note_panel(
     mode: &str,
     note: Option<JsValue>,
     passage: (i64, i64, i64, i64),
     reference: String,
-    code: &str,
+    quoted: Quoted<'_>,
     opener: Option<HtmlElement>,
 ) {
-    open_note_editor(mode, note, passage, reference, code, opener, None);
+    open_note_editor(mode, note, passage, reference, quoted, opener, None);
 }
 
 /// [`open_note_panel`], or, with `keep`, "Keep as mine" on that finding.
@@ -1780,13 +1807,13 @@ fn open_note_editor(
     note: Option<JsValue>,
     passage: (i64, i64, i64, i64),
     reference: String,
-    code: &str,
+    Quoted { pane, code }: Quoted<'_>,
     opener: Option<HtmlElement>,
     keep: Option<&Finding>,
 ) {
     let (book_id, chapter, start, end) = passage;
     let Some(verses) = with(|s| {
-        let here = s.here().chapter.as_ref()?;
+        let here = s.panes[pane].chapter.as_ref()?;
         let mut verses: Vec<Verse> = if here.book_id == book_id && here.chapter == chapter {
             here.column(code)
                 .iter()
@@ -1864,12 +1891,13 @@ fn note_passage(note: &JsValue) -> Option<((i64, i64, i64, i64), String)> {
     ))
 }
 
-fn edit(note: JsValue, code: &str, opener: Option<HtmlElement>) {
+fn edit(pane: PaneId, note: JsValue, code: &str, opener: Option<HtmlElement>) {
     let Some((passage, reference)) = note_passage(&note) else {
         ipc::log_error("The note to edit can't be read", &note);
         return;
     };
-    open_note_panel("edit", Some(note), passage, reference, code, opener);
+    let quoted = Quoted { pane, code };
+    open_note_panel("edit", Some(note), passage, reference, quoted, opener);
 }
 
 /// + Add note, or N: a note on the selected verses.
@@ -1893,7 +1921,11 @@ fn open_add_note(opener: Option<HtmlElement>) {
         ))
     });
     if let Some((passage, reference, code)) = found {
-        open_note_panel("add", None, passage, reference, &code, opener);
+        let quoted = Quoted {
+            pane: pane::active(),
+            code: &code,
+        };
+        open_note_panel("add", None, passage, reference, quoted, opener);
     }
 }
 
@@ -1910,6 +1942,10 @@ pub fn keep_finding(finding: &Finding, opener: Option<HtmlElement>) {
     }) else {
         return;
     };
+    let quoted = Quoted {
+        pane: pane::active(),
+        code: &code,
+    };
     open_note_editor(
         "keep",
         None,
@@ -1920,7 +1956,7 @@ pub fn keep_finding(finding: &Finding, opener: Option<HtmlElement>) {
             finding.verse_end,
         ),
         finding.reference.clone(),
-        &code,
+        quoted,
         opener,
         Some(finding),
     );
@@ -1949,21 +1985,29 @@ fn chapter_others(finding: &Finding) -> Vec<OtherNote> {
     })
 }
 
-/// A Library note's Edit has opened its passage (the reader jumped there,
-/// the passage selected, so its Notes section shows): the note opens.
-pub fn edit_note(note: &JsValue) {
+/// A Library note's Edit has opened its passage in `pane` (the reader
+/// jumped there, the passage selected, so its Notes section shows): the
+/// note opens, quoting that pane's chapter even if the reader has switched
+/// panes since (D-06).
+pub fn edit_note(pane: PaneId, note: &JsValue) {
     if note.is_null() || note.is_undefined() {
         return;
     }
     let code = with(|s| {
-        let chapter = s.here().chapter.as_ref()?;
-        Some(s.selection.as_ref().map_or_else(
-            || chapter.translation_code.clone(),
-            |sel| sel.translation_code.clone(),
-        ))
+        let chapter = s.panes[pane].chapter.as_ref()?;
+        // The selection is the active pane's.
+        Some(
+            s.selection
+                .as_ref()
+                .filter(|_| pane == pane::active())
+                .map_or_else(
+                    || chapter.translation_code.clone(),
+                    |sel| sel.translation_code.clone(),
+                ),
+        )
     });
     if let Some(code) = code {
-        edit(note.clone(), &code, None);
+        edit(pane, note.clone(), &code, None);
     }
 }
 
@@ -2103,19 +2147,7 @@ fn ghost_allowed(els: &Elements) -> bool {
     if !els.card.is_connected() {
         return false;
     }
-    let overlays = [
-        "import-overlay",
-        "about-overlay",
-        "note-overlay",
-        "export-choice-overlay",
-        "export-notes-overlay",
-        "shortcuts-overlay",
-        "welcome-overlay",
-    ];
-    if overlays.iter().any(|id| overlay_open(id)) {
-        return false;
-    }
-    if by_id("search-panel").is_some_and(|p| !p.hidden()) || !els.menu.hidden() {
+    if crate::overlays::any_open() || !els.menu.hidden() {
         return false;
     }
     let body = bridge::document().and_then(|d| d.body());
@@ -2645,7 +2677,7 @@ pub fn ask(ask: Ask) -> bool {
                 Some((note.raw.clone(), selection.translation_code.clone()))
             });
             if let Some((note, code)) = found {
-                edit(note, &code, opener);
+                edit(pane::active(), note, &code, opener);
             }
             true
         }

@@ -1161,7 +1161,7 @@ pub fn open(pane: PaneId, passage: &OpenPassage, note: JsValue) {
     spawn_local(async move {
         let loaded = load.await;
         if loaded && with(pane, |s| s.edit.holds(edit) && s.reading.is_some()) {
-            card::edit_note(&note);
+            card::edit_note(pane, &note);
         }
     });
 }
@@ -1332,15 +1332,22 @@ fn run(pane: PaneId, request: Request, sent: Option<Sent>) -> Load {
             {
                 return Box::pin(async { false });
             }
+            // The chapter on screen; with none (its load failed), the one
+            // that failed, which Try again would read, in the new
+            // translation (D-08); Genesis 1 only if nothing was ever asked.
             let inner = pane.inner();
-            let number = |name| {
-                inner
-                    .as_ref()
-                    .map_or(Some(1), |inner| data_number(inner, name))
-            };
-            match (number("data-current-book"), number("data-current-chapter")) {
-                (Some(book_id), Some(chapter)) => load_reading(pane, book_id, chapter),
-                _ => Box::pin(async { false }),
+            let on_screen = inner.as_ref().and_then(|inner| {
+                Some((
+                    data_number::<i64>(inner, "data-current-book")?,
+                    data_number::<i64>(inner, "data-current-chapter")?,
+                ))
+            });
+            let place = on_screen
+                .or_else(|| with(pane, |s| s.retry))
+                .or_else(|| inner.is_none().then_some((1, 1)));
+            match place {
+                Some((book_id, chapter)) => load_reading(pane, book_id, chapter),
+                None => Box::pin(async { false }),
             }
         }
         Request::Jump {
@@ -1610,15 +1617,19 @@ pub fn redraw(pane: PaneId) {
 }
 
 /// The second pane closed: nothing of it is kept, and anything still on its
-/// way for it is dropped as it comes.
+/// way for it is dropped as it comes. Its counters go on from where they
+/// were, never back to 0, so an answer from before never matches a newer
+/// ask (the history's token too, D-07).
 pub fn forget(pane: PaneId) {
     with(pane, |s| {
         s.edit.cancel();
         s.compare.cancel();
+        let history = s.history.after_close();
         *s = State {
             load_token: s.load_token + 1,
             edit: s.edit,
             compare: s.compare,
+            history,
             ..State::default()
         };
     });
@@ -1700,7 +1711,7 @@ pub fn mount() {
     }
     export_place();
     // A mouse's back and forward buttons; while a dialog is open, nothing
-    // (as Alt+← and Alt+→, `keyboard`), so the chapter behind it stays.
+    // (`overlays`), so the chapter behind it stays.
     if let Some(window) = web_sys::window() {
         dom::on(&window, "mouseup", |event| {
             let Some(event) = event.dyn_ref::<MouseEvent>() else {
@@ -1712,7 +1723,7 @@ pub fn mount() {
                 _ => return,
             };
             event.prevent_default();
-            if crate::page::modal_open() {
+            if crate::overlays::modal_open() {
                 return;
             }
             spawn(go_history(pane::active(), step));

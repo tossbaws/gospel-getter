@@ -721,12 +721,15 @@ impl Run<'_> {
                 .await?;
             seen_focus.push(seen["focus"].as_str().unwrap_or("?").to_owned());
         }
-        // Shift+Tab from the first stop wraps to the last.
+        // Shift+Tab from the first stop wraps to the last. The keys are
+        // seen on `window`, capturing: About stops every key there, as
+        // every modal does (ui-leptos overlays.rs), so `document` never
+        // gets one.
         self.ui
             .js(
                 "document.getElementById('about-close').focus();
                  window.__guiCheckKeys = [];
-                 document.addEventListener('keydown', (e) => window.__guiCheckKeys.push(
+                 window.addEventListener('keydown', (e) => window.__guiCheckKeys.push(
                      `${e.key}${e.shiftKey ? '+shift' : ''} on ${document.activeElement && document.activeElement.id}`), true);
                  return null;",
                 Vec::new(),

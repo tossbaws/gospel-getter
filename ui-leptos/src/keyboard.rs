@@ -194,7 +194,7 @@ fn not_ours(event: &KeyboardEvent) -> bool {
             return true;
         }
     }
-    page::modal_open()
+    crate::overlays::modal_open()
 }
 
 /// No text is selected on the page (a drag-highlight copies as usual).

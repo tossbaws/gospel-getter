@@ -59,7 +59,7 @@ use crate::dom;
 use crate::dto::SelectionNote;
 use crate::findings_text::{self, FindingGroup};
 use crate::margin_text::{self as text, Anchor, Entry};
-use crate::pane::{self, PaneId};
+use crate::pane;
 use crate::preferences;
 use crate::prefs;
 use crate::surfaces;
@@ -601,7 +601,7 @@ fn open(note_id: i64) {
         .collect();
     match text::selection(anchor, note.verse_start, note.verse_end, &numbered) {
         Some((start, end)) => card::select_for_note(&code, start, end),
-        None => card::edit_note(&raw),
+        None => card::edit_note(pane::active(), &raw),
     }
 }
 
@@ -821,23 +821,21 @@ fn export_margin() {
     layout_ms.forget();
 }
 
+/// A pane's chapter reflowed (`pane`, which watches both): the notes are
+/// placed again.
+pub fn reflowed() {
+    schedule();
+}
+
 /// Places the notes again whenever the page may have changed shape: the
-/// window resized, the reading pane resized, or a setting on `<html>`
-/// changed.
+/// window resized, or a setting on `<html>` changed (and a pane's chapter
+/// reflowed, [`reflowed`]).
 pub fn mount() {
     let Some(window) = web_sys::window() else {
         return;
     };
     dom::on(&window, "resize", |_| schedule());
     let changed = Closure::<dyn Fn()>::new(schedule);
-    if js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false)
-        && let (Some(pane), Ok(observer)) = (
-            PaneId::First.root(),
-            web_sys::ResizeObserver::new(changed.as_ref().unchecked_ref()),
-        )
-    {
-        observer.observe(&pane);
-    }
     if let (Some(html), Ok(observer)) = (
         root(),
         MutationObserver::new(changed.as_ref().unchecked_ref()),

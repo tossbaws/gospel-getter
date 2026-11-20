@@ -46,6 +46,7 @@ mod note_editor;
 mod note_links;
 mod note_markdown;
 mod note_text;
+mod overlays;
 mod page;
 mod page_text;
 mod palette;
@@ -118,6 +119,8 @@ pub fn start() {
     boot::start();
     // The table of shortcuts, for the tests (`window.gospelGetterShortcuts`).
     bridge::export_shortcuts();
+    // The overlays' one list, for the tests (`window.gospelGetterOverlays`).
+    overlays::export();
     // The rest in a task of its own, so the chapter is shown (painted, and
     // the window titled) before they mount.
     let rest = Closure::once_into_js(mount_the_rest);

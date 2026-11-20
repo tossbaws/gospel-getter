@@ -36,6 +36,7 @@ use crate::bridge;
 use crate::dom;
 use crate::dto::{DownloadEvent, NoteBlock, NoteSpan, UpdateInfo};
 use crate::ipc;
+use crate::overlays::Overlay;
 use crate::surfaces::{self, Surface};
 use crate::update_text::{self, Download};
 
@@ -217,15 +218,6 @@ impl Updates {
         }
     }
 
-    /// Whether About is open (its overlay is `surfaces`' to show and hide,
-    /// as one of the page's surfaces).
-    fn about_open() -> bool {
-        bridge::document()
-            .and_then(|d| d.get_element_by_id("about-overlay"))
-            .and_then(|el| el.dyn_into::<HtmlElement>().ok())
-            .is_some_and(|el| !el.hidden())
-    }
-
     /// The status line in both views.
     fn set_update_status(self, message: &str, is_error: bool) {
         for view in BOTH {
@@ -328,7 +320,7 @@ impl Updates {
     /// the one offered.
     fn offer(self, update: UpdateInfo) {
         if self.installing.get_value() {
-            if Self::about_open()
+            if Overlay::About.is_open()
                 && let Some(offered) = self.offered.get_value()
             {
                 self.show_in_about(&offered);
@@ -336,7 +328,7 @@ impl Updates {
             return;
         }
         self.offered.set_value(Some(update.clone()));
-        if Self::about_open() {
+        if Overlay::About.is_open() {
             self.show_in_about(&update);
         } else if !self.shown_in_about.get_value() {
             self.show_banner(&update);

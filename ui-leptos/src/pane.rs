@@ -34,7 +34,9 @@
 //! [`PaneId`]. What acts on a pane without being in one (the keys, the
 //! palette, the header, the selection card) acts on the [`active`] one; what
 //! follows every pane goes to each [`shown`]. A pointer pressed or focus
-//! moving into a pane makes it the active one (D8). The translation button's
+//! moving into a pane makes it the active one (D8). Either pane's chapter
+//! reflowing is noticed here, once, for the reading place logic and the
+//! margin ([`reflowed`]). The translation button's
 //! record, `#translation-select`, says the active pane's translation (D12),
 //! so the Library's previews, search and Export notes follow it; each
 //! pane's own is kept here while it isn't active ([`code`]).
@@ -818,7 +820,9 @@ fn copy_of(id: &str, pane: PaneId) -> Option<HtmlElement> {
 /// pane active, then does what the top bar's does.
 fn bar(element: &impl Fn(&str, &str) -> Option<HtmlElement>, pane: PaneId) -> Option<HtmlElement> {
     let bar = element("div", "pane-bar")?;
-    let _ = bar.set_attribute("role", "toolbar");
+    // A group, not a toolbar: its controls are each a Tab stop, and ← and →
+    // turn the chapter (GG32-17).
+    let _ = bar.set_attribute("role", "group");
     let _ = bar.set_attribute("aria-label", text::bar_label(pane == PaneId::First));
     let _ = bar.set_attribute("data-pane", pane.name());
     let prev = copy_of("chapter-prev", pane)?;
@@ -942,8 +946,16 @@ fn listen_to_column(pane: PaneId, column: &HtmlElement) {
     scrolled.forget();
 }
 
-/// The second pane's chapter reflowing (drawn, its fonts in) changes the
-/// layout the reading place logic keeps (`surfaces` watches the first's).
+/// A pane's chapter reflowed (drawn, its fonts in, a setting changed): the
+/// one notice of it, for either pane, so neither misses one (GG32-16). The
+/// reading place logic notes the layout (`surfaces`), and the margin places
+/// its notes again (`margin`), in whichever pane it's in.
+fn reflowed() {
+    surfaces::note_painted_place();
+    crate::margin::reflowed();
+}
+
+/// Watches a pane's root for a reflow ([`reflowed`]).
 fn observe_root(root: &HtmlElement) {
     let Some(window) = web_sys::window() else {
         return;
@@ -951,7 +963,7 @@ fn observe_root(root: &HtmlElement) {
     if !js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false) {
         return;
     }
-    let noted = Closure::<dyn Fn()>::new(surfaces::note_painted_place);
+    let noted = Closure::<dyn Fn()>::new(reflowed);
     if let Ok(observer) = ResizeObserver::new(noted.as_ref().unchecked_ref()) {
         observer.observe(root);
     }
@@ -1111,13 +1123,26 @@ pub fn show_steps(pane: PaneId, prev: Option<&str>, next: Option<&str>) {
 const CONTROLS: &str = "button, a[href], input, select, textarea, [contenteditable], \
      [role=\"button\"], [role=\"menuitem\"], [role=\"tab\"], [role=\"switch\"]";
 
+/// The reader's chrome outside the panes, whose controls the keys that
+/// scroll a page go through to the active pane: the top bar and the tabs.
+const CHROME: &str = "#top-bar, .pane-tabs";
+
+/// What scrolls itself, or has keys of its own, inside a pane or the
+/// chrome: a popover, a menu, a dialog, the selection card.
+const NOT_THE_PAGES: &str = ".popover, [role=\"menu\"], [role=\"dialog\"], #selection-card";
+
 /// A key that scrolls the page (Page Down, Space, Home…), while two panes
 /// are open: the active pane's column scrolls, here, rather than whatever
 /// the webview would pick (UNVERIFIED 1 in the design: with focus on the
 /// page itself, which of two columns either picks, if any). Only for a key
-/// aimed at the page or inside a pane, not at a popover or the card in it,
-/// nor anything else that scrolls itself. Whether it was one, its
-/// `preventDefault` given. With one pane the browser scrolls, as ever.
+/// aimed at the page, inside a pane or at the reader's chrome (a top-bar
+/// button, a pane's bar, a tab: where F6 and P can leave focus, GG32-15),
+/// never at a field, a popover, a menu or the card, nor anything else that
+/// scrolls itself (a dialog has the keyboard while it's open). Space and
+/// the arrows still press and move what they're aimed at
+/// (`pane_text::scroll_key`), and the tabs keep Home and End. Whether it
+/// was one, its `preventDefault` given. With one pane the browser scrolls,
+/// as ever.
 pub fn on_scroll_key(event: &KeyboardEvent) -> bool {
     if !split() {
         return false;
@@ -1131,13 +1156,13 @@ pub fn on_scroll_key(event: &KeyboardEvent) -> bool {
         || bridge::document()
             .and_then(|d| d.document_element())
             .is_some_and(|html| dom::same(Some(&target), &html));
-    let in_pane = of(&target).is_some()
-        && target
-            .closest(".popover, #selection-card")
-            .ok()
-            .flatten()
-            .is_none();
-    if !page && !in_pane {
+    let typing = matches!(target.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+        || target
+            .dyn_ref::<HtmlElement>()
+            .is_some_and(HtmlElement::is_content_editable);
+    let readers = (of(&target).is_some() || target.closest(CHROME).ok().flatten().is_some())
+        && target.closest(NOT_THE_PAGES).ok().flatten().is_none();
+    if !page && (typing || !readers) {
         return false;
     }
     let on_control = target.closest(CONTROLS).ok().flatten().is_some();
@@ -1251,6 +1276,9 @@ pub fn mount() {
                 set_active(pane);
             }
         });
+    }
+    if let Some(root) = PaneId::First.root() {
+        observe_root(&root);
     }
     export_panes();
 }

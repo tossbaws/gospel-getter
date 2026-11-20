@@ -324,3 +324,102 @@ test('Open beside into a hidden second pane records where the reader left it, so
         assert.equal(heading(app, 2), 'Romans 5');
         assert.equal(scrolled.second, 540, 'Back returns to where the reader left it');
     }));
+
+/** Each column's scroll position, kept here (jsdom keeps none): 5000px of chapter. */
+function scrollable(app) {
+    const scrolled = { first: 0, second: 0 };
+    for (const name of ['first', 'second']) {
+        const col = column(app, name);
+        Object.defineProperty(col, 'scrollHeight', { configurable: true, get: () => 5000 });
+        Object.defineProperty(col, 'scrollTop', {
+            configurable: true,
+            get: () => scrolled[name],
+            set: (y) => { scrolled[name] = Math.max(0, y); },
+        });
+    }
+    return scrolled;
+}
+
+// GG32-15: with two panes open, the keys that scroll a page reach the
+// active pane's column from the reader's chrome too (a top-bar button, a
+// pane's bar, a tab: where F6 and P can leave focus), never from a field.
+test('Page Down, Page Up, Home and End scroll the active pane from the top bar, a pane’s bar and a tab, never from a field', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv', width: 1280 }, async (app) => {
+        await openBeside(app, { bookId: ROMANS, chapter: 5, translation: 'bsb' });
+        const scrolled = scrollable(app);
+        const pageFrom = async (target) => {
+            target.focus();
+            const active = panes(app).active();
+            scrolled.first = scrolled.second = 0;
+            const down = await app.key('PageDown', {}, target);
+            assert.ok(down.defaultPrevented, `Page Down on ${target.id || target.className} (${active})`);
+            const was = scrolled[active];
+            assert.ok(was > 0, `Page Down on ${target.id || target.className} scrolls the active pane (${active})`);
+            await app.key('PageUp', {}, target);
+            assert.ok(scrolled[active] < was, 'Page Up back');
+            await app.key('End', {}, target);
+            assert.equal(scrolled[active], 5000, 'End');
+            await app.key('Home', {}, target);
+            assert.equal(scrolled[active], 0, 'Home');
+            assert.equal(scrolled[active === 'first' ? 'second' : 'first'], 0, 'the other pane stays');
+            return active;
+        };
+        for (const id of ['ref-btn', 'chapter-next', 'menu-toggle', 'aa-toggle']) {
+            assert.equal(await pageFrom($(app, id)), 'second');
+        }
+        // A pane's bar: its controls make their pane active as they take focus.
+        assert.equal(await pageFrom(column(app, 'first').querySelector('.pane-bar .ref-btn')), 'first');
+        assert.equal(await pageFrom(column(app, 'second').querySelector('.pane-bar .chapter-arrow')), 'second');
+
+        // Space and the arrows still press and move what they're aimed at.
+        $(app, 'ref-btn').focus();
+        scrolled.second = 0;
+        const space = await app.key(' ', {}, $(app, 'ref-btn'));
+        assert.ok(!space.defaultPrevented);
+        assert.equal(scrolled.second, 0);
+
+        // A tab, on a narrow window: Page Down scrolls its pane; Home and
+        // End stay the tabs'.
+        app.resize(800);
+        await app.click(tab(app, 'second'));
+        tab(app, 'second').focus();
+        scrolled.second = 0;
+        await app.key('PageDown', {}, tab(app, 'second'));
+        assert.ok(scrolled.second > 0, 'Page Down on a tab');
+        await app.key('Home', {}, tab(app, 'second'));
+        assert.equal(app.document.activeElement, tab(app, 'first'), 'Home goes to the first tab');
+        assert.equal(panes(app).active(), 'first');
+
+        // Typed in the search box or the note editor, they're the field's.
+        app.resize(1280);
+        scrolled.first = scrolled.second = 0;
+        const typedIn = async (input, where) => {
+            input.focus();
+            for (const key of ['PageDown', 'PageUp', 'End', 'Home', ' ']) {
+                const event = await app.key(key, {}, input);
+                assert.ok(!event.defaultPrevented, `${key} in ${where}`);
+            }
+            assert.deepEqual(scrolled, { first: 0, second: 0 }, where);
+        };
+        await app.click($(app, 'search-toggle'));
+        await typedIn(app.searchInput(), 'the search box');
+        await app.key('Escape', {}, app.searchInput());
+        const before = app.calls.length;
+        app.click(root(app, 1).querySelector('.chapter-main .verse[data-translation][data-verse="16"]'));
+        await app.idle(before);
+        await app.key('n');
+        await app.until(() => !$(app, 'note-overlay').hidden, 'the note editor');
+        await typedIn($(app, 'note-input'), 'the note editor');
+    }));
+
+// GG32-17: the panes' bars are labelled groups, not toolbars (their ← and
+// → turn the chapter, as everywhere, rather than moving along the bar).
+test('each pane’s bar is a labelled group', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv', width: 1280 }, async (app) => {
+        await openBeside(app, { bookId: ROMANS, chapter: 5, translation: 'bsb' });
+        for (const name of ['first', 'second']) {
+            const bar = column(app, name).querySelector('.pane-bar');
+            assert.equal(bar.getAttribute('role'), 'group', name);
+            assert.ok(bar.getAttribute('aria-label'), name);
+        }
+    }));
