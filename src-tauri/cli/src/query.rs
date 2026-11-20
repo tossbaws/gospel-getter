@@ -44,8 +44,6 @@ pub use verify::{VerifyQuoteArgs, VerifyQuoteOut};
 /// What every refusal to read an install that isn't ready ends with.
 const OPEN_THE_APP: &str = "Open Gospel Getter once first, then try again.";
 
-/// The most verses of a passage returned at once: more than any chapter has.
-const MAX_PASSAGE_VERSES: usize = 200;
 /// How many search results come back unless asked otherwise, and the most.
 const DEFAULT_SEARCH_LIMIT: u32 = 50;
 const MAX_SEARCH_LIMIT: u32 = 200;
@@ -694,7 +692,7 @@ impl Library {
                 )
             }
         };
-        Ok(capped_passage(verses, notice))
+        Ok((verses, notice))
     }
 
     async fn list_translations(&self) -> anyhow::Result<TranslationsOut> {
@@ -1240,9 +1238,8 @@ fn is_only_numbers(part: &str) -> bool {
 /// The reference that the numbers `part` make, going on from `previous`, which
 /// has a book's name to go on from, or `None`. It's in the same book. It's in the
 /// chapter `previous` ends in too if it names no chapter, and `previous` named
-/// verses: "John 3:16, 18" is John 3:18, and after a range across chapters,
-/// "John 3:16-4:2, 5" is John 4:5; but "John 3:16, 4:2" is John 4:2 and "Psalm
-/// 23, 24" is Psalm 24.
+/// verses: "John 3:16, 18" is John 3:18 and "John 3:16-18, 20" is John 3:20;
+/// but "John 3:16, 4:2" is John 4:2 and "Psalm 23, 24" is Psalm 24.
 fn continued(previous: &str, part: &str) -> Option<String> {
     let (at, last_letter) = previous.char_indices().rfind(|(_, c)| c.is_alphabetic())?;
     let (book, numbers) = previous.split_at(at + last_letter.len_utf8());
@@ -1277,24 +1274,6 @@ fn verse_out(verse: i64, shown: VerseText) -> VerseOut {
             })
             .collect(),
     }
-}
-
-/// At most `MAX_PASSAGE_VERSES` verses, saying so if there were more.
-fn capped_passage(
-    mut verses: Vec<VerseOut>,
-    notice: Option<String>,
-) -> (Vec<VerseOut>, Option<String>) {
-    if verses.len() <= MAX_PASSAGE_VERSES {
-        return (verses, notice);
-    }
-    let total = verses.len();
-    verses.truncate(MAX_PASSAGE_VERSES);
-    let capped = format!("Only the first {MAX_PASSAGE_VERSES} of {total} verses are here.");
-    let notice = match notice {
-        Some(notice) => format!("{notice} {capped}"),
-        None => capped,
-    };
-    (verses, Some(notice))
 }
 
 /// The limit asked for, `default` if none, between 1 and `max`.

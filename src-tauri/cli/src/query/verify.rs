@@ -19,7 +19,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-use super::{Library, MAX_PASSAGE_VERSES, OPEN_THE_APP};
+use super::{Library, OPEN_THE_APP};
 
 /// The longest quotation checked, in characters.
 const MAX_QUOTE_CHARS: usize = 10_000;
@@ -379,7 +379,6 @@ impl Library {
         Ok(JoinedVerses::new(
             verses
                 .iter()
-                .take(MAX_PASSAGE_VERSES)
                 .map(|v| (v.verse, v.shown(&translation.code).text)),
         ))
     }

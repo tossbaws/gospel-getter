@@ -570,7 +570,7 @@ for an agent quoting scripture or finding every place on a topic:
 - `get_passage` takes several references separated by commas or semicolons
   (`"John 3:16, 18; Rom 5:8"`), and answers as `get_passages` does. A part of
   only numbers goes on from the reference before it: `"John 3:16, 18"` is John
-  3:18, and after a range across chapters, `"John 3:16-4:2, 5"` is John 4:5.
+  3:18, and `"John 3:16-18, 20"` is John 3:20.
 - `search` gives at most 200 verses at a time, in Bible order: `offset`
   reads on past them, and `next_offset` is the next page's while more match.
   Only a query's first 12 words count, and its `notice` says when more were
@@ -657,7 +657,9 @@ one would need a licence that permits an offline copy.
    read the same way, as in `web.json`). Footnotes kept apart from the
    text go in each book's `footnotes`, as in `bsb.json`.
 2. Add an entry to `TRANSLATIONS` and to `TEXTS` in
-   `src-tauri/core/src/db/seed.rs`.
+   `src-tauri/core/src/db/seed.rs`, and its code at the end of
+   `SEED_ORDER` there, which is what's seeded (a test checks the three
+   agree).
 
 Existing installs seed only translations they don't already have. A
 change to one they've already seeded is a step in `DATA_STEPS` (in the

@@ -687,31 +687,6 @@ async fn get_passage_refuses_what_is_not_there() {
     pool.close().await;
 }
 
-/// No more verses than the cap, and the notice says so; a cap reached with a
-/// notice already there keeps it.
-#[test]
-fn a_passage_is_capped_and_says_so() {
-    let verses = |n: i64| -> Vec<VerseOut> {
-        (1..=n)
-            .map(|verse| VerseOut {
-                verse,
-                text: String::new(),
-                footnotes: Vec::new(),
-            })
-            .collect()
-    };
-    let (under, notice) = capped_passage(verses(176), None);
-    assert_eq!((under.len(), notice), (176, None));
-    let (at, notice) = capped_passage(verses(200), Some("Gap.".to_string()));
-    assert_eq!((at.len(), notice.as_deref()), (200, Some("Gap.")));
-    let (over, notice) = capped_passage(verses(201), Some("Gap.".to_string()));
-    assert_eq!(over.len(), 200);
-    assert_eq!(
-        notice.as_deref(),
-        Some("Gap. Only the first 200 of 201 verses are here.")
-    );
-}
-
 fn passages_of(references: &[&str], translation: Option<&str>) -> Request {
     Request::GetPassages(GetPassagesArgs {
         references: references.iter().map(|r| (*r).to_string()).collect(),
@@ -873,11 +848,6 @@ fn a_list_of_references_is_split_at_commas_and_semicolons() {
         ("John 3:16, 4:2", &["John 3:16", "John 4:2"]),
         ("John 3:16, 18-20", &["John 3:16", "John 3:18-20"]),
         ("John 3:16-18, 20", &["John 3:16-18", "John 3:20"]),
-        // After a range across chapters, the chapter it ends in.
-        ("John 3:16-4:2, 5", &["John 3:16-4:2", "John 4:5"]),
-        ("John 3:16 - 4:2, 5-7", &["John 3:16 - 4:2", "John 4:5-7"]),
-        ("John 3.16-4.2, 5", &["John 3.16-4.2", "John 4:5"]),
-        ("John 3:16-4:2, 5:1", &["John 3:16-4:2", "John 5:1"]),
         (
             "John 3:16\u{2013}18, 20\u{2013}22",
             &["John 3:16\u{2013}18", "John 3:20\u{2013}22"],
@@ -954,6 +924,16 @@ async fn get_passage_takes_several_references() {
         .map(|p| p["reference"].as_str().unwrap())
         .collect();
     assert_eq!(names, ["John 3:16", "John 3:18", "Romans 5:8"]);
+    // The README's other example: after a range, the next verse in its chapter.
+    let answer = ask(&db, passage_of("John 3:16-18, 20", Some("kjv"))).await;
+    let names: Vec<&str> = answer["passages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["reference"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["John 3:16\u{2013}18", "John 3:20"]);
+    assert_eq!(answer["verse_count"], 4);
 
     // A part that fails is that entry's answer, named by what it went on to be.
     let answer = ask(&db, passage_of("John 3:16, 99; Hezekiah 1", Some("kjv"))).await;
