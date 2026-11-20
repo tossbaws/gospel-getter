@@ -1163,7 +1163,8 @@ fn update_bookmark_button() {
 }
 
 /// Marks every bookmarked verse of the chapter on screen, in every column
-/// and every pane (bookmarks belong to no one translation, nor pane).
+/// and every pane (bookmarks belong to no one translation, nor pane), with
+/// the star (CSS) and, for screen readers, its cue.
 fn apply_bookmark_markers() {
     for pane in pane::shown() {
         let spans = with(|s| {
@@ -1181,6 +1182,7 @@ fn apply_bookmark_markers() {
                 number.is_some_and(|n| spans.iter().any(|&(start, end)| n >= start && n <= end))
             });
             toggle_class(&el, "is-bookmarked", marked);
+            set_cue(&el, "bookmark-cue", marked.then_some(text::BOOKMARK_CUE));
         }
     }
 }
@@ -1309,6 +1311,40 @@ fn set_highlight_marker(el: &Element, color: Option<&str>) {
         None => {
             let _ = el.remove_attribute("data-highlight");
         }
+    }
+    set_cue(
+        el,
+        "highlight-cue",
+        color.map(text::highlight_cue).as_deref(),
+    );
+}
+
+/// Puts the visually hidden cue `class` after `verse`'s number, saying
+/// `said`, or takes it away (`None`): what a screen reader hears for a mark
+/// drawn on the verse (`card_text::NOTE_CUE` and the rest). One per class.
+fn set_cue(verse: &Element, class: &str, said: Option<&str>) {
+    let cue = verse
+        .query_selector(&format!(":scope > .{class}"))
+        .ok()
+        .flatten();
+    match (cue, said) {
+        (Some(cue), None) => cue.remove(),
+        (Some(cue), Some(said)) => {
+            if cue.text_content().as_deref() != Some(said) {
+                cue.set_text_content(Some(said));
+            }
+        }
+        (None, Some(said)) => {
+            if let (Some(document), Ok(Some(number))) =
+                (bridge::document(), verse.query_selector(".verse-num"))
+                && let Ok(added) = document.create_element("span")
+            {
+                added.set_class_name(&format!("{class} visually-hidden"));
+                added.set_text_content(Some(said));
+                let _ = number.after_with_node_1(&added);
+            }
+        }
+        (None, None) => {}
     }
 }
 
@@ -1459,8 +1495,7 @@ fn highlight_selection(color: Option<String>) -> Task {
 // goes stale.
 
 /// Marks every verse of `pane`'s chapter that a note covers, in every
-/// column, with the pencil (CSS) and, for screen readers, one hidden "has
-/// notes" per verse.
+/// column, with the pencil (CSS) and, for screen readers, its cue.
 fn apply_note_markers(pane: PaneId) {
     let spans = with(|s| {
         let here = &s.panes[pane];
@@ -1472,30 +1507,13 @@ fn apply_note_markers(pane: PaneId) {
                 .collect::<Vec<_>>()
         })
     });
-    let Some(document) = bridge::document() else {
-        return;
-    };
     for el in selectable(pane) {
         let number = data_number::<i64>(&el, "data-verse");
         let noted = spans.as_ref().is_some_and(|spans| {
             number.is_some_and(|n| spans.iter().any(|&(start, end)| n >= start && n <= end))
         });
         toggle_class(&el, "has-notes", noted);
-        let cue = el.query_selector(":scope > .note-cue").ok().flatten();
-        match cue {
-            None if noted => {
-                if let (Ok(added), Some(number)) = (
-                    document.create_element("span"),
-                    el.query_selector(".verse-num").ok().flatten(),
-                ) {
-                    added.set_class_name("note-cue visually-hidden");
-                    added.set_text_content(Some("(has notes) "));
-                    let _ = number.after_with_node_1(&added);
-                }
-            }
-            Some(cue) if !noted => cue.remove(),
-            _ => {}
-        }
+        set_cue(&el, "note-cue", noted.then_some(text::NOTE_CUE));
     }
 }
 

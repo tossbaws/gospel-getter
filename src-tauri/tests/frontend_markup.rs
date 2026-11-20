@@ -2534,18 +2534,26 @@ fn notes_use_tested_theme_colors() {
     );
 }
 
-/// A verse's hidden "has notes" cue is for screen readers only: it can't
-/// be selected, so copying a verse's text never copies it (checked in
+/// A verse's hidden cues are for screen readers only: they can't be
+/// selected, so copying a verse's text never copies one (checked in
 /// WebKitGTK: without this, a native selection and copy of a verse with
 /// notes put "(has notes)" on the clipboard).
 #[test]
 fn the_has_notes_cue_is_never_copied() {
     let rules = rules();
-    // The same goes for a KJV verse's "(has footnotes)".
+    // Every cue: notes', a KJV verse's footnotes', a finding's, a
+    // bookmark's and a highlight's.
+    let cues = [
+        ".note-cue",
+        ".footnote-cue",
+        ".finding-cue",
+        ".bookmark-cue",
+        ".highlight-cue",
+    ];
     let cue = rules
         .iter()
-        .find(|r| r.at_rule.is_none() && selectors(r).eq([".note-cue", ".footnote-cue"]))
-        .expect("a `.note-cue, .footnote-cue` rule");
+        .find(|r| r.at_rule.is_none() && selectors(r).eq(cues))
+        .expect("one rule for every cue");
     assert!(cue.body.contains("-webkit-user-select: none"));
     assert!(cue.body.contains("user-select: none"));
     let hidden = screen_rule(&rules, ".visually-hidden");

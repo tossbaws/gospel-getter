@@ -4392,7 +4392,9 @@
         }
 
         /* A small star after the number of every bookmarked verse. A
-           pseudo-element, so it's never part of the verse's text. */
+           pseudo-element, so it's never part of the verse's text. Screen
+           readers get the verse's .bookmark-cue, and a highlight's
+           .highlight-cue for its color. */
         .chapter-main .verse.is-bookmarked .verse-num::after {
             content: '\2605';
             margin-left: 0.15rem;
@@ -4414,10 +4416,14 @@
             content: '\2605\2009\270E';
         }
 
-        /* A verse's "has notes" and "has footnotes" are for screen
-           readers only: they're never copied with the verse's text. */
+        /* A verse's cues ("has notes", "has footnotes", "AI finding",
+           "bookmarked", "highlighted yellow") are for screen readers
+           only: they're never copied with the verse's text. */
         .note-cue,
-        .footnote-cue {
+        .footnote-cue,
+        .finding-cue,
+        .bookmark-cue,
+        .highlight-cue {
             -webkit-user-select: none;
             user-select: none;
         }
