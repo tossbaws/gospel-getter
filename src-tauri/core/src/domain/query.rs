@@ -202,8 +202,8 @@ fn push_word(words: &mut Vec<String>, word: &str) {
 /// where they stand as the phrase (in order, side by side), in order. A
 /// word is a run of letters, digits and private-use characters, as
 /// SQLite's FTS5 tokenizer splits the text it indexes (`db::search`), and
-/// two words are the same if they are once decomposed (NFD), without their
-/// marks, and lowercased; what's between two words (a space, a comma) is
+/// two words are the same if they are once folded for search
+/// ([`search_folded`]) and lowercased; what's between two words (a space, a comma) is
 /// no word, as for the index. Every word is looked at, so a search marks
 /// each place it is in the verse. This is the one rule for it: the page
 /// draws the marks where it says.
@@ -261,14 +261,49 @@ fn word_char(c: char) -> bool {
     ) || c.general_category() == GeneralCategory::PrivateUse
 }
 
-/// `word` decomposed (NFD), without its marks, lowercased.
+/// `word` as search reads it ([`search_folded`]), lowercased.
 fn folded(word: &str) -> String {
-    use unicode_normalization::UnicodeNormalization;
+    search_folded(word).to_lowercase()
+}
+
+/// The letters search reads as two: the ligatures, which no decomposition
+/// takes apart. The bundled KJV has "æ" four times, in Matthew 22:21's
+/// "Cæsar" and Mark 8:27's "Cæsarea" (chapters taken from eBible.org,
+/// `sources/kjv`), and "Caesar" everywhere else; a reader types either.
+const SEARCH_LIGATURES: [(char, &str); 4] = [('æ', "ae"), ('Æ', "Ae"), ('œ', "oe"), ('Œ', "Oe")];
+
+/// `text` as search reads it: each letter decomposed (NFD) and without its
+/// marks (so "ē" is "e"), and each of `SEARCH_LIGATURES` as its two
+/// letters. A mark that stands on its own in `text` is kept: FTS5's
+/// tokenizer, like [`term_marks`], reads it as between words. The one fold
+/// for the search index (`db::search`), the query it's matched with and
+/// the marks drawn in a result ([`term_marks`]), so the three agree.
+///
+/// Only search folds. The stored text, the text shown and copied, and every
+/// exact comparison (`verify_quote`) keep each character as the
+/// translation has it: "Caesar" is not Matthew 22:21's wording, and a fold
+/// there would say it was. Highlighting maps back to the text shown, never
+/// to the folded copy.
+pub fn search_folded(text: &str) -> String {
     use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
-    word.nfd()
-        .filter(|c| c.general_category_group() != GeneralCategoryGroup::Mark)
-        .collect::<String>()
-        .to_lowercase()
+    let is_mark = |c: char| c.general_category_group() == GeneralCategoryGroup::Mark;
+    let mut folded = String::with_capacity(text.len());
+    for c in text.chars() {
+        if is_mark(c) {
+            folded.push(c);
+            continue;
+        }
+        unicode_normalization::char::decompose_canonical(c, |part| {
+            if is_mark(part) {
+                return;
+            }
+            match SEARCH_LIGATURES.iter().find(|&&(letter, _)| letter == part) {
+                Some(&(_, letters)) => folded.push_str(letters),
+                None => folded.push(part),
+            }
+        });
+    }
+    folded
 }
 
 /// Split off a trailing chapter/verse specification: the longest run at the
@@ -925,6 +960,34 @@ mod tests {
         assert_eq!(term_marks(text, &search_query("the great")), [(55, 58)]);
         assert!(term_marks(text, &SearchQuery::default()).is_empty());
         assert!(term_marks("", &search_query("love")).is_empty());
+    }
+
+    #[test]
+    fn search_folds_accents_and_ligatures_and_nothing_else() {
+        assert_eq!(search_folded("Cæsar’s"), "Caesar’s");
+        assert_eq!(
+            search_folded("ÆNEAS, Œdipus, mœurs"),
+            "AeNEAS, Oedipus, moeurs"
+        );
+        assert_eq!(search_folded("Bēth-shēmesh, Jōb"), "Beth-shemesh, Job");
+        assert_eq!(search_folded("Élie"), "Elie");
+        // A mark standing on its own stays, between words as for the index.
+        assert_eq!(search_folded("e\u{301}lie"), "e\u{301}lie");
+        // Quotes, dashes, hyphens and spaces are as they were.
+        let plain = "“Lord’s” — Beth-lehem\u{a0}¶ …";
+        assert_eq!(search_folded(plain), plain);
+    }
+
+    #[test]
+    fn term_marks_mark_a_ligature_whole_for_its_letters() {
+        let text =
+            "They say unto him, Cæsar’s. Then saith he unto them, Render therefore unto Cæsar";
+        for typed in ["caesar", "cæsar", "CAESAR"] {
+            let marks = term_marks(text, &search_query(typed));
+            let marked: Vec<&str> = marks.iter().map(|&(from, to)| &text[from..to]).collect();
+            assert_eq!(marked, ["Cæsar", "Cæsar"], "{typed}");
+        }
+        assert!(term_marks("Caesar", &search_query("cæsar")).len() == 1);
     }
 
     #[test]

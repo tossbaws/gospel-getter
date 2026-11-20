@@ -177,6 +177,32 @@ mod tests {
     use crate::domain::kjv_markup::VerseText;
     use crate::log_file::LogFile;
 
+    /// "caesar" finds Matthew 22:21's "Cæsar" through the app's search, and
+    /// its marks are on the verse as shown: "Cæsar" whole, each time, its
+    /// "æ" kept.
+    #[tokio::test]
+    async fn caesar_finds_and_marks_the_kjvs_caesar_with_ae() {
+        let (_db, state) = app_state("cmd_search_ae").await;
+        let v = search_in(&state, "caesar", "kjv").await;
+        let results = v["results"].as_array().expect("text results");
+        let hit = results
+            .iter()
+            .find(|r| r["reference"] == "Matthew 22:21")
+            .unwrap_or_else(|| panic!("Matthew 22:21 found: {v}"));
+        let text = hit["text"].as_str().unwrap();
+        let marked: Vec<&str> = hit["marks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| &text[m[0].as_u64().unwrap() as usize..m[1].as_u64().unwrap() as usize])
+            .collect();
+        assert_eq!(marked, ["C\u{e6}sar", "C\u{e6}sar", "C\u{e6}sar"], "{text}");
+        assert!(
+            results.iter().any(|r| r["reference"] == "Matthew 22:17"),
+            "and its \"Caesar\": {v}"
+        );
+    }
+
     #[tokio::test]
     async fn search_goes_to_references_checked_against_the_translation() {
         let (_db, state) = app_state("cmd_search_ref").await;

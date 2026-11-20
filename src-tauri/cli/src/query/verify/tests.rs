@@ -105,6 +105,24 @@ impl Install {
 
 /// The whole verse, and the whole of a passage of several, its verses joined
 /// by one space: exact.
+/// Search folds "æ" (`search_folded`), so "caesar" finds Matthew 22:21's
+/// "Cæsar"; a quote is still checked character for character: "Caesar"
+/// there is not the KJV's wording, with the reference or without it.
+#[tokio::test]
+async fn a_quote_with_caesar_for_caesar_with_ae_still_differs() {
+    let install = Install::indexed("verify_caesar").await;
+    let real = install.real_text("Matthew 22:21", "kjv").await;
+    assert!(real.contains("C\u{e6}sar"), "fixture: {real}");
+    let quote = real.replace('\u{e6}', "ae");
+    let checked = install.check(&quote, Some("Matthew 22:21"), "kjv").await;
+    assert_eq!(checked["status"], "differs", "{checked}");
+    install.assert_it_keeps_its_promise(&quote, &checked).await;
+    let found = install.check(&quote, None, "kjv").await;
+    assert_eq!(found["status"], "differs", "{found}");
+    install.assert_it_keeps_its_promise(&quote, &found).await;
+    install.close().await;
+}
+
 #[tokio::test]
 async fn the_whole_passage_is_exact() {
     let install = Install::indexed("verify_exact").await;

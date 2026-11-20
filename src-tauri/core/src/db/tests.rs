@@ -1302,12 +1302,73 @@ async fn the_kjv_is_searched_as_shown_without_its_margin_notes() {
             .contains(&(58, 10, 34))
     );
 
-    // The WEB is indexed exactly as stored.
+    // The WEB is indexed as stored (folded for search, see the next test).
     assert!(
         found(pool.read(), WEB, &["lamp", "feet"])
             .await
             .contains(&PSALM_119_105)
     );
+}
+
+/// The KJV's "Cæsar" (Matthew 22:21) and "Cæsarea" (Mark 8:27) are found
+/// by "caesar" as its "Caesar" (Matthew 22:17) is, and by "cæsar" too: the
+/// index and the query are folded alike (`search_folded`). An index of
+/// unfolded text, as up to 2.32 (content version 1), is built again once.
+#[tokio::test]
+async fn search_finds_the_kjvs_ae_spellings_by_either_spelling() {
+    let (_db, pool) = fresh_database("search_folded").await;
+    let verses_before = verses_snapshot(pool.read()).await;
+    let (matthew_22_17, matthew_22_21, mark_8_27) = ((40, 22, 17), (40, 22, 21), (41, 8, 27));
+    for typed in ["caesar", "cæsar", "CÆSAR"] {
+        let hits = found(pool.read(), KJV, &[typed]).await;
+        assert!(hits.contains(&matthew_22_17), "{typed}: {hits:?}");
+        assert!(hits.contains(&matthew_22_21), "{typed}: {hits:?}");
+    }
+    assert!(
+        found(pool.read(), KJV, &["caesarea", "philippi"])
+            .await
+            .contains(&mark_8_27)
+    );
+
+    // As 2.32 left it: content version 1, Matthew 22:21 indexed unfolded.
+    sqlx::query("UPDATE search_index_version SET version = 1")
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+    let rowid = 100_000_000 + 40 * 1_000_000 + 22 * 1_000 + 21;
+    sqlx::query("DELETE FROM verse_search WHERE rowid = $1")
+        .bind(rowid)
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO verse_search (rowid, text) VALUES ($1, $2)")
+        .bind(rowid)
+        .bind("They say unto him, Cæsar’s.")
+        .execute(pool.write().pool())
+        .await
+        .unwrap();
+    assert!(
+        !found(pool.read(), KJV, &["caesar"])
+            .await
+            .contains(&matthew_22_21)
+    );
+
+    prepare(pool.write()).await.unwrap();
+    assert_eq!(
+        ensure_search_index(&pool).await.unwrap(),
+        vec![KJV, WEB, BSB]
+    );
+    assert_eq!(
+        index_version(pool.read()).await,
+        Some(SEARCH_CONTENT_VERSION)
+    );
+    assert!(
+        found(pool.read(), KJV, &["caesar"])
+            .await
+            .contains(&matthew_22_21)
+    );
+    // The stored text keeps its "æ".
+    assert_eq!(verses_snapshot(pool.read()).await, verses_before);
 }
 
 #[tokio::test]

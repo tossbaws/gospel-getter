@@ -248,7 +248,9 @@ sidebar. The other eight themes are under **Aa**.
 
 **Search the text, or jump straight to a reference.** Matching words are
 highlighted, and clicking a result opens and selects that verse. Words in
-quotes, as here, are found as a phrase, together and in that order. Type a
+quotes, as here, are found as a phrase, together and in that order. Case,
+accents and the letters æ and œ don't matter (`caesar` finds the KJV's
+"Cæsar"), though a hyphen does (`bethlehem` doesn't find "Beth-lehem"). Type a
 book's name, like `Psalms` or `1 John`, to go straight to its first
 chapter, with the verses that mention it listed below.
 
@@ -429,7 +431,8 @@ Upgrading keeps your data.
   KJV's ten misnumbered chapters again, once, from the text it bundles (see
   [Data provenance](#data-provenance-and-textual-integrity)), and builds
   the KJV's search index again; every other verse is left as it was, and
-  your records there stay on the verse numbers they had. Moving back to an
+  your records there stay on the verse numbers they had. 2.33.0 builds the
+  search index again once, so `caesar` finds "Cæsar". Moving back to an
   older version after upgrading hasn't been tested.
 - Theme, text size, line spacing, width, layout, compare (and which
   translation it compares with) and reading mode are
@@ -673,8 +676,9 @@ verses and its row in `translations`), or the whole database.
   `domain/query.rs` decides whether search input is a reference or words.
 - **Search:** uses an SQLite FTS5 index derived from `verses`. It's never
   written back. It indexes each verse's text as the reader shows it
-  (without the KJV's margin notes or the BSB's footnotes), and results
-  show that text.
+  (without the KJV's margin notes or the BSB's footnotes), folded for
+  search only (accents dropped, æ and œ as two letters), and results show
+  the text as the reader does, its own letters marked.
 - **Database:** every connection uses SQLite's write-ahead logging, so
   reads and a write don't wait for each other, and the first launch's
   search index build, in the background, doesn't hold up the page. Every
