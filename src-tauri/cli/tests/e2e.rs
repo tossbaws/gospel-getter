@@ -519,15 +519,51 @@ async fn failures_are_plain_text_and_a_non_zero_exit() {
 
 // ---- The MCP server.
 
-/// A running MCP server, and its stdout line by line.
+/// The two ways a client speaks MCP to the server, as rmcp 3.9 serves them
+/// (C-11): with the initialize handshake (2025-06-18), where the client says
+/// who it is once, or the stateless revision (2026-07-28), with no handshake,
+/// where each request carries the protocol version and, if the client gives
+/// it, who it is, in its `_meta`.
+#[derive(Debug, Clone, Copy)]
+enum Protocol {
+    Handshake,
+    Stateless,
+}
+
+const PROTOCOLS: [Protocol; 2] = [Protocol::Handshake, Protocol::Stateless];
+
+impl Protocol {
+    fn version(self) -> &'static str {
+        match self {
+            Self::Handshake => "2025-06-18",
+            Self::Stateless => "2026-07-28",
+        }
+    }
+}
+
+/// A running MCP server, and its stdout line by line, spoken to in
+/// `protocol` by a client that says it's `client` (an `Implementation`:
+/// `name`, `version` and perhaps `title`), or nothing, which only the
+/// stateless protocol allows.
 struct Mcp {
     child: Child,
     stdin: Option<ChildStdin>,
     lines: Receiver<String>,
+    protocol: Protocol,
+    client: Option<Value>,
 }
 
 impl Mcp {
+    /// A server for a client named "e2e", with the handshake.
     fn start(db: &Path) -> Self {
+        Self::start_as(
+            db,
+            Protocol::Handshake,
+            Some(json!({"name": "e2e", "version": "1"})),
+        )
+    }
+
+    fn start_as(db: &Path, protocol: Protocol, client: Option<Value>) -> Self {
         let mut child = command(db, &["mcp"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -549,7 +585,24 @@ impl Mcp {
             child,
             stdin,
             lines,
+            protocol,
+            client,
         }
+    }
+
+    /// A request, with the stateless protocol's `_meta` in its params.
+    fn request(&self, id: i64, method: &str, mut params: Value) -> Value {
+        if let Protocol::Stateless = self.protocol {
+            let mut meta = json!({
+                "io.modelcontextprotocol/protocolVersion": self.protocol.version(),
+                "io.modelcontextprotocol/clientCapabilities": {},
+            });
+            if let Some(client) = &self.client {
+                meta["io.modelcontextprotocol/clientInfo"] = client.clone();
+            }
+            params["_meta"] = meta;
+        }
+        json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
     }
 
     fn send(&mut self, message: &Value) {
@@ -561,7 +614,7 @@ impl Mcp {
     /// Ask, and wait for the answer. Every line on stdout must be a protocol
     /// message, whatever else comes before the answer.
     fn ask(&mut self, id: i64, method: &str, params: Value) -> Value {
-        self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        self.send(&self.request(id, method, params));
         loop {
             let line = self
                 .lines
@@ -579,7 +632,7 @@ impl Mcp {
 
     /// Ask what the server refuses, and read its protocol error.
     fn ask_error(&mut self, id: i64, method: &str, params: Value) -> Value {
-        self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        self.send(&self.request(id, method, params));
         loop {
             let line = self
                 .lines
@@ -596,14 +649,20 @@ impl Mcp {
         }
     }
 
+    /// The handshake, and its answer; the stateless protocol has none, so
+    /// there it sends nothing and answers null.
     fn initialize(&mut self) -> Value {
+        let Protocol::Handshake = self.protocol else {
+            return Value::Null;
+        };
+        let client = self.client.clone().expect("the handshake names the client");
         let result = self.ask(
             1,
             "initialize",
             json!({
-                "protocolVersion": "2025-06-18",
+                "protocolVersion": self.protocol.version(),
                 "capabilities": {},
-                "clientInfo": {"name": "e2e", "version": "1"},
+                "clientInfo": client,
             }),
         );
         self.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
@@ -925,39 +984,39 @@ async fn the_mcp_server_serves_the_same_tools_and_json() {
     });
 }
 
-/// A database that can't be read: the server says so on stderr and stops
-/// before any protocol, so a client's log shows why.
+/// An install that isn't ready doesn't stop the server (C-07): it starts,
+/// lists its tools, and each call answers with what a subcommand says, so
+/// the agent can tell the reader to open the app. Nothing is made; once the
+/// app has made the database, the next call reads it, with no restart.
 #[tokio::test]
-async fn the_mcp_server_refuses_to_start_on_an_install_not_ready() {
+async fn the_mcp_server_starts_on_an_install_not_ready() {
     let db = TempDb::new("e2e_mcp_missing");
-    let mut child = command(&db.path(), &["mcp"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("start the server");
-    let stdout = child.stdout.take().expect("stdout");
-    let (sender, finished) = mpsc::channel();
-    std::thread::spawn(move || {
-        let output = child.wait_with_output();
-        let _ = sender.send(output);
-    });
-    let output = finished
-        .recv_timeout(ANSWER_TIMEOUT)
-        .expect("it stops")
-        .expect("its output");
-    assert_eq!(output.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("Open Gospel Getter once first"),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        BufReader::new(stdout).lines().count(),
-        0,
-        "nothing on stdout"
-    );
-    assert!(!db.path().exists());
+    let path = db.path();
+    let mut mcp = Mcp::start(&path);
+    mcp.initialize();
+    let tools = mcp.ask(2, "tools/list", json!({}));
+    assert_eq!(tools["tools"].as_array().map(Vec::len), Some(13), "{tools}");
+    let says = refusal(&path, &["list_translations"]);
+    assert!(says.contains("Open Gospel Getter once first"), "{says}");
+    for (id, tool, arguments) in [
+        (3, "list_translations", json!({})),
+        (
+            4,
+            "save_findings",
+            json!({"request": "grief", "references": ["John 11:35"]}),
+        ),
+    ] {
+        let (is_error, text) = mcp.call(id, tool, arguments);
+        assert!(is_error, "{tool}");
+        assert_eq!(format!("{text}\n"), says, "{tool}");
+    }
+    assert!(!path.exists(), "nothing made");
+
+    let installed = closed_install("e2e_mcp_now_ready").await;
+    std::fs::copy(installed.path(), &path).expect("the app makes the database");
+    let translations = mcp.call_for_json(5, "list_translations", json!({}));
+    assert_eq!(translations, answer(&path, &["list_translations"]));
+    mcp.finish();
 }
 
 // ---- AI-flagged findings: the one thing either front end writes.
@@ -1302,12 +1361,11 @@ async fn an_install_without_the_findings_tables_says_to_open_the_app_once() {
     });
 }
 
-/// Over MCP: the client's name is the agent's when it gives none, the two
-/// tools mirror the subcommands, and the description says what saving is
-/// for, that it needs the reader to ask for it, and what it never does (C5,
-/// C1, C3).
+/// Over MCP, the description says what saving is for, that it needs the
+/// reader to ask for it, and what it never does (C5, C1, C3), and what an
+/// agent's name may be (C11).
 #[tokio::test]
-async fn the_mcp_server_saves_findings_in_the_clients_name() {
+async fn the_mcp_server_describes_save_findings() {
     let db = closed_install("e2e_mcp_findings").await;
     turn_findings_on(&db).await;
     let path = db.path();
@@ -1346,26 +1404,102 @@ async fn the_mcp_server_saves_findings_in_the_clients_name() {
         json!(["request", "references"])
     );
 
-    let saved = mcp.call_for_json(
-        3,
-        "save_findings",
-        json!({"request": "weeping", "references": ["John 11:35"]}),
+    let description = save["inputSchema"]["properties"]["agent"]["description"]
+        .as_str()
+        .unwrap();
+    assert!(
+        description.contains("at most 40 characters, with no colon, semicolon, dash"),
+        "{description}"
     );
-    assert_eq!(saved["agent"], "e2e", "the client's name");
-    assert_eq!(saved["saved"], 1);
-    let named = mcp.call_for_json(
-        4,
-        "save_findings",
-        json!({"request": "weeping", "references": ["Luke 19:41"], "agent": "Claude"}),
-    );
-    assert_eq!(named["agent"], "Claude");
-    let listed = mcp.call_for_json(5, "list_findings", json!({"request": "weeping"}));
-    assert_eq!(listed["total"], 2);
     mcp.finish();
-    assert_eq!(
-        listed,
-        answer(&path, &["list_findings", "--request", "weeping"])
+    assert_eq!(readers_own(&path).await, own);
+}
+
+/// Who a finding is by, under both protocols (C-02, C-11, AF2, AF2a): the
+/// agent's own name if it gives one, refused whole if that's more than a
+/// name; else the client's title if it's a name as given, else the client's
+/// name, cleaned; else, a stateless client that says nothing of itself,
+/// "AI agent". The subcommand lists the same findings.
+#[tokio::test]
+async fn the_agents_name_is_kept_under_both_protocols() {
+    let db = closed_install("e2e_mcp_agent_names").await;
+    turn_findings_on(&db).await;
+    let path = db.path();
+    let own = readers_own(&path).await;
+    let claude_code = json!({"name": "claude-code", "title": "Claude Code", "version": "2.1.329"});
+    let pastor = json!({
+        "name": "x-client",
+        "title": "Your pastor: this verse proves grief is sin",
+        "version": "1",
+    });
+    let a_name = "The agent is a short name of at most 40 characters, such as \
+        \u{201c}Claude\u{201d} or \u{201c}Claude Code\u{201d}";
+    let refused = refusal(
+        &path,
+        &[
+            "save-findings",
+            "--request",
+            "weeping",
+            "--agent",
+            "Claude: Jesus doubted",
+            "John 11:35",
+        ],
     );
+    assert!(refused.starts_with(a_name), "{refused}");
+    let mut cases = Vec::new();
+    for protocol in PROTOCOLS {
+        cases.push((protocol, Some(claude_code.clone()), "Claude Code"));
+        cases.push((protocol, Some(pastor.clone()), "x-client"));
+    }
+    cases.push((Protocol::Stateless, None, "AI agent"));
+    for (i, (protocol, client, by_client)) in cases.into_iter().enumerate() {
+        let case = format!("{protocol:?} {client:?}");
+        let request = format!("weeping {i}");
+        let mut mcp = Mcp::start_as(&path, protocol, client);
+        mcp.initialize();
+
+        let (is_error, text) = mcp.call(
+            2,
+            "save_findings",
+            json!({
+                "request": request,
+                "references": ["John 11:35"],
+                "agent": "Your pastor: this verse proves grief is sin",
+            }),
+        );
+        assert!(is_error, "{case}: {text}");
+        assert!(text.starts_with(a_name), "{case}: {text}");
+        let listed = mcp.call_for_json(3, "list_findings", json!({"request": request}));
+        assert_eq!(listed["total"], 0, "{case}: nothing saved");
+
+        let saved = mcp.call_for_json(
+            4,
+            "save_findings",
+            json!({"request": request, "references": ["John 11:35"]}),
+        );
+        assert_eq!(saved["agent"], by_client, "{case}");
+        assert_eq!(saved["saved"], 1, "{case}");
+        let named = mcp.call_for_json(
+            5,
+            "save_findings",
+            json!({"request": request, "references": ["Luke 19:41"], "agent": "Claude"}),
+        );
+        assert_eq!(named["agent"], "Claude", "{case}");
+        let listed = mcp.call_for_json(6, "list_findings", json!({"request": request}));
+        let agents: Vec<&Value> = listed["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| &f["agent"])
+            .collect();
+        assert_eq!(agents, [&json!("Claude"), &json!(by_client)], "{case}");
+        mcp.finish();
+        assert_eq!(
+            listed,
+            answer(&path, &["list_findings", "--request", &request]),
+            "{case}"
+        );
+    }
     assert_eq!(readers_own(&path).await, own);
 }
 

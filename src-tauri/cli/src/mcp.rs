@@ -2,8 +2,9 @@
 //! subcommands, the same JSON in a text block; one prompt, for summarising
 //! the reader's own notes; and each chapter as a resource. Only rmcp writes to
 //! stdout, and all logging goes to stderr. Each call opens the database and
-//! closes it again, so a call always reads what the app has saved, and nothing
-//! here holds the database open while the app runs.
+//! closes it again, so a call always reads what the app has saved, nothing
+//! here holds the database open while the app runs, and an install that
+//! isn't ready yet is each call's answer rather than the server's end.
 //!
 //! The standing rule (no AI middleman) holds here: tools return the exact
 //! text and say where it is; nothing asks an agent to summarise, paraphrase or
@@ -11,6 +12,7 @@
 //! tells the agent never to summarise the verses they point to.
 
 use anyhow::Context;
+use gospel_getter_core::db::findings::client_agent;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -21,15 +23,13 @@ use rmcp::model::{
     ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
-use rmcp::{
-    ErrorData, Peer, RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router,
-};
+use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use std::path::PathBuf;
 
 use crate::query::{
-    self, CompareArgs, GetCrossReferencesArgs, GetPassageArgs, GetPassagesArgs, Library,
-    ListBookmarksArgs, ListFindingsArgs, ListHighlightsArgs, ListNotesArgs, Request,
-    SaveFindingsArgs, SearchArgs, VerifyQuoteArgs,
+    self, CompareArgs, GetCrossReferencesArgs, GetPassageArgs, GetPassagesArgs, ListBookmarksArgs,
+    ListFindingsArgs, ListHighlightsArgs, ListNotesArgs, Request, SaveFindingsArgs, SearchArgs,
+    VerifyQuoteArgs,
 };
 
 /// What the client's model is told about this server. Its last sentences are
@@ -250,7 +250,7 @@ impl Server {
 
     #[tool(
         name = "save_findings",
-        description = "Mark verses in the reader's Gospel Getter as AI-flagged findings for a request they made, so they can read each verse for themselves in the app. Use it only when the reader asks you to save, note or mark verses, for example: \"note every verse that deals with grief so I can read them\". A request only to find, list or quote verses isn't one: answer it, and offer to save them; save them only if the reader then asks you to. Each verse becomes one finding, shown in Gospel Getter beside the verse, marked as found by you (agent) for that request and kept apart from the reader's own notes. request is the reader's topic in a few words (at most 60 characters). Save only the locations: never summarise, paraphrase or explain the verses, and write nothing about what they mean; the app shows only who found each verse and for what request. Findings are add-only: saving a verse again for the same request changes nothing, nothing here edits or removes one, and the reader removes them in the app. references are read as get_passage reads them, at most 500 verses per call; a bad reference gets its own entry in errors and the rest still save, and one naming verses the translation doesn't number saves the verses it numbers and gets an entry in notices (reference, and get_passage's notice) saying which it doesn't. Saving is off until the reader turns it on in Gospel Getter (Aa, then AI agents); while it's off, this answers with how to turn it on. list_findings shows what's already saved.",
+        description = "Mark verses in the reader's Gospel Getter as AI-flagged findings for a request they made, so they can read each verse for themselves in the app. Use it only when the reader asks you to save, note or mark verses, for example: \"note every verse that deals with grief so I can read them\". A request only to find, list or quote verses isn't one: answer it, and offer to save them; save them only if the reader then asks you to. Each verse becomes one finding, shown in Gospel Getter beside the verse, marked as found by you (agent) for that request and kept apart from the reader's own notes. request is the reader's topic in a few words (at most 60 characters). agent is your name as the reader knows you, such as \"Claude\" (at most 40 characters, with no colon, semicolon or dash); without it, the name your MCP client sends is used, else \"AI agent\". Save only the locations: never summarise, paraphrase or explain the verses, and write nothing about what they mean; the app shows only who found each verse and for what request. Findings are add-only: saving a verse again for the same request changes nothing, nothing here edits or removes one, and the reader removes them in the app. references are read as get_passage reads them, at most 500 verses per call; a bad reference gets its own entry in errors and the rest still save, and one naming verses the translation doesn't number saves the verses it numbers and gets an entry in notices (reference, and get_passage's notice) saying which it doesn't. Saving is off until the reader turns it on in Gospel Getter (Aa, then AI agents); while it's off, this answers with how to turn it on. list_findings shows what's already saved.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -259,19 +259,18 @@ impl Server {
     )]
     async fn save_findings(
         &self,
-        peer: Peer<RoleServer>,
+        context: RequestContext<RoleServer>,
         Parameters(args): Parameters<SaveFindingsArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        // The agent's name, when it gives none, is the client's own, from the
-        // initialize handshake: its title if it has one, else its name.
-        let client = peer.peer_info().map(|info| {
-            let client = &info.client_info;
-            client
-                .title
-                .clone()
-                .filter(|title| !title.trim().is_empty())
-                .unwrap_or_else(|| client.name.clone())
-        });
+        // The agent's name, when it gives none, is the client's own, read from
+        // this request (`findings::client_agent` picks title or name). Never
+        // `Peer::peer_info` alone: only the initialize handshake fills it, the
+        // stateless protocol (2026-07-28) has none, and there every finding
+        // would read "AI agent" (C-02). `client_info` reads the request's
+        // `_meta` first, then the handshake (rmcp-3.9.0 src/service.rs:1248).
+        let client = context
+            .client_info()
+            .map(|info| client_agent(info.title.as_deref(), &info.name));
         self.answer(Request::SaveFindings { args, client }).await
     }
 
@@ -412,15 +411,16 @@ impl ServerHandler for Server {
     }
 }
 
-/// Serve until the client goes away. A database that can't be read yet stops
-/// here, with the same message as a subcommand, before any protocol starts.
+/// Serve until the client goes away. A database that can't be read yet
+/// doesn't stop the server: each call answers with what a subcommand says
+/// (open the app once first), so the agent can tell the reader, and the
+/// first call after the app has made it reads it, with no restart (C-07).
 pub async fn serve(database: PathBuf) -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .with_max_level(tracing_subscriber::filter::LevelFilter::WARN)
         .init();
-    Library::open(&database).await?.close().await;
     let service = Server::new(database)
         .serve(rmcp::transport::stdio())
         .await

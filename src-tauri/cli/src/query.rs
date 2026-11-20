@@ -185,8 +185,9 @@ pub enum Request {
     ListNotes(ListNotesArgs),
     VerifyQuote(VerifyQuoteArgs),
     ListFindings(ListFindingsArgs),
-    /// The one that writes: `client` is the MCP client's name, the agent's
-    /// when it gives none.
+    /// The one that writes: `client` is who the MCP client says it is, as a
+    /// name today's rule allows (`findings::client_agent`), the agent's when
+    /// it gives none.
     SaveFindings {
         args: SaveFindingsArgs,
         client: Option<String>,

@@ -194,8 +194,9 @@ pub struct ImportResultDto {
     /// chose to restore the file's (`restore_findings_permission`) and it
     /// has one; `None` when the switch was left as it was.
     pub findings_permission: Option<bool>,
-    /// How many of the file's AI findings had a request label this version's
-    /// rule refuses, so it was cleaned (`reader_data::validate_findings`).
+    /// How many of the file's AI findings had a request label or an agent's
+    /// name this version's rule refuses, so it was cleaned, one per finding
+    /// (`reader_data::validate_findings`).
     pub findings_tidied: usize,
     /// The reading position saved, if the reader chose to restore it.
     pub position: Option<PositionPreviewDto>,

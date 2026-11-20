@@ -760,7 +760,8 @@ async fn a_valid_file_imports_whole_with_each_kinds_rule_for_repeats() {
                     created_at: None,
                 },
             ]),
-            findings_tidied: 0,
+            // The name that can't be seen, cleaned to "AI agent".
+            findings_tidied: 1,
             ai_findings_enabled: Some(false),
             position: Some(NewPosition {
                 translation_id: bsb.id,

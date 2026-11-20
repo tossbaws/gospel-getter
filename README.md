@@ -579,11 +579,12 @@ one for yourself, and judge whether it got them right.
   answers with how to turn it on, and saves nothing.
 - **Markers, not commentary.** A finding says only who found the verse and
   for which of your requests: "Found by Claude for your request “grief”." It
-  never says what the verse means, and there's nowhere to store anything
-  that would; the verse beside it is left as it is, for you to read. The
-  request itself is a short topic label (at most 60 characters, with no
-  colon, semicolon, dash, line break or character that can't be seen), so
-  it can't carry commentary either.
+  never says what the verse means; the verse beside it is left as it is, for
+  you to read. The agent's name and the request are the only words an agent
+  saves, and both are short labels held to the same rule (no colon,
+  semicolon, dash, line break or character that can't be seen; at most 40
+  characters for the name and 60 for the request), so neither can carry
+  commentary.
 - **Add-only.** An agent can add findings, never edit or remove them, and
   never touch your notes, bookmarks or highlights. Saving the same verse for
   the same request again changes nothing.

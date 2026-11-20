@@ -111,7 +111,7 @@ impl Command {
             Self::VerifyQuote(args) => Request::VerifyQuote(args),
             Self::ListFindings(args) => Request::ListFindings(args),
             // On the command line there's no client to name: the agent is
-            // `--agent`, else "AI agent".
+            // `--agent` (refused if it isn't a name), else "AI agent".
             Self::SaveFindings(args) => Request::SaveFindings { args, client: None },
             Self::Mcp => return None,
         })

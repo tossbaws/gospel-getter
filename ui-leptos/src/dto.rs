@@ -248,8 +248,8 @@ pub struct ImportResult {
     pub findings_removed: u64,
     /// "Let AI agents save findings" as the import set it, if it did.
     pub findings_permission: Option<bool>,
-    /// How many AI findings had a label this version's rule refuses, so it
-    /// was tidied up.
+    /// How many AI findings had a request label or an agent's name this
+    /// version's rule refuses, so it was tidied up: one per finding.
     pub findings_tidied: u64,
     pub position: Option<PositionPreview>,
 }
