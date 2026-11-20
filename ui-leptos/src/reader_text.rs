@@ -920,11 +920,22 @@ pub struct History {
     /// step back or forward, is on its way.
     shown: bool,
     /// Bumped by each jump and step, so a step overtaken by a newer one
-    /// does nothing once it's done.
+    /// does nothing once it's done. It only grows, across a pane closed and
+    /// opened again too ([`Self::after_close`]).
     token: u64,
 }
 
 impl History {
+    /// The history of a pane that closed, for when it opens again: nothing
+    /// in it, but its token, so a step from before the close whose answer
+    /// is still on its way never matches one taken after (D-07).
+    pub fn after_close(&self) -> Self {
+        Self {
+            token: self.token,
+            ..Self::default()
+        }
+    }
+
     /// Starts over at the chapter being read.
     pub fn start(&mut self, book_id: i64, chapter: i64) {
         self.places = vec![Place::chapter(book_id, chapter)];
@@ -1585,6 +1596,30 @@ mod tests {
             end: verses.map(|v| v.1),
             ..Place::chapter(book_id, chapter)
         })
+    }
+
+    #[test]
+    fn a_step_from_before_a_close_never_matches_one_after() {
+        let mut h = History::default();
+        h.start(43, 3);
+        h.begin_jump();
+        h.end_jump(Some(Place::chapter(43, 4)));
+        let (old, _) = h.begin_go(-1).unwrap();
+        // The pane closes with that step on its way, opens again, and the
+        // reader takes as many steps as before.
+        let mut h = h.after_close();
+        assert!(!h.started());
+        h.start(45, 5);
+        h.begin_jump();
+        h.end_jump(Some(Place::chapter(45, 8)));
+        let (new, _) = h.begin_go(-1).unwrap();
+        assert_ne!(old, new);
+        assert!(!h.current(old));
+        // The old step ending changes nothing; the new one lands.
+        h.end_go(old, false);
+        h.end_go(new, true);
+        assert_eq!(h.here(), Some(&Place::chapter(45, 5)));
+        assert!(h.can_go(1));
     }
 
     #[test]

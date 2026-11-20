@@ -38,7 +38,7 @@ function layOut(width) {
         window.HTMLElement.prototype.getBoundingClientRect = function () {
             const box = (top, height, left = 420, right = 1180) => ({ top, bottom: top + height, left, right, width: right - left, height, x: left, y: top });
             if (this.id === 'top-bar') return box(0, 54, 0, width);
-            if (this.matches('#reading-pane-inner .chapter-main')) return box(100, 5000);
+            if (this.matches('#reading-pane-inner .chapter-main, #reading-pane-2-inner .chapter-main')) return box(100, 5000);
             if (this.matches('.chapter-main .verse[data-verse]')) return box(100 + 60 * Number(this.dataset.verse), 50);
             if (this.matches('.chapter-main .verse-num')) {
                 return box(102 + 60 * Number(this.closest('.verse').dataset.verse), 12);
@@ -253,4 +253,56 @@ test('none while comparing, out of reading mode, or with the switch off; the swi
         assert.equal(app.document.getElementById('margin-notes-btn').getAttribute('aria-pressed'), 'false');
         assert.equal(shown(app), 'nothing');
     });
+});
+
+// GG32-16: a reflow of either pane's chapter places the margin's notes
+// again, the second pane's too (reading mode shows it alone once it's
+// active, the margin in it). jsdom has no ResizeObserver: this one is the
+// test's to tell.
+test('a reflow of the second pane’s chapter places its margin notes again, as the first pane’s does', async () => {
+    await seed([[16, 16, 'Again on 16.']]);
+    const observed = [];
+    let shift = 0;
+    const setUp = (window) => {
+        layOut(1600)(window);
+        window.ResizeObserver = class {
+            constructor(callback) { this.callback = callback; }
+            observe(el) { observed.push({ el, observer: this }); }
+            unobserve() {}
+            disconnect() {}
+        };
+        // Verses `shift` px further down than laid out: a reflow above them.
+        const laidOut = window.HTMLElement.prototype.getBoundingClientRect;
+        window.HTMLElement.prototype.getBoundingClientRect = function () {
+            const box = laidOut.call(this);
+            if (!this.matches('.chapter-main .verse[data-verse], .chapter-main .verse-num')) return box;
+            return { ...box, top: box.top + shift, bottom: box.bottom + shift, y: box.y + shift };
+        };
+    };
+    const app = await openApp({ book: 'John', chapter: 3, readerMode: true, keepBookmarks: true, setUp });
+    try {
+        await frame(app);
+        const panes = app.window.gospelGetterPanes;
+        const before = app.calls.length;
+        await panes.openBeside({ bookId: JOHN, chapter: 3 });
+        await app.idle(before);
+        await frame(app);
+        assert.equal(panes.active(), 'second');
+        const root = (id) => app.document.getElementById(id);
+        const top = () => root('reading-pane-2').querySelector('.margin-notes .margin-note').style.top;
+        assert.equal(top(), '960px');
+        const reflow = (el) => {
+            const watching = observed.filter((o) => o.el === el);
+            assert.ok(watching.length > 0, `#${el.id} is watched`);
+            for (const { observer } of watching) observer.callback([], observer);
+        };
+        shift = 100;
+        reflow(root('reading-pane-2'));
+        await frame(app);
+        assert.equal(top(), '1060px', 'placed again');
+        // And the first pane's root, watched the same way.
+        reflow(root('reading-pane'));
+    } finally {
+        app.close();
+    }
 });

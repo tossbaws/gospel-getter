@@ -1778,18 +1778,27 @@ struct NotePassage {
     verse_end: i64,
 }
 
+/// Where the note editor quotes its passage from: a pane's chapter, in
+/// one of the translations it shows. The pane that asked, which may not be
+/// the active one by the time a note's Edit lands (D-06).
+#[derive(Clone, Copy)]
+struct Quoted<'a> {
+    pane: PaneId,
+    code: &'a str,
+}
+
 /// Opens the note editor: adding a note on `passage` (`note` is `None`), or
-/// editing `note` (as the backend gave it), with `code` the translation whose
-/// text is quoted, and focus going back to `opener` when it closes.
+/// editing `note` (as the backend gave it), its text `quoted`, and focus
+/// going back to `opener` when it closes.
 fn open_note_panel(
     mode: &str,
     note: Option<JsValue>,
     passage: (i64, i64, i64, i64),
     reference: String,
-    code: &str,
+    quoted: Quoted<'_>,
     opener: Option<HtmlElement>,
 ) {
-    open_note_editor(mode, note, passage, reference, code, opener, None);
+    open_note_editor(mode, note, passage, reference, quoted, opener, None);
 }
 
 /// [`open_note_panel`], or, with `keep`, "Keep as mine" on that finding.
@@ -1798,13 +1807,13 @@ fn open_note_editor(
     note: Option<JsValue>,
     passage: (i64, i64, i64, i64),
     reference: String,
-    code: &str,
+    Quoted { pane, code }: Quoted<'_>,
     opener: Option<HtmlElement>,
     keep: Option<&Finding>,
 ) {
     let (book_id, chapter, start, end) = passage;
     let Some(verses) = with(|s| {
-        let here = s.here().chapter.as_ref()?;
+        let here = s.panes[pane].chapter.as_ref()?;
         let mut verses: Vec<Verse> = if here.book_id == book_id && here.chapter == chapter {
             here.column(code)
                 .iter()
@@ -1882,12 +1891,13 @@ fn note_passage(note: &JsValue) -> Option<((i64, i64, i64, i64), String)> {
     ))
 }
 
-fn edit(note: JsValue, code: &str, opener: Option<HtmlElement>) {
+fn edit(pane: PaneId, note: JsValue, code: &str, opener: Option<HtmlElement>) {
     let Some((passage, reference)) = note_passage(&note) else {
         ipc::log_error("The note to edit can't be read", &note);
         return;
     };
-    open_note_panel("edit", Some(note), passage, reference, code, opener);
+    let quoted = Quoted { pane, code };
+    open_note_panel("edit", Some(note), passage, reference, quoted, opener);
 }
 
 /// + Add note, or N: a note on the selected verses.
@@ -1911,7 +1921,11 @@ fn open_add_note(opener: Option<HtmlElement>) {
         ))
     });
     if let Some((passage, reference, code)) = found {
-        open_note_panel("add", None, passage, reference, &code, opener);
+        let quoted = Quoted {
+            pane: pane::active(),
+            code: &code,
+        };
+        open_note_panel("add", None, passage, reference, quoted, opener);
     }
 }
 
@@ -1928,6 +1942,10 @@ pub fn keep_finding(finding: &Finding, opener: Option<HtmlElement>) {
     }) else {
         return;
     };
+    let quoted = Quoted {
+        pane: pane::active(),
+        code: &code,
+    };
     open_note_editor(
         "keep",
         None,
@@ -1938,7 +1956,7 @@ pub fn keep_finding(finding: &Finding, opener: Option<HtmlElement>) {
             finding.verse_end,
         ),
         finding.reference.clone(),
-        &code,
+        quoted,
         opener,
         Some(finding),
     );
@@ -1967,21 +1985,29 @@ fn chapter_others(finding: &Finding) -> Vec<OtherNote> {
     })
 }
 
-/// A Library note's Edit has opened its passage (the reader jumped there,
-/// the passage selected, so its Notes section shows): the note opens.
-pub fn edit_note(note: &JsValue) {
+/// A Library note's Edit has opened its passage in `pane` (the reader
+/// jumped there, the passage selected, so its Notes section shows): the
+/// note opens, quoting that pane's chapter even if the reader has switched
+/// panes since (D-06).
+pub fn edit_note(pane: PaneId, note: &JsValue) {
     if note.is_null() || note.is_undefined() {
         return;
     }
     let code = with(|s| {
-        let chapter = s.here().chapter.as_ref()?;
-        Some(s.selection.as_ref().map_or_else(
-            || chapter.translation_code.clone(),
-            |sel| sel.translation_code.clone(),
-        ))
+        let chapter = s.panes[pane].chapter.as_ref()?;
+        // The selection is the active pane's.
+        Some(
+            s.selection
+                .as_ref()
+                .filter(|_| pane == pane::active())
+                .map_or_else(
+                    || chapter.translation_code.clone(),
+                    |sel| sel.translation_code.clone(),
+                ),
+        )
     });
     if let Some(code) = code {
-        edit(note.clone(), &code, None);
+        edit(pane, note.clone(), &code, None);
     }
 }
 
@@ -2651,7 +2677,7 @@ pub fn ask(ask: Ask) -> bool {
                 Some((note.raw.clone(), selection.translation_code.clone()))
             });
             if let Some((note, code)) = found {
-                edit(note, &code, opener);
+                edit(pane::active(), note, &code, opener);
             }
             true
         }

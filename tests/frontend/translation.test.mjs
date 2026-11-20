@@ -191,3 +191,21 @@ test('Export data… and Import data… say what they do on hover, and nothing m
         assert.equal(exportBtn.textContent, 'Export data…');
         assert.equal(importBtn.textContent, 'Import data…');
     }));
+
+// D-08: with no chapter on screen (its first load failed), another
+// translation reads the chapter that failed, in it: never Genesis 1.
+test('after a first load that failed, another translation reads the chapter that failed in it, not Genesis 1', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv', failing: { get_reading: 'simulated get_reading failure' } }, async (app) => {
+        assert.match(app.notice(), /simulated get_reading failure/);
+        assert.equal(app.document.querySelector('.chapter-heading'), null, 'no chapter on screen');
+        app.failCommand('get_reading', null);
+        app.open('translation');
+        const before = app.calls.length;
+        await clickAndWait(app, radio(app, 'web'), 'get_reading');
+        const read = app.calls.slice(before).filter((c) => c.cmd === 'get_reading').map((c) => JSON.parse(JSON.stringify(c.args)));
+        assert.equal(read.length, 1, JSON.stringify(read));
+        assert.equal(read[0].chapter, 3);
+        assert.equal(read[0].translationCode, 'web');
+        assert.equal(app.heading(), 'John 3');
+        assert.equal($(app, 'translation-select').value, 'web');
+    }));

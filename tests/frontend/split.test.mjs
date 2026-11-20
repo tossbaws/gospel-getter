@@ -11,7 +11,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bookId, closeBridge, shownVerse, withApp } from './harness.mjs';
+import { backend, bookId, closeBridge, settle, shownVerse, withApp } from './harness.mjs';
 
 after(closeBridge);
 
@@ -441,3 +441,71 @@ test('printing while split fills the Cross references list of the pane that prin
         app.window.dispatchEvent(new app.window.Event('beforeprint'));
         assert.ok(list('xref-summary-list').querySelector('.xref-summary-row'));
     }));
+
+// D-07: a Back from the second pane still on its way as the pane closes
+// never ends a step taken after it opens again, however many steps match
+// its count: the history's token goes on across the close.
+test('a late Back from a closed second pane is dropped, never ending a newer step of the pane opened again', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        const back = () => app.key('ArrowLeft', { altKey: true });
+        const forward = () => app.document.getElementById('history-forward');
+        await openBeside(app, { bookId: ROMANS, chapter: 5 });
+        await openBeside(app, { bookId: ROMANS, chapter: 8 });
+        assert.equal(heading(app, 2), 'Romans 8');
+        // Back, its answer held; the pane closes meanwhile.
+        const late = app.holdAnswer('get_reading');
+        let before = app.calls.length;
+        await back();
+        await app.until(() => app.calls.length > before, 'the Back’s reading');
+        panes(app).close();
+        // Opened again: as many steps as before, the last one's answer held too.
+        await openBeside(app, { bookId: JOHN, chapter: 1 });
+        await openBeside(app, { bookId: JOHN, chapter: 2 });
+        assert.equal(heading(app, 2), 'John 2');
+        const newer = app.holdAnswer('get_reading');
+        before = app.calls.length;
+        await back();
+        await app.until(() => app.calls.length > before, 'the newer Back’s reading');
+        // The late answer comes first, then the newer one.
+        late();
+        await settle();
+        newer();
+        await app.idle();
+        assert.equal(heading(app, 2), 'John 1');
+        assert.equal(panes(app).active(), 'second');
+        // Back on John 1, where the pane's history began: Forward goes to
+        // John 2, and there's nothing earlier.
+        assert.equal(forward().getAttribute('aria-disabled'), null, 'Forward to John 2');
+        assert.equal(app.document.getElementById('history-back').getAttribute('aria-disabled'), 'true');
+        before = app.calls.length;
+        await app.key('ArrowRight', { altKey: true });
+        await app.idle(before);
+        assert.equal(heading(app, 2), 'John 2');
+    }));
+
+// D-06: a Library note's Edit opens the editor on the passage its jump put
+// on screen, in the pane that jumped, even if the reader switched panes
+// while the chapter was on its way.
+test('a note’s Edit, its jump landing after a switch of pane, quotes the passage the jump put on screen', async () => {
+    await backend('__reset', { bookId: bookId('Psalms'), chapter: 23, translationCode: 'kjv' });
+    await backend('add_note', { bookId: JOHN, chapter: 3, verseStart: 16, verseEnd: 16, body: 'Loved.' });
+    await withApp({ book: 'Psalms', chapter: 23, translation: 'kjv', keepBookmarks: true }, async (app) => {
+        await openBeside(app, { bookId: ROMANS, chapter: 5 });
+        assert.equal(panes(app).active(), 'second');
+        app.openLibrary('notes');
+        await app.idle(0);
+        const row = [...app.document.querySelectorAll('#note-list .note-item')].find((r) => r.textContent.includes('John 3:16'));
+        const land = app.holdAnswer('get_reading');
+        app.click(row.querySelector('.note-list-edit'));
+        await settle();
+        await app.key('F6');
+        assert.equal(panes(app).active(), 'first');
+        land();
+        await app.until(() => !app.document.getElementById('note-overlay').hidden, 'the note editor');
+        await settle();
+        assert.equal(heading(app, 2), 'John 3');
+        assert.equal(app.document.getElementById('note-title').textContent, 'John 3:16');
+        assert.match(app.document.querySelector('.note-passage').textContent, /For God so loved the world/);
+        assert.equal(app.document.getElementById('note-input').value, 'Loved.');
+    });
+});

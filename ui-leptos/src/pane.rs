@@ -34,7 +34,9 @@
 //! [`PaneId`]. What acts on a pane without being in one (the keys, the
 //! palette, the header, the selection card) acts on the [`active`] one; what
 //! follows every pane goes to each [`shown`]. A pointer pressed or focus
-//! moving into a pane makes it the active one (D8). The translation button's
+//! moving into a pane makes it the active one (D8). Either pane's chapter
+//! reflowing is noticed here, once, for the reading place logic and the
+//! margin ([`reflowed`]). The translation button's
 //! record, `#translation-select`, says the active pane's translation (D12),
 //! so the Library's previews, search and Export notes follow it; each
 //! pane's own is kept here while it isn't active ([`code`]).
@@ -944,8 +946,16 @@ fn listen_to_column(pane: PaneId, column: &HtmlElement) {
     scrolled.forget();
 }
 
-/// The second pane's chapter reflowing (drawn, its fonts in) changes the
-/// layout the reading place logic keeps (`surfaces` watches the first's).
+/// A pane's chapter reflowed (drawn, its fonts in, a setting changed): the
+/// one notice of it, for either pane, so neither misses one (GG32-16). The
+/// reading place logic notes the layout (`surfaces`), and the margin places
+/// its notes again (`margin`), in whichever pane it's in.
+fn reflowed() {
+    surfaces::note_painted_place();
+    crate::margin::reflowed();
+}
+
+/// Watches a pane's root for a reflow ([`reflowed`]).
 fn observe_root(root: &HtmlElement) {
     let Some(window) = web_sys::window() else {
         return;
@@ -953,7 +963,7 @@ fn observe_root(root: &HtmlElement) {
     if !js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false) {
         return;
     }
-    let noted = Closure::<dyn Fn()>::new(surfaces::note_painted_place);
+    let noted = Closure::<dyn Fn()>::new(reflowed);
     if let Ok(observer) = ResizeObserver::new(noted.as_ref().unchecked_ref()) {
         observer.observe(root);
     }
@@ -1266,6 +1276,9 @@ pub fn mount() {
                 set_active(pane);
             }
         });
+    }
+    if let Some(root) = PaneId::First.root() {
+        observe_root(&root);
     }
     export_panes();
 }

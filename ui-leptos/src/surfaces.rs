@@ -1007,9 +1007,8 @@ fn export_surfaces() {
     current.forget();
 }
 
-/// Notes the painted layout after a scroll, a resize, or a reflow of the
-/// reading pane (a chapter put on screen, or reflowed: text size, fonts),
-/// and once now. Each scroll's position is noted at once ([`SCROLL_SEEN`]),
+/// Notes the painted layout after a scroll or a resize, and once now (a
+/// reflow of either pane's chapter is `pane`'s to watch). Each scroll's position is noted at once ([`SCROLL_SEEN`]),
 /// a resize notes it as its event comes ([`SCROLL_BEFORE_RESIZE`]), and a
 /// scroll that ends after that, that it did ([`SCROLLED_AFTER_RESIZE`]).
 fn watch_painted_place() {
@@ -1053,16 +1052,6 @@ fn watch_painted_place() {
         });
         let _ = window.add_event_listener_with_callback("resize", resized.as_ref().unchecked_ref());
         resized.forget();
-        let noted = Closure::<dyn Fn()>::new(note_painted_place);
-        if js_sys::Reflect::has(&window, &JsValue::from_str("ResizeObserver")).unwrap_or(false)
-            && let (Some(pane), Ok(observer)) = (
-                PaneId::First.root(),
-                ResizeObserver::new(noted.as_ref().unchecked_ref()),
-            )
-        {
-            observer.observe(&pane);
-        }
-        noted.forget();
     }
     note_painted_place();
 }
