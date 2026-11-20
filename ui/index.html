@@ -5444,7 +5444,9 @@
     <link data-trunk rel="inline" href="leptos-loader.js" type="js" />
 </head>
 <body>
-    <div id="top-bar" class="top-bar">
+    <!-- The page's banner landmark, by its role: the page keeps no header
+         element (frontend_markup.rs, there_is_no_masthead). -->
+    <div id="top-bar" class="top-bar" role="banner">
         <button type="button" id="sidebar-toggle" class="bar-btn sidebar-toggle" aria-label="Books and chapters" title="Show or hide books and chapters" aria-controls="picker" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
         <div class="bar-item history-nav" role="group" aria-label="History">
             <button type="button" id="history-back" class="bar-btn history-btn" aria-label="Back" title="Nothing earlier in this session (Alt+←)" aria-keyshortcuts="Alt+ArrowLeft" aria-disabled="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></svg></button>

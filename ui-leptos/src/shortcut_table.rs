@@ -87,7 +87,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
 /// work, and how to turn them back on.
 pub const SINGLE_KEYS_OFF: &str = "Single-key shortcuts are off, so the keys here that are \
     pressed on their own, such as G, J, / and ?, do nothing. The ones with Ctrl or Alt, the \
-    arrow keys and Esc still work. To turn them back on, open Aa and switch on Single-key \
+    arrow keys, F6 and Esc still work. To turn them back on, open Aa and switch on Single-key \
     shortcuts.";
 
 /// The row `id`, if there is one.
@@ -174,5 +174,34 @@ mod tests {
         assert_eq!(row.group, "Panels");
         assert_eq!(row.handles, ["t", "T"]);
         assert_eq!(row.aria, "T");
+    }
+
+    /// Every way to press a page shortcut that isn't a character on its
+    /// own still works with Single-key shortcuts off
+    /// (`keyboard_text::route_for`), so the sheet's sentence names it. The
+    /// search box's own keys (no `handles`) are the box's either way.
+    #[test]
+    fn the_single_keys_off_sentence_names_every_key_that_still_works() {
+        for row in SHORTCUTS.iter().filter(|row| !row.handles.is_empty()) {
+            for caps in row.keys {
+                let named = if caps.contains(&"Ctrl") {
+                    "Ctrl"
+                } else if caps.contains(&"Alt") {
+                    "Alt"
+                } else {
+                    match caps.last().copied() {
+                        Some("←" | "→" | "↑" | "↓") => "arrow keys",
+                        Some(key) if key.chars().count() == 1 => continue,
+                        Some(key) => key,
+                        None => continue,
+                    }
+                };
+                assert!(
+                    SINGLE_KEYS_OFF.contains(named),
+                    "{}: {caps:?} still works, but the sentence leaves out {named}",
+                    row.id
+                );
+            }
+        }
     }
 }

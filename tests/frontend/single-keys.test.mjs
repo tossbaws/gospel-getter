@@ -19,7 +19,7 @@ after(async () => {
 });
 
 const KEY = 'gospel-getter-single-key-shortcuts';
-const OFF_TEXT = 'Single-key shortcuts are off, so the keys here that are pressed on their own, such as G, J, / and ?, do nothing. The ones with Ctrl or Alt, the arrow keys and Esc still work. To turn them back on, open Aa and switch on Single-key shortcuts.';
+const OFF_TEXT = 'Single-key shortcuts are off, so the keys here that are pressed on their own, such as G, J, / and ?, do nothing. The ones with Ctrl or Alt, the arrow keys, F6 and Esc still work. To turn them back on, open Aa and switch on Single-key shortcuts.';
 
 const toggle = (app) => el(app, 'single-keys-toggle');
 const sheetOpen = (app) => !el(app, 'shortcuts-overlay').hidden;

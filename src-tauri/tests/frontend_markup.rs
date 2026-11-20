@@ -3456,6 +3456,8 @@ fn the_reference_button_says_where_the_reader_is() {
         assert!(tag.contains(attr), "#ref-btn: {attr}");
     }
     let bar = &HTML[HTML.find(r#"<div id="top-bar""#).unwrap()..];
+    // The page's banner landmark (E-11).
+    assert!(bar.starts_with(r#"<div id="top-bar" class="top-bar" role="banner">"#));
     let order: Vec<usize> = [
         r#"id="sidebar-toggle""#,
         r#"id="ref-btn""#,
