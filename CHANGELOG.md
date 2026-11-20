@@ -4,6 +4,33 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.32.2] - 2026-11-20
+
+Fixes for restoring backups, the second pane and two rare out-of-date
+actions.
+
+### Fixed
+- A backup always restores. Versions 2.26.0 to 2.29.2 let an AI
+  finding's label hold characters that can't be seen, and a backup
+  holding such a finding used to be refused whole, notes included. Now
+  those labels are tidied up, the import says how many, and everything
+  else comes back as it was. **Undo** after removing such a finding
+  brings it back exactly, too. A backup with more AI findings than an
+  agent may save, from an install made before that limit, also restores
+  in full.
+- With two passages open, **Try again** on the second side, after a
+  chapter couldn't be read, now loads it. Before, the button did nothing.
+- Closing the second side, with × or `X`, keeps the verses you'd
+  selected on the first side.
+- **Copy as Markdown**, from a view that's out of date, can no longer
+  copy a different note that was given the same number; it says it
+  couldn't copy instead.
+- Removing a bookmark from a list that's out of date can no longer
+  remove a newer bookmark that was given the same number.
+
+No verse changes. Backups keep the same format. Updating keeps your
+bookmarks, highlights, notes, findings, reading position and settings.
+
 ## [2.32.1] - 2026-11-18
 
 Safer, with nothing else changed from 2.32.0. The app now uses a newer
