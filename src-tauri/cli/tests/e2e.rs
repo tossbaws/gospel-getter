@@ -1345,6 +1345,13 @@ async fn the_mcp_server_saves_findings_in_the_clients_name() {
         save["inputSchema"]["required"],
         json!(["request", "references"])
     );
+    let description = save["inputSchema"]["properties"]["agent"]["description"]
+        .as_str()
+        .unwrap();
+    assert!(
+        description.contains("at most 40 characters, with no colon, semicolon, dash"),
+        "{description}"
+    );
 
     let saved = mcp.call_for_json(
         3,

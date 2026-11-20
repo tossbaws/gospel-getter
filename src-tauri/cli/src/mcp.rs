@@ -11,6 +11,7 @@
 //! tells the agent never to summarise the verses they point to.
 
 use anyhow::Context;
+use gospel_getter_core::db::findings::client_agent;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -250,7 +251,7 @@ impl Server {
 
     #[tool(
         name = "save_findings",
-        description = "Mark verses in the reader's Gospel Getter as AI-flagged findings for a request they made, so they can read each verse for themselves in the app. Use it only when the reader asks you to save, note or mark verses, for example: \"note every verse that deals with grief so I can read them\". A request only to find, list or quote verses isn't one: answer it, and offer to save them; save them only if the reader then asks you to. Each verse becomes one finding, shown in Gospel Getter beside the verse, marked as found by you (agent) for that request and kept apart from the reader's own notes. request is the reader's topic in a few words (at most 60 characters). Save only the locations: never summarise, paraphrase or explain the verses, and write nothing about what they mean; the app shows only who found each verse and for what request. Findings are add-only: saving a verse again for the same request changes nothing, nothing here edits or removes one, and the reader removes them in the app. references are read as get_passage reads them, at most 500 verses per call; a bad reference gets its own entry in errors and the rest still save, and one naming verses the translation doesn't number saves the verses it numbers and gets an entry in notices (reference, and get_passage's notice) saying which it doesn't. Saving is off until the reader turns it on in Gospel Getter (Aa, then AI agents); while it's off, this answers with how to turn it on. list_findings shows what's already saved.",
+        description = "Mark verses in the reader's Gospel Getter as AI-flagged findings for a request they made, so they can read each verse for themselves in the app. Use it only when the reader asks you to save, note or mark verses, for example: \"note every verse that deals with grief so I can read them\". A request only to find, list or quote verses isn't one: answer it, and offer to save them; save them only if the reader then asks you to. Each verse becomes one finding, shown in Gospel Getter beside the verse, marked as found by you (agent) for that request and kept apart from the reader's own notes. request is the reader's topic in a few words (at most 60 characters). agent is your name as the reader knows you, such as \"Claude\" (at most 40 characters, with no colon, semicolon or dash); without it, the name your MCP client sends is used, else \"AI agent\". Save only the locations: never summarise, paraphrase or explain the verses, and write nothing about what they mean; the app shows only who found each verse and for what request. Findings are add-only: saving a verse again for the same request changes nothing, nothing here edits or removes one, and the reader removes them in the app. references are read as get_passage reads them, at most 500 verses per call; a bad reference gets its own entry in errors and the rest still save, and one naming verses the translation doesn't number saves the verses it numbers and gets an entry in notices (reference, and get_passage's notice) saying which it doesn't. Saving is off until the reader turns it on in Gospel Getter (Aa, then AI agents); while it's off, this answers with how to turn it on. list_findings shows what's already saved.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -263,14 +264,10 @@ impl Server {
         Parameters(args): Parameters<SaveFindingsArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         // The agent's name, when it gives none, is the client's own, from the
-        // initialize handshake: its title if it has one, else its name.
+        // initialize handshake (`findings::client_agent` picks title or name).
         let client = peer.peer_info().map(|info| {
             let client = &info.client_info;
-            client
-                .title
-                .clone()
-                .filter(|title| !title.trim().is_empty())
-                .unwrap_or_else(|| client.name.clone())
+            client_agent(client.title.as_deref(), &client.name)
         });
         self.answer(Request::SaveFindings { args, client }).await
     }

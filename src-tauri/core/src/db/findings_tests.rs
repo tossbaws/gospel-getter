@@ -5,9 +5,9 @@
 use std::time::Duration;
 
 use super::findings::{
-    DEFAULT_AGENT, Finding, FindingsWriter, KeepError, MAX_FINDINGS, NewFinding, RemovedFinding,
-    add_findings, all_findings, findings_enabled, keep_as_mine, list_findings, list_requests,
-    remove_finding, remove_request, restore_findings, set_findings_enabled,
+    Finding, FindingsWriter, KeepError, MAX_FINDINGS, NewFinding, RemovedFinding, add_findings,
+    all_findings, findings_enabled, keep_as_mine, list_findings, list_requests, remove_finding,
+    remove_request, restore_findings, set_findings_enabled,
 };
 use super::notes::{MAX_NOTES, NoteLimit, Passage, add_note, list_notes};
 use super::test_support::{
@@ -370,7 +370,7 @@ async fn the_writer_saves_only_while_the_switch_is_on() {
 
     set_findings_enabled(pool.write(), true).await.expect("on");
     let saved = writer
-        .add("  ", " grief ", &[verse(11, 33), verse(11, 35)])
+        .add(" Claude Code ", " grief ", &[verse(11, 33), verse(11, 35)])
         .await
         .expect("save");
     assert_eq!(saved.saved.len(), 2);
@@ -383,7 +383,7 @@ async fn the_writer_saves_only_while_the_switch_is_on() {
         (vec![verse(11, 36)], vec![verse(11, 35)])
     );
     let found = list_findings(pool.read(), JOHN, 11).await.unwrap();
-    assert_eq!(found[0].agent, DEFAULT_AGENT);
+    assert_eq!(found[0].agent, "Claude Code");
     assert_eq!(found[0].request, "grief");
 
     let bad_request = writer.add("Claude", "", &[verse(11, 1)]).await;
@@ -391,6 +391,20 @@ async fn the_writer_saves_only_while_the_switch_is_on() {
         matches!(bad_request, Err(FindingsError::Request(_))),
         "{bad_request:?}"
     );
+    // An agent's name is a label too (C11): commentary, a blank name or one
+    // past 40 characters saves nothing.
+    for agent in [
+        "Your pastor: this verse proves grief is sin",
+        "  ",
+        &"a".repeat(41),
+    ] {
+        let bad_agent = writer.add(agent, "grief", &[verse(11, 1)]).await;
+        assert!(
+            matches!(bad_agent, Err(FindingsError::Agent(_))),
+            "{agent:?}: {bad_agent:?}"
+        );
+    }
+    assert_eq!(list_findings(pool.read(), JOHN, 11).await.unwrap().len(), 3);
     writer.close().await;
     assert_eq!(readers_own(&pool).await, own, "no other table changed");
 }

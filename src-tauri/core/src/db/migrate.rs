@@ -220,8 +220,10 @@ pub async fn migrate(writer: &WritePool) -> anyhow::Result<()> {
     // grief"), so the reader can read each one themselves. A marker, never
     // commentary (C3): there's no column for free text. What the app shows
     // is built from `agent` and `request` alone ("Found by Claude for your
-    // request “grief”."). The passage's CHECKs are the notes'; the lengths
-    // back up `db::findings::{MAX_AGENT_CHARS, MAX_REQUEST_CHARS}`. Saving
+    // request “grief”."), two short labels held to one rule in Rust
+    // (`db::findings::normalize_agent`), so neither can carry commentary.
+    // The passage's CHECKs are the notes'; the lengths back up
+    // `db::findings::{MAX_STORED_AGENT_CHARS, MAX_REQUEST_CHARS}`. Saving
     // the same verse for the same request again is a no-op (the UNIQUE
     // index); they're looked up a chapter at a time and a request at a
     // time, hence the other two.

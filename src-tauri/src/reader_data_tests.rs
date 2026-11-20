@@ -2898,28 +2898,49 @@ async fn invalid_findings_reject_the_whole_file_but_a_refused_label_is_cleaned()
         );
     }
 
-    // A request label today's rule refuses never refuses the file: it's
-    // cleaned (`db::findings::recover_request`), and the result says so.
+    // A request label or an agent's name today's rule refuses never refuses
+    // the file: it's cleaned (`db::findings::{recover_request,
+    // recover_agent}`), and the result counts the finding once.
     for (label, fields, cleaned) in [
         (
             "empty request",
             r#""agent": "Claude", "request": "  ""#,
-            "Earlier request",
+            ("Claude", "Earlier request"),
         ),
         (
             "a request with commentary",
             r#""agent": "Claude", "request": "grief: here Jesus shows his sorrow""#,
-            "grief here Jesus shows his sorrow",
+            ("Claude", "grief here Jesus shows his sorrow"),
         ),
         (
             "a request with an invisible character",
             r#""agent": "Claude", "request": "tears\u200b""#,
-            "tears",
+            ("Claude", "tears"),
         ),
         (
             "a request with a line separator",
             r#""agent": "Claude", "request": "weeping\u2028Jesus weeps here""#,
-            "weeping Jesus weeps here",
+            ("Claude", "weeping Jesus weeps here"),
+        ),
+        (
+            "a name of 60 characters",
+            r#""agent": "Claude Code, asked by the reader for every verse about grief", "request": "sixty""#,
+            ("Claude Code, asked by the reader for eve", "sixty"),
+        ),
+        (
+            "a name with commentary",
+            r#""agent": "Your pastor: this verse proves grief is sin", "request": "colon""#,
+            ("Your pastor this verse proves grief is s", "colon"),
+        ),
+        (
+            "an empty name",
+            r#""agent": " ", "request": "nameless""#,
+            ("AI agent", "nameless"),
+        ),
+        (
+            "a name and a request both refused",
+            r#""agent": "Claude; sure", "request": "both: twice""#,
+            ("Claude sure", "both twice"),
         ),
     ] {
         let path = file(
@@ -2934,7 +2955,10 @@ async fn invalid_findings_reject_the_whole_file_but_a_refused_label_is_cleaned()
             "{label}"
         );
         assert!(
-            finding_rows(&state).await.iter().any(|f| f.5 == cleaned),
+            finding_rows(&state)
+                .await
+                .iter()
+                .any(|f| (f.4.as_str(), f.5.as_str()) == cleaned),
             "{label}"
         );
     }
@@ -3028,15 +3052,16 @@ async fn an_import_past_the_findings_limit_restores_in_full() {
     assert_eq!(finding_rows(&state).await.len(), MAX_FINDINGS + 1);
 }
 
-/// A reader's backup always restores (GG32-01, AF1). Findings saved under
-/// the request-label rule of 2.26.0 to 2.29.2, which today's refuses, stored
-/// as those versions stored them, go out in the export unchanged; restored
-/// on another profile, merging or replacing, the note comes back, every
-/// finding comes back with its label cleaned (and its passage, agent and
-/// date as they were), and the result says how many labels were cleaned.
+/// A reader's backup always restores (GG32-01, AF1, AF2). Findings saved
+/// under the request-label rule of 2.26.0 to 2.29.2 and the agent's-name
+/// rule before 2.33.0, which today's refuse, stored as those versions stored
+/// them, go out in the export unchanged; restored on another profile,
+/// merging or replacing, the note comes back, every finding comes back with
+/// its labels cleaned (and its passage and date as they were), and the
+/// result counts each finding tidied once, however many of its labels were.
 #[tokio::test]
 async fn a_backup_with_findings_an_older_rule_saved_always_restores() {
-    use crate::db::test_support::{OLD_RULE_REQUESTS, insert_old_rule_findings};
+    use crate::db::test_support::{OLD_RULE_REQUESTS, insert_old_rule_findings, old_rule_agent};
     let (db, pool) = fresh_database("rd_old_rule").await;
     let dates = insert_old_rule_findings(pool.write()).await;
     let state = AppState::load(pool).await.expect("load state");
@@ -3054,11 +3079,13 @@ async fn a_backup_with_findings_an_older_rule_saved_always_restores() {
         "{saved}"
     );
     let written = std::fs::read_to_string(&path).unwrap();
-    for (request, _) in OLD_RULE_REQUESTS {
-        assert!(
-            written.contains(&serde_json::to_string(request).unwrap()),
-            "the export keeps {request:?} as it was"
-        );
+    for (i, (request, _)) in OLD_RULE_REQUESTS.iter().enumerate() {
+        for label in [*request, old_rule_agent(i).0] {
+            assert!(
+                written.contains(&serde_json::to_string(label).unwrap()),
+                "the export keeps {label:?} as it was"
+            );
+        }
     }
 
     let mut expected: Vec<_> = OLD_RULE_REQUESTS
@@ -3072,7 +3099,7 @@ async fn a_backup_with_findings_an_older_rule_saved_always_restores() {
                 11,
                 verse,
                 verse,
-                "Claude".to_string(),
+                old_rule_agent(i).1.to_string(),
                 cleaned.to_string(),
                 date.clone(),
             )

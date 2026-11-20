@@ -2,16 +2,17 @@
 //! `list_findings`, which reads them (see the governing doc's C1-C10).
 //!
 //! A finding marks where a verse is and who found it for which of the
-//! reader's requests, nothing more (C3): there's nowhere to put words about
-//! a verse. Agents only add them (C4): no tool edits or removes one, and
+//! reader's requests, nothing more (C3): the agent's name and the request
+//! are short labels (`findings::normalize_agent`), with no room for words
+//! about a verse. Agents only add them (C4): no tool edits or removes one, and
 //! nothing here touches the reader's notes, bookmarks or highlights.
 //!
 //! Everything is read, checked and refused through the read-only
 //! [`Library`] first: whether the install has the findings' tables, whether
-//! the reader has turned saving on (C6), the request, each reference, the
-//! cap. Only then is [`FindingsWriter`] opened, for the one insert, and closed
-//! again; it checks the tables and the switch once more in its own
-//! transaction.
+//! the reader has turned saving on (C6), the request, the agent's name,
+//! each reference, the cap. Only then is [`FindingsWriter`] opened, for the
+//! one insert, and closed again; it checks the tables and the switch once
+//! more in its own transaction.
 
 use anyhow::{Context, bail};
 use clap::Args;
@@ -44,7 +45,7 @@ pub struct SaveFindingsArgs {
     /// The verses found, as references the app's Go to reads: "John 11:35", "Job 2:11-13" or "Psalm 6". Each verse is one finding. At most 500 verses in all.
     #[arg(required = true, value_name = "REF")]
     pub references: Vec<String>,
-    /// Who found them, as the app names them ("Found by Claude"). Default: the MCP client's name; on the command line, "AI agent". At most 60 characters.
+    /// Your name as the reader knows you, shown as "Found by Claude": a short name of at most 40 characters, with no colon, semicolon, dash (— or –), line break or character that can't be seen. Without it, the name the MCP client sends is used, else "AI agent".
     #[arg(long)]
     pub agent: Option<String>,
     /// The translation whose verse numbers the references use: kjv, bsb or web. Default: the one the reader last read.
@@ -147,8 +148,8 @@ pub struct FindingOut {
 }
 
 /// Save the findings `args` names in the install at `database`: one per
-/// verse, by `args.agent`, else `client` (the MCP client's name), else
-/// "AI agent".
+/// verse, by `args.agent` (refused if it isn't a name), else `client` (the
+/// MCP client's, `findings::client_agent`), else "AI agent".
 pub async fn save_findings(
     database: &Path,
     args: SaveFindingsArgs,
@@ -164,17 +165,15 @@ pub async fn save_findings(
     .await;
     let ToSave {
         request,
+        agent,
         translation,
         passages,
         errors,
         notices,
     } = found?;
-    let agent = normalize_agent(
-        args.agent
-            .as_deref()
-            .or(client.as_deref())
-            .unwrap_or(DEFAULT_AGENT),
-    );
+    let agent = agent
+        .or(client)
+        .unwrap_or_else(|| DEFAULT_AGENT.to_string());
     let saved = if passages.is_empty() {
         findings::SavedFindings::default()
     } else {
@@ -279,6 +278,8 @@ fn saved_message(
 /// What a save will save, once everything's been checked.
 struct ToSave {
     request: String,
+    /// The agent's own name for itself, if it gave one.
+    agent: Option<String>,
     translation: String,
     /// Each verse once, in the order given, with its reference.
     passages: Vec<(Passage, String)>,
@@ -302,13 +303,20 @@ impl Library {
     }
 
     /// The verses a save names, each once, after the checks that refuse it
-    /// all: the install, the switch (C6), the request and the cap.
+    /// all: the install, the switch (C6), the request, the agent's name and
+    /// the cap.
     async fn findings_to_save(&self, args: &SaveFindingsArgs) -> anyhow::Result<ToSave> {
         self.findings_ready().await?;
         if !findings::findings_enabled(&self.pool).await? {
             bail!(HOW_TO_TURN_ON);
         }
         let request = normalize_request(&args.request).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let agent = args
+            .agent
+            .as_deref()
+            .map(normalize_agent)
+            .transpose()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         let translation = self.translation(args.translation.as_deref()).await?;
         let references: Vec<String> = args
             .references
@@ -366,6 +374,7 @@ impl Library {
         }
         Ok(ToSave {
             request,
+            agent,
             translation: translation.code.clone(),
             passages,
             errors,

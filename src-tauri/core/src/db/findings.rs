@@ -5,8 +5,10 @@
 //!
 //! A finding is a marker, never commentary (C3): who found the verse
 //! (`agent`) and for what (`request`), and nothing else. The table has no
-//! column for free text, so no words about a verse can be stored beside it;
-//! what the app shows is built from those two fields alone ([`finding_text`]).
+//! column for free text, and both fields are short labels held to one rule
+//! ([`normalize_request`], [`normalize_agent`]), so neither can carry words
+//! about a verse; what the app shows is built from those two alone
+//! ([`finding_text`]).
 //! A finding is never the reader's note either (C2, C9): it lives in its own
 //! table, and only the reader turns one into a note ([`keep_as_mine`], C10).
 //!
@@ -25,18 +27,25 @@ use std::path::Path;
 use super::notes::{Note, NoteBodyError, NoteError, Passage, grouped, insert_note, normalize_body};
 use super::{BUSY_TIMEOUT, BookmarkError, WRITE_QUEUE_TIMEOUT, WritePool};
 
-/// The most characters an agent's name keeps; a longer one is cut short
-/// there. The `ai_findings` table's CHECK says the same.
-pub const MAX_AGENT_CHARS: usize = 60;
+/// The most characters an agent's name may have ([`normalize_agent`]):
+/// room for "Claude Code" or "GitHub Copilot", not for a sentence.
+pub const MAX_AGENT_CHARS: usize = 40;
+
+/// The most characters a stored agent's name can have: versions before
+/// 2.33.0 kept up to 60, and a stored name is shown and exported as it is,
+/// so this, not [`MAX_AGENT_CHARS`], bounds what a backup holds. The
+/// `ai_findings` table's CHECK says the same.
+pub const MAX_STORED_AGENT_CHARS: usize = 60;
 
 /// The most characters a request may have: a short topic label ("grief", "the
 /// sun"), never room for words about a verse (C3). The `ai_findings` table's
 /// CHECK says the same.
 pub const MAX_REQUEST_CHARS: usize = 60;
 
-/// What a request can't hold, besides line breaks and characters that can't
-/// be seen (`breaks_or_hides`): the punctuation that would start a sentence
-/// about the verse ("grief: here Jesus shows…"), not a label.
+/// What a request or an agent's name can't hold, besides line breaks and
+/// characters that can't be seen (`breaks_or_hides`): the punctuation that
+/// would start a sentence about the verse ("grief: here Jesus shows…"), not
+/// a label.
 pub const NOT_IN_A_REQUEST: [char; 4] = [':', ';', '\u{2014}', '\u{2013}'];
 
 /// Whether `c` breaks a line or can't be seen, so a request or an agent's
@@ -86,6 +95,10 @@ fn hidden_chars(text: &str) -> impl Iterator<Item = (char, bool)> {
 /// How every refusal of a request starts: what a request is.
 const A_REQUEST_IS: &str =
     "The request is a short topic label, such as \u{201c}grief\u{201d} or \u{201c}the sun\u{201d}";
+
+/// How every refusal of an agent's name starts: what a name is, and its cap.
+const AN_AGENT_IS: &str = "The agent is a short name of at most 40 characters, such as \
+    \u{201c}Claude\u{201d} or \u{201c}Claude Code\u{201d}";
 
 /// The most AI findings Gospel Getter keeps, every request's together, as
 /// [`MAX_NOTES`](super::notes::MAX_NOTES) is for notes: a backup holds them
@@ -187,39 +200,100 @@ impl fmt::Display for RequestError {
 
 impl std::error::Error for RequestError {}
 
+/// Why an agent's name can't be saved: the same faults as a request's
+/// ([`RequestError`]), at [`MAX_AGENT_CHARS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentError {
+    /// Nothing but whitespace.
+    Empty,
+    /// More than [`MAX_AGENT_CHARS`] characters, after trimming.
+    TooLong { chars: usize },
+    /// What a request can't hold either ([`RequestError::NotALabel`]).
+    NotALabel,
+}
+
+impl fmt::Display for AgentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => write!(f, "{AN_AGENT_IS}; this one is empty."),
+            Self::TooLong { chars } => write!(f, "{AN_AGENT_IS}, and this one has {chars}."),
+            Self::NotALabel => write!(
+                f,
+                "{AN_AGENT_IS}, so it can't have a colon, a semicolon, a dash (\u{2014} or \
+                 \u{2013}), a line break or a character that can't be seen."
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AgentError {}
+
+/// What's wrong with a label, by the one rule requests and agents' names
+/// share ([`label`]).
+enum LabelFault {
+    Empty,
+    TooLong { chars: usize },
+    NotALabel,
+}
+
+impl From<LabelFault> for RequestError {
+    fn from(fault: LabelFault) -> Self {
+        match fault {
+            LabelFault::Empty => Self::Empty,
+            LabelFault::TooLong { chars } => Self::TooLong { chars },
+            LabelFault::NotALabel => Self::NotALabel,
+        }
+    }
+}
+
+impl From<LabelFault> for AgentError {
+    fn from(fault: LabelFault) -> Self {
+        match fault {
+            LabelFault::Empty => Self::Empty,
+            LabelFault::TooLong { chars } => Self::TooLong { chars },
+            LabelFault::NotALabel => Self::NotALabel,
+        }
+    }
+}
+
+/// `raw` trimmed, if it's a label: 1 to `max_chars` characters on one
+/// visible line, none of them one of [`NOT_IN_A_REQUEST`].
+fn label(raw: &str, max_chars: usize) -> Result<String, LabelFault> {
+    let label = raw.trim();
+    if label.is_empty() {
+        return Err(LabelFault::Empty);
+    }
+    if hidden_chars(label).any(|(c, hidden)| hidden || NOT_IN_A_REQUEST.contains(&c)) {
+        return Err(LabelFault::NotALabel);
+    }
+    let chars = label.chars().count();
+    if chars > max_chars {
+        return Err(LabelFault::TooLong { chars });
+    }
+    Ok(label.to_string())
+}
+
 /// A request as it's stored: trimmed, then a short topic label (C3): 1 to
 /// [`MAX_REQUEST_CHARS`] characters on one visible line, none of them one of
 /// [`NOT_IN_A_REQUEST`].
 pub fn normalize_request(raw: &str) -> Result<String, RequestError> {
-    let request = raw.trim();
-    if request.is_empty() {
-        return Err(RequestError::Empty);
-    }
-    if hidden_chars(request).any(|(c, hidden)| hidden || NOT_IN_A_REQUEST.contains(&c)) {
-        return Err(RequestError::NotALabel);
-    }
-    let chars = request.chars().count();
-    if chars > MAX_REQUEST_CHARS {
-        return Err(RequestError::TooLong { chars });
-    }
-    Ok(request.to_string())
+    Ok(label(raw, MAX_REQUEST_CHARS)?)
 }
 
-/// An agent's name as it's stored: control, separator and invisible format
-/// characters (`hidden_chars`: a joiner inside a word or an emoji is kept) as
-/// spaces, trimmed, cut short at [`MAX_AGENT_CHARS`] characters, never ending
-/// in a space or a joiner, or [`DEFAULT_AGENT`] if that leaves nothing.
-pub fn normalize_agent(raw: &str) -> String {
-    let spaced: String = hidden_chars(raw)
-        .map(|(c, hidden)| if hidden { ' ' } else { c })
-        .collect();
-    let cut: String = spaced.trim().chars().take(MAX_AGENT_CHARS).collect();
-    let agent = cut.trim_end_matches(|c: char| c.is_whitespace() || JOINERS.contains(&c));
-    if agent.is_empty() {
-        DEFAULT_AGENT.to_string()
-    } else {
-        agent.to_string()
-    }
+/// An agent's name as it's stored: trimmed, then a short label by the
+/// request's own rule, at most [`MAX_AGENT_CHARS`] characters.
+///
+/// The name is the only free text an agent writes into the app ("Found by
+/// {agent} for your request …"), so it's held to the request's rule: a name
+/// such as "Your pastor: this verse proves grief is sin" would otherwise be
+/// commentary shown beside a verse (decision C11 of the ai-access doc, AF2
+/// of the 2026-11-19 audit fix chain). A name the agent gives is refused
+/// when it breaks the rule, as a request is; one that comes from elsewhere
+/// (an MCP client's, [`client_agent`], or a backup's, [`recover_agent`]) is
+/// cleaned instead, since nobody who could fix it chose it. A name already
+/// stored is shown as it is.
+pub fn normalize_agent(raw: &str) -> Result<String, AgentError> {
+    Ok(label(raw, MAX_AGENT_CHARS)?)
 }
 
 /// The label a finding from a backup gets when nothing of its own label is
@@ -269,6 +343,33 @@ pub fn recover_request(raw: &str) -> Recovered {
 /// nothing `rule` accepts. Deterministic, and never a label `rule` refuses
 /// unless `fallback` is one. The one shape for every label restored from
 /// the reader's records, so each kind's rule is the only thing that differs.
+/// An agent's name from a backup, or from anywhere else an agent didn't
+/// choose it, as today's rule ([`normalize_agent`]) allows it: unchanged if
+/// the rule accepts it, otherwise cleaned as a request label is
+/// ([`recover_request`]), or [`DEFAULT_AGENT`] if nothing is left.
+pub fn recover_agent(raw: &str) -> Recovered {
+    recover_label(
+        raw,
+        &NOT_IN_A_REQUEST,
+        MAX_AGENT_CHARS,
+        normalize_agent,
+        DEFAULT_AGENT,
+    )
+}
+
+/// Who an MCP client's findings are by, when the agent names nobody: the
+/// client's `title` if it passes [`normalize_agent`] as given ("Claude
+/// Code"), else its `name` ("claude-code") cleaned ([`recover_agent`]),
+/// else [`DEFAULT_AGENT`]. The title is the name a person reads, so it comes
+/// first, but it's free-form: one that breaks the rule isn't cleaned into
+/// something the client never said, it gives way to the name, the client's
+/// identifier (decision AF2a of the 2026-11-19 audit fix chain).
+pub fn client_agent(title: Option<&str>, name: &str) -> String {
+    title
+        .and_then(|title| normalize_agent(title).ok())
+        .unwrap_or_else(|| recover_agent(name).label)
+}
+
 fn recover_label<E>(
     raw: &str,
     refused: &[char],
@@ -317,7 +418,7 @@ fn recover_label<E>(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewFinding {
     pub passage: Passage,
-    /// As given: it's normalized as it's saved ([`normalize_agent`]).
+    /// As given: it's checked as it's saved ([`normalize_agent`]).
     pub agent: String,
     /// As given: it's checked as it's saved ([`normalize_request`]).
     pub request: String,
@@ -344,6 +445,7 @@ pub enum FindingsError {
     /// The reader hasn't turned it on ([`HOW_TO_TURN_ON`]).
     Off,
     Request(RequestError),
+    Agent(AgentError),
     /// A passage that doesn't exist (the same checks as bookmarks).
     Passage(BookmarkError),
     /// Saving them would take the reader past [`MAX_FINDINGS`] findings.
@@ -357,6 +459,7 @@ impl fmt::Display for FindingsError {
             Self::NotReady => f.write_str(NOT_READY),
             Self::Off => f.write_str(HOW_TO_TURN_ON),
             Self::Request(e) => write!(f, "{e}"),
+            Self::Agent(e) => write!(f, "{e}"),
             Self::Passage(e) => write!(f, "{e}"),
             Self::Limit => write!(
                 f,
@@ -373,6 +476,12 @@ impl std::error::Error for FindingsError {}
 impl From<RequestError> for FindingsError {
     fn from(e: RequestError) -> Self {
         Self::Request(e)
+    }
+}
+
+impl From<AgentError> for FindingsError {
+    fn from(e: AgentError) -> Self {
+        Self::Agent(e)
     }
 }
 
@@ -500,7 +609,7 @@ pub(crate) async fn insert_findings(
     };
     for finding in findings {
         let request = normalize_request(&finding.request)?;
-        let agent = normalize_agent(&finding.agent);
+        let agent = normalize_agent(&finding.agent)?;
         check_finding_passage(&mut *conn, &mut checked, &finding.passage).await?;
         let p = finding.passage;
         let inserted = sqlx::query(
@@ -986,7 +1095,9 @@ impl FindingsWriter {
     /// or none, once the database has the tables and the reader has turned
     /// it on, both checked in the same transaction. The same verses already
     /// saved for the same request are left as they were. Nothing is saved if
-    /// it would make more than [`MAX_FINDINGS`] ([`FindingsError::Limit`]).
+    /// `agent` or `request` isn't a label ([`normalize_agent`],
+    /// [`normalize_request`]), or if it would make more than
+    /// [`MAX_FINDINGS`] ([`FindingsError::Limit`]).
     pub async fn add(
         &self,
         agent: &str,
@@ -994,11 +1105,12 @@ impl FindingsWriter {
         passages: &[Passage],
     ) -> Result<SavedFindings, FindingsError> {
         let request = normalize_request(request)?;
+        let agent = normalize_agent(agent)?;
         let findings: Vec<NewFinding> = passages
             .iter()
             .map(|&passage| NewFinding {
                 passage,
-                agent: agent.to_string(),
+                agent: agent.clone(),
                 request: request.clone(),
                 created_at: None,
             })
@@ -1052,36 +1164,86 @@ mod tests {
         assert_eq!(f.text(), finding_text("Claude", "grief"));
     }
 
+    /// More than a label, each kind of character the rule refuses: its
+    /// punctuation, line breaks and controls, line and paragraph separators,
+    /// invisible format characters (H-02: "grief" and "grief\u{200B}" would
+    /// look the same), and a joiner outside a word or an emoji. A request
+    /// and an agent's name both refuse every one ([`label`]).
+    const NOT_LABELS: [&str; 25] = [
+        "grief: here Jesus shows that he shares our sorrow",
+        "grief; and loss",
+        "grief \u{2014} his tears",
+        "grief \u{2013} loss",
+        "grief\nand loss",
+        "grief\r\nand loss",
+        "grief\tloss",
+        "grief\u{0}loss",
+        "grief\u{2028}Jesus weeps here",
+        "grief\u{2029}x",
+        "grief\u{200B}",
+        "\u{2060}grief",
+        "\u{FEFF}grief",
+        "\u{202E}feirg",
+        "grief\u{2066}x\u{2069}",
+        "grief\u{AD}",
+        "gr\u{200C}ief",
+        "grief\u{200D}",
+        "\u{200D}grief",
+        "می\u{200C}\u{200C}خواهم",
+        "\u{200C}می",
+        "می\u{200D}",
+        "می \u{200C}خواهم",
+        "👨\u{200D}\u{200B}👩",
+        "Your pastor: this verse proves grief is sin",
+    ];
+
+    /// Labels of any script, with marks, symbols, emoji and the joiners
+    /// inside a word or an emoji, as they were given: a request and an
+    /// agent's name both keep every one.
+    const LABELS: [&str; 17] = [
+        "the sun",
+        "every reference to the sun",
+        "born-again",
+        "Lazarus's tomb",
+        "grief (and loss)",
+        "caf\u{e9}",
+        "cafe\u{301}",
+        "λύπη",
+        "אבל",
+        "حزن",
+        "悲伤",
+        "दुःख",
+        "🙏 prayer",
+        "❤\u{fe0f} love",
+        "می\u{200C}خواهم",
+        "👨\u{200D}👩\u{200D}👧 family",
+        "क्\u{200D}ष",
+    ];
+
     #[test]
-    fn a_request_is_trimmed_and_checked() {
-        assert_eq!(normalize_request("  grief \n"), Ok("grief".to_string()));
-        assert_eq!(normalize_request(" \t "), Err(RequestError::Empty));
-        // A label, in a few words: these are all one.
-        for label in [
-            "the sun",
-            "every reference to the sun",
-            "born-again",
-            "Lazarus's tomb",
-            "grief (and loss)",
-        ] {
-            assert_eq!(normalize_request(label), Ok(label.to_string()), "{label}");
-        }
-        // More than a label: refused, whatever comes after.
-        for not_one in [
-            "grief: here Jesus shows that he shares our sorrow",
-            "grief; and loss",
-            "grief \u{2014} his tears",
-            "grief \u{2013} loss",
-            "grief\nand loss",
-            "grief\r\nand loss",
-            "grief\tloss",
-        ] {
+    fn a_request_and_an_agent_refuse_the_same_characters() {
+        for not_one in NOT_LABELS {
             assert_eq!(
                 normalize_request(not_one),
                 Err(RequestError::NotALabel),
                 "{not_one:?}"
             );
+            assert_eq!(
+                normalize_agent(not_one),
+                Err(AgentError::NotALabel),
+                "{not_one:?}"
+            );
         }
+        for label in LABELS {
+            assert_eq!(normalize_request(label), Ok(label.to_string()), "{label:?}");
+            assert_eq!(normalize_agent(label), Ok(label.to_string()), "{label:?}");
+        }
+    }
+
+    #[test]
+    fn a_request_is_trimmed_and_checked() {
+        assert_eq!(normalize_request("  grief \n"), Ok("grief".to_string()));
+        assert_eq!(normalize_request(" \t "), Err(RequestError::Empty));
         let longest = "\u{1d11e}".repeat(MAX_REQUEST_CHARS);
         assert_eq!(normalize_request(&longest), Ok(longest.clone()));
         assert_eq!(
@@ -1092,118 +1254,115 @@ mod tests {
         );
     }
 
-    /// A request is one line a reader can see all of (H-02): no line or
-    /// paragraph separator, and no invisible format character (a zero-width
-    /// space, a joiner outside a word, the word joiner, a byte-order mark,
-    /// bidi controls), which would make "grief" and "grief\u{200B}" two
-    /// requests that look the same.
+    /// A joiner between two visible non-ASCII characters is part of how a
+    /// word or an emoji is written ([`LABELS`]); cut short just after one, a
+    /// recovered name doesn't end in it.
     #[test]
-    fn a_request_is_one_visible_line() {
-        for label in [
-            "grief\u{2028}Jesus weeps here",
-            "grief\u{2029}x",
-            "grief\u{200B}",
-            "\u{2060}grief",
-            "\u{FEFF}grief",
-            "gr\u{200C}ief",
-            "grief\u{200D}",
-            "\u{202E}feirg",
-            "grief\u{2066}x\u{2069}",
-            "grief\u{AD}",
-        ] {
-            assert_eq!(
-                normalize_request(label),
-                Err(RequestError::NotALabel),
-                "{label:?}"
-            );
-        }
-        // Labels of any script, with marks, symbols and emoji, are still
-        // labels, as they were given.
-        for label in [
-            "the sun",
-            "caf\u{e9}",
-            "cafe\u{301}",
-            "λύπη",
-            "אבל",
-            "حزن",
-            "悲伤",
-            "दुःख",
-            "🙏 prayer",
-            "❤\u{fe0f} love",
-            "grief 😢",
-        ] {
-            assert_eq!(normalize_request(label), Ok(label.to_string()), "{label:?}");
-        }
-    }
-
-    /// An agent's name is one visible line too: a line or paragraph separator
-    /// or an invisible character becomes a space, as a control character does.
-    #[test]
-    fn an_agent_is_one_visible_line() {
-        assert_eq!(normalize_agent("Claude\u{2028}x"), "Claude x");
-        assert_eq!(normalize_agent("Claude\u{2029}x"), "Claude x");
-        assert_eq!(normalize_agent("Claude\u{200B}Code"), "Claude Code");
-        assert_eq!(normalize_agent("\u{FEFF}Claude\u{2060}"), "Claude");
-        assert_eq!(normalize_agent("\u{202E}Claude"), "Claude");
-        assert_eq!(normalize_agent("\u{200B}\u{2028}"), DEFAULT_AGENT);
-        assert_eq!(
-            normalize_agent("Caf\u{e9} \u{1f916}"),
-            "Caf\u{e9} \u{1f916}"
-        );
-    }
-
-    /// A zero width non-joiner or joiner between two visible non-ASCII
-    /// characters is part of how a word or an emoji is written: a request or
-    /// an agent's name keeps it as it was given. Anywhere else it's refused in
-    /// a request, and a space in a name, as other invisible characters are.
-    #[test]
-    fn a_joiner_is_kept_only_inside_a_word_or_an_emoji() {
-        let persian = "می\u{200C}خواهم";
-        let family = "👨\u{200D}👩\u{200D}👧 family";
-        let conjunct = "क्\u{200D}ष";
-        for label in [persian, family, conjunct] {
-            assert_eq!(normalize_request(label), Ok(label.to_string()), "{label:?}");
-            assert_eq!(normalize_agent(label), label, "{label:?}");
-        }
-        for label in [
-            "gr\u{200C}ief",
-            "grief\u{200D}",
-            "\u{200D}grief",
-            "می\u{200C}\u{200C}خواهم",
-            "\u{200C}می",
-            "می\u{200D}",
-            "می \u{200C}خواهم",
-            "👨\u{200D}\u{200B}👩",
-        ] {
-            assert_eq!(
-                normalize_request(label),
-                Err(RequestError::NotALabel),
-                "{label:?}"
-            );
-        }
-        assert_eq!(normalize_agent("gr\u{200C}ief"), "gr ief");
-        assert_eq!(normalize_agent("Claude\u{200D}Code"), "Claude Code");
-        assert_eq!(normalize_agent("grief\u{200D}"), "grief");
-        assert_eq!(normalize_agent("\u{200D}grief"), "grief");
-        assert_eq!(normalize_agent("می\u{200C}\u{200C}خواهم"), "می  خواهم");
-        // Cut short just after a joiner, a name doesn't end in one.
+    fn a_recovered_name_never_ends_in_a_joiner() {
         let long = format!("{}👨\u{200D}👩", "a".repeat(MAX_AGENT_CHARS - 2));
         assert_eq!(
-            normalize_agent(&long),
+            recover_agent(&long).label,
             format!("{}👨", "a".repeat(MAX_AGENT_CHARS - 2))
         );
     }
 
     #[test]
-    fn an_agent_is_trimmed_and_cut_short_or_named_for_it() {
-        assert_eq!(normalize_agent("  Claude Code "), "Claude Code");
-        assert_eq!(normalize_agent("Claude\u{0}\nCode"), "Claude  Code");
-        assert_eq!(normalize_agent(" \n"), DEFAULT_AGENT);
-        let long = "a".repeat(MAX_AGENT_CHARS + 20);
-        assert_eq!(normalize_agent(&long).chars().count(), MAX_AGENT_CHARS);
-        // Cut short at a space, it doesn't end in one.
-        let spaced = format!("{} b", "a".repeat(MAX_AGENT_CHARS - 1));
-        assert_eq!(normalize_agent(&spaced), "a".repeat(MAX_AGENT_CHARS - 1));
+    fn an_agent_is_trimmed_and_at_most_40_characters() {
+        assert_eq!(MAX_AGENT_CHARS, 40);
+        assert_eq!(
+            normalize_agent("  Claude Code "),
+            Ok("Claude Code".to_string())
+        );
+        assert_eq!(normalize_agent(" \n"), Err(AgentError::Empty));
+        let longest = "\u{1d11e}".repeat(MAX_AGENT_CHARS);
+        assert_eq!(normalize_agent(&longest), Ok(longest.clone()));
+        assert_eq!(
+            normalize_agent(&format!("{longest}x")),
+            Err(AgentError::TooLong {
+                chars: MAX_AGENT_CHARS + 1
+            })
+        );
+    }
+
+    /// Each refusal of a name says what a name is and its cap, in the
+    /// request's words.
+    #[test]
+    fn a_refused_agent_is_told_it_is_a_short_name() {
+        let a_name = "The agent is a short name of at most 40 characters, such as \
+            \u{201c}Claude\u{201d} or \u{201c}Claude Code\u{201d}";
+        assert_eq!(
+            AgentError::Empty.to_string(),
+            format!("{a_name}; this one is empty.")
+        );
+        assert_eq!(
+            AgentError::TooLong { chars: 43 }.to_string(),
+            format!("{a_name}, and this one has 43.")
+        );
+        assert_eq!(
+            AgentError::NotALabel.to_string(),
+            format!(
+                "{a_name}, so it can't have a colon, a semicolon, a dash (\u{2014} or \u{2013}), \
+                 a line break or a character that can't be seen."
+            )
+        );
+    }
+
+    /// A name an agent didn't choose (a client's, a backup's) is cleaned,
+    /// never refused: the rule's punctuation and what can't be seen as
+    /// spaces, cut to 40, and "AI agent" if nothing is left.
+    #[test]
+    fn a_name_from_elsewhere_is_cleaned() {
+        let tidied = |raw: &str| {
+            let recovered = recover_agent(raw);
+            assert!(recovered.adjusted, "{raw:?}");
+            recovered.label
+        };
+        assert_eq!(
+            tidied("Your pastor: this verse proves grief is sin"),
+            "Your pastor this verse proves grief is s"
+        );
+        assert_eq!(tidied("Claude\u{200B}Code"), "Claude Code");
+        let sixty = "a".repeat(MAX_STORED_AGENT_CHARS);
+        assert_eq!(tidied(&sixty), "a".repeat(MAX_AGENT_CHARS));
+        for nothing in ["", "  ", ":", "\u{200B}\u{2028}", "\u{2014} ; \t"] {
+            assert_eq!(tidied(nothing), DEFAULT_AGENT, "{nothing:?}");
+        }
+        assert_eq!(normalize_agent(DEFAULT_AGENT).as_deref(), Ok(DEFAULT_AGENT));
+        assert_eq!(
+            recover_agent("Claude Code"),
+            Recovered {
+                label: "Claude Code".to_string(),
+                adjusted: false
+            }
+        );
+    }
+
+    /// A client's title when it's a name as given, else its name cleaned,
+    /// else "AI agent" (AF2a): Claude Code's own shape, a title that's
+    /// commentary, and a client that names nothing usable.
+    #[test]
+    fn a_clients_title_counts_only_when_it_is_a_name_as_given() {
+        assert_eq!(
+            client_agent(Some("Claude Code"), "claude-code"),
+            "Claude Code"
+        );
+        assert_eq!(client_agent(None, "claude-code"), "claude-code");
+        assert_eq!(
+            client_agent(
+                Some("Your pastor: this verse proves grief is sin"),
+                "x-client"
+            ),
+            "x-client"
+        );
+        assert_eq!(
+            client_agent(Some("  "), "codex-mcp-client"),
+            "codex-mcp-client"
+        );
+        let long = "T".repeat(MAX_AGENT_CHARS + 1);
+        assert_eq!(client_agent(Some(&long), "short"), "short");
+        assert_eq!(client_agent(Some("A: b"), "x: y"), "x y");
+        assert_eq!(client_agent(None, ""), DEFAULT_AGENT);
+        assert_eq!(client_agent(Some("\u{200B}"), "\u{2028}"), DEFAULT_AGENT);
     }
 
     /// Each refusal says plainly what a request is.
@@ -1357,15 +1516,23 @@ mod tests {
                 "{raw:?}"
             );
             assert_eq!(recover_request(&raw), recovered, "{raw:?}");
+            let name = recover_agent(&raw);
+            assert_eq!(
+                normalize_agent(&name.label).as_deref(),
+                Ok(name.label.as_str()),
+                "{raw:?}"
+            );
+            assert_eq!(name.adjusted, normalize_agent(&raw).is_err(), "{raw:?}");
+            assert_eq!(recover_agent(&raw), name, "{raw:?}");
         }
     }
 
-    /// The limits here are the ones the table's CHECKs enforce.
+    /// The limits on what's stored are the ones the table's CHECKs enforce.
     #[test]
     fn the_length_limits_match_the_table() {
         let migrate = include_str!("migrate.rs");
         for check in [
-            format!("CHECK (length(agent) BETWEEN 1 AND {MAX_AGENT_CHARS})"),
+            format!("CHECK (length(agent) BETWEEN 1 AND {MAX_STORED_AGENT_CHARS})"),
             format!("CHECK (length(request) BETWEEN 1 AND {MAX_REQUEST_CHARS})"),
         ] {
             assert!(migrate.contains(&check), "{check}");

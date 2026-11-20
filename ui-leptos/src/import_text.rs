@@ -413,15 +413,16 @@ pub fn result_parts(preview: &ImportPreview, replace: bool, result: &ImportResul
     parts
 }
 
-/// That `count` of the file's AI findings had a label this version doesn't
-/// allow (one saved under an older rule), so the import cleaned it instead
-/// of refusing the file.
+/// That `count` of the file's AI findings had an agent's name or a request
+/// label this version doesn't allow (one saved under an older rule), so the
+/// import cleaned it instead of refusing the file.
 fn tidied(count: u64) -> String {
     if count == 1 {
-        "1 AI finding had a label this version doesn’t allow, so it was tidied up.".to_string()
+        "1 AI finding had a name or label this version doesn’t allow, so it was tidied up."
+            .to_string()
     } else {
         format!(
-            "{} had labels this version doesn’t allow, so they were tidied up.",
+            "{} had names or labels this version doesn’t allow, so they were tidied up.",
             plural(count, "AI finding")
         )
     }
@@ -736,7 +737,7 @@ mod tests {
         assert!(!untouched.iter().any(|p| p.contains("Let AI agents")));
     }
 
-    /// Findings whose labels were cleaned (GG32-01) are said in one sentence
+    /// Findings whose names or labels were cleaned (GG32-01, AF2) are said in one sentence
     /// after the findings', one or many; none, nothing is said.
     #[test]
     fn tidied_labels_are_said_once_and_only_when_there_were_some() {
@@ -756,17 +757,17 @@ mod tests {
             .unwrap();
         assert_eq!(
             one[at + 1],
-            "1 AI finding had a label this version doesn’t allow, so it was tidied up."
+            "1 AI finding had a name or label this version doesn’t allow, so it was tidied up."
         );
         assert!(
             said(3).contains(
-                &"3 AI findings had labels this version doesn’t allow, so they were tidied up."
+                &"3 AI findings had names or labels this version doesn’t allow, so they were tidied up."
                     .to_string()
             )
         );
         assert!(
             said(1200).contains(
-                &"1,200 AI findings had labels this version doesn’t allow, so they were tidied up."
+                &"1,200 AI findings had names or labels this version doesn’t allow, so they were tidied up."
                     .to_string()
             )
         );

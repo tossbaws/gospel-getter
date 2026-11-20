@@ -43,7 +43,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use crate::db::findings::{normalize_agent, recover_request};
+use crate::db::findings::{recover_agent, recover_request};
 use crate::db::notes::normalize_body;
 // The rows an import writes are the database's (`db::reader_data`); named
 // here too, as validating a file makes them.
@@ -602,8 +602,9 @@ pub struct ValidatedImport {
     /// In the file's order. `None` for a format 1 to 3 file, which can't
     /// hold findings, so importing it leaves them alone.
     pub findings: Option<Vec<NewFinding>>,
-    /// How many of them had a request label today's rule refuses, so it was
-    /// cleaned (`db::findings::recover_request`).
+    /// How many of them had a request label or an agent's name today's rule
+    /// refuses, so it was cleaned (`db::findings::{recover_request,
+    /// recover_agent}`): one per finding, however many of its labels were.
     pub findings_tidied: usize,
     /// The file's "Let AI agents save findings", if it has one.
     pub ai_findings_enabled: Option<bool>,
@@ -970,9 +971,9 @@ fn validate_notes(
 }
 
 /// A file's AI findings: each a passage this install has, with a valid date
-/// if it has one, and its request label as today's rule allows it
-/// (`recover_request`: cleaned, never refused). Returns them, and how many
-/// labels were cleaned. Repeats are all kept here: merging keeps one per
+/// if it has one, and its request label and agent's name as today's rule
+/// allows them (`recover_request`, `recover_agent`: cleaned, never refused).
+/// Returns them, and how many findings had a label cleaned. Repeats are all kept here: merging keeps one per
 /// passage and request (`new_findings`).
 fn validate_findings(
     records: Vec<FindingRecord>,
@@ -989,6 +990,7 @@ fn validate_findings(
             last_verses,
         )?;
         let request = recover_request(&f.request);
+        let agent = recover_agent(&f.agent);
         let finding = NewFinding {
             passage: Passage {
                 book_id: found.id,
@@ -996,11 +998,11 @@ fn validate_findings(
                 verse_start: f.verse_start,
                 verse_end: f.verse_end,
             },
-            agent: normalize_agent(&f.agent),
+            agent: agent.label,
             request: request.label,
             created_at: checked_date(&label, &reference, f.created_at.as_deref())?,
         };
-        Ok((finding, request.adjusted))
+        Ok((finding, request.adjusted || agent.adjusted))
     });
     let tidied = checked.iter().filter(|(_, adjusted)| *adjusted).count();
     (checked.into_iter().map(|(f, _)| f).collect(), tidied)
@@ -1093,7 +1095,7 @@ pub fn normalize_timestamp(input: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::findings::normalize_request;
+    use crate::db::findings::{normalize_agent, normalize_request};
 
     fn names<T: Serialize>(values: &[T]) -> Vec<String> {
         values
@@ -1574,7 +1576,7 @@ mod tests {
         notes: usize,
         findings: usize,
     ) -> usize {
-        use crate::db::findings::{MAX_AGENT_CHARS, MAX_REQUEST_CHARS};
+        use crate::db::findings::{MAX_AGENT_CHARS, MAX_REQUEST_CHARS, MAX_STORED_AGENT_CHARS};
         let kjv = crate::db::test_support::bundled("kjv");
         let longest_name = kjv.iter().map(|b| b.name.as_str()).max_by_key(|n| n.len());
         let book_name = longest_name.map(str::to_string);
@@ -1591,9 +1593,13 @@ mod tests {
         let body = "\u{10ffff}".repeat(crate::db::notes::MAX_NOTE_CHARS);
         assert_eq!(normalize_body(&body).as_deref(), Ok(body.as_str()));
         // A finding's agent and request at their longest, of the same
-        // character (see `worst_case_finding_characters_take_4_bytes`).
-        let agent = "\u{10ffff}".repeat(MAX_AGENT_CHARS);
-        assert_eq!(normalize_agent(&agent), agent);
+        // character (see `worst_case_finding_characters_take_4_bytes`): the
+        // agent at the most a stored one holds, since an older version's
+        // names were longer than today's and an export writes them as they
+        // are.
+        let agent = "\u{10ffff}".repeat(MAX_STORED_AGENT_CHARS);
+        let todays = "\u{10ffff}".repeat(MAX_AGENT_CHARS);
+        assert_eq!(normalize_agent(&todays).as_deref(), Ok(todays.as_str()));
         let request = "\u{10ffff}".repeat(MAX_REQUEST_CHARS);
         assert_eq!(normalize_request(&request).as_deref(), Ok(request.as_str()));
         let finding = FindingRecord {
@@ -1689,16 +1695,17 @@ mod tests {
     }
 
     /// Of every character a finding's agent or request may hold, none takes
-    /// more than 4 bytes in a file: an agent's control characters become
-    /// spaces, and a request can't have one.
+    /// more than 4 bytes in a file: neither can have a control character
+    /// (and an older version stored an agent's as a space).
     #[test]
     fn worst_case_finding_characters_take_4_bytes() {
         let mut widest = (0, 0);
         for c in (0..=0x10_ffff).filter_map(char::from_u32) {
             let encoded = |text: &str| serde_json::to_string(text).unwrap().len() - 4;
             // Inside the text, so trimming can't drop it.
-            let agent = normalize_agent(&format!("a{c}b"));
-            widest.0 = usize::max(widest.0, encoded(&agent));
+            if let Ok(agent) = normalize_agent(&format!("a{c}b")) {
+                widest.0 = usize::max(widest.0, encoded(&agent));
+            }
             if let Ok(request) = normalize_request(&format!("a{c}b")) {
                 widest.1 = usize::max(widest.1, encoded(&request));
             }

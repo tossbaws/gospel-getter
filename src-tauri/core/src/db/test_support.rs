@@ -800,9 +800,33 @@ pub const OLD_RULE_REQUESTS: [(&str, &str); 11] = [
     ),
 ];
 
-/// One AI finding by "Claude" for each of [`OLD_RULE_REQUESTS`], on John
-/// 11:1, 11:2… in that order, dated a second apart from
-/// 2026-11-01T09:00:00.000Z, inserted with SQL as 2.26.0 to 2.29.2 stored
+/// Agents' names 2.26.0 to 2.32.x saved and today's rule
+/// (`findings::normalize_agent`, 2.33.0) refuses, each with the name a
+/// restore gives it (`findings::recover_agent`): one at the old 60
+/// characters, one with commentary after a colon.
+pub const OLD_RULE_AGENTS: [(&str, &str); 2] = [
+    (
+        "Claude Code, asked by the reader for every verse about grief",
+        "Claude Code, asked by the reader for eve",
+    ),
+    (
+        "Your pastor: this verse proves grief is sin",
+        "Your pastor this verse proves grief is s",
+    ),
+];
+
+/// The agent of the `i`th of [`insert_old_rule_findings`]'s findings, as
+/// stored: the first ones [`OLD_RULE_AGENTS`]' names, then "Claude".
+pub fn old_rule_agent(i: usize) -> (&'static str, &'static str) {
+    OLD_RULE_AGENTS
+        .get(i)
+        .copied()
+        .unwrap_or(("Claude", "Claude"))
+}
+
+/// One AI finding for each of [`OLD_RULE_REQUESTS`], on John 11:1, 11:2…
+/// in that order, by [`old_rule_agent`], dated a second apart from
+/// 2026-11-01T09:00:00.000Z, inserted with SQL as older versions stored
 /// them (today's rule would refuse them). Their dates, in order.
 pub async fn insert_old_rule_findings(writer: &WritePool) -> Vec<String> {
     let mut dates = Vec::new();
@@ -812,9 +836,10 @@ pub async fn insert_old_rule_findings(writer: &WritePool) -> Vec<String> {
         sqlx::query(
             "INSERT INTO ai_findings \
                  (book_id, chapter, verse_start, verse_end, agent, request, created_at) \
-             VALUES (43, 11, $1, $1, 'Claude', $2, $3)",
+             VALUES (43, 11, $1, $1, $2, $3, $4)",
         )
         .bind(verse)
+        .bind(old_rule_agent(i).0)
         .bind(request)
         .bind(&date)
         .execute(writer.pool())
