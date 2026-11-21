@@ -282,14 +282,15 @@ export async function openApp({
         state.held.set(cmd, new Promise((resolve) => releases.set(cmd, resolve)));
     }
 
-    const invoke = async (cmd, args = {}) => {
+    const invoke = (cmd, args = {}) => {
         const call = { cmd, args, done: false };
         calls.push(call);
-        try {
-            return await answer(cmd, args);
-        } finally {
+        const answered = answer(cmd, args).finally(() => {
             call.done = true;
-        }
+        });
+        // Settles once it's answered, either way: what `idle` waits for.
+        call.answered = answered.then(() => {}, () => {});
+        return answered;
     };
     const answer = async (cmd, args) => {
         if (cmd === 'get_reading' && state.failReading) {
@@ -535,6 +536,12 @@ export async function openApp({
         },
         /** Waits until a `cmd` call made after call number `since` has finished, and every call since. */
         async idle(since = 0, cmd = null) {
+            if (cmd) {
+                await until(() => calls.slice(since).some((c) => c.cmd === cmd), `${cmd} calls`);
+                // Its answer itself, not polled for: an export answers once its
+                // file is fsynced, which a busy disk can make outlast until's polling.
+                if (!releases.has(cmd)) await Promise.all(calls.slice(since).filter((c) => c.cmd === cmd).map((c) => c.answered));
+            }
             // Calls can lead to more calls (adding a bookmark reloads the
             // list), so wait until things stay quiet, not just until the
             // first batch finishes.
