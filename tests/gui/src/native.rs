@@ -334,12 +334,14 @@ Write-Output $class
 }
 
 /// Windows: waits up to `within` for a top-level window named `title` (a
-/// native message box) through UI Automation, and with `press` answers it
-/// as Enter would: its OK button, waited for up to `within` (run
-/// 44936952355 looked once, as the message came up, and found no button
-/// yet); failing that, Enter with the message focused; failing that, its
-/// close button. Returns its class name and, answered, how. The script is
-/// written to `work_dir` and run with `-File`, as above.
+/// native message box) through UI Automation, and with `press` answers it:
+/// its OK button, waited for up to `within`; failing that, Enter with the
+/// message focused; failing that, its close button. On the CI runner only
+/// the last has worked (dist run 44938883049: no button through UI
+/// Automation even after waiting, and the message "cannot receive focus");
+/// the app exits with code 1 however its message is closed. Returns its
+/// class name and, answered, how. The script is written to `work_dir` and
+/// run with `-File`, as above.
 pub async fn windows_message(
     title: &str,
     within: Duration,

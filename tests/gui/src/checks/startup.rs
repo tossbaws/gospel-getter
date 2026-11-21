@@ -6,8 +6,9 @@
 //!   run's private display on Linux, through UI Automation on Windows);
 //! - the log the app keeps has the failure down to its root cause,
 //!   SQLite's "unable to open database file", not only its outer words;
-//! - once the message is answered (Enter; its OK button on Windows), the
-//!   app exits with code 1, within a step, rather than panicking.
+//! - once the message is answered (Enter on Linux; on Windows, as UI
+//!   Automation can, see `native::windows_message`), the app exits with
+//!   code 1, within a step, rather than panicking.
 //!
 //! Nothing else runs meanwhile, so the app can't hand over to another copy
 //! of itself (`window::single_instance_plugin`).

@@ -23,16 +23,17 @@
 //!
 //! Before that, on Windows, each session's app is asked to close its window
 //! ([`closed_first`]), as the reader closes it, and given [`CLOSE_WAIT`] to
-//! exit by itself. Terminated, it would take WebView2 with it (they're in
-//! gui-launch's job) before WebView2 had written what the page put in
-//! local storage to disk: Chromium batches those writes, at most about one
-//! a minute, and writes the rest only as it shuts down. The app started
-//! again shares the first session's WebView2 data folder (gui-launch's
-//! `GUI_LAUNCH_WEBVIEW2_FOLDER`), so checks 26, 45, 65 and 77 read what
-//! the session before left there; the app's exit, not the session's end,
-//! is what writes it. One that doesn't exit within [`CLOSE_WAIT`] is left
-//! to the session's end, as before, and the check that needed what it
-//! would have written fails saying what it found.
+//! exit by itself; then the session ends as above. The app started again
+//! reads what the session before left in local storage, in the WebView2
+//! data folder gui-launch keeps for the whole run (checks 26, 45, 65 and
+//! 77), and an app terminated with gui-launch's job takes WebView2 with
+//! it, before WebView2 may have written all of it to disk. The close is
+//! there to give it the chance. On the CI runner the app has never exited
+//! within [`CLOSE_WAIT`] (dist runs 44936952355 and 44938883049: each was
+//! still running and ended with its session), yet the four checks passed
+//! in both: whether the close is what gets local storage written is
+//! unproven. Dropping it would save [`CLOSE_WAIT`] a session; prove that
+//! with dispatched runs first.
 //!
 //! On Linux nothing is recorded: WebKitWebDriver ends the app itself at the
 //! end of a session (the script's wrapper execs it), and the guard there is

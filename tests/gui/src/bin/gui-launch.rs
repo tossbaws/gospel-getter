@@ -35,10 +35,10 @@
 //! (the port is 0, see dist.yml), and only in the folder it gave, so this
 //! copies that file there once WebView2 has written it in the shared one
 //! ([`webview2`]). Before the app starts, the file left by the session
-//! before is removed (it names a port nothing serves now), and the last
-//! session's WebView2, which goes on writing to disk a moment after its app
-//! has exited, is waited for until it lets go of the folder: a WebView2
-//! started on a folder in use joins the browser already running there.
+//! before is removed (it names a port nothing serves now). A WebView2 still
+//! holding the folder is waited for until it lets go, as one started on a
+//! folder in use joins the browser already running there; on the CI runner
+//! none has been (the last session's ends with its app's job).
 //!
 //! The log starts with what the app was given that matters to WebDriver:
 //! its arguments and the WebView2 and Tauri automation variables.
