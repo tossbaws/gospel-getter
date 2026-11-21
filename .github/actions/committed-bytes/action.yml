@@ -1,0 +1,17 @@
+name: Committed bytes
+description: >-
+  Fails the job if any file of the checkout isn't byte for byte the
+  commit's: a line ending conversion, a filter, a missing file. Every job
+  that builds or tests the app runs it right after its checkout, so CI
+  tests, and the installers embed, the same bytes on every platform. See
+  tools/ci/committed_bytes.py.
+runs:
+  using: composite
+  steps:
+    - name: Check the checkout is the committed bytes
+      shell: bash
+      env:
+        PYTHONDONTWRITEBYTECODE: "1"
+      run: |
+        py=python3; [ "$RUNNER_OS" = Windows ] && py=python
+        "$py" "$GITHUB_WORKSPACE/tools/ci/committed_bytes.py" "$GITHUB_WORKSPACE"
