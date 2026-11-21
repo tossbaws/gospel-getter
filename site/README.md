@@ -121,8 +121,9 @@ icon) and the header beside "Gospel Getter", as the flat mark. It also
 appears, large, in "About the maker" (the detailed mark). The byline under
 "Gospel Getter" and the footer are text only. The
 site's look follows the mark, a round stained-glass window with
-circuit-trace lead lines. (The Gospel Getter app keeps its own icon, the
-white Chi-Rho on `#14082c`, in `packaging/`; the website no longer uses it.)
+circuit-trace lead lines. The Gospel Getter app's icon is the same mark
+(`packaging/generate_icons.py`): the detailed mark at 48 px and up, and at
+16 and 32 px the same flat-small frames as these favicons.
 
 The Chi-Rho, Alpha (Α) and Omega (Ω) are public-domain symbols. The Alpha
 and Omega ornaments beside the About heading are text, hidden from
