@@ -1,3 +1,9 @@
+# Every checkout gets the committed bytes, LF, whatever the machine's
+# core.autocrlf: release builds embed files (include_str!) and must embed
+# the same bytes on every platform. 2.33.0's Windows installers embedded a
+# CRLF schema_1.sql and couldn't start on an upgraded PC.
+* text=auto eol=lf
+
 # The BSB's raw sources, byte for byte as Berean publishes them, CRLF
 # and all (see sources/bsb/README.md). Never convert their line endings.
 sources/bsb/bsb.txt -text

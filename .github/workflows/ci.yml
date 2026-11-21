@@ -272,12 +272,8 @@ jobs:
       run:
         working-directory: src-tauri
     steps:
-      # The files as committed, not converted to CRLF: tests compare the
-      # page's markup and the bundled data byte for byte.
-      - name: Keep line endings
-        working-directory: .
-        run: git config --global core.autocrlf false
-
+      # The runner's default checkout, as dist.yml's Windows jobs have
+      # (see .gitattributes' first rule).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust

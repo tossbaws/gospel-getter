@@ -3107,3 +3107,24 @@ fn the_page_gets_no_permissions() {
     }
     assert!(uses > 0, "the page's calls to Tauri weren't found");
 }
+
+/// CI's tests and the installers must run on the same checkout, the
+/// committed bytes on every platform: no workflow or action sets git's
+/// `core.autocrlf`, and .gitattributes' first rule keeps every file as
+/// committed (the reason is above that rule).
+#[test]
+fn every_checkout_keeps_the_committed_line_endings() {
+    for (name, text) in github_files() {
+        assert!(
+            !text.to_ascii_lowercase().contains("autocrlf"),
+            "{name} sets core.autocrlf"
+        );
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let attributes = std::fs::read_to_string(root.join(".gitattributes")).expect(".gitattributes");
+    let first_rule = attributes
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('#'));
+    assert_eq!(first_rule, Some("* text=auto eol=lf"), ".gitattributes");
+}

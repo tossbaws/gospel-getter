@@ -12,8 +12,8 @@ use super::findings::{
 };
 use super::highlights::set_highlights;
 use super::migrate::{
-    OLDEST_READABLE_SCHEMA_VERSION, Rebuild, SCHEMA_VERSION, Step, complete_schema_1,
-    if_not_exists, migrate, migrate_with, schema_1,
+    HEAD_CHARS, OLDEST_READABLE_SCHEMA_VERSION, Rebuild, SCHEMA_VERSION, Step, complete_schema_1,
+    head, if_not_exists, migrate, migrate_with, schema_1,
 };
 use super::notes::{MAX_NOTE_CHARS, NoteBodyError, NoteError, Passage, add_note, delete_note};
 use super::test_support::{TempDb, fresh_database, insert_old_rule_findings, schema_1_database};
@@ -202,6 +202,24 @@ fn the_steps_end_at_the_schema_version() {
     let last = super::migrate::STEPS.last().map_or(1, |step| step.to);
     assert_eq!(last, SCHEMA_VERSION);
     assert!((1..=SCHEMA_VERSION).contains(&OLDEST_READABLE_SCHEMA_VERSION));
+}
+
+/// A statement `schema_1.sql` mustn't hold is named by its first line,
+/// cut short, not given whole: the error can reach the "couldn't start"
+/// dialog, which must stay readable.
+#[test]
+fn a_bad_statement_is_named_in_one_short_line() {
+    let long = format!(
+        "DROP TABLE {} -- a comment\nCREATE TABLE books (\n    id INTEGER\n)",
+        "x".repeat(200)
+    );
+    let message = if_not_exists(&long).unwrap_err().to_string();
+    assert!(!message.contains('\n'), "{message:?}");
+    assert!(!message.contains("CREATE TABLE books"), "{message:?}");
+    assert!(message.ends_with('…'), "{message:?}");
+    assert!(message.chars().count() < HEAD_CHARS + 80, "{message:?}");
+    assert_eq!(head("  SELECT 1;\nSELECT 2;"), "SELECT 1;");
+    assert_eq!(head(&"é".repeat(HEAD_CHARS)), "é".repeat(HEAD_CHARS));
 }
 
 /// What `schema_1.sql` makes is what it says: `sqlite_master` holds each

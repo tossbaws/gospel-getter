@@ -67,6 +67,26 @@ pub const OLDEST_READABLE_SCHEMA_VERSION: i64 = 1;
 /// Version 1's schema, frozen (see its header).
 const SCHEMA_1: &str = include_str!("migrate/schema_1.sql");
 
+// `schema_1()` splits on "\n", so a CRLF copy can't be read: refuse to build
+// one (see .gitattributes' first rule).
+const _: () = assert!(
+    !has_carriage_return(SCHEMA_1.as_bytes()),
+    "schema_1.sql has CRLF line endings; check it out as committed, LF \
+     (.gitattributes' `* text=auto eol=lf`)"
+);
+
+/// Whether `bytes` holds a `\r`, in a `const` (where iterators aren't).
+const fn has_carriage_return(bytes: &[u8]) -> bool {
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\r' {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 /// The steps past version 1, in order: `STEPS[i]` brings a database from
 /// version `i + 1` to `i + 2`.
 pub(crate) const STEPS: &[Step] = &[schema_2::STEP];
@@ -424,7 +444,7 @@ pub(crate) async fn complete_schema_1(writer: &WritePool) -> anyhow::Result<()> 
         sqlx::query(AssertSqlSafe(if_not_exists(sql)?))
             .execute(&mut *tx)
             .await
-            .with_context(|| format!("Failed to complete schema 1 with {sql}"))?;
+            .with_context(|| format!("Failed to complete schema 1 with {}", head(sql)))?;
     }
     if found < 1 {
         set_version(&mut tx, 1).await?;
@@ -461,8 +481,30 @@ pub(crate) fn if_not_exists(sql: &str) -> anyhow::Result<String> {
             return Ok(format!("{kind}IF NOT EXISTS {rest}"));
         }
     }
-    bail!("schema_1.sql holds a statement that isn't a CREATE TABLE or INDEX: {sql}")
+    bail!(
+        "schema_1.sql holds a statement that isn't a CREATE TABLE or INDEX: {}",
+        head(sql)
+    )
 }
+
+/// `sql`'s first line, cut to [`HEAD_CHARS`] characters: enough to name a
+/// statement in an error, which can reach the "couldn't start" dialog,
+/// without the whole of it.
+pub(crate) fn head(sql: &str) -> String {
+    let line = sql
+        .trim_start()
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim_end();
+    match line.char_indices().nth(HEAD_CHARS) {
+        Some((cut, _)) => format!("{}…", &line[..cut]),
+        None => line.to_owned(),
+    }
+}
+
+/// The most of a statement [`head`] keeps.
+pub(crate) const HEAD_CHARS: usize = 80;
 
 /// Run `step` on a database at version `step.to - 1`, in one write
 /// transaction with its version, on the writing connection with its
@@ -678,7 +720,7 @@ async fn rebuild_table(conn: &mut SqliteConnection, rebuild: &Rebuild) -> anyhow
         sqlx::query(AssertSqlSafe(sql.clone()))
             .execute(&mut *conn)
             .await
-            .with_context(|| format!("Failed to make {sql} again"))?;
+            .with_context(|| format!("Failed to make {} again", head(&sql)))?;
     }
     if rebuild.autoincrement {
         sqlx::query("DELETE FROM sqlite_sequence WHERE name = $1")
