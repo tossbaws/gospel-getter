@@ -19,9 +19,12 @@ cargo tauri build
 
 which yields both an NSIS `.exe` and an MSI under
 `src-tauri/target/release/bundle/`. The generated `icon.ico` in
-`src-tauri/icons/` (made from `packaging/icon.svg` by
-`packaging/generate-icons.sh`) is used automatically; there's nothing
-Windows-specific left to hand-maintain here.
+`src-tauri/icons/` (made from `packaging/icon-source.png` by
+`packaging/generate_icons.py`) is used automatically. The setup.exe also runs
+`src-tauri/windows-installer-hooks.nsh` once it has installed, which tells
+Explorer to refresh its icon cache, so a pinned taskbar button picks up a new
+icon without a sign-out. The MSI doesn't: WiX has no element for that call,
+and a custom action DLL for it isn't worth carrying.
 
 The released installers also carry `gospel-getter-cli.exe` beside the app. To
 build that too, build it first and name it for its target, as the `windows` job

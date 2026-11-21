@@ -7,7 +7,7 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { closeBridge, el as $, openApp, withApp } from './harness.mjs';
 
 after(closeBridge);
@@ -32,7 +32,11 @@ test(`About shows the icon, the name and "Version ${VERSION}", as a modal like t
         assert.ok(panel.classList.contains('import-panel'), 'the import dialog’s look');
         assert.ok($(app, 'about-overlay').classList.contains('import-overlay'));
         assert.equal($(app, panel.getAttribute('aria-labelledby')).textContent, 'Gospel Getter');
-        assert.equal(panel.querySelector('img').getAttribute('src'), 'favicon.svg');
+        // The app icon at 128 px (icons.test.mjs checks it), shown at 56.
+        const icon = panel.querySelector('img');
+        assert.equal(icon.getAttribute('src'), 'favicon.png');
+        assert.deepEqual([icon.getAttribute('width'), icon.getAttribute('height')], ['56', '56']);
+        assert.ok(existsSync(new URL('../../dist/favicon.png', import.meta.url)), 'the page serves it');
         assert.equal(versionLine(app).textContent, `Version ${VERSION}`);
         assert.ok(panel.contains(versionLine(app)));
         assert.equal(app.document.activeElement, $(app, 'about-close'), 'focus moves in');

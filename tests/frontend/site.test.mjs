@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import { decodePng, icoFrames } from './png.mjs';
 
 const root = new URL('../../', import.meta.url);
 const site = new URL('site/', root);
@@ -141,8 +142,13 @@ test('the Chi Rho Code LLC mark is the favicon and the header icon, and only the
     assert.ok(
         [...footer.querySelectorAll('p')].some((p) => p.textContent === 'Gospel Getter is made by Chi Rho Code LLC and released under the MIT license.'),
     );
-    // The Gospel Getter app icon is no longer used anywhere on the page.
-    assert.equal(document.querySelectorAll('[src*="icon.svg"], [href*="icon.svg"], [href*="favicon.svg"]').length, 0);
+    // The app's icon is the same mark: its 16 and 32 px frames are these
+    // favicons, pixel for pixel (both drawn by tools/site/build_brand_icons.py).
+    const appFrames = new Map(icoFrames(readFileSync(new URL('src-tauri/icons/icon.ico', root))).map((f) => [f.size, f.png]));
+    for (const size of [16, 32]) {
+        const favicon = decodePng(readFileSync(new URL(`assets/brand/chirho-code-flat-small-${size}.png`, site)));
+        assert.ok(favicon.rgba.equals(decodePng(appFrames.get(size)).rgba), `the app's ${size}px icon is the site's`);
+    }
     // One mark in the header: the byline is text only.
     assert.equal(document.querySelector('.brand-byline').textContent, 'by Chi Rho Code LLC');
     assert.equal(document.querySelectorAll('.brand-byline img').length, 0);

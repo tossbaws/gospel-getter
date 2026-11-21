@@ -155,7 +155,7 @@ pub fn AboutAndUpdates() -> impl IntoView {
                     "×"
                 </button>
                 <div class="about-head">
-                    <img class="about-icon" src="favicon.svg" alt="" width="56" height="56" />
+                    <img class="about-icon" src="favicon.png" alt="" width="56" height="56" />
                     <div>
                         <h2 id="about-title" class="import-title">"Gospel Getter"</h2>
                         <p id="app-version" class="app-version">
