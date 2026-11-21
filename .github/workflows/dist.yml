@@ -1034,6 +1034,10 @@ jobs:
       GUI_CHECK_STEP_TIMEOUT: "20"
       # As for gui-linux; the retry deletes the app's data folders first.
       GUI_CHECK_RETRY: "1"
+      # Check 74 stages a failed start in the account's own app folders,
+      # which only this throwaway runner can spare (tests/gui
+      # src/checks/startup.rs).
+      GUI_CHECK_STAGE_IN_APPDATA: "1"
       # The app's window comes up about 10s after launch on a cold runner.
       GUI_CHECK_SESSION_TIMEOUT: "60"
       # The installed app's program, as the windows job builds it

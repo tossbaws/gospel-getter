@@ -8,7 +8,8 @@
 //! an emptied environment holding nothing but that `DISPLAY` and `PATH`.
 //!
 //! Windows: UI Automation, through PowerShell, finds the dialog and closes
-//! it; the check stops at "the save dialog appeared" there.
+//! it; the check stops at "the save dialog appeared" there. It also finds
+//! and answers check 74's "couldn't start" message.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -326,6 +327,89 @@ Write-Output $class
     if !output.status.success() {
         bail!(
             "UI Automation found no save dialog: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// Windows: waits up to `within` for a top-level window named `title` (a
+/// native message box) through UI Automation, and with `press` answers it:
+/// its OK button, waited for up to `within`; failing that, Enter with the
+/// message focused; failing that, its close button. On the CI runner only
+/// the last has worked (dist run 44938883049: no button through UI
+/// Automation even after waiting, and the message "cannot receive focus");
+/// the app exits with code 1 however its message is closed. Returns its
+/// class name and, answered, how. The script is written to `work_dir` and
+/// run with `-File`, as above.
+pub async fn windows_message(
+    title: &str,
+    within: Duration,
+    press: bool,
+    work_dir: &Path,
+) -> Result<String> {
+    const SCRIPT: &str = r#"
+param([Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][int]$Millis, [switch]$Press)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$A = [System.Windows.Automation.AutomationElement]
+$T = [System.Windows.Automation.ControlType]
+$S = [System.Windows.Automation.TreeScope]
+$condition = New-Object System.Windows.Automation.AndCondition(
+    (New-Object System.Windows.Automation.PropertyCondition($A::NameProperty, $Title)),
+    (New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, $T::Window)))
+$isButton = New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, $T::Button)
+function Find-Message { $A::RootElement.FindFirst($S::Children, $condition) }
+$deadline = [DateTime]::UtcNow.AddMilliseconds($Millis)
+do {
+    $window = Find-Message
+    if ($window) { break }
+    Start-Sleep -Milliseconds 100
+} while ([DateTime]::UtcNow -lt $deadline)
+if (-not $window) { Write-Error "no window named '$Title' appeared"; exit 1 }
+$class = $window.Current.ClassName
+if (-not $Press) { Write-Output $class; exit 0 }
+$button = $null
+do {
+    $buttons = @($window.FindAll($S::Descendants, $isButton))
+    $button = $buttons | Where-Object { $_.Current.Name -eq 'OK' } | Select-Object -First 1
+    if (-not $button -and $buttons.Count -eq 1) { $button = $buttons[0] }
+    if ($button) { break }
+    Start-Sleep -Milliseconds 100
+} while ([DateTime]::UtcNow -lt $deadline)
+if ($button) {
+    $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Write-Output "$class, pressed $($button.Current.Name)"; exit 0
+}
+$how = "$class, no OK button through UI Automation (buttons: $(($buttons | ForEach-Object { $_.Current.Name }) -join ', '))"
+try {
+    $window.SetFocus()
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $how = "$how; pressed Enter"
+} catch { $how = "$how; Enter failed: $_" }
+$gone = [DateTime]::UtcNow.AddSeconds(2)
+while ((Find-Message) -and [DateTime]::UtcNow -lt $gone) { Start-Sleep -Milliseconds 100 }
+if (Find-Message) {
+    $window.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
+    $how = "$how; still there, so closed it"
+}
+Write-Output $how
+"#;
+    let script = work_dir.join("message.ps1");
+    tokio::fs::write(&script, SCRIPT)
+        .await
+        .with_context(|| format!("writing {}", script.display()))?;
+    let script = script.to_str().context("the script path is not UTF-8")?;
+    let millis = within.as_millis().to_string();
+    let mut args = vec!["-Title", title, "-Millis", &millis];
+    if press {
+        args.push("-Press");
+    }
+    let output = powershell(script, &args).await?;
+    if !output.status.success() {
+        bail!(
+            "UI Automation: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }

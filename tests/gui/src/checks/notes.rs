@@ -343,6 +343,13 @@ impl Run<'_> {
     pub(super) async fn draft_typed(&mut self) -> Result<DraftLeft> {
         self.plain_reading().await?;
         let heading = self.heading().await?;
+        // Check 45 leaves the page scrolled to the lists at the chapter's
+        // end, and Edge WebDriver scrolls verse 2 back only as far as under
+        // the sticky bar, where the bar takes the click (run 44936952355):
+        // back to the top of the chapter first.
+        self.ui
+            .js("window.scrollTo(0, 0); return null;", Vec::new())
+            .await?;
         self.select(DRAFT_VERSE).await?;
         let ui = &self.ui;
         ui.press("press N (write a note)", "n").await?;
@@ -386,6 +393,10 @@ impl Run<'_> {
             "the app started again at {here}, not {} where the draft was typed",
             left.heading
         );
+        // As before the app quit.
+        self.ui
+            .js("window.scrollTo(0, 0); return null;", Vec::new())
+            .await?;
         self.select(DRAFT_VERSE).await?;
         let ui = &self.ui;
         ui.press("press N (write a note)", "n").await?;

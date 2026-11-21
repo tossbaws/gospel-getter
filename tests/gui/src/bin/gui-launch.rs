@@ -24,6 +24,22 @@
 //! and its program's path), and the checks make sure it has exited before
 //! they start the next one (gui_check::launched).
 //!
+//! The app's WebView2 keeps its data, local storage with it, in one folder
+//! for the whole run (`GUI_LAUNCH_WEBVIEW2_FOLDER`, which
+//! scripts/gui-check.sh makes in its work folder and removes at the end),
+//! as the app as shipped keeps one: Edge WebDriver gives each session a new
+//! folder of its own (`WEBVIEW2_USER_DATA_FOLDER`, a fresh `scoped_dir…`),
+//! where the app started again couldn't see what the session before left
+//! (checks 26, 45, 65 and 77). Edge WebDriver finds the app's debugging
+//! port by the DevToolsActivePort file WebView2 writes in its data folder
+//! (the port is 0, see dist.yml), and only in the folder it gave, so this
+//! copies that file there once WebView2 has written it in the shared one
+//! ([`webview2`]). Before the app starts, the file left by the session
+//! before is removed (it names a port nothing serves now). A WebView2 still
+//! holding the folder is waited for until it lets go, as one started on a
+//! folder in use joins the browser already running there; on the CI runner
+//! none has been (the last session's ends with its app's job).
+//!
 //! The log starts with what the app was given that matters to WebDriver:
 //! its arguments and the WebView2 and Tauri automation variables.
 
@@ -52,11 +68,13 @@ fn main() -> ExitCode {
 mod launcher {
     use std::fs::{File, OpenOptions};
     use std::io::Write;
+    use std::path::PathBuf;
     use std::process::{Command, ExitCode, Stdio};
 
     use gui_check::launched::process::launched;
 
     use super::job::Job;
+    use super::webview2;
 
     /// The variables Edge WebDriver and tauri-driver set for the app.
     const SHOWN: [&str; 4] = [
@@ -68,7 +86,7 @@ mod launcher {
 
     /// Appends `line` to the app's log, as best it can: the log is for
     /// reading after, and a line lost there changes nothing else.
-    fn note(log: &mut File, line: &str) {
+    pub(super) fn note(log: &mut File, line: &str) {
         let _ = writeln!(log, "gui-launch: {line}");
     }
 
@@ -151,6 +169,29 @@ mod launcher {
             .map_err(|e| format!("sharing the log: {e}"))?;
         let mut command = Command::new(&target);
         command.args(&args);
+        let forward = match (
+            std::env::var_os(webview2::SHARED),
+            std::env::var_os("WEBVIEW2_USER_DATA_FOLDER"),
+        ) {
+            (Some(shared), Some(driver)) => {
+                let shared = PathBuf::from(shared);
+                webview2::prepare(&shared, &mut log)?;
+                command.env("WEBVIEW2_USER_DATA_FOLDER", &shared);
+                note(
+                    &mut log,
+                    &format!(
+                        "WEBVIEW2_USER_DATA_FOLDER={} instead (the run's own, kept from session \
+                         to session)",
+                        shared.display()
+                    ),
+                );
+                Some((shared, PathBuf::from(driver)))
+            }
+            // Not started by Edge WebDriver (check 73's second launch, which
+            // hands over at once): nothing to share.
+            (Some(_), None) => None,
+            (None, _) => None,
+        };
         if let Some(proxy) = &cut_off_proxy {
             for name in ["https_proxy", "http_proxy", "all_proxy", "no_proxy"] {
                 command.env_remove(name);
@@ -186,6 +227,12 @@ mod launcher {
             let _ = app.wait();
             return Err(e);
         }
+        if let Some((shared, driver)) = forward {
+            let log = log
+                .try_clone()
+                .map_err(|e| format!("sharing the log: {e}"))?;
+            std::thread::spawn(move || webview2::forward_port(&shared, &driver, log));
+        }
         note(
             &mut log,
             &format!(
@@ -218,6 +265,143 @@ mod launcher {
             Some(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
             None => ExitCode::FAILURE,
         })
+    }
+}
+
+/// The run's own WebView2 data folder (see the top of this file).
+#[cfg(windows)]
+mod webview2 {
+    use std::fs::{File, OpenOptions};
+    use std::io::ErrorKind;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::path::Path;
+    use std::time::{Duration, Instant};
+
+    use gui_check::webview2::{LOCK_FILE, PORT_FILES, port_file_complete};
+
+    use super::launcher::note;
+
+    /// The variable naming the folder.
+    pub const SHARED: &str = "GUI_LAUNCH_WEBVIEW2_FOLDER";
+
+    /// How long the last session's WebView2 may hold the folder.
+    const RELEASE_WAIT: Duration = Duration::from_secs(30);
+
+    /// How long WebView2 may take to write its port file: Edge WebDriver's
+    /// own wait for it is 60s.
+    const PORT_WAIT: Duration = Duration::from_secs(60);
+
+    const POLL: Duration = Duration::from_millis(50);
+
+    /// Before the app starts: waits until no WebView2 holds `shared`, then
+    /// removes the port files a session before left.
+    pub fn prepare(shared: &Path, log: &mut File) -> Result<(), String> {
+        std::fs::create_dir_all(shared).map_err(|e| format!("making {}: {e}", shared.display()))?;
+        let lock = shared.join(LOCK_FILE);
+        let begun = Instant::now();
+        let mut said = false;
+        while held(&lock) {
+            if begun.elapsed() >= RELEASE_WAIT {
+                note(
+                    log,
+                    &format!(
+                        "WARNING: {} is still held {:.0}s on: the last session's WebView2 \
+                         hasn't let go of the folder",
+                        lock.display(),
+                        RELEASE_WAIT.as_secs_f64()
+                    ),
+                );
+                break;
+            }
+            if !said {
+                said = true;
+                note(
+                    log,
+                    "waiting for the last session's WebView2 to let go of the folder",
+                );
+            }
+            std::thread::sleep(POLL);
+        }
+        if said {
+            note(
+                log,
+                &format!(
+                    "the folder is free after {:.2}s",
+                    begun.elapsed().as_secs_f64()
+                ),
+            );
+        }
+        for name in PORT_FILES {
+            match std::fs::remove_file(shared.join(name)) {
+                Ok(()) => {}
+                Err(e) if e.kind() == ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("removing the old {name}: {e}")),
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether a running WebView2 holds the lock file `lock` (it keeps it
+    /// open, letting nothing else open it exclusively).
+    fn held(lock: &Path) -> bool {
+        match OpenOptions::new().read(true).share_mode(0).open(lock) {
+            Ok(_) => false,
+            Err(e) => e.kind() != ErrorKind::NotFound,
+        }
+    }
+
+    /// Copies the port file, once WebView2 has written it whole in
+    /// `shared`, to `driver`, Edge WebDriver's folder, and says so in the
+    /// log. To each place WebView2 may write it ([`PORT_FILES`]), not only
+    /// the one it did: where the driver looks is its own affair.
+    pub fn forward_port(shared: &Path, driver: &Path, mut log: File) {
+        let begun = Instant::now();
+        loop {
+            let written = PORT_FILES.iter().find_map(|name| {
+                let text = std::fs::read_to_string(shared.join(name)).ok()?;
+                port_file_complete(&text).then_some((name, text))
+            });
+            if let Some((name, text)) = written {
+                for to in PORT_FILES.map(|name| driver.join(name)) {
+                    // Written beside it, then renamed, so the driver never
+                    // reads half a file.
+                    let partial = to.with_extension("partial");
+                    let copied = to
+                        .parent()
+                        .map_or(Ok(()), std::fs::create_dir_all)
+                        .and_then(|()| std::fs::write(&partial, &text))
+                        .and_then(|()| std::fs::rename(&partial, &to));
+                    if let Err(e) = copied {
+                        note(
+                            &mut log,
+                            &format!("WARNING: couldn't copy {name} to {}: {e}", to.display()),
+                        );
+                    }
+                }
+                note(
+                    &mut log,
+                    &format!(
+                        "{name} (port {}) written in the run's folder after {:.2}s, copied to \
+                         Edge WebDriver's",
+                        text.lines().next().unwrap_or("?"),
+                        begun.elapsed().as_secs_f64()
+                    ),
+                );
+                return;
+            }
+            if begun.elapsed() >= PORT_WAIT {
+                note(
+                    &mut log,
+                    &format!(
+                        "WARNING: WebView2 wrote no DevToolsActivePort in the run's folder within \
+                         {:.0}s",
+                        PORT_WAIT.as_secs_f64()
+                    ),
+                );
+                return;
+            }
+            std::thread::sleep(POLL);
+        }
     }
 }
 

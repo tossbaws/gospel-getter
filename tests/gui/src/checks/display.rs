@@ -528,20 +528,15 @@ impl Run<'_> {
 /// show every setting as it was left; then they're put back as they were
 /// before check 25. Check 45: the lists check 40 left open are open.
 /// Then check 65 (a third session) and check 77 (two more, `split`).
-/// Why checks 26, 45, 65 and 77 aren't run on Windows: their SKIP.
-const NOT_ON_WINDOWS: &str = "not run on Windows: Edge WebDriver gives each session's WebView2 a fresh \
-    user data folder (WEBVIEW2_USER_DATA_FOLDER, a new scoped_dir per session), so the app started again \
-    in a new session can't see the first session's local storage (the app as shipped keeps one folder)";
-
-/// The checks the app started again doesn't run on Windows, each a SKIP
-/// there ([`NOT_ON_WINDOWS`]): the relaunch checks the checks' table says
-/// never run on Windows (a unit test holds them to it).
-const NOT_RUN_ON_WINDOWS: [Check; 4] = [
-    Check::AaRestart,
-    Check::DisclosuresKept,
-    Check::NoteDraft,
-    Check::SplitRestart,
-];
+/// On Windows these read local storage the session before left in the
+/// WebView2 data folder gui-launch keeps for the whole run (see
+/// src/bin/gui-launch.rs), written as the app closed its window (see
+/// `exited`).
+///
+/// The relaunch checks the app started again doesn't run on Windows, each
+/// with why: a SKIP there, every time (a unit test holds them to the
+/// checks' table).
+const NOT_RUN_ON_WINDOWS: &[(Check, &str)] = &[];
 
 /// Ends `run`'s WebDriver session, which closes the app.
 pub(super) async fn end_session(run: Run<'_>, started: std::time::Instant, which: &str) {
@@ -549,6 +544,7 @@ pub(super) async fn end_session(run: Run<'_>, started: std::time::Instant, which
         started,
         &format!("close the app (end the {which} WebDriver session)"),
     );
+    super::exited::closed_first(run.config, started).await;
     let driver = run.ui.into_driver();
     match tokio::time::timeout(std::time::Duration::from_secs(10), driver.quit()).await {
         Ok(Ok(())) => log_line(started, "session ended, app closed"),
@@ -566,17 +562,12 @@ pub(super) async fn restart(
     left_at: Result<Value, String>,
 ) {
     let kept_here = [Check::AaRestart, Check::DisclosuresKept];
-    // Windows: Edge WebDriver starts each session's WebView2 with a user
-    // data folder of its own (WEBVIEW2_USER_DATA_FOLDER, a new
-    // `scoped_dir…` each time), so the app started again in a new session
-    // can't see what the first one saved in local storage; the app itself
-    // always uses the one folder. Checks 26, 45, 65 and 77 aren't run there:
-    // SKIP, never PASS. The reading position is the backend's (its
-    // database, in the account's own folder), so check 58 is.
     let windows = config.xvfb.is_none();
+    let runs_here =
+        |check: Check| !(windows && NOT_RUN_ON_WINDOWS.iter().any(|&(skip, _)| skip == check));
     if windows {
-        for check in NOT_RUN_ON_WINDOWS {
-            report.record(check, Err(skipped(NOT_ON_WINDOWS))).await;
+        for &(check, why) in NOT_RUN_ON_WINDOWS {
+            report.record(check, Err(skipped(why))).await;
         }
     }
     let looks = match looks {
@@ -630,20 +621,24 @@ pub(super) async fn restart(
         run.failure_screenshot(Check::ReopenAtVerse).await;
     }
     report.record(Check::ReopenAtVerse, reopened).await;
-    if let (false, Some(looks)) = (windows, looks) {
-        let result = run.restored(&looks).await;
-        if result.is_err() {
-            run.failure_screenshot(Check::AaRestart).await;
+    if let Some(looks) = looks {
+        if runs_here(Check::AaRestart) {
+            let result = run.restored(&looks).await;
+            if result.is_err() {
+                run.failure_screenshot(Check::AaRestart).await;
+            }
+            report.record(Check::AaRestart, result).await;
         }
-        report.record(Check::AaRestart, result).await;
-        let kept = run.disclosures_kept().await;
-        if kept.is_err() {
-            run.failure_screenshot(Check::DisclosuresKept).await;
+        if runs_here(Check::DisclosuresKept) {
+            let kept = run.disclosures_kept().await;
+            if kept.is_err() {
+                run.failure_screenshot(Check::DisclosuresKept).await;
+            }
+            report.record(Check::DisclosuresKept, kept).await;
         }
-        report.record(Check::DisclosuresKept, kept).await;
     }
     // Check 65: a new note typed and left open as the app quits.
-    let draft = if windows {
+    let draft = if !runs_here(Check::NoteDraft) {
         None
     } else {
         let typed = run.draft_typed().await;
@@ -667,7 +662,7 @@ pub(super) async fn restart(
 
     // Check 77: two panes as the app quits, both where they were as it
     // starts again, in sessions of its own.
-    if !windows {
+    if runs_here(Check::SplitRestart) {
         let split = super::split::split_restart(config, started).await;
         report.record(Check::SplitRestart, split).await;
     }
@@ -809,9 +804,11 @@ mod tests {
             .into_iter()
             .filter(|check| check.skip().allowed_on(Platform::Windows))
             .collect();
-        assert_eq!(NOT_RUN_ON_WINDOWS.to_vec(), may_skip);
-        for check in NOT_RUN_ON_WINDOWS {
+        let skipped: Vec<Check> = NOT_RUN_ON_WINDOWS.iter().map(|&(check, _)| check).collect();
+        assert_eq!(skipped, may_skip);
+        for &(check, why) in NOT_RUN_ON_WINDOWS {
             assert!(check.skip().always_on(Platform::Windows), "{check:?}");
+            assert!(why.starts_with("not run on Windows: "), "{check:?}: {why}");
         }
     }
 }
