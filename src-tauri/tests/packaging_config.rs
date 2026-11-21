@@ -2090,8 +2090,11 @@ fn only_a_release_run_signs_and_it_signs_what_was_checked() {
 
     let keys = dist_job_keys("sign");
     assert!(
-        keys.contains(&"needs: [linux, windows, gui-linux, gui-windows]"),
-        "the sign job should wait for the builds and both GUI checks: {keys:#?}"
+        keys.contains(
+            &"needs: [linux, windows, gui-linux, gui-windows, upgrade-linux, upgrade-windows]"
+        ),
+        "the sign job should wait for the builds, both GUI checks and both upgrade checks: \
+         {keys:#?}"
     );
     let job = |name: &str| -> Vec<&Step> { steps.iter().filter(|s| s.job == name).collect() };
     let sign = job("sign");
@@ -2718,6 +2721,95 @@ fn ci_cancels_only_a_pull_requests_superseded_run() {
     );
 }
 
+/// Each platform's upgrade check (tools/ci/upgrade_check.py, whose header
+/// says why) runs whenever that platform's GUI checks run, on the
+/// installer that platform's build job made, and the release's sign job
+/// waits for both, so a failed upgrade blocks the release.
+#[test]
+fn every_release_build_checks_an_upgrade_from_the_previous_release() {
+    let condition = |job: &str| -> Option<String> {
+        dist_job_keys(job)
+            .into_iter()
+            .find_map(|k| k.strip_prefix("if: "))
+            .map(str::to_owned)
+    };
+    let steps = dist_steps();
+    for (upgrade, gui, build, artifact, platform) in [
+        (
+            "upgrade-linux",
+            "gui-linux",
+            "linux",
+            "gospel-getter-linux-appimage",
+            "linux",
+        ),
+        (
+            "upgrade-windows",
+            "gui-windows",
+            "windows",
+            "gospel-getter-windows-nsis-installer",
+            "windows",
+        ),
+    ] {
+        let keys = dist_job_keys(upgrade);
+        assert!(
+            keys.contains(&format!("needs: [{build}]").as_str()),
+            "{upgrade} should wait for {build}: {keys:#?}"
+        );
+        assert_eq!(
+            condition(upgrade),
+            condition(gui),
+            "{upgrade} should run exactly when {gui} does"
+        );
+        let own: Vec<&Step> = steps.iter().filter(|s| s.job == upgrade).collect();
+        assert!(
+            own.iter()
+                .any(|s| s.text.contains(&format!("          name: {artifact}\n"))),
+            "{upgrade} should check this run's {artifact}: {own:#?}"
+        );
+        let previous = own
+            .iter()
+            .find(|s| s.text.contains("tools/ci/upgrade_check.py previous"))
+            .unwrap_or_else(|| panic!("{upgrade} gets no previous release: {own:#?}"));
+        assert!(
+            previous
+                .text
+                .contains(&format!("previous --platform {platform} "))
+                && previous.text.contains("GH_TOKEN: ${{ github.token }}")
+                && !previous.text.contains("continue-on-error"),
+            "{upgrade}: {previous:#?}"
+        );
+        let check = own
+            .iter()
+            .find(|s| s.text.contains("tools/ci/upgrade_check.py run "))
+            .unwrap_or_else(|| panic!("{upgrade} runs no upgrade check: {own:#?}"));
+        assert!(
+            check
+                .text
+                .contains("GOSPEL_GETTER_UPGRADE_CHECK: throwaway-runner")
+                && check
+                    .text
+                    .contains("${{ steps.previous.outputs.installer }}")
+                && !check.text.contains("continue-on-error")
+                && !check.text.contains("        if:"),
+            "{upgrade}: {check:#?}"
+        );
+    }
+    let sign = dist_job_keys("sign");
+    let needs = sign
+        .iter()
+        .find_map(|k| k.strip_prefix("needs: "))
+        .expect("the sign job's needs");
+    for upgrade in ["upgrade-linux", "upgrade-windows"] {
+        assert!(
+            needs
+                .trim_matches(['[', ']'])
+                .split(", ")
+                .any(|n| n == upgrade),
+            "the sign job doesn't wait for {upgrade}: {needs}"
+        );
+    }
+}
+
 /// The `ci:full` label: a pull request that has it runs gui-windows and
 /// sign-rehearsal (and their GUI-check test app's job) in its own
 /// pull_request run, as a release/ branch's does, in place of a run
@@ -3193,6 +3285,8 @@ fn every_build_and_test_job_first_checks_its_checkout_is_the_committed_bytes() {
             "dist.yml: gui-test-app-windows",
             "dist.yml: gui-linux",
             "dist.yml: gui-windows",
+            "dist.yml: upgrade-linux",
+            "dist.yml: upgrade-windows",
         ]
     );
 

@@ -75,13 +75,14 @@ name: Distribution Artifacts
 #   - dispatched on main (a release, `gh workflow run dist.yml --ref main`):
 #     the sign job, the only job that names the key's secrets, runs in the
 #     release environment (deployments from main only) once the GUI checks
-#     have passed on these very files. It signs each installer as `cargo
-#     tauri build` would (tools/release/sign_installers.py: the same .sig,
-#     bound to the app's version), checks each signature is by the app's
-#     key, checks each installer is byte for byte what was built (its
-#     SHA-256, recorded before signing), makes the update manifest from
-#     them as a dry run, and uploads each installer with its .sig and its
-#     SHA-256 (INSTALLER-SHA256SUMS) as an artifact of its own, the build
+#     and the upgrade checks have passed on these very files. It signs
+#     each installer as `cargo tauri build` would
+#     (tools/release/sign_installers.py: the same .sig, bound to the app's
+#     version), checks each signature is by the app's key, checks each
+#     installer is byte for byte what was built (its SHA-256, recorded
+#     before signing), makes the update manifest from them as a dry run,
+#     and uploads each installer with its .sig and its SHA-256
+#     (INSTALLER-SHA256SUMS) as an artifact of its own, the build
 #     artifact's name with -signed after it. The build's own artifacts are
 #     never replaced, so a sign job that fails can be re-run (Re-run failed
 #     jobs) on them as built. Then the bundle job, which names no secret,
@@ -1164,18 +1165,131 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # Installs the previous release, seeds reader data, upgrades to this
+  # build and checks it starts and kept the data: see
+  # tools/ci/upgrade_check.py's header. When gui-linux runs (no if: of its
+  # own, as gui-linux has none), and sign waits for it.
+  upgrade-linux:
+    name: Upgrade from the previous release (Linux)
+    needs: [linux]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the checkout is the committed bytes
+        uses: ./.github/actions/committed-bytes
+
+      # The app's runtime, as a reader's desktop has it: the AppImage
+      # leaves out libraries every desktop has (libEGL).
+      - name: Install Xvfb, xdotool and the app's runtime
+        timeout-minutes: 15
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=60 xvfb xdotool \
+            libwebkit2gtk-4.1-0 libgtk-3-0
+
+      - name: Download this run's AppImage
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gospel-getter-linux-appimage
+          path: appimage
+
+      - name: Download the previous release's AppImage
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/upgrade_check.py previous --platform linux --out "$RUNNER_TEMP/previous"
+
+      - name: Upgrade it to this build, and check it
+        env:
+          GOSPEL_GETTER_UPGRADE_CHECK: throwaway-runner
+          FROM: ${{ steps.previous.outputs.installer }}
+        run: |
+          set -euo pipefail
+          to="$(find appimage -maxdepth 1 -name '*.AppImage' | head -1)"
+          if [ -z "$to" ]; then
+            echo "::error::no AppImage in the downloaded artifact"
+            exit 1
+          fi
+          python3 tools/ci/upgrade_check.py run --from "$FROM" --to "$to" --work "$RUNNER_TEMP/upgrade"
+
+      - name: Upload what it saw
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: upgrade-check-linux
+          path: |
+            ${{ runner.temp }}/upgrade/*.log
+            ${{ runner.temp }}/upgrade/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # As upgrade-linux, on the NSIS installer, when gui-windows runs (its
+  # if:).
+  upgrade-windows:
+    name: Upgrade from the previous release (Windows)
+    needs: [windows]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release/') || contains(github.event.pull_request.labels.*.name, 'ci:full')))
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the checkout is the committed bytes
+        uses: ./.github/actions/committed-bytes
+
+      - name: Download this run's NSIS installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gospel-getter-windows-nsis-installer
+          path: nsis
+
+      - name: Download the previous release's NSIS installer
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/ci/upgrade_check.py previous --platform windows --out "$RUNNER_TEMP/previous"
+
+      - name: Upgrade it to this build, and check it
+        env:
+          GOSPEL_GETTER_UPGRADE_CHECK: throwaway-runner
+          FROM: ${{ steps.previous.outputs.installer }}
+        run: |
+          set -euo pipefail
+          to="$(find nsis -maxdepth 1 -name '*.exe' | head -1)"
+          if [ -z "$to" ]; then
+            echo "::error::no setup .exe in the downloaded artifact"
+            exit 1
+          fi
+          python tools/ci/upgrade_check.py run --from "$FROM" --to "$to" --work "$RUNNER_TEMP/upgrade"
+
+      - name: Upload what it saw
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: upgrade-check-windows
+          path: |
+            ${{ runner.temp }}/upgrade/*.log
+            ${{ runner.temp }}/upgrade/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   # The release's updater signatures (see the top of this file): only on a
-  # run dispatched on main, and only once both platforms' GUI checks have
-  # passed on the very files it signs. It downloads the four build
-  # artifacts by their exact names (never a -signed one, which a pattern
-  # such as gospel-getter-linux-* would also take) and uploads each signed
-  # as <name>-signed, leaving the build's artifacts as they were: a re-run
-  # of a failed attempt signs them again, and replaces whatever -signed
-  # artifacts that attempt uploaded. The only job that names the signing
-  # key's secrets; it builds nothing of the repository's.
+  # run dispatched on main, and only once both platforms' GUI checks and
+  # upgrade checks have passed on the very files it signs. It downloads
+  # the four build artifacts by their exact names (never a -signed one,
+  # which a pattern such as gospel-getter-linux-* would also take) and
+  # uploads each signed as <name>-signed, leaving the build's artifacts as
+  # they were: a re-run of a failed attempt signs them again, and replaces
+  # whatever -signed artifacts that attempt uploaded. The only job that
+  # names the signing key's secrets; it builds nothing of the repository's.
   sign:
     name: Sign the installers (release)
-    needs: [linux, windows, gui-linux, gui-windows]
+    needs: [linux, windows, gui-linux, gui-windows, upgrade-linux, upgrade-windows]
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     environment: release
     runs-on: ubuntu-22.04
