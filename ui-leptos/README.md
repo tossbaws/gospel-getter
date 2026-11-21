@@ -121,7 +121,7 @@ card, then the reader), which a native test pins.
 
 [Trunk] builds the page: `trunk build --release` at the repository root
 reads `Trunk.toml`, compiles this crate, runs wasm-bindgen (`no-modules`
-target) and wasm-opt (`-Oz`), copies the fonts and favicons, and writes
+target) and wasm-opt (`-Oz`), copies the fonts and the favicon, and writes
 `dist/`, which Tauri embeds (`frontendDist` in `src-tauri/tauri.conf.json`).
 Tauri runs it for you: `cargo tauri dev` and `cargo tauri build` call
 `trunk build` and `trunk build --release` first (`beforeDevCommand`,

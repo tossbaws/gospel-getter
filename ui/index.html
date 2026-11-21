@@ -4,9 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gospel Getter</title>
-    <!-- Generated from packaging/icon.svg by packaging/generate-icons.sh. -->
-    <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
+    <!-- The app icon, written by packaging/generate_icons.py. -->
+    <link rel="icon" type="image/png" sizes="128x128" href="favicon.png">
     <!-- The chapter's face, fetched while the page loads: its text waits
          for it (font-display: block), and the chapter is drawn by the
          page's Rust pieces once they've loaded, later than the page itself
@@ -18,7 +17,6 @@
          itself. These links are Trunk's; they do nothing in a browser. -->
     <link data-trunk rel="rust" href="../ui-leptos/Cargo.toml" data-bindgen-target="no-modules" data-wasm-opt="z" />
     <link data-trunk rel="copy-dir" href="fonts" />
-    <link data-trunk rel="copy-file" href="favicon.svg" />
     <link data-trunk rel="copy-file" href="favicon.png" />
     <style>
         /* Literata (TypeTogether, SIL Open Font License, see
@@ -206,9 +204,7 @@
             }
         }
 
-        /* Vaporwave, the default before Chi Rho. Its darkest tone,
-           #14082c, is also the app icon's background
-           (packaging/icon.svg). */
+        /* Vaporwave, the default before Chi Rho. */
         :root[data-theme="vaporwave"],
         [data-theme-preview="vaporwave"] {
             color-scheme: dark;

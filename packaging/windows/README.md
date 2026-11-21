@@ -19,8 +19,8 @@ cargo tauri build
 
 which yields both an NSIS `.exe` and an MSI under
 `src-tauri/target/release/bundle/`. The generated `icon.ico` in
-`src-tauri/icons/` (made from `packaging/icon.svg` by
-`packaging/generate-icons.sh`) is used automatically; there's nothing
+`src-tauri/icons/` (made from `packaging/icon-source.png` by
+`packaging/generate_icons.py`) is used automatically; there's nothing
 Windows-specific left to hand-maintain here.
 
 The released installers also carry `gospel-getter-cli.exe` beside the app. To
