@@ -17,6 +17,7 @@ const CI_YML: &str = include_str!("../../.github/workflows/ci.yml");
 const TRUNK_TOML: &str = include_str!("../../Trunk.toml");
 const INSTALL_SH: &str = include_str!("../../packaging/install.sh");
 const WINDOWS_PACKAGING: &str = include_str!("../../packaging/windows/README.md");
+const NSIS_HOOKS: &str = include_str!("../windows-installer-hooks.nsh");
 const SIDECAR_CONF: &str = include_str!("../tauri.sidecar.conf.json");
 const GITIGNORE: &str = include_str!("../.gitignore");
 const CARGO_LOCK: &str = include_str!("../Cargo.lock");
@@ -144,6 +145,32 @@ fn pkgbuild_version_tracks_cargo_toml() {
              expected a `{expected}` line"
         );
     }
+}
+
+/// The setup.exe tells Explorer to refresh its icon cache once it has
+/// installed (see the hook file's header). Tauri runs the hook only if
+/// tauri.conf.json names it, and only the macro of that exact name.
+#[test]
+fn the_nsis_installer_refreshes_the_shell_icon_cache() {
+    let conf: Value = serde_json::from_str(TAURI_CONF).unwrap();
+    assert_eq!(
+        conf["bundle"]["windows"]["nsis"]["installerHooks"], "windows-installer-hooks.nsh",
+        "bundle.windows.nsis.installerHooks must name the hook file"
+    );
+    let body = NSIS_HOOKS
+        .split("!macro NSIS_HOOK_POSTINSTALL")
+        .nth(1)
+        .and_then(|rest| rest.split("!macroend").next())
+        .expect("the hook file defines NSIS_HOOK_POSTINSTALL");
+    let call = body
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("System::Call"))
+        .expect("NSIS_HOOK_POSTINSTALL calls a Win32 function");
+    assert_eq!(
+        call, "System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)'",
+        "SHChangeNotify with SHCNE_ASSOCCHANGED (0x08000000), flushed (SHCNF_FLUSH, 0x1000)"
+    );
 }
 
 /// Windows Installer only takes a version of numbers, so the MSI target

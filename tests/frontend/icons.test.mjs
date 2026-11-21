@@ -1,105 +1,55 @@
-// Guards the app icon against drift: every shipped raster (packaging PNG,
-// Tauri PNGs, every ICO frame, every PNG in the ICNS, the favicon) must
-// come from the one canonical source, packaging/icon.svg, via
-// packaging/generate-icons.sh. No dependencies: PNGs are decoded with
-// Node's own zlib.
+// Guards the app icon against drift: every shipped raster (the packaging
+// PNG, the Tauri PNGs, every ICO frame, every PNG in the ICNS, the favicon)
+// must be what packaging/generate_icons.py made from the one source,
+// packaging/icon-source.png, in the style its size calls for (see the
+// generator's header).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { inflateSync } from 'node:zlib';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { decodePng, icnsEntries, icoFrames } from './png.mjs';
 
 const root = new URL('../../', import.meta.url);
 const bytes = (path) => readFileSync(new URL(path, root));
 const text = (path) => bytes(path).toString('utf8');
+const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 
-const BG = [0x14, 0x08, 0x2c];
-const WHITE = [0xff, 0xff, 0xff];
+// The Captain's C2 Chi-Rho, byte for byte:
+// Brand_Attempts/2026-10-05_brand_chi-rho_C2_circuit-reliquary_polish.png.
+const SOURCE_SHA256 = 'a38236d8300c2df06a0be3a95b84b0e7f7f58365a9c8bc34ad48346dbfc997c7';
+const SMALLEST_DETAILED = 48;
+const PNGS = {
+    'packaging/icon.png': 512,
+    'src-tauri/icons/32x32.png': 32,
+    'src-tauri/icons/64x64.png': 64,
+    'src-tauri/icons/128x128.png': 128,
+    'src-tauri/icons/128x128@2x.png': 256,
+    'src-tauri/icons/icon.png': 512,
+    'ui/favicon.png': 128,
+};
+const ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 256];
+const ICNS_SIZES = { ic07: 128, ic08: 256, ic09: 512, ic10: 1024, ic11: 32, ic12: 64, ic13: 256, ic14: 512 };
 
-/** Decodes an 8-bit RGBA, non-interlaced PNG into { width, height, rgba }. */
-function decodePng(buf) {
-    assert.deepEqual([...buf.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], 'PNG signature');
-    let width;
-    let height;
-    const idat = [];
-    for (let i = 8; i < buf.length;) {
-        const length = buf.readUInt32BE(i);
-        const type = buf.toString('latin1', i + 4, i + 8);
-        const data = buf.subarray(i + 8, i + 8 + length);
-        if (type === 'IHDR') {
-            width = data.readUInt32BE(0);
-            height = data.readUInt32BE(4);
-            assert.equal(data[8], 8, 'bit depth 8');
-            assert.equal(data[9], 6, 'colour type RGBA');
-            assert.equal(data[12], 0, 'not interlaced');
-        } else if (type === 'IDAT') {
-            idat.push(data);
-        }
-        i += 12 + length;
-    }
-    const raw = inflateSync(Buffer.concat(idat));
-    const stride = width * 4;
-    const rgba = Buffer.alloc(stride * height);
-    for (let y = 0; y < height; y++) {
-        const filter = raw[y * (stride + 1)];
-        const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
-        for (let x = 0; x < stride; x++) {
-            const a = x >= 4 ? rgba[y * stride + x - 4] : 0;
-            const b = y > 0 ? rgba[(y - 1) * stride + x] : 0;
-            const c = x >= 4 && y > 0 ? rgba[(y - 1) * stride + x - 4] : 0;
-            let predictor = 0;
-            if (filter === 1) predictor = a;
-            else if (filter === 2) predictor = b;
-            else if (filter === 3) predictor = (a + b) >> 1;
-            else if (filter === 4) {
-                const p = a + b - c;
-                const [pa, pb, pc] = [Math.abs(p - a), Math.abs(p - b), Math.abs(p - c)];
-                predictor = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-            }
-            rgba[y * stride + x] = (line[x] + predictor) & 255;
-        }
-    }
-    return { width, height, rgba };
-}
+const source = decodePng(bytes('packaging/icon-source.png'));
+const master = decodePng(bytes('packaging/icon.png'));
 
-/** Each frame of an ICO: its declared size and its (PNG) image. */
-function icoFrames(buf) {
-    const count = buf.readUInt16LE(4);
-    return Array.from({ length: count }, (_, k) => {
-        const entry = 6 + 16 * k;
-        const size = buf[entry] || 256;
-        const length = buf.readUInt32LE(entry + 8);
-        const offset = buf.readUInt32LE(entry + 12);
-        return { size, png: buf.subarray(offset, offset + length) };
-    });
-}
-
-/** Each entry of an ICNS: its type and payload. */
-function icnsEntries(buf) {
-    assert.equal(buf.toString('latin1', 0, 4), 'icns');
-    const entries = [];
-    for (let i = 8; i < buf.length;) {
-        const length = buf.readUInt32BE(i + 4);
-        entries.push({ type: buf.toString('latin1', i, i + 4), data: buf.subarray(i + 8, i + length) });
-        i += length;
-    }
-    return entries;
-}
-
-/** Box-averages an image down to n x n, composited over mid grey. */
-function downsample({ width, height, rgba }, n) {
+/**
+ * Box-averages an image down to n x n, composited over mid grey, reading
+ * the source `dy` rows lower (rows past the edge count as grey).
+ */
+function downsample({ width, height, rgba }, n, dy = 0) {
     const out = new Float64Array(n * n * 3);
     for (let ty = 0; ty < n; ty++) {
         for (let tx = 0; tx < n; tx++) {
             const [x0, x1] = [Math.floor((tx * width) / n), Math.floor(((tx + 1) * width) / n)];
             const [y0, y1] = [Math.floor((ty * height) / n), Math.floor(((ty + 1) * height) / n)];
             const sum = [0, 0, 0];
-            for (let y = y0; y < y1; y++) {
+            for (let y = y0 + dy; y < y1 + dy; y++) {
                 for (let x = x0; x < x1; x++) {
                     const i = (y * width + x) * 4;
-                    const alpha = rgba[i + 3] / 255;
-                    for (let ch = 0; ch < 3; ch++) sum[ch] += rgba[i + ch] * alpha + 128 * (1 - alpha);
+                    const alpha = y < height ? rgba[i + 3] / 255 : 0;
+                    for (let ch = 0; ch < 3; ch++) sum[ch] += (alpha ? rgba[i + ch] * alpha : 0) + 128 * (1 - alpha);
                 }
             }
             const count = (x1 - x0) * (y1 - y0);
@@ -109,92 +59,126 @@ function downsample({ width, height, rgba }, n) {
     return out;
 }
 
-const master = decodePng(bytes('packaging/icon.png'));
+/** Mean difference (0 to 1) of two n x n downsamples, inside 90% of the circle. */
+function difference(a, b, n) {
+    const centre = (n - 1) / 2;
+    let diff = 0;
+    let count = 0;
+    for (let y = 0; y < n; y++) {
+        for (let x = 0; x < n; x++) {
+            if (Math.hypot(x - centre, y - centre) > 0.45 * n) continue;
+            for (let ch = 0; ch < 3; ch++) diff += Math.abs(a[(y * n + x) * 3 + ch] - b[(y * n + x) * 3 + ch]);
+            count += 3;
+        }
+    }
+    return diff / count / 255;
+}
 
 /**
- * Checks one raster: its size; that every visible pixel is the background,
- * white, or an antialiased blend of the two (no third colour, like the old
- * cyan rim); that it has the same silhouette as the 512px master; and that
- * the Rho's counter is open where there are enough pixels for one.
+ * Checks one raster: its size; the round window with transparent corners;
+ * and its style. From 48 px it is the detailed mark (the 512px master,
+ * stained glass and all); below, the flat-small glyph (gold on two dark
+ * panes, no cyan glass), which looks nothing like the master.
  */
 function assertIconRaster(name, image, size) {
     assert.equal(image.width, size, `${name} width`);
     assert.equal(image.height, size, `${name} height`);
+    // Tauri's codegen refuses any PNG icon that isn't RGBA.
+    assert.equal(image.colourType, 6, `${name} is RGBA`);
 
-    let brightest = 0;
-    let background = 0;
-    for (let i = 0; i < image.rgba.length; i += 4) {
-        // Mostly transparent edge pixels (the rounded corners) carry too
-        // little colour precision to judge.
-        if (image.rgba[i + 3] < 192) continue;
-        const px = [image.rgba[i], image.rgba[i + 1], image.rgba[i + 2]];
-        const t = (px[1] - BG[1]) / (WHITE[1] - BG[1]);
-        const expected = BG.map((c, ch) => c + t * (WHITE[ch] - c));
-        const off = Math.max(...px.map((c, ch) => Math.abs(c - expected[ch])));
-        assert.ok(off <= 12, `${name}: pixel ${i / 4} rgb(${px}) isn't a blend of #14082c and #ffffff`);
-        if (image.rgba[i + 3] === 255) brightest = Math.max(brightest, t);
-        if (image.rgba[i + 3] === 255 && t < 0.03) background++;
+    const centre = (size - 1) / 2;
+    let opaque = 0;
+    let cyan = 0;
+    let gold = 0;
+    let bluest = 0;
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+            const i = (y * size + x) * 4;
+            const [r, g, b, a] = image.rgba.subarray(i, i + 4);
+            // Past the window's edge, only the downsampling's faint ringing
+            // (alpha 3 at most, invisible) reaches; the corners are clear.
+            const distance = Math.hypot(x - centre, y - centre);
+            if (distance > 0.6 * size) assert.equal(a, 0, `${name}: (${x}, ${y}) is in a corner, so transparent`);
+            else if (distance > 0.52 * size) assert.ok(a <= 4, `${name}: (${x}, ${y}) is outside the window (alpha ${a})`);
+            if (a < 255) continue;
+            opaque++;
+            bluest = Math.max(bluest, b);
+            if (g > 170 && b > 170 && r < 120) cyan++;
+            if (r > 230 && g > 180 && b < 140) gold++;
+        }
     }
-    // Below 32px the strokes are thinner than a pixel, so antialiasing
-    // never quite reaches pure white.
-    assert.ok(brightest > (size >= 32 ? 0.97 : 0.6), `${name}: the emblem is white (brightest ${brightest.toFixed(2)})`);
-    assert.ok(background > 0, `${name} has the dark background`);
-    assert.ok(image.rgba[3] < 255, `${name}: the top-left corner is rounded off`);
+    const middle = (Math.floor(size / 2) * size + Math.floor(size / 2)) * 4;
+    assert.equal(image.rgba[middle + 3], 255, `${name}: the middle is opaque`);
+    assert.ok(gold > 0, `${name}: the gold glyph`);
 
-    const n = Math.min(size, 512);
-    const [a, b] = [downsample(image, n), downsample(master, n)];
-    let diff = 0;
-    for (let i = 0; i < a.length; i++) diff += Math.abs(a[i] - b[i]);
-    const mean = diff / a.length / 255;
-    assert.ok(mean < 0.04, `${name} differs from packaging/icon.png (mean ${mean.toFixed(3)})`);
-
-    // The counter's centre, (146.75, 60.55) in the SVG's 256-unit space.
-    if (size >= 32) {
-        const [x, y] = [Math.floor((146.75 * size) / 256), Math.floor((60.55 * size) / 256)];
-        const i = (y * size + x) * 4;
-        assert.ok(image.rgba[i + 1] < 64, `${name}: the Rho's counter is filled in at (${x}, ${y})`);
+    const off = difference(downsample(image, Math.min(size, 512)), downsample(master, Math.min(size, 512)), Math.min(size, 512));
+    if (size >= SMALLEST_DETAILED) {
+        assert.ok(off < 0.04, `${name} is the detailed mark (differs from packaging/icon.png by ${off.toFixed(3)})`);
+        assert.ok(cyan > 0.04 * opaque, `${name} has the cyan glass (${cyan} of ${opaque} pixels)`);
+    } else {
+        assert.ok(off > 0.1, `${name} is the flat glyph, not the detailed mark (${off.toFixed(3)})`);
+        assert.equal(cyan, 0, `${name}: no cyan glass in the flat glyph`);
+        assert.ok(bluest < 160, `${name}: the flat glyph's panes are dark (bluest ${bluest})`);
     }
 }
 
-test('the icon source is the approved white-on-dark Chi-Rho', () => {
-    const svg = text('packaging/icon.svg');
-    assert.deepEqual([...new Set(svg.match(/#[0-9a-f]{6}\b/gi))].sort(), ['#14082c', '#ffffff']);
-    assert.match(svg, /<rect width="256" height="256" rx="48" fill="#14082c"\/>/);
-    assert.match(svg, /<path fill="#ffffff" d="M 9\.2814416,182\.9088 /);
-    assert.ok(!/stroke/.test(svg), 'no outline');
+test('the icon source is the C2 Chi-Rho brand mark, as approved', () => {
+    assert.equal(sha256(bytes('packaging/icon-source.png')), SOURCE_SHA256);
+    assert.deepEqual([source.width, source.height, source.colourType], [2048, 2048, 2], '2048x2048 RGB');
+});
+
+test('the detailed mark is the source art, its window centred and nothing else changed', () => {
+    // generate_icons.py moves the window up 10 px at 2048 to centre it.
+    const off = difference(downsample(source, 64, 10), downsample(master, 64), 64);
+    assert.ok(off < 0.005, `packaging/icon.png differs from the source by ${off.toFixed(4)}`);
 });
 
 test('the generated icons are up to date with the source', () => {
-    const recorded = text('packaging/icon.svg.sha256').split(/\s+/)[0];
-    const actual = createHash('sha256').update(bytes('packaging/icon.svg')).digest('hex');
-    assert.equal(recorded, actual, 'icon.svg changed since packaging/generate-icons.sh last ran');
-});
-
-test('every PNG icon matches the source', () => {
-    assertIconRaster('packaging/icon.png', master, 512);
-    for (const [file, size] of [
-        ['32x32.png', 32],
-        ['64x64.png', 64],
-        ['128x128.png', 128],
-        ['128x128@2x.png', 256],
-        ['icon.png', 512],
-    ]) {
-        assertIconRaster(`src-tauri/icons/${file}`, decodePng(bytes(`src-tauri/icons/${file}`)), size);
+    const manifest = text('packaging/icons.sha256')
+        .trim()
+        .split('\n')
+        .map((line) => line.split(/ {2}/));
+    assert.deepEqual(manifest[0], [sha256(bytes('packaging/icon-source.png')), 'packaging/icon-source.png'],
+        'icon-source.png changed since packaging/generate_icons.py last ran');
+    assert.deepEqual(
+        manifest.slice(1).map(([, path]) => path),
+        [...Object.keys(PNGS), 'src-tauri/icons/icon.icns', 'src-tauri/icons/icon.ico'].sort(),
+        'the generator writes every shipped icon, and nothing else',
+    );
+    for (const [hash, path] of manifest.slice(1)) {
+        assert.equal(sha256(bytes(path)), hash, `${path} isn't what packaging/generate_icons.py wrote`);
     }
 });
 
-test('the Windows ICO has every size, all matching the source', () => {
+test('every PNG icon is the mark at its size', () => {
+    for (const [path, size] of Object.entries(PNGS)) assertIconRaster(path, decodePng(bytes(path)), size);
+});
+
+test('the Windows ICO has every size Windows asks for, flat below 48 px and detailed from 48', () => {
     const frames = icoFrames(bytes('src-tauri/icons/icon.ico'));
-    assert.deepEqual(frames.map((f) => f.size).sort((a, b) => a - b), [16, 24, 32, 48, 64, 256]);
+    assert.deepEqual(frames.map((f) => f.size), ICO_SIZES);
     for (const { size, png } of frames) assertIconRaster(`icon.ico ${size}px`, decodePng(png), size);
 });
 
-test('the macOS ICNS PNG entries all match the source', () => {
-    const expected = { ic07: 128, ic08: 256, ic09: 512, ic10: 1024, ic11: 32, ic12: 64, ic13: 256, ic14: 512 };
+test('the macOS ICNS PNG entries are the mark at each size', () => {
     const entries = icnsEntries(bytes('src-tauri/icons/icon.icns'));
     const pngs = entries.filter((e) => e.data.subarray(1, 4).toString('latin1') === 'PNG');
-    assert.deepEqual(pngs.map((e) => e.type).sort(), Object.keys(expected).sort());
-    for (const { type, data } of pngs) assertIconRaster(`icon.icns ${type}`, decodePng(data), expected[type]);
+    assert.deepEqual(pngs.map((e) => e.type).sort(), Object.keys(ICNS_SIZES).sort());
+    for (const { type, data } of pngs) assertIconRaster(`icon.icns ${type}`, decodePng(data), ICNS_SIZES[type]);
+});
+
+test('a size is the same image in every file that has it', () => {
+    const images = new Map();
+    const add = (name, image) => {
+        const seen = images.get(image.width);
+        if (seen) assert.ok(seen.image.rgba.equals(image.rgba), `${name} isn't ${seen.name}'s image`);
+        else images.set(image.width, { name, image });
+    };
+    for (const path of Object.keys(PNGS)) add(path, decodePng(bytes(path)));
+    for (const { size, png } of icoFrames(bytes('src-tauri/icons/icon.ico'))) add(`icon.ico ${size}px`, decodePng(png));
+    for (const { type, data } of icnsEntries(bytes('src-tauri/icons/icon.icns'))) {
+        if (data.subarray(1, 4).toString('latin1') === 'PNG') add(`icon.icns ${type}`, decodePng(data));
+    }
 });
 
 test('Tauri bundles exactly the generated icon files', () => {
@@ -208,21 +192,45 @@ test('Tauri bundles exactly the generated icon files', () => {
     ]);
 });
 
-test('the webview favicon is the same art, served from the frontend', () => {
+test('the webview favicon is the 128px icon, served from the frontend', () => {
     const html = text('ui/index.html');
     const head = html.slice(0, html.indexOf('</head>'));
     const links = [...head.matchAll(/<link rel="icon"[^>]*>/g)].map((m) => m[0]);
-    assert.deepEqual(links, [
-        '<link rel="icon" type="image/svg+xml" href="favicon.svg">',
-        '<link rel="icon" type="image/png" sizes="64x64" href="favicon.png">',
-    ]);
+    assert.deepEqual(links, ['<link rel="icon" type="image/png" sizes="128x128" href="favicon.png">']);
     // Tauri serves frontendDist as the app's root: dist/, the page as Trunk
-    // built it from ui/ (Trunk.toml), with the favicons copied beside it
+    // built it from ui/ (Trunk.toml), with the favicon copied beside it
     // (`npm test` builds it before the tests run).
     assert.equal(JSON.parse(text('src-tauri/tauri.conf.json')).build.frontendDist, '../dist');
-    assert.deepEqual(bytes('ui/favicon.svg'), bytes('packaging/icon.svg'));
-    assertIconRaster('ui/favicon.png', decodePng(bytes('ui/favicon.png')), 64);
-    assert.deepEqual(bytes('dist/favicon.svg'), bytes('ui/favicon.svg'), 'Trunk copies the SVG favicon as it is');
-    assert.deepEqual(bytes('dist/favicon.png'), bytes('ui/favicon.png'), 'Trunk copies the PNG favicon as it is');
-    assert.ok(!existsSync(new URL('ui/favicon.ico', root)), 'no separate, possibly stale favicon.ico');
+    assert.deepEqual(bytes('ui/favicon.png'), bytes('src-tauri/icons/128x128.png'));
+    assert.deepEqual(bytes('dist/favicon.png'), bytes('ui/favicon.png'), 'Trunk copies the favicon as it is');
+    for (const stale of ['ui/favicon.svg', 'ui/favicon.ico', 'dist/favicon.svg']) {
+        assert.ok(!existsSync(new URL(stale, root)), `no separate, possibly stale ${stale}`);
+    }
+});
+
+test('nothing points at the old SVG icon or its script', () => {
+    const gone = ['packaging/icon.svg', 'packaging/icon.svg.sha256', 'packaging/generate-icons.sh'];
+    for (const path of gone) assert.ok(!existsSync(new URL(path, root)), `${path} is gone`);
+    // Everything that builds, packages or describes the app; the changelog
+    // keeps its history, and this file names them to check for them.
+    const self = new URL(import.meta.url).pathname;
+    const files = [];
+    const walk = (dir) => {
+        for (const name of readdirSync(new URL(dir, root))) {
+            const path = `${dir}${name}`;
+            // Build output, and the Bible texts (19 MB of JSON).
+            if (['node_modules', 'target', 'dist'].includes(name) || path === 'src-tauri/data') continue;
+            if (statSync(new URL(path, root)).isDirectory()) walk(`${path}/`);
+            else if (/\.(rs|mjs|js|html|md|sh|py|json|toml|yml|nsh|txt)$|PKGBUILD$/.test(name)) files.push(path);
+        }
+    };
+    for (const dir of ['ui/', 'ui-leptos/', 'packaging/', 'tests/', 'scripts/', 'src-tauri/', 'tools/', '.github/']) walk(dir);
+    files.push('README.md', 'CLAUDE.md', 'Trunk.toml');
+    for (const path of files) {
+        if (new URL(path, root).pathname === self) continue;
+        const body = text(path);
+        for (const old of [...gone, 'favicon.svg']) {
+            assert.ok(!body.includes(old), `${path} still names ${old}`);
+        }
+    }
 });
