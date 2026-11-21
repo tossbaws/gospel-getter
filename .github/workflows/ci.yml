@@ -19,6 +19,12 @@ name: CI
 # .github/dependabot.yml), and every job builds with the Rust release the
 # installers are built with (RUST_TOOLCHAIN below). Every job has a time
 # limit, and apt-get retries, as in dist.yml.
+#
+# Every job checks, right after its checkout, that each file is the
+# commit's bytes (.github/actions/committed-bytes). build-and-test and
+# test-windows build as dist.yml's linux and windows jobs do:
+# src-tauri/tests/packaging_config.rs's ci_tests_what_the_release_jobs_build
+# lists what may differ, and why.
 
 on:
   push:
@@ -56,6 +62,9 @@ jobs:
         working-directory: src-tauri
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the checkout is the committed bytes
+        uses: ./.github/actions/committed-bytes
 
       # The release tools: the update manifest generator, the installers'
       # signer (dist.yml's sign job) and the website's deploy gate
@@ -205,6 +214,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Check the checkout is the committed bytes
+        uses: ./.github/actions/committed-bytes
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags
         with:
@@ -275,6 +287,9 @@ jobs:
       # The runner's default checkout, as dist.yml's Windows jobs have
       # (see .gitattributes' first rule).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the checkout is the committed bytes
+        uses: ./.github/actions/committed-bytes
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16); the action has no release tags

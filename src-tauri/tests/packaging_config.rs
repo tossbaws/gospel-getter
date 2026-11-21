@@ -3135,6 +3135,492 @@ fn the_page_gets_no_permissions() {
     assert!(uses > 0, "the page's calls to Tauri weren't found");
 }
 
+/// The committed-bytes check, the step every job that builds or tests the
+/// app runs right after its checkout (see tools/ci/committed_bytes.py).
+const COMMITTED_BYTES: &str = "uses: ./.github/actions/committed-bytes";
+
+/// Every job in ci.yml and dist.yml that checks out the repository runs the
+/// committed-bytes check as its very next step, unconditionally, so nothing
+/// reads a file before it's checked; the action fails the job when a file
+/// differs. Why: .gitattributes' first rule, and CHANGELOG.md's 2.33.1.
+#[test]
+fn every_build_and_test_job_first_checks_its_checkout_is_the_committed_bytes() {
+    // They build and test nothing of the repository's: they sign, check and
+    // assemble the files the installer jobs built, and the release's
+    // signing path stays as it is.
+    const BUILD_NOTHING: [&str; 3] = ["sign", "sign-rehearsal", "bundle"];
+    let mut checked = Vec::new();
+    for (file, workflow) in [("ci.yml", CI_YML), ("dist.yml", DIST_YML)] {
+        let steps = workflow_steps(workflow);
+        for (job, _) in workflow_jobs(workflow) {
+            let own: Vec<&Step> = steps.iter().filter(|s| s.job == job).collect();
+            let checkout = own
+                .iter()
+                .position(|s| s.text.contains("uses: actions/checkout@"));
+            let check = own.iter().position(|s| s.text.contains(COMMITTED_BYTES));
+            if BUILD_NOTHING.contains(&job.as_str()) {
+                assert!(checkout.is_some(), "{file}: {job} checks out nothing");
+                continue;
+            }
+            let Some(at) = checkout else {
+                assert_eq!(check, None, "{file}: {job} checks a checkout it hasn't");
+                continue;
+            };
+            assert_eq!(
+                check,
+                Some(at + 1),
+                "{file}: {job}'s next step after its checkout should be `{COMMITTED_BYTES}`"
+            );
+            let step = own[at + 1];
+            for key in ["if:", "continue-on-error:", "with:"] {
+                assert!(
+                    !step.text.contains(&format!("        {key}")),
+                    "{file}: {job}'s check has {key}: {step:#?}"
+                );
+            }
+            checked.push(format!("{file}: {job}"));
+        }
+    }
+    assert_eq!(
+        checked,
+        [
+            "ci.yml: build-and-test",
+            "ci.yml: frontend-tests",
+            "ci.yml: test-windows",
+            "dist.yml: linux",
+            "dist.yml: gui-test-app-linux",
+            "dist.yml: windows",
+            "dist.yml: gui-test-app-windows",
+            "dist.yml: gui-linux",
+            "dist.yml: gui-windows",
+        ]
+    );
+
+    let action = github_files()
+        .into_iter()
+        .find(|(name, _)| name == "actions/committed-bytes/action.yml")
+        .map(|(_, text)| text)
+        .expect(".github/actions/committed-bytes/action.yml");
+    let code: Vec<&str> = action
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    assert!(
+        code.contains(
+            &"\"$py\" \"$GITHUB_WORKSPACE/tools/ci/committed_bytes.py\" \"$GITHUB_WORKSPACE\""
+        ),
+        "{action}"
+    );
+    assert!(!action.contains("continue-on-error"), "{action}");
+}
+
+/// ci.yml's job that tests each platform, and dist.yml's job that builds
+/// that platform's installers.
+const TESTED_RELEASES: [(&str, &str); 2] =
+    [("build-and-test", "linux"), ("test-windows", "windows")];
+
+/// A way a CI test job may build differently from the release job it
+/// stands for: what differs (a key of [`build_setup`]), the value in each
+/// (`-` for none, a set's values joined with `; `), and why.
+struct AllowedDifference {
+    ci_job: &'static str,
+    what: &'static str,
+    in_ci: &'static str,
+    in_release: &'static str,
+    why: &'static str,
+}
+
+const LINT_TOOLS: &str = "the lint tools CI runs; they change nothing rustc builds";
+const CI_CARGO_CONFIG: &str = "it sets only debug and test builds' profile, which no release build \
+     reads (ci_tests_what_the_release_jobs_build checks it)";
+const PACKAGES: &str = "CI tests the workspace's default members together, the release builds \
+     each package alone; no build turns a feature on, and the GUI checks run on the installers \
+     and on a test app built -p gospel_getter as they are";
+const SELF_UPDATE: &str = "a compile-time switch the installers alone have (see updater.rs); \
+     updater::update_mode takes it as an argument, and its tests run both values";
+
+const ALLOWED_DIFFERENCES: &[AllowedDifference] = &[
+    AllowedDifference {
+        ci_job: "build-and-test",
+        what: "runs-on",
+        in_ci: "ubuntu-latest",
+        in_release: "ubuntu-22.04",
+        why: "the installers are built on the oldest Ubuntu Tauri supports (see the linux \
+              job), and gui-linux tests them there",
+    },
+    AllowedDifference {
+        ci_job: "build-and-test",
+        what: "rust components",
+        in_ci: "rustfmt, clippy",
+        in_release: "-",
+        why: LINT_TOOLS,
+    },
+    AllowedDifference {
+        ci_job: "test-windows",
+        what: "rust components",
+        in_ci: "clippy",
+        in_release: "-",
+        why: LINT_TOOLS,
+    },
+    AllowedDifference {
+        ci_job: "build-and-test",
+        what: "cargo config",
+        in_ci: ".github/ci/cargo-config.toml into CARGO_HOME",
+        in_release: "-",
+        why: CI_CARGO_CONFIG,
+    },
+    AllowedDifference {
+        ci_job: "test-windows",
+        what: "cargo config",
+        in_ci: ".github/ci/cargo-config.toml into CARGO_HOME",
+        in_release: "-",
+        why: CI_CARGO_CONFIG,
+    },
+    AllowedDifference {
+        ci_job: "build-and-test",
+        what: "env RUSTDOCFLAGS",
+        in_ci: "-D warnings (step: Docs)",
+        in_release: "-",
+        why: "rustdoc's own flags, for the docs step; nothing is built with them",
+    },
+    AllowedDifference {
+        ci_job: "test-windows",
+        what: "env RUSTFLAGS",
+        in_ci: "-",
+        in_release: "-C target-feature=+crt-static (step: Build the CLI sidecar)",
+        why: "links the shipped CLI's C runtime statically, which only its link step sees; \
+              the windows job checks its imports itself",
+    },
+    AllowedDifference {
+        ci_job: "build-and-test",
+        what: "env GOSPEL_GETTER_SELF_UPDATE",
+        in_ci: "-",
+        in_release: "1 (step: Build AppImage and deb bundles)",
+        why: SELF_UPDATE,
+    },
+    AllowedDifference {
+        ci_job: "test-windows",
+        what: "env GOSPEL_GETTER_SELF_UPDATE",
+        in_ci: "-",
+        in_release: "1 (step: Build Windows installers)",
+        why: SELF_UPDATE,
+    },
+    AllowedDifference {
+        ci_job: "build-and-test",
+        what: "cargo packages",
+        in_ci: "-p gospel-getter-cli; default members",
+        in_release: "-p gospel-getter-cli; -p gospel_getter",
+        why: PACKAGES,
+    },
+    AllowedDifference {
+        ci_job: "test-windows",
+        what: "cargo packages",
+        in_ci: "default members",
+        in_release: "-p gospel-getter-cli; -p gospel_getter",
+        why: PACKAGES,
+    },
+];
+
+/// What a job builds with, as `what -> values` ([`build_setup`]).
+type BuildSetup = std::collections::BTreeMap<String, std::collections::BTreeSet<String>>;
+
+/// How a job prepares and runs its build, as `what -> values`: the runner,
+/// the checkout step, the Rust install's action and `with:` options, every
+/// `RUST*`, `CARGO*` and `GOSPEL_GETTER_*` variable (the workflow's, the
+/// job's and each step's, a step's named), the cargo config it adds, and the
+/// packages and features of its app builds (the cargo build, test and tauri
+/// build commands it runs in src-tauri). Panics on a git config step, which
+/// no build job may have (see every_checkout_keeps_the_committed_line_endings).
+fn build_setup(workflow: &str, job: &str) -> BuildSetup {
+    let mut setup = BuildSetup::default();
+    let mut add = |what: &str, value: String| {
+        setup.entry(what.to_owned()).or_default().insert(value);
+    };
+    let (_, job_text) = workflow_jobs(workflow)
+        .into_iter()
+        .find(|(id, _)| id == job)
+        .unwrap_or_else(|| panic!("no job {job}"));
+    let steps: Vec<Step> = workflow_steps(workflow)
+        .into_iter()
+        .filter(|s| s.job == job)
+        .collect();
+    // A step's own lines, without comments: a job's last step's text runs
+    // on into the next job's keys (see workflow_steps), at fewer spaces.
+    let code = |text: &str| -> Vec<String> {
+        text.lines()
+            .take_while(|l| l.is_empty() || l.starts_with("      "))
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .map(|l| l.trim_end().to_owned())
+            .collect()
+    };
+
+    for key in job_keys(workflow, job) {
+        if let Some(runner) = key.strip_prefix("runs-on: ") {
+            add("runs-on", runner.to_owned());
+        }
+    }
+
+    let checkouts: Vec<&Step> = steps
+        .iter()
+        .filter(|s| s.text.contains("uses: actions/checkout@"))
+        .collect();
+    let [checkout] = checkouts.as_slice() else {
+        panic!("{job}: one checkout: {checkouts:#?}");
+    };
+    add(
+        "checkout",
+        code(&checkout.text).join("\n").trim().to_owned(),
+    );
+
+    let installs: Vec<&Step> = steps
+        .iter()
+        .filter(|s| s.text.contains("uses: dtolnay/rust-toolchain@"))
+        .collect();
+    let [install] = installs.as_slice() else {
+        panic!("{job}: one Rust install: {installs:#?}");
+    };
+    for line in code(&install.text) {
+        let line = line.trim_start_matches(' ');
+        if let Some(action) = line.strip_prefix("uses: ") {
+            add("rust action", action.to_owned());
+        }
+    }
+    for (key, value) in block(&install.text, 8, "with") {
+        add(&format!("rust {key}"), value);
+    }
+
+    let built_with = |name: &str| {
+        ["RUST", "CARGO", "GOSPEL_GETTER_"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+    };
+    for (name, value) in block(workflow, 0, "env")
+        .into_iter()
+        .chain(block(&job_text, 4, "env"))
+    {
+        if built_with(&name) {
+            add(&format!("env {name}"), value);
+        }
+    }
+    for step in &steps {
+        for (name, value) in block(&step.text, 8, "env") {
+            if built_with(&name) {
+                add(
+                    &format!("env {name}"),
+                    format!("{value} (step: {})", step.name),
+                );
+            }
+        }
+    }
+
+    let defaults = "    defaults:\n      run:\n        working-directory: src-tauri\n";
+    let default_dir = if job_text.contains(defaults) {
+        "src-tauri"
+    } else {
+        "."
+    };
+    for step in &steps {
+        let lines = code(&step.text);
+        for line in &lines {
+            assert!(
+                !line.contains("git config") && !line.contains("git -c "),
+                "{job}: a git config step: {step:#?}"
+            );
+            if let Some((cat, into)) = line.trim_start().split_once(" >> ")
+                && let Some(file) = cat.strip_prefix("run: cat ").or(cat.strip_prefix("cat "))
+                && into.contains("CARGO_HOME")
+                && into.ends_with("config.toml\"")
+            {
+                add("cargo config", format!("{file} into CARGO_HOME"));
+            }
+        }
+        let dir = lines
+            .iter()
+            .find_map(|l| l.strip_prefix("        working-directory: "))
+            .unwrap_or(default_dir);
+        for line in &lines {
+            // A command, not a message that names one.
+            let line = line.trim_start();
+            let Some(command) = line
+                .strip_prefix("run: cargo ")
+                .or(line.strip_prefix("cargo "))
+            else {
+                continue;
+            };
+            // Cargo's own arguments: `cargo tauri build` hands those after
+            // `--` to cargo; cargo build and test hand them to the program.
+            let args = if let Some(tauri) = command.strip_prefix("tauri build") {
+                tauri.split_once(" -- ").map_or("", |(_, cargo)| cargo)
+            } else if let Some(rest) = command
+                .strip_prefix("build")
+                .or(command.strip_prefix("test"))
+            {
+                rest.split_once(" -- ").map_or(rest, |(cargo, _)| cargo)
+            } else {
+                continue;
+            };
+            let args: Vec<&str> = args.split_whitespace().collect();
+            let mut features = Vec::new();
+            let mut packages = Vec::new();
+            for (i, arg) in args.iter().enumerate() {
+                let next = args.get(i + 1).copied().unwrap_or_default();
+                match *arg {
+                    "--config" => add("cargo config", format!("--config {next}")),
+                    "--features" | "-F" => features.push(format!("--features {next}")),
+                    "--all-features" | "--no-default-features" => features.push((*arg).to_owned()),
+                    "-p" | "--package" => packages.push(format!("-p {next}")),
+                    "--workspace" => packages.push("--workspace".to_owned()),
+                    other if other.starts_with("--config=") => {
+                        add("cargo config", other.replacen('=', " ", 1));
+                    }
+                    other if other.starts_with("--features=") => {
+                        features.push(other.replacen('=', " ", 1));
+                    }
+                    _ => {}
+                }
+            }
+            if dir != "src-tauri" {
+                continue;
+            }
+            add(
+                "cargo features",
+                if features.is_empty() {
+                    "default".to_owned()
+                } else {
+                    features.join(" ")
+                },
+            );
+            add(
+                "cargo packages",
+                if packages.is_empty() {
+                    "default members".to_owned()
+                } else {
+                    packages.join(" ")
+                },
+            );
+        }
+    }
+    setup
+}
+
+/// The `key: value` lines of the `name:` block at `indent` in `text`, the
+/// first one there, without quotes. A block given as `name: |` or a nested
+/// map is left out.
+fn block(text: &str, indent: usize, name: &str) -> Vec<(String, String)> {
+    let header = format!("{}{name}:", " ".repeat(indent));
+    let inner = " ".repeat(indent + 2);
+    text.lines()
+        .skip_while(|l| *l != header)
+        .skip(1)
+        .take_while(|l| l.is_empty() || l.starts_with(&inner))
+        .filter(|l| !l.starts_with(&format!("{inner} ")) && !l.trim_start().starts_with('#'))
+        .filter_map(|l| l.trim().split_once(": "))
+        .map(|(k, v)| (k.to_owned(), v.trim_matches('"').to_owned()))
+        .collect()
+}
+
+/// CI tests what the release builds (H3): each platform's test job prepares
+/// its build as that platform's release job does (the checkout, the Rust,
+/// every variable rustc, cargo or the app's build reads, the cargo config,
+/// the features), but for the differences [`ALLOWED_DIFFERENCES`] lists,
+/// each with its reason. A new difference fails here until someone writes
+/// down why, and an entry that no longer differs fails too. CI's added
+/// cargo config only ever touches debug and test builds, and every release
+/// build is a release one. The same class of bug as
+/// every_checkout_keeps_the_committed_line_endings, in general.
+#[test]
+fn ci_tests_what_the_release_jobs_build() {
+    let mut unexplained = Vec::new();
+    let mut used = std::collections::BTreeSet::new();
+    for (ci_job, release_job) in TESTED_RELEASES {
+        let ci = build_setup(CI_YML, ci_job);
+        let release = build_setup(DIST_YML, release_job);
+        let keys: std::collections::BTreeSet<&String> = ci.keys().chain(release.keys()).collect();
+        for what in keys {
+            let shown = |setup: &BuildSetup| {
+                setup.get(what).map_or("-".to_owned(), |values| {
+                    values.iter().cloned().collect::<Vec<_>>().join("; ")
+                })
+            };
+            let (in_ci, in_release) = (shown(&ci), shown(&release));
+            if in_ci == in_release {
+                continue;
+            }
+            match ALLOWED_DIFFERENCES.iter().position(|a| {
+                a.ci_job == ci_job
+                    && a.what == what
+                    && a.in_ci == in_ci
+                    && a.in_release == in_release
+            }) {
+                Some(at) => {
+                    used.insert(at);
+                }
+                None => unexplained.push(format!(
+                    "{ci_job} (ci.yml) and {release_job} (dist.yml) differ in {what}: \
+                     CI has `{in_ci}`, the release `{in_release}`"
+                )),
+            }
+        }
+    }
+    assert!(
+        unexplained.is_empty(),
+        "CI's tests would run on a build the release doesn't make. Make them match, or add each \
+         to ALLOWED_DIFFERENCES with the reason it's a difference between testing and shipping:\n{}",
+        unexplained.join("\n")
+    );
+    for (at, allowed) in ALLOWED_DIFFERENCES.iter().enumerate() {
+        assert!(
+            used.contains(&at),
+            "ALLOWED_DIFFERENCES allows a difference there is no longer: {} {}",
+            allowed.ci_job,
+            allowed.what
+        );
+        assert!(!allowed.why.is_empty());
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let config = std::fs::read_to_string(root.join(".github/ci/cargo-config.toml"))
+        .expect(".github/ci/cargo-config.toml");
+    let mut table = None;
+    for line in config.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            assert!(
+                line == "[profile.dev]" || line.starts_with("[profile.dev.package."),
+                "CI's cargo config reaches past debug and test builds: {line}"
+            );
+            table = Some(line);
+        }
+        assert!(
+            table.is_some(),
+            "CI's cargo config sets {line} outside a profile"
+        );
+    }
+
+    for (_, release_job) in TESTED_RELEASES {
+        for step in workflow_steps(DIST_YML)
+            .iter()
+            .filter(|s| s.job == release_job)
+        {
+            for line in step
+                .text
+                .lines()
+                .filter(|l| !l.trim_start().starts_with('#'))
+            {
+                if line.contains("cargo build") {
+                    assert!(line.contains("--release"), "{release_job}: {line}");
+                }
+                if line.contains("cargo tauri build") {
+                    assert!(!line.contains("--debug"), "{release_job}: {line}");
+                }
+            }
+        }
+    }
+}
+
 /// CI's tests and the installers must run on the same checkout, the
 /// committed bytes on every platform: no workflow or action sets git's
 /// `core.autocrlf`, and .gitattributes' first rule keeps every file as
