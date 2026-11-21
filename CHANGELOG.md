@@ -4,6 +4,72 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.33.0] - 2026-11-20
+
+Search results past the first 200 for AI agents, a search that ignores
+accents, a window title that stays put, and fixes for cross-references,
+dialogs, Vaporwave, screen readers and two passages side by side.
+
+### Added
+- AI agents can read on past the first 200 search results: a search
+  gives 200 verses at a time and says where the next ones start. A
+  search also says when it left out words after the 12th.
+
+### Changed
+- Search ignores accents and the letters æ and œ: `caesar` finds the
+  KJV's "Cæsar". The search index is built again once, on the first
+  launch of 2.33.0.
+- The window's title, in the title bar, the taskbar and Alt-Tab, stays
+  "Gospel Getter" instead of naming the chapter you're reading.
+- An AI agent's name, shown on its findings as in "Found by Claude", is
+  a short name of at most 40 characters, with no colon, semicolon, dash,
+  line break or character that can't be seen. An agent that doesn't give
+  one is named from its MCP client, such as "Claude Code", or else "AI
+  agent". A backup holding older findings with names that don't fit is
+  tidied up on import, and the import says how many.
+- A note, bookmark or AI finding's number is never given to another
+  after it's deleted. On its first launch, 2.33.0 upgrades the database
+  once, and before that it keeps a copy of it beside the original, named
+  `gospel_getter.db.before-schema-2`. That copy is never deleted
+  automatically; once you've used 2.33 for a while you can delete it.
+  Going back to 2.32.x still works: it reads and writes the upgraded
+  database.
+
+### Fixed
+- A cross-reference whose range runs backwards or past the end of its
+  chapter shows its first verse, with "(full range not available)",
+  instead of a wrong range. **About Gospel Getter** credits the
+  cross-references to OpenBible.info, under CC BY 4.0.
+- One Escape on **About Gospel Getter** closes only About. While a
+  dialog is open, the reader's shortcuts, Ctrl+= and Ctrl+-, and the
+  mouse's Back and Forward buttons no longer change the chapter or the
+  text size behind it.
+- Vaporwave's text is readable all the way down the page: the reading
+  column and the margin notes sit on a dark panel over the sunset.
+- Screen readers hear "highlighted" with the color, and "bookmarked", on
+  a verse that has them.
+- With two passages open: after the note editor closes, focus goes back
+  to the side you were on. Page Up, Page Down, Home, End and Space page
+  the active side from the buttons in the top bar and in each side's bar,
+  and Page Up and Page Down from the tabs on a narrow window. Notes in the
+  margin on the right-hand side move to their verses again after the text
+  reflows. A note's **Edit** opens on the side it took you to. A late
+  Back from a side you've closed is ignored. Changing translation after a
+  chapter couldn't be read tries that chapter again, instead of opening
+  Genesis 1.
+- With Single-key shortcuts off, the keys that still work are named in
+  full: **Keyboard shortcuts** now names F6, and the note under **Aa**
+  names F6 and Esc.
+- For AI agents: asked for a whole chapter that a translation doesn't
+  number every verse of, an agent is told which ("In Romans 16, verse 24
+  isn't numbered in the Berean Standard Bible."). A reference to a verse
+  that doesn't exist, such as John 3:99, gets the same message as in the
+  app. The MCP server starts even before the app has set up its library,
+  and says so on the first call instead of failing to start.
+
+No verse changes. Backups keep the same format. Updating keeps your
+bookmarks, highlights, notes, findings, reading position and settings.
+
 ## [2.32.2] - 2026-11-20
 
 Fixes for restoring backups, the second pane and two rare out-of-date
