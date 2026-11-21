@@ -21,7 +21,7 @@ use anyhow::{Result, bail, ensure};
 use serde_json::{Value, json};
 use thirtyfour::prelude::*;
 
-use super::{DESCRIBE_JS, Run, VISIBLE_JS};
+use super::{DESCRIBE_JS, Run, TITLE, VISIBLE_JS};
 
 /// The screenshots checks 38 to 44 take (check 4 lists them).
 pub(super) const READER_SHOTS: [&str; 7] = [
@@ -242,7 +242,8 @@ impl Run<'_> {
             "{DESCRIBE_JS} const seen = (() => {{ {HERE_JS} }})();
              const inner = document.getElementById('reading-pane-inner');
              const box = document.getElementById('search-panel');
-             const read = seen.heading === arguments[0] && seen.title === `${{seen.reference}} — Gospel Getter`
+             const read = seen.heading === arguments[0] && seen.reference.startsWith(arguments[0])
+                 && seen.title === '{TITLE}'
                  && !!inner && inner.dataset.guiCheckOld === undefined && box.hidden;
              if (!read) {{
                  const noted = window.__guiCheckGoTo;
@@ -286,7 +287,8 @@ impl Run<'_> {
     }
 
     /// Check 38: the chapter's end turns the chapter, from its top: Next,
-    /// then Previous, the reference button and the title following.
+    /// then Previous, the reference button following and the window's
+    /// title staying "Gospel Getter" (the native one too).
     pub(super) async fn chapter_steps(&mut self) -> Result<String> {
         self.go_to("John 3", "John 3").await?;
         let ui = &self.ui;
@@ -311,10 +313,12 @@ impl Run<'_> {
                 &format!(
                     "const seen = (() => {{ {HERE_JS} }})();
                      return [seen.heading === 'John 4' && seen.reference === 'John 4 · KJV'
-                         && seen.title === 'John 4 · KJV — Gospel Getter' && seen.scrollY === 0, seen];"
+                         && seen.title === '{TITLE}' && seen.scrollY === 0, seen];"
                 ),
             )
             .await?;
+        let window = self.window_titled().await?;
+        let ui = &self.ui;
         ui.js(
             "document.querySelector('.chapter-end').scrollIntoView({ block: 'center' }); return null;",
             Vec::new(),
@@ -331,8 +335,8 @@ impl Run<'_> {
         )
         .await?;
         Ok(format!(
-            "from John 3's end (scrolled {}px): Next read {} from its top (\"{}\", title \"{}\"); Previous read \
-             John 3 again, from its top",
+            "from John 3's end (scrolled {}px): Next read {} from its top (\"{}\", title \"{}\", {window}); \
+             Previous read John 3 again, from its top",
             before["scrollY"],
             next["heading"].as_str().unwrap_or("?"),
             next["reference"].as_str().unwrap_or("?"),
@@ -928,7 +932,7 @@ mod tests {
 
     fn seen(keys: &[&str], sent: &[&str], pane: &str, box_: &str) -> serde_json::Value {
         json!({
-            "heading": "John 3", "reference": "John 3 · KJV", "title": "John 3 · KJV — Gospel Getter",
+            "heading": "John 3", "reference": "John 3 · KJV", "title": "Gospel Getter",
             "box": box_, "pane": pane, "focus": "#search-input", "keys": keys, "sent": sent,
         })
     }

@@ -2,7 +2,7 @@
 //! markup (its verses, the faded neighbors or the Bible's edge cards,
 //! Compare's grid, the chapter's end, its Footnotes and Cross references),
 //! a verse's and a footnote's text as markup, the translations' records,
-//! what the reference button and the window title say, which translations
+//! what the reference button says, which translations
 //! Compare fetches, and the passage history's bookkeeping. `reader` puts
 //! them on the page.
 //!
@@ -714,7 +714,7 @@ pub fn translation_options(translations: &[Translation], current: &str) -> Strin
         .collect()
 }
 
-/// What the reference button and the window title say.
+/// What the reference button says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reference {
     /// `#ref-text`: "John 3 · KJV", or "John 3 · KJV + WEB" comparing.
@@ -725,8 +725,6 @@ pub struct Reference {
     pub codes: String,
     /// `#ref-btn`'s `aria-label`, the translations named in full.
     pub label: String,
-    /// `document.title`, which the backend copies to the window.
-    pub title: String,
 }
 
 /// Where the reader is: the chapter (`book_name` `chapter`) in the
@@ -749,7 +747,6 @@ pub fn reference(
     let text = format!("{place} · {codes}");
     Reference {
         label: format!("{place}, {spoken}. Choose a book and chapter"),
-        title: format!("{text} — Gospel Getter"),
         text,
         place,
         codes,
@@ -1498,7 +1495,6 @@ mod tests {
             Reference {
                 text: "John 3 · KJV".into(),
                 label: "John 3, King James Version. Choose a book and chapter".into(),
-                title: "John 3 · KJV — Gospel Getter".into(),
                 place: "John 3".into(),
                 codes: "KJV".into(),
             }

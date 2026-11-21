@@ -67,7 +67,7 @@ const SINGLE_KEYS_WATCH_JS: &str = "const seen = [];
 const SINGLE_KEYS_SEEN_JS: &str = "return window.__guiCheckSingleKeys || null;";
 
 /// Where the reader is, and what's selected and shown of it: the heading,
-/// the title, the verses selected, whether the card is open and a
+/// the reference, the title, the verses selected, whether the card is open and a
 /// cross-reference read in it, and whether each selected verse is in view
 /// below the top bar.
 const READING_JS: &str = "const heading = document.querySelector('.chapter-main .chapter-heading');
@@ -77,7 +77,8 @@ const READING_JS: &str = "const heading = document.querySelector('.chapter-main 
     const preview = document.getElementById('xref-preview');
     const menu = document.getElementById('copy-as-menu');
     const editor = document.getElementById('note-overlay');
-    return { heading: heading ? heading.textContent.trim() : null, title: document.title,
+    return { heading: heading ? heading.textContent.trim() : null,
+             reference: document.getElementById('ref-text').textContent, title: document.title,
              selected: selected.map((v) => Number(v.dataset.verse)),
              shown: selected.every((v) => { const r = v.getBoundingClientRect();
                  return r.top >= bar - 1 && r.bottom <= window.innerHeight + 1; }),
@@ -182,7 +183,7 @@ impl Run<'_> {
         self.ui.press(&format!("press {label}"), key).await?;
         self.reading_is(
             &format!("{heading} after {label}"),
-            "seen.heading === arguments[0] && seen.title.startsWith(arguments[0])",
+            "seen.heading === arguments[0] && seen.reference.startsWith(arguments[0])",
             vec![json!(heading)],
         )
         .await
@@ -202,7 +203,7 @@ impl Run<'_> {
         Ok(format!(
             "John 3 → John 4 ← John 3, ] Acts 1, [ John 1, [ Luke 1, ← {} (\"{}\")",
             back["heading"].as_str().unwrap_or("?"),
-            back["title"].as_str().unwrap_or("?"),
+            back["reference"].as_str().unwrap_or("?"),
         ))
     }
 
@@ -521,7 +522,8 @@ impl Run<'_> {
 
     /// Check 58, first after the restart: a cold start goes straight to the
     /// chapter the first session left (`saved`, its heading), its verses on
-    /// screen, the window titled, with nothing said above it.
+    /// screen, the reference button saying it and the window titled
+    /// "Gospel Getter", with nothing said above it.
     pub(super) async fn cold_start(&mut self, saved: Option<&str>) -> Result<String> {
         let Some(saved) = saved else {
             anyhow::bail!("not run: the first session didn't say where it left the reader");
@@ -536,19 +538,22 @@ impl Run<'_> {
                  const nav = performance.getEntriesByType('navigation')[0];
                  const seen = { heading: heading ? heading.textContent.trim() : null, verses: verses.length,
                      inner: !!document.getElementById('reading-pane-inner'), title: document.title,
+                     reference: (document.getElementById('ref-text') || {}).textContent || '',
                      notice: notice ? (notice.hidden ? '' : notice.textContent) : null,
                      loaded: nav ? Math.round(nav.domContentLoadedEventEnd) : null };
                  return [seen.heading === arguments[0] && seen.verses > 0 && seen.inner
-                     && seen.title.startsWith(arguments[0]) && seen.notice === '', seen];",
+                     && seen.reference.startsWith(arguments[0]) && seen.title === 'Gospel Getter'
+                     && seen.notice === '', seen];",
                 vec![json!(saved)],
                 Some(self.config.session_timeout),
             )
             .await?;
         ensure!(seen["verses"].as_u64().unwrap_or(0) > 0, "no verses");
         Ok(format!(
-            "after the restart: {} ({} verses, the reader's markup), titled \"{}\", nothing above it; page read in {} ms",
+            "after the restart: {} ({} verses, the reader's markup, \"{}\"), titled \"{}\", nothing above it; page read in {} ms",
             seen["heading"].as_str().unwrap_or("?"),
             seen["verses"],
+            seen["reference"].as_str().unwrap_or("?"),
             seen["title"].as_str().unwrap_or("?"),
             seen["loaded"],
         ))

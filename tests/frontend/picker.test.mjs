@@ -9,7 +9,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { clickAndWaitForCalls as clickAndWait, closeBridge, el as $, openApp, settle, shownOnScreen, withApp } from './harness.mjs';
+import { bookId, clickAndWaitForCalls as clickAndWait, closeBridge, el as $, openApp, settle, shownOnScreen, withApp } from './harness.mjs';
 
 after(closeBridge);
 
@@ -92,39 +92,61 @@ test('the reference follows navigation, the translation and compare', () =>
         assert.deepEqual(app.consoleErrors, []);
     }));
 
-// The backend copies the page's title to the native window (window.rs),
-// so the taskbar and Alt-Tab say where the reader is.
-test('the window title follows the reference: navigation, the translation and compare', () =>
-    withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
-        const title = () => app.document.title;
-        assert.equal(title(), 'John 3 · KJV — Gospel Getter');
+// The window's title is the app's name all session (D24, window.rs): the
+// taskbar and Alt-Tab don't change as the reader moves. The reference
+// button says where the reader is.
+test('the window title stays “Gospel Getter”: navigation, the translation, Compare, two panes and a restart', async () => {
+    const title = (app) => app.document.title;
+    const label = (app) => refBtn(app).getAttribute('aria-label');
+    let storage;
+    await withApp({ book: 'John', chapter: 3, translation: 'kjv' }, async (app) => {
+        assert.equal(title(app), 'Gospel Getter');
         await keyAndWait(app, 'ArrowRight');
-        assert.equal(title(), 'John 4 · KJV — Gospel Getter');
+        assert.equal(refText(app), 'John 4 · KJV');
+        assert.equal(title(app), 'Gospel Getter');
 
         app.click(book(app, 'Mark'));
         await clickAndWait(app, chapter(app, 16), 'get_reading');
-        assert.equal(title(), 'Mark 16 · KJV — Gospel Getter');
+        assert.equal(refText(app), 'Mark 16 · KJV');
+        assert.equal(title(app), 'Gospel Getter');
 
         app.open('translation');
         await clickAndWait(app, $(app, 'translation-choices').querySelector('[data-value="web"]'), 'get_reading');
-        assert.equal(title(), 'Mark 16 · WEB — Gospel Getter');
+        assert.equal(refText(app), 'Mark 16 · WEB');
+        assert.equal(title(app), 'Gospel Getter');
 
-        // Comparing: what the reference button shows.
         app.key('Escape', {}, app.document.activeElement);
         await keyAndWait(app, 'c');
         assert.equal(refText(app), 'Mark 16 · WEB + KJV');
-        assert.equal(title(), 'Mark 16 · WEB + KJV — Gospel Getter');
-        await keyAndWait(app, 'ArrowLeft');
-        assert.equal(title(), 'Mark 15 · WEB + KJV — Gospel Getter');
+        assert.equal(title(app), 'Gospel Getter');
         await keyAndWait(app, 'c');
-        assert.equal(title(), 'Mark 15 · WEB — Gospel Getter');
+        assert.equal(refText(app), 'Mark 16 · WEB');
 
-        // Back (Alt+←): to John 4, where the reader left for Mark 16.
-        const before = app.calls.length;
-        app.key('ArrowLeft', { altKey: true });
-        await app.idle(before, 'get_reading');
-        assert.equal(title(), 'John 4 · WEB — Gospel Getter');
-    }));
+        // Two panes, the second active, then closed, then open again for
+        // the restart.
+        const panes = app.window.gospelGetterPanes;
+        let before = app.calls.length;
+        await panes.openBeside({ bookId: bookId('Romans'), chapter: 5, translation: 'kjv' });
+        await app.idle(before);
+        assert.match(label(app), /^Romans 5,/);
+        assert.equal(title(app), 'Gospel Getter');
+        await app.click(app.document.querySelector('.pane[data-pane="second"] .pane-close'));
+        assert.match(label(app), /^Mark 16,/);
+        assert.equal(title(app), 'Gospel Getter');
+        before = app.calls.length;
+        await panes.openBeside({ bookId: bookId('Romans'), chapter: 5, translation: 'kjv' });
+        await app.idle(before);
+        app.window.dispatchEvent(new app.window.Event('blur'));
+        await app.idle();
+        storage = app.storage();
+    });
+    await withApp({ book: 'John', chapter: 3, translation: 'kjv', keepPosition: true, storage }, async (app) => {
+        assert.equal(app.document.documentElement.dataset.split, 'on', 'the panes restored');
+        const first = app.document.querySelector('#reading-pane .chapter-heading').textContent;
+        assert.ok(label(app).startsWith(`${first},`), `${label(app)} names ${first}`);
+        assert.equal(title(app), 'Gospel Getter');
+    });
+});
 
 test('before a chapter is read the window title is the app’s name', () => {
     const html = readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8');

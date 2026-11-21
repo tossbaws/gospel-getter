@@ -27,6 +27,8 @@ const bar = (app, name) => column(app, name).querySelector('.pane-bar');
 const verseIn = (app, n, verse) => root(app, n).querySelector(`.chapter-main .verse[data-translation][data-verse="${verse}"]`);
 const marked = (app, n, cls) => [...root(app, n).querySelectorAll(`.chapter-main .verse[data-translation].${cls}`)]
     .map((v) => Number(v.dataset.verse));
+// The reference button's label: where the active pane is.
+const place = (app) => app.document.getElementById('ref-btn').getAttribute('aria-label');
 const readings = (app, since = 0) => app.calls.slice(since).filter((c) => c.cmd === 'get_reading')
     .map((c) => JSON.parse(JSON.stringify(c.args)));
 
@@ -93,13 +95,13 @@ test('two panes: each chapter is its own get_reading, in its own translation, th
         assert.equal(new Set(ids).size, ids.length, 'every id once');
     }));
 
-test('the second pane is active once opened beside (S13); a press in a pane makes it active, with its heading rule and the title', () =>
+test('the second pane is active once opened beside (S13); a press in a pane makes it active, with its heading rule and the reference', () =>
     withApp({ book: 'John', chapter: 3 }, async (app) => {
         await openBeside(app, { bookId: ROMANS, chapter: 5, translation: 'bsb' });
         assert.equal(panes(app).active(), 'second');
         assert.equal(column(app, 'second').dataset.paneActive, 'true');
         assert.equal(column(app, 'first').dataset.paneActive, 'false');
-        assert.match(app.document.title, /^Romans 5/);
+        assert.match(place(app), /^Romans 5,/);
         assert.equal(app.document.getElementById('translation-select').value, 'bsb');
         assert.equal(app.document.getElementById('translation-toggle').textContent, 'BSB');
 
@@ -110,7 +112,7 @@ test('the second pane is active once opened beside (S13); a press in a pane make
         assert.equal(panes(app).active(), 'first');
         assert.equal(column(app, 'first').dataset.paneActive, 'true');
         assert.equal(column(app, 'second').dataset.paneActive, 'false');
-        assert.match(app.document.title, /^John 3/);
+        assert.match(place(app), /^John 3,/);
         // The record says the active pane's translation; neither pane is
         // read again for it.
         assert.equal(app.document.getElementById('translation-select').value, 'kjv');
@@ -119,7 +121,7 @@ test('the second pane is active once opened beside (S13); a press in a pane make
         // A click from the keyboard (no press) is for its pane too.
         await app.click(verseIn(app, 2, 1));
         assert.equal(panes(app).active(), 'second');
-        assert.match(app.document.title, /^Romans 5/);
+        assert.match(place(app), /^Romans 5,/);
         // One selection at a time (D3).
         assert.deepEqual(marked(app, 2, 'verse-selected'), [1]);
         await press(app, verseIn(app, 1, 3));

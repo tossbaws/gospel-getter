@@ -81,7 +81,7 @@ test('below 900px the panes are tabs: a tab list naming each pane, only the acti
         assert.deepEqual(tabsSeen(app), {
             tabs: true, shown: true, selected: ['first'], tabindex: ['0', '-1'], hidden: ['second'], active: 'first',
         });
-        assert.match(app.document.title, /^John 3/);
+        assert.match($(app, 'ref-btn').getAttribute('aria-label'), /^John 3,/);
         assert.equal($(app, 'translation-select').value, 'kjv');
 
         // 900px: side by side again, each with its bar; the tabs go.

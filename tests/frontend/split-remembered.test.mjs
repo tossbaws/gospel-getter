@@ -121,7 +121,7 @@ test('a restart with the panes split opens the second where it was, the first at
         assert.equal(app.document.documentElement.dataset.split, 'on');
         assert.deepEqual([...panes(app).shown()], ['first', 'second']);
         assert.equal(panes(app).active(), 'first', 'the first pane is active at launch (D8)');
-        assert.match(app.document.title, /^John 3/);
+        assert.match(el(app, 'ref-btn').getAttribute('aria-label'), /^John 3,/);
         assert.equal(app.document.getElementById('translation-select').value, 'kjv');
         // The first pane's chapter, then the second's, each read once.
         assert.deepEqual(readings(app), [

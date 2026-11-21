@@ -235,10 +235,9 @@ needed.
   update. See [Updates](#updates) for which installs
   update themselves and how to turn the check off.
 - **A native desktop app.** Built with Tauri: no browser, no background
-  server, nothing listening on a port. The window's title says where you
-  are (`John 3 · KJV — Gospel Getter`), and the window opens at the size
-  and place you left it, on a screen that's still there. It can be as
-  small as 640×480.
+  server, nothing listening on a port. The window opens at the size and
+  place you left it, on a screen that's still there. It can be as small
+  as 640×480.
 
 ## A quick tour
 

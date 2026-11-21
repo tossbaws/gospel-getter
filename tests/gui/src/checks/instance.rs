@@ -23,9 +23,10 @@ use super::Run;
 /// What the app already open logs when it's opened again (`window.rs`).
 const OPENED_AGAIN: &str = "Gospel Getter was opened again; showing the window already open";
 
-/// The page's title and heading, to see it's the same page after.
+/// The page's reference and heading, to see it's the same page after.
 const PAGE_JS: &str = "const h = document.querySelector('.chapter-main .chapter-heading');
-    return { title: document.title, heading: h ? h.textContent.trim() : null,
+    return { reference: document.getElementById('ref-text').textContent,
+        heading: h ? h.textContent.trim() : null,
         visible: document.visibilityState, focused: document.hasFocus() };";
 
 /// How many times `log` (app.log) says the app was opened again.
@@ -69,14 +70,14 @@ impl Run<'_> {
         );
         let now = self.ui.js(PAGE_JS, Vec::new()).await?;
         ensure!(
-            now["title"] == page["title"] && now["heading"] == page["heading"],
+            now["reference"] == page["reference"] && now["heading"] == page["heading"],
             "the app already open should still show the same page: {page} before, {now} after"
         );
         Ok(format!(
             "the second launch exited 0 in {:.2}s; the app already open logged being opened \
              again and still shows {} (visibility {}, focused {})",
             took.as_secs_f64(),
-            now["title"],
+            now["reference"],
             now["visible"],
             now["focused"],
         ))

@@ -262,8 +262,7 @@ fn tauri_conf_turns_off_the_webview_page_zoom() {
 /// the app (`create: false`), hidden (`visible: false`), so it's shown only
 /// once its size and place are restored (see `window.rs`). The plugin is
 /// used only from Rust, so the webview gets none of its permissions, nor
-/// any window permission for the title (the page's own title is copied to
-/// the window).
+/// any window permission.
 #[test]
 fn the_window_state_plugin_restores_a_hidden_window_before_showing_it() {
     assert!(
@@ -290,6 +289,52 @@ fn the_window_state_plugin_restores_a_hidden_window_before_showing_it() {
     let capability: Value = serde_json::from_str(CAPABILITY).unwrap();
     assert_eq!(capability["windows"], serde_json::json!(["main"]));
     assert_eq!(capability["permissions"], serde_json::json!([]));
+}
+
+/// The window's title is "Gospel Getter" all session (D24, see
+/// `window.rs`): the main window is configured with it, and no code sets
+/// the page's title or the window's after. A file dialog's title is a
+/// literal (`.set_title("Export notes")`), so that's the only `set_title`.
+#[test]
+fn the_window_title_is_the_apps_name_and_nothing_changes_it() {
+    let conf: Value = serde_json::from_str(TAURI_CONF).unwrap();
+    assert_eq!(conf["app"]["windows"][0]["label"], "main");
+    assert_eq!(conf["app"]["windows"][0]["title"], "Gospel Getter");
+
+    fn sources(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("{dir:?}: {e}")) {
+            let path = entry.expect("a source entry").path();
+            if path.is_dir() {
+                sources(&path, found);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                found.push(path);
+            }
+        }
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut found = vec![root.join("ui/index.html"), root.join("ui/leptos-loader.js")];
+    sources(&root.join("ui-leptos/src"), &mut found);
+    sources(&root.join("src-tauri/src"), &mut found);
+    let mut dialogs = 0;
+    for path in &found {
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        assert!(
+            !text.contains("document.title"),
+            "{path:?} sets the page's title"
+        );
+        assert!(
+            !text.contains("title_changed"),
+            "{path:?} follows the page's title"
+        );
+        for (at, _) in text.match_indices("set_title(") {
+            assert!(
+                text[at + "set_title(".len()..].starts_with('"'),
+                "{path:?} sets a title that isn't a dialog's literal"
+            );
+            dialogs += 1;
+        }
+    }
+    assert!(dialogs > 0, "the file dialogs' titles weren't found");
 }
 
 /// One app at a time: the official single-instance plugin is a desktop
