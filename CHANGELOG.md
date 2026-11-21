@@ -4,6 +4,28 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.33.1] - 2026-11-21
+
+A fix for Windows PCs that couldn't start 2.33.0.
+
+### Fixed
+- On Windows, 2.33.0 couldn't start on a PC that already had an earlier
+  version of Gospel Getter: it showed "Gospel Getter couldn't start" with
+  a very long message, every time. New installs and Linux weren't
+  affected. 2.33.1 starts, and does the one-time upgrade 2.33.0
+  described: it keeps a copy of the database first, then builds the
+  search index again. The failed starts changed nothing: your bookmarks,
+  highlights, notes, findings, reading position and settings are as they
+  were.
+- Because 2.33.0 never starts on those PCs, it can't update itself: on
+  Windows, install 2.33.1 by hand once, from the release's Downloads,
+  over 2.33.0. Installs of 2.32.x and older that haven't updated yet are
+  offered 2.33.1 directly.
+- If the app ever can't start, its message is now short.
+
+No verse changes. Backups keep the same format. Updating keeps your
+bookmarks, highlights, notes, findings, reading position and settings.
+
 ## [2.33.0] - 2026-11-20
 
 Search results past the first 200 for AI agents, a search that ignores
