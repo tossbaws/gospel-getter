@@ -4,6 +4,29 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.34.0] - 2026-11-21
+
+A new app icon, and release builds that check an upgrade before they ship.
+
+### Changed
+- The app's icon is the Chi Rho Code mark, the same as the website's: the
+  stained-glass Chi-Rho at larger sizes, and a bold gold Chi-Rho at the
+  smallest, in the taskbar, the title bar and tabs. It shows in the
+  window, the taskbar, the Start menu and the desktop shortcut on Windows,
+  the app launcher on Linux, and **About Gospel Getter**.
+- On Windows, the setup.exe installer, which the in-app update also uses,
+  tells Windows to refresh its icons, so the new icon shows without
+  signing out. The MSI doesn't, so after installing with the MSI a
+  shortcut may keep the old icon until Windows refreshes it; signing out
+  and back in does.
+
+Behind the scenes: every release is now checked by installing the
+previous one, adding notes, bookmarks and highlights, and upgrading it,
+before it can be published. Nothing you'll see changes.
+
+No verse changes. Backups keep the same format. Updating keeps your
+bookmarks, highlights, notes, findings, reading position and settings.
+
 ## [2.33.1] - 2026-11-21
 
 A fix for Windows PCs that couldn't start 2.33.0.
