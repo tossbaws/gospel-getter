@@ -26,11 +26,13 @@ force-fail = []
 
 # Windows: gui-launch ties the app to itself with a job object, and the
 # checks make sure each app it started has exited before the next starts
-# (src/launched.rs). Already in the tree through tokio.
+# (src/launched.rs), closing its window first so WebView2 writes local
+# storage to disk (src/checks/exited.rs). Already in the tree through tokio.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
 ] }

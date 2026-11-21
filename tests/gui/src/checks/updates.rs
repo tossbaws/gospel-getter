@@ -144,6 +144,7 @@ pub(super) async fn run(
         .await;
 
     log_line(started, "close the test build (end the WebDriver session)");
+    super::exited::closed_first(run.config, started).await;
     let driver = run.ui.into_driver();
     match tokio::time::timeout(Duration::from_secs(10), driver.quit()).await {
         Ok(Ok(())) => log_line(started, "session ended, test build closed"),

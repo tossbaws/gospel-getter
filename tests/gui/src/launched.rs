@@ -127,20 +127,26 @@ impl Launched {
 }
 
 /// Windows processes: opened by pid, asked when they were created, what
-/// program they run and whether they have exited, and terminated.
+/// program they run and whether they have exited, asked to close their
+/// windows, and terminated.
 #[cfg(windows)]
 pub mod process {
     use std::io;
     use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
 
     use windows_sys::Win32::Foundation::{
-        ERROR_INVALID_PARAMETER, FILETIME, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        ERROR_INVALID_PARAMETER, FILETIME, HWND, LPARAM, WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::System::Threading::{
         GetProcessTimes, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
         PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, QueryFullProcessImageNameW, TerminateProcess,
         WaitForSingleObject,
     };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GW_OWNER, GetWindow, GetWindowThreadProcessId, IsWindowVisible, PostMessageW,
+        WM_CLOSE,
+    };
+    use windows_sys::core::BOOL;
 
     use super::{Identity, Launched, refused};
 
@@ -270,6 +276,50 @@ pub mod process {
             return Err(io::Error::last_os_error());
         }
         Ok((u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime))
+    }
+
+    /// Asks every visible top-level window of the process `pid` to close
+    /// (WM_CLOSE, as its title bar's close button does), and says how many
+    /// it asked. Posted, not sent: it returns before the app has acted.
+    pub fn close_windows(pid: u32) -> io::Result<usize> {
+        let mut found: (u32, Vec<HWND>) = (pid, Vec::new());
+        // SAFETY: `each` only reads the windows it's given and pushes to the
+        // pair `lparam` points to, which outlives the call; EnumWindows
+        // calls it on this thread, before it returns.
+        let ok = unsafe { EnumWindows(Some(each), (&raw mut found) as LPARAM) };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        for &window in &found.1 {
+            // SAFETY: a window handle EnumWindows just gave; one closed
+            // since makes the call fail, which is reported.
+            if unsafe { PostMessageW(window, WM_CLOSE, 0, 0) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(found.1.len())
+    }
+
+    /// EnumWindows' callback for [`close_windows`]: keeps `window` if it's
+    /// a visible, unowned top-level window of the pid `lparam`'s pair
+    /// names.
+    unsafe extern "system" fn each(window: HWND, lparam: LPARAM) -> BOOL {
+        // SAFETY: `lparam` is the `&mut (u32, Vec<HWND>)` close_windows
+        // passed, alive and borrowed by nothing else for the whole
+        // enumeration.
+        let found = unsafe { &mut *(lparam as *mut (u32, Vec<HWND>)) };
+        let mut owner_pid = 0u32;
+        // SAFETY: `window` is the handle EnumWindows passed; the pid
+        // pointer is to a u32 that outlives the call.
+        unsafe { GetWindowThreadProcessId(window, &mut owner_pid) };
+        // SAFETY: as above; both only read the window's state.
+        let shown = unsafe { IsWindowVisible(window) } != 0
+            && unsafe { GetWindow(window, GW_OWNER) }.is_null();
+        if owner_pid == found.0 && shown {
+            found.1.push(window);
+        }
+        // Go on to the next window.
+        1
     }
 
     /// The full path of the program the process `handle` runs.

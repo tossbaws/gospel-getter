@@ -8,7 +8,8 @@
 //! an emptied environment holding nothing but that `DISPLAY` and `PATH`.
 //!
 //! Windows: UI Automation, through PowerShell, finds the dialog and closes
-//! it; the check stops at "the save dialog appeared" there.
+//! it; the check stops at "the save dialog appeared" there. It also finds
+//! and answers check 74's "couldn't start" message.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -326,6 +327,65 @@ Write-Output $class
     if !output.status.success() {
         bail!(
             "UI Automation found no save dialog: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// Windows: waits up to `within` for a top-level window named `title` (a
+/// native message box) through UI Automation, and with `press` presses its
+/// OK button (its only button, failing that), as Enter would. Returns its
+/// class name and, pressed, the button's name. The script is written to
+/// `work_dir` and run with `-File`, as above.
+pub async fn windows_message(
+    title: &str,
+    within: Duration,
+    press: bool,
+    work_dir: &Path,
+) -> Result<String> {
+    const SCRIPT: &str = r#"
+param([Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][int]$Millis, [switch]$Press)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$A = [System.Windows.Automation.AutomationElement]
+$T = [System.Windows.Automation.ControlType]
+$condition = New-Object System.Windows.Automation.AndCondition(
+    (New-Object System.Windows.Automation.PropertyCondition($A::NameProperty, $Title)),
+    (New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, $T::Window)))
+$deadline = [DateTime]::UtcNow.AddMilliseconds($Millis)
+do {
+    $window = $A::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+    if ($window) { break }
+    Start-Sleep -Milliseconds 100
+} while ([DateTime]::UtcNow -lt $deadline)
+if (-not $window) { Write-Error "no window named '$Title' appeared"; exit 1 }
+$class = $window.Current.ClassName
+if (-not $Press) { Write-Output $class; exit 0 }
+$buttons = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+    (New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, $T::Button))))
+$button = $buttons | Where-Object { $_.Current.Name -eq 'OK' } | Select-Object -First 1
+if (-not $button -and $buttons.Count -eq 1) { $button = $buttons[0] }
+if (-not $button) {
+    Write-Error "no OK button in '$Title' (buttons: $(($buttons | ForEach-Object { $_.Current.Name }) -join ', '))"; exit 1
+}
+$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+Write-Output "$class, pressed $($button.Current.Name)"
+"#;
+    let script = work_dir.join("message.ps1");
+    tokio::fs::write(&script, SCRIPT)
+        .await
+        .with_context(|| format!("writing {}", script.display()))?;
+    let script = script.to_str().context("the script path is not UTF-8")?;
+    let millis = within.as_millis().to_string();
+    let mut args = vec!["-Title", title, "-Millis", &millis];
+    if press {
+        args.push("-Press");
+    }
+    let output = powershell(script, &args).await?;
+    if !output.status.success() {
+        bail!(
+            "UI Automation: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }

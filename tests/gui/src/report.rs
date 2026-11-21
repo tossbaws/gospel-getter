@@ -95,7 +95,7 @@ checks! {
     (23, PickerKeyboard,      "picker-keyboard",        Shipped,  Never),
     (24, SidebarPlace,        "sidebar-reading-place",  Shipped,  OnNarrowWindows),
     (25, AaControls,          "aa-controls",            Shipped,  Never),
-    (26, AaRestart,           "aa-restart",             Relaunch, OnWindows),
+    (26, AaRestart,           "aa-restart",             Relaunch, Never    ),
     (27, TranslationSwitch,   "translation-switch",     Shipped,  Never),
     (28, Compare,             "compare",                Shipped,  Never),
     (29, ReadingMode,         "reading-mode",           Shipped,  Never),
@@ -114,7 +114,7 @@ checks! {
     (42, LongChapter,         "long-chapter",           Shipped,  Never),
     (43, TryAgain,            "try-again",              Shipped,  Never),
     (44, PlainText,           "plain-text-fallback",    Shipped,  Never),
-    (45, DisclosuresKept,     "disclosures-kept",       Relaunch, OnWindows),
+    (45, DisclosuresKept,     "disclosures-kept",       Relaunch, Never    ),
     (46, SelectVerses,        "select-verses",          Shipped,  Never),
     (47, CopyFormats,         "copy-and-copy-as",       Shipped,  Never),
     (48, CardBookmark,        "card-bookmark",          Shipped,  Never),
@@ -134,7 +134,7 @@ checks! {
     (62, MarginNarrow,        "margin-narrow",          Shipped,  Never),
     (63, MarginPsalm119,      "margin-psalm-119",       Shipped,  Never),
     (64, NotesSearch,         "notes-search",           Shipped,  Never),
-    (65, NoteDraft,           "note-draft",             Relaunch, OnWindows),
+    (65, NoteDraft,           "note-draft",             Relaunch, Never    ),
     (66, NoteMarkdown,        "note-markdown",          Shipped,  Never),
     (67, BarHistory,          "bar-back-forward-recent",Shipped,  Never),
     (68, BarChapters,         "bar-chapter-arrows",     Shipped,  Never),
@@ -143,10 +143,10 @@ checks! {
     (71, ExportChoice,        "export-choice",          Shipped,  Never),
     (72, SingleKeys,          "single-key-switch",      Shipped,  Never),
     (73, SecondLaunch,        "second-launch",          Shipped,  Never),
-    (74, StartupFailure,      "startup-failure",        Startup,  OnWindows),
+    (74, StartupFailure,      "startup-failure",        Startup,  OnWindowsOutsideCi),
     (75, SplitPanes,          "split-panes",            Shipped,  Never),
     (76, SplitTabs,           "split-tabs",             Shipped,  Never),
-    (77, SplitRestart,        "split-restart",          Relaunch, OnWindows),
+    (77, SplitRestart,        "split-restart",          Relaunch, Never    ),
     (78, OpenBeside,          "open-beside",            Shipped,  Never),
 }
 
@@ -262,6 +262,10 @@ pub enum Skip {
     Never,
     /// Never run on Windows: a SKIP there, every time.
     OnWindows,
+    /// A SKIP on Windows unless CI asks for it (`GUI_CHECK_CI_STAGING`):
+    /// it changes the account's own data, which only a throwaway CI
+    /// runner can spare (see `checks::startup`).
+    OnWindowsOutsideCi,
     /// A SKIP on Windows when the window can't be made wide enough for the
     /// sidebar (1200 px; the CI runner's screen can be), run otherwise.
     OnNarrowWindows,
@@ -272,7 +276,9 @@ impl Skip {
     pub fn allowed_on(self, platform: Platform) -> bool {
         match self {
             Skip::Never => false,
-            Skip::OnWindows | Skip::OnNarrowWindows => platform == Platform::Windows,
+            Skip::OnWindows | Skip::OnWindowsOutsideCi | Skip::OnNarrowWindows => {
+                platform == Platform::Windows
+            }
         }
     }
 
@@ -288,6 +294,7 @@ impl fmt::Display for Skip {
         f.write_str(match self {
             Skip::Never => "-",
             Skip::OnWindows => "windows",
+            Skip::OnWindowsOutsideCi => "windows-outside-ci",
             Skip::OnNarrowWindows => "windows-when-narrow",
         })
     }
@@ -590,8 +597,8 @@ mod tests {
         for line in [
             "9 update-banner updater -",
             "21 picker-sidebar shipped windows-when-narrow",
-            "26 aa-restart relaunch windows",
-            "74 startup-failure startup windows",
+            "26 aa-restart relaunch -",
+            "74 startup-failure startup windows-outside-ci",
         ] {
             assert!(lines.contains(&line), "{line:?} in {list}");
         }
@@ -644,11 +651,12 @@ mod tests {
         );
     }
 
-    /// Where the checks skip themselves today: 26, 45, 65, 74 and 77 never run
-    /// on Windows (`checks::display::NOT_RUN_ON_WINDOWS` and
-    /// `checks::startup`), and the sidebar's checks (21, 24, 35, 36 and 37,
-    /// through `Run::not_wide`) don't when the window can't be made wide
-    /// enough there. Nothing skips on Linux.
+    /// Where the checks skip themselves today: 74 on Windows outside CI
+    /// (`checks::startup`), and the sidebar's checks (21, 24, 35, 36 and
+    /// 37, through `Run::not_wide`) when the window can't be made wide
+    /// enough there. No check is left that never runs on Windows
+    /// (`checks::display::NOT_RUN_ON_WINDOWS` is empty). Nothing skips on
+    /// Linux.
     #[test]
     fn the_skips_are_where_the_checks_skip() {
         let on = |skip: Skip| -> Vec<u8> {
@@ -658,7 +666,8 @@ mod tests {
                 .map(Check::number)
                 .collect()
         };
-        assert_eq!(on(Skip::OnWindows), [26, 45, 65, 74, 77]);
+        assert_eq!(on(Skip::OnWindows), [0u8; 0]);
+        assert_eq!(on(Skip::OnWindowsOutsideCi), [74]);
         assert_eq!(on(Skip::OnNarrowWindows), [21, 24, 35, 36, 37]);
         for check in Check::all() {
             assert!(!check.skip().allowed_on(Platform::Linux), "{check:?}");
@@ -679,13 +688,17 @@ mod tests {
         let linux = Platform::Linux;
 
         // As the table says: unchanged.
-        let why = "not run on Windows: why";
+        let why = "not run on Windows outside CI: why";
         assert_eq!(
-            verdict(Check::AaRestart, windows, Err(skipped(why))),
-            format!("SKIP 26 aa-restart: {why}\n")
+            verdict(Check::StartupFailure, windows, Err(skipped(why))),
+            format!("SKIP 74 startup-failure: {why}\n")
         );
         assert_eq!(
-            verdict(Check::AaRestart, linux, Ok("kept".to_owned())),
+            verdict(Check::StartupFailure, windows, Ok("shown".to_owned())),
+            "PASS 74 startup-failure: shown\n"
+        );
+        assert_eq!(
+            verdict(Check::AaRestart, windows, Ok("kept".to_owned())),
             "PASS 26 aa-restart: kept\n"
         );
         assert_eq!(
@@ -723,12 +736,18 @@ mod tests {
                 "{lines}"
             );
         }
-        // A pass where the table says it never runs: a FAIL too.
         assert_eq!(
-            verdict(Check::NoteDraft, windows, Ok("offered".to_owned())),
-            "FAIL 65 note-draft: it ran on Windows, where the checks' table (tests/gui \
-             src/report.rs) says it's a SKIP: offered\n"
+            verdict(Check::NoteDraft, windows, Err(skipped("not here"))),
+            "FAIL 65 note-draft: a SKIP on Windows, which the checks' table (tests/gui \
+             src/report.rs) doesn't list for it: not here\n"
         );
+        // A pass where the table says it never runs is a FAIL too; no row
+        // says that today, so only the rule is held here.
+        assert!(Skip::OnWindows.always_on(windows));
+        assert!(!Skip::OnWindows.always_on(linux));
+        for skip in [Skip::Never, Skip::OnWindowsOutsideCi, Skip::OnNarrowWindows] {
+            assert!(!skip.always_on(windows), "{skip:?}");
+        }
     }
 
     /// A run passes only when every listed check passed.

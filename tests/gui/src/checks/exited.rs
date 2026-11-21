@@ -21,6 +21,19 @@
 //! 42879721170: "couldn't tell what pid 7896 is: Access is denied"), is
 //! waited through within the same [`EXIT_WAIT`], never taken as an answer.
 //!
+//! Before that, on Windows, each session's app is asked to close its window
+//! ([`closed_first`]), as the reader closes it, and given [`CLOSE_WAIT`] to
+//! exit by itself. Terminated, it would take WebView2 with it (they're in
+//! gui-launch's job) before WebView2 had written what the page put in
+//! local storage to disk: Chromium batches those writes, at most about one
+//! a minute, and writes the rest only as it shuts down. The app started
+//! again shares the first session's WebView2 data folder (gui-launch's
+//! `GUI_LAUNCH_WEBVIEW2_FOLDER`), so checks 26, 45, 65 and 77 read what
+//! the session before left there; the app's exit, not the session's end,
+//! is what writes it. One that doesn't exit within [`CLOSE_WAIT`] is left
+//! to the session's end, as before, and the check that needed what it
+//! would have written fails saying what it found.
+//!
 //! On Linux nothing is recorded: WebKitWebDriver ends the app itself at the
 //! end of a session (the script's wrapper execs it), and the guard there is
 //! a name on the run's own session bus. But WebKit's helper processes go a
@@ -41,7 +54,7 @@ use crate::config::Config;
 use crate::ui::log_line;
 
 #[cfg(windows)]
-use windows::exited;
+use windows::{close, exited};
 
 /// How long the run's WebKit helpers may take to exit once their app has
 /// (Linux).
@@ -140,6 +153,47 @@ async fn helpers_exited(runtime_dir: &str, started: Instant, deadline: Instant) 
     }
 }
 
+/// Windows: asks every app gui-launch has started that's still running to
+/// close its window, and waits up to [`CLOSE_WAIT`] for each to exit (see
+/// the module's docs), logging what happened. Its session is ended next,
+/// either way. Nothing to do on Linux.
+pub(super) async fn closed_first(config: &Config, started: Instant) {
+    let Some(record) = &config.launched else {
+        return;
+    };
+    let apps = match std::fs::read_to_string(record)
+        .map_err(anyhow::Error::from)
+        .and_then(|text| Launched::parse_all(&text))
+    {
+        Ok(apps) => apps,
+        Err(e) => {
+            log_line(
+                started,
+                &format!(
+                    "couldn't read the apps gui-launch started ({}) to close them: {e:#}",
+                    record.display()
+                ),
+            );
+            return;
+        }
+    };
+    for app in &apps {
+        if let Some(said) = close(app).await {
+            log_line(started, &said);
+        }
+    }
+}
+
+/// How long an app asked to close its window may take to exit (Windows).
+#[cfg_attr(not(windows), allow(dead_code))]
+const CLOSE_WAIT: Duration = Duration::from_secs(15);
+
+/// gui-launch only runs on Windows, so there's never an app to close.
+#[cfg(not(windows))]
+async fn close(_app: &Launched) -> Option<String> {
+    None
+}
+
 /// gui-launch only runs on Windows, so there's never a record to go by.
 #[cfg(not(windows))]
 async fn exited(app: &Launched, _started: Instant, _deadline: Instant) -> Result<String> {
@@ -159,6 +213,49 @@ mod windows {
     use gui_check::launched::{Identity, Launched};
 
     use crate::ui::log_line;
+
+    /// Asks `app`, if it's still the app gui-launch recorded and running,
+    /// to close its window, and waits up to [`CLOSE_WAIT`](super::CLOSE_WAIT)
+    /// for it to exit. What happened, or `None` for an app long gone.
+    pub(super) async fn close(app: &Launched) -> Option<String> {
+        let name = format!("pid {} ({})", app.pid, app.path);
+        let process = match Process::open(app.pid) {
+            Ok(Some(process)) => process,
+            Ok(None) => return None,
+            Err(e) => return Some(format!("couldn't open {name} to close it: {e}")),
+        };
+        match process.exited() {
+            Ok(true) => return None,
+            Ok(false) => {}
+            Err(e) => return Some(format!("couldn't tell whether {name} has exited: {e}")),
+        }
+        match process.identify(app) {
+            Ok(Some(Identity::App)) => {}
+            Ok(Some(Identity::CreatedOtherwise | Identity::OtherProgram)) => return None,
+            Ok(Some(Identity::AppExiting) | None) => {
+                return Some(format!("{name} is already exiting"));
+            }
+            Err(e) => return Some(format!("couldn't tell what pid {} is: {e}", app.pid)),
+        }
+        let asked = match gui_check::launched::process::close_windows(app.pid) {
+            Ok(0) => return Some(format!("{name} has no window to close")),
+            Ok(asked) => asked,
+            Err(e) => return Some(format!("couldn't ask {name} to close its window: {e}")),
+        };
+        let begun = Instant::now();
+        Some(match gone_within(&process, super::CLOSE_WAIT).await {
+            Ok(true) => format!(
+                "asked {name} to close its window ({asked}): it exited after {:.2}s",
+                begun.elapsed().as_secs_f64()
+            ),
+            Ok(false) => format!(
+                "asked {name} to close its window ({asked}): still running after {:.0}s, left to \
+                 the session's end",
+                super::CLOSE_WAIT.as_secs_f64()
+            ),
+            Err(e) => format!("asked {name} to close its window ({asked}): {e:#}"),
+        })
+    }
 
     /// How long an app may take to exit once its session has ended.
     const EXIT_WAIT: Duration = Duration::from_secs(30);

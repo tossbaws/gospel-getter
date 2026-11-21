@@ -621,6 +621,7 @@ async fn shipped(
         .await;
 
     log_line(started, "close the app (end the WebDriver session)");
+    exited::closed_first(run.config, started).await;
     let driver = run.ui.into_driver();
     match tokio::time::timeout(Duration::from_secs(10), driver.quit()).await {
         Ok(Ok(())) => log_line(started, "session ended, app closed"),

@@ -12,8 +12,9 @@
 # --list prints every check, one to a line: its number and name, as
 # results.txt names it, its group (the session it runs in: startup,
 # shipped, relaunch or updater) and the platforms it's a SKIP on (windows;
-# windows-when-narrow, on Windows only when the window can't be made wide
-# enough for the sidebar; - for none). It's the checks' own list (gui-check
+# windows-outside-ci, on Windows unless CI asks for it; windows-when-narrow,
+# on Windows only when the window can't be made wide enough for the
+# sidebar; - for none). It's the checks' own list (gui-check
 # --list, made from the table in tests/gui src/report.rs), which a run's
 # results.txt is made from too: which check is which is there, not here.
 #
@@ -557,9 +558,13 @@ else
     # and records each app it starts in GUI_LAUNCH_PIDS, which the checks
     # read to make sure it has exited before they start the next.
     : >"$out/launched.txt"
+    # The WebView2 data folder every session's app keeps (see gui-launch),
+    # removed with $work.
+    mkdir -p "$work/webview2"
     run_env=(env GUI_LAUNCH_TARGET="$(cygpath -w "$app")" GUI_LAUNCH_LOG="$(cygpath -w "$out/app.log")"
         GUI_LAUNCH_CUT_OFF_PROXY="$cut_off_proxy"
         GUI_LAUNCH_PIDS="$(cygpath -w "$out/launched.txt")"
+        GUI_LAUNCH_WEBVIEW2_FOLDER="$(cygpath -w "$work/webview2")"
         GOSPEL_GETTER_TEST_UPDATER="$(cygpath -w "$updater_settings")")
     if [[ -n $updater_app ]]; then
         # The same launcher under another name, which starts the test build
