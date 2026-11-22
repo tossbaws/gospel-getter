@@ -4352,37 +4352,11 @@ fn the_palette_and_copy_as_are_aa_in_every_theme() {
 /// Ctrl+= (and Ctrl++, numpad +) and Ctrl+- (numpad -) step the text size,
 /// Ctrl+0 resets it, through Aa's control; their default (the page zoom) is
 /// always prevented, and in a field they change nothing. A brief status
-/// says the new size, politely.
+/// says the new size, politely. The keys are tested in aa_text.rs
+/// (`the_size_keys`), reading-flow.test.mjs and palette.test.mjs; here, the
+/// status line's markup.
 #[test]
 fn the_text_size_keys_step_aa_and_never_zoom_the_page() {
-    // Aa's keys are the page's Rust pieces' (`ui-leptos/src/aa.rs`, the
-    // rule in `aa_text.rs`).
-    let keys = block_after(piece("aa_text.rs"), "pub fn size_key(");
-    for key in [
-        r#"key == "=""#,
-        r#"key == "+""#,
-        r#"code == "NumpadAdd""#,
-        r#"key == "-""#,
-        r#"code == "NumpadSubtract""#,
-        r#"code == "Numpad0""#,
-    ] {
-        assert!(keys.contains(key), "{key}");
-    }
-    let aa = piece("aa.rs");
-    let body = block_after(aa, "fn on_size_key(");
-    let prevent = body.find("event.prevent_default();").unwrap();
-    let typing = body.find(r#""INPUT" | "TEXTAREA" | "SELECT""#).unwrap();
-    assert!(
-        prevent < typing,
-        "the page zoom is prevented even in a field"
-    );
-    // The keys' step, which the command palette's Text size commands run
-    // too.
-    let step = block_after(aa, "pub fn text_size_shortcut(");
-    assert!(step.contains(r#"choose(&select, "medium");"#));
-    assert!(step.contains("step_text_size(i32::from(step));"));
-    assert!(step.contains("show_text_size();"));
-    assert!(piece("search.rs").contains("Run::TextSize(step) => aa::text_size_shortcut(*step),"));
     assert!(HTML.contains(r#"<p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>"#));
 }
 
@@ -4501,7 +4475,8 @@ fn the_bible_s_edges_have_a_quiet_card_in_the_neighbor_s_place() {
 
 /// Layout is a display setting in Aa, after Width: Verses (the default, a
 /// verse to a line as always) or Flowing. It's exported with the others.
-/// While comparing, its buttons are disabled and a note says why.
+/// While comparing, its buttons are disabled and a note says why (tested in
+/// flowing.test.mjs; here, the markup the note and buttons start from).
 #[test]
 fn layout_is_a_display_setting_in_aa() {
     assert_eq!(
@@ -4524,9 +4499,6 @@ fn layout_is_a_display_setting_in_aa() {
     let theme = HTML.find(r#"id="theme-label""#).unwrap();
     assert!(width < layout && layout < theme);
     assert_eq!(preferences::LAYOUT.file_name, Some("layout"));
-    let aa = piece("aa.rs");
-    assert!(aa.contains("btn.set_disabled(comparing);"));
-    assert!(aa.contains("note.set_hidden(!comparing);"));
 
     // A disabled segment is quiet but still AA: --text-dim on the
     // segments' --panel-bg, over the popover's --option-bg (a pair in
