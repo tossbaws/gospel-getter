@@ -413,10 +413,16 @@ test('reading mode shows the active pane alone, the top bar acting on it, and le
         await app.idle(before);
     }));
 
-test('opened beside in reading mode, the second pane shows alone; × brings the first back as it was', () =>
+test('opened beside in reading mode, both panes show (B12); R shows the second alone; × brings the first back as it was', () =>
     withApp({ book: 'John', chapter: 3, readerMode: true }, async (app) => {
         await openBeside(app, { bookId: ROMANS, chapter: 5 });
+        assert.equal(app.document.documentElement.dataset.readerMode, undefined);
         assert.equal(panes(app).active(), 'second');
+        assert.equal(column(app, 'first').hidden, false);
+        assert.equal(column(app, 'second').hidden, false);
+        app.key('r');
+        await settle();
+        assert.equal(app.document.documentElement.dataset.readerMode, 'on');
         assert.equal(column(app, 'first').hidden, true);
         assert.equal(column(app, 'second').hidden, false);
         const before = app.calls.length;

@@ -1485,14 +1485,21 @@ pub fn scrolled(pane: PaneId) {
 /// Opens `passage` in the second pane: every Open beside (the selection
 /// card's cross-reference preview and note row, a Library row, a search
 /// result, a note's link Shift- or Alt-clicked, the palette) and
-/// `pane`'s `gospelGetterPanes` come here, the one way in (S8). In `code`,
-/// or in the active pane's translation, the pane asked from (D9): a pane opened beside reads
-/// it, its history starting there; one already open jumps to it, as a jump
-/// in its own history, so its Back returns (S12). The first pane is never
-/// replaced. The second pane is then the active one (S13). Its end is the
-/// load's.
+/// `pane`'s `gospelGetterPanes` come here, the one way in (S8). In reading
+/// mode, which shows one pane alone (D6), it leaves reading mode first, as
+/// S does, so both panes show side by side (B12), the first where it was
+/// read: here, not in the callers, so none can miss it. First, so the
+/// second pane made active, and focus with it, come after leaving moves
+/// focus to Aa. In `code`, or in the active pane's translation, the pane
+/// asked from (D9): a pane opened beside reads it, its history starting
+/// there; one already open jumps to it, as a jump in its own history, so
+/// its Back returns (S12). The first pane is never replaced. The second
+/// pane is then the active one (S13). Its end is the load's.
 pub fn open_beside(passage: &OpenPassage, code: Option<String>) -> Load {
     let code = code.unwrap_or_else(|| pane::code(pane::active()));
+    if prefs::on(&preferences::READER_MODE) {
+        aa::set_reader_mode(false);
+    }
     let pane = PaneId::Second;
     pane::open_second();
     if !pane::split() {
@@ -1501,11 +1508,12 @@ pub fn open_beside(passage: &OpenPassage, code: Option<String>) -> Load {
     let (book_id, chapter) = (passage.book_id, passage.chapter);
     let (start, end) = (passage.verse_start, passage.verse_end);
     if with(pane, |s| s.reading.is_some()) {
-        // Active first, so it's in view: a pane out of view (the tabs,
-        // reading mode) has its place put back as it comes into view
-        // (`surfaces`), and the jump then records where the reader left
-        // it, not a hidden column's scroll position (0 in WebKitGTK and
-        // WebView2), which would send its Back to the chapter's top.
+        // Active first, so it's in view: a pane out of view (the tabs;
+        // reading mode is left above) has its place put back as it comes
+        // into view (`surfaces`), and the jump then records where the
+        // reader left it, not a hidden column's scroll position (0 in
+        // WebKitGTK and WebView2), which would send its Back to the
+        // chapter's top.
         pane::set_active(pane);
         if code != pane::code(pane) {
             switch_for_jump(pane, &code);
@@ -1538,10 +1546,9 @@ pub fn chapter_shown(pane: PaneId) -> bool {
 /// active pane's chapter opened in the second pane ([`open_beside`], in the
 /// active pane's translation), with the verse at the top of the active
 /// pane's view put at the top of the second's, as far below its bar. In
-/// reading mode, which shows one pane alone (D6), it leaves reading mode
-/// first, so both panes show (B12); the verse is the one read there. The
-/// other ways to open a passage beside (the card, the Library, search, a
-/// note's link) leave reading mode as it is. Its end is the load's.
+/// reading mode, the verse is the one read there: it's measured before
+/// [`open_beside`] leaves reading mode, which moves the text. Its end is the
+/// load's.
 pub fn open_here_beside() -> Load {
     let from = pane::active();
     let Some((book_id, chapter)) =
@@ -1550,9 +1557,6 @@ pub fn open_here_beside() -> Load {
         return Box::pin(async { false });
     };
     let top = surfaces::top_verse(from, &pane::code(from));
-    if prefs::on(&preferences::READER_MODE) {
-        aa::set_reader_mode(false);
-    }
     let passage = OpenPassage {
         book_id,
         chapter,

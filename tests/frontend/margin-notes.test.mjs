@@ -292,7 +292,11 @@ test('a reflow of the second pane’s chapter places its margin notes again, as 
         const before = app.calls.length;
         await panes.openBeside({ bookId: JOHN, chapter: 3 });
         await app.idle(before);
+        // Open beside left reading mode (B12); R puts it back, the second
+        // pane alone, with its margin.
+        app.key('r');
         await frame(app);
+        assert.equal(app.document.documentElement.dataset.readerMode, 'on');
         assert.equal(panes.active(), 'second');
         const root = (id) => app.document.getElementById(id);
         const top = () => root('reading-pane-2').querySelector('.margin-notes .margin-note').style.top;

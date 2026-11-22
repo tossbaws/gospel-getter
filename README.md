@@ -114,12 +114,12 @@ needed.
   the one you're reading, in its own translation: from a cross-reference's
   preview, a bookmark, highlight or note in the Library, a verse in search
   (or Alt+Enter), or a link in a note (Shift-click or Alt-click, or **Open
-  beside** in the card's note row). Each side has its own ‹ and ›, book and
-  chapter button and translation button, and × (or `X`) closes the
-  second. The side you last clicked is the active one, for the arrow keys,
-  `T`, `G`, `N`, Back and Forward; F6 or `P` switches sides. Opening beside
-  again replaces the right-hand side, and the left is always your saved
-  reading place.
+  beside** in the card's note row), leaving reading mode first too. Each
+  side has its own ‹ and ›, book and chapter button and translation
+  button, and × (or `X`) closes the second. The side you last clicked is
+  the active one, for the arrow keys, `T`, `G`, `N`, Back and Forward; F6
+  or `P` switches sides. Opening beside again replaces the right-hand
+  side, and the left is always your saved reading place.
   Compare waits while two passages are open and comes back when you close
   the second. In a narrow window the sides become tabs, reading mode shows
   the active side alone, and printing prints it. The second side reopens

@@ -70,9 +70,14 @@
 //!   unverified): if it doesn't, the palette's Switch pane (F6) does the
 //!   same, and the check says F6 never arrived rather than failing.
 //! - × closes the second pane: one pane, focus on its reference button.
+//! - In reading mode (R, a real key), the same Open beside leaves it first,
+//!   as S does (B12): reading mode off, both panes side by side and in
+//!   view, the second active, the first pane's place (the verse at the top
+//!   of its view) where it was in reading mode, within a line. R then shows
+//!   the second pane alone, in reading mode.
 //!
-//! Whatever happens, the second pane is closed after, and the window's
-//! width and the first pane's chapter put back.
+//! Whatever happens, reading mode is left, the second pane closed, and the
+//! window's width and the first pane's chapter put back.
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
@@ -555,17 +560,10 @@ impl Run<'_> {
         }
     }
 
-    async fn open_beside_steps(&mut self) -> Result<String> {
+    /// Opens Romans 5:8's preview from the card on John 3:16, in the first
+    /// pane, by a pointer's clicks: the verse, then its chip.
+    async fn preview_romans(&self) -> Result<()> {
         let ui = &self.ui;
-        let mut said = Vec::new();
-        self.go_to("John 3", "John 3").await?;
-        self.plain_reading().await?;
-        let code = ui
-            .js(
-                "return document.getElementById('translation-select').value;",
-                Vec::new(),
-            )
-            .await?;
         ui.click(
             "click verse 16",
             "#reading-pane .chapter-main .verse[data-translation][data-verse=\"16\"]",
@@ -601,6 +599,21 @@ impl Run<'_> {
             beside["text"] == "Open beside" && beside["name"] == "Open Romans 5:8 beside",
             "the preview's Open beside: {beside}"
         );
+        Ok(())
+    }
+
+    async fn open_beside_steps(&mut self) -> Result<String> {
+        let ui = &self.ui;
+        let mut said = Vec::new();
+        self.go_to("John 3", "John 3").await?;
+        self.plain_reading().await?;
+        let code = ui
+            .js(
+                "return document.getElementById('translation-select').value;",
+                Vec::new(),
+            )
+            .await?;
+        self.preview_romans().await?;
         ui.click("click Open beside", "#xref-preview .xref-preview-beside")
             .await?;
         let opened = ui
@@ -655,7 +668,73 @@ impl Run<'_> {
             "× closed it: {}",
             json!({ "split": closed["split"], "focus": closed["focus"] })
         ));
+        said.push(self.open_beside_in_reading_mode().await?);
         Ok(said.join("; "))
+    }
+
+    /// Check 78's pass in reading mode: R, the preview's Open beside, then
+    /// R again.
+    async fn open_beside_in_reading_mode(&self) -> Result<String> {
+        let ui = &self.ui;
+        self.plain_reading().await?;
+        ui.js(
+            "if (document.activeElement) document.activeElement.blur(); return null;",
+            Vec::new(),
+        )
+        .await?;
+        ui.press("press R (reading mode)", "r").await?;
+        self.panes_are(
+            "reading mode, one pane",
+            "seen.reading && !seen.split && seen.first",
+        )
+        .await?;
+        ui.settled("reading mode to settle").await?;
+        self.preview_romans().await?;
+        ui.settled("the preview to settle").await?;
+        let reading = self.panes().await?;
+        ensure!(
+            reading["reading"] == json!(true) && reading["split"] == json!(false),
+            "still one pane in reading mode before Open beside: {reading}"
+        );
+        ui.click(
+            "click Open beside in reading mode",
+            "#xref-preview .xref-preview-beside",
+        )
+        .await?;
+        let opened = self
+            .panes_are(
+                "reading mode left, two panes side by side, Romans 5 beside, active",
+                "!seen.reading && seen.split && !seen.tabs && seen.active === 'second' && seen.heading2 === 'Romans 5'
+                 && !!seen.first && !!seen.second && seen.first.right <= seen.second.left + 1
+                 && seen.first.right - seen.first.left > 200 && seen.second.right - seen.second.left > 200",
+            )
+            .await?;
+        ui.settled("the panes to settle").await?;
+        let left = self.panes().await?;
+        let kept = Self::same_split_place(
+            "reading mode left by Open beside, the first pane",
+            &reading["first"],
+            &left["first"],
+        )?;
+        ui.js(
+            "if (document.activeElement) document.activeElement.blur(); return null;",
+            Vec::new(),
+        )
+        .await?;
+        ui.press("press R (reading mode again)", "r").await?;
+        let alone = self
+            .panes_are(
+                "reading mode, the second pane shown alone",
+                "seen.reading && seen.split && seen.active === 'second' && !!seen.second && !seen.first",
+            )
+            .await?;
+        Ok(format!(
+            "in reading mode, Open beside left it: {}; {kept}; R showed the second alone: {}",
+            json!({ "first": [opened["first"]["left"], opened["first"]["right"]],
+                    "second": [opened["second"]["left"], opened["second"]["right"]],
+                    "active": opened["active"] }),
+            json!({ "reading": alone["reading"], "active": alone["active"] })
+        ))
     }
 
     /// Check 76.
