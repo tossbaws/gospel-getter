@@ -42,7 +42,8 @@ properly.
 Behind the scenes, every release build now also checks going back: it
 installs the previous release over the new one, and checks that it
 starts and keeps everything. There's also some code tidying, with
-nothing visible.
+nothing visible. It also takes a fixed version of a URL library that
+one of its components uses.
 
 No verse changes. Backups keep the same format. Updating keeps your
 bookmarks, highlights, notes, findings, reading position and settings.
