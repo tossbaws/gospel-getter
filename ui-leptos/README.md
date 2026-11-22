@@ -63,8 +63,8 @@ The dialogs:
 - `welcome`: the welcome.
 - `install`: the welcome's fresh-install rule.
 - `about`: About, with the updater's section.
-- `updates`: the updater: Check now, the launch check, the banner, the update shown in About, and installing with its progress.
-- `update_text`: the updater's sentences, `megabytes` and download progress.
+- `updates`: the updater: Check now, the launch check, the banner with Skip this version, the update shown in About, installing with its progress, and Go back to the previous version with its confirm dialog.
+- `update_text`: the updater's sentences, `megabytes`, download progress, Skip this version's rule and Go back's words.
 
 The header, the Library and search:
 

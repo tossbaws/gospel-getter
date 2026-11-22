@@ -32,10 +32,10 @@
 use serde::{Deserialize, Serialize};
 
 pub use crate::wire::{
-    BibleEdgeDto as Edge, Block as NoteBlock, BookStartDto as BookStart, Commentary,
+    BackupSaved, BibleEdgeDto as Edge, Block as NoteBlock, BookStartDto as BookStart, Commentary,
     CopyFormatsDto as CopyFormats, DownloadEvent, FindingDto as Finding,
     FindingRequestDto as FindingRequest, GoToDto as GoTo, NoteLinkDto as NoteLink, NotedBook,
-    NotesExportOutcome as ExportOutcome, NotesFolderOutcome as FolderOutcome,
+    NotesExportOutcome as ExportOutcome, NotesFolderOutcome as FolderOutcome, PreviousInfo,
     SearchDto as SearchAnswer, SearchResultDto as SearchVerse, Span as NoteSpan,
     TranslationDto as Translation, XrefDto as Xref,
 };

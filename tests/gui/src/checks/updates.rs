@@ -17,11 +17,28 @@
 //! - 13 update-offline: a server that never answers: Check now gives up
 //!   after the check's time limit (shortened to 2 s through the test
 //!   settings) with the "couldn't reach GitHub" message.
+//! - 79 update-skip: the page reloaded (a new launch check) shows the
+//!   banner with Skip this version; a real click on it hides it and keeps
+//!   that version; reloaded again, the launch check finds it and stays
+//!   quiet; Check now in About still shows it, noting it was skipped, with
+//!   Update now. In both looks. The skip is forgotten afterwards, pass or
+//!   fail.
+//! - 80 go-back: with the test settings pointing Go back at the server's
+//!   `previous.json` (a lower version, signed with the run's key), Check
+//!   now shows "Go back to <version>"; a real click opens its confirm
+//!   dialog (Escape closes it, About staying open); "Go back" saves the
+//!   backup beside the database (it exists and is a backup file), skips
+//!   this version, downloads and verifies the release, and the test build
+//!   stops there, saying so. Then a `previous.json` whose release can't
+//!   use this database: the button gives way to the line saying why. In
+//!   both looks, at 1280x850, and About in the smallest window with the
+//!   largest text; the window, the text size and the skip are put back
+//!   afterwards, pass or fail.
 
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
-use serde_json::json;
+use serde_json::{Value, json};
 use thirtyfour::prelude::*;
 
 use super::{Run, Shots, VISIBLE_JS, start_session};
@@ -67,6 +84,25 @@ const RECORD_JS: &str = "
 
 /// The theme in use (Chi Rho has no attribute).
 const THEME_JS: &str = "return document.documentElement.dataset.theme || 'chi-rho';";
+
+/// Where Skip this version keeps the skipped version
+/// (`update_text::SKIPPED_KEY`).
+const SKIPPED_KEY: &str = "gospel-getter-update-skipped";
+
+/// About's note under a skipped update (`update_text::SKIPPED_NOTE`).
+const SKIPPED_NOTE: &str =
+    "You skipped this version, so it isn’t offered when Gospel Getter starts.";
+
+/// The window checks 79 and 80 are photographed in, and the smallest one
+/// the app allows (`tauri.conf.json`'s minWidth and minHeight).
+const SHOT_WINDOW: (u32, u32) = (1280, 850);
+const SMALLEST_WINDOW: (u32, u32) = (640, 480);
+
+/// How long checks 79 and 80 let the page paint before a screenshot.
+const SHOT_PAUSE: Duration = Duration::from_millis(500);
+
+/// Aa's text sizes, smallest first (`preferences::TextSize`).
+const TEXT_SIZES: [&str; 4] = ["small", "medium", "large", "x-large"];
 
 pub(super) async fn run(
     config: &Config,
@@ -138,6 +174,22 @@ pub(super) async fn run(
             run.failure_screenshot(Check::UpdateOffline).await;
         }
         report.record(Check::UpdateOffline, offline).await;
+
+        let window = run.ui.driver().get_window_rect().await.ok();
+        let skip = checks.skip(&mut run).await;
+        if skip.is_err() {
+            run.failure_screenshot(Check::UpdateSkip).await;
+        }
+        let skip = put_back(&run, skip, window.as_ref(), None).await;
+        report.record(Check::UpdateSkip, skip).await;
+
+        let size = text_size(&run.ui).await.ok();
+        let back = checks.go_back(&mut run).await;
+        if back.is_err() {
+            run.failure_screenshot(Check::GoBack).await;
+        }
+        let back = put_back(&run, back, window.as_ref(), size.as_deref()).await;
+        report.record(Check::GoBack, back).await;
     }
     report
         .fail_the_rest(&Check::UPDATER, "not run: About's check failed (check 10)")
@@ -561,6 +613,382 @@ impl Updates<'_> {
             bytes / 1024
         ))
     }
+
+    /// Check 79.
+    async fn skip(&self, run: &mut Run<'_>) -> Result<String> {
+        self.server
+            .write_settings(self.settings, "self", false)
+            .await?;
+        let (width, height) = SHOT_WINDOW;
+        set_window(&run.ui, width, height).await?;
+        let first = theme(&run.ui).await?;
+        let other = other_theme(&first);
+        let available = format!("Gospel Getter {} is available", update_server::VERSION);
+
+        // A new launch check: the page loaded afresh.
+        let before = self.server.manifests();
+        reload(&run.ui, run.config.session_timeout).await?;
+        let seen = wait_for_banner(&run.ui, &available).await?;
+        ensure!(
+            seen["skip"] == "Skip this version" && seen["later"] == true,
+            "the banner lacks Skip this version beside Later: {seen}"
+        );
+        ensure!(
+            self.server.manifests() > before,
+            "the reloaded page didn't check for updates"
+        );
+        let mut shots = vec![
+            self.shot(run, &format!("79-update-skip-banner-{first}"))
+                .await?,
+        ];
+        choose_theme(run, other).await?;
+        shots.push(
+            self.shot(run, &format!("79-update-skip-banner-{other}"))
+                .await?,
+        );
+
+        run.ui.click("Skip this version", "#update-skip").await?;
+        let kept = run
+            .ui
+            .wait_with(
+                "the banner to go, the version kept",
+                "return [document.getElementById('update-banner').hidden
+                     && localStorage.getItem(arguments[0]) === arguments[1],
+                     { kept: localStorage.getItem(arguments[0]) }];",
+                vec![json!(SKIPPED_KEY), json!(update_server::VERSION)],
+            )
+            .await?;
+
+        // The next launch check finds it, and stays quiet.
+        let before = self.server.manifests();
+        reload(&run.ui, run.config.session_timeout).await?;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while self.server.manifests() == before {
+            ensure!(
+                Instant::now() < deadline,
+                "the reloaded page didn't check for updates"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        // Its answer is shown (or not) the moment it's in: a moment more
+        // for the page to have done so.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let quiet = run
+            .ui
+            .js(
+                &format!(
+                    "{VISIBLE_JS} return {{ banner: visible(document.getElementById('update-banner')),
+                        kept: localStorage.getItem(arguments[0]) }};"
+                ),
+                vec![json!(SKIPPED_KEY)],
+            )
+            .await?;
+        ensure!(
+            quiet["banner"] == false && quiet["kept"] == update_server::VERSION,
+            "the launch check showed the skipped version: {quiet}"
+        );
+
+        // Check now still finds it, saying it was skipped.
+        open_about(&run.ui).await?;
+        run.ui.click("Check now", "#update-check-btn").await?;
+        let about = run
+            .ui
+            .wait_with(
+                "the skipped update in About, with its note and Update now",
+                &format!(
+                    "{VISIBLE_JS} const id = (i) => document.getElementById(i);
+                     const title = (id('about-update-title') || {{}}).textContent || '';
+                     return [visible(id('about-update')) && title === arguments[0]
+                         && visible(id('about-update-skipped')), {{
+                         title, note: id('about-update-skipped').textContent,
+                         install: visible(id('about-update-install')),
+                         banner: visible(id('update-banner')) }}];"
+                ),
+                vec![json!(available)],
+            )
+            .await?;
+        ensure!(
+            about["note"] == SKIPPED_NOTE && about["install"] == true && about["banner"] == false,
+            "About should show the skipped update with its note and Update now: {about}"
+        );
+        shots.push(self.shot(run, &format!("79-about-skipped-{other}")).await?);
+        close_about(&run.ui).await?;
+        choose_theme(run, &first).await?;
+        open_about(&run.ui).await?;
+        run.ui
+            .wait(
+                "About still showing the skipped update",
+                &format!(
+                    "{VISIBLE_JS} return [visible(document.getElementById('about-update-skipped')), null];"
+                ),
+            )
+            .await?;
+        shots.push(self.shot(run, &format!("79-about-skipped-{first}")).await?);
+        close_about(&run.ui).await?;
+        Ok(format!(
+            "reloaded, the launch check showed \"{available}\" with Skip this version beside \
+             Later; a click on it put the banner away and kept {} ({}); reloaded again, the \
+             launch check reached the server and showed nothing; Check now in About showed it \
+             with \"{SKIPPED_NOTE}\" and Update now; {}",
+            update_server::VERSION,
+            kept["kept"],
+            shots.join(", ")
+        ))
+    }
+
+    /// Check 80.
+    async fn go_back(&self, run: &mut Run<'_>) -> Result<String> {
+        self.server
+            .write_settings_with(self.settings, "self", false, Some(&self.server.previous))
+            .await?;
+        let (width, height) = SHOT_WINDOW;
+        set_window(&run.ui, width, height).await?;
+        let first = theme(&run.ui).await?;
+        let other = other_theme(&first);
+        let size = text_size(&run.ui).await?;
+        let version = update_server::PREVIOUS_VERSION;
+        let label = format!("Go back to {version}");
+        let this_version = run
+            .ui
+            .js(
+                "return (document.getElementById('app-version').textContent || '').replace(/^Version /, '');",
+                Vec::new(),
+            )
+            .await?;
+        let this_version = this_version.as_str().unwrap_or_default().to_owned();
+        ensure!(!this_version.is_empty(), "About gives no version");
+
+        open_about(&run.ui).await?;
+        let asked = self.server.previous_requests();
+        run.ui.click("Check now", "#update-check-btn").await?;
+        let offered = wait_for_go_back(&run.ui, &label).await?;
+        ensure!(
+            self.server.previous_requests() > asked,
+            "Check now didn't ask the test server for previous.json"
+        );
+        ensure!(
+            offered["unavailable"] == false,
+            "both Go back and the line saying it isn't offered: {offered}"
+        );
+        let mut shots = vec![self.shot(run, &format!("80-about-go-back-{first}")).await?];
+        let title = open_confirm(&run.ui, version).await?;
+        shots.push(
+            self.shot(run, &format!("80-go-back-confirm-{first}"))
+                .await?,
+        );
+        // Escape closes the dialog alone: About stays open.
+        run.ui
+            .press("press Escape (close Go back's dialog)", Key::Escape)
+            .await?;
+        run.ui
+            .wait(
+                "the dialog to close, About still open, focus on Go back",
+                "const focus = document.activeElement;
+                 return [document.getElementById('go-back-overlay').hidden
+                     && !document.getElementById('about-overlay').hidden
+                     && !!focus && focus.id === 'go-back-btn', { focus: focus ? focus.id : null }];",
+            )
+            .await?;
+
+        close_about(&run.ui).await?;
+        choose_theme(run, other).await?;
+        open_about(&run.ui).await?;
+        wait_for_go_back(&run.ui, &label).await?;
+        shots.push(self.shot(run, &format!("80-about-go-back-{other}")).await?);
+        open_confirm(&run.ui, version).await?;
+        shots.push(
+            self.shot(run, &format!("80-go-back-confirm-{other}"))
+                .await?,
+        );
+
+        // Go back: the backup, the skip, the download and its check.
+        let recording = run.ui.js(RECORD_JS, vec![json!("go-back-status")]).await?;
+        ensure!(recording == true, "no #go-back-status to watch");
+        let bytes_before = self.server.package_bytes();
+        run.ui.click("Go back", "#go-back-confirm").await?;
+        let saved = run
+            .ui
+            .wait(
+                "the backup to be saved",
+                &format!(
+                    "{VISIBLE_JS} const saved = document.getElementById('go-back-saved');
+                     return [visible(saved), {{ saved: saved.textContent }}];"
+                ),
+            )
+            .await?;
+        let path = saved["saved"]
+            .as_str()
+            .and_then(|t| t.strip_prefix("Backup saved: "))
+            .with_context(|| format!("the backup's line says {saved}"))?
+            .to_owned();
+        let end = run
+            .ui
+            .wait_within(
+                "going back to end (the test build doesn't install)",
+                "const status = document.getElementById('go-back-status');
+                 return [status.classList.contains('is-error'),
+                     { status: status.textContent, log: window.__guiCheckStatus,
+                       kept: localStorage.getItem(arguments[0]) }];",
+                vec![json!(SKIPPED_KEY)],
+                Some(DOWNLOAD),
+            )
+            .await?;
+        ensure!(
+            end["status"] == DOESNT_INSTALL,
+            "going back ended with {:?}, not the test build's stop (a failed backup, signature \
+             check or download says why here)",
+            end["status"]
+        );
+        ensure!(
+            end["kept"].as_str() == Some(&*this_version),
+            "the version left behind ({this_version}) wasn't skipped: {}",
+            end["kept"]
+        );
+        let texts: Vec<String> = end["log"]
+            .as_array()
+            .context("no status log")?
+            .iter()
+            .filter_map(|entry| entry["text"].as_str().map(str::to_owned))
+            .collect();
+        let downloading = format!("Downloading {version}… ");
+        let steps = texts.iter().filter(|t| t.starts_with(&downloading)).count();
+        ensure!(
+            texts
+                .iter()
+                .any(|t| t.starts_with("Saving a backup of your notes"))
+                && steps >= 2
+                && texts.iter().any(|t| t
+                    == &format!(
+                        "Installing {version}. Gospel Getter will restart when it’s done."
+                    )),
+            "going back didn't say backup, download steps and verified: {texts:?}"
+        );
+        let sent = self.server.package_bytes() - bytes_before;
+        ensure!(
+            sent >= self.server.package_size,
+            "the server sent {sent} of {} bytes",
+            self.server.package_size
+        );
+        let backup = check_backup(&path, version)?;
+        wait_for_go_back(&run.ui, &label).await?;
+        let _ = run
+            .ui
+            .js(
+                "localStorage.removeItem(arguments[0]); return true;",
+                vec![json!(SKIPPED_KEY)],
+            )
+            .await;
+
+        // The smallest window, the largest text: About still fits.
+        close_about(&run.ui).await?;
+        set_text_size(run, "x-large").await?;
+        let (width, height) = SMALLEST_WINDOW;
+        set_window(&run.ui, width, height).await?;
+        open_about(&run.ui).await?;
+        let fits = run
+            .ui
+            .wait(
+                "Go back within About, About within the window",
+                &format!(
+                    "{VISIBLE_JS} const button = document.getElementById('go-back-btn');
+                     const panel = document.getElementById('about-panel').getBoundingClientRect();
+                     button.scrollIntoView({{ block: 'center' }});
+                     const b = button.getBoundingClientRect();
+                     return [visible(button) && panel.right <= window.innerWidth + 1
+                         && b.left >= panel.left && b.right <= panel.right + 1,
+                         {{ panel: [panel.left, panel.right], button: [b.left, b.right],
+                            width: window.innerWidth }}];"
+                ),
+            )
+            .await?;
+        shots.push(
+            self.shot(run, &format!("80-about-go-back-smallest-x-large-{other}"))
+                .await?,
+        );
+        close_about(&run.ui).await?;
+        set_window(&run.ui, SHOT_WINDOW.0, SHOT_WINDOW.1).await?;
+        set_text_size(run, &size).await?;
+
+        // A release that can't use this database: no button, one line.
+        self.server
+            .write_settings_with(
+                self.settings,
+                "self",
+                false,
+                Some(&self.server.previous_unreadable),
+            )
+            .await?;
+        open_about(&run.ui).await?;
+        run.ui.click("Check now", "#update-check-btn").await?;
+        let line = format!(
+            "Going back to {version} isn’t offered: it can’t read the data this version has updated."
+        );
+        let unavailable = run
+            .ui
+            .wait_with(
+                "the line in place of Go back",
+                &format!(
+                    "{VISIBLE_JS} const id = (i) => document.getElementById(i);
+                     const line = id('go-back-unavailable');
+                     return [visible(line) && line.textContent === arguments[0]
+                         && !visible(id('go-back-btn')), {{ line: line.textContent }}];"
+                ),
+                vec![json!(line)],
+            )
+            .await?;
+        shots.push(
+            self.shot(run, &format!("80-go-back-unavailable-{other}"))
+                .await?,
+        );
+        close_about(&run.ui).await?;
+        choose_theme(run, &first).await?;
+        open_about(&run.ui).await?;
+        run.ui
+            .wait_with(
+                "the line still in About",
+                &format!(
+                    "{VISIBLE_JS} const line = document.getElementById('go-back-unavailable');
+                     return [visible(line) && line.textContent === arguments[0], null];"
+                ),
+                vec![json!(line)],
+            )
+            .await?;
+        shots.push(
+            self.shot(run, &format!("80-go-back-unavailable-{first}"))
+                .await?,
+        );
+        close_about(&run.ui).await?;
+        Ok(format!(
+            "Check now showed \"{label}\" from the test server's previous.json; a click opened \
+             \"{title}\" (Escape closed it, About stayed open); \"Go back\" saved {backup}, \
+             skipped {this_version}, downloaded {} KB in {steps} steps, verified it with the \
+             run's key, and the test build stopped: \"{DOESNT_INSTALL}\"; at 640x480 with \
+             Extra large text About still holds the button ({}); a previous.json whose release \
+             can't use this database showed \"{}\" and no button; {}",
+            sent / 1024,
+            fits,
+            unavailable["line"].as_str().unwrap_or_default(),
+            shots.join(", ")
+        ))
+    }
+
+    /// A screenshot named `stem`, once nothing on the page is still
+    /// moving (About fading in) and a moment more, as
+    /// `screenshots/<stem>.png (n KB)`. Without the moment WebKit's
+    /// screenshot can be a frame from before the last change: About not
+    /// yet open over the ☰ menu, or not yet scrolled.
+    async fn shot(&self, run: &Run<'_>, stem: &str) -> Result<String> {
+        run.ui
+            .settled(&format!("the page to settle for {stem}"))
+            .await?;
+        tokio::time::sleep(SHOT_PAUSE).await;
+        let name = format!("{stem}.png");
+        let bytes = run
+            .ui
+            .screenshot(&format!("screenshot: {stem}"), &run.shot_path(&name))
+            .await?;
+        Ok(format!("screenshots/{name} ({} KB)", bytes / 1024))
+    }
 }
 
 async fn theme(ui: &Ui) -> Result<String> {
@@ -628,4 +1056,257 @@ async fn choose_theme(run: &Run<'_>, theme: &str) -> Result<()> {
     )
     .await?;
     Ok(())
+}
+
+fn other_theme(theme: &str) -> &'static str {
+    if theme == "vellum" {
+        "chi-rho"
+    } else {
+        "vellum"
+    }
+}
+
+/// The page loaded afresh, as at a launch (a new launch check), then
+/// booted.
+async fn reload(ui: &Ui, timeout: Duration) -> Result<()> {
+    ui.driver().refresh().await.context("reloading the page")?;
+    ui.wait_within(
+        "the reloaded page to boot",
+        "const heading = document.querySelector('.chapter-main .chapter-heading');
+         return [!!heading && !!heading.textContent.trim() && !!document.getElementById('update-banner'),
+             { heading: heading ? heading.textContent.trim() : null }];",
+        Vec::new(),
+        Some(timeout),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn wait_for_banner(ui: &Ui, available: &str) -> Result<Value> {
+    ui.wait_with(
+        "the launch check's banner",
+        &format!(
+            "{VISIBLE_JS} const id = (i) => document.getElementById(i);
+             const title = (id('update-title') || {{}}).textContent || '';
+             return [visible(id('update-banner')) && title === arguments[0], {{
+                 title, later: visible(id('update-later')),
+                 skip: visible(id('update-skip')) ? id('update-skip').textContent : null }}];"
+        ),
+        vec![json!(available)],
+    )
+    .await
+}
+
+async fn wait_for_go_back(ui: &Ui, label: &str) -> Result<Value> {
+    ui.wait_with(
+        "Go back in About",
+        &format!(
+            "{VISIBLE_JS} const id = (i) => document.getElementById(i);
+             const button = id('go-back-btn');
+             return [visible(button) && button.textContent === arguments[0] && !button.disabled,
+                 {{ button: button.textContent, unavailable: visible(id('go-back-unavailable')) }}];"
+        ),
+        vec![json!(label)],
+    )
+    .await
+}
+
+/// A real click on Go back: its dialog, its title, focus on Cancel.
+async fn open_confirm(ui: &Ui, version: &str) -> Result<String> {
+    ui.click(&format!("Go back to {version}"), "#go-back-btn")
+        .await?;
+    let title = format!("Go back to {version}?");
+    let seen = ui
+        .wait_with(
+            "Go back's dialog, focus on Cancel",
+            &format!(
+                "{VISIBLE_JS} const id = (i) => document.getElementById(i);
+                 const focus = document.activeElement;
+                 return [visible(id('go-back-panel')) && id('go-back-title').textContent === arguments[0]
+                     && !!focus && focus.id === 'go-back-cancel',
+                     {{ title: id('go-back-title').textContent, body: id('go-back-body').textContent,
+                        focus: focus ? focus.id : null }}];"
+            ),
+            vec![json!(title)],
+        )
+        .await?;
+    ensure!(
+        seen["body"]
+            .as_str()
+            .is_some_and(|b| b.contains("save a full backup") && b.contains(version)),
+        "the dialog doesn't say what it does: {seen}"
+    );
+    Ok(title)
+}
+
+/// The file Go back saved: a backup file, named for the step, beside the
+/// database.
+fn check_backup(path: &str, version: &str) -> Result<String> {
+    let path = std::path::Path::new(path);
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading the backup {}", path.display()))?;
+    let file: Value = serde_json::from_str(&text)
+        .with_context(|| format!("the backup {} isn't JSON", path.display()))?;
+    ensure!(
+        file["format"] == "gospel-getter-reader-data",
+        "{} isn't a backup file: {}",
+        path.display(),
+        file["format"]
+    );
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    ensure!(
+        name.starts_with(&format!("gospel-getter-backup-before-{version}-"))
+            && name.ends_with(".gospel-getter.json"),
+        "the backup's name doesn't say what it's for: {name}"
+    );
+    let database = path
+        .parent()
+        .map(|dir| dir.join("gospel_getter.db"))
+        .context("the backup has no folder")?;
+    ensure!(
+        database.is_file(),
+        "the backup isn't beside the database: no {}",
+        database.display()
+    );
+    Ok(format!(
+        "{} ({} bytes, format {}, beside {})",
+        path.display(),
+        text.len(),
+        file["format_version"],
+        database.display()
+    ))
+}
+
+async fn set_window(ui: &Ui, width: u32, height: u32) -> Result<()> {
+    let rect = ui.driver().get_window_rect().await?;
+    ui.driver()
+        .set_window_rect(rect.x, rect.y, width, height)
+        .await
+        .with_context(|| format!("resizing the window to {width}x{height}"))?;
+    ui.wait_with(
+        &format!("the window to be {width}x{height}"),
+        "return [Math.abs(window.outerWidth - arguments[0]) <= 2
+             || Math.abs(window.innerWidth - arguments[0]) <= 2,
+             { inner: [window.innerWidth, window.innerHeight] }];",
+        vec![json!(width)],
+    )
+    .await?;
+    Ok(())
+}
+
+async fn text_size(ui: &Ui) -> Result<String> {
+    Ok(ui
+        .js(
+            "return document.documentElement.dataset.textSize || 'medium';",
+            Vec::new(),
+        )
+        .await?
+        .as_str()
+        .unwrap_or("medium")
+        .to_owned())
+}
+
+/// Aa's text size, `want`, by its stepper, as a reader would.
+async fn set_text_size(run: &Run<'_>, want: &str) -> Result<()> {
+    let target = TEXT_SIZES
+        .iter()
+        .position(|s| *s == want)
+        .with_context(|| format!("no text size {want}"))?;
+    let ui = &run.ui;
+    let now = text_size(ui).await?;
+    if now == want {
+        return Ok(());
+    }
+    ui.click("open Aa", "#aa-toggle").await?;
+    ui.wait(
+        "the Aa panel to show",
+        &format!("{VISIBLE_JS} return [visible(document.getElementById('aa-popover')), null];"),
+    )
+    .await?;
+    for _ in 0..TEXT_SIZES.len() {
+        let now = text_size(ui).await?;
+        let at = TEXT_SIZES.iter().position(|s| *s == now).unwrap_or(1);
+        if at == target {
+            break;
+        }
+        let (what, css) = if at < target {
+            ("Aa: A+ (larger)", "#text-size-up")
+        } else {
+            ("Aa: A− (smaller)", "#text-size-down")
+        };
+        ui.click(what, css).await?;
+        ui.wait_with(
+            "the text size to change",
+            "return [(document.documentElement.dataset.textSize || 'medium') !== arguments[0], null];",
+            vec![json!(now)],
+        )
+        .await?;
+    }
+    ui.press("press Escape (close Aa)", Key::Escape).await?;
+    ui.wait(
+        "the Aa panel to close",
+        "return [document.getElementById('aa-popover').hidden, null];",
+    )
+    .await?;
+    ensure!(text_size(ui).await? == want, "the text size isn't {want}");
+    Ok(())
+}
+
+/// What checks 79 and 80 change, put back whether they passed or not: the
+/// skip forgotten, About and its dialog closed, the window's size and the
+/// text size as they were. A check that passed fails if it can't be.
+async fn put_back(
+    run: &Run<'_>,
+    result: Result<String>,
+    window: Option<&thirtyfour::Rect>,
+    text: Option<&str>,
+) -> Result<String> {
+    let ui = &run.ui;
+    let mut problems = Vec::new();
+    if let Err(e) = ui
+        .js(
+            "localStorage.removeItem(arguments[0]);
+             const confirm = document.getElementById('go-back-overlay');
+             if (confirm && !confirm.hidden) document.getElementById('go-back-cancel').click();
+             return true;",
+            vec![json!(SKIPPED_KEY)],
+        )
+        .await
+    {
+        problems.push(format!("forgetting the skip: {e:#}"));
+    }
+    let about_open = ui
+        .js(
+            "return !document.getElementById('about-overlay').hidden;",
+            Vec::new(),
+        )
+        .await
+        .unwrap_or(Value::Bool(false));
+    if about_open == true
+        && let Err(e) = close_about(ui).await
+    {
+        problems.push(format!("closing About: {e:#}"));
+    }
+    if let Some(text) = text
+        && let Err(e) = set_text_size(run, text).await
+    {
+        problems.push(format!("putting the text size back to {text}: {e:#}"));
+    }
+    if let Some(rect) = window
+        && let Err(e) = ui
+            .driver()
+            .set_window_rect(rect.x, rect.y, rect.width as u32, rect.height as u32)
+            .await
+    {
+        problems.push(format!("putting the window back: {e}"));
+    }
+    match result {
+        Ok(said) if problems.is_empty() => Ok(said),
+        Ok(said) => bail!("{said}; but then {}", problems.join("; ")),
+        Err(e) if problems.is_empty() => Err(e),
+        Err(e) => Err(e.context(format!("and then {}", problems.join("; ")))),
+    }
 }

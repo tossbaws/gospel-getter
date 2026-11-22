@@ -80,6 +80,31 @@ impl Db {
             .context("Failed to fold the write-ahead log into the database")?;
         Ok(busy == 0)
     }
+
+    /// The database's `PRAGMA user_version`: the schema it's at now, which
+    /// is above [`SCHEMA_VERSION`](crate::db::migrate::SCHEMA_VERSION) if a
+    /// newer app has used it.
+    pub async fn schema_version(&self) -> anyhow::Result<i64> {
+        sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&self.read)
+            .await
+            .context("Failed to read the database's schema version")
+    }
+
+    /// The database's file, as SQLite opened it (`PRAGMA database_list`'s
+    /// `main`): a backup made beside it goes in its folder.
+    pub async fn file(&self) -> anyhow::Result<PathBuf> {
+        let file: String =
+            sqlx::query_scalar("SELECT file FROM pragma_database_list WHERE name = 'main'")
+                .fetch_one(&self.read)
+                .await
+                .context("Failed to read where the database is")?;
+        anyhow::ensure!(
+            !file.is_empty(),
+            "The database has no file (it's in memory)"
+        );
+        Ok(PathBuf::from(file))
+    }
 }
 
 /// The one connection the app writes with, as a pool of one: callers

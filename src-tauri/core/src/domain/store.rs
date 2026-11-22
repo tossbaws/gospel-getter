@@ -331,6 +331,16 @@ impl Store {
         db::reader_data::now(self.db.read()).await
     }
 
+    /// The database's schema version now (`Db::schema_version`).
+    pub async fn schema_version(&self) -> anyhow::Result<i64> {
+        self.db.schema_version().await
+    }
+
+    /// The database's file (`Db::file`).
+    pub async fn database_file(&self) -> anyhow::Result<std::path::PathBuf> {
+        self.db.file().await
+    }
+
     /// Apply a validated import, all or nothing.
     pub async fn apply_import(
         &self,

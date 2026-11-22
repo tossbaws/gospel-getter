@@ -24,6 +24,16 @@ an upgraded one (2.33.0 couldn't start on any Windows PC upgraded from
                     promises
                 5d  every seeded item is still there, read back with the
                     --to install's own gospel-getter-cli (read-only)
+    back      the other way, as About's Go back does: install --from (this
+              build) on no data, start it once, seed the same items,
+              install --to (the previous release) over it, start that, and
+              assert 5a, 5b (it's --expect-version, the previous release's),
+              5c (the database is still at this build's schema: an older
+              app keeps a newer schema as it is) and 5d (read back with the
+              previous release's own gospel-getter-cli). On Windows this is
+              the older NSIS installer run with /S over the newer, exactly
+              what Go back runs. The data folders an earlier `run` left are
+              deleted first.
 
 The installers are any two: Windows takes NSIS setup .exes (installed with
 /S, the second over the first), Linux AppImages (each extracted and started
@@ -32,6 +42,8 @@ the version from src-tauri/tauri.conf.json, the schema from the migrate
 module. Usage, from dist.yml's upgrade jobs:
     python3 tools/ci/upgrade_check.py previous --platform linux --out DIR
     python3 tools/ci/upgrade_check.py run --from OLD --to NEW --work DIR
+    python3 tools/ci/upgrade_check.py back --from NEW --to OLD --work DIR2 \
+        --expect-version OLD_VERSION
 
 It installs over the account's own app and writes into the app's data
 folder, so it refuses to run unless GOSPEL_GETTER_UPGRADE_CHECK=throwaway-runner
@@ -429,6 +441,10 @@ class Linux:
         if self.data_dir.exists():
             raise Refused(f"{self.data_dir} already exists: this check starts from no data")
 
+    def clear(self):
+        """The app's data folder, which is in the work folder, gone."""
+        return clear_folders([self.data_dir])
+
     def install(self, installer, slot):
         folder = self.work / slot
         if folder.exists():
@@ -515,6 +531,12 @@ class Windows:
         for folder in (self.data_dir, self.log_dir.parent):
             if folder.exists():
                 raise Refused(f"{folder} already exists: this check starts from no data")
+
+    def clear(self):
+        """The account's app data folders (the database, the logs, the
+        WebView2 profile), which an earlier run left, gone: only behind the
+        throwaway-runner switch."""
+        return clear_folders([self.data_dir, self.log_dir.parent])
 
     def entry(self):
         import winreg
@@ -618,6 +640,16 @@ class Windows:
         pass
 
 
+def clear_folders(folders):
+    """Remove each of `folders` that exists; the ones removed."""
+    removed = []
+    for folder in folders:
+        if folder.exists():
+            shutil.rmtree(folder)
+            removed.append(str(folder))
+    return removed
+
+
 # --- one start ---------------------------------------------------------------
 
 
@@ -702,13 +734,17 @@ def started_verdict(seen, seconds_after):
                   f"no \"{FAILED_TEXT}\" in its log, windows {seen.titles}")
 
 
-def run(args, platform_class=None):
+def run(args, platform_class=None, back=False):
+    """`run` (the previous release, then this build over it) or, with
+    `back`, `back` (this build, then the previous release over it)."""
     if os.environ.get(SWITCH) != SWITCH_VALUE:
         raise Refused(
             f"refusing to run: this installs over the app and writes its data folder, so it runs only on a "
             f"throwaway CI runner, with {SWITCH}={SWITCH_VALUE}"
         )
     conf = TAURI_CONF.read_text(encoding="utf-8")
+    if back and not args.expect_version:
+        raise Refused("back needs --expect-version: the version of the release it goes back to")
     want_version = args.expect_version or expected_version(conf)
     want_schema = args.expect_schema or schema_version(MIGRATE_RS.read_text(encoding="utf-8"))
     steps = kept_copies(p.read_text(encoding="utf-8") for p in sorted(MIGRATE_DIR.glob("schema_*.rs")))
@@ -717,21 +753,27 @@ def run(args, platform_class=None):
     if platform_class is None:
         platform_class = Windows if sys.platform == "win32" else Linux
     platform = platform_class(work, identifier(conf))
-    say(f"from {args.from_installer} to {args.to_installer}; expecting version {want_version}, schema {want_schema}")
+    (first_name, second_name) = ("this build", "the previous release") if back else ("the previous release", "this build")
+    say(f"from {args.from_installer} to {args.to_installer} ({'going back' if back else 'upgrading'}); "
+        f"expecting version {want_version}, schema {want_schema}")
     verdicts = Verdicts()
     try:
+        if back:
+            removed = platform.clear()
+            if removed:
+                say(f"removed the data an earlier check left: {removed}")
         platform.guard()
 
-        # 1-2: the previous release, as a reader has it.
+        # 1-2: the first install, as a reader has it.
         old, old_binary = platform.install(Path(args.from_installer), "from")
         first = start(platform, old, old_binary, "from", args.startup_seconds, 2, until="Built search index")
         database = Path(log_says(first.output, "Using database at ") or platform.data_dir / DATABASE_FILE)
         ok, detail = started_verdict(first, 2)
-        say(f"the previous release started once: {'yes' if ok else 'NO'}: {detail}; closed: {first.closed}")
+        say(f"{first_name} started once: {'yes' if ok else 'NO'}: {detail}; closed: {first.closed}")
         if not ok:
-            raise Refused("the previous release didn't start, so there's nothing to upgrade from")
+            raise Refused(f"{first_name} didn't start, so there's nothing to go on from")
         if not database.exists():
-            raise Refused(f"the previous release made no database at {database}")
+            raise Refused(f"{first_name} made no database at {database}")
 
         # 3: the reader's data, in its own schema.
         seeded = seed(database)
@@ -741,10 +783,10 @@ def run(args, platform_class=None):
         for key in ("bookmarks", "highlights", "notes", "reading_position", "reading_place"):
             say(f"  {key}: {seeded[key]}")
 
-        # 4: this build, over it.
+        # 4: the second install, over it.
         new, new_binary = platform.install(Path(args.to_installer), "to")
         seen = start(platform, new, new_binary, "to", args.startup_seconds, args.settle_seconds)
-        say(f"this build started; closed: {seen.closed}")
+        say(f"{second_name} started; closed: {seen.closed}")
 
         # 5a
         ok, detail = started_verdict(seen, args.settle_seconds)
@@ -760,23 +802,14 @@ def run(args, platform_class=None):
         reported = {k: v for k, v in reports.items() if v}
         wrong = {k: v for k, v in reported.items() if numeric(v) != want_version}
         ok = bool(seen.program) and bool(reported) and not wrong
-        running = f"the running program is {seen.program}" if seen.program else "this build's program wasn't running"
+        running = f"the running program is {seen.program}" if seen.program else f"{second_name}'s program wasn't running"
         verdicts.line("5b", f"it's {want_version}", ok, f"{running}; reported: {reported}")
 
         # 5c
         now = user_version(database)
-        promised = promised_copies(old_schema, want_schema, steps)
-        copies = {to: Path(f"{database}.before-schema-{to}") for to in promised}
-        missing = [str(p) for p in copies.values() if not p.exists()]
-        copy_versions = {str(p): user_version(p) for p in copies.values() if p.exists()}
-        ok = now == want_schema and not missing
-        detail = f"PRAGMA user_version {now} (was {old_schema}); "
-        if promised:
-            detail += f"copies promised: {[str(p) for p in copies.values()]}, at {copy_versions}"
-            if missing:
-                detail += f", missing: {missing}"
-        else:
-            detail += "no step ran, so no before-schema copy is promised"
+        ok, detail = schema_verdict(database, old_schema, want_schema, now, [] if back else promised_copies(old_schema, want_schema, steps))
+        if back:
+            detail += "; an older app leaves a newer schema as it is"
         verdicts.line("5c", f"the database is at schema {want_schema}", ok, detail)
 
         # 5d
@@ -794,6 +827,23 @@ def run(args, platform_class=None):
     return 0
 
 
+def schema_verdict(database, old_schema, want_schema, now, promised):
+    """(ok, detail) for 5c: the database at `want_schema`, with each
+    `.before-schema-N` copy in `promised` beside it."""
+    copies = {to: Path(f"{database}.before-schema-{to}") for to in promised}
+    missing = [str(p) for p in copies.values() if not p.exists()]
+    copy_versions = {str(p): user_version(p) for p in copies.values() if p.exists()}
+    ok = now == want_schema and not missing
+    detail = f"PRAGMA user_version {now} (was {old_schema}); "
+    if promised:
+        detail += f"copies promised: {[str(p) for p in copies.values()]}, at {copy_versions}"
+        if missing:
+            detail += f", missing: {missing}"
+    else:
+        detail += "no step ran, so no before-schema copy is promised"
+    return ok, detail
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -801,14 +851,16 @@ def main(argv=None):
     p.add_argument("--platform", choices=sorted(ASSETS), required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", REPOSITORY))
-    r = sub.add_parser("run", help="upgrade --from to --to and check it")
-    r.add_argument("--from", dest="from_installer", required=True)
-    r.add_argument("--to", dest="to_installer", required=True)
-    r.add_argument("--work", required=True)
-    r.add_argument("--expect-version")
-    r.add_argument("--expect-schema", type=int)
-    r.add_argument("--startup-seconds", type=int, default=90)
-    r.add_argument("--settle-seconds", type=int, default=10)
+    for name, help in (("run", "upgrade --from to --to and check it"),
+                       ("back", "go back from --from (this build) to --to (the previous release) and check it")):
+        r = sub.add_parser(name, help=help)
+        r.add_argument("--from", dest="from_installer", required=True)
+        r.add_argument("--to", dest="to_installer", required=True)
+        r.add_argument("--work", required=True)
+        r.add_argument("--expect-version")
+        r.add_argument("--expect-schema", type=int)
+        r.add_argument("--startup-seconds", type=int, default=90)
+        r.add_argument("--settle-seconds", type=int, default=10)
     args = parser.parse_args(argv)
     # The CLI's answers and the windows' titles are UTF-8 (an en dash, a
     # middle dot), whatever the console's code page.
@@ -823,7 +875,7 @@ def main(argv=None):
                     out.write(f"tag={tag}\ninstaller={path}\n")
             print(path)
             return 0
-        return run(args)
+        return run(args, back=args.command == "back")
     except Refused as e:
         say(f"ERROR: {e}")
         if os.environ.get("GITHUB_ACTIONS") == "true":

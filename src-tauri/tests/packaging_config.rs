@@ -173,6 +173,19 @@ fn the_nsis_installer_refreshes_the_shell_icon_cache() {
     );
 }
 
+/// About's Go back runs the previous release's installer over this one
+/// (`updater::install_previous_version`), and dist.yml's upgrade jobs run
+/// the previous NSIS installer with /S over this build's. Both installers
+/// refuse an older version without `allowDowngrades` (the NSIS installer
+/// aborts; the MSI's MajorUpgrade gets no AllowDowngrades): Tauri's default
+/// is true, and this keeps it said, so a change of default can't take Go
+/// back away.
+#[test]
+fn the_windows_installers_allow_going_back_to_an_older_version() {
+    let conf: Value = serde_json::from_str(TAURI_CONF).unwrap();
+    assert_eq!(conf["bundle"]["windows"]["allowDowngrades"], true);
+}
+
 /// Windows Installer only takes a version of numbers, so the MSI target
 /// refuses a pre-release such as `2.19.0-beta.1` unless
 /// `bundle.windows.wix.version` gives the MSI its own. That version has to
@@ -2777,6 +2790,27 @@ fn every_release_build_checks_an_upgrade_from_the_previous_release() {
                 && previous.text.contains("GH_TOKEN: ${{ github.token }}")
                 && !previous.text.contains("continue-on-error"),
             "{upgrade}: {previous:#?}"
+        );
+        // And back the other way, as About's Go back does: this build
+        // first, the previous release over it, expecting its version.
+        let back = own
+            .iter()
+            .find(|s| s.text.contains("tools/ci/upgrade_check.py back "))
+            .unwrap_or_else(|| panic!("{upgrade} never goes back: {own:#?}"));
+        assert!(
+            back.text
+                .contains("GOSPEL_GETTER_UPGRADE_CHECK: throwaway-runner")
+                && back
+                    .text
+                    .contains("BACK_TO: ${{ steps.previous.outputs.installer }}")
+                && back
+                    .text
+                    .contains("BACK_TAG: ${{ steps.previous.outputs.tag }}")
+                && back.text.contains("--to \"$BACK_TO\"")
+                && back.text.contains("--expect-version \"${BACK_TAG#v}\"")
+                && !back.text.contains("continue-on-error")
+                && !back.text.contains("        if:"),
+            "{upgrade}: {back:#?}"
         );
         let check = own
             .iter()

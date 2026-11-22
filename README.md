@@ -390,11 +390,31 @@ couldn't be reached. **Later** hides the notice until the next start. When
 notes, **Update now** (with the download's progress) and **Close**, and
 the banner doesn't open as well.
 
+**Skip this version.** **Skip this version** on the notice stops it
+offering that version when the app starts. A newer version shows the notice
+again, and **Check now** in About still finds a skipped version, says you
+skipped it, and offers **Update now**. It's remembered on this computer and
+isn't exported.
+
+**Go back to the previous version.** In About, an install that updates
+itself offers **Go back to** the release before the one you have, from
+2.36.0 on. It asks first, then saves a full backup of your notes,
+bookmarks, highlights and settings next to the app's database (named
+`gospel-getter-backup-before-<version>-<date>.gospel-getter.json`), skips the
+version you're leaving, installs the earlier release (checked against its
+signature, like an update) and restarts. If the earlier version can't read
+your data as this one has left it, About says so instead of offering it.
+A version from before 2.36.0 doesn't know **Skip this version**, so after
+going back to one it offers the newer version again when it starts:
+**Later** puts it away.
+
 **It always asks first.** An update is never downloaded or installed
-without you choosing **Update and restart** or **Update now**.
+without you choosing **Update and restart** or **Update now** (or, going
+back, **Go back**).
 
 **Privacy.** Checking downloads a small file from GitHub that names the
-latest version, so GitHub sees your IP address, as with any download.
+latest version, and, on an install that updates itself, one that names the
+version before yours, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
 **Coming from 2.6.0 through 2.34.0?** Each updates itself to 2.35.0: it

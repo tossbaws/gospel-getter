@@ -148,6 +148,8 @@ checks! {
     (76, SplitTabs,           "split-tabs",             Shipped,  Never),
     (77, SplitRestart,        "split-restart",          Relaunch, Never    ),
     (78, OpenBeside,          "open-beside",            Shipped,  Never),
+    (79, UpdateSkip,          "update-skip",            Updater,  Never),
+    (80, GoBack,              "go-back",                Updater,  Never),
 }
 
 // The table is numbered 1, 2, 3… in order, with no gap: results.txt and
@@ -637,7 +639,7 @@ mod tests {
                 Check::RELAUNCH.len(),
                 Check::UPDATER.len()
             ],
-            [66, 6, 5]
+            [66, 6, 7]
         );
         assert_eq!(
             Check::UPDATER,
@@ -646,7 +648,9 @@ mod tests {
                 Check::UpdateAbout,
                 Check::UpdateDownload,
                 Check::UpdateLinkOnly,
-                Check::UpdateOffline
+                Check::UpdateOffline,
+                Check::UpdateSkip,
+                Check::GoBack
             ]
         );
     }

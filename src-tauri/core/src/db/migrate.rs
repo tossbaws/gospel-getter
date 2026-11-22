@@ -37,13 +37,17 @@
 //! constraints change is rebuilt (`Rebuild`: SQLite can't alter a
 //! constraint in place).
 //!
-//! Every step so far is compatible both ways: an app or CLI of an earlier
-//! version reads and writes a database this one has brought up to date,
-//! and this one reads one the step hasn't reached yet. The first step that
-//! isn't must wait for a released max-writer check (an app or CLI refusing
-//! to write a database whose version is above the newest it knows to be
-//! safe: this version and every earlier one write a database of any higher
-//! version) and raise [`OLDEST_READABLE_SCHEMA_VERSION`] with it.
+//! Every step so far is compatible both ways (each `Step` says so,
+//! `compatible_both_ways`): an app or CLI of an earlier version reads and
+//! writes a database this one has brought up to date, and this one reads
+//! one the step hasn't reached yet. The first step that isn't must wait for
+//! a released max-writer check (an app or CLI refusing to write a database
+//! whose version is above the newest it knows to be safe: this version and
+//! every earlier one write a database of any higher version) and raise
+//! [`OLDEST_READABLE_SCHEMA_VERSION`] with it. About's Go back asks
+//! [`older_app_can_use`], which reads the flag, before it offers an older
+//! release: mark such a step `false`, and Go back is no longer offered to a
+//! release from before it.
 
 use std::path::PathBuf;
 
@@ -104,6 +108,11 @@ pub(crate) struct Step {
     /// step runs, `<database>.before-schema-<to>` (see
     /// [`keep_copy_before`]), so the step can be undone by hand.
     pub(crate) keep_copy: bool,
+    /// Whether an app or CLI from before the step still reads and writes
+    /// the database once it has run (see the module's doc). Go back to an
+    /// older release is offered only past steps that are
+    /// ([`older_app_can_use`]).
+    pub(crate) compatible_both_ways: bool,
     /// The tables it rebuilds, in order.
     pub(crate) rebuilds: &'static [Rebuild],
 }
@@ -339,6 +348,30 @@ const CURRENT: [(&str, &str); 21] = [
         )",
     ),
 ];
+
+/// Whether an app or CLI built for schema `app_schema` can use a database
+/// at schema `database_schema`: yes if the database isn't past it (that
+/// app brings it up to date itself), or if every step past it, up to the
+/// database's, is compatible both ways. A step this build doesn't know (a
+/// database a newer app has moved on, or an app from before versions were
+/// kept, at 0, whose step to 1 isn't one of the steps) is a no: nothing
+/// says it's safe. About's Go back asks this of the release it would
+/// install (its `previous.json`'s `schemaVersion`) and the database's
+/// `PRAGMA user_version`.
+#[must_use]
+pub fn older_app_can_use(app_schema: i64, database_schema: i64) -> bool {
+    can_use_with(STEPS, app_schema, database_schema)
+}
+
+/// [`older_app_can_use`], with `steps` for [`STEPS`] (a test's).
+pub(crate) fn can_use_with(steps: &[Step], app_schema: i64, database_schema: i64) -> bool {
+    ((app_schema + 1)..=database_schema).all(|to| {
+        steps
+            .iter()
+            .find(|step| step.to == to)
+            .is_some_and(|step| step.compatible_both_ways)
+    })
+}
 
 /// Bring the database's schema up to [`SCHEMA_VERSION`], as the module's
 /// doc describes. Safe to run on every launch: once a database is up to

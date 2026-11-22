@@ -30,6 +30,8 @@ pub enum Overlay {
     Import,
     /// About, which `surfaces` opens and closes as one of its surfaces.
     About,
+    /// About's Go back's confirm dialog, over About (`updates`).
+    GoBack,
     NoteEditor,
     /// ☰ → Export data…'s chooser.
     ExportChoice,
@@ -45,9 +47,10 @@ pub enum Overlay {
 
 impl Overlay {
     /// Every overlay.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Import,
         Self::About,
+        Self::GoBack,
         Self::NoteEditor,
         Self::ExportChoice,
         Self::ExportNotes,
@@ -62,6 +65,7 @@ impl Overlay {
         match self {
             Self::Import => "import-overlay",
             Self::About => "about-overlay",
+            Self::GoBack => "go-back-overlay",
             Self::NoteEditor => "note-overlay",
             Self::ExportChoice => "export-choice-overlay",
             Self::ExportNotes => "export-notes-overlay",

@@ -12,8 +12,8 @@ use super::findings::{
 };
 use super::highlights::set_highlights;
 use super::migrate::{
-    HEAD_CHARS, OLDEST_READABLE_SCHEMA_VERSION, Rebuild, SCHEMA_VERSION, Step, complete_schema_1,
-    head, if_not_exists, migrate, migrate_with, schema_1,
+    HEAD_CHARS, OLDEST_READABLE_SCHEMA_VERSION, Rebuild, SCHEMA_VERSION, STEPS, Step, can_use_with,
+    complete_schema_1, head, if_not_exists, migrate, migrate_with, older_app_can_use, schema_1,
 };
 use super::notes::{MAX_NOTE_CHARS, NoteBodyError, NoteError, Passage, add_note, delete_note};
 use super::test_support::{TempDb, fresh_database, insert_old_rule_findings, schema_1_database};
@@ -397,6 +397,7 @@ async fn a_step_that_fails_part_way_changes_nothing() {
     let fails = [Step {
         to: 2,
         keep_copy: false,
+        compatible_both_ways: true,
         rebuilds: &FAILS_PART_WAY,
     }];
     migrate_with(pool.write(), &fails).await.unwrap();
@@ -1124,4 +1125,59 @@ async fn version_2_32_2_reads_and_writes_an_upgraded_database() {
     prepare(pool.write()).await.unwrap();
     assert_eq!(readers_rows(pool.read()).await, left);
     assert_eq!(user_version(pool.read()).await, 2);
+}
+
+/// Go back's data check, as a table: an app built for schema P can use a
+/// database at schema D if D isn't past P, or if every step past P up to
+/// D is compatible both ways. With today's steps, every release back to
+/// schema 1 can; a step marked incompatible (injected here) makes every
+/// app from before it a no, and one past it still a yes; a step this
+/// build doesn't know is a no.
+#[test]
+fn an_older_app_can_use_the_database_only_past_compatible_steps() {
+    assert!(STEPS.iter().all(|step| step.compatible_both_ways));
+    for (app, database, can) in [
+        (2, 2, true),
+        (1, 2, true),
+        (2, 1, true),
+        (1, 1, true),
+        // Before versions were kept: its step to 1 isn't a `Step`.
+        (0, 2, false),
+        // A newer app's database, past every step this build knows.
+        (2, SCHEMA_VERSION + 1, false),
+    ] {
+        assert_eq!(
+            older_app_can_use(app, database),
+            can,
+            "app at {app}, database at {database}"
+        );
+    }
+
+    let step = |to, compatible_both_ways| Step {
+        to,
+        keep_copy: false,
+        compatible_both_ways,
+        rebuilds: &[],
+    };
+    let steps = [step(2, true), step(3, false), step(4, true)];
+    for (app, database, can) in [
+        (1, 2, true),
+        (2, 2, true),
+        (1, 3, false),
+        (2, 3, false),
+        (2, 4, false),
+        (1, 4, false),
+        (3, 3, true),
+        (3, 4, true),
+        (4, 4, true),
+        (4, 3, true),
+        (1, 1, true),
+        (4, 5, false),
+    ] {
+        assert_eq!(
+            can_use_with(&steps, app, database),
+            can,
+            "app at {app}, database at {database}"
+        );
+    }
 }

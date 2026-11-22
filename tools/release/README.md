@@ -51,11 +51,33 @@ can't see the release as an update.
        --notes-file NOTES.md --assets bundle
    ```
 
+   Then write `previous.json` (below), into the bundle too, naming the
+   release kept before this one, `vP.Q.R` (Latest until this one is
+   published):
+
+   ```sh
+   python3 tools/release/make_previous_json.py --for X.Y.Z --previous P.Q.R \
+       --out bundle/previous.json
+   ```
+
 3. Upload everything in `bundle/` (the installers, their `.sig` files, the
-   two CLI binaries, `SHA256SUMS` and `latest.json`) to the `vX.Y.Z`
-   release. The manifest's URLs point at that tag
+   two CLI binaries, `SHA256SUMS`, `latest.json` and `previous.json`) to
+   the `vX.Y.Z` release. The manifest's URLs point at that tag
    (`releases/download/vX.Y.Z/...`), so it names exactly the four
-   installers it was made for.
+   installers it was made for; `previous.json`'s point at `vP.Q.R`'s.
+
+4. GitHub keeps Latest and one previous release. Delete the one before
+   `vP.Q.R`, `vO.O.O`, keeping its tag (no `--cleanup-tag`), then delete
+   `vP.Q.R`'s own `previous.json`: it names `vO.O.O`'s installers, which
+   are gone now, so `vP.Q.R` must offer no Go back (a 404 shows no button).
+   A release from before 2.36.0 has no `previous.json`; skip that command
+   for it.
+
+   ```sh
+   gh release delete vO.O.O --yes
+   gh release delete-asset vP.Q.R previous.json --yes
+   gh release view vP.Q.R --json assets --jq '.assets[].name'   # no previous.json
+   ```
 
 ### By hand, if there's no bundle
 
@@ -102,7 +124,9 @@ docstring).
    binaries, by these names. Each installer's hash is the one in its
    `INSTALLER-SHA256SUMS`: renaming changes no byte.
 
-5. Write the manifest and upload, as in steps 2 and 3 above.
+5. Write the manifest and `previous.json` and upload, then delete the
+   release before the previous one and its stale `previous.json`, as in
+   steps 2 to 4 above.
 
 Each installer has its own platform key, which the updater plugin looks up
 for the bundle the running copy was installed from. A `.deb` install is only
@@ -110,6 +134,27 @@ ever offered the `.deb`, an MSI install the MSI, and so on. The app also
 requires the version inside each signature to match the manifest's
 (`requireSignedVersion`), which stops an old, validly signed build from
 being passed off as a new one.
+
+## `make_previous_json.py`: Go back's manifest
+
+About's Go back reads `previous.json` from the running version's own
+release (`releases/download/vX.Y.Z/previous.json`,
+`updater::previous_manifest`), never from Latest. It is the previous
+release's own `latest.json`, downloaded from its release (`gh release
+download vP.Q.R -p latest.json`), unchanged, plus `schemaVersion`: the
+database schema that release was built for (`SCHEMA_VERSION` in `git show
+vP.Q.R:src-tauri/core/src/db/migrate.rs`). The app installs it only if its
+version is lower and final, every signature verifies with the app's key and
+names that version, and that schema can use the reader's database
+(`migrate::older_app_can_use`); otherwise About says Go back isn't offered.
+
+It refuses, writing nothing, if `vP.Q.R` isn't a plain release before
+`vX.Y.Z`, its `latest.json` names another version or lacks an installer, a
+signature wasn't made for `P.Q.R`, a URL isn't one of `vP.Q.R`'s own assets
+(`releases/download/vP.Q.R/`), or the schema version isn't found. Publish
+step 2 runs it; step 4 deletes the copy that would point at deleted assets.
+`--latest-json FILE` and `--migrate-rs FILE` read the two from files
+instead of `gh` and `git`.
 
 ## `sign_installers.py`: the updater signatures
 

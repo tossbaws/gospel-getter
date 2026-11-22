@@ -158,6 +158,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::cancel_import,
         updater::check_for_update,
         updater::install_update,
+        updater::check_previous_version,
+        updater::save_backup_before_going_back,
+        updater::install_previous_version,
         updater::open_download_page,
         updater::open_release_notes,
         credit_links::open_credit_link,
@@ -428,7 +431,9 @@ mod ipc_tests {
     use tauri::test::{INVOKE_KEY, get_ipc_response, mock_builder, mock_context, noop_assets};
     use tauri::webview::InvokeRequest;
 
-    use crate::commands::{AppState, BridgeScript, ScriptedCheck, ScriptedInstall};
+    use crate::commands::{
+        AppState, BridgeScript, ScriptedCheck, ScriptedInstall, ScriptedPrevious,
+    };
     use crate::db::test_support::{bundled, fresh_database};
     use crate::updater::{DownloadEvent, Problem, UpdateInfo};
 
@@ -901,6 +906,18 @@ mod ipc_tests {
                 ],
                 problem: Some(Problem::NotVerified),
             }
+        }
+
+        fn check_previous(&self) -> Option<ScriptedPrevious> {
+            None
+        }
+
+        fn backup_folder(&self) -> Option<PathBuf> {
+            None
+        }
+
+        fn update_mode(&self) -> crate::updater::UpdateMode {
+            crate::updater::UpdateMode::SelfUpdate
         }
 
         fn restart(&self) {

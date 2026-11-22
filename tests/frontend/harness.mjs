@@ -176,9 +176,14 @@ export async function backend(cmd, args = {}, channels = {}) {
  * null (no update), an update ({ version, notes, date, canSelfUpdate }),
  * { problem } or { noAnswer: true } (given up on after the app's own time
  * limit, which `checkTimeoutMs` shortens); `install` is { events, problem }
- * (no problem: it restarts, and never answers). Problems are the app's:
- * offline, noReleaseInfo, notForThisInstall, notVerified,
- * packageNotInstalled, installerDidntStart, other.
+ * (no problem: it restarts, and never answers), and installing Go back's
+ * release too. `previous` is what this release's previous.json names, {
+ * version, schemaVersion } (none: offline or a 404), which the app's own
+ * rules judge; `backupFolder` is where Go back saves its backup in place
+ * of beside the database; `mode: 'link'` is a build that can't update
+ * itself (Go back's rule; the check's is `canSelfUpdate`). Problems are the app's: offline, noReleaseInfo,
+ * notForThisInstall, notVerified, packageNotInstalled,
+ * installerDidntStart, other.
  */
 export function setUpdate(script) {
     return backend('__set_update', script);

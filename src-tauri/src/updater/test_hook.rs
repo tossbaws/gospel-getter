@@ -11,7 +11,9 @@
 //!
 //! `mode` is `self` (a release installer: Update now downloads and
 //! verifies) or `link` (any other build: Download page); `timeoutMs` is the
-//! check's time limit, [`CHECK_TIMEOUT`] if left out. The file is read
+//! check's time limit, [`CHECK_TIMEOUT`] if left out; `previous`, if given,
+//! is where Go back reads `previous.json`, in place of this version's
+//! release (`updater::previous_manifest`). The file is read
 //! before every check and install, and with the variable unset the build
 //! checks as a release would. Either way a test build never installs what
 //! it downloads: once the update is downloaded and verified it says
@@ -43,6 +45,7 @@ struct TestSettings {
     pubkey: String,
     mode: TestMode,
     timeout_ms: Option<u64>,
+    previous: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,6 +79,11 @@ pub fn parse(text: &str) -> Result<Settings, String> {
         .endpoint
         .parse::<tauri::Url>()
         .map_err(|e| format!("Test build: the updater endpoint isn’t a URL: {e}"))?;
+    let previous = file
+        .previous
+        .map(|previous| previous.parse::<tauri::Url>())
+        .transpose()
+        .map_err(|e| format!("Test build: the previous.json address isn’t a URL: {e}"))?;
     Ok(Settings {
         mode: match file.mode {
             TestMode::SelfUpdate => UpdateMode::SelfUpdate,
@@ -85,6 +93,7 @@ pub fn parse(text: &str) -> Result<Settings, String> {
         endpoint: Some(endpoint),
         pubkey: Some(file.pubkey),
         installs: false,
+        previous,
     })
 }
 
@@ -137,6 +146,17 @@ mod tests {
         assert_eq!(settings.mode, UpdateMode::SelfUpdate);
         assert_eq!(settings.timeout, CHECK_TIMEOUT);
         assert!(!settings.installs);
+        assert_eq!(settings.previous, None);
+
+        let settings = parse(
+            r#"{ "endpoint": "http://127.0.0.1:1/latest.json", "pubkey": "k", "mode": "self",
+                 "previous": "http://127.0.0.1:1/previous.json" }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            settings.previous.unwrap().as_str(),
+            "http://127.0.0.1:1/previous.json"
+        );
     }
 
     #[test]
@@ -147,6 +167,7 @@ mod tests {
             r#"{ "endpoint": "not a url", "pubkey": "k", "mode": "self" }"#,
             r#"{ "endpoint": "http://x/", "pubkey": "k", "mode": "maybe" }"#,
             r#"{ "endpoint": "http://x/", "pubkey": "k", "mode": "self", "installs": true }"#,
+            r#"{ "endpoint": "http://x/", "pubkey": "k", "mode": "self", "previous": "nope" }"#,
         ] {
             assert!(parse(bad).unwrap_err().starts_with("Test build:"), "{bad}");
         }

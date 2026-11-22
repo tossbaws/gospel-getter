@@ -48,7 +48,8 @@
 //! more (65, `notes`); two passages side by side as the app quits, both
 //! where they were when it's started again (77, `split`, in two sessions of
 //! its own); and, in a last session on the GUI checks' test
-//! build, the updater (9 to 13, `updates`). Before any of it, with no
+//! build, the updater (9 to 13, `updates`), Skip this version on the banner
+//! (79) and Go back to the previous version from About (80). Before any of it, with no
 //! session, the app started on a database it can't open, saying why in a
 //! native message and its log, and exiting with code 1 (74, `startup`).
 

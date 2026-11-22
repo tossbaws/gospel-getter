@@ -1,7 +1,8 @@
 //! Updates: Check now and its status line in About, the check at launch,
-//! the "new version" banner with Later, the update shown inside About when
-//! it's found there, installing with download progress (from either), and
-//! Download page for builds that can't update themselves. The backend
+//! the "new version" banner with Skip this version and Later, the update
+//! shown inside About when it's found there, installing with download
+//! progress (from either), Download page for builds that can't update
+//! themselves, and About's Go back to the release before this one. The backend
 //! decides what this copy can do (`updater.rs`): a release installer
 //! downloads, verifies and installs the update (then restarts); any other
 //! build links to the releases page. Nothing is installed until the reader
@@ -16,6 +17,23 @@
 //! the banner shows it. Installing from either shows its progress in both,
 //! and closing About part way through brings the banner up, so the download
 //! never runs out of sight.
+//!
+//! Skip this version remembers that exact version on this computer
+//! (`update_text::SKIPPED_KEY`): the launch check then stays quiet for it,
+//! a newer one shows the banner again, and Check now still shows it in
+//! About, noting it was skipped, with Update now (`update_text::launch_offer`).
+//! Later is for this session only.
+//!
+//! Go back: beside each check, the backend is asked for the release this
+//! one's `previous.json` names (`check_previous_version`, quietly: none
+//! means no button). A release installer whose previous release can use
+//! the data gets "Go back to <version>"; one that can't gets a line saying
+//! why. Pressing it asks first (its confirm dialog, an overlay over About,
+//! `Overlay::GoBack`); then the backend saves a whole backup beside the
+//! database, the version left behind is skipped, and the release is
+//! downloaded, verified and installed as Update now does, with the same
+//! progress (in About, and the banner if About closes). A failed backup
+//! stops it there: nothing is installed.
 //!
 //! Each event writes the DOM within itself (the views, the status lines,
 //! focus), then any command it starts runs on; the frontend tests look at
@@ -34,20 +52,36 @@ use web_sys::{Element, HtmlElement};
 
 use crate::bridge;
 use crate::dom;
-use crate::dto::{DownloadEvent, NoteBlock, NoteSpan, UpdateInfo};
+use crate::dto::{BackupSaved, DownloadEvent, NoteBlock, NoteSpan, PreviousInfo, UpdateInfo};
 use crate::ipc;
 use crate::overlays::Overlay;
 use crate::surfaces::{self, Surface};
-use crate::update_text::{self, Download};
+use crate::update_text::{self, Download, Offer};
 
-/// The banner or About: the two places an update shows.
+/// The banner or About: the two places an update shows; and About's Go
+/// back, where going back shows its progress (and the banner, if About
+/// closes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     Banner,
     About,
+    GoBack,
 }
 
 const BOTH: [View; 2] = [View::Banner, View::About];
+
+/// The version the reader skipped, if any.
+fn skipped() -> Option<String> {
+    dom::storage()?.get_item(update_text::SKIPPED_KEY).ok()?
+}
+
+/// Skip `version` from now on; quietly not, if local storage can't be
+/// written.
+fn skip_version(version: &str) {
+    if let Some(storage) = dom::storage() {
+        let _ = storage.set_item(update_text::SKIPPED_KEY, version);
+    }
+}
 
 /// What the download's channel calls with each message.
 type OnMessage = Closure<dyn FnMut(JsValue)>;
@@ -91,6 +125,11 @@ pub struct Updates {
     checks: StoredValue<u32>,
     /// The update the last check found.
     offered: StoredValue<Option<UpdateInfo>>,
+    /// The release Go back offers (or says it can't), as the last check
+    /// found it.
+    previous: StoredValue<Option<PreviousInfo>>,
+    /// The release being gone back to, while it is.
+    going_back: StoredValue<Option<String>>,
     /// About has shown it (after which the banner stays away).
     shown_in_about: StoredValue<bool>,
     /// The app's version, as `get_app_version` read it (none if it
@@ -108,6 +147,7 @@ pub struct Updates {
     pub banner_status: NodeRef<html::P>,
     pub banner_install: NodeRef<html::Button>,
     pub banner_download: NodeRef<html::Button>,
+    pub banner_skip: NodeRef<html::Button>,
     pub banner_later: NodeRef<html::Button>,
 
     // About's Updates section.
@@ -115,12 +155,26 @@ pub struct Updates {
     pub check_status: NodeRef<html::P>,
     pub about_update: NodeRef<html::Div>,
     pub about_title: NodeRef<html::H4>,
+    pub about_skipped: NodeRef<html::P>,
     pub about_notes: NodeRef<html::Div>,
     pub about_progress: NodeRef<html::Progress>,
     pub about_status: NodeRef<html::P>,
     pub about_install: NodeRef<html::Button>,
     pub about_download: NodeRef<html::Button>,
     pub about_close: NodeRef<html::Button>,
+
+    // About's Go back, and its confirm dialog.
+    pub go_back_box: NodeRef<html::Div>,
+    pub go_back_button: NodeRef<html::Button>,
+    pub go_back_unavailable: NodeRef<html::P>,
+    pub go_back_saved: NodeRef<html::P>,
+    pub go_back_progress: NodeRef<html::Progress>,
+    pub go_back_status: NodeRef<html::P>,
+    pub confirm: NodeRef<html::Div>,
+    pub confirm_panel: NodeRef<html::Div>,
+    pub confirm_title: NodeRef<html::H2>,
+    pub confirm_body: NodeRef<html::P>,
+    pub confirm_cancel: NodeRef<html::Button>,
 }
 
 fn hide(el: Option<impl AsRef<HtmlElement>>, hidden: bool) {
@@ -150,6 +204,8 @@ impl Updates {
             installing: StoredValue::new(false),
             checks: StoredValue::new(0),
             offered: StoredValue::new(None),
+            previous: StoredValue::new(None),
+            going_back: StoredValue::new(None),
             shown_in_about: StoredValue::new(false),
             version,
             progress: StoredValue::new_local(None),
@@ -161,17 +217,40 @@ impl Updates {
             banner_status: NodeRef::new(),
             banner_install: NodeRef::new(),
             banner_download: NodeRef::new(),
+            banner_skip: NodeRef::new(),
             banner_later: NodeRef::new(),
             check_button: NodeRef::new(),
             check_status: NodeRef::new(),
             about_update: NodeRef::new(),
             about_title: NodeRef::new(),
+            about_skipped: NodeRef::new(),
             about_notes: NodeRef::new(),
             about_progress: NodeRef::new(),
             about_status: NodeRef::new(),
             about_install: NodeRef::new(),
             about_download: NodeRef::new(),
             about_close: NodeRef::new(),
+            go_back_box: NodeRef::new(),
+            go_back_button: NodeRef::new(),
+            go_back_unavailable: NodeRef::new(),
+            go_back_saved: NodeRef::new(),
+            go_back_progress: NodeRef::new(),
+            go_back_status: NodeRef::new(),
+            confirm: NodeRef::new(),
+            confirm_panel: NodeRef::new(),
+            confirm_title: NodeRef::new(),
+            confirm_body: NodeRef::new(),
+            confirm_cancel: NodeRef::new(),
+        }
+    }
+
+    /// Where the download under way shows: the banner and About's update,
+    /// or, going back, the banner and About's Go back.
+    fn views(self) -> [View; 2] {
+        if self.going_back.with_value(Option::is_some) {
+            [View::Banner, View::GoBack]
+        } else {
+            BOTH
         }
     }
 
@@ -179,6 +258,7 @@ impl Updates {
         match view {
             View::Banner => self.banner.get_untracked(),
             View::About => self.about_update.get_untracked().map(Into::into),
+            View::GoBack => self.go_back_box.get_untracked().map(Into::into),
         }
     }
 
@@ -186,6 +266,7 @@ impl Updates {
         match view {
             View::Banner => self.banner_progress.get_untracked(),
             View::About => self.about_progress.get_untracked(),
+            View::GoBack => self.go_back_progress.get_untracked(),
         }
     }
 
@@ -193,6 +274,7 @@ impl Updates {
         match view {
             View::Banner => self.banner_status.get_untracked(),
             View::About => self.about_status.get_untracked(),
+            View::GoBack => self.go_back_status.get_untracked(),
         }
     }
 
@@ -200,6 +282,7 @@ impl Updates {
         match view {
             View::Banner => self.banner_install.get_untracked(),
             View::About => self.about_install.get_untracked(),
+            View::GoBack => None,
         }
     }
 
@@ -207,6 +290,7 @@ impl Updates {
         match view {
             View::Banner => self.banner_download.get_untracked(),
             View::About => self.about_download.get_untracked(),
+            View::GoBack => None,
         }
     }
 
@@ -215,12 +299,21 @@ impl Updates {
         match view {
             View::Banner => self.banner_later.get_untracked(),
             View::About => self.about_close.get_untracked(),
+            View::GoBack => None,
         }
     }
 
-    /// The status line in both views.
+    /// Skip this version (the banner's).
+    fn skip_button(self, view: View) -> Option<web_sys::HtmlButtonElement> {
+        match view {
+            View::Banner => self.banner_skip.get_untracked(),
+            View::About | View::GoBack => None,
+        }
+    }
+
+    /// The status line where the download under way shows (both views).
     fn set_update_status(self, message: &str, is_error: bool) {
-        for view in BOTH {
+        for view in self.views() {
             let status = self.status(view);
             set_text(status.clone(), message);
             set_error(status, is_error);
@@ -240,6 +333,7 @@ impl Updates {
             install.set_disabled(false);
         }
         hide(self.download_button(view), update.can_self_update);
+        hide(self.skip_button(view), false);
         hide(self.dismiss_button(view), false);
         hide(self.progress_bar(view), true);
     }
@@ -289,6 +383,10 @@ impl Updates {
             self.about_title.get_untracked(),
             &update_text::available(&update.version),
         );
+        hide(
+            self.about_skipped.get_untracked(),
+            skipped().as_deref() != Some(&*update.version),
+        );
         if let Some(notes) = self.about_notes.get_untracked() {
             render_note_blocks(&notes, &update.note_blocks);
             notes.set_hidden(notes.child_element_count() == 0);
@@ -316,19 +414,25 @@ impl Updates {
     }
 
     /// Where an offered update shows: About if it's open, else the banner,
-    /// unless About has already shown it. The update being installed stays
-    /// the one offered.
-    fn offer(self, update: UpdateInfo) {
+    /// unless About has already shown it; nowhere if the launch check
+    /// (`quiet`) found the version the reader skipped. The update being
+    /// installed stays the one offered.
+    fn offer(self, update: UpdateInfo, quiet: bool) {
         if self.installing.get_value() {
             if Overlay::About.is_open()
+                && self.going_back.with_value(Option::is_none)
                 && let Some(offered) = self.offered.get_value()
             {
                 self.show_in_about(&offered);
             }
             return;
         }
+        let offer = update_text::launch_offer(&update.version, skipped().as_deref(), quiet);
+        if offer == Offer::Quiet {
+            return;
+        }
         self.offered.set_value(Some(update.clone()));
-        if Overlay::About.is_open() {
+        if Overlay::About.is_open() || offer == Offer::Skipped {
             self.show_in_about(&update);
         } else if !self.shown_in_about.get_value() {
             self.show_banner(&update);
@@ -340,6 +444,9 @@ impl Updates {
     /// sees changes at once; the check runs on. Check now stays disabled
     /// until no check is on its way, the quiet one included.
     pub fn check(self, quiet: bool) {
+        if self.going_back.with_value(Option::is_some) {
+            return;
+        }
         let button = self.check_button.get_untracked();
         self.checks.update_value(|n| *n += 1);
         if !quiet {
@@ -353,7 +460,7 @@ impl Updates {
         }
         spawn_local(async move {
             match ipc::invoke::<Option<UpdateInfo>>("check_for_update", JsValue::UNDEFINED).await {
-                Ok(Some(update)) => self.offer(update),
+                Ok(Some(update)) => self.offer(update, quiet),
                 Ok(None) => {
                     if !quiet {
                         let version = self.version.await;
@@ -371,10 +478,16 @@ impl Updates {
                 *n
             });
             if running == Some(0)
+                && self.going_back.with_value(Option::is_none)
                 && let Some(button) = button
             {
                 button.set_disabled(false);
             }
+            // Go back's release, quietly, once the update's answer is in.
+            let previous =
+                ipc::invoke::<Option<PreviousInfo>>("check_previous_version", JsValue::UNDEFINED)
+                    .await;
+            self.show_previous(previous.ok().flatten());
         });
     }
 
@@ -399,18 +512,20 @@ impl Updates {
         for view in BOTH {
             hide(self.install_button(view), true);
             hide(self.download_button(view), true);
+            hide(self.skip_button(view), true);
             hide(self.dismiss_button(view), true);
             if let Some(bar) = self.progress_bar(view) {
                 bar.set_hidden(false);
                 let _ = bar.remove_attribute("value");
             }
         }
+        hide(self.go_back_button.get_untracked(), true);
         self.set_update_status(update_text::DOWNLOADING, false);
         if had_focus && let Some(root) = self.root(from) {
             let _ = root.focus();
         }
 
-        let channel = match self.channel() {
+        let channel = match self.channel(Download::default()) {
             Ok(channel) => channel,
             Err(e) => {
                 self.install_failed(from, &offered, &e);
@@ -427,8 +542,8 @@ impl Updates {
     }
 
     /// A Tauri `Channel` (`window.__TAURI__.core.Channel`) whose messages
-    /// move both views' progress.
-    fn channel(self) -> Result<JsValue, JsValue> {
+    /// move `download`'s progress, where it shows.
+    fn channel(self, download: Download) -> Result<JsValue, JsValue> {
         let window: JsValue = web_sys::window()
             .ok_or_else(|| JsValue::from_str("no window"))?
             .into();
@@ -439,7 +554,7 @@ impl Updates {
             .dyn_into::<js_sys::Function>()?;
         let channel = js_sys::Reflect::construct(&class, &js_sys::Array::new())?;
 
-        let download = Rc::new(RefCell::new(Download::default()));
+        let download = Rc::new(RefCell::new(download));
         let on_message = OnMessage::new(move |message: JsValue| {
             let Ok(event) = serde_wasm_bindgen::from_value::<DownloadEvent>(message) else {
                 return;
@@ -457,7 +572,7 @@ impl Updates {
     }
 
     fn show_step(self, step: &update_text::Step) {
-        for view in BOTH {
+        for view in self.views() {
             if let Some(bar) = self.progress_bar(view) {
                 if let Some(max) = step.max {
                     #[allow(clippy::cast_precision_loss)]
@@ -480,6 +595,7 @@ impl Updates {
         for view in BOTH {
             self.reset_view(view, offered);
         }
+        self.draw_previous();
         self.set_update_status(&ipc::error_text(error), true);
         let active = dom::active_element();
         let focus_was_here = match (&active, self.root(from)) {
@@ -512,11 +628,38 @@ impl Updates {
         self.hide_banner();
     }
 
-    /// About closed part way through an install: the banner carries on
-    /// showing it.
+    /// Skip this version: that exact version is out of the way at every
+    /// launch from now on (a newer one isn't), and out of the way now.
+    pub fn skip(self) {
+        if let Some(offered) = self.offered.get_value() {
+            skip_version(&offered.version);
+        }
+        self.hide_banner();
+    }
+
+    /// About closed part way through an install, or through going back:
+    /// the banner carries on showing it.
     fn about_closed(self) {
         let banner_hidden = self.banner.get_untracked().is_none_or(|b| b.hidden());
         if !self.installing.get_value() || !banner_hidden {
+            return;
+        }
+        if let Some(version) = self.going_back.get_value() {
+            set_text(
+                self.banner_title.get_untracked(),
+                &update_text::going_back(&version),
+            );
+            hide(self.banner_notes.get_untracked(), true);
+            for button in [
+                self.install_button(View::Banner),
+                self.download_button(View::Banner),
+                self.skip_button(View::Banner),
+                self.dismiss_button(View::Banner),
+            ] {
+                hide(button, true);
+            }
+            hide(self.banner_progress.get_untracked(), false);
+            hide(self.banner.get_untracked(), false);
             return;
         }
         let Some(offered) = self.offered.get_value() else {
@@ -526,10 +669,238 @@ impl Updates {
         hide(self.banner.get_untracked(), false);
     }
 
+    /// The release Go back offers, as a check found it (`None`: no
+    /// `previous.json`, offline, or not a release this build may go back
+    /// to). Not while an install or going back is under way: what's
+    /// showing stays.
+    fn show_previous(self, previous: Option<PreviousInfo>) {
+        if self.installing.get_value() {
+            return;
+        }
+        self.previous.set_value(previous);
+        // What the last Go back said is over: this check's answer stands.
+        set_text(self.go_back_saved.get_untracked(), "");
+        hide(self.go_back_saved.get_untracked(), true);
+        let status = self.go_back_status.get_untracked();
+        set_text(status.clone(), "");
+        set_error(status, false);
+        self.draw_previous();
+    }
+
+    /// About's Go back as the last check found it: the button, if that
+    /// release can use the data; the line saying why not, if it can't;
+    /// neither, if there's none.
+    fn draw_previous(self) {
+        let previous = self.previous.get_value();
+        let offered = previous.as_ref().filter(|p| p.reads_this_data);
+        if let Some(button) = self.go_back_button.get_untracked() {
+            if let Some(offered) = offered {
+                button.set_text_content(Some(&update_text::go_back(&offered.version)));
+            }
+            button.set_hidden(offered.is_none());
+            button.set_disabled(false);
+        }
+        let unavailable = previous.as_ref().filter(|p| !p.reads_this_data);
+        set_text(
+            self.go_back_unavailable.get_untracked(),
+            &unavailable
+                .map(|p| update_text::go_back_unavailable(&p.version))
+                .unwrap_or_default(),
+        );
+        hide(
+            self.go_back_unavailable.get_untracked(),
+            unavailable.is_none(),
+        );
+        hide(self.go_back_progress.get_untracked(), true);
+        hide(self.go_back_box.get_untracked(), previous.is_none());
+    }
+
+    /// The release Go back would install now, if it may.
+    fn previous_to_offer(self) -> Option<String> {
+        self.previous.with_value(|p| {
+            p.as_ref()
+                .filter(|p| p.reads_this_data)
+                .map(|p| p.version.clone())
+        })
+    }
+
+    /// Go back to <version>: asks first, in its confirm dialog over About.
+    pub fn ask_to_go_back(self) {
+        if self.installing.get_value() {
+            return;
+        }
+        let Some(version) = self.previous_to_offer() else {
+            return;
+        };
+        set_text(
+            self.confirm_title.get_untracked(),
+            &update_text::go_back_title(&version),
+        );
+        set_text(
+            self.confirm_body.get_untracked(),
+            &update_text::go_back_body(&version),
+        );
+        hide(self.confirm.get_untracked(), false);
+        if let Some(cancel) = self.confirm_cancel.get_untracked() {
+            dom::focus(&cancel);
+        }
+    }
+
+    /// The confirm dialog closes (Cancel, Escape, a click on the dimmed
+    /// page): focus goes back to Go back, and About stays open.
+    fn close_confirm(self) {
+        let Some(confirm) = self.confirm.get_untracked() else {
+            return;
+        };
+        if confirm.hidden() {
+            return;
+        }
+        confirm.set_hidden(true);
+        if let Some(button) = self.go_back_button.get_untracked()
+            && dom::usable(&button)
+        {
+            dom::focus(&button);
+        }
+    }
+
+    /// While the confirm dialog is open it has the keyboard: Escape closes
+    /// it, Tab stays inside it, and nothing else hears a key, About's own
+    /// handler included (which stands aside too, `about`).
+    fn on_confirm_keydown(self, event: &web_sys::KeyboardEvent) {
+        if !Overlay::GoBack.is_open() {
+            return;
+        }
+        // About's own handler is on `window` too, so it would hear this key
+        // next, with the dialog already closed: none of the window's other
+        // handlers do.
+        event.stop_immediate_propagation();
+        match event.key().as_str() {
+            "Escape" => {
+                event.prevent_default();
+                self.close_confirm();
+            }
+            "Tab" => {
+                if let Some(panel) = self.confirm_panel.get_untracked() {
+                    let stops = dom::focusable(&panel, "button");
+                    dom::trap_tab(event, &panel, &stops);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Go back, confirmed: the backup first, beside the database; if it
+    /// can't be saved, that's said and nothing is installed. Then the
+    /// version left behind is skipped, and the release is downloaded,
+    /// verified and installed, its progress shown as an update's.
+    fn go_back(self) {
+        self.close_confirm();
+        if self.installing.get_value() {
+            return;
+        }
+        let Some(version) = self.previous_to_offer() else {
+            return;
+        };
+        self.installing.set_value(true);
+        self.going_back.set_value(Some(version.clone()));
+        for view in BOTH {
+            hide(self.install_button(view), true);
+            hide(self.download_button(view), true);
+            hide(self.skip_button(view), true);
+        }
+        if let Some(button) = self.check_button.get_untracked() {
+            button.set_disabled(true);
+        }
+        hide(self.go_back_button.get_untracked(), true);
+        set_text(self.go_back_saved.get_untracked(), "");
+        hide(self.go_back_saved.get_untracked(), true);
+        self.set_update_status(update_text::BACKING_UP, false);
+        if let Some(root) = self.root(View::GoBack) {
+            dom::focus(&root);
+        }
+
+        spawn_local(async move {
+            let args = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(
+                &args,
+                &JsValue::from_str("preferences"),
+                &crate::aa::current(),
+            );
+            match ipc::invoke::<BackupSaved>("save_backup_before_going_back", args.into()).await {
+                Ok(saved) => {
+                    set_text(
+                        self.go_back_saved.get_untracked(),
+                        &update_text::backup_saved(&saved.path),
+                    );
+                    hide(self.go_back_saved.get_untracked(), false);
+                }
+                Err(e) => {
+                    self.go_back_failed(&e);
+                    return;
+                }
+            }
+            // The version left behind, so it isn't offered straight back
+            // (by a release that knows Skip).
+            if let Some(this_version) = self.version.await {
+                skip_version(&this_version);
+            }
+            let download = Download::going_back_to(&version);
+            for view in self.views() {
+                if let Some(bar) = self.progress_bar(view) {
+                    let _ = bar.remove_attribute("value");
+                }
+            }
+            hide(self.go_back_progress.get_untracked(), false);
+            self.set_update_status(&download.downloading(), false);
+            let channel = match self.channel(download) {
+                Ok(channel) => channel,
+                Err(e) => {
+                    self.go_back_failed(&e);
+                    return;
+                }
+            };
+            let args = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(&args, &JsValue::from_str("onEvent"), &channel);
+            if let Err(e) = ipc::invoke_value("install_previous_version", args.into()).await {
+                self.go_back_failed(&e);
+            }
+        });
+    }
+
+    /// Going back stopped (the backup, the download, the install): said
+    /// where it showed, and everything is as it was before, Go back
+    /// offered again.
+    fn go_back_failed(self, error: &JsValue) {
+        self.set_update_status(&ipc::error_text(error), true);
+        self.installing.set_value(false);
+        self.going_back.set_value(None);
+        self.progress.set_value(None);
+        hide(self.banner_progress.get_untracked(), true);
+        // The banner, if About closed part way: Later puts it away.
+        hide(self.dismiss_button(View::Banner), false);
+        if let Some(offered) = self.offered.get_value() {
+            self.reset_view(View::About, &offered);
+        }
+        if let Some(button) = self.check_button.get_untracked() {
+            button.set_disabled(false);
+        }
+        self.draw_previous();
+        if let Some(button) = self.go_back_button.get_untracked()
+            && dom::usable(&button)
+            && self
+                .root(View::GoBack)
+                .is_some_and(|root| dom::same(dom::active_element().as_ref(), &root))
+        {
+            dom::focus(&button);
+        }
+    }
+
     /// Is there for the launch check ([`launch_check`]) and About closing
-    /// ([`surface_closed`]).
+    /// ([`surface_closed`]), and the confirm dialog has the keyboard while
+    /// it's open.
     pub fn mounted(self) {
         UPDATES.set(Some(self));
+        dom::on_window_keydown(move |event| self.on_confirm_keydown(&event));
     }
 }
 
@@ -655,6 +1026,15 @@ pub fn UpdateBanner(updates: Updates) -> impl IntoView {
                 </button>
                 <button
                     type="button"
+                    id="update-skip"
+                    class="reader-mode-btn"
+                    node_ref=updates.banner_skip
+                    on:click=move |_| updates.skip()
+                >
+                    "Skip this version"
+                </button>
+                <button
+                    type="button"
                     id="update-later"
                     class="reader-mode-btn"
                     node_ref=updates.banner_later
@@ -685,7 +1065,7 @@ pub fn UpdatesSection(updates: Updates) -> impl IntoView {
                 <span>"Check for updates when Gospel Getter starts"</span>
             </label>
             <p class="section-note" id="update-note">
-                "Checking downloads a small file from GitHub that names the latest version, so GitHub sees your IP address, as with any download. Nothing about your reading or your data is sent."
+                "Checking downloads a small file from GitHub that names the latest version, and, on an install that updates itself, one that names the version before yours, so GitHub sees your IP address, as with any download. Nothing about your reading or your data is sent."
             </p>
             <button
                 type="button"
@@ -718,6 +1098,14 @@ pub fn UpdatesSection(updates: Updates) -> impl IntoView {
                     class="about-update-title"
                     node_ref=updates.about_title
                 ></h4>
+                <p
+                    id="about-update-skipped"
+                    class="section-note"
+                    hidden
+                    node_ref=updates.about_skipped
+                >
+                    {update_text::SKIPPED_NOTE}
+                </p>
                 <div
                     id="about-update-notes"
                     class="about-update-notes"
@@ -771,6 +1159,101 @@ pub fn UpdatesSection(updates: Updates) -> impl IntoView {
                     </button>
                 </div>
             </div>
+            <div
+                id="go-back"
+                class="go-back"
+                role="group"
+                aria-label="Go back to the previous version"
+                tabindex="-1"
+                hidden
+                node_ref=updates.go_back_box
+            >
+                <button
+                    type="button"
+                    id="go-back-btn"
+                    class="reader-mode-btn"
+                    hidden
+                    node_ref=updates.go_back_button
+                    on:click=move |_| updates.ask_to_go_back()
+                ></button>
+                <p
+                    id="go-back-unavailable"
+                    class="section-note"
+                    hidden
+                    node_ref=updates.go_back_unavailable
+                ></p>
+                <p id="go-back-saved" class="update-status" hidden node_ref=updates.go_back_saved></p>
+                <progress
+                    id="go-back-progress"
+                    class="update-progress"
+                    aria-labelledby="go-back-status"
+                    hidden
+                    node_ref=updates.go_back_progress
+                ></progress>
+                <p
+                    id="go-back-status"
+                    class="update-status"
+                    role="status"
+                    aria-live="polite"
+                    node_ref=updates.go_back_status
+                ></p>
+            </div>
         </section>
+    }
+}
+
+/// Go back's confirm dialog: over About, which stays open behind it
+/// (`Overlay::GoBack`). Cancel, Escape or a click on the dimmed page close
+/// it, focus going back to Go back.
+#[component]
+pub fn GoBackConfirm(updates: Updates) -> impl IntoView {
+    view! {
+        <div
+            id="go-back-overlay"
+            class="modal-overlay"
+            hidden
+            node_ref=updates.confirm
+            on:click=move |ev: web_sys::MouseEvent| {
+                if let Some(overlay) = updates.confirm.get_untracked()
+                    && dom::targets(&ev, &overlay)
+                {
+                    updates.close_confirm();
+                }
+            }
+        >
+            <div
+                id="go-back-panel"
+                class="modal-panel go-back-panel"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="go-back-title"
+                aria-describedby="go-back-body"
+                node_ref=updates.confirm_panel
+            >
+                <div class="modal-body">
+                    <h2 id="go-back-title" class="note-title" node_ref=updates.confirm_title></h2>
+                    <p id="go-back-body" node_ref=updates.confirm_body></p>
+                </div>
+                <div class="modal-buttons">
+                    <button
+                        type="button"
+                        id="go-back-confirm"
+                        class="import-confirm"
+                        on:click=move |_| updates.go_back()
+                    >
+                        "Go back"
+                    </button>
+                    <button
+                        type="button"
+                        id="go-back-cancel"
+                        class="reader-mode-btn"
+                        node_ref=updates.confirm_cancel
+                        on:click=move |_| updates.close_confirm()
+                    >
+                        "Cancel"
+                    </button>
+                </div>
+            </div>
+        </div>
     }
 }

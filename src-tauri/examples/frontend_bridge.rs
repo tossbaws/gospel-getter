@@ -38,7 +38,12 @@
 //!   own messages (`updater::check_message` and `install_message`). The
 //!   progress goes through the command's own Tauri `Channel`, and is written
 //!   as its own lines, `{"id": 1, "channel": "onEvent", "message": ...}`,
-//!   before the answer.
+//!   before the answer. Go back's `previous.json` is `previous` (`{
+//!   version, schemaVersion }`, none if left out), which the app's own
+//!   rules then judge against this database, and installing it is
+//!   `install`, as an update's; `backupFolder` moves its backup from
+//!   beside the database (to make it fail, say); `mode: "link"` is a build
+//!   that can't update itself, which Go back isn't offered to.
 //! - The notes export's dates are the computer's, unless a test fixes the
 //!   time and time zone with `__set_clock`.
 //!
@@ -67,10 +72,12 @@ use tauri::ipc::{CallbackFn, InvokeBody, InvokeResponse, InvokeResponseBody};
 use tauri::test::{INVOKE_KEY, MockRuntime, mock_builder, mock_context, noop_assets};
 use tauri::webview::InvokeRequest;
 
-use gospel_getter_lib::commands::{AppState, BridgeScript, ScriptedCheck, ScriptedInstall};
+use gospel_getter_lib::commands::{
+    AppState, BridgeScript, ScriptedCheck, ScriptedInstall, ScriptedPrevious,
+};
 use gospel_getter_lib::db::{self, Passage, WritePool};
 use gospel_getter_lib::domain::kjv_markup::VerseText;
-use gospel_getter_lib::updater::{self, DownloadEvent, Problem, UpdateInfo};
+use gospel_getter_lib::updater::{self, DownloadEvent, Problem, UpdateInfo, UpdateMode};
 
 /// Where the page is served from, so a request from it counts as the app's
 /// own (as in `lib.rs`'s `ipc_tests`): Windows serves the `tauri://`
@@ -116,6 +123,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 struct UpdateScript {
     check: ScriptedCheck,
     install: ScriptedInstall,
+    previous: Option<ScriptedPrevious>,
+    backup_folder: Option<PathBuf>,
+    mode: UpdateMode,
 }
 
 impl Default for UpdateScript {
@@ -126,12 +136,15 @@ impl Default for UpdateScript {
                 answer: Some(Ok(None)),
             },
             install: ScriptedInstall::default(),
+            previous: None,
+            backup_folder: None,
+            mode: UpdateMode::SelfUpdate,
         }
     }
 }
 
 impl UpdateScript {
-    /// `{ check, checkTimeoutMs, install }`, as `harness.mjs`'s `setUpdate`
+    /// `{ check, checkTimeoutMs, install, previous, backupFolder, mode }`, as `harness.mjs`'s `setUpdate`
     /// documents it.
     fn parse(script: &Value) -> anyhow::Result<Self> {
         let limit = script
@@ -157,11 +170,25 @@ impl UpdateScript {
             Some(name) => Some(problem(name)?),
             None => None,
         };
+        let previous = match script.get("previous") {
+            None | Some(Value::Null) => None,
+            Some(previous) => Some(ScriptedPrevious {
+                version: arg(previous, "version")?,
+                schema_version: arg(previous, "schemaVersion")?,
+            }),
+        };
         Ok(Self {
             check: ScriptedCheck { limit, answer },
             install: ScriptedInstall {
                 events: events.unwrap_or_default(),
                 problem,
+            },
+            previous,
+            backup_folder: arg(script, "backupFolder")?,
+            mode: match script.get("mode").and_then(Value::as_str) {
+                None | Some("self") => UpdateMode::SelfUpdate,
+                Some("link") => UpdateMode::LinkOnly,
+                Some(other) => bail!("unknown update mode {other}"),
             },
         })
     }
@@ -208,6 +235,18 @@ impl BridgeScript for Script {
 
     fn install_update(&self) -> ScriptedInstall {
         lock(&UPDATE).clone().unwrap_or_default().install
+    }
+
+    fn check_previous(&self) -> Option<ScriptedPrevious> {
+        lock(&UPDATE).clone().unwrap_or_default().previous
+    }
+
+    fn backup_folder(&self) -> Option<PathBuf> {
+        lock(&UPDATE).clone().unwrap_or_default().backup_folder
+    }
+
+    fn update_mode(&self) -> UpdateMode {
+        lock(&UPDATE).clone().unwrap_or_default().mode
     }
 
     fn restart(&self) {
