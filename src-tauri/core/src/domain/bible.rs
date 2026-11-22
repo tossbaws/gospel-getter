@@ -105,87 +105,31 @@ mod tests {
     }
 
     #[test]
-    fn next_within_same_book() {
+    fn next_chapter_steps_forward_across_books_and_stops_at_the_end() {
         let books = sample_books();
-        let at = ChapterRef {
-            book_id: 1,
-            chapter: 1,
-        };
-        assert_eq!(
-            next_chapter(&books, at),
-            Some(ChapterRef {
-                book_id: 1,
-                chapter: 2
-            })
-        );
+        let at = |book_id, chapter| ChapterRef { book_id, chapter };
+        let rows = [
+            ("within the same book", at(1, 1), Some(at(1, 2))),
+            ("across a book boundary", at(1, 50), Some(at(2, 1))),
+            ("at the end of the Bible", at(3, 27), None),
+        ];
+        for (row, from, expected) in rows {
+            assert_eq!(next_chapter(&books, from), expected, "{row}");
+        }
     }
 
     #[test]
-    fn next_crosses_book_boundary() {
+    fn previous_chapter_steps_back_across_books_and_stops_at_the_start() {
         let books = sample_books();
-        let at = ChapterRef {
-            book_id: 1,
-            chapter: 50,
-        };
-        assert_eq!(
-            next_chapter(&books, at),
-            Some(ChapterRef {
-                book_id: 2,
-                chapter: 1
-            })
-        );
-    }
-
-    #[test]
-    fn next_at_end_of_bible_is_none() {
-        let books = sample_books();
-        let at = ChapterRef {
-            book_id: 3,
-            chapter: 27,
-        };
-        assert_eq!(next_chapter(&books, at), None);
-    }
-
-    #[test]
-    fn previous_within_same_book() {
-        let books = sample_books();
-        let at = ChapterRef {
-            book_id: 2,
-            chapter: 5,
-        };
-        assert_eq!(
-            previous_chapter(&books, at),
-            Some(ChapterRef {
-                book_id: 2,
-                chapter: 4
-            })
-        );
-    }
-
-    #[test]
-    fn previous_crosses_book_boundary() {
-        let books = sample_books();
-        let at = ChapterRef {
-            book_id: 2,
-            chapter: 1,
-        };
-        assert_eq!(
-            previous_chapter(&books, at),
-            Some(ChapterRef {
-                book_id: 1,
-                chapter: 50
-            })
-        );
-    }
-
-    #[test]
-    fn previous_at_start_of_bible_is_none() {
-        let books = sample_books();
-        let at = ChapterRef {
-            book_id: 1,
-            chapter: 1,
-        };
-        assert_eq!(previous_chapter(&books, at), None);
+        let at = |book_id, chapter| ChapterRef { book_id, chapter };
+        let rows = [
+            ("within the same book", at(2, 5), Some(at(2, 4))),
+            ("across a book boundary", at(2, 1), Some(at(1, 50))),
+            ("at the start of the Bible", at(1, 1), None),
+        ];
+        for (row, from, expected) in rows {
+            assert_eq!(previous_chapter(&books, from), expected, "{row}");
+        }
     }
 
     #[test]
