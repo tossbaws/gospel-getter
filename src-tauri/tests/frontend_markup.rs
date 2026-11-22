@@ -4987,34 +4987,11 @@ fn every_welcome_class_styled_is_used() {
 /// button; and its colors are the card's tested ones, AA over its faint
 /// wash in every theme: the title and any notice in --text-dim, the verses
 /// in --text, their numbers and Go to in --accent-2. The pressed chip keeps
-/// its --accent-2 text, AA over the same wash, ringed at 3:1.
+/// its --accent-2 text, AA over the same wash, ringed at 3:1. What the
+/// chips control and do is tested in xref-preview.test.mjs; here, the
+/// style.
 #[test]
 fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
-    // The preview is the selection card's (ui-leptos/src/card.rs, its markup
-    // in card_text.rs).
-    let render = block_after(piece("card_text.rs"), "pub fn xrefs_html(");
-    assert!(render.contains(r#"aria-expanded="false" aria-controls="xref-preview""#));
-    assert!(piece("card.rs").contains(r#"let _ = preview.set_attribute("role", "region");"#));
-    assert!(
-        piece("card.rs")
-            .contains(r#"let _ = preview.set_attribute("aria-labelledby", "xref-preview-title");"#)
-    );
-    let toggle = block_after(piece("card.rs"), "fn toggle_preview(");
-    assert!(toggle.contains(
-        "\"get_passage\", &PassageTextArgs { translation_code: &code, book_id, chapter, start, end,"
-    ));
-    assert!(
-        !toggle.contains("reader::"),
-        "a chip previews; only Go to opens"
-    );
-    // Its verses' markup is the reader's (reader_text::verse_html), without
-    // note markers.
-    assert!(
-        block_after(piece("card_text.rs"), "pub fn preview_html(").contains("verse_html(v, false)")
-    );
-    // Through the page's own `invoke` (ui-leptos/src/ipc.rs).
-    assert!(block_after(piece("card.rs"), "fn send(").contains("ipc::send(cmd, args)"));
-
     let rules = rules();
     for control in [".xref-citation", ".xref-preview-go"] {
         let focus = format!("{control}:focus-visible");
