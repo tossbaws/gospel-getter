@@ -3951,48 +3951,10 @@ fn the_picker_uses_tested_theme_colors() {
 /// straight after the verses (or the compare grid), in a labelled
 /// navigation landmark; only the one there is at Genesis 1 and
 /// Revelation 22. The keys' hint is one quiet line under them, inside the
-/// chapter.
+/// chapter. The markup and its order are tested in reader_text.rs (the
+/// Genesis 1 fixture) and reading-flow.test.mjs; here, the style.
 #[test]
 fn the_chapter_ends_with_buttons_to_the_chapters_around_it() {
-    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
-    let reader = piece("reader_text.rs");
-    let end = block_after(reader, "fn chapter_end(");
-    assert!(
-        end.contains(r#"<nav class=\"chapter-end\" aria-label=\"Previous and next chapter\">"#)
-    );
-    assert!(
-        end.contains("let Some(side) = side else { return String::new();"),
-        "one button per neighbour there is"
-    );
-    assert!(
-        end.contains("step(dto.prev.as_ref(), Which::Prev), step(dto.next.as_ref(), Which::Next),")
-    );
-    assert!(end.contains(r#"class="chapter-step chapter-step-{}""#));
-    assert!(end.contains(r#"data-book="{}" data-chapter="{}" aria-label="{label}""#));
-    assert!(end.contains(r#"<p class=\"nav-hint\">"#));
-    // Its three keys are caps alike; the arrows are drawn, and named.
-    for key in [
-        r#"hint_key("Left arrow", Some(ARROW_LEFT))"#,
-        r#"hint_key("Right arrow", Some(ARROW_RIGHT))"#,
-        r#"hint_key("?", None)"#,
-    ] {
-        assert!(end.contains(key), "{key}");
-    }
-    let caps = block_after(reader, "fn hint_key(");
-    assert!(caps.contains(r#"<kbd><span class="visually-hidden">{name}</span>{drawn}</kbd>"#));
-    assert!(
-        reader.contains(
-            r##"const ARROW_LEFT: &str = r#"<svg viewBox="0 0 16 16" aria-hidden="true""##
-        )
-    );
-    let pane = block_after(reader, "pub fn reading_pane(");
-    let body = pane.find("{s28}{body}").expect("the verses");
-    let after = pane.find("{s28}{end}").expect("the buttons");
-    let lists = pane.find("{s28}{footnotes}").unwrap();
-    assert!(
-        body < after && after < lists,
-        "after the verses, before the lists"
-    );
     let rules = rules();
     let step = screen_rule(&rules, ".chapter-step");
     assert!(step.body.contains("font-family: var(--font-ui)"));
@@ -4511,18 +4473,10 @@ fn side_chapters_never_squeeze_the_column_below_50_characters() {
 /// holds the backend's edge card (so the chapter being read doesn't move
 /// between Genesis 1 and 2), in the neighbors' faded style with no new
 /// colors: a heading like theirs in --accent over --rule, and a line in
-/// --text. It has no verses and nothing to click.
+/// --text. It has no verses and nothing to click (its markup is tested in
+/// reader_text.rs and reading-flow.test.mjs; here, its style).
 #[test]
 fn the_bible_s_edges_have_a_quiet_card_in_the_neighbor_s_place() {
-    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
-    let reader = piece("reader_text.rs");
-    let pane = block_after(reader, "pub fn reading_pane(");
-    assert!(pane.contains("Some(s) => side_chapter(s), None => edge_card(edge),"));
-    assert!(pane.contains("side(dto.prev.as_ref(), dto.prev_edge.as_ref(), Which::Prev)"));
-    assert!(pane.contains("side(dto.next.as_ref(), dto.next_edge.as_ref(), Which::Next)"));
-    let card = block_after(reader, "fn edge_card(");
-    assert!(card.contains("escape_html(&edge.title)") && card.contains("escape_html(d)"));
-    assert!(!card.contains("<button") && !card.contains("class=\"verse"));
     let rules = rules();
     let title = screen_rule(&rules, ".edge-card-title");
     for declaration in [
@@ -4586,7 +4540,9 @@ fn layout_is_a_display_setting_in_aa() {
 /// chapter being read and the faded neighbors (and so reading mode and
 /// print, which show them). It keys off `.chapter-text`, which compare's
 /// grid doesn't have, so compare stays a verse to a row. The verse number
-/// is inline with no line height, so it can't open up its line.
+/// is inline with no line height, so it can't open up its line. Which
+/// markup has a `.chapter-text` is tested in reader_text.rs (the Genesis 1
+/// fixture) and flowing.test.mjs.
 #[test]
 fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
     let rules = rules();
@@ -4642,21 +4598,6 @@ fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
         assert!(selector.contains(".chapter-text"), "{selector}");
         assert!(!selector.contains("compare"), "{selector}");
     }
-    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
-    // Compare's translations are its grid.
-    let reader = piece("reader_text.rs");
-    let pane = block_after(reader, "pub fn reading_pane(");
-    assert!(pane.contains("Beside::Translations(compare) => compare_grid(dto, compare),"));
-    assert!(pane.contains("Beside::Nothing => chapter_text(dto, code),"));
-    assert!(
-        block_after(reader, "fn chapter_text(")
-            .contains(r##"r#"<div class="chapter-text">{}</div>"#,"##)
-    );
-    assert!(!block_after(reader, "fn compare_grid(").contains("chapter-text"));
-    assert!(
-        block_after(reader, "fn side_chapter(")
-            .contains(r#"<div class=\"chapter-text\">{verses}</div>"#)
-    );
     // Nothing in print touches the verses' display: printed, Flowing
     // flows (and Verses stays a verse to a line).
     for rule in rules
@@ -5165,11 +5106,10 @@ fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
 /// the buttons. AA, and the ring 3:1, on every flat page; on a gradient
 /// they're the color of the verse labels beside them (see
 /// `the_quiet_accent_carries_the_quiet_jobs`). Printing doesn't style them.
+/// Their markup is tested in reader_text.rs (the Genesis 1 fixture) and
+/// reading-flow.test.mjs; here, their style.
 #[test]
 fn chapter_end_cross_references_are_quiet_links() {
-    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
-    let summary = block_after(piece("reader_text.rs"), "fn xref_rows(");
-    assert!(summary.contains(r#"<button type="button" class="xref-summary-chip" data-book="{}""#));
     let rules = rules();
     let chip = screen_rule(&rules, ".xref-summary-chip");
     for declaration in [
@@ -5205,7 +5145,6 @@ fn chapter_end_cross_references_are_quiet_links() {
             .any(|r| r.body.contains("outline: 2px solid var(--accent)")),
         "the shared focus ring"
     );
-    assert!(summary.contains(r#"<span class="xref-summary-item"><button"#));
     screen_rule(&rules, ".xref-summary-item:not(:last-child)::after");
     assert!(!block_after(HTML, "@media print").contains(".xref-summary"));
     for (theme, props) in theme_palettes(&rules) {
@@ -5283,7 +5222,8 @@ fn the_translation_chooser_and_credits_are_accessible_and_use_tested_theme_color
 }
 
 /// A USFM footnote's verse number (the BSB's "²¹But this kind") is small
-/// and raised without opening up its line.
+/// and raised without opening up its line. Its markup is tested in
+/// reader_text.rs and bsb.test.mjs.
 #[test]
 fn a_footnotes_verse_number_is_set_small() {
     let rules = rules();
@@ -5295,10 +5235,6 @@ fn a_footnotes_verse_number_is_set_small() {
     ] {
         assert!(rule.body.contains(declaration), "{declaration}");
     }
-    // A footnote's markup is the reader's (ui-leptos/src/reader_text.rs).
-    let footnote = block_after(piece("reader_text.rs"), "pub fn footnote_html(");
-    assert!(footnote.contains(r#"<em class="footnote-alt">"#));
-    assert!(footnote.contains(r#"<sup class="footnote-verse">"#));
 }
 
 /// The key values a handler compares against: `event.key === 'j'`,

@@ -1101,6 +1101,20 @@ mod tests {
         );
     }
 
+    /// The card in Genesis 1's or Revelation 22's missing neighbor's place
+    /// is the backend's words, escaped, with nothing to click and no verse.
+    #[test]
+    fn an_edge_card_is_the_backend_s_words_escaped() {
+        let card = edge_card(Some(&Edge {
+            title: "<b>The</b> end".to_string(),
+            detail: Some("Genesis & Exodus".to_string()),
+        }));
+        assert!(card.contains(r#"<p class="edge-card-title">&lt;b&gt;The&lt;/b&gt; end</p>"#));
+        assert!(card.contains(r#"<p class="edge-card-detail">Genesis &amp; Exodus</p>"#));
+        assert!(!card.contains("<button") && !card.contains(r#"class="verse"#));
+        assert_eq!(edge_card(None), "");
+    }
+
     #[test]
     fn a_verse_s_parts_are_italics_and_markers_its_words_untouched() {
         let mut v = verse(1, "");
