@@ -262,12 +262,12 @@ fn print_stylesheet_hides_chrome_but_not_reading_content() {
     }
 }
 
-/// Margin notes in reading mode (ui-leptos/src/margin.rs): beside the
-/// column, never in its flow (so they can't move the text), on screen only
-/// (printing leaves them out, and the markers that stand in for them), in
-/// the UI's sans and smaller than the verses, in tested theme colors. Aa's
-/// "Notes in the margin" is a pressed toggle like Reading mode's, shown with
-/// it, and the setting is this computer's, never in a backup. The margin
+/// Margin notes (ui-leptos/src/margin.rs): beside the column, never in its
+/// flow (so they can't move the text), on screen only (printing leaves them
+/// out, and the markers that stand in for them), in the UI's sans and
+/// smaller than the verses, in tested theme colors, folded past ten lines.
+/// Aa's "Notes beside the text" is a segmented row, always there, M its
+/// key, and the setting is this computer's, never in a backup. The margin
 /// never scrolls the page: markers, which reflow the text, go in and out
 /// through the reading place logic.
 #[test]
@@ -310,21 +310,30 @@ fn margin_notes_sit_beside_the_text_on_screen_only() {
         piece("margin.rs")
             .contains(r#"set_property("--margin-fold-lines", &text::FOLD_LINES.to_string())"#)
     );
+    assert!(piece("margin_text.rs").contains("pub const FOLD_LINES: u32 = 10;"));
+    // The quiet line of an empty margin ("Always"): quiet by its italic,
+    // in --text, which is never less legible on the page than the notes.
+    let empty = screen(".margin-notes-empty");
+    assert!(empty.contains("color: var(--text);") && empty.contains("font-style: italic;"));
     let print = block_after(HTML, "@media print");
     assert!(print.contains(".margin-notes, .margin-marker { display: none !important; }"));
 
+    // Aa's one control, Off · In reading mode · Always, there in or out of
+    // reading mode, M named as its key (no visible "(M)").
     assert!(HTML.contains(
-        r#"<button type="button" id="margin-notes-btn" class="reader-mode-btn margin-notes-btn" aria-pressed="true""#
+        r#"<span class="section-label" id="notes-beside-label">Notes beside the text</span>"#
     ));
-    assert!(
-        screen_rule(
-            &rules,
-            r#":root:not([data-reader-mode="on"]) .margin-notes-btn"#
-        )
-        .body
-        .contains("display: none;")
+    assert!(HTML.contains(
+        r#"<div id="notes-beside-choices" class="segmented" role="group" aria-labelledby="notes-beside-label" title="Your notes in the margin: never, in reading mode, or always (M)" aria-keyshortcuts="M"></div>"#
+    ));
+    assert!(!HTML.contains("margin-notes-btn"));
+    assert!(!rules.iter().any(|r| r.selector.contains("notes-beside")));
+    assert_eq!(preferences::MARGIN_NOTES.fallback, "reading");
+    assert_eq!(
+        preferences::MARGIN_NOTES.values.list(),
+        ["off", "reading", "always"]
     );
-    assert_eq!(preferences::MARGIN_NOTES.fallback, "on");
+    assert_eq!(preferences::MARGIN_NOTES.renamed, [("on", "reading")]);
     assert_eq!(
         preferences::MARGIN_NOTES.file_name,
         None,
@@ -336,116 +345,200 @@ fn margin_notes_sit_beside_the_text_on_screen_only() {
     assert!(!margin_rs.contains("scroll_by") && !margin_rs.contains("scroll_to"));
 }
 
-/// Compare with Notes (ui-leptos/src/margin.rs): the reader's notes in a
-/// "My notes" column beside the text, placed as margin notes are and drawn
-/// in the margin's look (the UI sans, smaller than the verses, the label in
-/// the quiet accent, a thin rule beside a range), absolutely in the column
-/// so they can't move the text; folded past 10 lines. Under the pointer or
-/// holding focus, a note is lifted onto the card's surface (--option-bg,
-/// ringed in --accent-dim), where its words, its label, its "where" and its
-/// focus ring are legible in every theme, and which stands apart from the
-/// page in every theme. The column goes where Compare
-/// stacks, the notes then under their verses; printing leaves both out and
-/// sets the text alone. The choice is this computer's, never in a backup.
+/// A selector's specificity, (ids, classes, elements), as the cascade
+/// counts it: attributes and pseudo-classes as classes, `:not(…)` as what's
+/// in it, pseudo-elements as elements. Enough for the stylesheet's own
+/// selectors (no `:is`, `:where` or `:has`).
+fn specificity(selector: &str) -> (u32, u32, u32) {
+    let (mut ids, mut classes, mut elements) = (0, 0, 0);
+    let bytes = selector.as_bytes();
+    let mut i = 0;
+    let word = |from: usize| {
+        selector[from..]
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+            .map_or(selector.len(), |n| from + n)
+    };
+    while i < bytes.len() {
+        match bytes[i] {
+            b'#' => {
+                ids += 1;
+                i = word(i + 1);
+            }
+            b'.' => {
+                classes += 1;
+                i = word(i + 1);
+            }
+            b'[' => {
+                classes += 1;
+                i += selector[i..].find(']').expect("a closing ]") + 1;
+            }
+            b':' if selector[i..].starts_with("::") => {
+                elements += 1;
+                i = word(i + 2);
+            }
+            b':' if selector[i..].starts_with(":not(") => {
+                // What's in it counts; the `)` is skipped below.
+                i += ":not(".len();
+            }
+            b':' => {
+                classes += 1;
+                i = word(i + 1);
+                if selector[i..].starts_with('(') {
+                    i += selector[i..].find(')').expect("a closing )") + 1;
+                }
+            }
+            c if c.is_ascii_alphabetic() || c == b'*' => {
+                if c != b'*' {
+                    elements += 1;
+                }
+                i = word(i + 1).max(i + 1);
+            }
+            _ => i += 1,
+        }
+    }
+    (ids, classes, elements)
+}
+
 #[test]
-fn notes_beside_the_text_in_compare_on_screen_only() {
-    let rules = rules();
-    let screen = |selector: &str| {
-        rules
-            .iter()
-            .find(|r| r.at_rule.as_deref() == Some("@media screen") && r.selector == selector)
-            .unwrap_or_else(|| panic!("expected an `@media screen` rule for `{selector}`"))
-            .body
-            .clone()
-    };
-    let column = screen(".notes-column");
-    for declaration in [
-        "position: relative;",
-        "font-family: var(--font-ui);",
-        "font-size: max(11px, calc(0.8rem * var(--ui-scale)));",
-        "line-height: 1.45;",
-        "color: var(--text);",
-    ] {
-        assert!(column.contains(declaration), ".notes-column: {declaration}");
-    }
-    let under = screen(".note-under");
-    assert!(under.contains("border-left: 1px solid var(--accent-dim);"));
-    assert!(under.contains("font-family: var(--font-ui);"));
-    // The empty column's one line: quiet by its italic, in --text, which
-    // is never less legible on the page than the notes themselves.
-    let empty = screen(".notes-column-empty");
-    assert!(empty.contains("color: var(--text);") && empty.contains("font-style: italic;"));
-    let wash = screen(
-        ".notes-column .margin-note:hover, .notes-column .margin-note:focus-within, .note-under .margin-note:hover, .note-under .margin-note:focus-within",
-    );
-    assert!(wash.contains("background: var(--option-bg);"));
-    assert!(wash.contains("box-shadow: 0 0 0 1px var(--accent-dim);"));
-    // The margin's notes, ring and rule, unchanged, in the column too.
-    assert!(screen(".margin-note").contains("position: absolute;"));
-    assert!(
-        screen(".margin-note-ref:focus-visible, .margin-marker:focus-visible")
-            .contains("outline: 2px solid var(--accent);")
-    );
-    assert!(
-        piece("margin.rs").contains(
-            r#"set_property("--margin-fold-lines", &text::COLUMN_FOLD_LINES.to_string())"#
-        )
-    );
-    assert!(piece("margin_text.rs").contains("pub const COLUMN_FOLD_LINES: u32 = 10;"));
-
-    // Where Compare stacks, the same query as the page's Rust pieces ask.
-    assert!(
-        piece("margin_text.rs")
-            .contains(r#"pub const STACKED_QUERY: &str = "(max-width: 640px)";"#)
-    );
-    let stacked = |selector: &str| {
-        rules
-            .iter()
-            .find(|r| {
-                r.at_rule.as_deref() == Some("@media (max-width: 640px)") && r.selector == selector
-            })
-            .unwrap_or_else(|| panic!("expected a stacked rule for `{selector}`"))
-            .body
-            .clone()
-    };
-    assert!(stacked(".compare-grid").contains("grid-template-columns: minmax(0, 1fr);"));
-    assert!(stacked(".notes-column").contains("display: none;"));
-
-    let print = block_after(HTML, "@media print");
-    assert!(print.contains(
-        ".notes-grid > .compare-head, .notes-column, .note-under, .margin-notes, .margin-marker { display: none !important; }"
-    ));
-    assert!(print.contains(".notes-grid { display: block !important; }"));
-
-    for (theme, props) in theme_palettes(&rules) {
-        let lifted = property(&props, "--option-bg");
-        for (what, fg, floor) in [
-            ("a note's words", "--text", 4.5),
-            ("a note's label", "--accent-2", 4.5),
-            ("a note's \"not numbered\"", "--text-dim", 4.5),
-            ("a note's focus ring", "--accent", 3.0),
-        ] {
-            let ratio = contrast_ratio(property(&props, fg), lifted);
-            assert!(
-                ratio >= floor,
-                "theme `{theme}`: {what} on --option-bg is {ratio:.2}:1"
-            );
-        }
-        for bg in backgrounds(&props) {
-            assert_ne!(
-                bg.to_lowercase(),
-                lifted.to_lowercase(),
-                "theme `{theme}`: a lifted note stands apart from the page"
-            );
-        }
-    }
-
-    assert_eq!(preferences::COMPARE_NOTES.fallback, "off");
+fn specificity_counts_as_the_cascade_does() {
+    assert_eq!(specificity(".chapter-main"), (0, 1, 0));
+    assert_eq!(specificity(".pane .chapter-main"), (0, 2, 0));
+    assert_eq!(specificity("#top-bar .ref-btn"), (1, 1, 0));
     assert_eq!(
-        preferences::COMPARE_NOTES.file_name,
-        None,
-        "never in a backup"
+        specificity(r#":root[data-reader-mode="on"] .container"#),
+        (0, 3, 0)
     );
+    assert_eq!(
+        specificity(r#":root:not([data-reader-mode="on"]) .reader-exit"#),
+        (0, 3, 0)
+    );
+    assert_eq!(specificity("html body"), (0, 0, 2));
+    assert_eq!(specificity(".verse .verse-num::after"), (0, 2, 1));
+}
+
+/// Notes beside the text, "Always", outside reading mode: reading mode's
+/// shape for the text (no faded neighbors or nav hint), the bar and the
+/// sidebar as in normal reading, and the column and the margin one group
+/// left-aligned beside the sidebar, the column giving up width for the
+/// margin's 14rem (M1). On screen only, and never in reading mode, while
+/// comparing translations or with two panes open, each with its own layout.
+/// No other rule for the same thing outranks them, before or after them.
+#[test]
+fn notes_beside_the_text_always_takes_reading_modes_shape_beside_the_sidebar() {
+    const ALWAYS: &str = r#":root[data-margin-notes="always"]:not([data-reader-mode="on"]):not([data-compare="on"]):not([data-split])"#;
+    let rules = rules();
+    let always = |what: &str| {
+        let selector = format!("{ALWAYS} {what}");
+        rules
+            .iter()
+            .find(|r| selectors(r).any(|s| s == selector))
+            .unwrap_or_else(|| panic!("expected a rule for `{selector}`"))
+    };
+    for (what, declarations) in [
+        (".chapter-side", &["display: none;"][..]),
+        (".nav-hint", &["display: none;"]),
+        (
+            ".container",
+            &["max-width: calc(var(--reader-column) + 3rem + 22.625rem);"],
+        ),
+        (".reading-row", &["justify-content: flex-start;"]),
+        (
+            ".chapter-main",
+            &[
+                "flex: 1 1 var(--reader-column);",
+                "max-width: min(var(--reader-column), calc(100% - 16.625rem));",
+                "min-width: min(var(--column-min), 100%);",
+            ],
+        ),
+    ] {
+        let rule = always(what);
+        assert_eq!(rule.at_rule.as_deref(), Some("@media screen"), "{what}");
+        for declaration in declarations {
+            assert!(rule.body.contains(declaration), "{what}: {declaration}");
+        }
+    }
+    // Never in reading mode, while comparing, or with two panes open: the
+    // attributes those set (the page's own, before the first frame).
+    for not in [
+        r#":not([data-reader-mode="on"])"#,
+        r#":not([data-compare="on"])"#,
+        ":not([data-split])",
+    ] {
+        assert!(ALWAYS.contains(not), "{not}");
+    }
+    for pref in [
+        &preferences::READER_MODE,
+        &preferences::COMPARE,
+        &preferences::SPLIT,
+    ] {
+        assert_eq!(pref.values.list(), ["off", "on"], "{}", pref.name);
+    }
+    assert!(piece("pane.rs").contains("prefs::set(&preferences::SPLIT, \"on\")"));
+    // 16.625rem and 22.625rem are the margin, its gap and its edge.
+    let text = piece("margin_text.rs");
+    for constant in [
+        "pub const MIN_WIDTH_REM: f64 = 14.0;",
+        "pub const MAX_WIDTH_REM: f64 = 20.0;",
+        "pub const GAP_REM: f64 = 1.5;",
+        "pub const EDGE_REM: f64 = 1.125;",
+    ] {
+        assert!(text.contains(constant), "{constant}");
+    }
+    assert!((14.0f64 + 1.5 + 1.125 - 16.625).abs() < f64::EPSILON);
+    assert!((20.0f64 + 1.5 + 1.125 - 22.625).abs() < f64::EPSILON);
+
+    // The cascade: every other rule on screen that sets the same property
+    // of the same thing, and could apply with "Always" (not reading mode's,
+    // Compare's or two panes', not print's), is outranked by "Always"'s,
+    // wherever it is in the stylesheet.
+    let exclusive = [
+        r#"[data-reader-mode="on"]"#,
+        "is-comparing",
+        "[data-split]",
+        "[data-pane-tabs]",
+        ".pane ",
+        r#":not([data-margin-notes="always"])"#,
+    ];
+    let mut outranked = Vec::new();
+    for (what, properties) in [
+        (".chapter-side", &["display"][..]),
+        (".nav-hint", &["display"]),
+        (".container", &["max-width"]),
+        (".reading-row", &["justify-content"]),
+        (".chapter-main", &["flex", "max-width", "min-width"]),
+    ] {
+        let ours = specificity(&format!("{ALWAYS} {what}"));
+        for rule in rules.iter().filter(|r| {
+            r.at_rule.as_deref() != Some("@media print") && !r.selector.contains(ALWAYS)
+        }) {
+            for selector in selectors(rule)
+                .filter(|s| s.ends_with(what) && !exclusive.iter().any(|x| s.contains(x)))
+            {
+                for property in properties {
+                    let sets = rule
+                        .body
+                        .split(';')
+                        .any(|d| d.trim().starts_with(&format!("{property}:")));
+                    if sets {
+                        assert!(
+                            !rule.body.contains("!important"),
+                            "`{selector}` sets {property} !important"
+                        );
+                        assert!(
+                            specificity(selector) < ours,
+                            "`{selector}` ({:?}) would outrank \"Always\"'s {what} {property}",
+                            specificity(selector)
+                        );
+                        outranked.push(selector.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    // The base rules it overrides are among them, so the scan sees them.
+    for base in [".chapter-main", ".container", ".reading-row"] {
+        assert!(outranked.iter().any(|s| s == base), "{base}: {outranked:?}");
+    }
 }
 
 /// Regression guard for GH-5: the random chapter control must be a real,
@@ -989,7 +1082,10 @@ fn preference_selects_match_the_values_the_script_persists() {
 /// The saved look is on the page before its first frame: the first script
 /// in `<head>` is the pre-paint script generated from the one table
 /// (`preferences::prepaint_script`), byte for byte, and it only reads what's
-/// saved. Everything that saves a setting is the page's Rust pieces'.
+/// saved, but for retiring Compare's Notes (M4) before anything is applied:
+/// "on" becomes notes beside the text "always", Compare (which showed no
+/// translation) goes off, and the old key goes. Everything else that saves
+/// a setting is the page's Rust pieces'.
 #[test]
 fn the_pre_paint_script_applies_the_saved_look_from_the_one_table() {
     let script = preferences::prepaint_script();
@@ -1006,9 +1102,33 @@ fn the_pre_paint_script_applies_the_saved_look_from_the_one_table() {
     for key in preferences::PREFERENCES.map(|p| p.key) {
         assert!(script.contains(&format!("['{key}', ")), "{key}");
     }
+    let retire = &script[..script.find("var SAVED").unwrap()];
+    assert_eq!(
+        head.matches("setItem").count(),
+        retire.matches("setItem").count(),
+        "the head scripts never save a setting, but to retire one"
+    );
+    assert!(retire.contains(&format!(
+        "localStorage.getItem('{}')",
+        preferences::RETIRED_COMPARE_NOTES_KEY
+    )));
+    assert!(retire.contains(&format!(
+        "if (notes === 'on') {{\n                    localStorage.setItem('{}', 'always');",
+        preferences::MARGIN_NOTES.key
+    )));
+    assert!(retire.contains(&format!(
+        "if (localStorage.getItem('{0}') === 'on') localStorage.setItem('{0}', 'off');",
+        preferences::COMPARE.key
+    )));
+    assert!(retire.contains(&format!(
+        "if (notes !== null) localStorage.removeItem('{}');",
+        preferences::RETIRED_COMPARE_NOTES_KEY
+    )));
+    assert_eq!(retire.matches("setItem").count(), 2);
     assert!(
-        !head.contains("setItem"),
-        "the head scripts never save a setting"
+        preferences::PREFERENCES
+            .iter()
+            .all(|p| p.key != preferences::RETIRED_COMPARE_NOTES_KEY)
     );
     assert!(piece("aa.rs").contains("prefs::set(&preferences::UPDATE_CHECK, value);"));
 }
@@ -1211,9 +1331,7 @@ const UI_SCALED_AT_MEDIUM: &[(&str, &str, &str)] = &[
     (".finding-group-meta", "font-size", "0.78rem"),
     (".finding-open", "font-size", "0.8rem"),
     (".margin-note-more", "font-size", "0.75rem"),
-    (".notes-column", "font-size", "0.8rem"),
-    (".notes-column-empty", "font-size", "0.85rem"),
-    (".note-under", "font-size", "0.8rem"),
+    (".margin-notes-empty", "font-size", "0.85rem"),
     // What the shared button rule gave them (0.85rem), now their own.
     (".search-more", "font-size", "0.85rem"),
     // Recent places, the menu from the bar's ▾.
@@ -4534,18 +4652,15 @@ fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
         }
     }
     // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
-    // Compare's translations are its grid; with the notes, the text is the
-    // reading pane's own, so it flows.
+    // Compare's translations are its grid.
     let reader = piece("reader_text.rs");
     let pane = block_after(reader, "pub fn reading_pane(");
     assert!(pane.contains("Beside::Translations(compare) => compare_grid(dto, compare),"));
-    assert!(pane.contains("Beside::Notes { name } => notes_grid(dto, code, name),"));
     assert!(pane.contains("Beside::Nothing => chapter_text(dto, code),"));
     assert!(
         block_after(reader, "fn chapter_text(")
             .contains(r##"r#"<div class="chapter-text">{}</div>"#,"##)
     );
-    assert!(block_after(reader, "fn notes_grid(").contains("chapter_text(dto, code),"));
     assert!(!block_after(reader, "fn compare_grid(").contains("chapter-text"));
     assert!(
         block_after(reader, "fn side_chapter(")

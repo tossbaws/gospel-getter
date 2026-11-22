@@ -124,40 +124,26 @@ fn body_html(group: &FindingGroup, id: &str) -> String {
 }
 
 /// One verse's findings in the margin (C7): a toggle showing the badge and
-/// `shown` (the reference, or the notes column's "35"), collapsed, and the
-/// findings it expands to. It opens collapsed every time it's drawn.
-fn entry_html(group: &FindingGroup, shown: &str, where_: &str) -> String {
+/// the reference, collapsed, and the findings it expands to. It opens
+/// collapsed every time it's drawn.
+pub fn margin_html(group: &FindingGroup) -> String {
     let key = group.key();
-    let body = format!("finding-body-{where_}-{key}");
+    let body = format!("finding-body-margin-{key}");
     format!(
         r#"<article class="margin-finding" data-finding-key="{key}" aria-label="{label}"><button type="button" class="margin-finding-head" data-finding-key="{key}" aria-expanded="false" aria-controls="{body}"><span class="ai-badge">{badge}</span> <span class="margin-finding-ref">{shown}</span></button>{items}</article>"#,
         label = escape_html(&label(group)),
         badge = badge(group.findings.len()),
-        shown = escape_html(shown),
+        shown = escape_html(&group.reference),
         items = body_html(group, &body),
-    )
-}
-
-/// One verse's findings in the margin.
-pub fn margin_html(group: &FindingGroup) -> String {
-    entry_html(group, &group.reference, "margin")
-}
-
-/// One verse's findings in Compare's notes column, or under its verse,
-/// labelled with its verses as the column labels the reader's notes.
-pub fn column_html(group: &FindingGroup, where_: &str) -> String {
-    entry_html(
-        group,
-        &crate::margin_text::verses_label(group.verse_start, group.verse_end),
-        where_,
     )
 }
 
 /// A verse's findings where there's no room for the margin (C9): a small
 /// violet marker after the verse, after the reader's pencil, that opens
-/// the findings in the text, after it.
-pub fn marker_html(group: &FindingGroup) -> String {
-    let key = group.key();
+/// the findings in the text, after it. `pane` (`pane::PaneId::name`) keeps
+/// its id apart from the other pane's, which may show the same chapter.
+pub fn marker_html(group: &FindingGroup, pane: &str) -> String {
+    let key = format!("{pane}-{}", group.key());
     let label = escape_html(&label(group));
     let items: String = group
         .findings
@@ -165,7 +151,8 @@ pub fn marker_html(group: &FindingGroup) -> String {
         .map(|f| item_html(f, "span"))
         .collect();
     format!(
-        r#"<button type="button" class="margin-marker finding-marker" data-finding-key="{key}" aria-expanded="false" aria-controls="finding-inline-{key}" aria-label="{label}" title="{label}"><span class="ai-badge">{badge}</span></button><span class="finding-inline" id="finding-inline-{key}" data-finding-key="{key}" hidden>{items}</span>"#,
+        r#"<button type="button" class="margin-marker finding-marker" data-finding-key="{finding}" aria-expanded="false" aria-controls="finding-inline-{key}" aria-label="{label}" title="{label}"><span class="ai-badge">{badge}</span></button><span class="finding-inline" id="finding-inline-{key}" data-finding-key="{finding}" hidden>{items}</span>"#,
+        finding = group.key(),
         badge = badge(group.findings.len()),
     )
 }
@@ -297,11 +284,12 @@ mod tests {
         );
         assert!(plain(&html).starts_with("AI John 11:35"));
         assert!(html.contains(KEEP) && html.contains(REMOVE));
-        assert!(
-            column_html(group, "column").contains(r#"<span class="margin-finding-ref">35</span>"#)
-        );
-        let marker = marker_html(group);
+        let marker = marker_html(group, "first");
         assert!(marker.contains(r#"class="margin-marker finding-marker""#));
+        // Its id is the pane's own: the other pane may show the same verse.
+        assert!(marker.contains(r#"aria-controls="finding-inline-first-35-35""#));
+        assert!(marker_html(group, "second").contains(r#"id="finding-inline-second-35-35""#));
+        assert!(marker.contains(r#"data-finding-key="35-35""#));
         assert!(marker.contains("hidden><span class=\"finding-item\""));
     }
 

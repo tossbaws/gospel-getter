@@ -108,16 +108,9 @@ needed.
   button, chooses the other one, and it's remembered; until you choose,
   it's the KJV (or, beside the KJV, the WEB). Where only one translation
   numbers a verse, the other column says so instead of shifting anything.
-
-  **Notes**, the last of the **with** choices, shows your own notes on the
-  chapter instead, in a **My notes** column beside the text. The text
-  stays exactly as you read it (Verses or Flowing), and each note sits
-  beside its first verse, labelled with its verses; a long one folds
-  after about ten lines. Click a note to select its verses and edit it in
-  the card. In a narrow window each note sits under its first verse. Reading
-  mode keeps its margin notes, and the choice stays on this computer, out
-  of backups.
-- **Two passages side by side.** **Open beside** opens a passage next to
+- **Two passages side by side.** `S` opens the chapter you're reading
+  beside itself, at the verse you're on (leaving reading mode first), and
+  `S` again closes the second. **Open beside** opens a passage next to
   the one you're reading, in its own translation: from a cross-reference's
   preview, a bookmark, highlight or note in the Library, a verse in search
   (or Alt+Enter), or a link in a note (Shift-click or Alt-click, or **Open
@@ -159,11 +152,17 @@ needed.
   line spacings, three widths for the text (Narrow, Normal and Wide), a
   layout, and a distraction-free reading mode, all under **Aa**. Printing
   is always black on white.
-- **Notes in the margin.** In reading mode, your notes on the chapter sit
-  in the margin to the right of the text, each beside the verse it's on,
-  with a thin line beside a note on several verses. Click one to select
-  its verses and open it in the card. **Notes in the margin**, under
-  **Aa** with reading mode, turns them off.
+- **Notes beside the text.** Your notes on the chapter sit in the margin
+  to the right of the text, each beside the verse it's on, with a thin
+  line beside a note on several verses; a long one folds after ten lines.
+  Click one to select its verses and open it in the card. **Notes beside
+  the text**, under **Aa**, says when: **In reading mode** (the default),
+  **Always**, or **Off**. With **Always**, the text takes reading mode's
+  single column beside the margin, keeping the bar and the sidebar, and a
+  chapter with no notes says so at the top of the margin. `M` shows or
+  hides them wherever you are. In a window too narrow for the margin, or
+  with two passages open, a ✎ after each noted verse opens its note
+  instead. The setting stays on this computer, out of backups.
 
   ![John 3 in the KJV in reading mode, in the Chi Rho theme: no sidebar, and the bar holds only the reference button, "Exit reading mode (Esc)", KJV, Aa and search. The verses run down the middle, with ✎ marks after verses 2, 3 and 5 to 8 and small letters after verses 3 and 7 marking their footnotes. In the margin to the right, each beside its first verse, are three notes under their references: John 3:2, "He comes by night, a ruler of the Jews. By 19:39 he brings myrrh and aloes to bury Jesus."; John 3:3, "“Again” is anothen, which also means “from above” (as in v. 31). Nicodemus hears only “a second time”."; and John 3:5–8, "Water and Spirit together recall Ezekiel 36:25–27: clean water, a new heart, God's Spirit within. A teacher of Israel should have known it (v. 10).", its Ezekiel 36:25–27 underlined as a link, with a thin line beside verses 5 to 8](screenshots/margin-notes.png)
 - **Verses or Flowing.** **Layout** under **Aa** sets the verses one to a
@@ -297,7 +296,9 @@ The main ones:
 | `T` | Open or close the translations and Compare (the translation button) |
 | `C` | Compare translations on/off |
 | `R` | Reading mode on/off (Esc also leaves it) |
+| `M` | Notes beside the text: show or hide them where you are |
 | F6 / Shift+F6 / `P` | Switch pane, with two passages open side by side |
+| `S` | Open this passage beside, or close the second pane (leaves reading mode first) |
 | `X` | Close the second pane |
 | Ctrl+= / Ctrl+- | Larger / smaller text, through the four sizes |
 | Ctrl+0 | Text size back to Medium |
@@ -309,9 +310,9 @@ The main ones:
 | Esc | Close search or the open panel or popover, then clear the selection, then leave reading mode |
 | `?` | All the keyboard shortcuts |
 
-The keys that work pressed on their own (`G`, `T`, `C`, `R`, `N`, `B`,
-`H`, `X`, `P`, `j`, `k`, `[`, `]`, `/` and `?`) can get in the way of speech input or a screen
-reader. **Single-key shortcuts** under **Aa** turns them off: those keys
+The keys that work pressed on their own (`G`, `T`, `C`, `R`, `M`, `N`,
+`B`, `H`, `S`, `X`, `P`, `j`, `k`, `[`, `]`, `/` and `?`) can get in the
+way of speech input or a screen reader. **Single-key shortcuts** under **Aa** turns them off: those keys
 then do nothing, and the shortcuts with Ctrl or Alt, the arrow keys, F6 and
 Esc still work. With them off, Ctrl+K opens the search box and the command
 palette, and **Keyboard shortcuts** in the ☰ menu (or in the palette) lists

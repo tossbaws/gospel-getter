@@ -214,18 +214,17 @@ test('a narrow window shows both markers after the verse, the pencil first, and 
         assert.deepEqual(app.selectedVerseNumbers(), [], 'the click selects nothing');
     }));
 
-test('Compare’s My notes column shows the findings the same way', () =>
+test('with notes beside the text “Always”, the margin outside reading mode shows the findings the same way', () =>
     withFindings({
         readerMode: false,
-        compare: true,
-        storage: { 'gospel-getter-compare-notes': 'on' },
+        storage: { 'gospel-getter-margin-notes': 'always' },
         seed: () => save({ request: 'grief', verses: [35] }),
     }, async (app) => {
-        assert.equal(app.window.gospelGetterMargin.shown(), 'column');
-        const found = $(app, '.notes-column .margin-finding');
-        assert.ok(found, 'in the column');
-        assert.equal(found.querySelector('.margin-finding-head').textContent, 'AI 35');
-        assert.equal($(app, '.notes-column .notes-column-empty'), null, 'not "no notes" when there are findings');
+        assert.equal(app.window.gospelGetterMargin.shown(), 'margin');
+        const found = $(app, '.margin-notes .margin-finding');
+        assert.ok(found, 'in the margin');
+        assert.equal(found.querySelector('.margin-finding-head').textContent, 'AI John 11:35');
+        assert.equal($(app, '.margin-notes .margin-notes-empty'), null, 'not "no notes" when there are findings');
         app.click(found.querySelector('.margin-finding-head'));
         await frame(app);
         assert.deepEqual(texts(found), [QUOTE('grief')]);

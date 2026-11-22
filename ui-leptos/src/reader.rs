@@ -59,6 +59,8 @@ use crate::nav_text::RecentPlace;
 use crate::palette::PaletteState;
 use crate::pane::{self, PaneId, PerPane};
 use crate::pane_text::SecondPlace;
+use crate::preferences;
+use crate::prefs;
 use crate::reader_text::{self as text, Disclosure, History, Opened, Place, Which};
 use crate::surfaces;
 
@@ -161,8 +163,7 @@ pub fn translation_name(code: &str) -> String {
         .unwrap_or_else(|| code.to_uppercase())
 }
 
-/// Comparing translations (Compare on, with a translation rather than the
-/// notes): the comparison is fetched.
+/// Comparing translations: the comparison is fetched.
 fn is_comparing() -> bool {
     aa::beside() == Beside::Translations
 }
@@ -358,11 +359,9 @@ fn render_current(pane: PaneId) {
         }
     }
 
-    let name = translation_name(&here.translation_code);
-    let beside = match (&compare, aa::beside()) {
-        (Some(compare), _) => text::Beside::Translations(compare),
-        (None, Beside::Notes) => text::Beside::Notes { name: &name },
-        (None, _) => text::Beside::Nothing,
+    let beside = match &compare {
+        Some(compare) => text::Beside::Translations(compare),
+        None => text::Beside::Nothing,
     };
     // The faded neighbors give way while two panes share the window (D7).
     let neighbours = if pane::split() {
@@ -874,9 +873,8 @@ fn export_place() {
     saved.forget();
 }
 
-/// Compare went on or off, or what it compares with changed (or reading
-/// mode, with Compare's Notes chosen; `aa`): every pane draws its chapter
-/// in the new layout ([`on_compare_change`]).
+/// Compare went on or off, or what it compares with changed (`aa`): every
+/// pane draws its chapter in the new layout ([`on_compare_change`]).
 pub fn compare_changed() {
     for pane in pane::shown() {
         on_compare_change(pane);
@@ -1531,10 +1529,19 @@ pub fn open_beside(passage: &OpenPassage, code: Option<String>) -> Load {
     })
 }
 
-/// The palette's "Open this passage beside": the active pane's chapter
-/// opened in the second pane ([`open_beside`], in the active pane's
-/// translation), with the verse at the top of the active pane's view put
-/// at the top of the second's, as far below its bar. Its end is the load's.
+/// Whether `pane` has a chapter on screen.
+pub fn chapter_shown(pane: PaneId) -> bool {
+    with(pane, |s| s.reading.is_some())
+}
+
+/// The palette's "Open this passage beside", and S with one pane open: the
+/// active pane's chapter opened in the second pane ([`open_beside`], in the
+/// active pane's translation), with the verse at the top of the active
+/// pane's view put at the top of the second's, as far below its bar. In
+/// reading mode, which shows one pane alone (D6), it leaves reading mode
+/// first, so both panes show (B12); the verse is the one read there. The
+/// other ways to open a passage beside (the card, the Library, search, a
+/// note's link) leave reading mode as it is. Its end is the load's.
 pub fn open_here_beside() -> Load {
     let from = pane::active();
     let Some((book_id, chapter)) =
@@ -1543,6 +1550,9 @@ pub fn open_here_beside() -> Load {
         return Box::pin(async { false });
     };
     let top = surfaces::top_verse(from, &pane::code(from));
+    if prefs::on(&preferences::READER_MODE) {
+        aa::set_reader_mode(false);
+    }
     let passage = OpenPassage {
         book_id,
         chapter,

@@ -70,8 +70,8 @@ The header, the Library and search:
 
 - `surfaces`: the header's popovers and panels and the picker's two shapes, the sidebar or the popover: one open at a time, their buttons, focus in and back, a click outside, Escape, the menu's keys and the window crossing 1200px (and 900px, with two panes open), keeping each pane's place, and that of a pane out of view.
 - `surfaces_text`: the surfaces' table, the sidebar's rule and the ☰ menu's keys.
-- `aa`: Aa and the translation button's popover: the translations, Compare, text size, line spacing, width, layout, theme, reading mode and the launch check's setting.
-- `aa_text`: the size keys and stepping, and what Compare shows beside the text.
+- `aa`: Aa and the translation button's popover: the translations, Compare, text size, line spacing, width, layout, theme, reading mode, notes beside the text (and M) and the launch check's setting.
+- `aa_text`: the size keys and stepping, what Compare shows beside the text, and what M makes of notes beside the text.
 - `prefs`: the saved settings' store, by the one table in `preferences`.
 - `nav`: the top bar's Back, Forward and Recent places, and the chapter arrows.
 - `nav_text`: their words and rules, and the Recent places list as it's kept.
@@ -88,13 +88,13 @@ The reader, the selection card and notes:
 
 - `reader`: the chapter on screen, how it gets there, and the passage history; Open beside, the one way a passage opens in the second pane.
 - `pane`: the reading panes' elements (each one's root, `#reading-pane-inner` and notice, by its own ids), which the reading view's queries run on, and each one's `Scroller` (the window, or its own column while two are open), the one way a reading view's scroll position and the band in view are read and set; which pane is active, which are open and which are in view, and `PerPane`, the state the pieces keep for each pane; the second pane opened and closed, and opened again at launch where it was (its place kept on this computer); the panes' bars, the tabs on a narrow window and reading mode's one pane, F6's switch between panes, the keys that scroll a pane's column, either pane's chapter reflowing (told to the reading place and the margin), and `window.gospelGetterPanes`.
-- `pane_text`: how two panes are laid out (side by side, tabs, or reading mode's one), the panes' bars' and tabs' names, which tab an arrow key goes to, what Compare says while two are open, how far the keys that scroll a page scroll a pane's column, and the second pane's place as this computer keeps it (`SECOND_PANE_KEY`), and which can be one.
+- `pane_text`: how two panes are laid out (side by side, tabs, or reading mode's one), the panes' bars' and tabs' names, which tab an arrow key goes to, what S does, what Compare says while two are open, how far the keys that scroll a page scroll a pane's column, and the second pane's place as this computer keeps it (`SECOND_PANE_KEY`), and which can be one.
 - `reader_text`: the chapter's markup, byte for byte `fixtures/genesis-1.html` (which a test compares), Compare's rows, the reference, and the passage history's bookkeeping.
 - `card`: the selection card: the verse selection, Copy and Copy as…, the card's bookmark, highlight and notes, the verses' marks and the Shift ghost.
 - `card_text`: the card's markup and placement.
-- `margin`: the notes in the margin in reading mode.
-- `margin_text`: where a margin note sits, how notes stack, and the margin's markup.
-- `findings`: the AI-flagged findings an agent saved at the reader's request, in the margin, Compare's notes column and the Library, with Aa's switch for them.
+- `margin`: the notes in the margin beside each pane's chapter, in reading mode or always (or markers in their place).
+- `margin_text`: whether the margin shows, where a margin note sits, how notes stack, and the margin's markup.
+- `findings`: the AI-flagged findings an agent saved at the reader's request, in the margin and the Library, with Aa's switch for them.
 - `findings_text`: the findings' rules and markup.
 - `note_markdown`: a note's text as Markdown wherever it shows: the subset, everything else escaped, the references the backend found in it as links.
 - `note_links`: the links in a note: a reference goes to its passage (Shift- or Alt-click, or the card's Open beside: in the second pane), a web link opens through the backend.

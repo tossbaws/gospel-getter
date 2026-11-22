@@ -1390,12 +1390,12 @@ mod tests {
         }
     }
 
-    /// Compare's Notes is a setting of the computer's that no backup
+    /// Notes beside the text is a setting of the computer's that no backup
     /// carries, so an export's `compare_with` is still only ever a
     /// translation's code, and the format is unchanged. Even a file that
-    /// named the notes there (written by hand) imports, as one naming a
-    /// translation this version lacks does: that one setting skipped and
-    /// named, everything else applied.
+    /// named the notes there (written by hand, when Compare could show
+    /// them) imports, as one naming a translation this version lacks does:
+    /// that one setting skipped and named, everything else applied.
     #[test]
     fn a_file_naming_the_notes_as_compares_partner_still_imports() {
         let file = r#"{"format": "gospel-getter-reader-data", "format_version": 3,
@@ -1417,7 +1417,7 @@ mod tests {
                 .filter_map(|p| p.file_name)
                 .all(|name| Preferences::NAMES.contains(&name))
         );
-        assert_eq!(crate::preferences::COMPARE_NOTES.file_name, None);
+        assert_eq!(crate::preferences::MARGIN_NOTES.file_name, None);
         // Two panes open is this computer's, never a file's (S9).
         assert_eq!(crate::preferences::SPLIT.file_name, None);
     }

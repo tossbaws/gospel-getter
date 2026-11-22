@@ -88,6 +88,38 @@ choices! {
 }
 
 choices! {
+    /// Where the reader's notes sit beside the text, in the margin (Aa's
+    /// "Notes beside the text"): nowhere, in reading mode only, or always,
+    /// outside reading mode too.
+    NotesBeside {
+        Off = "off", "Off";
+        Reading = "reading", "In reading mode";
+        Always = "always", "Always";
+    }
+}
+
+impl NotesBeside {
+    /// The choice saved as `value`, if it's one.
+    pub fn from_value(value: &str) -> Option<Self> {
+        match value {
+            "off" => Some(Self::Off),
+            "reading" => Some(Self::Reading),
+            "always" => Some(Self::Always),
+            _ => None,
+        }
+    }
+
+    /// Its saved value.
+    pub fn value(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Reading => "reading",
+            Self::Always => "always",
+        }
+    }
+}
+
+choices! {
     /// How a chapter is set (Aa's Layout row): a verse to a line, or the
     /// verses flowing on as prose. Presentation only: the text is the same.
     Layout {
@@ -233,8 +265,7 @@ pub const WIDTH: Preference = Preference {
 };
 
 /// A verse to a line, as it always was, or flowing on as prose. Compare's
-/// translations keep a verse to a row whichever is chosen (its notes leave
-/// the text as chosen).
+/// translations keep a verse to a row whichever is chosen.
 pub const LAYOUT: Preference = Preference {
     name: "layout",
     key: "gospel-getter-layout",
@@ -301,33 +332,26 @@ pub const UPDATE_CHECK: Preference = Preference {
     file_name: None,
 };
 
-/// The reader's notes in the margin, beside the text, in reading mode
-/// (Aa's "Notes in the margin", with reading mode's controls). A display
-/// setting of this computer's, like the sidebar: no backup carries it.
+/// The reader's notes in the margin, beside the text (Aa's "Notes beside
+/// the text", and M): in reading mode only (the default), always, outside
+/// reading mode too, or never. A display setting of this computer's, like
+/// the sidebar: no backup carries it. A saved "on" is "reading".
 pub const MARGIN_NOTES: Preference = Preference {
     name: "marginNotes",
     key: "gospel-getter-margin-notes",
-    fallback: "on",
-    values: Values::Words(&["on", "off"]),
-    renamed: &[],
+    fallback: "reading",
+    values: Values::Choices(NotesBeside::CHOICES),
+    renamed: &[("on", "reading")],
     select: None,
     file_name: None,
 };
 
-/// Compare shows the reader's notes on the chapter beside the text, in
-/// place of a second translation (the "with" choices' Notes). A display
-/// setting of this computer's, like the margin's: no backup carries it, so
-/// an export's `compare_with` stays a translation's code, and the
-/// translation chosen before stays chosen for when Notes isn't.
-pub const COMPARE_NOTES: Preference = Preference {
-    name: "compareNotes",
-    key: "gospel-getter-compare-notes",
-    fallback: "off",
-    values: ON_OFF,
-    renamed: &[],
-    select: None,
-    file_name: None,
-};
+/// The local storage key of a retired setting: Compare's "with" Notes,
+/// which showed the reader's notes in a column in place of a second
+/// translation. The pre-paint script turns a saved "on" into
+/// [`MARGIN_NOTES`]'s "always" (and Compare off, which was showing no
+/// translation), then forgets the key, before the first frame.
+pub const RETIRED_COMPARE_NOTES_KEY: &str = "gospel-getter-compare-notes";
 
 /// The keyboard shortcuts that are a character key pressed on its own (G,
 /// T, C, N, j and k, `[` and `]`, `/` and `?`: Aa's "Single-key
@@ -363,7 +387,7 @@ pub const SPLIT: Preference = Preference {
 };
 
 /// Every saved setting, in the order they're applied (and exported).
-pub const PREFERENCES: [Preference; 14] = [
+pub const PREFERENCES: [Preference; 13] = [
     THEME,
     TEXT_SIZE,
     LINE_SPACING,
@@ -375,7 +399,6 @@ pub const PREFERENCES: [Preference; 14] = [
     SIDEBAR,
     UPDATE_CHECK,
     MARGIN_NOTES,
-    COMPARE_NOTES,
     SINGLE_KEY_SHORTCUTS,
     SPLIT,
 ];
@@ -400,7 +423,9 @@ pub const WIDE_QUERY: &str = "(min-width: 1200px)";
 /// as each setting's data attribute on `<html>` before the first frame
 /// (renamed values under their new names, anything else unknown as the
 /// default), then the picker's shape: `data-wide` on a wide window, and
-/// `data-picker="sidebar"` while the sidebar shows there. It only reads.
+/// `data-picker="sidebar"` while the sidebar shows there. First, it retires
+/// Compare's Notes ([`RETIRED_COMPARE_NOTES_KEY`]), so the page never
+/// shows a frame laid out for it: its only writes.
 pub fn prepaint_script() -> String {
     let quoted = |s: &str| format!("'{s}'");
     let rows: String = PREFERENCES
@@ -436,15 +461,26 @@ pub fn prepaint_script() -> String {
         // The saved look, before the first frame: each saved setting as its
         // data attribute on <html> (none for its default), which the CSS
         // keys off, then the book and chapter picker's shape, so the page
-        // is laid out for it from the start. Only that: the page's Rust
-        // pieces keep the settings (ui-leptos/src/aa.rs) and the picker's
-        // shape (ui-leptos/src/surfaces.rs) from then on, and without them
-        // the Bible text still shows in the saved look. The table is
+        // is laid out for it from the start. Only that, and a retired
+        // setting carried over (below): the page's Rust pieces keep the
+        // settings (ui-leptos/src/aa.rs) and the picker's shape
+        // (ui-leptos/src/surfaces.rs) from then on, and without them the
+        // Bible text still shows in the saved look. The table is
         // generated from shared/preferences.rs (prepaint_script); a test
         // keeps the two the same.
         (function () {{
             'use strict';
             var data = document.documentElement.dataset;
+            // Compare's retired Notes: notes beside the text always
+            // instead, and Compare, which showed no translation, off.
+            try {{
+                var notes = localStorage.getItem('{retired}');
+                if (notes === 'on') {{
+                    localStorage.setItem('{margin}', 'always');
+                    if (localStorage.getItem('{compare}') === 'on') localStorage.setItem('{compare}', 'off');
+                }}
+                if (notes !== null) localStorage.removeItem('{retired}');
+            }} catch (e) {{}}
             // Local storage key, data attribute, default, the values it
             // may have (null: a translation's code), renamed values.
             var SAVED = [
@@ -468,6 +504,9 @@ pub fn prepaint_script() -> String {
             else delete data.picker;
         }})();
     </script>
-"
+",
+        retired = RETIRED_COMPARE_NOTES_KEY,
+        margin = MARGIN_NOTES.key,
+        compare = COMPARE.key,
     )
 }

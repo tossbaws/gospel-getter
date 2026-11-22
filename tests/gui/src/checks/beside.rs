@@ -1,27 +1,28 @@
-//! Check 69: Compare with Notes (ui-leptos/src/margin.rs), on John 3 in
-//! the KJV with five notes added through the page's own IPC (a verse, a
-//! range, a note starting on the verse after the range's first, a long
-//! sermon outline over two verses, and one far down), in Verses:
+//! Check 69: notes beside the text, "Always", outside reading mode
+//! (ui-leptos/src/margin.rs, M1), on John 3 in the KJV with five notes added
+//! through the page's own IPC (a verse, a range, a note starting on the
+//! verse after the range's first, a long sermon outline over two verses,
+//! and one far down), in Verses, in a 1440x900 window with the sidebar open:
 //!
-//! - Notes, chosen among Compare's "with" choices, puts a "My notes"
-//!   region beside the text, headed like a translation's column, and the
-//!   reference still says just the KJV.
+//! - Aa's "Notes beside the text: Always" shows the margin, not markers,
+//!   beside a text column that keeps the bar and the sidebar, the column and
+//!   the margin one group beside the sidebar; the margin's left edge is at
+//!   or right of the column's right edge.
 //! - The text never moves: every verse's `offsetTop` is the same, to the
-//!   pixel, the moment Notes is chosen (the chapter drawn, its notes not
-//!   yet: they come in a later frame), with the notes placed, and after a
-//!   note is edited in the card; and the first verse's once every note is
-//!   gone (the column's one line; the reader's own ✎ after a noted verse's
-//!   number goes with the notes, and can rewrap that verse).
+//!   pixel, the moment Always is chosen (the page in its shape, the notes
+//!   not yet placed: they come in a later frame), with the notes placed, and
+//!   after a note is edited in the card.
 //! - Each note's top is at or below its first verse's top (beside it, or
-//!   just below the note above where they'd overlap); none overlap; the
-//!   range's rule runs beside its verses; the column is beside the text,
-//!   never over it.
-//! - A note's label opens the card on its verses; the note edited there is
-//!   shown edited in the column.
+//!   just below the note above where they'd overlap); none overlap.
+//! - S, pressed as a real key, opens this passage beside (each pane then
+//!   has markers, not a margin), and S again closes the second pane; in
+//!   reading mode, S leaves it and opens both panes (B9-B12).
 //!
-//! Screenshots in Chi Rho, after the edit (the card open on the note, the
-//! column showing it edited), and in Vellum. The notes are
-//! deleted after, and the settings, Compare and its "with" put back.
+//! A screen that can't hold a 1440 px window (the Windows runner's) has the
+//! margin or markers as its room allows: the check says which, and checks
+//! the margin's measures only where it shows. Screenshots in Chi Rho,
+//! after the edit (the card open on the note), and in Vellum. The notes are
+//! deleted after, and the settings, the window and reading mode put back.
 
 use anyhow::{Result, ensure};
 use serde_json::{Value, json};
@@ -30,13 +31,15 @@ use super::{Run, VISIBLE_JS};
 
 /// The screenshots check 69 takes (check 4 lists them).
 pub(super) const BESIDE_SHOTS: [&str; 3] = [
-    "69-notes-beside-chi-rho.png",
-    "69-notes-beside-edited-chi-rho.png",
-    "69-notes-beside-vellum.png",
+    "69-notes-always-chi-rho.png",
+    "69-notes-always-edited-chi-rho.png",
+    "69-notes-always-vellum.png",
 ];
 
-/// The window it's checked in: the app's default.
-const BESIDE_WINDOW: u32 = 1280;
+/// The window it's checked in: wide enough for the sidebar and the margin
+/// beside the Normal column (M1's measures).
+const BESIDE_WIDTH: u32 = 1440;
+const BESIDE_HEIGHT: u32 = 900;
 
 /// The sermon-prep notes of the mockup (in the reader's own words; no
 /// verse's words are touched): John 3:2, 3–5, 4, 7–8 and 16.
@@ -83,57 +86,72 @@ const VERSE_TOPS_JS: &str =
     "return [...document.querySelectorAll('.chapter-main .chapter-text > .verse[data-verse]')]
     .map((v) => v.offsetTop);";
 
-/// Chooses Notes among Compare's "with" choices (its popover open) and, in
-/// the same task, before the frame that places the notes, measures the
-/// text: the chapter is drawn in Compare's Notes layout by then, its
-/// column still empty.
-const CHOOSE_NOTES_JS: &str = "const choice = document.querySelector('#compare-with-choices [data-beside=\"notes\"]');
-    if (!choice) return { error: 'no Notes among the \"with\" choices' };
+/// Chooses Always in Aa's "Notes beside the text" (Aa open) and, in the
+/// same task, before the frame that places the notes, measures the text:
+/// the page has its shape for Always by then, the margin not yet drawn.
+const CHOOSE_ALWAYS_JS: &str = "const choice = document.querySelector('#notes-beside-choices [data-value=\"always\"]');
+    if (!choice) return { error: 'no Always in Aa' };
     choice.click();
-    const column = document.querySelector('.chapter-main .notes-column');
     return { pressed: choice.getAttribute('aria-pressed'),
-             empty: !!column && column.childElementCount === 0 && !column.dataset.drawn,
+             setting: document.documentElement.dataset.marginNotes || null,
+             drawn: !!document.querySelector('.chapter-main .margin-notes, .chapter-main .margin-marker'),
              tops: [...document.querySelectorAll('.chapter-main .chapter-text > .verse[data-verse]')].map((v) => v.offsetTop) };";
 
-/// The column as laid out, against the notes added (`arguments[0]`: [id,
-/// start, end] each): each note's box with its first verse's, the range's
-/// rule against its verses, and the column against the text.
-const COLUMN_JS: &str = "const added = arguments[0];
-    const column = document.querySelector('.chapter-main .notes-column');
-    const text = document.querySelector('.chapter-main .chapter-text').getBoundingClientRect();
-    const verse = (n) => document.querySelector(`.chapter-main .chapter-text > .verse[data-verse=\"${n}\"]`);
-    const notes = column ? [...column.querySelectorAll('.margin-note')].map((el) => {
+/// The margin as laid out, against the notes added (`arguments[0]`: [id,
+/// start, end] each): each note's box with its first verse's, the margin
+/// against the column, and the page around them.
+const MARGIN_JS: &str = "const added = arguments[0];
+    const main = document.querySelector('#reading-pane .chapter-main');
+    const aside = main && main.querySelector('.margin-notes');
+    const verse = (n) => main.querySelector(`.chapter-text > .verse[data-verse=\"${n}\"]`);
+    const notes = aside ? [...aside.querySelectorAll('.margin-note')].map((el) => {
         const id = Number(el.dataset.noteId);
         const [, start, end] = added.find(([i]) => i === id) || [];
         const box = el.getBoundingClientRect();
         const more = el.querySelector('.margin-note-more');
-        return { id, start, end, top: box.top, bottom: box.bottom, left: box.left,
+        return { id, start, end, top: box.top, bottom: box.bottom,
                  verse: start && verse(start) ? verse(start).getBoundingClientRect().top : null,
                  label: el.querySelector('.margin-note-ref').textContent,
                  body: el.querySelector('.margin-note-body').textContent,
                  folded: el.classList.contains('is-folded'), more: !!more && !more.hidden };
     }) : [];
-    const rules = column ? [...column.querySelectorAll('.margin-rule')].map((el) => {
-        const id = Number(el.dataset.noteId);
-        const [, start, end] = added.find(([i]) => i === id) || [];
-        const box = el.getBoundingClientRect();
-        return { top: box.top, bottom: box.bottom,
-                 from: verse(start) ? verse(start).getBoundingClientRect().top : null,
-                 to: verse(end) ? verse(end).getBoundingClientRect().bottom : null };
-    }) : [];
-    const box = column ? column.getBoundingClientRect() : null;
+    const shown = (el) => !!el && getComputedStyle(el).display !== 'none';
+    const column = main.getBoundingClientRect();
+    const margin = aside ? aside.getBoundingClientRect() : null;
+    const picker = document.getElementById('picker');
     return { shown: window.gospelGetterMargin ? window.gospelGetterMargin.shown() : null,
-             tag: column && column.tagName, label: column && column.getAttribute('aria-label'),
-             heads: [...document.querySelectorAll('.chapter-main .compare-head')].map((h) => h.textContent.trim()),
-             reference: document.getElementById('ref-text').textContent, title: document.title,
-             text: { left: text.left, right: text.right }, column: box && { left: box.left, right: box.right },
-             empty: column ? (column.querySelector('.notes-column-empty') || {}).textContent || null : null,
-             notes, rules, innerWidth: window.innerWidth };";
+             column: [Math.round(column.left), Math.round(column.width), Math.round(column.right)],
+             margin: margin && [Math.round(margin.left), Math.round(margin.width), Math.round(margin.right)],
+             sidebar: document.documentElement.dataset.picker === 'sidebar' && shown(picker) && !picker.hidden,
+             bar: shown(document.getElementById('library-toggle')) && shown(document.getElementById('menu-toggle')),
+             neighbours: [...document.querySelectorAll('.chapter-side')].filter(shown).length,
+             markers: main.querySelectorAll('.margin-marker').length,
+             readerMode: document.documentElement.dataset.readerMode || 'off',
+             reference: document.getElementById('ref-text').textContent,
+             notes, innerWidth: window.innerWidth };";
 
-/// What check 69 leaves to undo: its notes, and what it found.
+/// The panes, and what the margin shows in each pane laid out.
+const PANES_JS: &str = "const html = document.documentElement;
+    const panes = window.gospelGetterPanes.shown();
+    const each = panes.map((name) => {
+        const root = document.getElementById(name === 'first' ? 'reading-pane' : 'reading-pane-2');
+        const col = root.closest('.pane');
+        const hidden = !!(col && col.hidden);
+        return { name, hidden, heading: (root.querySelector('.chapter-heading') || {}).textContent || null,
+                 margin: !!root.querySelector('.margin-notes'),
+                 markers: [...root.querySelectorAll('.verse .margin-marker')].map((m) => Number(m.closest('.verse').dataset.verse)) };
+    });
+    return { panes, each, readerMode: html.dataset.readerMode || 'off', split: !!html.dataset.split,
+             active: window.gospelGetterPanes.active(),
+             shown: window.gospelGetterMargin ? window.gospelGetterMargin.shown() : null,
+             focus: document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : null };";
+
+/// What check 69 leaves to undo: its notes, the window it found, and what
+/// else it found.
 #[derive(Debug, Default)]
 struct Left {
     notes: Vec<i64>,
+    window: Option<(i64, i64, u32, u32)>,
     found: Option<Value>,
 }
 
@@ -152,24 +170,26 @@ impl Run<'_> {
 
     async fn notes_beside_checked(&mut self, left: &mut Left) -> Result<String> {
         let mut found = self.look().await?;
-        found["readerMode"] = self
+        found["page"] = self
             .ui
             .js(
-                "return document.documentElement.dataset.readerMode || 'off';",
-                Vec::new(),
-            )
-            .await?;
-        found["compare"] = self
-            .ui
-            .js(
-                "return document.documentElement.dataset.compare || 'off';",
+                "const data = document.documentElement.dataset;
+                 return { readerMode: data.readerMode || 'off', compare: data.compare || 'off',
+                          marginNotes: data.marginNotes || 'reading' };",
                 Vec::new(),
             )
             .await?;
         left.found = Some(found.clone());
-        if found["readerMode"] == "on" {
+        let rect = self.ui.driver().get_window_rect().await?;
+        left.window = Some((rect.x, rect.y, rect.width as u32, rect.height as u32));
+        if found["page"]["readerMode"] == "on" {
             self.ui.click("the exit button", "#reader-exit").await?;
             self.reading_mode_off("reading mode to end").await?;
+        }
+        if found["page"]["compare"] == "on" {
+            self.open_translations().await?;
+            self.ui.click("Compare off", "#compare-btn").await?;
+            self.close_translations().await?;
         }
         self.go_to("John 3", "John 3").await?;
         let notes: Vec<(u32, u32, u32, u32, String)> = JOHN_NOTES
@@ -184,63 +204,80 @@ impl Run<'_> {
             .zip(JOHN_NOTES)
             .map(|(id, (start, end, _))| json!([id, start, end]))
             .collect();
+        // The window M1 was measured in; a screen that can't hold it keeps
+        // what it can.
+        let _ = self
+            .ui
+            .driver()
+            .set_window_rect(rect.x, rect.y, BESIDE_WIDTH, BESIDE_HEIGHT)
+            .await;
+        let _ = self.window_width(BESIDE_WIDTH).await;
         // Read again, with the notes.
         self.go_to("John 3", "John 3").await?;
-        let _ = self.window_width(BESIDE_WINDOW).await;
         self.open_aa().await?;
         self.aa_choose("layout-choices", "layout", "verses").await?;
         self.aa_choose("theme-choices", "theme", "chi-rho").await?;
-        self.close_with_escape("Aa", "aa-popover").await?;
-
-        // Compare with the WEB, then Notes.
-        self.open_translations().await?;
-        self.ui
-            .click(
-                "Compare with: the WEB",
-                "#compare-with-choices [data-value=\"web\"]",
-            )
-            .await?;
-        if found["compare"] != "on" {
-            self.ui.click("Compare on", "#compare-btn").await?;
-        }
-        self.ui
-            .wait(
-                "the KJV and the WEB side by side",
-                "const heads = [...document.querySelectorAll('.chapter-main .compare-head')].map((h) => h.textContent.trim());
-                 return [!document.querySelector('.notes-grid') && heads.length === 2, heads];",
-            )
-            .await?;
-        let chosen = self.ui.js(CHOOSE_NOTES_JS, Vec::new()).await?;
+        let chosen = self.ui.js(CHOOSE_ALWAYS_JS, Vec::new()).await?;
         ensure!(chosen["error"].is_null(), "{chosen}");
-        ensure!(chosen["pressed"] == "true", "Notes isn't pressed: {chosen}");
         ensure!(
-            chosen["empty"] == true,
-            "the column should be empty before its notes' frame: {chosen}"
+            chosen["pressed"] == "true" && chosen["setting"] == "always",
+            "Always isn't chosen: {chosen}"
+        );
+        ensure!(
+            chosen["drawn"] == false,
+            "the margin should be drawn in a later frame: {chosen}"
         );
         let before = chosen["tops"].clone();
         ensure!(
             before.as_array().is_some_and(|t| t.len() == 36),
             "John 3 has 36 verses: {chosen}"
         );
-        self.close_translations().await?;
+        self.close_with_escape("Aa", "aa-popover").await?;
 
-        let placed = self.column_settled(&added).await?;
-        let said_placed = self.column_checked(&placed, JOHN_NOTES.len())?;
+        let placed = self.beside_settled(&added).await?;
+        let said_placed = self.beside_measured(&placed, JOHN_NOTES.len())?;
         let after = self.ui.js(VERSE_TOPS_JS, Vec::new()).await?;
         ensure!(
             after == before,
             "the text moved when the notes came: {before} then {after}"
         );
-        let first = before[0].as_f64().unwrap_or(f64::NAN);
-        self.shot("screenshot: Compare with Notes, Chi Rho", BESIDE_SHOTS[0])
-            .await;
+        self.shot(
+            "screenshot: notes beside the text, Always, Chi Rho",
+            BESIDE_SHOTS[0],
+        )
+        .await;
 
-        // A note opened from the column, edited in the card.
-        let love = ids[4];
+        let edited = if placed["shown"] == "margin" {
+            self.beside_edit(ids[4], &before, &added).await?
+        } else {
+            "not edited from the margin (markers here)".to_owned()
+        };
+        self.shot(
+            "screenshot: Always, a note edited, Chi Rho",
+            BESIDE_SHOTS[1],
+        )
+        .await;
+        self.plain_reading().await?;
+        self.open_aa().await?;
+        self.aa_choose("theme-choices", "theme", "vellum").await?;
+        self.close_with_escape("Aa", "aa-popover").await?;
+        self.two_frames().await?;
+        self.shot("screenshot: Always, Vellum", BESIDE_SHOTS[2])
+            .await;
+        let s_key = self.beside_s_key().await?;
+        Ok(format!(
+            "Always: {said_placed}; every verse's offsetTop the same the moment Always was chosen (no margin \
+             drawn), with the notes placed{edited}; {s_key}"
+        ))
+    }
+
+    /// Opens John 3:16's note (`love`) from the margin, edits it in the
+    /// card, and checks the text stayed where it was (`before`).
+    async fn beside_edit(&mut self, love: i64, before: &Value, added: &[Value]) -> Result<String> {
         self.ui
             .click(
-                "John 3:16's note's label",
-                &format!(".notes-column .margin-note[data-note-id=\"{love}\"] .margin-note-ref"),
+                "John 3:16's note's reference",
+                &format!(".margin-notes .margin-note[data-note-id=\"{love}\"] .margin-note-ref"),
             )
             .await?;
         self.ui
@@ -279,8 +316,8 @@ impl Run<'_> {
         let edited = self
             .ui
             .wait_with(
-                "the column to show the note edited",
-                "const note = document.querySelector(`.notes-column .margin-note[data-note-id=\"${arguments[0]}\"]`);
+                "the margin to show the note edited",
+                "const note = document.querySelector(`.margin-notes .margin-note[data-note-id=\"${arguments[0]}\"]`);
                  const body = note ? note.querySelector('.margin-note-body').textContent : null;
                  return [!!body && body.endsWith(arguments[1].trim()) && note.style.top !== '', body];",
                 vec![json!(love), json!(EDITED)],
@@ -289,50 +326,96 @@ impl Run<'_> {
         self.two_frames().await?;
         let after_edit = self.ui.js(VERSE_TOPS_JS, Vec::new()).await?;
         ensure!(
-            after_edit == before,
+            &after_edit == before,
             "the text moved when a note was edited: {before} then {after_edit}"
         );
-        let replaced = self.ui.js(COLUMN_JS, vec![json!(added)]).await?;
-        self.column_checked(&replaced, JOHN_NOTES.len())?;
-        self.shot(
-            "screenshot: Compare with Notes, a note edited, Chi Rho",
-            BESIDE_SHOTS[1],
-        )
-        .await;
+        let replaced = self.ui.js(MARGIN_JS, vec![json!(added)]).await?;
+        self.beside_measured(&replaced, JOHN_NOTES.len())?;
+        Ok(format!(
+            ", and after John 3:16's note was edited in the card (the margin then saying \"{}\")",
+            edited.as_str().unwrap_or("?")
+        ))
+    }
 
-        self.open_aa().await?;
-        self.aa_choose("theme-choices", "theme", "vellum").await?;
-        self.close_with_escape("Aa", "aa-popover").await?;
-        self.two_frames().await?;
-        self.shot("screenshot: Compare with Notes, Vellum", BESIDE_SHOTS[2])
-            .await;
-
-        // Every note gone: the column's one line, the text where it was.
-        self.delete_notes(&ids).await?;
-        left.notes.clear();
-        self.go_to("John 3", "John 3").await?;
-        let empty = self
+    /// S as a real key: this passage beside, then the second pane closed;
+    /// then in reading mode, which S leaves first.
+    async fn beside_s_key(&mut self) -> Result<String> {
+        self.focus_off_controls().await?;
+        self.ui
+            .press("press S (open this passage beside)", "s")
+            .await?;
+        let opened = self
             .ui
             .wait(
-                "the column to say the chapter has no notes",
-                "const column = document.querySelector('.chapter-main .notes-column');
-                 const line = column && column.querySelector('.notes-column-empty');
-                 return [!!line && !column.querySelector('.margin-note'), line ? line.textContent : null];",
+                "two panes, John 3 in each, markers in each pane laid out",
+                &format!(
+                    "const seen = (() => {{ {PANES_JS} }})();
+                     const laidOut = seen.each.filter((p) => !p.hidden);
+                     return [seen.split && seen.panes.length === 2 && seen.active === 'second'
+                             && seen.each.every((p) => p.heading === 'John 3')
+                             && laidOut.every((p) => !p.margin && p.markers.length > 0), seen];"
+                ),
             )
             .await?;
-        let tops_empty = self.ui.js(VERSE_TOPS_JS, Vec::new()).await?;
-        // The verses before the first noted one (John 3:2): a noted verse's
-        // ✎ after its number is the reader's own mark, gone with the notes,
-        // and can rewrap its verse.
         ensure!(
-            tops_empty.get(0) == before.get(0),
-            "the first verse isn't where it was with the notes: {before} then {tops_empty}"
+            opened["shown"] == "markers",
+            "two panes should have markers: {opened}"
         );
+        self.ui
+            .press("press S (close the second pane)", "s")
+            .await?;
+        let closed = self
+            .ui
+            .wait(
+                "one pane again",
+                &format!(
+                    "const seen = (() => {{ {PANES_JS} }})();
+                     return [!seen.split && seen.panes.length === 1, seen];"
+                ),
+            )
+            .await?;
+        self.reading_mode_on().await?;
+        self.ui
+            .press("press S in reading mode (leave it, open both panes)", "s")
+            .await?;
+        let both = self
+            .ui
+            .wait(
+                "reading mode left and both panes open, side by side",
+                &format!(
+                    "const seen = (() => {{ {PANES_JS} }})();
+                     return [seen.readerMode === 'off' && seen.split && seen.panes.length === 2
+                             && seen.each.every((p) => !p.hidden || window.innerWidth < 900), seen];"
+                ),
+            )
+            .await?;
+        self.ui
+            .press("press S (close the second pane)", "s")
+            .await?;
+        self.ui
+            .wait(
+                "one pane again",
+                &format!(
+                    "const seen = (() => {{ {PANES_JS} }})();
+                     return [!seen.split && seen.panes.length === 1, seen];"
+                ),
+            )
+            .await?;
+        let markers = |seen: &Value| -> Vec<String> {
+            seen["each"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|p| format!("{}: {}", p["name"].as_str().unwrap_or("?"), p["markers"]))
+                .collect()
+        };
         Ok(format!(
-            "Notes chosen: {said_placed}; every verse's offsetTop the same (verse 1 at {first}px) the moment \
-             Notes was chosen (column empty), with the notes placed, after John 3:16's note was edited in the \
-             card (the column then saying \"{}\"); verse 1's too with no notes left ({empty})",
-            edited.as_str().unwrap_or("?"),
+            "S (a real key) opened John 3 beside it, the second active, markers in each pane ({}), and S again \
+             closed it (focus on {}); in reading mode S left it and opened both panes ({}), and S closed the \
+             second",
+            markers(&opened).join("; "),
+            closed["focus"].as_str().unwrap_or("?"),
+            both["panes"]
         ))
     }
 
@@ -355,45 +438,65 @@ impl Run<'_> {
         self.ui.settled("the page to settle").await
     }
 
-    /// Waits until the column holds `added`'s notes, each placed, and the
-    /// page has settled: the column as laid out then.
-    async fn column_settled(&self, added: &[Value]) -> Result<Value> {
+    /// Waits until the margin holds `added`'s notes, each placed (or, with
+    /// no room for it, the markers are in), and the page has settled: the
+    /// margin as laid out then.
+    async fn beside_settled(&self, added: &[Value]) -> Result<Value> {
         self.ui
             .wait_with(
-                "the notes column to be drawn and placed",
-                "const column = document.querySelector('.chapter-main .notes-column');
-                 const notes = column ? [...column.querySelectorAll('.margin-note')] : [];
+                "the margin to be drawn and placed",
+                "const aside = document.querySelector('#reading-pane .chapter-main .margin-notes');
+                 const notes = aside ? [...aside.querySelectorAll('.margin-note')] : [];
                  const shown = window.gospelGetterMargin ? window.gospelGetterMargin.shown() : null;
-                 return [shown === 'column' && notes.length === arguments[0] && notes.every((n) => n.style.top !== ''),
-                         { shown, notes: notes.length }];",
+                 const placed = shown === 'margin' && notes.length === arguments[0] && notes.every((n) => n.style.top !== '');
+                 return [placed || shown === 'markers', { shown, notes: notes.length }];",
                 vec![json!(added.len())],
             )
             .await?;
         self.two_frames().await?;
-        self.ui.js(COLUMN_JS, vec![json!(added)]).await
+        self.ui.js(MARGIN_JS, vec![json!(added)]).await
     }
 
-    /// Check 69's measures of the column.
-    fn column_checked(&self, seen: &Value, count: usize) -> Result<String> {
-        ensure!(seen["shown"] == "column", "no notes column: {seen}");
-        ensure!(
-            seen["tag"] == "SECTION" && seen["label"] == "My notes",
-            "the column isn't the \"My notes\" region: {seen}"
-        );
-        ensure!(
-            seen["heads"] == json!(["King James Version (KJV)", "My notes"]),
-            "the column heads: {seen}"
-        );
-        ensure!(seen["reference"] == "John 3 · KJV", "the reference: {seen}");
-        ensure!(seen["title"] == "Gospel Getter", "the title: {seen}");
+    /// Check 69's measures of the margin: the margin where the window is
+    /// 1440 px wide (markers only on a screen that can't hold it).
+    fn beside_measured(&self, seen: &Value, count: usize) -> Result<String> {
         let num = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
-        let (text_right, column_left) = (num(&seen["text"]["right"]), num(&seen["column"]["left"]));
+        let width = num(&seen["innerWidth"]);
         ensure!(
-            column_left >= text_right,
-            "the column is over the text: {seen}"
+            seen["readerMode"] == "off" && seen["bar"] == true,
+            "not normal reading's bar, out of reading mode: {seen}"
+        );
+        ensure!(seen["neighbours"] == 0, "the neighbours show: {seen}");
+        ensure!(seen["reference"] == "John 3 · KJV", "the reference: {seen}");
+        if width >= f64::from(BESIDE_WIDTH) - 40.0 {
+            ensure!(
+                seen["shown"] == "margin",
+                "a {width} px window should have the margin, not {}: {seen}",
+                seen["shown"]
+            );
+            ensure!(seen["sidebar"] == true, "the sidebar isn't open: {seen}");
+        }
+        let column = format!(
+            "column (left, width, right) {}",
+            seen["column"].to_string().replace(',', ", ")
+        );
+        if seen["shown"] != "margin" {
+            ensure!(
+                seen["shown"] == "markers" && seen["markers"].as_u64() == Some(count as u64),
+                "neither the margin nor a marker for each note: {seen}"
+            );
+            return Ok(format!(
+                "markers in a {width} px window (no room for the margin there), {column}"
+            ));
+        }
+        let column_right = num(&seen["column"][2]);
+        let margin_left = num(&seen["margin"][0]);
+        ensure!(
+            margin_left >= column_right,
+            "the margin is over the column: {seen}"
         );
         let notes = seen["notes"].as_array().cloned().unwrap_or_default();
-        ensure!(notes.len() == count, "{} notes in the column", notes.len());
+        ensure!(notes.len() == count, "{} notes in the margin", notes.len());
         let (mut beside, mut stacked) = (0, 0);
         let mut previous_bottom = f64::NEG_INFINITY;
         for note in &notes {
@@ -408,81 +511,51 @@ impl Run<'_> {
                 "notes overlap: {note} under {previous_bottom}"
             );
             if verse >= previous_bottom + 8.0 - 0.5 {
-                ensure!(
-                    (top - verse).abs() <= 2.0,
-                    "a note isn't beside its first verse: {note}"
-                );
                 beside += 1;
             } else {
-                ensure!(
-                    (top - (previous_bottom + 8.0)).abs() <= 2.0,
-                    "a note that would overlap isn't just below the one above: {note}"
-                );
                 stacked += 1;
             }
             previous_bottom = bottom;
         }
         let labels: Vec<&str> = notes.iter().filter_map(|n| n["label"].as_str()).collect();
-        ensure!(
-            labels == ["2", "3–5", "4", "7–8", "16"],
-            "the labels: {labels:?}"
-        );
-        let rules = seen["rules"].as_array().cloned().unwrap_or_default();
-        ensure!(rules.len() == 2, "a rule for each range: {seen}");
-        for rule in &rules {
-            ensure!(
-                (num(&rule["top"]) - num(&rule["from"])).abs() <= 2.0
-                    && (num(&rule["bottom"]) - num(&rule["to"])).abs() <= 2.0,
-                "a range's rule isn't beside its verses: {rule}"
-            );
-        }
         let folded = notes.iter().filter(|n| n["folded"] == true).count();
         Ok(format!(
-            "the \"My notes\" region beside the text (from x={column_left:.0}, the text ending at \
-             {text_right:.0}), labels {labels:?}, {beside} beside their first verse and {stacked} just below \
-             the note above, none above its verse or overlapping, both ranges' rules beside their verses, \
-             {folded} folded past 10 lines, \"{}\"",
-            seen["reference"].as_str().unwrap_or("?"),
+            "the margin in a {width} px window, the sidebar open: {column}, margin (left, width, right) {}; \
+             labels {labels:?}, {beside} beside their first verse and {stacked} just below the note above, \
+             none above its verse or overlapping, {folded} folded past 10 lines",
+            seen["margin"].to_string().replace(',', ", "),
         ))
     }
 
-    /// Puts things back as check 69 found them: none of its notes, the look,
-    /// Compare (with the WEB), reading mode and the default window.
+    /// Puts things back as check 69 found them: none of its notes, one
+    /// pane, the look, notes beside the text, Compare, reading mode and the
+    /// window.
     async fn beside_clean_up(&mut self, left: &Left) -> Result<()> {
+        let ui = &self.ui;
+        ui.js(
+            "if (document.documentElement.dataset.readerMode === 'on') document.getElementById('reader-exit').click();
+             if (window.gospelGetterPanes.shown().length > 1) window.gospelGetterPanes.close();
+             return null;",
+            Vec::new(),
+        )
+        .await?;
+        ui.wait(
+            "one pane, out of reading mode",
+            "const html = document.documentElement;
+             return [html.dataset.readerMode !== 'on' && !html.dataset.split, null];",
+        )
+        .await?;
         if !left.notes.is_empty() {
             self.delete_notes(&left.notes).await?;
         }
-        let _ = self.window_width(BESIDE_WINDOW).await;
+        if let Some((x, y, width, height)) = left.window {
+            let _ = self.ui.driver().set_window_rect(x, y, width, height).await;
+            let _ = self.window_width(width).await;
+        }
         let Some(found) = &left.found else {
             return Ok(());
         };
-        let open = self
-            .ui
-            .js(
-                "return !document.getElementById('translation-popover').hidden;",
-                Vec::new(),
-            )
-            .await?;
-        if open != true {
-            self.open_translations().await?;
-        }
-        self.ui
-            .click(
-                "Compare with: the WEB",
-                "#compare-with-choices [data-value=\"web\"]",
-            )
-            .await?;
-        let compare = self
-            .ui
-            .js(
-                "return document.documentElement.dataset.compare || 'off';",
-                Vec::new(),
-            )
-            .await?;
-        if compare != found["compare"] {
-            self.ui.click("Compare as it was", "#compare-btn").await?;
-        }
-        self.close_translations().await?;
+        self.plain_reading().await?;
         let settings = &found["settings"];
         self.open_aa().await?;
         for (group, name) in [
@@ -495,8 +568,20 @@ impl Run<'_> {
                 self.aa_choose(group, name, value).await?;
             }
         }
+        let notes = found["page"]["marginNotes"].as_str().unwrap_or("reading");
+        self.ui
+            .click(
+                &format!("Aa: notes beside the text {notes}"),
+                &format!("#notes-beside-choices [data-value=\"{notes}\"]"),
+            )
+            .await?;
         self.close_with_escape("Aa", "aa-popover").await?;
-        if found["readerMode"] == "on" {
+        if found["page"]["compare"] == "on" {
+            self.open_translations().await?;
+            self.ui.click("Compare on", "#compare-btn").await?;
+            self.close_translations().await?;
+        }
+        if found["page"]["readerMode"] == "on" {
             self.reading_mode_on().await?;
         }
         Ok(())

@@ -1563,7 +1563,7 @@ fn refresh_chapter_notes(pane: PaneId) -> Task {
             s.chapter_notes_read = read;
         });
         apply_note_markers(pane);
-        show_margin();
+        show_margin(pane);
     })
 }
 
@@ -1571,13 +1571,12 @@ fn refresh_chapter_notes(pane: PaneId) -> Task {
 /// the chapter's notes asked for.
 const PAST_EVERY_LAST_VERSE: i64 = 999;
 
-/// The chapter's notes, to the margin (`margin`), which shows them in
-/// reading mode and in Compare's notes column, and whether they're known:
-/// read for this chapter (not still on their way, or unreadable), so the
-/// column only says a chapter has none when it hasn't.
-fn show_margin() {
+/// `pane`'s chapter's notes, to the margin (`margin`), and whether they're
+/// known: read for this chapter (not still on their way, or unreadable), so
+/// the margin only says a chapter has none when it hasn't.
+fn show_margin(pane: PaneId) {
     let found = with(|s| {
-        let here = s.here();
+        let here = &s.panes[pane];
         let c = here.chapter.as_ref()?;
         let known =
             here.chapter_notes_read && here.chapter_notes_of == Some((c.book_id, c.chapter));
@@ -1596,7 +1595,7 @@ fn show_margin() {
         ))
     });
     if let Some((book_id, chapter, code, notes, known)) = found {
-        margin::notes(book_id, chapter, &code, notes, known);
+        margin::notes(pane, book_id, chapter, &code, notes, known);
     }
 }
 
@@ -2352,7 +2351,7 @@ pub fn shown(
     apply_bookmark_markers();
     apply_highlight_markers();
     apply_note_markers(pane);
-    show_margin();
+    show_margin(pane);
     if let Some((book_id, chapter)) = with(|s| {
         s.panes[pane]
             .chapter
@@ -2410,9 +2409,10 @@ pub fn reselect(held: Option<Selection>) {
     place_card();
 }
 
-/// Another pane is the active one: the margin shows its notes.
+/// Another pane is the active one: the margin, which follows it in
+/// reading mode, is placed again.
 pub fn pane_switched() {
-    show_margin();
+    margin::relayout();
 }
 
 /// `pane` closed: what the card knew of its chapter goes, and its notes

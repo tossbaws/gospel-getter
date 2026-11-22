@@ -14,8 +14,9 @@
 //!   default text size, in a 1280x900 window (the app's default): the
 //!   margin, not markers (screenshot), unless the screen can't hold a
 //!   window that wide.
-//! - 61: Aa's "Notes in the margin" off and on again leaves the text
-//!   column where it was, to the pixel, and the margin goes and comes.
+//! - 61: Aa's "Notes beside the text" Off and In reading mode again
+//!   leaves the text column where it was, to the pixel, and the margin goes
+//!   and comes.
 //! - 62: in a window too narrow for the margin, a marker after each noted
 //!   verse, and a marker opens the card with its note (screenshot).
 //! - 63: Psalm 119 with 176 notes is placed in under 16 ms (the margin's
@@ -65,7 +66,7 @@ const JOHN_NOTES: [(u32, u32, &str); 4] = [
     (
         20,
         20,
-        "A long note.\nLine two.\nLine three.\nLine four.\nLine five.\nLine six.\nLine seven.\nLine eight.\nLine nine.",
+        "A long note.\nLine two.\nLine three.\nLine four.\nLine five.\nLine six.\nLine seven.\nLine eight.\nLine nine.\nLine ten.\nLine eleven.\nLine twelve.\nLine thirteen.",
     ),
     (5, 5, "Water and the Spirit."),
 ];
@@ -556,7 +557,8 @@ impl Run<'_> {
         Ok(said)
     }
 
-    /// Check 61: the switch off and on leaves the column where it was.
+    /// Check 61: the setting Off and on again leaves the column where it
+    /// was.
     pub(super) async fn margin_switch(&mut self) -> Result<String> {
         let (room, seen) = self.margin_settled(JOHN_NOTES.len()).await?;
         if room == Room::Markers {
@@ -567,10 +569,13 @@ impl Run<'_> {
         }
         let before = self.ui.js(COLUMN_JS, Vec::new()).await?;
         let mut seen_off = Value::Null;
-        for (pressed, shown) in [("false", "nothing"), ("true", "margin")] {
+        for (value, shown) in [("off", "nothing"), ("reading", "margin")] {
             self.open_aa().await?;
             self.ui
-                .click("Aa: Notes in the margin", "#margin-notes-btn")
+                .click(
+                    &format!("Aa: notes beside the text {value}"),
+                    &format!("#notes-beside-choices [data-value=\"{value}\"]"),
+                )
                 .await?;
             let seen = self
                 .ui
@@ -578,13 +583,13 @@ impl Run<'_> {
                     &format!("the margin to show {shown}"),
                     &format!(
                         "const seen = (() => {{ {COLUMN_JS} }})();
-                         const pressed = document.getElementById('margin-notes-btn').getAttribute('aria-pressed');
-                         seen.pressed = pressed;
+                         const pressed = document.querySelector('#notes-beside-choices [aria-pressed=\"true\"]');
+                         seen.pressed = pressed ? pressed.dataset.value : null;
                          seen.aside = !!document.querySelector('.chapter-main .margin-notes');
-                         return [pressed === arguments[0] && seen.shown === arguments[1]
+                         return [seen.pressed === arguments[0] && seen.shown === arguments[1]
                              && seen.aside === (arguments[1] === 'margin'), seen];"
                     ),
-                    vec![json!(pressed), json!(shown)],
+                    vec![json!(value), json!(shown)],
                 )
                 .await?;
             self.close_with_escape("Aa", "aa-popover").await?;
@@ -599,8 +604,8 @@ impl Run<'_> {
             }
         }
         Ok(format!(
-            "Notes in the margin off (aria-pressed {}, no margin) and on again: the column at {} and its first \
-             verses at {} both times, to the pixel",
+            "Notes beside the text Off (pressed {}, no margin) and In reading mode again: the column at {} \
+             and its first verses at {} both times, to the pixel",
             seen_off["pressed"], before["column"], before["verses"]
         ))
     }

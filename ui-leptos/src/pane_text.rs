@@ -1,13 +1,13 @@
 //! The reading panes' words and rules, free of the DOM (`pane` puts them on
 //! the page): how two open panes are laid out ([`shape`]: side by side,
-//! tabs, or reading mode's one column), what each pane's
-//! bar and the tabs are called, which tab an arrow key goes to, what
-//! Compare says while two panes are open, and how far the keys that scroll
-//! a page scroll a pane's own column, which the keyboard dispatcher does
-//! itself while the panes are split (no webview can be trusted to pick the
-//! right one of two scrolling columns when focus is on the page itself);
-//! and the second pane's place as this computer keeps it for the next
-//! launch ([`SECOND_PANE_KEY`]).
+//! tabs, or reading mode's one column), what each pane's bar and the tabs
+//! are called, which tab an arrow key goes to, what S does
+//! ([`split_key`]), what Compare says while two panes are open, and how far
+//! the keys that scroll a page scroll a pane's own column, which the
+//! keyboard dispatcher does itself while the panes are split (no webview
+//! can be trusted to pick the right one of two scrolling columns when focus
+//! is on the page itself); and the second pane's place as this computer
+//! keeps it for the next launch ([`SECOND_PANE_KEY`]).
 
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +49,31 @@ impl Shape {
     /// translation button give way to them).
     pub fn bars(self) -> bool {
         self == Self::SideBySide
+    }
+}
+
+/// What S does (B9-B11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitKey {
+    /// "Open this passage beside" (`reader::open_here_beside`, which leaves
+    /// reading mode first, B12).
+    OpenBeside,
+    /// The second pane closed, as X closes it.
+    CloseSecond,
+    /// Nothing: the key goes on, as the palette's command is disabled.
+    Nothing,
+}
+
+/// What S does: with two panes open (`split`), closes the second; with one,
+/// opens the active pane's chapter beside it, if a chapter is shown
+/// (`chapter_shown`), in reading mode or not.
+pub fn split_key(split: bool, chapter_shown: bool) -> SplitKey {
+    if split {
+        SplitKey::CloseSecond
+    } else if chapter_shown {
+        SplitKey::OpenBeside
+    } else {
+        SplitKey::Nothing
     }
 }
 
@@ -285,6 +310,17 @@ mod tests {
         );
         assert_eq!(scroll_move(ScrollKey::Top, 800.0), ScrollMove::Top);
         assert_eq!(scroll_move(ScrollKey::Bottom, 800.0), ScrollMove::Bottom);
+    }
+
+    /// B9-B11: S opens the passage beside with one pane, in reading mode
+    /// or not (B12 is `reader::open_here_beside`'s), and closes the second
+    /// with two, whatever's shown; with no chapter shown, it does nothing.
+    #[test]
+    fn s_opens_this_passage_beside_or_closes_the_second_pane() {
+        assert_eq!(split_key(false, true), SplitKey::OpenBeside);
+        assert_eq!(split_key(true, true), SplitKey::CloseSecond);
+        assert_eq!(split_key(true, false), SplitKey::CloseSecond);
+        assert_eq!(split_key(false, false), SplitKey::Nothing);
     }
 
     #[test]

@@ -1,39 +1,32 @@
-//! Margin notes in reading mode: the reader's notes on the chapter on
-//! screen, in the open space to the right of the text, each beside its
-//! first verse, as in a printed Bible's margin (where each goes is
-//! `margin_text`'s). On by default; Aa's "Notes in the margin" turns them
-//! off, a setting of this computer's that no backup carries. Read-only: a
-//! note's reference, its "more" or a click on it selects its verses and
-//! opens the selection card with them, the note among their notes, where
-//! it's edited as ever.
+//! Margin notes: the reader's notes on the chapter on screen, in the open
+//! space to the right of the text, each beside its first verse, as in a
+//! printed Bible's margin (where each goes is `margin_text`'s). Aa's "Notes
+//! beside the text" (and M) says when: in reading mode (the default), or
+//! always, outside reading mode too, or never; a setting of this
+//! computer's that no backup carries. Read-only: a note's reference, its
+//! "more" or a click on it selects its verses and opens the selection card
+//! with them, the note among their notes, where it's edited as ever.
 //!
 //! The margin is absolutely placed beside the reading column (in
-//! `.chapter-main`, after the chapter in reading order), so turning it on
-//! or off never moves the text. It's there only in reading mode, not while
-//! comparing, on screen (print leaves it out), and where there's room for
-//! it (`margin_text::width`). With less room, each note gets a small marker
-//! after its verse instead, which opens the card the same way.
+//! `.chapter-main`, after the chapter in reading order), so drawing it never
+//! moves the text. Outside reading mode, "Always" gives the page reading
+//! mode's shape whether the chapter has notes or not (the stylesheet's
+//! `data-margin-notes="always"` rules), so the text never jumps between
+//! chapters, and a chapter without notes says so at the margin's top. There's
+//! no margin while comparing translations, nor on paper (print leaves it
+//! out), nor where there's no room for it (`margin_text::width`): then each
+//! note gets a small marker after its verse instead, which opens the card
+//! the same way. Two panes side by side have no room beside either, so each
+//! has markers; reading mode shows the active one alone, with its margin.
 //!
-//! The selection card (`card`) hands over the chapter's notes whenever it
-//! has them ([`notes`]: a chapter shown, a note added, edited, deleted or
-//! restored). The notes are placed again, at most once a frame, whenever
-//! the page may have changed shape: the window resized, the reading pane
-//! resized (text size, line spacing, width, layout, fonts), or a setting on
-//! `<html>` changed (reading mode, Compare, the theme, this one). It never
-//! scrolls the page; markers, which reflow the text, go in and out through
-//! the reading place logic (`surfaces::keep_reading_place`).
-//!
-//! The same notes, placed by the same rules, fill Compare's "My notes"
-//! column (Compare with Notes, outside reading mode): the reader draws the
-//! chapter's text as normal reading sets it with an empty column beside
-//! it, where Compare's second translation would be, and this draws the
-//! notes into the column (or says the chapter has none), each beside its
-//! first verse, labelled with its verses, stacked where they'd overlap,
-//! folded past `margin_text::COLUMN_FOLD_LINES` lines. They're absolutely
-//! placed in the column, so they never move the text. In a window too
-//! narrow for columns (where Compare stacks them), each goes under its
-//! first verse instead, in the text, through the reading place logic.
-//! Read-only too: a note opens the card as a margin note does.
+//! The selection card (`card`) hands over each pane's chapter's notes
+//! whenever it has them ([`notes`]: a chapter shown, a note added, edited,
+//! deleted or restored). The notes are placed again, at most once a frame,
+//! whenever the page may have changed shape: the window resized, a reading
+//! pane resized (text size, line spacing, width, layout, fonts), or a
+//! setting on `<html>` changed (reading mode, Compare, the theme, this one).
+//! It never scrolls the page; markers, which reflow the text, go in and out
+//! through the reading place logic (`surfaces::keep_reading_place`).
 //!
 //! The chapter's AI-flagged findings (`findings`, handed over with
 //! [`findings`]) go everywhere the notes do, by the same rules: one entry
@@ -41,8 +34,9 @@
 //! violet badge and the verse until clicked (C7, `findings_text`); a marker
 //! after the pencil in a narrow window. They're drawn collapsed every time.
 //!
-//! `window.gospelGetterMargin` says what's shown and how long the last
-//! placing took, for the tests ([`export_margin`]).
+//! `window.gospelGetterMargin` says what's shown beside the active pane's
+//! chapter and how long the last placing took, for the tests
+//! ([`export_margin`]).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -58,37 +52,11 @@ use crate::card;
 use crate::dom;
 use crate::dto::SelectionNote;
 use crate::findings_text::{self, FindingGroup};
-use crate::margin_text::{self as text, Anchor, Entry};
-use crate::pane;
+use crate::margin_text::{self as text, Anchor, Entry, Reading, Shown};
+use crate::pane::{self, PaneId, PerPane};
 use crate::preferences;
 use crate::prefs;
 use crate::surfaces;
-
-/// What the margin shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum Shown {
-    #[default]
-    Nothing,
-    Margin,
-    Markers,
-    /// Compare's notes column, beside the text.
-    Column,
-    /// Each note under its first verse: Compare with Notes in a window too
-    /// narrow for columns.
-    Under,
-}
-
-impl Shown {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Nothing => "nothing",
-            Self::Margin => "margin",
-            Self::Markers => "markers",
-            Self::Column => "column",
-            Self::Under => "under",
-        }
-    }
-}
 
 /// A note of the chapter, as the card has it (and as the backend sent it,
 /// for the note editor), and where it sits.
@@ -98,8 +66,9 @@ struct Placed {
     anchor: Anchor,
 }
 
+/// What the margin knows of one pane's chapter, and has drawn there.
 #[derive(Default)]
-struct State {
+struct InPane {
     /// The chapter on screen (book, chapter), the translation being read,
     /// and its notes, as the card handed them over.
     chapter: Option<(i64, i64, String)>,
@@ -117,6 +86,10 @@ struct State {
     drawn: Option<(u64, Shown)>,
     placed: Vec<Placed>,
     placed_findings: Vec<(FindingGroup, Anchor)>,
+}
+
+struct State {
+    panes: PerPane<InPane>,
     /// A frame is asked for, to place the notes.
     frame_pending: bool,
     /// How long the last placing took, in milliseconds.
@@ -124,7 +97,11 @@ struct State {
 }
 
 thread_local! {
-    static STATE: RefCell<State> = RefCell::new(State::default());
+    static STATE: RefCell<State> = RefCell::new(State {
+        panes: PerPane::new(|_| InPane::default()),
+        frame_pending: false,
+        last_ms: 0.0,
+    });
 }
 
 /// The state, never held while the page is touched.
@@ -132,18 +109,24 @@ fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     STATE.with_borrow_mut(f)
 }
 
-/// The chapter's notes (`book_id` `chapter`, read in `code`), each with
-/// the backend's own object for it, from the card, and whether they're
-/// `known` (read for this chapter, not on their way or unreadable): drawn
-/// in the next frame.
+/// `pane`'s part of the state.
+fn with_pane<R>(pane: PaneId, f: impl FnOnce(&mut InPane) -> R) -> R {
+    with(|s| f(&mut s.panes[pane]))
+}
+
+/// `pane`'s chapter's notes (`book_id` `chapter`, read in `code`), each
+/// with the backend's own object for it, from the card, and whether
+/// they're `known` (read for this chapter, not on their way or
+/// unreadable): drawn in the next frame.
 pub fn notes(
+    pane: PaneId,
     book_id: i64,
     chapter: i64,
     code: &str,
     notes: Vec<(SelectionNote, JsValue)>,
     known: bool,
 ) {
-    with(|s| {
+    with_pane(pane, |s| {
         s.chapter = Some((book_id, chapter, code.to_string()));
         s.notes = notes;
         s.known = known;
@@ -152,10 +135,10 @@ pub fn notes(
     schedule();
 }
 
-/// The chapter's AI findings (`book_id` `chapter`), a group per verse, from
-/// `findings`: drawn in the next frame.
-pub fn findings(book_id: i64, chapter: i64, groups: Vec<FindingGroup>) {
-    with(|s| {
+/// `pane`'s chapter's AI findings (`book_id` `chapter`), a group per verse,
+/// from `findings`: drawn in the next frame.
+pub fn findings(pane: PaneId, book_id: i64, chapter: i64, groups: Vec<FindingGroup>) {
+    with_pane(pane, |s| {
         s.findings = groups;
         s.findings_of = Some((book_id, chapter));
         s.generation += 1;
@@ -163,8 +146,20 @@ pub fn findings(book_id: i64, chapter: i64, groups: Vec<FindingGroup>) {
     schedule();
 }
 
+/// `pane` closed: what the margin knew of its chapter goes.
+pub fn forget(pane: PaneId) {
+    with_pane(pane, |s| {
+        let generation = s.generation + 1;
+        *s = InPane {
+            generation,
+            ..InPane::default()
+        };
+    });
+    schedule();
+}
+
 /// The chapter's findings, if they're for the chapter the notes are.
-fn findings_here(s: &State) -> Vec<FindingGroup> {
+fn findings_here(s: &InPane) -> Vec<FindingGroup> {
     match (&s.chapter, s.findings_of) {
         (Some((book_id, chapter, _)), Some(of)) if of == (*book_id, *chapter) => s.findings.clone(),
         _ => Vec::new(),
@@ -172,7 +167,8 @@ fn findings_here(s: &State) -> Vec<FindingGroup> {
 }
 
 /// Places the notes again in the next frame: an entry grew or shrank (a
-/// verse's findings opened or closed).
+/// verse's findings opened or closed), or another pane became the active
+/// one.
 pub fn relayout() {
     schedule();
 }
@@ -204,11 +200,10 @@ fn now() -> f64 {
         .map_or(0.0, |p| p.now())
 }
 
-/// The reading column of the chapter the notes are for, if it's the one on
-/// screen in the active pane (the margin follows it).
-fn column() -> Option<HtmlElement> {
-    let (book_id, chapter, _) = with(|s| s.chapter.clone())?;
-    let inner = pane::active().inner()?;
+/// `pane`'s reading column, if its chapter is the one its notes are for.
+fn column(pane: PaneId) -> Option<HtmlElement> {
+    let (book_id, chapter, _) = with_pane(pane, |s| s.chapter.clone())?;
+    let inner = pane.inner()?;
     let number = |name: &str| inner.get_attribute(name)?.parse::<i64>().ok();
     if number("data-current-book") != Some(book_id)
         || number("data-current-chapter") != Some(chapter)
@@ -287,100 +282,76 @@ fn room(column: &HtmlElement) -> f64 {
     f64::from(window_width) - column.get_bounding_client_rect().right()
 }
 
-/// Whether the window is too narrow for Compare's columns (they stack).
-fn stacked() -> bool {
-    web_sys::window()
-        .and_then(|w| w.match_media(text::STACKED_QUERY).ok().flatten())
-        .is_some_and(|query| query.matches())
+/// What the margin should show now beside `pane`'s `column`
+/// (`margin_text::shown`): nothing in a pane out of view.
+fn wanted(pane: PaneId, column: &HtmlElement) -> Shown {
+    if !pane::in_view().any(|shown| shown == pane) {
+        return Shown::Nothing;
+    }
+    let reading = Reading {
+        setting: aa::notes_beside(),
+        reading_mode: prefs::on(&preferences::READER_MODE),
+        comparing: aa::beside() == Beside::Translations,
+        split: pane::split(),
+    };
+    let (entries, known) = with_pane(pane, |s| {
+        (
+            !(s.notes.is_empty() && findings_here(s).is_empty()),
+            s.known,
+        )
+    });
+    let room = text::width(room(column), rem()).is_some();
+    text::shown(reading, entries, known, room)
 }
 
-/// What the margin should show now, for `column`: Compare's notes, while
-/// it compares with them; none while it compares translations; otherwise
-/// the margin, in reading mode (Compare's Notes chosen or not).
-fn wanted(column: &HtmlElement) -> Shown {
-    match aa::beside() {
-        Beside::Notes if stacked() => return Shown::Under,
-        Beside::Notes => return Shown::Column,
-        Beside::Translations => return Shown::Nothing,
-        Beside::Nothing => {}
-    }
-    let attr = |name: &str| root().and_then(|html| html.get_attribute(name));
-    let shown = attr("data-reader-mode").as_deref() == Some("on")
-        && prefs::on(&preferences::MARGIN_NOTES)
-        && !with(|s| s.notes.is_empty() && findings_here(s).is_empty());
-    if !shown {
-        Shown::Nothing
-    } else if text::width(room(column), rem()).is_some() {
-        Shown::Margin
-    } else {
-        Shown::Markers
-    }
-}
-
-/// Draws what's wanted (again, if the notes or what's wanted changed, or
-/// the pane was drawn again), then places the margin's notes beside their
-/// verses.
+/// Draws what's wanted beside each pane's chapter (again, if the notes or
+/// what's wanted changed, or the pane was drawn again), then places the
+/// margin's notes beside their verses.
 fn place() {
     let started = now();
-    let column = column();
-    let shown = column.as_ref().map_or(Shown::Nothing, wanted);
-    let generation = with(|s| s.generation);
-    let on_page = column.as_ref().is_some_and(|column| match shown {
-        Shown::Margin => column
-            .query_selector(".margin-notes")
-            .ok()
-            .flatten()
-            .is_some(),
-        Shown::Markers => column
-            .query_selector(".margin-marker")
-            .ok()
-            .flatten()
-            .is_some(),
-        Shown::Column | Shown::Under => column
-            .query_selector(&format!(r#".notes-column[data-drawn="{}"]"#, shown.name()))
-            .ok()
-            .flatten()
-            .is_some(),
-        Shown::Nothing => true,
-    });
-    if with(|s| s.drawn) != Some((generation, shown)) || !on_page {
-        clear();
-        if let Some(column) = &column {
-            draw(column, shown);
-        }
-        with(|s| s.drawn = Some((generation, shown)));
-    }
-    match (shown, &column) {
-        (Shown::Margin, Some(column)) => place_margin(column),
-        (Shown::Column, Some(column)) => place_column(column),
-        (Shown::Under, Some(column)) => place_under(column),
-        _ => {}
+    for pane in [PaneId::First, PaneId::Second] {
+        place_in(pane);
     }
     let took = now() - started;
     with(|s| s.last_ms = took);
 }
 
-/// Takes the margin and the markers off the page.
-fn clear() {
-    let Some(document) = bridge::document() else {
-        return;
-    };
-    let found = |selector: &str| {
-        document
-            .query_selector_all(selector)
-            .map(|found| dom::elements(&found))
-            .unwrap_or_default()
-    };
-    for aside in found(".margin-notes") {
+/// [`place`], in `pane`.
+fn place_in(pane: PaneId) {
+    let column = pane::shown()
+        .any(|shown| shown == pane)
+        .then(|| column(pane))
+        .flatten();
+    let shown = column
+        .as_ref()
+        .map_or(Shown::Nothing, |column| wanted(pane, column));
+    let generation = with_pane(pane, |s| s.generation);
+    let on_page = column.as_ref().is_some_and(|column| {
+        let found = |selector: &str| column.query_selector(selector).ok().flatten().is_some();
+        match shown {
+            Shown::Margin | Shown::Empty => found(".margin-notes"),
+            Shown::Markers => found(".margin-marker"),
+            Shown::Nothing => true,
+        }
+    });
+    if with_pane(pane, |s| s.drawn) != Some((generation, shown)) || !on_page {
+        clear(pane);
+        if let Some(column) = &column {
+            draw(pane, column, shown);
+        }
+        with_pane(pane, |s| s.drawn = Some((generation, shown)));
+    }
+    if let (Shown::Margin, Some(column)) = (shown, &column) {
+        place_margin(pane, column);
+    }
+}
+
+/// Takes the margin and the markers off `pane`'s chapter.
+fn clear(pane: PaneId) {
+    for aside in pane.query_all(".margin-notes") {
         aside.remove();
     }
-    // Compare's column stays, the reader's: emptied.
-    for column in found(".notes-column[data-drawn]") {
-        column.set_inner_html("");
-        let _ = column.remove_attribute("data-drawn");
-        let _ = column.style().remove_property("min-height");
-    }
-    let markers = found(".margin-marker, .note-under, .finding-inline");
+    let markers = pane.query_all(".margin-marker, .finding-inline");
     if !markers.is_empty() {
         surfaces::keep_reading_place(
             || {
@@ -391,17 +362,17 @@ fn clear() {
             None,
         );
     }
-    with(|s| {
+    with_pane(pane, |s| {
         s.placed.clear();
         s.placed_findings.clear();
     });
 }
 
-/// The chapter's notes in the order they go down the margin (by the verse
-/// each sits beside, then as the backend ordered them), each with where
-/// it sits among `numbered` (`margin_text::in_order`).
-fn anchored(numbered: &[i64]) -> Vec<Placed> {
-    let notes = with(|s| s.notes.clone());
+/// `pane`'s chapter's notes in the order they go down the margin (by the
+/// verse each sits beside, then as the backend ordered them), each with
+/// where it sits among `numbered` (`margin_text::in_order`).
+fn anchored(pane: PaneId, numbered: &[i64]) -> Vec<Placed> {
+    let notes = with_pane(pane, |s| s.notes.clone());
     text::in_order(
         notes.into_iter().map(|(note, raw)| {
             let (start, end) = (note.verse_start, note.verse_end);
@@ -414,10 +385,10 @@ fn anchored(numbered: &[i64]) -> Vec<Placed> {
     .collect()
 }
 
-/// The chapter's findings in the order they go down the page, each with
-/// where it sits among `numbered`, as a note on its verses would.
-fn anchored_findings(numbered: &[i64]) -> Vec<(FindingGroup, Anchor)> {
-    let groups = with(|s| findings_here(s));
+/// `pane`'s chapter's findings in the order they go down the page, each
+/// with where it sits among `numbered`, as a note on its verses would.
+fn anchored_findings(pane: PaneId, numbered: &[i64]) -> Vec<(FindingGroup, Anchor)> {
+    let groups = with_pane(pane, |s| findings_here(s));
     text::in_order(
         groups.into_iter().map(|g| {
             let (start, end) = (g.verse_start, g.verse_end);
@@ -437,33 +408,26 @@ fn all_entries<'a>(
     text::entries(&notes, &findings)
 }
 
-fn draw(column: &HtmlElement, shown: Shown) {
-    let Some(code) = with(|s| s.chapter.as_ref().map(|c| c.2.clone())) else {
+fn draw(pane: PaneId, column: &HtmlElement, shown: Shown) {
+    let Some(code) = with_pane(pane, |s| s.chapter.as_ref().map(|c| c.2.clone())) else {
         return;
     };
     let verses = verses(column, &code);
     let numbered: Vec<i64> = verses.iter().filter_map(|v| number(v)).collect();
     let verses = by_number(verses);
-    let placed = anchored(&numbered);
-    let placed_findings = anchored_findings(&numbered);
-    let entries = all_entries(&placed, &placed_findings);
-    let known = with(|s| s.known);
+    let placed = anchored(pane, &numbered);
+    let placed_findings = anchored_findings(pane, &numbered);
     match shown {
         Shown::Nothing => {}
-        Shown::Column => {
-            if let Some(empty) = column.query_selector(".notes-column").ok().flatten() {
-                empty.set_outer_html(&text::column_entries_html(&entries, known));
-            }
-            if let Some(drawn) = column.query_selector(".notes-column").ok().flatten() {
-                let _ = drawn.set_attribute("data-drawn", shown.name());
-                listen(&drawn);
-            }
-        }
-        Shown::Under => draw_under(column, &verses, &entries, known),
-        Shown::Margin => {
-            let _ = column.insert_adjacent_html("beforeend", &text::margin_entries_html(&entries));
+        Shown::Margin | Shown::Empty => {
+            let html = if shown == Shown::Empty {
+                text::empty_html()
+            } else {
+                text::margin_entries_html(&all_entries(&placed, &placed_findings))
+            };
+            let _ = column.insert_adjacent_html("beforeend", &html);
             if let Some(aside) = column.query_selector(".margin-notes").ok().flatten() {
-                listen(&aside);
+                listen(pane, &aside);
             }
         }
         Shown::Markers => {
@@ -480,7 +444,7 @@ fn draw(column: &HtmlElement, shown: Shown) {
                         if let Some(verse) = verses.get(&anchor.verse) {
                             let _ = verse.insert_adjacent_html(
                                 "beforeend",
-                                &findings_text::marker_html(group),
+                                &findings_text::marker_html(group, pane.name()),
                             );
                         }
                     }
@@ -492,75 +456,27 @@ fn draw(column: &HtmlElement, shown: Shown) {
                 .map(|found| dom::elements(&found))
                 .unwrap_or_default()
             {
-                listen(&marker);
+                listen(pane, &marker);
             }
         }
     }
-    with(|s| {
+    with_pane(pane, |s| {
         s.placed = placed;
         s.placed_findings = placed_findings;
     });
-}
-
-/// Each note under the verse it sits beside, in the text (the reading
-/// place kept, as the markers keep it), or, with none, the line saying how
-/// to add one above the text; Compare's column, hidden at this width, says
-/// what's drawn.
-fn draw_under(
-    column: &HtmlElement,
-    verses: &HashMap<i64, HtmlElement>,
-    placed: &[(Entry, Anchor)],
-    known: bool,
-) {
-    let mut under: Vec<(i64, Vec<(Entry, Anchor)>)> = Vec::new();
-    for &(entry, anchor) in placed {
-        match under.last_mut() {
-            Some((verse, entries)) if *verse == anchor.verse => entries.push((entry, anchor)),
-            _ => under.push((anchor.verse, vec![(entry, anchor)])),
-        }
-    }
-    let text_column = column.query_selector(".chapter-text").ok().flatten();
-    surfaces::keep_reading_place(
-        || {
-            if placed.is_empty() {
-                if let (true, Some(text_column)) = (known, &text_column) {
-                    let _ =
-                        text_column.insert_adjacent_html("afterbegin", &text::under_empty_html());
-                }
-                return;
-            }
-            for (verse, entries) in &under {
-                if let Some(verse) = verses.get(verse) {
-                    let _ =
-                        verse.insert_adjacent_html("afterend", &text::under_entries_html(entries));
-                }
-            }
-        },
-        None,
-    );
-    for note in column
-        .query_selector_all(".note-under")
-        .map(|found| dom::elements(&found))
-        .unwrap_or_default()
-    {
-        listen(&note);
-    }
-    if let Some(drawn) = column.query_selector(".notes-column").ok().flatten() {
-        let _ = drawn.set_attribute("data-drawn", Shown::Under.name());
-    }
 }
 
 /// A click on a note, its reference or "more" (or a marker; Enter and
 /// Space click them) opens it; the click goes no further, so it neither
 /// selects the verse a marker is in nor clears the selection. A verse's
 /// findings, their toggle and their actions are `findings`'.
-fn listen(target: &Element) {
+fn listen(pane: PaneId, target: &Element) {
     dom::on(target, "keydown", |event| {
         if let Some(event) = event.dyn_ref::<web_sys::KeyboardEvent>() {
             crate::findings::on_key(event);
         }
     });
-    dom::on(target, "click", |event| {
+    dom::on(target, "click", move |event| {
         if crate::findings::on_click(&event) {
             return;
         }
@@ -575,17 +491,19 @@ fn listen(target: &Element) {
             if let Some(event) = event.dyn_ref::<MouseEvent>() {
                 event.prevent_default();
             }
-            open(note_id);
+            open(pane, note_id);
         }
     });
 }
 
-/// Opens note `note_id`: its verses selected and the card with them, the
-/// note among their notes (`margin_text::selection`). A note no selection
-/// of this translation's verses can reach (past the chapter's end here)
-/// opens in the note editor, as the Library's Edit opens it.
-fn open(note_id: i64) {
-    let found = with(|s| {
+/// Opens note `note_id`, in `pane`: its verses selected and the card with
+/// them, the note among their notes (`margin_text::selection`). A note no
+/// selection of this translation's verses can reach (past the chapter's
+/// end here) opens in the note editor, as the Library's Edit opens it. The
+/// pointer pressed in the pane made it the active one (`pane`), whose
+/// verses the card selects.
+fn open(pane: PaneId, note_id: i64) {
+    let found = with_pane(pane, |s| {
         let code = s.chapter.as_ref()?.2.clone();
         let p = s.placed.iter().find(|p| p.note.id == note_id)?;
         Some((code, p.note.clone(), p.raw.clone(), p.anchor))
@@ -593,7 +511,8 @@ fn open(note_id: i64) {
     let Some((code, note, raw, anchor)) = found else {
         return;
     };
-    let numbered: Vec<i64> = column()
+    pane::set_active(pane);
+    let numbered: Vec<i64> = column(pane)
         .map(|column| verses(&column, &code))
         .unwrap_or_default()
         .iter()
@@ -601,14 +520,14 @@ fn open(note_id: i64) {
         .collect();
     match text::selection(anchor, note.verse_start, note.verse_end, &numbered) {
         Some((start, end)) => card::select_for_note(&code, start, end),
-        None => card::edit_note(pane::active(), &raw),
+        None => card::edit_note(pane, &raw),
     }
 }
 
 /// Sets the margin's width, then puts each note beside its verse (or,
 /// where they'd overlap, below the one above), folded if it's long, and
 /// each range's rule beside its verses ([`place_notes`]).
-fn place_margin(column: &HtmlElement) {
+fn place_margin(pane: PaneId, column: &HtmlElement) {
     let Some(aside) = column
         .query_selector(".margin-notes")
         .ok()
@@ -628,50 +547,12 @@ fn place_margin(column: &HtmlElement) {
         .style()
         .set_property("--margin-fold-lines", &text::FOLD_LINES.to_string());
     // The margin is placed at the column's top.
-    place_notes(column, &aside, column.get_bounding_client_rect().top());
-}
-
-/// Compare's notes column: each note beside its verse, as in the margin
-/// ([`place_notes`]), folded past the column's lines; the column reaches
-/// down to its last note, so nothing after the text runs under it.
-fn place_column(column: &HtmlElement) {
-    let Some(aside) = column
-        .query_selector(".notes-column")
-        .ok()
-        .flatten()
-        .and_then(|el| el.dyn_into::<HtmlElement>().ok())
-    else {
-        return;
-    };
-    let _ = aside
-        .style()
-        .set_property("--margin-fold-lines", &text::COLUMN_FOLD_LINES.to_string());
-    let top = aside.get_bounding_client_rect().top();
-    let bottom = place_notes(column, &aside, top);
-    let _ = aside
-        .style()
-        .set_property("min-height", &format!("{}px", bottom.max(0.0)));
-}
-
-/// The notes under their verses: each folded past the column's lines.
-fn place_under(column: &HtmlElement) {
-    let lines = text::COLUMN_FOLD_LINES.to_string();
-    let notes = column
-        .query_selector_all(".note-under")
-        .map(|found| dom::elements(&found))
-        .unwrap_or_default();
-    for note in &notes {
-        let _ = note.style().set_property("--margin-fold-lines", &lines);
-    }
-    let found: Vec<HtmlElement> = notes
-        .iter()
-        .filter_map(|n| n.query_selector(".margin-note").ok().flatten())
-        .filter_map(|n| n.dyn_into::<HtmlElement>().ok())
-        .collect();
-    let folded: Vec<bool> = found.iter().map(is_cut_short).collect();
-    for (note, folded) in found.iter().zip(folded) {
-        fold(note, folded);
-    }
+    place_notes(
+        pane,
+        column,
+        &aside,
+        column.get_bounding_client_rect().top(),
+    );
 }
 
 /// `note`'s part `class`.
@@ -700,23 +581,23 @@ fn fold(note: &HtmlElement, folded: bool) {
     }
 }
 
-/// Puts each note in `aside` beside its verse in `column` (or, where
-/// they'd overlap, below the one above), folded if it's long, and each
-/// range's rule beside its verses, every top from `top_of` (the aside's
-/// own top, px): every box read in one pass, then every top written. How
-/// far down the last note reaches, from `top_of`.
-fn place_notes(column: &HtmlElement, aside: &HtmlElement, top_of: f64) -> f64 {
+/// Puts each note in `aside` beside its verse in `pane`'s `column` (or,
+/// where they'd overlap, below the one above), folded if it's long, and
+/// each range's rule beside its verses, every top from `top_of` (the
+/// aside's own top, px): every box read in one pass, then every top
+/// written.
+fn place_notes(pane: PaneId, column: &HtmlElement, aside: &HtmlElement, top_of: f64) {
     let flowing = root()
         .and_then(|html| html.get_attribute("data-layout"))
         .as_deref()
         == Some("flowing");
-    let Some(code) = with(|s| s.chapter.as_ref().map(|c| c.2.clone())) else {
-        return 0.0;
+    let Some(code) = with_pane(pane, |s| s.chapter.as_ref().map(|c| c.2.clone())) else {
+        return;
     };
     let verses = by_number(verses(column, &code));
     // Each entry down the page: a note by its id, a verse's findings by
     // their key, in the order they go (`margin_text::entries`).
-    let ids: Vec<(Option<i64>, String, Anchor)> = with(|s| {
+    let ids: Vec<(Option<i64>, String, Anchor)> = with_pane(pane, |s| {
         all_entries(&s.placed, &s.placed_findings)
             .into_iter()
             .map(|(entry, anchor)| match entry {
@@ -794,23 +675,23 @@ fn place_notes(column: &HtmlElement, aside: &HtmlElement, top_of: f64) -> f64 {
                 .set_property("height", &format!("{span_height}px"));
         }
     }
-    tops.iter()
-        .zip(&heights)
-        .map(|(top, height)| top + height)
-        .chain(spans.iter().flatten().map(|(top, height)| top + height))
-        .fold(0.0, f64::max)
 }
 
-/// `window.gospelGetterMargin`: `shown()`, what the margin shows now
-/// ("margin", "markers" or "nothing"), and `layoutMs()`, how long its last
-/// placing took. For the tests.
+/// `window.gospelGetterMargin`: `shown()`, what the margin shows beside
+/// the active pane's chapter now ("margin", "markers", "empty" or
+/// "nothing"), and `layoutMs()`, how long its last placing took. For the
+/// tests.
 fn export_margin() {
     let Some(window) = web_sys::window() else {
         return;
     };
     let global = js_sys::Object::new();
     let shown = Closure::<dyn Fn() -> JsValue>::new(|| {
-        let shown = with(|s| s.drawn.map_or(Shown::Nothing, |(_, shown)| shown));
+        let shown = with(|s| {
+            s.panes[pane::active()]
+                .drawn
+                .map_or(Shown::Nothing, |(_, shown)| shown)
+        });
         JsValue::from_str(shown.name())
     });
     let layout_ms = Closure::<dyn Fn() -> JsValue>::new(|| JsValue::from_f64(with(|s| s.last_ms)));
