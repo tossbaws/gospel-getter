@@ -1328,7 +1328,11 @@ fn reading_presets_default_to_the_original_typography() {
     assert_eq!(property(&root, "--reading-scale"), "1");
     assert_eq!(property(&root, "--reading-leading"), "1.7");
 
-    let verse = &screen_rule(&rules, ".verse").body;
+    let verse = &screen_rule(
+        &rules,
+        r#".verse, :root[data-layout="flowing"] .chapter-text"#,
+    )
+    .body;
     assert!(verse.contains("font-size: calc(1.05rem * var(--reading-scale))"));
     assert!(verse.contains("line-height: var(--reading-leading)"));
 
@@ -3517,7 +3521,7 @@ fn literata_is_bundled_for_scripture_and_the_ui_uses_the_sans() {
             .contains("font-family: var(--font-ui)")
     );
     for selector in [
-        ".verse",
+        r#".verse, :root[data-layout="flowing"] .chapter-text"#,
         ".verse-num",
         ".chapter-heading",
         ".chapter-heading-link",
@@ -4599,7 +4603,10 @@ fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
     for decl in ["display: inline", "min-width: 0", "line-height: 0"] {
         assert!(number.body.contains(decl), "{decl}");
     }
-    let text = screen_rule(&rules, r#":root[data-layout="flowing"] .chapter-text"#);
+    let text = screen_rule(
+        &rules,
+        r#".verse, :root[data-layout="flowing"] .chapter-text"#,
+    );
     for decl in [
         "font-family: var(--font-scripture)",
         "font-size: calc(1.05rem * var(--reading-scale))",
@@ -4610,9 +4617,12 @@ fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
     }
     // The same size as a verse, in the center and the neighbors.
     assert!(
-        screen_rule(&rules, ".verse")
-            .body
-            .contains("font-size: calc(1.05rem * var(--reading-scale))")
+        screen_rule(
+            &rules,
+            r#".verse, :root[data-layout="flowing"] .chapter-text"#
+        )
+        .body
+        .contains("font-size: calc(1.05rem * var(--reading-scale))")
     );
     let side = screen_rule(
         &rules,
@@ -4624,14 +4634,13 @@ fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
     );
     // Only .chapter-text flows, and only the reading pane and the side
     // chapters have one; compare's grid doesn't.
-    for rule in rules
+    for selector in rules
         .iter()
-        .filter(|r| r.selector.contains(r#"data-layout="flowing""#))
+        .flat_map(selectors)
+        .filter(|s| s.contains(r#"data-layout="flowing""#))
     {
-        for selector in selectors(rule) {
-            assert!(selector.contains(".chapter-text"), "{selector}");
-            assert!(!selector.contains("compare"), "{selector}");
-        }
+        assert!(selector.contains(".chapter-text"), "{selector}");
+        assert!(!selector.contains("compare"), "{selector}");
     }
     // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
     // Compare's translations are its grid.
@@ -4902,8 +4911,8 @@ fn the_welcome_uses_tested_theme_colors() {
         (".welcome-look", "--text"),
         (".welcome-hint", "--text-dim"),
         (".welcome-start-row", "--text"),
-        (".welcome-start-title", "--accent"),
-        (".welcome-start-line", "--text-dim"),
+        (".welcome-start-title, .export-choice-name", "--accent"),
+        (".welcome-start-line, .export-choice-line", "--text-dim"),
         (".welcome-look-sample", "--accent"),
     ] {
         assert!(
@@ -4997,8 +5006,8 @@ fn the_export_chooser_is_a_modal_in_tested_theme_colors() {
     let rules = rules();
     for (selector, color) in [
         (".export-choice", "--text"),
-        (".export-choice-name", "--accent"),
-        (".export-choice-line", "--text-dim"),
+        (".welcome-start-title, .export-choice-name", "--accent"),
+        (".welcome-start-line, .export-choice-line", "--text-dim"),
         (".export-choice:disabled .export-choice-name", "--text-dim"),
     ] {
         assert!(
