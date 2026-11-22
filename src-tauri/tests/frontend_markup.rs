@@ -931,31 +931,168 @@ fn every_theme_option_defines_a_complete_palette() {
     }
 }
 
-/// Text, dimmed text and accent-colored text must all be legible on the
-/// opaque popup/select background, and text drawn on an accent-filled
-/// control (active book/chapter) must be legible on the accent — WCAG AA
-/// (4.5:1) for every theme, which is what keeps Hot Pink from being pink
-/// on pink.
+/// What a color in `CONTRAST_PAIRS` sits on: a theme's token, or its
+/// translucent `--panel-bg` laid over one.
+#[derive(Debug, Clone, Copy)]
+enum Ground {
+    On(&'static str),
+    PanelOn(&'static str),
+}
+
+impl Ground {
+    /// The opaque color it comes to in a theme.
+    fn color(self, props: &[(String, String)]) -> String {
+        match self {
+            Self::On(token) => property(props, token).to_owned(),
+            Self::PanelOn(token) => {
+                let (panel, under) = (property(props, "--panel-bg"), property(props, token));
+                if panel.starts_with("rgba(") {
+                    composite(panel, under)
+                } else {
+                    panel.to_owned()
+                }
+            }
+        }
+    }
+}
+
+/// Every pair of theme tokens a surface draws one on the other, with the
+/// least contrast it needs in every theme (4.5:1, WCAG AA, for text; 3:1
+/// for a ring, a chevron or a focus outline) and where it's drawn.
+/// `theme_palettes_meet_wcag_aa_contrast` checks them all; each surface's
+/// test says only that its selectors use these tokens, and checks its own
+/// tints, washes and gradients.
+const CONTRAST_PAIRS: &[(&str, Ground, f64, &str)] = &[
+    (
+        "--text",
+        Ground::On("--option-bg"),
+        4.5,
+        "popups, the toast, the selection card, the palette, the welcome, the shortcuts sheet, Export notes, the picker as a dialog",
+    ),
+    (
+        "--text-dim",
+        Ground::On("--option-bg"),
+        4.5,
+        "the same, and the bar's menus' headings, the hint keys, the export choices, About's credits",
+    ),
+    (
+        "--accent",
+        Ground::On("--option-bg"),
+        4.5,
+        "titles and links in popups, the chapter end's buttons, the export choices",
+    ),
+    (
+        "--accent",
+        Ground::On("--option-bg"),
+        3.0,
+        "the chosen swatch's and welcome look's rings, Export notes' chevron and focus rings",
+    ),
+    (
+        "--accent-2",
+        Ground::On("--option-bg"),
+        4.5,
+        "footnote labels and citations in popups and the card",
+    ),
+    (
+        "--accent-2",
+        Ground::On("--option-bg"),
+        3.0,
+        "the cross-reference preview's pressed ring",
+    ),
+    (
+        "--ai",
+        Ground::On("--option-bg"),
+        4.5,
+        "AI findings in the card and the Library",
+    ),
+    (
+        "--text",
+        Ground::On("--bar-bg"),
+        4.5,
+        "the bar, and the sidebar picker's books",
+    ),
+    (
+        "--text-dim",
+        Ground::On("--bar-bg"),
+        4.5,
+        "the bar's ghost buttons, the sidebar picker's testament headings",
+    ),
+    (
+        "--accent",
+        Ground::On("--bar-bg"),
+        4.5,
+        "the bar, the sidebar picker's book being read",
+    ),
+    (
+        "--accent-2",
+        Ground::On("--bar-bg"),
+        4.5,
+        "the quiet accent on the bar",
+    ),
+    (
+        "--ai",
+        Ground::On("--bar-bg"),
+        4.5,
+        "AI findings in the margin",
+    ),
+    (
+        "--on-accent",
+        Ground::On("--accent"),
+        4.5,
+        "an accent-filled control: a chosen segment, filter or translation",
+    ),
+    ("--on-ai", Ground::On("--ai"), 4.5, "the AI badge's text"),
+    (
+        "--text",
+        Ground::PanelOn("--option-bg"),
+        4.5,
+        "the Notes section, the translations, the picker dialog's chapters",
+    ),
+    (
+        "--text-dim",
+        Ground::PanelOn("--option-bg"),
+        4.5,
+        "the Notes section, the translations, a disabled Aa segment",
+    ),
+    (
+        "--accent",
+        Ground::PanelOn("--option-bg"),
+        4.5,
+        "the Notes section, the translations, an unpressed highlight filter",
+    ),
+    (
+        "--accent",
+        Ground::PanelOn("--option-bg"),
+        3.0,
+        "a translation's focus ring",
+    ),
+    (
+        "--accent-2",
+        Ground::PanelOn("--option-bg"),
+        4.5,
+        "the Notes section, the quiet accent on a panel",
+    ),
+    (
+        "--text",
+        Ground::PanelOn("--bar-bg"),
+        4.5,
+        "the sidebar picker's chapters",
+    ),
+];
+
+/// Every pair in `CONTRAST_PAIRS` has the contrast it needs in every theme;
+/// this is what keeps Hot Pink from being pink on pink.
 #[test]
 fn theme_palettes_meet_wcag_aa_contrast() {
     let rules = rules();
     for (theme, props) in theme_palettes(&rules) {
-        let option_bg = property(&props, "--option-bg");
-        for fg in ["--text", "--text-dim", "--accent"] {
-            let ratio = contrast_ratio(property(&props, fg), option_bg);
+        for &(fg, ground, least, used) in CONTRAST_PAIRS {
+            let ratio = contrast_ratio(property(&props, fg), &ground.color(&props));
             assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: {fg} on --option-bg is {ratio:.2}:1, below 4.5:1"
+                ratio >= least,
+                "theme `{theme}`: {fg} on {ground:?} is {ratio:.2}:1, below {least}:1 ({used})"
             );
         }
-        let ratio = contrast_ratio(
-            property(&props, "--on-accent"),
-            property(&props, "--accent"),
-        );
-        assert!(
-            ratio >= 4.5,
-            "theme `{theme}`: --on-accent on --accent is {ratio:.2}:1, below 4.5:1"
-        );
     }
 }
 
@@ -1988,7 +2125,6 @@ fn history_and_chapter_buttons_use_tested_theme_colors_enabled_and_disabled() {
         let wash = |a: f64, under: &str| composite(&format!("rgba({accent_rgb}, {a})"), under);
         let enabled = contrast_ratio(text_dim, bar_bg);
         for (what, ratio) in [
-            ("an available history or chapter button", enabled),
             (
                 "one under the pointer",
                 contrast_ratio(text, &wash(hover_alpha, bar_bg)),
@@ -2001,7 +2137,6 @@ fn history_and_chapter_buttons_use_tested_theme_colors_enabled_and_disabled() {
                 "the place you're at",
                 contrast_ratio(text, &wash(here_alpha, option_bg)),
             ),
-            ("the menu's heading", contrast_ratio(text_dim, option_bg)),
         ] {
             assert!(ratio >= 4.5, "theme `{theme}`: {what} is {ratio:.2}:1");
         }
@@ -2056,17 +2191,6 @@ fn header_surfaces_use_tested_theme_colors() {
         let option_bg = property(&props, "--option-bg");
         for (what, fg, bg) in [
             (
-                "--text on --bar-bg",
-                property(&props, "--text").to_owned(),
-                bar_bg.to_owned(),
-            ),
-            ("--accent on --bar-bg", accent.to_owned(), bar_bg.to_owned()),
-            (
-                "a bar button",
-                property(&props, "--text-dim").to_owned(),
-                bar_bg.to_owned(),
-            ),
-            (
                 "a bar button under the pointer",
                 property(&props, "--text").to_owned(),
                 composite(&format!("rgba({accent_rgb}, {hover_alpha})"), bar_bg),
@@ -2088,11 +2212,6 @@ fn header_surfaces_use_tested_theme_colors() {
                 "theme `{theme}`: {what} is {ratio:.2}:1, below 4.5:1"
             );
         }
-        let ring = contrast_ratio(accent, option_bg);
-        assert!(
-            ring >= 3.0,
-            "theme `{theme}`: the chosen swatch's ring is {ring:.2}:1, below 3:1"
-        );
     }
 
     let segment = screen_rule(&rules, ".segment");
@@ -2170,25 +2289,6 @@ fn export_notes_book_list_uses_tested_theme_colors() {
          .export-notes-field:focus-visible,\n        .export-notes-tools .reader-mode-btn:focus-visible",
     );
     assert!(focus.body.contains("outline: 2px solid var(--accent)"));
-
-    for (theme, props) in theme_palettes(&rules) {
-        let option_bg = property(&props, "--option-bg");
-        let text = contrast_ratio(property(&props, "--text"), option_bg);
-        assert!(
-            text >= 4.5,
-            "theme `{theme}`: the book list's text is {text:.2}:1, below 4.5:1"
-        );
-        let count = contrast_ratio(property(&props, "--text-dim"), option_bg);
-        assert!(
-            count >= 4.5,
-            "theme `{theme}`: the books' counts are {count:.2}:1, below 4.5:1"
-        );
-        let accent = contrast_ratio(property(&props, "--accent"), option_bg);
-        assert!(
-            accent >= 3.0,
-            "theme `{theme}`: the book list's chevron and focus ring are {accent:.2}:1, below 3:1"
-        );
-    }
 }
 
 /// The theme swatches in Aa are drawn from the theme definitions
@@ -2368,20 +2468,6 @@ fn highlight_list_swatches_and_filter_use_tested_theme_colors() {
     assert!(pressed.body.contains("color: var(--on-accent)"));
     let filter = screen_rule(&rules, ".highlight-filter-btn");
     assert!(filter.body.contains("color: var(--accent)"));
-
-    // Unpressed, a filter is --accent on --panel-bg, a translucent tint
-    // over the menu's opaque --option-bg.
-    for (theme, props) in theme_palettes(&rules) {
-        let behind = composite(
-            property(&props, "--panel-bg"),
-            property(&props, "--option-bg"),
-        );
-        let ratio = contrast_ratio(property(&props, "--accent"), &behind);
-        assert!(
-            ratio >= 4.5,
-            "theme `{theme}`: an unpressed highlight filter is {ratio:.2}:1, below 4.5:1"
-        );
-    }
 }
 
 /// An `rgba(r, g, b, a)` color laid over an opaque `#rrggbb`, as `#rrggbb`.
@@ -2464,16 +2550,6 @@ fn about_update_uses_tested_theme_colors() {
         let rule = screen_rule(&rules, selector);
         for declaration in declarations {
             assert!(rule.body.contains(declaration), "{selector}: {declaration}");
-        }
-    }
-    for (theme, props) in theme_palettes(&rules) {
-        let option = property(&props, "--option-bg");
-        for token in ["--text", "--text-dim", "--accent"] {
-            let ratio = contrast_ratio(property(&props, token), option);
-            assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: {token} on --option-bg is {ratio:.2}:1"
-            );
         }
     }
 }
@@ -2600,19 +2676,6 @@ fn notes_use_tested_theme_colors() {
             "{selector} should be {color}"
         );
     }
-    for (theme, props) in theme_palettes(&rules) {
-        let behind = composite(
-            property(&props, "--panel-bg"),
-            property(&props, "--option-bg"),
-        );
-        for fg in ["--text", "--text-dim", "--accent", "--accent-2"] {
-            let ratio = contrast_ratio(property(&props, fg), &behind);
-            assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: {fg} in the Notes section is {ratio:.2}:1, below 4.5:1"
-            );
-        }
-    }
 
     let panel = screen_rule(&rules, ".modal-panel");
     assert!(panel.body.contains("background: var(--option-bg)"));
@@ -2715,13 +2778,6 @@ fn kjv_footnotes_use_tested_theme_colors() {
             .body
             .contains("font-style: italic")
     );
-    for (theme, props) in theme_palettes(&rules) {
-        let option_bg = property(&props, "--option-bg");
-        for fg in ["--accent", "--accent-2", "--text-dim"] {
-            let ratio = contrast_ratio(property(&props, fg), option_bg);
-            assert!(ratio >= 4.5, "theme `{theme}`: {fg} is {ratio:.2}:1");
-        }
-    }
 }
 
 /// Printing keeps the chapter's Footnotes section and the markers in the
@@ -3206,19 +3262,9 @@ fn the_quiet_accent_carries_the_quiet_jobs() {
         {
             assert_eq!(accent_2, property(&props, "--accent"), "{theme}");
         }
-        let option = property(&props, "--option-bg");
-        let bar = property(&props, "--bar-bg");
-        let mut behind = vec![
-            option.to_owned(),
-            bar.to_owned(),
-            composite(property(&props, "--panel-bg"), option),
-        ];
         let page = backgrounds(&props);
-        if page.len() == 1 {
-            behind.push(page[0].clone());
-        }
-        for bg in behind {
-            let ratio = contrast_ratio(accent_2, &bg);
+        if let [bg] = &page[..] {
+            let ratio = contrast_ratio(accent_2, bg);
             assert!(
                 ratio >= 4.5,
                 "theme `{theme}`: --accent-2 on {bg} is {ratio:.2}:1, below 4.5:1"
@@ -3846,44 +3892,20 @@ fn the_sidebar_is_for_wide_windows_only() {
 /// chapter in `--text` (on a wash under the pointer), testament headings in
 /// `--text-dim`, the book being read in `--accent`, and chapters in
 /// `--text` on `--panel-bg` (`--on-accent` on `--accent` for the one being
-/// read, tested with the other controls).
+/// read; the pairs are in `CONTRAST_PAIRS`).
 #[test]
 fn the_picker_uses_tested_theme_colors() {
     let rules = rules();
-    let over = |color: &str, under: &str| -> String {
-        if color.starts_with("rgba(") {
-            composite(color, under)
-        } else {
-            color.to_owned()
-        }
-    };
     for (theme, props) in theme_palettes(&rules) {
         let accent_rgb = property(&props, "--accent-rgb");
         for surface in ["--bar-bg", "--option-bg"] {
             let bg = property(&props, surface);
             let wash = composite(&format!("rgba({accent_rgb}, 0.12)"), bg);
-            let panel = over(property(&props, "--panel-bg"), bg);
-            for (what, fg, under) in [
-                ("a book", property(&props, "--text"), bg.to_owned()),
-                ("a book under the pointer", property(&props, "--text"), wash),
-                (
-                    "a testament heading",
-                    property(&props, "--text-dim"),
-                    bg.to_owned(),
-                ),
-                (
-                    "the book being read",
-                    property(&props, "--accent"),
-                    bg.to_owned(),
-                ),
-                ("a chapter", property(&props, "--text"), panel),
-            ] {
-                let ratio = contrast_ratio(fg, &under);
-                assert!(
-                    ratio >= 4.5,
-                    "theme `{theme}` on {surface}: {what} is {ratio:.2}:1, below 4.5:1"
-                );
-            }
+            let ratio = contrast_ratio(property(&props, "--text"), &wash);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}` on {surface}: a book under the pointer is {ratio:.2}:1, below 4.5:1"
+            );
         }
     }
     for (selector, declaration) in [
@@ -4101,25 +4123,13 @@ fn the_chapter_end_uses_tested_theme_colors() {
     }
     let mut hint_below_aa = Vec::new();
     for (theme, props) in theme_palettes(&rules) {
-        let option = property(&props, "--option-bg").to_owned();
         let dim = property(&props, "--text-dim");
-        let key = contrast_ratio(dim, &option);
-        assert!(key >= 4.5, "theme `{theme}`: a hint key is {key:.2}:1");
         for bg in reading_grounds(&props) {
-            for (what, fg, under) in [
-                (
-                    "a chapter button",
-                    property(&props, "--accent"),
-                    option.as_str(),
-                ),
-                ("a disclosure", property(&props, "--text"), bg.as_str()),
-            ] {
-                let ratio = contrast_ratio(fg, under);
-                assert!(
-                    ratio >= 4.5,
-                    "theme `{theme}`: {what} is {ratio:.2}:1 on {under}"
-                );
-            }
+            let ratio = contrast_ratio(property(&props, "--text"), &bg);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: a disclosure is {ratio:.2}:1 on {bg}"
+            );
             let chevron = contrast_ratio(property(&props, "--accent"), &bg);
             assert!(
                 chevron >= 3.0,
@@ -4217,18 +4227,6 @@ fn the_selection_card_floats_over_the_text() {
             .contains("color: var(--accent-2)")
     );
     assert!(block_after(HTML, "@media print").contains(".selection-card"));
-    // On the card's opaque --option-bg, every color it uses is AA; its
-    // buttons' --panel-bg over it is covered by notes_use_tested_theme_colors.
-    for (theme, props) in theme_palettes(&rules) {
-        let bg = property(&props, "--option-bg");
-        for fg in ["--text", "--text-dim", "--accent", "--accent-2"] {
-            let ratio = contrast_ratio(property(&props, fg), bg);
-            assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: {fg} in the card is {ratio:.2}:1"
-            );
-        }
-    }
 }
 
 /// Aa's Width row: Narrow, Normal and Wide, as a labelled group of buttons
@@ -4372,14 +4370,11 @@ fn the_palette_and_copy_as_are_aa_in_every_theme() {
         let get = |name: &str| property(&props, name).to_owned();
         let panel = get("--option-bg");
         let active = blend(&panel, &get("--accent-rgb"), 0.12);
-        for (what, fg, bg) in [
-            ("text on the panel", get("--text"), panel.clone()),
-            ("dim text on the panel", get("--text-dim"), panel.clone()),
-            ("text on the active option", get("--text"), active.clone()),
-        ] {
-            let ratio = contrast_ratio(&fg, &bg);
-            assert!(ratio >= 4.5, "{theme}: {what} is {ratio:.2}:1");
-        }
+        let ratio = contrast_ratio(&get("--text"), &active);
+        assert!(
+            ratio >= 4.5,
+            "{theme}: text on the active option is {ratio:.2}:1"
+        );
         // Why the active option's dim text turns --text: it isn't AA there
         // in every theme.
         if theme == "matrix" {
@@ -4576,24 +4571,11 @@ fn layout_is_a_display_setting_in_aa() {
     assert!(aa.contains("note.set_hidden(!comparing);"));
 
     // A disabled segment is quiet but still AA: --text-dim on the
-    // segments' --panel-bg, over the popover's --option-bg.
+    // segments' --panel-bg, over the popover's --option-bg (a pair in
+    // `CONTRAST_PAIRS`).
     let rules = rules();
     let disabled = screen_rule(&rules, ".segment:disabled");
     assert!(disabled.body.contains("color: var(--text-dim)"));
-    for (theme, props) in theme_palettes(&rules) {
-        let option_bg = property(&props, "--option-bg");
-        let panel = property(&props, "--panel-bg");
-        let behind = if panel.starts_with("rgba(") {
-            composite(panel, option_bg)
-        } else {
-            panel.to_owned()
-        };
-        let ratio = contrast_ratio(property(&props, "--text-dim"), &behind);
-        assert!(
-            ratio >= 4.5,
-            "theme `{theme}`: a disabled segment is {ratio:.2}:1"
-        );
-    }
 }
 
 /// Flowing runs each chapter's verses inline in one paragraph, in the
@@ -4950,29 +4932,13 @@ fn the_welcome_uses_tested_theme_colors() {
             &format!("rgba({}, 0.06)", property(&props, "--accent-rgb")),
             bg,
         );
-        for (what, fg, under) in [
-            ("the title", "--accent", bg.to_owned()),
-            ("a look's name", "--text", bg.to_owned()),
-            ("the hint", "--text-dim", bg.to_owned()),
-            (
-                "a place's title under the pointer",
-                "--accent",
-                wash.clone(),
-            ),
-            (
-                "a place's line under the pointer",
-                "--text-dim",
-                wash.clone(),
-            ),
+        for (what, fg) in [
+            ("a place's title under the pointer", "--accent"),
+            ("a place's line under the pointer", "--text-dim"),
         ] {
-            let ratio = contrast_ratio(property(&props, fg), &under);
+            let ratio = contrast_ratio(property(&props, fg), &wash);
             assert!(ratio >= 4.5, "theme `{theme}`: {what} is {ratio:.2}:1");
         }
-        let ring = contrast_ratio(property(&props, "--accent"), bg);
-        assert!(
-            ring >= 3.0,
-            "theme `{theme}`: the checked ring is {ring:.2}:1"
-        );
     }
     // The previews: each theme's large "Aa" on its own page background.
     for theme in ["chi-rho", "vellum"] {
@@ -5059,22 +5025,11 @@ fn the_export_chooser_is_a_modal_in_tested_theme_colors() {
             &format!("rgba({}, 0.06)", property(&props, "--accent-rgb")),
             bg,
         );
-        for (what, fg, under) in [
-            ("a choice's name", "--accent", bg),
-            ("a choice's line", "--text-dim", bg),
-            ("a greyed-out choice's name and line", "--text-dim", bg),
-            (
-                "a choice's name under the pointer",
-                "--accent",
-                wash.as_str(),
-            ),
-            (
-                "a choice's line under the pointer",
-                "--text-dim",
-                wash.as_str(),
-            ),
+        for (what, fg) in [
+            ("a choice's name under the pointer", "--accent"),
+            ("a choice's line under the pointer", "--text-dim"),
         ] {
-            let ratio = contrast_ratio(property(&props, fg), under);
+            let ratio = contrast_ratio(property(&props, fg), &wash);
             assert!(ratio >= 4.5, "theme `{theme}`: {what} is {ratio:.2}:1");
         }
     }
@@ -5192,11 +5147,6 @@ fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
                 "theme `{theme}`: {fg} on the preview's wash is {ratio:.2}:1"
             );
         }
-        let ring = contrast_ratio(property(&props, "--accent-2"), card);
-        assert!(
-            ring >= 3.0,
-            "theme `{theme}`: the pressed ring is {ring:.2}:1"
-        );
     }
 }
 
@@ -5321,42 +5271,6 @@ fn the_translation_chooser_and_credits_are_accessible_and_use_tested_theme_color
             .body
             .contains("outline: 2px solid var(--accent)")
     );
-    for (theme, props) in theme_palettes(&rules) {
-        // --panel-bg is a translucent tint over the popover's opaque
-        // --option-bg.
-        let panel = &composite(
-            property(&props, "--panel-bg"),
-            property(&props, "--option-bg"),
-        );
-        for fg in ["--text", "--text-dim", "--accent"] {
-            let ratio = contrast_ratio(property(&props, fg), panel);
-            assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: {fg} on a translation is {ratio:.2}:1"
-            );
-        }
-        let chosen = contrast_ratio(
-            property(&props, "--on-accent"),
-            property(&props, "--accent"),
-        );
-        assert!(
-            chosen >= 4.5,
-            "theme `{theme}`: the chosen translation is {chosen:.2}:1"
-        );
-        let ring = contrast_ratio(property(&props, "--accent"), panel);
-        assert!(
-            ring >= 3.0,
-            "theme `{theme}`: the focus ring is {ring:.2}:1"
-        );
-        let credits = contrast_ratio(
-            property(&props, "--text-dim"),
-            property(&props, "--option-bg"),
-        );
-        assert!(
-            credits >= 4.5,
-            "theme `{theme}`: About's credits are {credits:.2}:1"
-        );
-    }
 }
 
 /// A USFM footnote's verse number (the BSB's "²¹But this kind") is small
@@ -5585,18 +5499,6 @@ fn the_shortcuts_sheet_is_a_modal_dialog_aa_in_every_theme() {
             .body
             .contains("background: var(--option-bg)")
     );
-    for (theme, props) in theme_palettes(&rules) {
-        let get = |name: &str| property(&props, name).to_owned();
-        let panel = get("--option-bg");
-        for (what, fg) in [
-            ("a row", get("--text")),
-            ("a key cap or heading", get("--text-dim")),
-            ("the title", get("--accent")),
-        ] {
-            let ratio = contrast_ratio(&fg, &panel);
-            assert!(ratio >= 4.5, "{theme}: {what} is {ratio:.2}:1");
-        }
-    }
 }
 
 /// The page never opens a web page itself: no anchor opens a new window,
@@ -5768,15 +5670,6 @@ fn ai_findings_have_their_own_violet_in_every_theme() {
     let rules = rules();
     for (theme, props) in theme_palettes(&rules) {
         let ai = property(&props, "--ai");
-        for bg in ["--option-bg", "--bar-bg"] {
-            let ratio = contrast_ratio(ai, property(&props, bg));
-            assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: --ai on {bg} is {ratio:.2}:1"
-            );
-        }
-        let on = contrast_ratio(property(&props, "--on-ai"), ai);
-        assert!(on >= 4.5, "theme `{theme}`: --on-ai on --ai is {on:.2}:1");
         let accent_2 = property(&props, "--accent-2");
         for stop in backgrounds(&props) {
             let ratio = contrast_ratio(ai, &stop);
