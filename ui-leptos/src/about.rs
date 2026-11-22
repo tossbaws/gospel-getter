@@ -26,7 +26,7 @@ use crate::ipc;
 use crate::overlays::Overlay;
 use crate::surfaces;
 use crate::update_text;
-use crate::updates::{UpdateBanner, Updates, UpdatesSection};
+use crate::updates::{GoBackConfirm, UpdateBanner, Updates, UpdatesSection};
 
 /// The release page of `version`, as the backend opens it
 /// (`updater::release_notes_page`), shown as the link's address.
@@ -47,7 +47,9 @@ const CROSS_REFERENCES_CREDIT: &str =
 /// outside it (a click on its backdrop) comes back to the first (or, with
 /// Shift, the last), as in the other modals (`dom::trap_tab`, D2-02).
 fn on_keydown(panel: NodeRef<html::Div>, event: &KeyboardEvent) {
-    if !Overlay::About.is_open() {
+    // Go back's confirm dialog, over About, has the keyboard while it's
+    // open (`updates`).
+    if !Overlay::About.is_open() || Overlay::GoBack.is_open() {
         return;
     }
     event.stop_propagation();
@@ -217,6 +219,7 @@ pub fn AboutAndUpdates() -> impl IntoView {
                     </span>
                 </p>
             </div>
+            <GoBackConfirm updates=updates />
         </div>
         <UpdateBanner updates=updates />
     }

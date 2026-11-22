@@ -1170,9 +1170,10 @@ jobs:
           retention-days: 14
 
   # Installs the previous release, seeds reader data, upgrades to this
-  # build and checks it starts and kept the data: see
-  # tools/ci/upgrade_check.py's header. When gui-linux runs (no if: of its
-  # own, as gui-linux has none), and sign waits for it.
+  # build and checks it starts and kept the data, then goes back the other
+  # way, as About's Go back does: see tools/ci/upgrade_check.py's header.
+  # When gui-linux runs (no if: of its own, as gui-linux has none), and
+  # sign waits for it.
   upgrade-linux:
     name: Upgrade from the previous release (Linux)
     needs: [linux]
@@ -1218,6 +1219,17 @@ jobs:
           fi
           python3 tools/ci/upgrade_check.py run --from "$FROM" --to "$to" --work "$RUNNER_TEMP/upgrade"
 
+      - name: Go back from this build to the previous release, and check it
+        env:
+          GOSPEL_GETTER_UPGRADE_CHECK: throwaway-runner
+          BACK_TO: ${{ steps.previous.outputs.installer }}
+          BACK_TAG: ${{ steps.previous.outputs.tag }}
+        run: |
+          set -euo pipefail
+          from="$(find appimage -maxdepth 1 -name '*.AppImage' | head -1)"
+          python3 tools/ci/upgrade_check.py back --from "$from" --to "$BACK_TO" --work "$RUNNER_TEMP/back" \
+            --expect-version "${BACK_TAG#v}"
+
       - name: Upload what it saw
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1226,6 +1238,8 @@ jobs:
           path: |
             ${{ runner.temp }}/upgrade/*.log
             ${{ runner.temp }}/upgrade/*.json
+            ${{ runner.temp }}/back/*.log
+            ${{ runner.temp }}/back/*.json
           if-no-files-found: warn
           retention-days: 14
 
@@ -1271,6 +1285,20 @@ jobs:
           fi
           python tools/ci/upgrade_check.py run --from "$FROM" --to "$to" --work "$RUNNER_TEMP/upgrade"
 
+      # The previous release's NSIS installer, /S, over this build's: what
+      # About's Go back runs. It needs bundle.windows.allowDowngrades
+      # (tauri.conf.json; packaging_config pins it).
+      - name: Go back from this build to the previous release, and check it
+        env:
+          GOSPEL_GETTER_UPGRADE_CHECK: throwaway-runner
+          BACK_TO: ${{ steps.previous.outputs.installer }}
+          BACK_TAG: ${{ steps.previous.outputs.tag }}
+        run: |
+          set -euo pipefail
+          from="$(find nsis -maxdepth 1 -name '*.exe' | head -1)"
+          python tools/ci/upgrade_check.py back --from "$from" --to "$BACK_TO" --work "$RUNNER_TEMP/back" \
+            --expect-version "${BACK_TAG#v}"
+
       - name: Upload what it saw
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1279,6 +1307,8 @@ jobs:
           path: |
             ${{ runner.temp }}/upgrade/*.log
             ${{ runner.temp }}/upgrade/*.json
+            ${{ runner.temp }}/back/*.log
+            ${{ runner.temp }}/back/*.json
           if-no-files-found: warn
           retention-days: 14
 

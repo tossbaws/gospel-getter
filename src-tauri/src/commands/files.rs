@@ -20,6 +20,37 @@ pub(super) fn write_atomically(path: &Path, bytes: &[u8]) -> anyhow::Result<()> 
     write_atomically_then(path, bytes, sync_dir)
 }
 
+/// [`write_atomically`], but only to a name that's free: a file already at
+/// `path` is never replaced, and the error is then `AlreadyExists` (look
+/// for it with [`already_exists`]), so the caller can try another name.
+pub(crate) fn write_new_atomically(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    use std::io::Write;
+    path.file_name()
+        .with_context(|| format!("{} isn't a file name", path.display()))?;
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    remove_stale_temp_files(&dir, SystemTime::now());
+    let write = || -> std::io::Result<()> {
+        let mut temp = create_temp_file(&dir, temp_names())?;
+        let file = temp.file.as_mut().expect("open until persisted");
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        temp.persist_new(path)
+    };
+    write().with_context(|| format!("Couldn't write {}", path.display()))?;
+    sync_dir(&dir);
+    Ok(())
+}
+
+/// Whether `error` is [`write_new_atomically`]'s for a name that's taken.
+pub(crate) fn already_exists(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|e| e.kind() == std::io::ErrorKind::AlreadyExists)
+}
+
 /// [`write_atomically`], with `sync_dir` run on the folder once the file is
 /// in place.
 fn write_atomically_then(
@@ -127,6 +158,26 @@ impl TempFile {
         std::fs::rename(path, target)?;
         self.path = None;
         Ok(())
+    }
+
+    /// Close it and give it the name `target`, only if that's free: a hard
+    /// link refuses a name that's taken (`AlreadyExists`), all at once,
+    /// where a rename would replace the file. The temporary name goes when
+    /// it's dropped. A file system without hard links (FAT) gets the rename,
+    /// once the name is seen to be free.
+    fn persist_new(mut self, target: &Path) -> std::io::Result<()> {
+        drop(self.file.take());
+        let path = self.path.as_ref().expect("not yet persisted");
+        match std::fs::hard_link(path, target) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(e),
+            Err(_) if !target.exists() => {
+                std::fs::rename(path, target)?;
+                self.path = None;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     #[cfg(test)]
@@ -284,6 +335,31 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// A new file is written whole under a free name, and a name that's
+    /// taken is refused, the file there left exactly as it was, with no
+    /// temporary file left beside either.
+    #[test]
+    fn a_new_file_never_replaces_one_already_there() {
+        let scratch = Scratch::new("new");
+        let target = scratch.0.join("backup.gospel-getter.json");
+        write_new_atomically(&target, b"first").expect("a free name");
+        assert_eq!(std::fs::read(&target).expect("read it"), b"first");
+        let taken = write_new_atomically(&target, b"second").expect_err("a taken name");
+        assert!(already_exists(&taken), "{taken:#}");
+        assert_eq!(std::fs::read(&target).expect("read it"), b"first");
+        let names: Vec<_> = std::fs::read_dir(&scratch.0)
+            .expect("list it")
+            .map(|e| e.expect("an entry").file_name())
+            .collect();
+        assert_eq!(
+            names,
+            [std::ffi::OsString::from("backup.gospel-getter.json")]
+        );
+        let elsewhere = write_new_atomically(&scratch.0.join("no-folder/x.json"), b"x")
+            .expect_err("no such folder");
+        assert!(!already_exists(&elsewhere), "{elsewhere:#}");
     }
 
     /// The folder is synced once the file is in place under its own name,

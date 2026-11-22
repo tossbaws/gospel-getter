@@ -14,6 +14,13 @@
 //! it with its HTTPS proxy on a port nothing serves, so a release on GitHub
 //! newer than the build can't put its banner over the page.
 //!
+//! For Go back (check 80) it also serves a `previous.json` naming a lower
+//! version ([`PREVIOUS_VERSION`]), the same package signed for that
+//! version with the run's key, and the database schema this build makes
+//! ([`PREVIOUS_SCHEMA`]); and one whose schema is 0, from before versions
+//! were kept, which no step says can use this database, so About says Go
+//! back isn't offered.
+//!
 //! Also here: a "black hole" for check 13, which takes connections and
 //! never answers, so the check runs out of time.
 
@@ -33,6 +40,14 @@ use tokio::net::{TcpListener, TcpStream};
 /// The version the server announces: newer than any real one.
 pub const VERSION: &str = "99.0.0";
 
+/// The version Go back's `previous.json` names: lower than any real one.
+pub const PREVIOUS_VERSION: &str = "1.0.0";
+
+/// The schema `previous.json` says that version was built for: this
+/// build's (`migrate::SCHEMA_VERSION`), so it can use the database. The
+/// other `previous.json` says 0, which it can't.
+pub const PREVIOUS_SCHEMA: i64 = 2;
+
 /// The release notes it announces, as Markdown (About shows them as
 /// blocks; the banner as text).
 pub const NOTES: &str = "A test release, from the GUI checks' own update server.\n\n## Fixes\n- **Search** finds words again.\n  - Even `G`.\n- The About box.";
@@ -48,6 +63,8 @@ const CHUNK_PAUSE: Duration = Duration::from_millis(120);
 #[derive(Debug, Default)]
 pub struct Requests {
     pub manifests: AtomicU64,
+    /// `previous.json`, either.
+    pub previous: AtomicU64,
     pub packages: AtomicU64,
     /// Bytes of the package sent, over all downloads.
     pub package_bytes: AtomicU64,
@@ -59,6 +76,10 @@ pub struct UpdateServer {
     pub endpoint: String,
     /// The black hole's address, as an endpoint.
     pub black_hole: String,
+    /// `http://127.0.0.1:<port>/previous.json`, and the one whose release
+    /// can't use this database.
+    pub previous: String,
+    pub previous_unreadable: String,
     /// The run's public key, as `tauri.conf.json` writes one (base64 of
     /// minisign's public key file).
     pub pubkey: String,
@@ -76,57 +97,81 @@ impl UpdateServer {
             .collect();
         // As the Tauri CLI signs an update: the version in the trusted
         // comment (the app requires it, `requireSignedVersion`).
-        let trusted = format!(
-            "timestamp:{}\tfile:gui-check-update.bin\tversion:{VERSION}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs())
-        );
-        let signature = minisign::sign(
-            Some(&keys.pk),
-            &keys.sk,
-            Cursor::new(&package),
-            Some(&trusted),
-            Some("signature from the GUI checks' test key"),
-        )
-        .context("signing the test package")?;
+        let sign = |version: &str| -> Result<String> {
+            let trusted = format!(
+                "timestamp:{}\tfile:gui-check-update.bin\tversion:{version}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs())
+            );
+            let signature = minisign::sign(
+                Some(&keys.pk),
+                &keys.sk,
+                Cursor::new(&package),
+                Some(&trusted),
+                Some("signature from the GUI checks' test key"),
+            )
+            .context("signing the test package")?;
+            Ok(STANDARD.encode(signature.to_string()))
+        };
+        let signature = sign(VERSION)?;
+        let previous_signature = sign(PREVIOUS_VERSION)?;
         let pubkey = STANDARD.encode(
             keys.pk
                 .to_box()
                 .context("writing the run's public key")?
                 .to_string(),
         );
-        let signature = STANDARD.encode(signature.to_string());
 
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .context("starting the test update server")?;
         let port = listener.local_addr()?.port();
         let base = format!("http://127.0.0.1:{port}");
-        let entry =
-            json!({ "signature": signature, "url": format!("{base}/gui-check-update.bin") });
-        let mut platforms = serde_json::Map::new();
-        for os in ["linux-x86_64", "windows-x86_64"] {
-            platforms.insert(os.to_string(), entry.clone());
-        }
-        for key in [
-            "linux-x86_64-appimage",
-            "linux-x86_64-deb",
-            "windows-x86_64-nsis",
-            "windows-x86_64-msi",
-        ] {
-            platforms.insert(key.to_string(), entry.clone());
-        }
+        let platforms = |signature: &str| {
+            let entry =
+                json!({ "signature": signature, "url": format!("{base}/gui-check-update.bin") });
+            let mut platforms = serde_json::Map::new();
+            for os in ["linux-x86_64", "windows-x86_64"] {
+                platforms.insert(os.to_string(), entry.clone());
+            }
+            for key in [
+                "linux-x86_64-appimage",
+                "linux-x86_64-deb",
+                "windows-x86_64-nsis",
+                "windows-x86_64-msi",
+            ] {
+                platforms.insert(key.to_string(), entry.clone());
+            }
+            platforms
+        };
         let manifest = json!({
             "version": VERSION,
             "notes": NOTES,
             "pub_date": "2026-10-20T00:00:00Z",
-            "platforms": platforms,
+            "platforms": platforms(&signature),
         })
         .to_string();
+        // As tools/release/make_previous_json.py writes one: the previous
+        // release's own latest.json, plus its schema.
+        let previous_manifest = |schema: i64| {
+            json!({
+                "version": PREVIOUS_VERSION,
+                "notes": "The release before.",
+                "pub_date": "2026-09-01T00:00:00Z",
+                "platforms": platforms(&previous_signature),
+                "schemaVersion": schema,
+            })
+            .to_string()
+        };
 
         let requests = Arc::new(Requests::default());
-        let served = Arc::new((manifest, package));
+        let served = Arc::new(Served {
+            manifest,
+            previous: previous_manifest(PREVIOUS_SCHEMA),
+            previous_unreadable: previous_manifest(0),
+            package,
+        });
         tokio::spawn({
             let requests = requests.clone();
             async move {
@@ -134,7 +179,7 @@ impl UpdateServer {
                     let requests = requests.clone();
                     let served = served.clone();
                     tokio::spawn(async move {
-                        let _ = serve(stream, &served.0, &served.1, &requests).await;
+                        let _ = serve(stream, &served, &requests).await;
                     });
                 }
             }
@@ -155,6 +200,8 @@ impl UpdateServer {
         Ok(Self {
             endpoint: format!("{base}/latest.json"),
             black_hole: format!("http://127.0.0.1:{hole_port}/latest.json"),
+            previous: format!("{base}/previous.json"),
+            previous_unreadable: format!("{base}/previous-unreadable.json"),
             pubkey,
             requests,
             package_size: PACKAGE_SIZE as u64,
@@ -165,6 +212,19 @@ impl UpdateServer {
     /// `mode` is `self` or `link`; `offline` points it at the black hole
     /// with a short time limit.
     pub async fn write_settings(&self, path: &Path, mode: &str, offline: bool) -> Result<()> {
+        self.write_settings_with(path, mode, offline, None).await
+    }
+
+    /// [`write_settings`](Self::write_settings), with Go back reading
+    /// `previous` (one of the server's two) in place of the real
+    /// release's.
+    pub async fn write_settings_with(
+        &self,
+        path: &Path,
+        mode: &str,
+        offline: bool,
+        previous: Option<&str>,
+    ) -> Result<()> {
         let mut settings = json!({
             "endpoint": if offline { &self.black_hole } else { &self.endpoint },
             "pubkey": self.pubkey,
@@ -173,6 +233,9 @@ impl UpdateServer {
         if offline {
             settings["timeoutMs"] = json!(OFFLINE_LIMIT.as_millis() as u64);
         }
+        if let Some(previous) = previous {
+            settings["previous"] = json!(previous);
+        }
         tokio::fs::write(path, settings.to_string())
             .await
             .with_context(|| format!("writing the test updater settings {}", path.display()))
@@ -180,6 +243,10 @@ impl UpdateServer {
 
     pub fn manifests(&self) -> u64 {
         self.requests.manifests.load(Ordering::SeqCst)
+    }
+
+    pub fn previous_requests(&self) -> u64 {
+        self.requests.previous.load(Ordering::SeqCst)
     }
 
     pub fn packages(&self) -> u64 {
@@ -194,13 +261,17 @@ impl UpdateServer {
 /// The check's time limit check 13 sets: the app gives up after this.
 pub const OFFLINE_LIMIT: Duration = Duration::from_secs(2);
 
-/// Answers one request: the manifest, the package (slowly), or 404.
-async fn serve(
-    mut stream: TcpStream,
-    manifest: &str,
-    package: &[u8],
-    requests: &Requests,
-) -> Result<()> {
+/// What the server serves.
+struct Served {
+    manifest: String,
+    previous: String,
+    previous_unreadable: String,
+    package: Vec<u8>,
+}
+
+/// Answers one request: a manifest, the package (slowly), or 404.
+async fn serve(mut stream: TcpStream, served: &Served, requests: &Requests) -> Result<()> {
+    let package = &served.package;
     let mut head = Vec::new();
     let mut buf = [0u8; 1024];
     while !head.windows(4).any(|w| w == b"\r\n\r\n") {
@@ -212,14 +283,25 @@ async fn serve(
     }
     let head = String::from_utf8_lossy(&head);
     let path = head.split_whitespace().nth(1).unwrap_or("/");
+    let json = |manifest: &str| {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{manifest}",
+            manifest.len()
+        )
+    };
     match path {
         "/latest.json" => {
             requests.manifests.fetch_add(1, Ordering::SeqCst);
-            let reply = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{manifest}",
-                manifest.len()
-            );
-            stream.write_all(reply.as_bytes()).await?;
+            stream.write_all(json(&served.manifest).as_bytes()).await?;
+        }
+        "/previous.json" | "/previous-unreadable.json" => {
+            requests.previous.fetch_add(1, Ordering::SeqCst);
+            let manifest = if path == "/previous.json" {
+                &served.previous
+            } else {
+                &served.previous_unreadable
+            };
+            stream.write_all(json(manifest).as_bytes()).await?;
         }
         "/gui-check-update.bin" => {
             requests.packages.fetch_add(1, Ordering::SeqCst);

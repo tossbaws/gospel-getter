@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { backend, closeBridge, el, select, waitFor, withApp } from './harness.mjs';
+import { backend, closeBridge, el, select, setUpdate, waitFor, withApp } from './harness.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-dialogs-'));
 after(async () => {
@@ -91,7 +91,22 @@ const OPENERS = {
         await app.key('n', {}, from);
         return from;
     },
+    // Go back's confirm, over About: About stays open behind it (below).
+    'go-back-overlay': async (app) => {
+        await setUpdate({ previous: { version: '1.0.0', schemaVersion: 2 } });
+        app.open('about');
+        const before = app.calls.length;
+        app.click(el(app, 'update-check-btn'));
+        await app.idle(before, 'check_previous_version');
+        const from = el(app, 'go-back-btn');
+        from.focus();
+        app.click(from);
+        return from;
+    },
 };
+
+// The modals that open over another, which stays open once they close.
+const OVER = { 'go-back-overlay': 'about' };
 
 test('one Escape closes each modal and nothing else: focus goes back, the selection and the chapter stay', async () => {
     await backend('__reset', { bookId: 43, chapter: 3, translationCode: 'kjv' });
@@ -113,7 +128,11 @@ test('one Escape closes each modal and nothing else: focus goes back, the select
             assert.deepEqual(app.selectedVerseNumbers(), [16], `${id}: the selection stays`);
             assert.equal(app.heading(), heading, `${id}: the chapter stays`);
             assert.equal(readings(app, before), 0, `${id}: nothing is read`);
-            assert.equal(app.window.gospelGetterSurfaces.current(), null, `${id}: nothing else is open`);
+            assert.equal(app.window.gospelGetterSurfaces.current(), OVER[id] ?? null, `${id}: nothing else is open`);
+            if (OVER[id]) {
+                await app.key('Escape', {}, app.document.activeElement);
+                assert.equal(app.window.gospelGetterSurfaces.current(), null, `${id}: what it was over closes next`);
+            }
         }
         assert.deepEqual(Object.keys(OPENERS).sort(), modals(app).sort(), 'every modal on the list was walked');
     });

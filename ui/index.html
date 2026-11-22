@@ -1363,9 +1363,36 @@
         }
 
         .about-update:focus-visible,
-        .about-update-notes:focus-visible {
+        .about-update-notes:focus-visible,
+        .go-back:focus-visible {
             outline: 2px solid var(--accent);
             outline-offset: 2px;
+        }
+
+        /* "You skipped this version", under the skipped update's title. */
+        .about-update .section-note {
+            margin-top: 0;
+        }
+
+        /* Go back, under Check now: the button, or the line saying why it
+           isn't offered, then the backup's path and the download. The path
+           wraps anywhere, so a long one never widens About. */
+        .go-back:not([hidden]) {
+            display: block;
+            margin-top: 0.6rem;
+        }
+
+        .go-back .section-note {
+            margin-bottom: 0;
+        }
+
+        #go-back-saved {
+            overflow-wrap: anywhere;
+            margin: 0.4rem 0 0;
+        }
+
+        #go-back-progress:not([hidden]) {
+            margin-top: 0.5rem;
         }
 
         /* The bundled texts' sources, as the README gives them: quiet, as

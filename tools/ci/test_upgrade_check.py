@@ -243,5 +243,64 @@ class Refusal(unittest.TestCase):
                 platform.guard()
 
 
+class GoingBack(unittest.TestCase):
+    """`back`: this build first, then the previous release over it."""
+
+    def test_refuses_without_the_switch_or_the_version_it_goes_back_to(self):
+        with mock.patch.dict(os.environ, {}, clear=True), redirect_stdout(io.StringIO()) as out:
+            code = u.main(["back", "--from", "a", "--to", "b", "--work", "w", "--expect-version", "2.35.0"])
+        self.assertEqual(code, 2)
+        self.assertIn("refusing to run", out.getvalue())
+        with mock.patch.dict(os.environ, {u.SWITCH: u.SWITCH_VALUE}), redirect_stdout(io.StringIO()) as out:
+            code = u.main(["back", "--from", "a", "--to", "b", "--work", "w"])
+        self.assertEqual(code, 2)
+        self.assertIn("back needs --expect-version", out.getvalue())
+
+    def test_back_runs_the_check_the_other_way(self):
+        seen = {}
+
+        def fake(args, back=False):
+            seen.update(back=back, version=args.expect_version, start=args.from_installer)
+            return 0
+
+        with mock.patch.object(u, "run", fake):
+            self.assertEqual(u.main(["back", "--from", "new.exe", "--to", "old.exe", "--work", "w",
+                                     "--expect-version", "2.35.0"]), 0)
+        self.assertEqual(seen, {"back": True, "version": "2.35.0", "start": "new.exe"})
+        with mock.patch.object(u, "run", fake):
+            self.assertEqual(u.main(["run", "--from", "old.exe", "--to", "new.exe", "--work", "w"]), 0)
+        self.assertEqual(seen["back"], False)
+
+    def test_the_schema_stays_this_builds_with_no_copy_promised(self):
+        with tempfile.TemporaryDirectory() as temp:
+            database = Path(temp) / u.DATABASE_FILE
+            version_1_database(database)
+            ok, detail = u.schema_verdict(database, 2, 2, 2, [])
+            self.assertTrue(ok, detail)
+            self.assertIn("no before-schema copy is promised", detail)
+            # An older app that moved the schema (or a newer one's) fails.
+            ok, _ = u.schema_verdict(database, 2, 2, 1, [])
+            self.assertFalse(ok)
+            # The upgrade's promised copy, missing, fails.
+            ok, detail = u.schema_verdict(database, 1, 2, 2, [2])
+            self.assertFalse(ok)
+            self.assertIn("missing", detail)
+
+    def test_clearing_removes_only_the_apps_folders_that_exist(self):
+        with tempfile.TemporaryDirectory() as temp:
+            kept = Path(temp) / "kept"
+            data = Path(temp) / "com.tossbaws.gospel-getter"
+            logs = Path(temp) / "local" / "com.tossbaws.gospel-getter"
+            for folder in (kept, data, logs / "logs"):
+                folder.mkdir(parents=True)
+            platform = u.Windows.__new__(u.Windows)
+            platform.data_dir = data
+            platform.log_dir = logs / "logs"
+            self.assertEqual(platform.clear(), [str(data), str(logs)])
+            self.assertEqual(platform.clear(), [])
+            self.assertTrue(kept.exists())
+            platform.guard()
+
+
 if __name__ == "__main__":
     unittest.main()

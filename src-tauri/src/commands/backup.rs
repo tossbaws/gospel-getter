@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use super::{
-    AppState, app_version, book_name, failed, lock, over_main_window, run_dialog, write_atomically,
+    AppState, already_exists, app_version, book_name, failed, lock, over_main_window, run_dialog,
+    write_atomically, write_new_atomically,
 };
 use crate::db::notes::grouped;
 use crate::db::reader_data::{ApplyImportError, FindingsImport, ImportCounts};
@@ -326,6 +327,61 @@ pub async fn save_reader_data(data: &ReaderData, path: &Path) -> anyhow::Result<
         has_position: data.reading_position.is_some(),
         preferences: data.preferences.count(),
     })
+}
+
+/// The most backups Go back saves on one day, before one version: then it
+/// says so rather than look further for a free name.
+const MAX_BACKUPS_A_DAY: u32 = 100;
+
+/// The backup About's Go back saves before it installs `version`: the whole
+/// of the reader's data, exactly as Export data… saves it (the display
+/// `preferences` the page passed in), in `folder` (the database's, see
+/// `updater::save_backup_before_going_back`), named for the step and the
+/// day by the database's clock: `gospel-getter-backup-before-2.35.0-2026-11-22.gospel-getter.json`,
+/// then `…-2026-11-22-2.gospel-getter.json` and on if that's taken. It
+/// never replaces a file already there (`write_new_atomically`). Where it
+/// went, once it's whole on disk.
+pub async fn save_backup_before(
+    state: &AppState,
+    preferences: Preferences,
+    folder: &Path,
+    version: &str,
+) -> anyhow::Result<PathBuf> {
+    let now = state
+        .store
+        .now()
+        .await
+        .context("Failed to read the date for the backup's name")?;
+    let stem = format!(
+        "gospel-getter-backup-before-{version}-{}",
+        now.get(..10).unwrap_or("today")
+    );
+    let data = build_reader_data(state, preferences)
+        .await
+        .context("Failed to gather the data to back up")?;
+    let contents =
+        reader_data::to_file_contents(&data).context("The backup couldn't be converted to JSON")?;
+    let folder = folder.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        for n in 1..=MAX_BACKUPS_A_DAY {
+            let name = match n {
+                1 => format!("{stem}{}", reader_data::FILE_SUFFIX),
+                n => format!("{stem}-{n}{}", reader_data::FILE_SUFFIX),
+            };
+            let path = folder.join(name);
+            match write_new_atomically(&path, contents.as_bytes()) {
+                Ok(()) => return Ok(path),
+                Err(e) if already_exists(&e) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        anyhow::bail!(
+            "{} already holds {MAX_BACKUPS_A_DAY} backups made today before {stem}",
+            folder.display()
+        )
+    })
+    .await
+    .context("The backup was interrupted")?
 }
 
 /// The name the save dialog suggests for a backup made now: the day it's

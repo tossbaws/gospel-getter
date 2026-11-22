@@ -20,6 +20,21 @@
 //! a URL: `open_download_page`, always [`RELEASES_PAGE`], and
 //! `open_release_notes`, always this version's page
 //! ([`release_notes_page`]). Neither takes a URL from the page.
+//!
+//! Go back (About): each release also carries `previous.json`
+//! (`tools/release/make_previous_json.py`), latest.json's shape plus
+//! `schemaVersion`, naming the release kept before it and that release's
+//! own signed installers. This build reads its own release's copy, at
+//! [`previous_manifest`] of its own version (never a URL from the page),
+//! with the same key and `requireSignedVersion`, and the only version it
+//! takes from it is a lower, final one ([`is_valid_previous`], the
+//! comparator of that one updater; the check for updates keeps
+//! [`is_offered`]). It offers it only to a release installer, and only if
+//! that release can use the database as it is now
+//! (`migrate::older_app_can_use`); otherwise About says why. Going back
+//! saves a whole backup beside the database first
+//! (`save_backup_before_going_back`), and installs nothing until one is
+//! saved for that version (`install_previous_version`).
 
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -43,6 +58,17 @@ pub const RELEASES_PAGE: &str = "https://github.com/tossbaws/gospel-getter/relea
 /// Every release's page is this, then its version (`v2.6.0`'s for 2.6.0).
 /// About's Release notes link builds the same URL in the page, to show it.
 pub const RELEASE_NOTES_PREFIX: &str = "https://github.com/tossbaws/gospel-getter/releases/tag/v";
+
+/// Every release's `previous.json` is under this, then its version (see
+/// [`previous_manifest`]).
+pub const PREVIOUS_PREFIX: &str = "https://github.com/tossbaws/gospel-getter/releases/download/v";
+
+/// Where the release of `version` keeps its `previous.json`: its own
+/// assets, so each release names the one kept before it.
+#[must_use]
+pub fn previous_manifest(version: &str) -> String {
+    format!("{PREVIOUS_PREFIX}{version}/previous.json")
+}
 
 /// The release page for `version`: its notes and downloads.
 #[must_use]
@@ -105,6 +131,15 @@ pub fn is_offered(current: &semver::Version, remote: &semver::Version) -> bool {
     remote.pre.is_empty() && remote.cmp_precedence(current).is_gt()
 }
 
+/// Whether Go back may install `remote` over `current`, from this
+/// release's `previous.json`: only a lower, final release (never a
+/// pre-release, nor this version or a newer one). The signature must also
+/// be this app's key's and name `remote` (`requireSignedVersion`), which
+/// the download checks.
+pub fn is_valid_previous(current: &semver::Version, remote: &semver::Version) -> bool {
+    remote.pre.is_empty() && remote.cmp_precedence(current).is_lt()
+}
+
 /// An available update, for the banner and About.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,7 +179,7 @@ impl UpdateInfo {
 }
 
 // Shared with the page, which reads them whole (see shared/wire.rs).
-pub use crate::wire::DownloadEvent;
+pub use crate::wire::{BackupSaved, DownloadEvent, PreviousInfo};
 
 /// The messages the reader sees. The frontend tests use these too, through
 /// the test bridge, so the wording is checked in one place.
@@ -166,6 +201,11 @@ pub mod messages {
     pub const LINK_ONLY: &str = "This copy of Gospel Getter can\u{2019}t update itself. Download the new version from the releases page.";
     pub const OPEN_FAILED: &str = "Couldn\u{2019}t open the releases page in your browser.";
     pub const NOTES_OPEN_FAILED: &str = "Couldn\u{2019}t open the release notes in your browser.";
+    pub const NOTHING_TO_GO_BACK_TO: &str =
+        "There\u{2019}s no earlier version to go back to. Check for updates first.";
+    pub const BACKUP_FAILED: &str = "Your notes, bookmarks, highlights and settings couldn\u{2019}t be backed up, so Gospel Getter didn\u{2019}t go back. Nothing was changed.";
+    pub const NOT_BACKED_UP: &str =
+        "Gospel Getter goes back only once it has saved a backup. Nothing was changed.";
 }
 
 /// How long a check for updates may take: one that hasn't answered by then
@@ -254,14 +294,63 @@ pub fn with_causes(error: &dyn std::error::Error) -> String {
     line
 }
 
-/// The update the last check found, for `install_update`.
+/// The update the last check found, for `install_update`, and the release
+/// Go back offers, for `install_previous_version`.
 #[derive(Default)]
 pub struct PendingUpdate {
     update: Mutex<Option<Update>>,
+    previous: Mutex<Option<Previous>>,
     /// Set by the Windows hook ([`installer_hook`]) right before the
     /// installer is started: an install that returns once it's set
     /// didn't start the installer.
     installer_starting: Arc<AtomicBool>,
+}
+
+/// The release Go back offers: its version, the updater's update for it
+/// (none under the frontend tests' bridge), and whether a backup has been
+/// saved before going back to it.
+struct Previous {
+    version: String,
+    update: Option<Update>,
+    backed_up: bool,
+}
+
+impl PendingUpdate {
+    fn offer_previous(&self, previous: Option<Previous>) {
+        *self.previous.lock().unwrap_or_else(|e| e.into_inner()) = previous;
+    }
+
+    fn previous_version(&self) -> Option<String> {
+        self.previous
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|p| p.version.clone())
+    }
+
+    /// A backup was saved before going back to `version`, if it's still
+    /// the one offered.
+    fn backed_up_for(&self, version: &str) {
+        if let Some(previous) = self
+            .previous
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_mut()
+            .filter(|p| p.version == version)
+        {
+            previous.backed_up = true;
+        }
+    }
+
+    /// The release to go back to, once a backup was saved for it.
+    fn previous_to_install(&self) -> Result<(String, Option<Update>), &'static str> {
+        let previous = self.previous.lock().unwrap_or_else(|e| e.into_inner());
+        let previous = previous.as_ref().ok_or(messages::NOTHING_TO_GO_BACK_TO)?;
+        if !previous.backed_up {
+            return Err(messages::NOT_BACKED_UP);
+        }
+        Ok((previous.version.clone(), previous.update.clone()))
+    }
 }
 
 /// The bundle type the Tauri bundler marked this binary with.
@@ -296,6 +385,9 @@ pub struct Settings {
     pub endpoint: Option<tauri::Url>,
     pub pubkey: Option<String>,
     pub installs: bool,
+    /// Where `previous.json` is in place of [`previous_manifest`] of this
+    /// version: only a GUI-check test build's can be anything but `None`.
+    pub previous: Option<tauri::Url>,
 }
 
 /// This build's [`Settings`]: `tauri.conf.json`'s endpoint and key (the
@@ -312,6 +404,7 @@ pub fn settings() -> Result<Settings, String> {
         endpoint: None,
         pubkey: None,
         installs: true,
+        previous: None,
     })
 }
 
@@ -403,16 +496,44 @@ fn save_window_state<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// What an updater looks for: the update (the endpoint `tauri.conf.json`
+/// or the settings name, any newer final release) or Go back's release
+/// (this version's `previous.json`, a lower final release).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Looking {
+    Update,
+    Previous,
+}
+
 fn updater<R: Runtime>(
     app: &AppHandle<R>,
     settings: &Settings,
     installer_starting: &Arc<AtomicBool>,
+    looking: Looking,
 ) -> Result<tauri_plugin_updater::Updater, Error> {
-    let mut builder = app
-        .updater_builder()
-        .version_comparator(|current, release| is_offered(&current, &release.version));
-    if let Some(endpoint) = &settings.endpoint {
-        builder = builder.endpoints(vec![endpoint.clone()])?;
+    let mut builder = app.updater_builder();
+    match looking {
+        Looking::Update => {
+            builder = builder
+                .version_comparator(|current, release| is_offered(&current, &release.version));
+            if let Some(endpoint) = &settings.endpoint {
+                builder = builder.endpoints(vec![endpoint.clone()])?;
+            }
+        }
+        // Its own updater, so the lower version it accepts is only ever
+        // this one manifest's: the check for updates never sees this
+        // comparator.
+        Looking::Previous => {
+            let endpoint = match &settings.previous {
+                Some(endpoint) => endpoint.clone(),
+                None => previous_manifest(crate::commands::app_version()).parse()?,
+            };
+            builder = builder
+                .version_comparator(|current, release| {
+                    is_valid_previous(&current, &release.version)
+                })
+                .endpoints(vec![endpoint])?;
+        }
     }
     if let Some(pubkey) = &settings.pubkey {
         builder = builder.pubkey(pubkey.clone());
@@ -465,7 +586,12 @@ pub async fn check_for_update<R: Runtime>(
     let settings = settings()?;
     let mode = settings.mode;
     let found = within_check_time(settings.timeout, async {
-        let found = match updater(&app, &settings, &pending.installer_starting) {
+        let found = match updater(
+            &app,
+            &settings,
+            &pending.installer_starting,
+            Looking::Update,
+        ) {
             Ok(updater) => updater.check().await,
             Err(e) => Err(e),
         };
@@ -492,15 +618,7 @@ pub async fn install_update<R: Runtime>(
     on_event: Channel<DownloadEvent>,
 ) -> Result<(), String> {
     if let Some(script) = state.bridge_script() {
-        let install = script.install_update();
-        for event in install.events {
-            let _ = on_event.send(event);
-        }
-        if let Some(problem) = install.problem {
-            return Err(install_message(problem).to_string());
-        }
-        script.restart();
-        return std::future::pending().await;
+        return scripted_install(script, &on_event).await;
     }
     let settings = settings()?;
     if settings.mode != UpdateMode::SelfUpdate {
@@ -512,7 +630,36 @@ pub async fn install_update<R: Runtime>(
         .unwrap_or_else(|e| e.into_inner())
         .clone()
         .ok_or_else(|| messages::NOTHING_TO_INSTALL.to_string())?;
+    download_and_install(app, &settings, &pending, update, on_event).await
+}
 
+/// Installing as the frontend tests' bridge scripts it (`BridgeScript`):
+/// its progress, then its problem, or a restart, after which it never
+/// answers.
+async fn scripted_install(
+    script: &dyn crate::commands::BridgeScript,
+    on_event: &Channel<DownloadEvent>,
+) -> Result<(), String> {
+    let install = script.install_update();
+    for event in install.events {
+        let _ = on_event.send(event);
+    }
+    if let Some(problem) = install.problem {
+        return Err(install_message(problem).to_string());
+    }
+    script.restart();
+    std::future::pending().await
+}
+
+/// Download `update`, verify it, install it and restart (Update now's, and
+/// Go back's): it only returns on failure.
+async fn download_and_install<R: Runtime>(
+    app: AppHandle<R>,
+    settings: &Settings,
+    pending: &PendingUpdate,
+    update: Update,
+    on_event: Channel<DownloadEvent>,
+) -> Result<(), String> {
     let mut started = false;
     let progress = on_event.clone();
     let bytes = update
@@ -539,14 +686,9 @@ pub async fn install_update<R: Runtime>(
         })?;
     let _ = on_event.send(DownloadEvent::Finished);
     // A GUI-check test build stops here, downloaded and verified: it
-    // never replaces itself. (No other build has this.)
-    #[cfg(feature = "gui-test-updater")]
+    // never replaces itself. (No other build's settings say this.)
     if !settings.installs {
-        tracing::info!(
-            "Downloaded and verified update {}; a test build doesn't install it",
-            update.version
-        );
-        return Err(test_hook::DOESNT_INSTALL.to_string());
+        return Err(not_installed(&update.version));
     }
 
     let installing = update.clone();
@@ -560,6 +702,204 @@ pub async fn install_update<R: Runtime>(
         tracing::error!("Failed to close the database before restarting: {e}");
     }
     app.restart();
+}
+
+/// What a build whose settings say it doesn't install says once the
+/// update is downloaded and verified: only a GUI-check test build's can
+/// (see `Settings::installs`).
+fn not_installed(version: &str) -> String {
+    tracing::info!("Downloaded and verified update {version}; a test build doesn't install it");
+    #[cfg(feature = "gui-test-updater")]
+    return test_hook::DOESNT_INSTALL.to_string();
+    #[cfg(not(feature = "gui-test-updater"))]
+    messages::INSTALL_FAILED.to_string()
+}
+
+/// The release this one's `previous.json` names, for About's Go back,
+/// fetched quietly beside each check for updates: `None`, with no error,
+/// if this build can't install it (it links to the releases page), if
+/// there's no `previous.json` (an older release, offline, or a 404), or if
+/// what it names isn't a lower final release signed with this app's key
+/// for its version. If it can't use the database as it is now, it's
+/// returned as such and not offered.
+#[tauri::command]
+pub async fn check_previous_version<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    pending: State<'_, PendingUpdate>,
+) -> Result<Option<PreviousInfo>, String> {
+    if let Some(script) = state.bridge_script() {
+        let found = script
+            .check_previous()
+            .filter(|_| script.update_mode() == UpdateMode::SelfUpdate);
+        let info = match found {
+            Some(found) => previous_info(&state, &found.version, Some(found.schema_version)).await,
+            None => None,
+        };
+        pending.offer_previous(
+            info.as_ref()
+                .filter(|i| i.reads_this_data)
+                .map(|i| Previous {
+                    version: i.version.clone(),
+                    update: None,
+                    backed_up: false,
+                }),
+        );
+        return Ok(info);
+    }
+    let Ok(settings) = settings() else {
+        return Ok(None);
+    };
+    if settings.mode != UpdateMode::SelfUpdate {
+        pending.offer_previous(None);
+        return Ok(None);
+    }
+    let found = within_check_time(settings.timeout, async {
+        let found = match updater(
+            &app,
+            &settings,
+            &pending.installer_starting,
+            Looking::Previous,
+        ) {
+            Ok(updater) => updater.check().await,
+            Err(e) => Err(e),
+        };
+        found.map_err(|e| with_causes(&e))
+    })
+    .await;
+    let update = match found {
+        Ok(Some(update)) => update,
+        Ok(None) => {
+            tracing::warn!("This release's previous.json names no lower, final release");
+            pending.offer_previous(None);
+            return Ok(None);
+        }
+        Err(e) => {
+            tracing::info!("No earlier release to go back to: {e}");
+            pending.offer_previous(None);
+            return Ok(None);
+        }
+    };
+    let schema = update
+        .raw_json
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_i64);
+    let info = previous_info(&state, &update.version, schema).await;
+    pending.offer_previous(
+        info.as_ref()
+            .filter(|i| i.reads_this_data)
+            .map(|i| Previous {
+                version: i.version.clone(),
+                update: Some(update.clone()),
+                backed_up: false,
+            }),
+    );
+    Ok(info)
+}
+
+/// What About says of going back to `version`, whose `previous.json` says
+/// its schema is `schema`: nothing if it isn't a lower final release than
+/// this one, or if its schema isn't given or the database's can't be read
+/// (nothing then says it's safe).
+async fn previous_info(
+    state: &AppState,
+    version: &str,
+    schema: Option<i64>,
+) -> Option<PreviousInfo> {
+    let current = semver::Version::parse(crate::commands::app_version()).ok()?;
+    let remote = semver::Version::parse(version).ok()?;
+    if !is_valid_previous(&current, &remote) {
+        tracing::warn!("previous.json names {version}, which isn't a release before this one");
+        return None;
+    }
+    let Some(schema) = schema else {
+        tracing::warn!("previous.json for {version} gives no schemaVersion");
+        return None;
+    };
+    let database = match state.store.schema_version().await {
+        Ok(database) => database,
+        Err(e) => {
+            tracing::error!("Couldn't read the database's schema for Go back: {e:#}");
+            return None;
+        }
+    };
+    let reads_this_data = crate::db::migrate::older_app_can_use(schema, database);
+    if !reads_this_data {
+        tracing::info!(
+            "Go back to {version} isn't offered: it's built for schema {schema}, and the \
+             database is at {database}"
+        );
+    }
+    Some(PreviousInfo {
+        version: version.to_string(),
+        reads_this_data,
+    })
+}
+
+/// Go back's first step: save a whole backup of the reader's data (the
+/// Export data… format, with the display `preferences` the page passes)
+/// beside the database, under a name that says what it's for, never over
+/// a file already there (`commands::save_backup_before`). Going back
+/// installs nothing until this has succeeded for the release offered.
+#[tauri::command]
+pub async fn save_backup_before_going_back(
+    state: State<'_, AppState>,
+    pending: State<'_, PendingUpdate>,
+    preferences: crate::reader_data::Preferences,
+) -> Result<BackupSaved, String> {
+    let version = pending
+        .previous_version()
+        .ok_or_else(|| messages::NOTHING_TO_GO_BACK_TO.to_string())?;
+    let folder = match state.bridge_script().and_then(|s| s.backup_folder()) {
+        Some(folder) => Ok(folder),
+        None => state.store.database_file().await.and_then(|file| {
+            file.parent()
+                .map(std::path::Path::to_path_buf)
+                .ok_or_else(|| anyhow::anyhow!("{} has no folder", file.display()))
+        }),
+    };
+    let saved = match folder {
+        Ok(folder) => {
+            crate::commands::save_backup_before(&state, preferences, &folder, &version).await
+        }
+        Err(e) => Err(e),
+    };
+    let path = saved.map_err(|e| {
+        tracing::error!("Failed to back up before going back to {version}: {e:#}");
+        messages::BACKUP_FAILED.to_string()
+    })?;
+    tracing::info!(
+        "Backed up before going back to {version}: {}",
+        path.display()
+    );
+    pending.backed_up_for(&version);
+    Ok(BackupSaved {
+        path: path.display().to_string(),
+    })
+}
+
+/// Go back: download the release `previous.json` named, verify it with
+/// this app's key and its version, install it and restart, exactly as
+/// Update now does, with the same progress. Only once a backup was saved
+/// for it (`save_backup_before_going_back`); it only returns on failure.
+#[tauri::command]
+pub async fn install_previous_version<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    pending: State<'_, PendingUpdate>,
+    on_event: Channel<DownloadEvent>,
+) -> Result<(), String> {
+    let (version, update) = pending.previous_to_install().map_err(str::to_string)?;
+    if let Some(script) = state.bridge_script() {
+        return scripted_install(script, &on_event).await;
+    }
+    let settings = settings()?;
+    if settings.mode != UpdateMode::SelfUpdate {
+        return Err(messages::LINK_ONLY.to_string());
+    }
+    let update = update.ok_or_else(|| messages::NOTHING_TO_GO_BACK_TO.to_string())?;
+    tracing::info!("Going back to {version}");
+    download_and_install(app, &settings, &pending, update, on_event).await
 }
 
 /// Run `install`, the updater's: on Windows it runs [`installer_hook`],
@@ -708,6 +1048,171 @@ mod tests {
         assert!(!is_offered(&v("2.5.0"), &v("2.5.0+rebuild")));
         // A pre-release build is offered its final release.
         assert!(is_offered(&v("2.6.0-rc.1"), &v("2.6.0")));
+    }
+
+    /// Go back takes only a lower, final release from previous.json; the
+    /// check for updates never takes one (`is_offered`, above), and the two
+    /// never agree on a version.
+    #[test]
+    fn go_back_takes_only_a_lower_final_release() {
+        let current = v("2.36.0");
+        assert!(is_valid_previous(&current, &v("2.35.0")));
+        assert!(is_valid_previous(&current, &v("2.35.9")));
+        assert!(is_valid_previous(&current, &v("1.0.0")));
+        assert!(
+            is_valid_previous(&v("2.10.0"), &v("2.9.0")),
+            "compared as numbers, not text"
+        );
+        assert!(!is_valid_previous(&current, &current), "not this version");
+        assert!(!is_valid_previous(&current, &v("2.36.0+rebuild")));
+        assert!(!is_valid_previous(&current, &v("2.37.0")), "never newer");
+        assert!(
+            !is_valid_previous(&current, &v("2.35.0-rc.1")),
+            "no pre-release"
+        );
+        // A pre-release build may go back to the release before it.
+        assert!(is_valid_previous(&v("2.36.0-beta.1"), &v("2.35.0")));
+        for remote in ["2.35.0", "2.36.0", "2.37.0", "2.35.0-rc.1"] {
+            assert!(
+                !(is_valid_previous(&current, &v(remote)) && is_offered(&current, &v(remote))),
+                "{remote}"
+            );
+        }
+    }
+
+    /// Each release reads its own previous.json, beside its own assets:
+    /// never the Latest release's, never one the page names.
+    #[test]
+    fn previous_json_is_this_releases_own() {
+        assert_eq!(
+            previous_manifest("2.36.0"),
+            "https://github.com/tossbaws/gospel-getter/releases/download/v2.36.0/previous.json"
+        );
+        assert!(previous_manifest(crate::commands::app_version()).starts_with(PREVIOUS_PREFIX));
+        assert!(!previous_manifest("2.36.0").contains("/latest/"));
+    }
+
+    /// Go back installs nothing until a backup was saved for the very
+    /// release offered: none offered, one offered but not backed up, a
+    /// backup for another version, then one for it.
+    #[test]
+    fn go_back_installs_only_once_backed_up() {
+        let pending = PendingUpdate::default();
+        assert_eq!(
+            pending.previous_to_install().err(),
+            Some(messages::NOTHING_TO_GO_BACK_TO)
+        );
+        pending.offer_previous(Some(Previous {
+            version: "2.35.0".into(),
+            update: None,
+            backed_up: false,
+        }));
+        assert_eq!(
+            pending.previous_to_install().err(),
+            Some(messages::NOT_BACKED_UP)
+        );
+        pending.backed_up_for("2.34.0");
+        assert_eq!(
+            pending.previous_to_install().err(),
+            Some(messages::NOT_BACKED_UP)
+        );
+        pending.backed_up_for("2.35.0");
+        assert_eq!(
+            pending.previous_to_install().map(|(version, _)| version),
+            Ok("2.35.0".to_string())
+        );
+        // A new check offers it afresh: backed up again before it installs.
+        pending.offer_previous(Some(Previous {
+            version: "2.35.0".into(),
+            update: None,
+            backed_up: false,
+        }));
+        assert_eq!(
+            pending.previous_to_install().err(),
+            Some(messages::NOT_BACKED_UP)
+        );
+        pending.offer_previous(None);
+        assert_eq!(pending.previous_version(), None);
+    }
+
+    /// Go back's backup: the whole of the reader's data in the Export
+    /// data… format, beside the database, named for the step and the day,
+    /// and never over a file already there; the day's second gets `-2`.
+    #[tokio::test]
+    async fn the_backup_before_going_back_is_a_whole_backup_beside_the_database() {
+        use crate::db::test_support::fresh_database;
+        let (db, pool) = fresh_database("go_back_backup").await;
+        let state = AppState::load(pool).await.expect("load state");
+        state
+            .store
+            .add_note(
+                &crate::db::Passage {
+                    book_id: 43,
+                    chapter: 3,
+                    verse_start: 16,
+                    verse_end: 16,
+                },
+                "Before going back.",
+                None,
+            )
+            .await
+            .expect("a note");
+        let folder = state
+            .store
+            .database_file()
+            .await
+            .expect("the database's file")
+            .parent()
+            .expect("its folder")
+            .to_path_buf();
+        assert_eq!(folder, db.path().parent().expect("its folder"));
+        let preferences = || {
+            serde_json::from_value::<crate::reader_data::Preferences>(
+                serde_json::json!({ "theme": "vellum" }),
+            )
+            .expect("preferences")
+        };
+        let first = crate::commands::save_backup_before(&state, preferences(), &folder, "2.35.0")
+            .await
+            .expect("saved");
+        let day = &state.store.now().await.expect("now")[..10];
+        assert_eq!(first.parent(), Some(folder.as_path()));
+        assert_eq!(
+            first.file_name().and_then(|n| n.to_str()),
+            Some(&*format!(
+                "gospel-getter-backup-before-2.35.0-{day}.gospel-getter.json"
+            ))
+        );
+        let text = std::fs::read_to_string(&first).expect("read it");
+        let file: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+        assert_eq!(file["format"], crate::reader_data::FORMAT);
+        assert_eq!(file["notes"][0]["body"], "Before going back.");
+        assert_eq!(file["preferences"]["theme"], "vellum");
+
+        let second = crate::commands::save_backup_before(&state, preferences(), &folder, "2.35.0")
+            .await
+            .expect("saved again");
+        assert_ne!(second, first);
+        assert!(
+            second
+                .to_string_lossy()
+                .ends_with(&format!("2.35.0-{day}-2.gospel-getter.json")),
+            "{}",
+            second.display()
+        );
+        assert_eq!(std::fs::read_to_string(&first).expect("read it"), text);
+
+        let nowhere = folder.join("not-a-folder.txt");
+        std::fs::write(&nowhere, "a file").expect("a file");
+        assert!(
+            crate::commands::save_backup_before(&state, preferences(), &nowhere, "2.35.0")
+                .await
+                .is_err()
+        );
+        for path in [first, second, nowhere] {
+            let _ = std::fs::remove_file(path);
+        }
+        drop(db);
     }
 
     /// 2.19.0-beta.1 reads releases/latest, 2.18.1 until 2.19.0 is out:
@@ -1032,6 +1537,7 @@ mod tests {
                 endpoint: None,
                 pubkey: None,
                 installs: true,
+                previous: None,
             })
         );
     }

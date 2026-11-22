@@ -37,6 +37,8 @@ use super::{Rebuild, Step};
 pub(super) const STEP: Step = Step {
     to: 2,
     keep_copy: true,
+    // 2.32.x reads and writes the result (the module's doc).
+    compatible_both_ways: true,
     rebuilds: &[
         Rebuild {
             table: "bookmarks",

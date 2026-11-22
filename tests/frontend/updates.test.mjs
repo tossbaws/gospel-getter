@@ -39,7 +39,7 @@ test('About has an Updates section: a launch check that is on, Check now, and wh
         assert.equal(toggle.closest('label').textContent.trim(), 'Check for updates when Gospel Getter starts');
         assert.equal(
             $(app, 'update-note').textContent,
-            'Checking downloads a small file from GitHub that names the latest version, so GitHub sees your IP address, as with any download. Nothing about your reading or your data is sent.',
+            'Checking downloads a small file from GitHub that names the latest version, and, on an install that updates itself, one that names the version before yours, so GitHub sees your IP address, as with any download. Nothing about your reading or your data is sent.',
         );
         const button = $(app, 'update-check-btn');
         assert.equal(button.tagName, 'BUTTON');
