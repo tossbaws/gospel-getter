@@ -4,6 +4,49 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.36.0] - 2026-11-22
+
+Skip an update you don't want, go back to the previous version from
+About, and Open beside works the same in reading mode.
+
+### Added
+- **Skip this version** on the update notice. That version stops showing
+  when the app starts, and a newer one shows again. **Check now** in
+  About still finds a skipped version, says you skipped it, and offers
+  **Update now**.
+- **Go back to** the previous version, in About, on the installs that
+  update themselves (the Windows setup and MSI, the AppImage and the
+  .deb). It asks first, then saves a full backup of your notes,
+  bookmarks, highlights and settings next to the app's database, and if
+  that fails it stops and changes nothing. Then it installs the previous
+  release, checked against the same signing key as every update, and
+  restarts. The version you left is skipped. If the previous version
+  couldn't read your data as this one has left it, About says why
+  instead of offering it.
+
+### Changed
+- In reading mode, every **Open beside** (from a cross-reference's
+  preview, the card's note row, a link in a note with Shift-click or
+  Alt-click, or a search result) leaves reading mode first, as `S` does:
+  both passages show side by side, the one you just opened is active,
+  and `R` reads it alone.
+- On the installs that update themselves, checking for updates also
+  downloads one more small file from the release, which names the
+  version before yours.
+
+Going back from 2.36.0 lands on 2.35.0, which doesn't know **Skip this
+version** yet, so it still offers 2.36.0 when it starts; **Later** hides
+it until the next start. From 2.37.0 on, going back to 2.36.0 skips
+properly.
+
+Behind the scenes, every release build now also checks going back: it
+installs the previous release over the new one, and checks that it
+starts and keeps everything. There's also some code tidying, with
+nothing visible.
+
+No verse changes. Backups keep the same format. Updating keeps your
+bookmarks, highlights, notes, findings, reading position and settings.
+
 ## [2.35.0] - 2026-11-21
 
 Your notes beside the text whenever you like, and a key for two passages
