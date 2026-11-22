@@ -1159,7 +1159,8 @@
             border-top: 1px solid var(--accent-dim);
         }
 
-        .finding-group-head {
+        .finding-group-head,
+        .note-card-head {
             display: flex;
             flex-wrap: wrap;
             align-items: baseline;
@@ -1643,7 +1644,8 @@
             color: var(--accent);
         }
 
-        .search-text mark {
+        .search-text mark,
+        .note-search-mark {
             background: rgba(var(--accent-rgb), 0.3);
             color: inherit;
             border-radius: var(--radius-s);
@@ -2099,13 +2101,15 @@
             background: rgba(var(--accent-rgb), 0.06);
         }
 
-        .welcome-start-title {
+        .welcome-start-title,
+        .export-choice-name {
             display: block;
             font-size: 0.95rem;
             color: var(--accent);
         }
 
-        .welcome-start-line {
+        .welcome-start-line,
+        .export-choice-line {
             display: block;
             font-size: 0.85rem;
             color: var(--text-dim);
@@ -2339,12 +2343,6 @@
             display: none;
         }
 
-        .note-search-mark {
-            background: rgba(var(--accent-rgb), 0.3);
-            color: inherit;
-            border-radius: var(--radius-s);
-        }
-
         /* ☰ → Export data…: a small modal (the note panel's look) of two
            choices, Everything (the backup) and My notes (Export notes,
            below), each a name over a line saying what it is or, greyed out,
@@ -2387,19 +2385,7 @@
             cursor: not-allowed;
         }
 
-        .export-choice-name {
-            display: block;
-            font-size: 0.95rem;
-            color: var(--accent);
-        }
-
         .export-choice:disabled .export-choice-name {
-            color: var(--text-dim);
-        }
-
-        .export-choice-line {
-            display: block;
-            font-size: 0.85rem;
             color: var(--text-dim);
         }
 
@@ -3989,7 +3975,8 @@
             }
         }
 
-        .verse {
+        .verse,
+        :root[data-layout="flowing"] .chapter-text {
             font-family: var(--font-scripture);
             font-size: calc(1.05rem * var(--reading-scale));
             line-height: var(--reading-leading);
@@ -4038,15 +4025,8 @@
            --verse-num-color), a space between verses. Presentation only:
            the verses are the same elements, with the same text. Compare
            has no .chapter-text (its grid is a verse to a row), so it's
-           untouched. */
-        :root[data-layout="flowing"] .chapter-text {
-            font-family: var(--font-scripture);
-            font-size: calc(1.05rem * var(--reading-scale));
-            line-height: var(--reading-leading);
-            color: var(--text);
-            margin-bottom: 0.5rem;
-        }
-
+           untouched. The paragraph has a verse's look (with .verse,
+           above). */
         :root[data-layout="flowing"] .chapter-side .chapter-text {
             font-size: calc(0.9rem * var(--reading-scale));
             line-height: calc(var(--reading-leading) - 0.1);
@@ -4165,7 +4145,8 @@
             display: none;
         }
 
-        .selection-card .verse-actions {
+        .selection-card .verse-actions,
+        .selection-card .verse-notes {
             margin: 0;
             padding: 0 0 0.5rem;
             background: none;
@@ -4472,15 +4453,6 @@
             cursor: default;
         }
 
-        .selection-card .verse-notes {
-            margin: 0;
-            padding: 0 0 0.5rem;
-            background: none;
-            border: none;
-            border-bottom: 1px solid var(--accent-dim);
-            border-radius: 0;
-        }
-
         .verse-notes-title {
             font-size: max(11px, calc(0.75rem * var(--ui-scale)));
             font-weight: normal;
@@ -4496,13 +4468,6 @@
 
         .note-card:last-of-type {
             border-bottom: none;
-        }
-
-        .note-card-head {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: baseline;
-            gap: 0.2rem 0.6rem;
         }
 
         .note-card-ref {
@@ -4810,13 +4775,15 @@
             text-decoration: underline solid;
         }
 
-        .xref-summary {
+        .xref-summary,
+        .footnote-summary {
             margin-top: 2rem;
             padding-top: 1rem;
             border-top: 1px solid var(--rule);
         }
 
-        .xref-summary-title {
+        .xref-summary-title,
+        .footnote-summary-title {
             font-size: 1rem;
             font-weight: normal;
             color: var(--accent);
@@ -4903,20 +4870,8 @@
         }
 
         /* The chapter's footnotes (the KJV's or the BSB's), above its
-           cross-references and styled like them: "119:105a lamp: or,
-           candle". */
-        .footnote-summary {
-            margin-top: 2rem;
-            padding-top: 1rem;
-            border-top: 1px solid var(--rule);
-        }
-
-        .footnote-summary-title {
-            font-size: 1rem;
-            font-weight: normal;
-            color: var(--accent);
-        }
-
+           cross-references and styled like them (the section and its title
+           share their rules, above): "119:105a lamp: or, candle". */
         .footnote-row {
             font-size: 0.85rem;
             margin-bottom: 0.4rem;

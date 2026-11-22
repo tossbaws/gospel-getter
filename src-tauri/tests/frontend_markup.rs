@@ -931,31 +931,168 @@ fn every_theme_option_defines_a_complete_palette() {
     }
 }
 
-/// Text, dimmed text and accent-colored text must all be legible on the
-/// opaque popup/select background, and text drawn on an accent-filled
-/// control (active book/chapter) must be legible on the accent — WCAG AA
-/// (4.5:1) for every theme, which is what keeps Hot Pink from being pink
-/// on pink.
+/// What a color in `CONTRAST_PAIRS` sits on: a theme's token, or its
+/// translucent `--panel-bg` laid over one.
+#[derive(Debug, Clone, Copy)]
+enum Ground {
+    On(&'static str),
+    PanelOn(&'static str),
+}
+
+impl Ground {
+    /// The opaque color it comes to in a theme.
+    fn color(self, props: &[(String, String)]) -> String {
+        match self {
+            Self::On(token) => property(props, token).to_owned(),
+            Self::PanelOn(token) => {
+                let (panel, under) = (property(props, "--panel-bg"), property(props, token));
+                if panel.starts_with("rgba(") {
+                    composite(panel, under)
+                } else {
+                    panel.to_owned()
+                }
+            }
+        }
+    }
+}
+
+/// Every pair of theme tokens a surface draws one on the other, with the
+/// least contrast it needs in every theme (4.5:1, WCAG AA, for text; 3:1
+/// for a ring, a chevron or a focus outline) and where it's drawn.
+/// `theme_palettes_meet_wcag_aa_contrast` checks them all; each surface's
+/// test says only that its selectors use these tokens, and checks its own
+/// tints, washes and gradients.
+const CONTRAST_PAIRS: &[(&str, Ground, f64, &str)] = &[
+    (
+        "--text",
+        Ground::On("--option-bg"),
+        4.5,
+        "popups, the toast, the selection card, the palette, the welcome, the shortcuts sheet, Export notes, the picker as a dialog",
+    ),
+    (
+        "--text-dim",
+        Ground::On("--option-bg"),
+        4.5,
+        "the same, and the bar's menus' headings, the hint keys, the export choices, About's credits",
+    ),
+    (
+        "--accent",
+        Ground::On("--option-bg"),
+        4.5,
+        "titles and links in popups, the chapter end's buttons, the export choices",
+    ),
+    (
+        "--accent",
+        Ground::On("--option-bg"),
+        3.0,
+        "the chosen swatch's and welcome look's rings, Export notes' chevron and focus rings",
+    ),
+    (
+        "--accent-2",
+        Ground::On("--option-bg"),
+        4.5,
+        "footnote labels and citations in popups and the card",
+    ),
+    (
+        "--accent-2",
+        Ground::On("--option-bg"),
+        3.0,
+        "the cross-reference preview's pressed ring",
+    ),
+    (
+        "--ai",
+        Ground::On("--option-bg"),
+        4.5,
+        "AI findings in the card and the Library",
+    ),
+    (
+        "--text",
+        Ground::On("--bar-bg"),
+        4.5,
+        "the bar, and the sidebar picker's books",
+    ),
+    (
+        "--text-dim",
+        Ground::On("--bar-bg"),
+        4.5,
+        "the bar's ghost buttons, the sidebar picker's testament headings",
+    ),
+    (
+        "--accent",
+        Ground::On("--bar-bg"),
+        4.5,
+        "the bar, the sidebar picker's book being read",
+    ),
+    (
+        "--accent-2",
+        Ground::On("--bar-bg"),
+        4.5,
+        "the quiet accent on the bar",
+    ),
+    (
+        "--ai",
+        Ground::On("--bar-bg"),
+        4.5,
+        "AI findings in the margin",
+    ),
+    (
+        "--on-accent",
+        Ground::On("--accent"),
+        4.5,
+        "an accent-filled control: a chosen segment, filter or translation",
+    ),
+    ("--on-ai", Ground::On("--ai"), 4.5, "the AI badge's text"),
+    (
+        "--text",
+        Ground::PanelOn("--option-bg"),
+        4.5,
+        "the Notes section, the translations, the picker dialog's chapters",
+    ),
+    (
+        "--text-dim",
+        Ground::PanelOn("--option-bg"),
+        4.5,
+        "the Notes section, the translations, a disabled Aa segment",
+    ),
+    (
+        "--accent",
+        Ground::PanelOn("--option-bg"),
+        4.5,
+        "the Notes section, the translations, an unpressed highlight filter",
+    ),
+    (
+        "--accent",
+        Ground::PanelOn("--option-bg"),
+        3.0,
+        "a translation's focus ring",
+    ),
+    (
+        "--accent-2",
+        Ground::PanelOn("--option-bg"),
+        4.5,
+        "the Notes section, the quiet accent on a panel",
+    ),
+    (
+        "--text",
+        Ground::PanelOn("--bar-bg"),
+        4.5,
+        "the sidebar picker's chapters",
+    ),
+];
+
+/// Every pair in `CONTRAST_PAIRS` has the contrast it needs in every theme;
+/// this is what keeps Hot Pink from being pink on pink.
 #[test]
 fn theme_palettes_meet_wcag_aa_contrast() {
     let rules = rules();
     for (theme, props) in theme_palettes(&rules) {
-        let option_bg = property(&props, "--option-bg");
-        for fg in ["--text", "--text-dim", "--accent"] {
-            let ratio = contrast_ratio(property(&props, fg), option_bg);
+        for &(fg, ground, least, used) in CONTRAST_PAIRS {
+            let ratio = contrast_ratio(property(&props, fg), &ground.color(&props));
             assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: {fg} on --option-bg is {ratio:.2}:1, below 4.5:1"
+                ratio >= least,
+                "theme `{theme}`: {fg} on {ground:?} is {ratio:.2}:1, below {least}:1 ({used})"
             );
         }
-        let ratio = contrast_ratio(
-            property(&props, "--on-accent"),
-            property(&props, "--accent"),
-        );
-        assert!(
-            ratio >= 4.5,
-            "theme `{theme}`: --on-accent on --accent is {ratio:.2}:1, below 4.5:1"
-        );
     }
 }
 
@@ -1191,7 +1328,11 @@ fn reading_presets_default_to_the_original_typography() {
     assert_eq!(property(&root, "--reading-scale"), "1");
     assert_eq!(property(&root, "--reading-leading"), "1.7");
 
-    let verse = &screen_rule(&rules, ".verse").body;
+    let verse = &screen_rule(
+        &rules,
+        r#".verse, :root[data-layout="flowing"] .chapter-text"#,
+    )
+    .body;
     assert!(verse.contains("font-size: calc(1.05rem * var(--reading-scale))"));
     assert!(verse.contains("line-height: var(--reading-leading)"));
 
@@ -1988,7 +2129,6 @@ fn history_and_chapter_buttons_use_tested_theme_colors_enabled_and_disabled() {
         let wash = |a: f64, under: &str| composite(&format!("rgba({accent_rgb}, {a})"), under);
         let enabled = contrast_ratio(text_dim, bar_bg);
         for (what, ratio) in [
-            ("an available history or chapter button", enabled),
             (
                 "one under the pointer",
                 contrast_ratio(text, &wash(hover_alpha, bar_bg)),
@@ -2001,7 +2141,6 @@ fn history_and_chapter_buttons_use_tested_theme_colors_enabled_and_disabled() {
                 "the place you're at",
                 contrast_ratio(text, &wash(here_alpha, option_bg)),
             ),
-            ("the menu's heading", contrast_ratio(text_dim, option_bg)),
         ] {
             assert!(ratio >= 4.5, "theme `{theme}`: {what} is {ratio:.2}:1");
         }
@@ -2056,17 +2195,6 @@ fn header_surfaces_use_tested_theme_colors() {
         let option_bg = property(&props, "--option-bg");
         for (what, fg, bg) in [
             (
-                "--text on --bar-bg",
-                property(&props, "--text").to_owned(),
-                bar_bg.to_owned(),
-            ),
-            ("--accent on --bar-bg", accent.to_owned(), bar_bg.to_owned()),
-            (
-                "a bar button",
-                property(&props, "--text-dim").to_owned(),
-                bar_bg.to_owned(),
-            ),
-            (
                 "a bar button under the pointer",
                 property(&props, "--text").to_owned(),
                 composite(&format!("rgba({accent_rgb}, {hover_alpha})"), bar_bg),
@@ -2088,11 +2216,6 @@ fn header_surfaces_use_tested_theme_colors() {
                 "theme `{theme}`: {what} is {ratio:.2}:1, below 4.5:1"
             );
         }
-        let ring = contrast_ratio(accent, option_bg);
-        assert!(
-            ring >= 3.0,
-            "theme `{theme}`: the chosen swatch's ring is {ring:.2}:1, below 3:1"
-        );
     }
 
     let segment = screen_rule(&rules, ".segment");
@@ -2170,25 +2293,6 @@ fn export_notes_book_list_uses_tested_theme_colors() {
          .export-notes-field:focus-visible,\n        .export-notes-tools .reader-mode-btn:focus-visible",
     );
     assert!(focus.body.contains("outline: 2px solid var(--accent)"));
-
-    for (theme, props) in theme_palettes(&rules) {
-        let option_bg = property(&props, "--option-bg");
-        let text = contrast_ratio(property(&props, "--text"), option_bg);
-        assert!(
-            text >= 4.5,
-            "theme `{theme}`: the book list's text is {text:.2}:1, below 4.5:1"
-        );
-        let count = contrast_ratio(property(&props, "--text-dim"), option_bg);
-        assert!(
-            count >= 4.5,
-            "theme `{theme}`: the books' counts are {count:.2}:1, below 4.5:1"
-        );
-        let accent = contrast_ratio(property(&props, "--accent"), option_bg);
-        assert!(
-            accent >= 3.0,
-            "theme `{theme}`: the book list's chevron and focus ring are {accent:.2}:1, below 3:1"
-        );
-    }
 }
 
 /// The theme swatches in Aa are drawn from the theme definitions
@@ -2368,20 +2472,6 @@ fn highlight_list_swatches_and_filter_use_tested_theme_colors() {
     assert!(pressed.body.contains("color: var(--on-accent)"));
     let filter = screen_rule(&rules, ".highlight-filter-btn");
     assert!(filter.body.contains("color: var(--accent)"));
-
-    // Unpressed, a filter is --accent on --panel-bg, a translucent tint
-    // over the menu's opaque --option-bg.
-    for (theme, props) in theme_palettes(&rules) {
-        let behind = composite(
-            property(&props, "--panel-bg"),
-            property(&props, "--option-bg"),
-        );
-        let ratio = contrast_ratio(property(&props, "--accent"), &behind);
-        assert!(
-            ratio >= 4.5,
-            "theme `{theme}`: an unpressed highlight filter is {ratio:.2}:1, below 4.5:1"
-        );
-    }
 }
 
 /// An `rgba(r, g, b, a)` color laid over an opaque `#rrggbb`, as `#rrggbb`.
@@ -2464,16 +2554,6 @@ fn about_update_uses_tested_theme_colors() {
         let rule = screen_rule(&rules, selector);
         for declaration in declarations {
             assert!(rule.body.contains(declaration), "{selector}: {declaration}");
-        }
-    }
-    for (theme, props) in theme_palettes(&rules) {
-        let option = property(&props, "--option-bg");
-        for token in ["--text", "--text-dim", "--accent"] {
-            let ratio = contrast_ratio(property(&props, token), option);
-            assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: {token} on --option-bg is {ratio:.2}:1"
-            );
         }
     }
 }
@@ -2600,19 +2680,6 @@ fn notes_use_tested_theme_colors() {
             "{selector} should be {color}"
         );
     }
-    for (theme, props) in theme_palettes(&rules) {
-        let behind = composite(
-            property(&props, "--panel-bg"),
-            property(&props, "--option-bg"),
-        );
-        for fg in ["--text", "--text-dim", "--accent", "--accent-2"] {
-            let ratio = contrast_ratio(property(&props, fg), &behind);
-            assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: {fg} in the Notes section is {ratio:.2}:1, below 4.5:1"
-            );
-        }
-    }
 
     let panel = screen_rule(&rules, ".modal-panel");
     assert!(panel.body.contains("background: var(--option-bg)"));
@@ -2715,13 +2782,6 @@ fn kjv_footnotes_use_tested_theme_colors() {
             .body
             .contains("font-style: italic")
     );
-    for (theme, props) in theme_palettes(&rules) {
-        let option_bg = property(&props, "--option-bg");
-        for fg in ["--accent", "--accent-2", "--text-dim"] {
-            let ratio = contrast_ratio(property(&props, fg), option_bg);
-            assert!(ratio >= 4.5, "theme `{theme}`: {fg} is {ratio:.2}:1");
-        }
-    }
 }
 
 /// Printing keeps the chapter's Footnotes section and the markers in the
@@ -3206,19 +3266,9 @@ fn the_quiet_accent_carries_the_quiet_jobs() {
         {
             assert_eq!(accent_2, property(&props, "--accent"), "{theme}");
         }
-        let option = property(&props, "--option-bg");
-        let bar = property(&props, "--bar-bg");
-        let mut behind = vec![
-            option.to_owned(),
-            bar.to_owned(),
-            composite(property(&props, "--panel-bg"), option),
-        ];
         let page = backgrounds(&props);
-        if page.len() == 1 {
-            behind.push(page[0].clone());
-        }
-        for bg in behind {
-            let ratio = contrast_ratio(accent_2, &bg);
+        if let [bg] = &page[..] {
+            let ratio = contrast_ratio(accent_2, bg);
             assert!(
                 ratio >= 4.5,
                 "theme `{theme}`: --accent-2 on {bg} is {ratio:.2}:1, below 4.5:1"
@@ -3471,7 +3521,7 @@ fn literata_is_bundled_for_scripture_and_the_ui_uses_the_sans() {
             .contains("font-family: var(--font-ui)")
     );
     for selector in [
-        ".verse",
+        r#".verse, :root[data-layout="flowing"] .chapter-text"#,
         ".verse-num",
         ".chapter-heading",
         ".chapter-heading-link",
@@ -3846,44 +3896,20 @@ fn the_sidebar_is_for_wide_windows_only() {
 /// chapter in `--text` (on a wash under the pointer), testament headings in
 /// `--text-dim`, the book being read in `--accent`, and chapters in
 /// `--text` on `--panel-bg` (`--on-accent` on `--accent` for the one being
-/// read, tested with the other controls).
+/// read; the pairs are in `CONTRAST_PAIRS`).
 #[test]
 fn the_picker_uses_tested_theme_colors() {
     let rules = rules();
-    let over = |color: &str, under: &str| -> String {
-        if color.starts_with("rgba(") {
-            composite(color, under)
-        } else {
-            color.to_owned()
-        }
-    };
     for (theme, props) in theme_palettes(&rules) {
         let accent_rgb = property(&props, "--accent-rgb");
         for surface in ["--bar-bg", "--option-bg"] {
             let bg = property(&props, surface);
             let wash = composite(&format!("rgba({accent_rgb}, 0.12)"), bg);
-            let panel = over(property(&props, "--panel-bg"), bg);
-            for (what, fg, under) in [
-                ("a book", property(&props, "--text"), bg.to_owned()),
-                ("a book under the pointer", property(&props, "--text"), wash),
-                (
-                    "a testament heading",
-                    property(&props, "--text-dim"),
-                    bg.to_owned(),
-                ),
-                (
-                    "the book being read",
-                    property(&props, "--accent"),
-                    bg.to_owned(),
-                ),
-                ("a chapter", property(&props, "--text"), panel),
-            ] {
-                let ratio = contrast_ratio(fg, &under);
-                assert!(
-                    ratio >= 4.5,
-                    "theme `{theme}` on {surface}: {what} is {ratio:.2}:1, below 4.5:1"
-                );
-            }
+            let ratio = contrast_ratio(property(&props, "--text"), &wash);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}` on {surface}: a book under the pointer is {ratio:.2}:1, below 4.5:1"
+            );
         }
     }
     for (selector, declaration) in [
@@ -3925,48 +3951,10 @@ fn the_picker_uses_tested_theme_colors() {
 /// straight after the verses (or the compare grid), in a labelled
 /// navigation landmark; only the one there is at Genesis 1 and
 /// Revelation 22. The keys' hint is one quiet line under them, inside the
-/// chapter.
+/// chapter. The markup and its order are tested in reader_text.rs (the
+/// Genesis 1 fixture) and reading-flow.test.mjs; here, the style.
 #[test]
 fn the_chapter_ends_with_buttons_to_the_chapters_around_it() {
-    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
-    let reader = piece("reader_text.rs");
-    let end = block_after(reader, "fn chapter_end(");
-    assert!(
-        end.contains(r#"<nav class=\"chapter-end\" aria-label=\"Previous and next chapter\">"#)
-    );
-    assert!(
-        end.contains("let Some(side) = side else { return String::new();"),
-        "one button per neighbour there is"
-    );
-    assert!(
-        end.contains("step(dto.prev.as_ref(), Which::Prev), step(dto.next.as_ref(), Which::Next),")
-    );
-    assert!(end.contains(r#"class="chapter-step chapter-step-{}""#));
-    assert!(end.contains(r#"data-book="{}" data-chapter="{}" aria-label="{label}""#));
-    assert!(end.contains(r#"<p class=\"nav-hint\">"#));
-    // Its three keys are caps alike; the arrows are drawn, and named.
-    for key in [
-        r#"hint_key("Left arrow", Some(ARROW_LEFT))"#,
-        r#"hint_key("Right arrow", Some(ARROW_RIGHT))"#,
-        r#"hint_key("?", None)"#,
-    ] {
-        assert!(end.contains(key), "{key}");
-    }
-    let caps = block_after(reader, "fn hint_key(");
-    assert!(caps.contains(r#"<kbd><span class="visually-hidden">{name}</span>{drawn}</kbd>"#));
-    assert!(
-        reader.contains(
-            r##"const ARROW_LEFT: &str = r#"<svg viewBox="0 0 16 16" aria-hidden="true""##
-        )
-    );
-    let pane = block_after(reader, "pub fn reading_pane(");
-    let body = pane.find("{s28}{body}").expect("the verses");
-    let after = pane.find("{s28}{end}").expect("the buttons");
-    let lists = pane.find("{s28}{footnotes}").unwrap();
-    assert!(
-        body < after && after < lists,
-        "after the verses, before the lists"
-    );
     let rules = rules();
     let step = screen_rule(&rules, ".chapter-step");
     assert!(step.body.contains("font-family: var(--font-ui)"));
@@ -4101,25 +4089,13 @@ fn the_chapter_end_uses_tested_theme_colors() {
     }
     let mut hint_below_aa = Vec::new();
     for (theme, props) in theme_palettes(&rules) {
-        let option = property(&props, "--option-bg").to_owned();
         let dim = property(&props, "--text-dim");
-        let key = contrast_ratio(dim, &option);
-        assert!(key >= 4.5, "theme `{theme}`: a hint key is {key:.2}:1");
         for bg in reading_grounds(&props) {
-            for (what, fg, under) in [
-                (
-                    "a chapter button",
-                    property(&props, "--accent"),
-                    option.as_str(),
-                ),
-                ("a disclosure", property(&props, "--text"), bg.as_str()),
-            ] {
-                let ratio = contrast_ratio(fg, under);
-                assert!(
-                    ratio >= 4.5,
-                    "theme `{theme}`: {what} is {ratio:.2}:1 on {under}"
-                );
-            }
+            let ratio = contrast_ratio(property(&props, "--text"), &bg);
+            assert!(
+                ratio >= 4.5,
+                "theme `{theme}`: a disclosure is {ratio:.2}:1 on {bg}"
+            );
             let chevron = contrast_ratio(property(&props, "--accent"), &bg);
             assert!(
                 chevron >= 3.0,
@@ -4217,18 +4193,6 @@ fn the_selection_card_floats_over_the_text() {
             .contains("color: var(--accent-2)")
     );
     assert!(block_after(HTML, "@media print").contains(".selection-card"));
-    // On the card's opaque --option-bg, every color it uses is AA; its
-    // buttons' --panel-bg over it is covered by notes_use_tested_theme_colors.
-    for (theme, props) in theme_palettes(&rules) {
-        let bg = property(&props, "--option-bg");
-        for fg in ["--text", "--text-dim", "--accent", "--accent-2"] {
-            let ratio = contrast_ratio(property(&props, fg), bg);
-            assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: {fg} in the card is {ratio:.2}:1"
-            );
-        }
-    }
 }
 
 /// Aa's Width row: Narrow, Normal and Wide, as a labelled group of buttons
@@ -4372,14 +4336,11 @@ fn the_palette_and_copy_as_are_aa_in_every_theme() {
         let get = |name: &str| property(&props, name).to_owned();
         let panel = get("--option-bg");
         let active = blend(&panel, &get("--accent-rgb"), 0.12);
-        for (what, fg, bg) in [
-            ("text on the panel", get("--text"), panel.clone()),
-            ("dim text on the panel", get("--text-dim"), panel.clone()),
-            ("text on the active option", get("--text"), active.clone()),
-        ] {
-            let ratio = contrast_ratio(&fg, &bg);
-            assert!(ratio >= 4.5, "{theme}: {what} is {ratio:.2}:1");
-        }
+        let ratio = contrast_ratio(&get("--text"), &active);
+        assert!(
+            ratio >= 4.5,
+            "{theme}: text on the active option is {ratio:.2}:1"
+        );
         // Why the active option's dim text turns --text: it isn't AA there
         // in every theme.
         if theme == "matrix" {
@@ -4391,37 +4352,11 @@ fn the_palette_and_copy_as_are_aa_in_every_theme() {
 /// Ctrl+= (and Ctrl++, numpad +) and Ctrl+- (numpad -) step the text size,
 /// Ctrl+0 resets it, through Aa's control; their default (the page zoom) is
 /// always prevented, and in a field they change nothing. A brief status
-/// says the new size, politely.
+/// says the new size, politely. The keys are tested in aa_text.rs
+/// (`the_size_keys`), reading-flow.test.mjs and palette.test.mjs; here, the
+/// status line's markup.
 #[test]
 fn the_text_size_keys_step_aa_and_never_zoom_the_page() {
-    // Aa's keys are the page's Rust pieces' (`ui-leptos/src/aa.rs`, the
-    // rule in `aa_text.rs`).
-    let keys = block_after(piece("aa_text.rs"), "pub fn size_key(");
-    for key in [
-        r#"key == "=""#,
-        r#"key == "+""#,
-        r#"code == "NumpadAdd""#,
-        r#"key == "-""#,
-        r#"code == "NumpadSubtract""#,
-        r#"code == "Numpad0""#,
-    ] {
-        assert!(keys.contains(key), "{key}");
-    }
-    let aa = piece("aa.rs");
-    let body = block_after(aa, "fn on_size_key(");
-    let prevent = body.find("event.prevent_default();").unwrap();
-    let typing = body.find(r#""INPUT" | "TEXTAREA" | "SELECT""#).unwrap();
-    assert!(
-        prevent < typing,
-        "the page zoom is prevented even in a field"
-    );
-    // The keys' step, which the command palette's Text size commands run
-    // too.
-    let step = block_after(aa, "pub fn text_size_shortcut(");
-    assert!(step.contains(r#"choose(&select, "medium");"#));
-    assert!(step.contains("step_text_size(i32::from(step));"));
-    assert!(step.contains("show_text_size();"));
-    assert!(piece("search.rs").contains("Run::TextSize(step) => aa::text_size_shortcut(*step),"));
     assert!(HTML.contains(r#"<p id="size-status" class="toast size-status is-hidden" role="status" aria-live="polite"></p>"#));
 }
 
@@ -4512,18 +4447,10 @@ fn side_chapters_never_squeeze_the_column_below_50_characters() {
 /// holds the backend's edge card (so the chapter being read doesn't move
 /// between Genesis 1 and 2), in the neighbors' faded style with no new
 /// colors: a heading like theirs in --accent over --rule, and a line in
-/// --text. It has no verses and nothing to click.
+/// --text. It has no verses and nothing to click (its markup is tested in
+/// reader_text.rs and reading-flow.test.mjs; here, its style).
 #[test]
 fn the_bible_s_edges_have_a_quiet_card_in_the_neighbor_s_place() {
-    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
-    let reader = piece("reader_text.rs");
-    let pane = block_after(reader, "pub fn reading_pane(");
-    assert!(pane.contains("Some(s) => side_chapter(s), None => edge_card(edge),"));
-    assert!(pane.contains("side(dto.prev.as_ref(), dto.prev_edge.as_ref(), Which::Prev)"));
-    assert!(pane.contains("side(dto.next.as_ref(), dto.next_edge.as_ref(), Which::Next)"));
-    let card = block_after(reader, "fn edge_card(");
-    assert!(card.contains("escape_html(&edge.title)") && card.contains("escape_html(d)"));
-    assert!(!card.contains("<button") && !card.contains("class=\"verse"));
     let rules = rules();
     let title = screen_rule(&rules, ".edge-card-title");
     for declaration in [
@@ -4548,7 +4475,8 @@ fn the_bible_s_edges_have_a_quiet_card_in_the_neighbor_s_place() {
 
 /// Layout is a display setting in Aa, after Width: Verses (the default, a
 /// verse to a line as always) or Flowing. It's exported with the others.
-/// While comparing, its buttons are disabled and a note says why.
+/// While comparing, its buttons are disabled and a note says why (tested in
+/// flowing.test.mjs; here, the markup the note and buttons start from).
 #[test]
 fn layout_is_a_display_setting_in_aa() {
     assert_eq!(
@@ -4571,36 +4499,22 @@ fn layout_is_a_display_setting_in_aa() {
     let theme = HTML.find(r#"id="theme-label""#).unwrap();
     assert!(width < layout && layout < theme);
     assert_eq!(preferences::LAYOUT.file_name, Some("layout"));
-    let aa = piece("aa.rs");
-    assert!(aa.contains("btn.set_disabled(comparing);"));
-    assert!(aa.contains("note.set_hidden(!comparing);"));
 
     // A disabled segment is quiet but still AA: --text-dim on the
-    // segments' --panel-bg, over the popover's --option-bg.
+    // segments' --panel-bg, over the popover's --option-bg (a pair in
+    // `CONTRAST_PAIRS`).
     let rules = rules();
     let disabled = screen_rule(&rules, ".segment:disabled");
     assert!(disabled.body.contains("color: var(--text-dim)"));
-    for (theme, props) in theme_palettes(&rules) {
-        let option_bg = property(&props, "--option-bg");
-        let panel = property(&props, "--panel-bg");
-        let behind = if panel.starts_with("rgba(") {
-            composite(panel, option_bg)
-        } else {
-            panel.to_owned()
-        };
-        let ratio = contrast_ratio(property(&props, "--text-dim"), &behind);
-        assert!(
-            ratio >= 4.5,
-            "theme `{theme}`: a disabled segment is {ratio:.2}:1"
-        );
-    }
 }
 
 /// Flowing runs each chapter's verses inline in one paragraph, in the
 /// chapter being read and the faded neighbors (and so reading mode and
 /// print, which show them). It keys off `.chapter-text`, which compare's
 /// grid doesn't have, so compare stays a verse to a row. The verse number
-/// is inline with no line height, so it can't open up its line.
+/// is inline with no line height, so it can't open up its line. Which
+/// markup has a `.chapter-text` is tested in reader_text.rs (the Genesis 1
+/// fixture) and flowing.test.mjs.
 #[test]
 fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
     let rules = rules();
@@ -4617,7 +4531,10 @@ fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
     for decl in ["display: inline", "min-width: 0", "line-height: 0"] {
         assert!(number.body.contains(decl), "{decl}");
     }
-    let text = screen_rule(&rules, r#":root[data-layout="flowing"] .chapter-text"#);
+    let text = screen_rule(
+        &rules,
+        r#".verse, :root[data-layout="flowing"] .chapter-text"#,
+    );
     for decl in [
         "font-family: var(--font-scripture)",
         "font-size: calc(1.05rem * var(--reading-scale))",
@@ -4628,9 +4545,12 @@ fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
     }
     // The same size as a verse, in the center and the neighbors.
     assert!(
-        screen_rule(&rules, ".verse")
-            .body
-            .contains("font-size: calc(1.05rem * var(--reading-scale))")
+        screen_rule(
+            &rules,
+            r#".verse, :root[data-layout="flowing"] .chapter-text"#
+        )
+        .body
+        .contains("font-size: calc(1.05rem * var(--reading-scale))")
     );
     let side = screen_rule(
         &rules,
@@ -4642,30 +4562,14 @@ fn flowing_runs_the_verses_on_as_prose_but_not_in_compare() {
     );
     // Only .chapter-text flows, and only the reading pane and the side
     // chapters have one; compare's grid doesn't.
-    for rule in rules
+    for selector in rules
         .iter()
-        .filter(|r| r.selector.contains(r#"data-layout="flowing""#))
+        .flat_map(selectors)
+        .filter(|s| s.contains(r#"data-layout="flowing""#))
     {
-        for selector in selectors(rule) {
-            assert!(selector.contains(".chapter-text"), "{selector}");
-            assert!(!selector.contains("compare"), "{selector}");
-        }
+        assert!(selector.contains(".chapter-text"), "{selector}");
+        assert!(!selector.contains("compare"), "{selector}");
     }
-    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
-    // Compare's translations are its grid.
-    let reader = piece("reader_text.rs");
-    let pane = block_after(reader, "pub fn reading_pane(");
-    assert!(pane.contains("Beside::Translations(compare) => compare_grid(dto, compare),"));
-    assert!(pane.contains("Beside::Nothing => chapter_text(dto, code),"));
-    assert!(
-        block_after(reader, "fn chapter_text(")
-            .contains(r##"r#"<div class="chapter-text">{}</div>"#,"##)
-    );
-    assert!(!block_after(reader, "fn compare_grid(").contains("chapter-text"));
-    assert!(
-        block_after(reader, "fn side_chapter(")
-            .contains(r#"<div class=\"chapter-text\">{verses}</div>"#)
-    );
     // Nothing in print touches the verses' display: printed, Flowing
     // flows (and Verses stays a verse to a line).
     for rule in rules
@@ -4920,8 +4824,8 @@ fn the_welcome_uses_tested_theme_colors() {
         (".welcome-look", "--text"),
         (".welcome-hint", "--text-dim"),
         (".welcome-start-row", "--text"),
-        (".welcome-start-title", "--accent"),
-        (".welcome-start-line", "--text-dim"),
+        (".welcome-start-title, .export-choice-name", "--accent"),
+        (".welcome-start-line, .export-choice-line", "--text-dim"),
         (".welcome-look-sample", "--accent"),
     ] {
         assert!(
@@ -4950,29 +4854,13 @@ fn the_welcome_uses_tested_theme_colors() {
             &format!("rgba({}, 0.06)", property(&props, "--accent-rgb")),
             bg,
         );
-        for (what, fg, under) in [
-            ("the title", "--accent", bg.to_owned()),
-            ("a look's name", "--text", bg.to_owned()),
-            ("the hint", "--text-dim", bg.to_owned()),
-            (
-                "a place's title under the pointer",
-                "--accent",
-                wash.clone(),
-            ),
-            (
-                "a place's line under the pointer",
-                "--text-dim",
-                wash.clone(),
-            ),
+        for (what, fg) in [
+            ("a place's title under the pointer", "--accent"),
+            ("a place's line under the pointer", "--text-dim"),
         ] {
-            let ratio = contrast_ratio(property(&props, fg), &under);
+            let ratio = contrast_ratio(property(&props, fg), &wash);
             assert!(ratio >= 4.5, "theme `{theme}`: {what} is {ratio:.2}:1");
         }
-        let ring = contrast_ratio(property(&props, "--accent"), bg);
-        assert!(
-            ring >= 3.0,
-            "theme `{theme}`: the checked ring is {ring:.2}:1"
-        );
     }
     // The previews: each theme's large "Aa" on its own page background.
     for theme in ["chi-rho", "vellum"] {
@@ -4989,7 +4877,8 @@ fn the_welcome_uses_tested_theme_colors() {
 /// ☰ → Export data… is the one place to export (D20): a modal chooser like
 /// the page's others (the overlay's and panel's classes, a dialog named by
 /// its title), whose two choices are buttons named by their names and
-/// described by their lines, and Cancel; the Library's Notes tab has no
+/// described by their lines (tested in export-choice.test.mjs), and
+/// Cancel; the Library's Notes tab has no
 /// Export notes… button any more. Its colors add nothing of its own:
 /// --text, --text-dim and --accent on the modal's opaque --option-bg, a
 /// choice under the pointer the welcome's 0.06 --accent wash, a greyed-out
@@ -5008,18 +4897,6 @@ fn the_export_chooser_is_a_modal_in_tested_theme_colors() {
     }
     assert!(tag_of("export-choice-title").contains(r#"class="note-title""#));
     assert!(tag_of("export-choice-cancel").contains(r#"class="reader-mode-btn""#));
-    let chooser = piece("export_choice.rs");
-    for needle in [
-        r#"class="export-choice""#,
-        "aria-labelledby=labelled_by",
-        "aria-describedby=described_by",
-        r#"class="export-choice-name""#,
-        r#"class="export-choice-line""#,
-        r#""export-choice-everything","#,
-        r#""export-choice-notes","#,
-    ] {
-        assert!(chooser.contains(needle), "{needle}");
-    }
     assert!(tag_of("export-data-btn").contains(r#"title="Save a backup, or export your notes""#));
     for (file, source) in std::iter::once(("index.html", HTML)).chain(PIECES.iter().copied()) {
         assert!(
@@ -5031,8 +4908,8 @@ fn the_export_chooser_is_a_modal_in_tested_theme_colors() {
     let rules = rules();
     for (selector, color) in [
         (".export-choice", "--text"),
-        (".export-choice-name", "--accent"),
-        (".export-choice-line", "--text-dim"),
+        (".welcome-start-title, .export-choice-name", "--accent"),
+        (".welcome-start-line, .export-choice-line", "--text-dim"),
         (".export-choice:disabled .export-choice-name", "--text-dim"),
     ] {
         assert!(
@@ -5059,22 +4936,11 @@ fn the_export_chooser_is_a_modal_in_tested_theme_colors() {
             &format!("rgba({}, 0.06)", property(&props, "--accent-rgb")),
             bg,
         );
-        for (what, fg, under) in [
-            ("a choice's name", "--accent", bg),
-            ("a choice's line", "--text-dim", bg),
-            ("a greyed-out choice's name and line", "--text-dim", bg),
-            (
-                "a choice's name under the pointer",
-                "--accent",
-                wash.as_str(),
-            ),
-            (
-                "a choice's line under the pointer",
-                "--text-dim",
-                wash.as_str(),
-            ),
+        for (what, fg) in [
+            ("a choice's name under the pointer", "--accent"),
+            ("a choice's line under the pointer", "--text-dim"),
         ] {
-            let ratio = contrast_ratio(property(&props, fg), under);
+            let ratio = contrast_ratio(property(&props, fg), &wash);
             assert!(ratio >= 4.5, "theme `{theme}`: {what} is {ratio:.2}:1");
         }
     }
@@ -5110,34 +4976,11 @@ fn every_welcome_class_styled_is_used() {
 /// button; and its colors are the card's tested ones, AA over its faint
 /// wash in every theme: the title and any notice in --text-dim, the verses
 /// in --text, their numbers and Go to in --accent-2. The pressed chip keeps
-/// its --accent-2 text, AA over the same wash, ringed at 3:1.
+/// its --accent-2 text, AA over the same wash, ringed at 3:1. What the
+/// chips control and do is tested in xref-preview.test.mjs; here, the
+/// style.
 #[test]
 fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
-    // The preview is the selection card's (ui-leptos/src/card.rs, its markup
-    // in card_text.rs).
-    let render = block_after(piece("card_text.rs"), "pub fn xrefs_html(");
-    assert!(render.contains(r#"aria-expanded="false" aria-controls="xref-preview""#));
-    assert!(piece("card.rs").contains(r#"let _ = preview.set_attribute("role", "region");"#));
-    assert!(
-        piece("card.rs")
-            .contains(r#"let _ = preview.set_attribute("aria-labelledby", "xref-preview-title");"#)
-    );
-    let toggle = block_after(piece("card.rs"), "fn toggle_preview(");
-    assert!(toggle.contains(
-        "\"get_passage\", &PassageTextArgs { translation_code: &code, book_id, chapter, start, end,"
-    ));
-    assert!(
-        !toggle.contains("reader::"),
-        "a chip previews; only Go to opens"
-    );
-    // Its verses' markup is the reader's (reader_text::verse_html), without
-    // note markers.
-    assert!(
-        block_after(piece("card_text.rs"), "pub fn preview_html(").contains("verse_html(v, false)")
-    );
-    // Through the page's own `invoke` (ui-leptos/src/ipc.rs).
-    assert!(block_after(piece("card.rs"), "fn send(").contains("ipc::send(cmd, args)"));
-
     let rules = rules();
     for control in [".xref-citation", ".xref-preview-go"] {
         let focus = format!("{control}:focus-visible");
@@ -5192,11 +5035,6 @@ fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
                 "theme `{theme}`: {fg} on the preview's wash is {ratio:.2}:1"
             );
         }
-        let ring = contrast_ratio(property(&props, "--accent-2"), card);
-        assert!(
-            ring >= 3.0,
-            "theme `{theme}`: the pressed ring is {ring:.2}:1"
-        );
     }
 }
 
@@ -5206,11 +5044,10 @@ fn the_cross_reference_preview_is_accessible_and_uses_tested_theme_colors() {
 /// the buttons. AA, and the ring 3:1, on every flat page; on a gradient
 /// they're the color of the verse labels beside them (see
 /// `the_quiet_accent_carries_the_quiet_jobs`). Printing doesn't style them.
+/// Their markup is tested in reader_text.rs (the Genesis 1 fixture) and
+/// reading-flow.test.mjs; here, their style.
 #[test]
 fn chapter_end_cross_references_are_quiet_links() {
-    // The chapter's markup is the reader's (ui-leptos/src/reader_text.rs).
-    let summary = block_after(piece("reader_text.rs"), "fn xref_rows(");
-    assert!(summary.contains(r#"<button type="button" class="xref-summary-chip" data-book="{}""#));
     let rules = rules();
     let chip = screen_rule(&rules, ".xref-summary-chip");
     for declaration in [
@@ -5246,7 +5083,6 @@ fn chapter_end_cross_references_are_quiet_links() {
             .any(|r| r.body.contains("outline: 2px solid var(--accent)")),
         "the shared focus ring"
     );
-    assert!(summary.contains(r#"<span class="xref-summary-item"><button"#));
     screen_rule(&rules, ".xref-summary-item:not(:last-child)::after");
     assert!(!block_after(HTML, "@media print").contains(".xref-summary"));
     for (theme, props) in theme_palettes(&rules) {
@@ -5321,46 +5157,11 @@ fn the_translation_chooser_and_credits_are_accessible_and_use_tested_theme_color
             .body
             .contains("outline: 2px solid var(--accent)")
     );
-    for (theme, props) in theme_palettes(&rules) {
-        // --panel-bg is a translucent tint over the popover's opaque
-        // --option-bg.
-        let panel = &composite(
-            property(&props, "--panel-bg"),
-            property(&props, "--option-bg"),
-        );
-        for fg in ["--text", "--text-dim", "--accent"] {
-            let ratio = contrast_ratio(property(&props, fg), panel);
-            assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: {fg} on a translation is {ratio:.2}:1"
-            );
-        }
-        let chosen = contrast_ratio(
-            property(&props, "--on-accent"),
-            property(&props, "--accent"),
-        );
-        assert!(
-            chosen >= 4.5,
-            "theme `{theme}`: the chosen translation is {chosen:.2}:1"
-        );
-        let ring = contrast_ratio(property(&props, "--accent"), panel);
-        assert!(
-            ring >= 3.0,
-            "theme `{theme}`: the focus ring is {ring:.2}:1"
-        );
-        let credits = contrast_ratio(
-            property(&props, "--text-dim"),
-            property(&props, "--option-bg"),
-        );
-        assert!(
-            credits >= 4.5,
-            "theme `{theme}`: About's credits are {credits:.2}:1"
-        );
-    }
 }
 
 /// A USFM footnote's verse number (the BSB's "²¹But this kind") is small
-/// and raised without opening up its line.
+/// and raised without opening up its line. Its markup is tested in
+/// reader_text.rs and bsb.test.mjs.
 #[test]
 fn a_footnotes_verse_number_is_set_small() {
     let rules = rules();
@@ -5372,10 +5173,6 @@ fn a_footnotes_verse_number_is_set_small() {
     ] {
         assert!(rule.body.contains(declaration), "{declaration}");
     }
-    // A footnote's markup is the reader's (ui-leptos/src/reader_text.rs).
-    let footnote = block_after(piece("reader_text.rs"), "pub fn footnote_html(");
-    assert!(footnote.contains(r#"<em class="footnote-alt">"#));
-    assert!(footnote.contains(r#"<sup class="footnote-verse">"#));
 }
 
 /// The key values a handler compares against: `event.key === 'j'`,
@@ -5585,18 +5382,6 @@ fn the_shortcuts_sheet_is_a_modal_dialog_aa_in_every_theme() {
             .body
             .contains("background: var(--option-bg)")
     );
-    for (theme, props) in theme_palettes(&rules) {
-        let get = |name: &str| property(&props, name).to_owned();
-        let panel = get("--option-bg");
-        for (what, fg) in [
-            ("a row", get("--text")),
-            ("a key cap or heading", get("--text-dim")),
-            ("the title", get("--accent")),
-        ] {
-            let ratio = contrast_ratio(&fg, &panel);
-            assert!(ratio >= 4.5, "{theme}: {what} is {ratio:.2}:1");
-        }
-    }
 }
 
 /// The page never opens a web page itself: no anchor opens a new window,
@@ -5768,15 +5553,6 @@ fn ai_findings_have_their_own_violet_in_every_theme() {
     let rules = rules();
     for (theme, props) in theme_palettes(&rules) {
         let ai = property(&props, "--ai");
-        for bg in ["--option-bg", "--bar-bg"] {
-            let ratio = contrast_ratio(ai, property(&props, bg));
-            assert!(
-                ratio >= 4.5,
-                "theme `{theme}`: --ai on {bg} is {ratio:.2}:1"
-            );
-        }
-        let on = contrast_ratio(property(&props, "--on-ai"), ai);
-        assert!(on >= 4.5, "theme `{theme}`: --on-ai on --ai is {on:.2}:1");
         let accent_2 = property(&props, "--accent-2");
         for stop in backgrounds(&props) {
             let ratio = contrast_ratio(ai, &stop);

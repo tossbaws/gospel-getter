@@ -599,9 +599,9 @@ fn raw(value: &JsValue) -> Raw {
     }
 }
 
-/// Applies and saves an export file's display settings (`values`, each by
-/// its name in the file), after checking every one, so an unknown one
-/// changes nothing: an import's, or `window.gospelGetterPreferences.apply`.
+/// Applies and saves an import's display settings (`values`, each by its
+/// name in the file), after checking every one, so an unknown one changes
+/// nothing.
 /// `Ok` says whether they were all saved too; if not (storage blocked or
 /// full), they still apply until the app closes. An error is an `Error`
 /// saying what was wrong.
@@ -687,34 +687,21 @@ fn show_toggles() {
 }
 
 /// `window.gospelGetterPreferences`: `current()`, the display settings in
-/// effect as an export file has them (Export data… reads it), and
-/// `apply(values)`, which applies and saves them and returns
-/// `{ persisted }`, or throws what was wrong.
+/// effect as an export file has them (Export data… reads it). An import
+/// applies a file's settings in Rust (`apply_preferences`).
 fn export_preferences() {
     let Some(window) = web_sys::window() else {
         return;
     };
     let global = js_sys::Object::new();
     let current = Closure::<dyn Fn() -> JsValue>::new(current);
-    let apply = Closure::<dyn Fn(JsValue) -> Result<JsValue, JsValue>>::new(|values: JsValue| {
-        let persisted = apply_preferences(&values)?;
-        let out = js_sys::Object::new();
-        js_sys::Reflect::set(
-            &out,
-            &JsValue::from_str("persisted"),
-            &JsValue::from_bool(persisted),
-        )?;
-        Ok(out.into())
-    });
     let _ = js_sys::Reflect::set(&global, &JsValue::from_str("current"), current.as_ref());
-    let _ = js_sys::Reflect::set(&global, &JsValue::from_str("apply"), apply.as_ref());
     let _ = js_sys::Reflect::set(
         &window,
         &JsValue::from_str("gospelGetterPreferences"),
         &global,
     );
     current.forget();
-    apply.forget();
 }
 
 // ---- Listening.
