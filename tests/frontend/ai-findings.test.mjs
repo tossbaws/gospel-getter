@@ -300,7 +300,11 @@ test('the note editor, closed once its opener is gone, leaves focus on the activ
         const before = app.calls.length;
         await panes.openBeside({ bookId: JOHN, chapter: 11 });
         await app.idle(before);
+        // Open beside left reading mode (B12); R puts it back, the second
+        // pane alone.
+        app.key('r');
         await frame(app);
+        assert.equal(app.document.documentElement.dataset.readerMode, 'on');
         assert.equal(panes.active(), 'second');
         const second = app.document.getElementById('reading-pane-2');
         const found = second.querySelector('.margin-notes .margin-finding[data-finding-key="35-35"]');

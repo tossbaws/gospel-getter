@@ -5,8 +5,9 @@
 // Each opens the passage in the second pane in the translation of the
 // pane it was asked from (D9), the second pane then active (S13); while
 // split, it replaces only the second pane's passage, whose Back returns
-// (S12). F6 and Shift+F6 switch panes (D10). The panes themselves are
-// split.test.mjs's and split-narrow.test.mjs's.
+// (S12). In reading mode, every Open beside leaves it first, as S does
+// (B12), so both panes show. F6 and Shift+F6 switch panes (D10). The panes
+// themselves are split.test.mjs's and split-narrow.test.mjs's.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -322,7 +323,7 @@ test('the palette: Open this passage beside with one pane; Switch pane (F6) and 
         assert.deepEqual(commandLabels(app), ['Open this passage beside']);
     }));
 
-test('opened beside while tabbed, the second pane’s tab shows; in reading mode, the second pane shows', () =>
+test('opened beside while tabbed, the second pane’s tab shows; in reading mode, reading mode ends and both panes show', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv', width: 800 }, async (app) => {
         await panes(app).openBeside({ bookId: ROMANS, chapter: 5 });
         await settle();
@@ -339,8 +340,8 @@ test('opened beside while tabbed, the second pane’s tab shows; in reading mode
         assert.ok(!column(app, 'second').hidden && column(app, 'first').hidden);
         assert.equal(heading(app, 2), 'Psalms 23');
 
-        // Reading mode, the first pane shown: a note's link Alt-clicked
-        // there shows the second.
+        // Reading mode, the first pane shown: Open beside from its card
+        // leaves reading mode, both panes side by side, the second active.
         app.resize(1280);
         await app.click($(app, 'pane-tab-first'));
         root(app, 1).querySelector('.chapter-main .verse[data-translation]')
@@ -353,8 +354,117 @@ test('opened beside while tabbed, the second pane’s tab shows; in reading mode
         const chip = [...card(app).querySelectorAll('.xref-citation')].find((c) => c.textContent === 'Romans 5:8');
         await clickAndWait(app, chip, 'get_passage');
         await clickBeside(app, $(app, 'xref-preview').querySelector('.xref-preview-beside'));
-        assert.equal(app.document.documentElement.dataset.readerMode, 'on');
+        assert.equal(app.document.documentElement.dataset.readerMode, undefined);
         assert.equal(panes(app).active(), 'second');
-        assert.ok(!column(app, 'second').hidden && column(app, 'first').hidden);
+        assert.ok(!column(app, 'second').hidden && !column(app, 'first').hidden);
         assert.equal(heading(app, 2), 'Romans 5');
+    }));
+
+/** Reading mode, which panes are in view and which is active. */
+const shape = (app) => ({
+    readerMode: app.document.documentElement.dataset.readerMode ?? 'off',
+    inView: ['first', 'second'].filter((name) => column(app, name) ? !column(app, name).hidden : name === 'first'),
+    active: panes(app).active(),
+});
+
+/** Opens the chip for Romans 5:8 in the card on John 3:16, in the first pane. */
+async function previewRomans(app) {
+    await selectIn(app, 1, 16);
+    const chip = [...card(app).querySelectorAll('.xref-citation')].find((c) => c.textContent === 'Romans 5:8');
+    assert.ok(chip, 'fixture: John 3:16 cites Romans 5:8');
+    await clickAndWait(app, chip, 'get_passage');
+}
+
+/** Each way to open beside, asked from the first pane, and the chapter the second pane then reads. */
+const ENTRY_POINTS = [
+    ['the card’s cross-reference preview', 'Romans 5', async (app) => {
+        await previewRomans(app);
+        await clickBeside(app, $(app, 'xref-preview').querySelector('.xref-preview-beside'));
+    }],
+    ['the card’s note row', 'Romans 5', async (app) => {
+        await selectIn(app, 1, 16);
+        await clickBeside(app, app.document.querySelector('.verse-notes .note-card .note-beside'));
+    }],
+    ['a note’s link, Shift-clicked', 'Romans 5', async (app) => {
+        await selectIn(app, 1, 16);
+        const link = [...app.document.querySelectorAll('.verse-notes .note-card a.note-ref-link')]
+            .find((a) => a.textContent === 'Rom 5:8');
+        await clickBeside(app, link, { shiftKey: true });
+    }],
+    ['a search result', 'Psalms 23', async (app) => {
+        await app.search('my shepherd');
+        const result = app.searchResults().find((r) => r.querySelector('.search-beside')
+            && r.querySelector('.search-ref').textContent.startsWith('Psalms 23:'));
+        assert.ok(result, 'fixture: search finds a verse of Psalms 23');
+        await clickBeside(app, result.querySelector('.search-beside'));
+    }],
+    ['the palette’s Open this passage beside', 'John 3', async (app) => {
+        await type(app, '>open this');
+        const before = app.calls.length;
+        app.key('Enter', {}, app.searchInput());
+        await app.idle(before, 'get_reading');
+    }],
+    ['gospelGetterPanes.openBeside', 'Romans 5', async (app) => {
+        await panes(app).openBeside({ bookId: ROMANS, chapter: 5, verse: 8 });
+        await settle();
+    }],
+];
+
+for (const [row, second, openBeside] of ENTRY_POINTS) {
+    test(`in reading mode, ${row}: Open beside leaves it, both panes show, the second active; R shows the second alone`, async () => {
+        await backend('__reset', { bookId: JOHN, chapter: 3, translationCode: 'kjv' });
+        await backend('add_note', { bookId: JOHN, chapter: 3, verseStart: 16, verseEnd: 16, body: 'See Rom 5:8.' });
+        const app = await openApp({ book: 'John', chapter: 3, translation: 'web', keepBookmarks: true });
+        try {
+            const r = async () => {
+                app.key('r');
+                await settle();
+            };
+            await r();
+            assert.deepEqual(shape(app), { readerMode: 'on', inView: ['first'], active: 'first' }, `${row}: one pane, in reading mode`);
+            await openBeside(app);
+            assert.deepEqual(shape(app), { readerMode: 'off', inView: ['first', 'second'], active: 'second' }, `${row}: one pane, opened beside`);
+            assert.deepEqual([heading(app, 1), heading(app, 2)], ['John 3', second], `${row}: one pane, the passages`);
+            await r();
+            assert.deepEqual(shape(app), { readerMode: 'on', inView: ['second'], active: 'second' }, `${row}: R after`);
+
+            // Two panes in reading mode, the first shown alone: the same.
+            // The second turned to its next chapter first, so opening
+            // beside again loads one.
+            const before = app.calls.length;
+            app.key('ArrowRight');
+            await app.idle(before, 'get_reading');
+            app.key('F6');
+            await settle();
+            assert.deepEqual(shape(app), { readerMode: 'on', inView: ['first'], active: 'first' }, `${row}: two panes, in reading mode`);
+            await openBeside(app);
+            assert.deepEqual(shape(app), { readerMode: 'off', inView: ['first', 'second'], active: 'second' }, `${row}: two panes, opened beside`);
+            assert.deepEqual([heading(app, 1), heading(app, 2)], ['John 3', second], `${row}: two panes, the passages`);
+            await r();
+            assert.deepEqual(shape(app), { readerMode: 'on', inView: ['second'], active: 'second' }, `${row}: two panes, R after`);
+        } finally {
+            app.close();
+        }
+    });
+}
+
+test('out of reading mode, Open beside leaves reading mode off', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
+        await previewRomans(app);
+        await clickBeside(app, $(app, 'xref-preview').querySelector('.xref-preview-beside'));
+        assert.deepEqual(shape(app), { readerMode: 'off', inView: ['first', 'second'], active: 'second' });
+        assert.notEqual(app.document.activeElement, $(app, 'aa-toggle'), 'focus left where Open beside put it, not on Aa');
+    }));
+
+test('the Library, whose rows have Open beside, can’t be open in reading mode: R closes it and Ctrl+B doesn’t open it', () =>
+    withApp({ book: 'John', chapter: 3, translation: 'web' }, async (app) => {
+        app.openLibrary('bookmarks');
+        assert.ok(!app.surface('library').hidden);
+        app.key('r');
+        await settle();
+        assert.equal(app.document.documentElement.dataset.readerMode, 'on');
+        assert.ok(app.surface('library').hidden, 'R closed it');
+        app.key('b', { ctrlKey: true });
+        await settle();
+        assert.ok(app.surface('library').hidden, 'Ctrl+B left it closed');
     }));

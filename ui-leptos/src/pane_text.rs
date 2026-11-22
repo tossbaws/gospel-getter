@@ -55,8 +55,8 @@ impl Shape {
 /// What S does (B9-B11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitKey {
-    /// "Open this passage beside" (`reader::open_here_beside`, which leaves
-    /// reading mode first, B12).
+    /// "Open this passage beside" (`reader::open_here_beside`; leaving
+    /// reading mode first, B12, is `reader::open_beside`'s).
     OpenBeside,
     /// The second pane closed, as X closes it.
     CloseSecond,
@@ -313,7 +313,7 @@ mod tests {
     }
 
     /// B9-B11: S opens the passage beside with one pane, in reading mode
-    /// or not (B12 is `reader::open_here_beside`'s), and closes the second
+    /// or not (B12 is `reader::open_beside`'s), and closes the second
     /// with two, whatever's shown; with no chapter shown, it does nothing.
     #[test]
     fn s_opens_this_passage_beside_or_closes_the_second_pane() {

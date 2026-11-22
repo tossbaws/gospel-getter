@@ -285,7 +285,7 @@ test('each pane keeps its place across the tabs and the 900px crossing, not trus
         assert.deepEqual([scrolled.first, scrolled.second], [300, 590]);
     }));
 
-test('Open beside into a hidden second pane records where the reader left it, so its Back returns there, tabbed or in reading mode', () =>
+test('Open beside into a hidden second pane records where the reader left it, so its Back returns there, tabbed or from reading mode', () =>
     withApp({ book: 'John', chapter: 3, translation: 'kjv', width: 1280 }, async (app) => {
         await openBeside(app, { bookId: ROMANS, chapter: 5, translation: 'bsb' });
         const scrolled = layOut(app);
@@ -309,7 +309,8 @@ test('Open beside into a hidden second pane records where the reader left it, so
         assert.equal(heading(app, 2), 'Romans 5');
         assert.equal(scrolled.second, 600, 'Back returns to verse 10, where the reader left it');
 
-        // Reading mode: the same, the first pane the one shown.
+        // Reading mode, the first pane the one shown: Open beside leaves
+        // it first (B12), both panes then shown, and Back the same.
         app.resize(1280);
         await frame(app);
         await scrollColumn(app, scrolled, 'second', 540);
@@ -319,7 +320,9 @@ test('Open beside into a hidden second pane records where the reader left it, so
         assert.equal(app.document.documentElement.dataset.readerMode, 'on');
         assert.deepEqual(tabsSeen(app).hidden, ['second']);
         await openBeside(app, { bookId: ROMANS, chapter: 8 });
-        assert.deepEqual(tabsSeen(app).hidden, ['first'], 'reading mode shows the second pane (S13)');
+        assert.equal(app.document.documentElement.dataset.readerMode, undefined, 'reading mode left (B12)');
+        assert.deepEqual(tabsSeen(app).hidden, [], 'both panes shown');
+        assert.equal(panes(app).active(), 'second', 'the second active (S13)');
         await back();
         assert.equal(heading(app, 2), 'Romans 5');
         assert.equal(scrolled.second, 540, 'Back returns to where the reader left it');
