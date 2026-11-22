@@ -51,6 +51,7 @@ pub use crate::db::reader_data::{
     NewBookmark, NewHighlight, NewNote, NewPosition, NoteKey, StoredNote, notes_to_add,
 };
 use crate::db::{Book, Finding, HighlightColor, NewFinding, Passage, Translation};
+use crate::passage_reference::passage_reference;
 
 /// The `format` every reader-data file declares.
 pub const FORMAT: &str = "gospel-getter-reader-data";
@@ -679,15 +680,7 @@ fn check_passage_record<'a>(
     last_verses: &HashMap<(i64, i64), i64>,
 ) -> Result<(&'a Book, String), String> {
     let found = check_chapter(label, book_number, book_name, chapter, books)?;
-    let reference = format!(
-        "{} {chapter}:{verse_start}{}",
-        found.name,
-        if verse_end == verse_start {
-            String::new()
-        } else {
-            format!("\u{2013}{verse_end}")
-        }
-    );
+    let reference = passage_reference(&found.name, chapter, Some((verse_start, verse_end)));
     let last = last_verses.get(&(found.id, chapter)).copied().unwrap_or(0);
     if verse_start < 1 || verse_end < verse_start {
         return Err(format!("{label}: {reference} isn't a valid verse range."));
@@ -708,7 +701,7 @@ fn check_verse_record<'a>(
     last_verses: &HashMap<(i64, i64), i64>,
 ) -> Result<(&'a Book, String), String> {
     let found = check_chapter(label, book_number, book_name, chapter, books)?;
-    let reference = format!("{} {chapter}:{verse}", found.name);
+    let reference = passage_reference(&found.name, chapter, Some((verse, verse)));
     let last = last_verses.get(&(found.id, chapter)).copied().unwrap_or(0);
     if verse < 1 {
         return Err(format!("{label}: {reference} isn't a valid verse."));
