@@ -4,6 +4,38 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.35.0] - 2026-11-21
+
+Your notes beside the text whenever you like, and a key for two passages
+side by side.
+
+### Added
+- **Notes beside the text**, a new choice under **Aa**: **Off**, **In
+  reading mode** or **Always**. **In reading mode** is the default, and
+  it's how notes in the margin always worked. **Always** shows your notes
+  in the margin in normal reading too, with the top bar and the sidebar
+  still there; the text column narrows a little when needed, so the notes
+  fit beside it.
+- A chapter with no notes says so at the top of the margin. In a narrow
+  window, a ✎ after each noted verse opens its notes instead.
+- `M` shows or hides your notes right where you are.
+- `S` opens the passage you're reading in a second pane beside it, and
+  closes the second pane when two are open. From reading mode, it leaves
+  reading mode first.
+
+### Changed
+- Compare compares translations only. Its **Notes** choice is gone,
+  because **Always** does that job now. If you used Compare → **Notes**,
+  2.35.0 switches you to **Always** when you update, and turns Compare
+  off.
+- Long notes in the margin fold after 10 lines, not 6.
+- These settings stay on this computer and aren't in backups, as before.
+
+No verse changes. Backups keep the same format. Updating keeps your
+bookmarks, highlights, notes, findings, reading position and settings.
+Going back to 2.34.0 shows notes in the margin in reading mode again;
+Compare's Notes stays off.
+
 ## [2.34.0] - 2026-11-21
 
 A new app icon, and release builds that check an upgrade before they ship.
