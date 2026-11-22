@@ -112,6 +112,10 @@ test('☰ → Export data… opens a chooser: Export, Everything (backup) or My 
             assert.equal(choice.getAttribute('type'), 'button');
             assert.equal(choice.getAttribute('aria-labelledby'), `${choice.id}-name`);
             assert.equal(choice.getAttribute('aria-describedby'), `${choice.id}-line`);
+            // The classes the stylesheet draws a choice with.
+            assert.equal(choice.className, 'export-choice');
+            assert.equal(el(app, `${choice.id}-name`).className, 'export-choice-name');
+            assert.equal(el(app, `${choice.id}-line`).className, 'export-choice-line');
             assert.ok(!choice.disabled);
         }
         // In this order, then Cancel.

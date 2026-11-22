@@ -4877,7 +4877,8 @@ fn the_welcome_uses_tested_theme_colors() {
 /// ☰ → Export data… is the one place to export (D20): a modal chooser like
 /// the page's others (the overlay's and panel's classes, a dialog named by
 /// its title), whose two choices are buttons named by their names and
-/// described by their lines, and Cancel; the Library's Notes tab has no
+/// described by their lines (tested in export-choice.test.mjs), and
+/// Cancel; the Library's Notes tab has no
 /// Export notes… button any more. Its colors add nothing of its own:
 /// --text, --text-dim and --accent on the modal's opaque --option-bg, a
 /// choice under the pointer the welcome's 0.06 --accent wash, a greyed-out
@@ -4896,18 +4897,6 @@ fn the_export_chooser_is_a_modal_in_tested_theme_colors() {
     }
     assert!(tag_of("export-choice-title").contains(r#"class="note-title""#));
     assert!(tag_of("export-choice-cancel").contains(r#"class="reader-mode-btn""#));
-    let chooser = piece("export_choice.rs");
-    for needle in [
-        r#"class="export-choice""#,
-        "aria-labelledby=labelled_by",
-        "aria-describedby=described_by",
-        r#"class="export-choice-name""#,
-        r#"class="export-choice-line""#,
-        r#""export-choice-everything","#,
-        r#""export-choice-notes","#,
-    ] {
-        assert!(chooser.contains(needle), "{needle}");
-    }
     assert!(tag_of("export-data-btn").contains(r#"title="Save a backup, or export your notes""#));
     for (file, source) in std::iter::once(("index.html", HTML)).chain(PIECES.iter().copied()) {
         assert!(
