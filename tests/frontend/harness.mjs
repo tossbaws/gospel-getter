@@ -752,6 +752,18 @@ export async function exportData(app, path) {
     await app.exportEverything();
 }
 
+/** ☰ → Import data… with the open dialog answering `path`, then Import in its preview. */
+export async function importData(app, path) {
+    await app.pick(path);
+    app.open('menu');
+    let before = app.calls.length;
+    app.click(app.document.getElementById('import-data-btn'));
+    await app.idle(before);
+    before = app.calls.length;
+    app.click(app.document.getElementById('import-confirm'));
+    await app.idle(before, 'apply_import');
+}
+
 /** A note's text as shown, its line breaks (`<br>`, the note as Markdown) as new lines. */
 export function shownText(el) {
     const copy = el.cloneNode(true);

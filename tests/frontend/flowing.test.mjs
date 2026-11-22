@@ -5,9 +5,16 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clickAndWaitForCalls as clickAndWait, closeBridge, el as $, main, openApp, shownVerse, withApp } from './harness.mjs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { clickAndWaitForCalls as clickAndWait, closeBridge, el as $, importData, main, openApp, shownVerse, withApp } from './harness.mjs';
 
-after(closeBridge);
+const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-flowing-'));
+after(async () => {
+    await closeBridge();
+    rmSync(dir, { recursive: true, force: true });
+});
 
 const FLOWING = { 'gospel-getter-layout': 'flowing' };
 const card = (app) => $(app, 'selection-card');
@@ -266,14 +273,30 @@ test('bookmarks, notes, highlights and KJV footnotes all show in Flowing', () =>
         assert.match(card(app).querySelector('.selection-footnotes').textContent, /Footnotes/);
     }));
 
-test('a backup carries the layout, and an unknown one is refused before anything changes', () =>
-    withApp({}, async (app) => {
-        const prefs = app.window.gospelGetterPreferences;
-        assert.equal(prefs.current().layout, 'verses');
-        prefs.apply({ layout: 'flowing' });
+test('a backup carries the layout, and an unknown one is refused before anything changes', () => {
+    const path = join(dir, 'layout.gospel-getter.json');
+    writeFileSync(path, JSON.stringify({
+        format: 'gospel-getter-reader-data', format_version: 3, exported_at: '2026-10-13T12:00:00.000Z',
+        app_version: '2.11.0', reading_position: null, bookmarks: [], highlights: [], notes: [],
+        preferences: { layout: 'flowing' },
+    }));
+    // The backend skips a setting this version doesn't offer before the
+    // page sees it; `refused` hands the page one anyway, with a valid
+    // theme, so the page's own check (every value before any applies) is
+    // what refuses them.
+    let refused = false;
+    const preview = (answer) => (refused
+        ? { ...answer, preview: { ...answer.preview, preferences: { layout: 'columns', theme: 'matrix' } } }
+        : answer);
+    return withApp({ alter: { choose_import_file: preview } }, async (app) => {
+        assert.equal(app.window.gospelGetterPreferences.current().layout, 'verses');
+        await importData(app, path);
         assert.equal(layoutOf(app), 'flowing');
         assert.equal(app.storage()['gospel-getter-layout'], 'flowing');
-        assert.throws(() => prefs.apply({ layout: 'columns', theme: 'matrix' }), /isn’t a valid layout/);
+        refused = true;
+        await importData(app, path);
+        assert.match(app.notice(), /Display settings weren’t applied: .*isn’t a valid layout/);
         assert.equal(layoutOf(app), 'flowing');
         assert.notEqual(app.document.documentElement.dataset.theme, 'matrix');
-    }));
+    });
+});

@@ -15,10 +15,10 @@
 //! page reads none of them): `window.gospelGetterShortcuts`, the table of
 //! shortcuts (`shortcut_table`, [`export_shortcuts`]);
 //! `window.gospelGetterPreferences` (`aa`): `current()`, the display
-//! settings an export carries, and `apply(values)`;
-//! `window.gospelGetterSurfaces` (`surfaces`): `current()`, the open
-//! header surface's name or `null`; `window.gospelGetterLibrary`
-//! (`library`): `refresh(lists)`, the Library's lists reloaded;
+//! settings an export carries; `window.gospelGetterSurfaces` (`surfaces`):
+//! `current()`, the open header surface's name or `null`;
+//! `window.gospelGetterLibrary` (`library`): `refresh(lists)`, the
+//! Library's lists reloaded;
 //! `window.gospelGetterPanes` (`pane`): a second pane opened beside and
 //! closed, and which panes show and which is active; and
 //! `window.gospelGetterOverlays` (`overlays`), the overlays' one list.

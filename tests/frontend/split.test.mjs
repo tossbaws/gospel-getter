@@ -11,9 +11,27 @@
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backend, bookId, closeBridge, settle, shownVerse, withApp } from './harness.mjs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { backend, bookId, closeBridge, importData, settle, shownVerse, withApp } from './harness.mjs';
 
-after(closeBridge);
+const dir = mkdtempSync(join(tmpdir(), 'gospel-getter-split-'));
+after(async () => {
+    await closeBridge();
+    rmSync(dir, { recursive: true, force: true });
+});
+
+/** A backup holding only reading mode, on or off. */
+function readingModeFile(on) {
+    const path = join(dir, `reading-mode-${on ? 'on' : 'off'}.gospel-getter.json`);
+    writeFileSync(path, JSON.stringify({
+        format: 'gospel-getter-reader-data', format_version: 3, exported_at: '2026-10-13T12:00:00.000Z',
+        app_version: '2.11.0', reading_position: null, bookmarks: [], highlights: [], notes: [],
+        preferences: { reading_mode: on },
+    }));
+    return path;
+}
 
 const ROMANS = bookId('Romans');
 const JOHN = bookId('John');
@@ -404,11 +422,11 @@ test('reading mode shows the active pane alone, the top bar acting on it, and le
         // Reading mode from an import: the same.
         app.resize(1280);
         before = app.calls.length;
-        app.window.gospelGetterPreferences.apply({ reading_mode: true });
+        await importData(app, readingModeFile(true));
         assert.deepEqual(seen(), {
             readingMode: true, tabs: false, hidden: ['second'], shown: ['first', 'second'], active: 'first',
         });
-        app.window.gospelGetterPreferences.apply({ reading_mode: false });
+        await importData(app, readingModeFile(false));
         assert.deepEqual(seen().hidden, []);
         await app.idle(before);
     }));
