@@ -131,9 +131,7 @@ pub fn chapter_shown(pane: PaneId, book_id: i64, chapter: i64) {
         show(pane);
     } else {
         with_pane(pane, |s| s.findings.clear());
-        if pane == pane::active() {
-            margin::findings(book_id, chapter, Vec::new());
-        }
+        margin::findings(pane, book_id, chapter, Vec::new());
     }
     spawn_local(refresh_pane(pane));
 }
@@ -185,8 +183,7 @@ pub async fn refresh_everywhere() {
     }
 }
 
-/// Marks `pane`'s flagged verses and, if it's the active pane (the margin
-/// follows it), hands the findings to the margin.
+/// Marks `pane`'s flagged verses and hands the findings to the margin.
 fn show(pane: PaneId) {
     let Some((book_id, chapter, findings)) = with_pane(pane, |s| {
         let (book_id, chapter) = s.chapter?;
@@ -195,12 +192,11 @@ fn show(pane: PaneId) {
         return;
     };
     mark(pane, &findings);
-    if pane == pane::active() {
-        margin::findings(book_id, chapter, text::groups(findings));
-    }
+    margin::findings(pane, book_id, chapter, text::groups(findings));
 }
 
-/// Another pane is the active one: the margin shows its findings.
+/// Another pane is the active one: its findings are marked and handed to
+/// the margin again.
 pub fn pane_switched() {
     show(pane::active());
 }
@@ -252,7 +248,8 @@ fn mark(pane: PaneId, findings: &[Finding]) {
 }
 
 /// The finding with this id, of the chapter on screen in the active pane
-/// (where the margin is).
+/// (a pointer pressed in a pane's margin or marker made it the active
+/// one).
 fn finding(id: i64) -> Option<Finding> {
     with_pane(pane::active(), |s| {
         s.findings.iter().find(|f| f.id == id).cloned()
@@ -267,8 +264,7 @@ fn id_of(el: &Element) -> Option<i64> {
     el.get_attribute("data-finding-id")?.parse().ok()
 }
 
-/// A click in a verse's findings (in the margin, the notes column, under a
-/// verse or a marker's): its toggle opens or folds them, "Keep as mine" and
+/// A click in a verse's findings (in the margin, or a marker's): its toggle opens or folds them, "Keep as mine" and
 /// "Remove" act; any click there goes no further, so it never selects a
 /// verse. Whether the click was one of them.
 pub fn on_click(event: &web_sys::Event) -> bool {

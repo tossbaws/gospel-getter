@@ -955,7 +955,6 @@ fn run(action: &Run) {
         Run::TextSize(step) => aa::text_size_shortcut(*step),
         Run::Translation(code) => aa::choose_translation(code),
         Run::CompareWith(code) => aa::compare_with(code),
-        Run::CompareNotes => aa::compare_with_notes(),
         Run::Page(command) => crate::page::run_command(command),
     }
 }

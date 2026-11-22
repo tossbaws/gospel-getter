@@ -69,6 +69,13 @@ pub enum Route {
     /// X: the second pane closed, as its × does (H5); with one pane, the
     /// key goes on.
     ClosePane,
+    /// S: this passage opened beside, as the palette's "Open this passage
+    /// beside" does, or, with two panes open, the second closed, as X does
+    /// (B9-B12); with no chapter shown, the key goes on.
+    Split,
+    /// M: "Notes beside the text", shown or hidden where the reader is
+    /// (`aa_text::notes_toggled`, M2).
+    NotesBeside,
     /// G: the book and chapter picker.
     Picker,
     /// T: the translations and Compare, opened or closed.
@@ -95,8 +102,9 @@ pub enum Route {
 /// Whether a route's `preventDefault` comes with it, whatever happens: the
 /// rest depend on what the key did (`Escape`, `Copy`, `CopyAs`, `Note`,
 /// `Bookmark`, `Highlight`: only with a selection; `ClosePane`,
-/// `SwitchPane`: with one pane, F6 is the webview's) or never prevent it
-/// (`Compare`, `Turn`).
+/// `SwitchPane`: with one pane, F6 is the webview's; `Split`: with a
+/// chapter shown; `NotesBeside`: once it's changed the setting) or never
+/// prevent it (`Compare`, `Turn`).
 pub fn always_prevented(route: Route) -> bool {
     !matches!(
         route,
@@ -107,6 +115,8 @@ pub fn always_prevented(route: Route) -> bool {
             | Route::Bookmark
             | Route::Highlight
             | Route::ClosePane
+            | Route::Split
+            | Route::NotesBeside
             | Route::Compare
             | Route::Turn(_)
             | Route::SwitchPane
@@ -161,6 +171,13 @@ pub fn route(press: &Press) -> Option<Route> {
     }
     if plain && !shift && (key == "x" || key == "X") {
         return Some(Route::ClosePane);
+    }
+    // Plain only, as B and C are: Ctrl+S (Cmd+S) stays the webview's.
+    if plain && !shift && (key == "s" || key == "S") {
+        return Some(Route::Split);
+    }
+    if plain && !shift && (key == "m" || key == "M") {
+        return Some(Route::NotesBeside);
     }
     // Plain only: Ctrl+P (Cmd+P) stays the webview's print.
     if plain && !shift && (key == "p" || key == "P") {
@@ -375,6 +392,8 @@ mod tests {
         // AltGr+B is B, not the Library.
         assert_eq!(route(&altgr("b")), Some(Route::Bookmark));
         assert_eq!(route(&altgr("c")), Some(Route::Compare));
+        assert_eq!(route(&altgr("s")), Some(Route::Split));
+        assert_eq!(route(&altgr("m")), Some(Route::NotesBeside));
     }
 
     #[test]
@@ -597,7 +616,14 @@ mod tests {
         for id in ["search", "library", "back", "next-chapter", "close"] {
             assert!(kept.contains(&id), "{id} stays");
         }
-        for id in ["bookmark", "highlight", "close-pane", "switch-pane"] {
+        for id in [
+            "bookmark",
+            "highlight",
+            "close-pane",
+            "switch-pane",
+            "split",
+            "notes-beside",
+        ] {
             assert!(turned_off.contains(&id), "{id}'s letter is turned off");
         }
         // A key that's no shortcut is no shortcut either way.
@@ -610,6 +636,38 @@ mod tests {
         };
         assert!(!character_only(&ctrl_k));
         assert_eq!(route_for(&ctrl_k, false), Some(Route::Search));
+    }
+
+    /// S and M alone, either case (Caps Lock gives the capital), are split
+    /// view and "Notes beside the text" (B9, B7). With Ctrl, Cmd or Alt
+    /// (or Shift) they're no part of it: Ctrl+S stays the webview's. Off,
+    /// Single-key shortcuts turn both off.
+    #[test]
+    fn s_and_m_alone_split_and_show_the_notes() {
+        for (keys, to) in [(["s", "S"], Route::Split), (["m", "M"], Route::NotesBeside)] {
+            for key in keys {
+                assert_eq!(route(&press(key)), Some(to), "{key}");
+                assert!(character_only(&press(key)), "{key}");
+                assert_eq!(route_for(&press(key), true), Some(to), "{key} on");
+                assert_eq!(route_for(&press(key), false), None, "{key} off");
+                assert!(!always_prevented(to), "{key} prevents only when it acts");
+                for (what, f) in [
+                    ("Ctrl", (|p: &mut Press| p.ctrl = true) as fn(&mut Press)),
+                    ("Cmd", |p| p.meta = true),
+                    ("Alt", |p| p.alt = true),
+                    ("Shift", |p| p.shift = true),
+                    ("Ctrl+Alt", |p| {
+                        p.ctrl = true;
+                        p.alt = true;
+                    }),
+                ] {
+                    assert_eq!(with(key, f), None, "{what}+{key}");
+                    let mut pressed = press(key);
+                    f(&mut pressed);
+                    assert_eq!(route_for(&pressed, false), None, "{what}+{key}, keys off");
+                }
+            }
+        }
     }
 
     #[test]
@@ -692,7 +750,7 @@ mod tests {
     fn shift_takes_some_letters_and_not_others() {
         // ? is typed with Shift, and still opens the sheet.
         assert_eq!(with("?", |p| p.shift = true), Some(Route::Shortcuts));
-        for key in ["N", "G", "T", "C", "B", "H", "X", "P"] {
+        for key in ["N", "G", "T", "C", "B", "H", "X", "P", "S", "M"] {
             assert_eq!(with(key, |p| p.shift = true), None, "{key}");
         }
         assert_eq!(with("{", |p| p.shift = true), None);
@@ -734,6 +792,8 @@ mod tests {
             (Route::Bookmark, false),
             (Route::Highlight, false),
             (Route::ClosePane, false),
+            (Route::Split, false),
+            (Route::NotesBeside, false),
             (Route::Picker, true),
             (Route::Translation, true),
             (

@@ -114,7 +114,7 @@ test('groups come in order: Go to, Commands, Verses; ↓ and ↑ move through al
         // Words some commands and some verses have.
         await type(app, 'compare');
         assert.deepEqual(groupLabels(app), ['Commands', 'Verses']);
-        assert.deepEqual(commandLabels(app), ['Compare on', 'Compare with: BSB', 'Compare with: WEB', 'Compare with: Notes']);
+        assert.deepEqual(commandLabels(app), ['Compare on', 'Compare with: BSB', 'Compare with: WEB']);
         const all = groups(app).flatMap((g) => g.options);
         assert.ok(all.length > 3);
         assert.equal(active(app), all[0], 'the first command is active');
@@ -147,7 +147,7 @@ test('">" lists commands only, without searching', () =>
         await type(app, '> theme ma');
         assert.deepEqual(commandLabels(app), ['Theme: Matrix']);
         await type(app, '>');
-        assert.equal(commandLabels(app).length, 46);
+        assert.equal(commandLabels(app).length, 48);
         assert.equal(commandLabels(app)[0], 'Compare on');
         assert.equal(commandLabels(app).at(-1), 'Keyboard shortcuts');
         await type(app, '>nothing like this');
@@ -162,9 +162,10 @@ test('">" lists commands only, without searching', () =>
 test('commands match word prefixes, in any order, ignoring case', () =>
     withApp({}, async (app) => {
         for (const [query, labels] of [
-            ['rea mo', ['Reading mode']],
-            ['mo rea', ['Reading mode']],
-            ['READING', ['Reading mode']],
+            // Notes beside the text's "In reading mode" is one too.
+            ['rea mo', ['Reading mode', 'Notes beside the text: In reading mode']],
+            ['mo rea', ['Reading mode', 'Notes beside the text: In reading mode']],
+            ['READING', ['Reading mode', 'Notes beside the text: In reading mode']],
             ['theme ma', ['Theme: Matrix']],
             ['Theme: classic d', ['Theme: Classic Dark']],
             ['text size lar', ['Text size: Larger']],
@@ -190,7 +191,7 @@ test('accents are ignored in what’s typed, as case is', () =>
         await type(app, 'thème ma');
         assert.deepEqual(commandLabels(app), ['Theme: Matrix']);
         await type(app, '>RÉADING MÖDE');
-        assert.deepEqual(commandLabels(app), ['Reading mode']);
+        assert.deepEqual(commandLabels(app), ['Reading mode', 'Notes beside the text: In reading mode']);
     }));
 
 test('commands show their keys', () =>
@@ -337,7 +338,7 @@ test('next and previous chapter turn as the arrow keys do; reading mode and the 
         await enter(app);
         assert.equal(root.dataset.readerMode, 'on');
         await type(app, 'reading mode');
-        assert.deepEqual(commandLabels(app), ['Exit reading mode']);
+        assert.deepEqual(commandLabels(app), ['Exit reading mode', 'Notes beside the text: In reading mode']);
         assert.equal(option(app, 'Exit reading mode').querySelector('kbd').textContent, 'Esc');
         await enter(app);
         assert.notEqual(root.dataset.readerMode, 'on');

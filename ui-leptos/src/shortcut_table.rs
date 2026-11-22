@@ -53,6 +53,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     Shortcut { id: "next-book", group: "Reading", keys: &[&["]"]], aria: "]", does: "Next book, at chapter 1", handles: &["]"] },
     Shortcut { id: "picker", group: "Reading", keys: &[&["G"]], aria: "G", does: "Choose a book and chapter", handles: &["g", "G"] },
     Shortcut { id: "compare", group: "Reading", keys: &[&["C"]], aria: "C", does: "Compare translations, on or off", handles: &["c", "C"] },
+    Shortcut { id: "split", group: "Reading", keys: &[&["S"]], aria: "S", does: "Open this passage beside, or close the second pane", handles: &["s", "S"] },
     Shortcut { id: "switch-pane", group: "Reading", keys: &[&["F6"], &["Shift", "F6"], &["P"]], aria: "F6 Shift+F6 P", does: "Switch pane", handles: &["F6", "p", "P"] },
     Shortcut { id: "close-pane", group: "Reading", keys: &[&["X"]], aria: "X", does: "Close the second pane", handles: &["x", "X"] },
     Shortcut { id: "next-verse", group: "Selection", keys: &[&["j"]], aria: "J", does: "Select the next verse", handles: &["j", "J"] },
@@ -78,6 +79,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     Shortcut { id: "text-medium", group: "Text & display", keys: &[&["Ctrl", "0"]], aria: "Control+0", does: "Medium text", handles: &["0", "Numpad0"] },
     Shortcut { id: "reader-mode", group: "Text & display", keys: &[&["R"]], aria: "R", does: "Reading mode, on or off", handles: &["r", "R"] },
     Shortcut { id: "reader-exit", group: "Text & display", keys: &[&["Esc"]], aria: "Escape", does: "Leave reading mode", handles: &["Escape"] },
+    Shortcut { id: "notes-beside", group: "Text & display", keys: &[&["M"]], aria: "M", does: "Notes beside the text, on or off where you are", handles: &["m", "M"] },
     Shortcut { id: "back", group: "History", keys: &[&["Alt", "←"]], aria: "Alt+ArrowLeft", does: "Back to the passage you jumped from", handles: &["ArrowLeft"] },
     Shortcut { id: "forward", group: "History", keys: &[&["Alt", "→"]], aria: "Alt+ArrowRight", does: "Forward again", handles: &["ArrowRight"] },
 ];
@@ -166,6 +168,33 @@ mod tests {
             let at = |id: &str| SHORTCUTS.iter().position(|s| s.id == id);
             assert_eq!(at(after).map(|i| i + 1), at(id), "{id} after {after}");
         }
+    }
+
+    #[test]
+    fn s_and_m_have_their_rows() {
+        let at = |id: &str| SHORTCUTS.iter().position(|s| s.id == id);
+        let split = shortcut("split").unwrap();
+        assert_eq!(
+            (split.group, split.aria, split.handles, split.does),
+            (
+                "Reading",
+                "S",
+                &["s", "S"][..],
+                "Open this passage beside, or close the second pane"
+            )
+        );
+        assert_eq!(at("split").map(|i| i + 1), at("switch-pane"));
+        let notes = shortcut("notes-beside").unwrap();
+        assert_eq!(
+            (notes.group, notes.aria, notes.handles, notes.does),
+            (
+                "Text & display",
+                "M",
+                &["m", "M"][..],
+                "Notes beside the text, on or off where you are"
+            )
+        );
+        assert_eq!(notes.first_keys(), "M");
     }
 
     #[test]

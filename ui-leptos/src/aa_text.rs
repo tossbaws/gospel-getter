@@ -1,6 +1,9 @@
 //! Aa's rules, free of the DOM so they are tested natively (`cargo test`):
-//! which keys change the text size, and stepping through the sizes, and
-//! what Compare shows beside the text.
+//! which keys change the text size, and stepping through the sizes, what
+//! Compare shows beside the text, and what M does to "Notes beside the
+//! text".
+
+use crate::preferences::NotesBeside;
 
 /// What Compare shows beside the text being read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -9,20 +12,30 @@ pub enum Beside {
     Nothing,
     /// The translations, side by side.
     Translations,
-    /// The reader's notes on the chapter (Compare's "with" Notes).
-    Notes,
 }
 
-/// What Compare shows, with Compare on or off (`compare`), Notes chosen as
-/// what it compares with or not (`notes`), in reading mode or not.
-/// Reading mode shows the text with its margin notes, never the notes
-/// column; it compares translations.
-pub fn beside(compare: bool, notes: bool, reading_mode: bool) -> Beside {
-    match (compare, notes) {
-        (false, _) => Beside::Nothing,
-        (true, false) => Beside::Translations,
-        (true, true) if reading_mode => Beside::Nothing,
-        (true, true) => Beside::Notes,
+/// What Compare shows, with Compare on or off (`compare`): it compares
+/// translations only. The reader's notes are the margin's
+/// (`margin_text::shown`).
+pub fn beside(compare: bool) -> Beside {
+    if compare {
+        Beside::Translations
+    } else {
+        Beside::Nothing
+    }
+}
+
+/// What M makes "Notes beside the text", from `now`: it shows or hides the
+/// notes right where the reader is. Outside reading mode, Always goes back
+/// to In reading mode and anything else becomes Always; in reading mode,
+/// Off becomes In reading mode and anything else Off. So each press flips
+/// whether the notes show there.
+pub fn notes_toggled(now: NotesBeside, reading_mode: bool) -> NotesBeside {
+    match (reading_mode, now) {
+        (false, NotesBeside::Always) => NotesBeside::Reading,
+        (false, _) => NotesBeside::Always,
+        (true, NotesBeside::Off) => NotesBeside::Reading,
+        (true, _) => NotesBeside::Off,
     }
 }
 
@@ -163,14 +176,41 @@ mod tests {
     }
 
     #[test]
-    fn compare_shows_the_notes_only_out_of_reading_mode() {
-        for reading_mode in [false, true] {
-            assert_eq!(beside(false, false, reading_mode), Beside::Nothing);
-            assert_eq!(beside(false, true, reading_mode), Beside::Nothing);
-            assert_eq!(beside(true, false, reading_mode), Beside::Translations);
+    fn compare_compares_translations_only() {
+        assert_eq!(beside(false), Beside::Nothing);
+        assert_eq!(beside(true), Beside::Translations);
+    }
+
+    /// M2: M shows or hides the notes where the reader is, in or out of
+    /// reading mode, from each of the three settings.
+    #[test]
+    fn m_shows_or_hides_the_notes_where_the_reader_is() {
+        use NotesBeside::{Always, Off, Reading};
+        for (now, reading_mode, then) in [
+            (Off, false, Always),
+            (Reading, false, Always),
+            (Always, false, Reading),
+            (Off, true, Reading),
+            (Reading, true, Off),
+            (Always, true, Off),
+        ] {
+            assert_eq!(
+                notes_toggled(now, reading_mode),
+                then,
+                "{now:?}, {reading_mode}"
+            );
         }
-        assert_eq!(beside(true, true, false), Beside::Notes);
-        // Reading mode: the text, with the margin's notes.
-        assert_eq!(beside(true, true, true), Beside::Nothing);
+        // Each press flips whether they show where the reader is.
+        let shows = |s: NotesBeside, reading_mode: bool| match s {
+            Off => false,
+            Reading => reading_mode,
+            Always => true,
+        };
+        for now in [Off, Reading, Always] {
+            for reading_mode in [false, true] {
+                let then = notes_toggled(now, reading_mode);
+                assert_ne!(shows(now, reading_mode), shows(then, reading_mode));
+            }
+        }
     }
 }

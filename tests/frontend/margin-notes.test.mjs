@@ -2,9 +2,10 @@
 // open space to the right of the text, each beside its first verse (on the
 // verse number in Flowing), a thin rule beside a range's verses, notes that
 // would overlap stacked downward in verse order; a marker after each noted
-// verse where the window is too narrow; none while comparing, out of
-// reading mode, or with Aa's "Notes in the margin" off, a setting kept on
-// this computer and never in a backup. Read-only: a note opens the
+// verse where the window is too narrow; none while comparing, or with Aa's
+// "Notes beside the text" Off (or out of reading mode, by default), a
+// setting kept on this computer and never in a backup ("Always", outside
+// reading mode, is notes-beside.test.mjs's). Read-only: a note opens the
 // selection card with its verses selected. Against the real backend.
 // jsdom has no layout: `layOut` gives the page one.
 
@@ -204,24 +205,27 @@ test('a note on a verse the translation does not number sits by the verse before
         assert.deepEqual(cardNotes(app), ['The verse the BSB leaves out.']);
     }));
 
-test('none while comparing, out of reading mode, or with the switch off; the switch is remembered and never backed up', async () => {
+test('none while comparing, out of reading mode, or with the setting Off; the setting is remembered and never backed up', async () => {
     let storage;
+    const choice = (app, label) => [...app.document.querySelectorAll('#notes-beside-choices button')].find((b) => b.textContent === label);
     await withMargin([[16, 16, 'For God so loved.']], {}, async (app) => {
         assert.equal(shown(app), 'margin');
-        // Aa's switch, with reading mode's: on by default.
-        const toggle = app.document.getElementById('margin-notes-btn');
-        assert.equal(toggle.textContent, 'Notes in the margin');
-        assert.equal(toggle.getAttribute('aria-pressed'), 'true');
-        app.click(toggle);
+        // Aa's "Notes beside the text": In reading mode by default.
+        app.open('aa');
+        const off = choice(app, 'Off');
+        const reading = choice(app, 'In reading mode');
+        assert.equal(reading.getAttribute('aria-pressed'), 'true');
+        app.click(off);
         await frame(app);
-        assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+        assert.equal(off.getAttribute('aria-pressed'), 'true');
+        assert.equal(reading.getAttribute('aria-pressed'), 'false');
         assert.equal(app.document.documentElement.dataset.marginNotes, 'off');
         assert.equal(shown(app), 'nothing');
         assert.equal(margin(app), null);
         // Not a display setting a backup carries.
         const exported = JSON.parse(JSON.stringify(app.window.gospelGetterPreferences.current()));
         assert.deepEqual(Object.keys(exported).sort(), ['compare', 'layout', 'line_spacing', 'reading_mode', 'text_size', 'theme', 'width']);
-        app.click(toggle);
+        app.click(reading);
         await frame(app);
         assert.equal(shown(app), 'margin');
         // Compare: no room, no margin.
@@ -242,7 +246,8 @@ test('none while comparing, out of reading mode, or with the switch off; the swi
         assert.equal(app.document.querySelectorAll('.margin-marker').length, 0);
         // Off again, for the restart.
         app.click(app.document.getElementById('reader-mode-btn'));
-        app.click(toggle);
+        app.open('aa');
+        app.click(off);
         await frame(app);
         assert.equal(shown(app), 'nothing');
         storage = app.storage();
@@ -250,7 +255,8 @@ test('none while comparing, out of reading mode, or with the switch off; the swi
     assert.equal(storage['gospel-getter-margin-notes'], 'off');
     await withMargin([[16, 16, 'For God so loved.']], { storage }, async (app) => {
         assert.equal(app.document.documentElement.dataset.marginNotes, 'off', 'applied before the first frame');
-        assert.equal(app.document.getElementById('margin-notes-btn').getAttribute('aria-pressed'), 'false');
+        app.open('aa');
+        assert.equal(choice(app, 'Off').getAttribute('aria-pressed'), 'true');
         assert.equal(shown(app), 'nothing');
     });
 });

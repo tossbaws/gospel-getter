@@ -26,8 +26,9 @@
 //! mode: beside their verses,
 //! the switch leaving the text where it was, the markers in a narrow
 //! window, Psalm 119 with a note on every verse (60 to 63, `margin`);
-//! Compare with Notes, the notes beside a text that never moves (69,
-//! `beside`); the
+//! notes beside the text "Always", outside reading mode, beside a text
+//! that never moves, and S opening and closing split view (69, `beside`);
+//! the
 //! Library's Notes tab searched (64, `notes`) and a note's Markdown and
 //! references in the card, the Library and the margin, and Copy as
 //! Markdown (66, `notes`); an AI-flagged finding saved by gospel-getter-cli
@@ -490,7 +491,8 @@ async fn shipped(
                 &format!("putting things back after the margin checks failed: {e:#}"),
             );
         }
-        // Compare with Notes (69), on notes of its own, deleted after.
+        // Notes beside the text, "Always", and S (69), on notes of its own,
+        // deleted after.
         let beside = run.notes_beside().await;
         if beside.is_err() {
             run.failure_screenshot(Check::NotesBeside).await;

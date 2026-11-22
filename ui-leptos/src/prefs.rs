@@ -206,10 +206,9 @@ mod tests {
         );
     }
 
-    /// The table's first ten settings, then the
-    /// margin notes' switch, Compare's notes, the single-key shortcuts and
-    /// two panes open: their keys, defaults and values, and the renamed
-    /// theme.
+    /// The table's first ten settings, then notes beside the text, the
+    /// single-key shortcuts and two panes open: their keys, defaults and
+    /// values, and the renamed theme and margin notes.
     #[test]
     fn the_table_is_the_page_s() {
         let rows: Vec<(&str, &str, &str, Vec<&str>)> = PREFERENCES
@@ -282,14 +281,8 @@ mod tests {
                 (
                     "marginNotes",
                     "gospel-getter-margin-notes",
-                    "on",
-                    vec!["on", "off"]
-                ),
-                (
-                    "compareNotes",
-                    "gospel-getter-compare-notes",
-                    "off",
-                    vec!["off", "on"]
+                    "reading",
+                    vec!["off", "reading", "always"]
                 ),
                 (
                     "singleKeyShortcuts",
@@ -305,6 +298,12 @@ mod tests {
             Some("beast-slayer")
         );
         assert!(!preferences::THEME.allows("monster-hunter"));
+        // "On" was the margin's in reading mode, before "Always".
+        assert_eq!(preferences::MARGIN_NOTES.renamed_to("on"), Some("reading"));
+        assert!(!preferences::MARGIN_NOTES.allows("on"));
+        assert_eq!(preferences::MARGIN_NOTES.file_name, None);
+        assert_eq!(preferences::MARGIN_NOTES.label("always"), Some("Always"));
+        assert!(preferences::by_name("compareNotes").is_none());
         assert_eq!(preferences::COMPARE_WITH.values, Values::Code);
         for code in ["kjv", "bsb", "web", "a", "abcdefghijklmnop", "x1"] {
             assert!(preferences::COMPARE_WITH.allows(code), "{code}");

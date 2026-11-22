@@ -78,7 +78,7 @@ pub enum PaneId {
 
 impl PaneId {
     /// Its name in `data-pane` and to the tests.
-    fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Self::First => "first",
             Self::Second => "second",
@@ -659,6 +659,7 @@ pub fn close_second() {
         reader::forget(PaneId::Second);
         crate::card::forget(PaneId::Second);
         crate::findings::forget(PaneId::Second);
+        crate::margin::forget(PaneId::Second);
         reader::redraw(PaneId::First);
         crate::card::reselect(held);
     });

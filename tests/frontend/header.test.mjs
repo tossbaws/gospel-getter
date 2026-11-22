@@ -137,14 +137,16 @@ test('Aa changes the real preferences live, and they persist across a restart', 
         assert.equal(dialog.getAttribute('role'), 'dialog');
         assert.equal(dialog.getAttribute('aria-label'), 'Display');
         // In this order: text size, line spacing, width, layout, theme,
-        // reading mode, then the two settings that aren't about the page's
-        // look: the keyboard's single-key shortcuts and the AI agents'
-        // switch.
+        // reading mode, notes beside the text, then the two settings that
+        // aren't about the page's look: the keyboard's single-key shortcuts
+        // and the AI agents' switch.
         const order = [...dialog.querySelectorAll('.section-label')].map((l) => l.textContent);
-        assert.deepEqual(order, ['Text size', 'Line spacing', 'Width', 'Layout', 'Theme', 'Keyboard', 'AI agents']);
+        assert.deepEqual(order, ['Text size', 'Line spacing', 'Width', 'Layout', 'Theme', 'Notes beside the text', 'Keyboard', 'AI agents']);
         const last = dialog.querySelector('.popover-body').lastElementChild;
         const keyboard = last.previousElementSibling;
-        assert.equal(keyboard.previousElementSibling.querySelector('button').id, 'reader-mode-btn');
+        const notes = keyboard.previousElementSibling;
+        assert.equal(notes.querySelector('.segmented').id, 'notes-beside-choices');
+        assert.equal(notes.previousElementSibling.querySelector('button').id, 'reader-mode-btn');
         assert.equal(keyboard.querySelector('input').id, 'single-keys-toggle');
         assert.equal(last.querySelector('input').id, 'ai-findings-toggle');
         // Compare, with the translation to compare with, under the translations.

@@ -1,23 +1,19 @@
 //! The margin notes' rules and markup, free of the DOM (`margin` puts them
-//! on the page): in reading mode, the reader's notes on the chapter sit in
-//! the open space to the right of the text, each beside its first verse,
-//! as in a printed Bible's margin. Which verse a note sits beside, how
-//! notes that would overlap stack, whether there's room for the margin, and
-//! the markup for the margin and for the markers that take its place in a
-//! window too narrow for it. Notes are the reader's own words, shown as
-//! the card shows them (`note_markdown`: the Markdown subset, everything
-//! else escaped, the references typed in them links to their passages);
-//! nothing here touches scripture.
-//!
-//! The same rules place them in Compare's "My notes" column (Compare with
-//! Notes, outside reading mode): beside the text in the column Compare's
-//! second translation would have, each labelled with its verses, or, in a
-//! window too narrow for columns ([`STACKED_QUERY`]), under its first
-//! verse.
+//! on the page): the reader's notes on the chapter sit in the open space to
+//! the right of the text, each beside its first verse, as in a printed
+//! Bible's margin. Whether the margin shows (Aa's "Notes beside the text":
+//! in reading mode, or always), which verse a note sits beside, how notes
+//! that would overlap stack, whether there's room for the margin, and the
+//! markup for the margin and for the markers that take its place in a
+//! window too narrow for it. Notes are the reader's own words, shown as the
+//! card shows them (`note_markdown`: the Markdown subset, everything else
+//! escaped, the references typed in them links to their passages); nothing
+//! here touches scripture.
 
 use crate::dto::SelectionNote;
 use crate::findings_text::{self, FindingGroup};
 use crate::note_markdown::{self, Layout};
+use crate::preferences::NotesBeside;
 use crate::reader_text::escape_html;
 
 /// The narrowest the margin is drawn, in rem (224px at the page's 16px).
@@ -38,11 +34,8 @@ pub const EDGE_REM: f64 = 1.125;
 /// Between two notes stacked because they'd overlap, in px.
 pub const STACK_GAP_PX: f64 = 8.0;
 /// A note longer than this many lines shows them, faded at the foot, with
-/// "more".
-pub const FOLD_LINES: u32 = 6;
-/// The same, in Compare's notes column (and under a verse, in a window too
-/// narrow for it), which is wider than the margin.
-pub const COLUMN_FOLD_LINES: u32 = 10;
+/// "more": enough for a sermon outline to read as one (B5).
+pub const FOLD_LINES: u32 = 10;
 
 /// Whether a note's words are cut short at the fold: they reach further
 /// (`full`, px) than they're shown (`shown`), by more than a pixel of
@@ -51,15 +44,73 @@ pub fn cut_short(full: f64, shown: f64) -> bool {
     full > shown + 1.0
 }
 
-/// Where Compare stacks its columns (the stylesheet's `.compare-grid`
-/// query): the notes go under their verses instead of beside the text.
-pub const STACKED_QUERY: &str = "(max-width: 640px)";
-
-/// What Compare's notes column is called: its landmark and its heading.
-pub const COLUMN_NAME: &str = "My notes";
-
-/// Said at the top of the notes column when the chapter has no notes.
+/// Said at the top of the margin, with "Always", when the chapter has no
+/// notes: the margin is there on every chapter, so it says why it's empty.
 pub const NO_NOTES: &str = "No notes on this chapter yet. Select verses and choose Add note.";
+
+/// What the margin shows beside a pane's chapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Shown {
+    #[default]
+    Nothing,
+    /// The notes beside the text.
+    Margin,
+    /// A marker after each noted verse: no room for the margin.
+    Markers,
+    /// The margin with no notes in it, saying so ([`NO_NOTES`]).
+    Empty,
+}
+
+impl Shown {
+    /// Its name to the tests (`window.gospelGetterMargin.shown()`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Nothing => "nothing",
+            Self::Margin => "margin",
+            Self::Markers => "markers",
+            Self::Empty => "empty",
+        }
+    }
+}
+
+/// Where a pane's chapter is being read, as far as the margin cares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reading {
+    /// Aa's "Notes beside the text".
+    pub setting: NotesBeside,
+    pub reading_mode: bool,
+    /// Compare shows translations side by side: there's no room.
+    pub comparing: bool,
+    /// Two panes are open.
+    pub split: bool,
+}
+
+/// What the margin shows for a pane's chapter read as `reading` says, with
+/// notes or findings on it (`entries`) or none, the notes `known` (read for
+/// this chapter, not still on their way), and `room` for the margin beside
+/// the text ([`width`]). None while comparing, or where the setting doesn't
+/// show them. Two panes open, outside reading mode, have no room for it
+/// beside either: markers in each. Reading mode, which shows one pane
+/// alone, has the margin as it always did, and with no notes keeps its
+/// empty space; "Always" outside it says the chapter has none, once that's
+/// known.
+pub fn shown(reading: Reading, entries: bool, known: bool, room: bool) -> Shown {
+    let wanted = match reading.setting {
+        NotesBeside::Off => false,
+        NotesBeside::Reading => reading.reading_mode,
+        NotesBeside::Always => true,
+    };
+    if !wanted || reading.comparing {
+        return Shown::Nothing;
+    }
+    let beside = room && !(reading.split && !reading.reading_mode);
+    match (entries, beside) {
+        (true, true) => Shown::Margin,
+        (true, false) => Shown::Markers,
+        (false, true) if known && !reading.reading_mode => Shown::Empty,
+        (false, _) => Shown::Nothing,
+    }
+}
 
 /// Where a note sits: beside `verse`, which is its own first verse
 /// (`own`), or, where the translation doesn't number that one (Matthew
@@ -171,16 +222,6 @@ pub fn label(reference: &str) -> String {
     format!("Note on {reference}")
 }
 
-/// A note's verses, as the notes column labels it: "16", or "3–5" for a
-/// range (its own verses, wherever it sits).
-pub fn verses_label(start: i64, end: i64) -> String {
-    if end > start {
-        format!("{start}\u{2013}{end}")
-    } else {
-        start.to_string()
-    }
-}
-
 /// What the reference line adds when the note isn't on the verse it's
 /// beside.
 pub const NOT_NUMBERED: &str = "not numbered in this translation";
@@ -190,19 +231,8 @@ pub const NOT_NUMBERED: &str = "not numbered in this translation";
 /// with "more" (which `margin` shows only where the words are cut short).
 /// A note beside a verse it isn't on says so after its reference.
 pub fn note_html(note: &SelectionNote, anchor: Anchor) -> String {
-    labelled_note_html(note, anchor, None)
-}
-
-/// [`note_html`], its reference button reading `shown` instead (the notes
-/// column's "3–5"), named in full for a screen reader; or, with none, the
-/// reference.
-fn labelled_note_html(note: &SelectionNote, anchor: Anchor, shown: Option<&str>) -> String {
     let id = note.id;
     let reference = escape_html(&note.reference);
-    let (named, text) = match shown {
-        Some(shown) => (format!(r#" aria-label="{reference}""#), escape_html(shown)),
-        None => (String::new(), reference.clone()),
-    };
     let (class, aside) = if anchor.own {
         ("", String::new())
     } else {
@@ -212,7 +242,7 @@ fn labelled_note_html(note: &SelectionNote, anchor: Anchor, shown: Option<&str>)
         )
     };
     format!(
-        r#"<article class="margin-note{class}" data-note-id="{id}" aria-label="{label}"><button type="button" class="margin-note-ref" data-note-id="{id}"{named}>{text}{aside}</button><div class="margin-note-body note-text" id="margin-note-body-{id}">{body}</div><button type="button" class="margin-note-more note-link" data-note-id="{id}" aria-label="More of the note on {reference}" hidden>more</button></article>"#,
+        r#"<article class="margin-note{class}" data-note-id="{id}" aria-label="{label}"><button type="button" class="margin-note-ref" data-note-id="{id}">{reference}{aside}</button><div class="margin-note-body note-text" id="margin-note-body-{id}">{body}</div><button type="button" class="margin-note-more note-link" data-note-id="{id}" aria-label="More of the note on {reference}" hidden>more</button></article>"#,
         label = escape_html(&label(&note.reference)),
         body = note_markdown::note_html(&note.body, &note.links, &[], Layout::Blocks),
     )
@@ -299,81 +329,18 @@ pub fn margin_entries_html(entries: &[(Entry, Anchor)]) -> String {
     )
 }
 
-/// One note in Compare's notes column, or under its verse: as in the
-/// margin ([`note_html`]), labelled with its verses ([`verses_label`]).
-pub fn column_note_html(note: &SelectionNote, anchor: Anchor) -> String {
-    labelled_note_html(
-        note,
-        anchor,
-        Some(&verses_label(note.verse_start, note.verse_end)),
+/// The margin for a chapter with no notes (nor findings), with "Always":
+/// the landmark as ever, and one quiet line at its top saying how to add
+/// one.
+pub fn empty_html() -> String {
+    format!(
+        r#"<aside class="margin-notes" role="complementary" aria-label="Your notes"><p class="margin-notes-empty">{NO_NOTES}</p></aside>"#
     )
 }
 
-/// Compare's notes column, a region named "My notes" beside the text: as
-/// the margin, its notes in verse order and a rule beside each range; with
-/// none (`known`: the chapter has none, rather than they're still on their
-/// way or couldn't be read), one quiet line saying how to add one. Empty,
-/// it's what the reader draws before the notes come.
-pub fn column_html(notes: &[(&SelectionNote, Anchor)], known: bool) -> String {
-    column_entries_html(&entries(notes, &[]), known)
-}
-
-/// Compare's notes column, the verses' AI findings among the reader's
-/// notes as in the margin; the line for a chapter with none only when it has
-/// neither.
-pub fn column_entries_html(entries: &[(Entry, Anchor)], known: bool) -> String {
-    let inner = if entries.is_empty() {
-        if known {
-            format!(r#"<p class="notes-column-empty">{NO_NOTES}</p>"#)
-        } else {
-            String::new()
-        }
-    } else {
-        let rules = rules_html(&notes_of(entries));
-        let items: String = entries
-            .iter()
-            .map(|e| column_entry_html(e, "column"))
-            .collect();
-        format!("{rules}{items}")
-    };
-    format!(r#"<section class="notes-column" aria-label="{COLUMN_NAME}">{inner}</section>"#)
-}
-
-/// One entry of the notes column, or under its verse (`where_`).
-fn column_entry_html((entry, anchor): &(Entry, Anchor), where_: &str) -> String {
-    match entry {
-        Entry::Note(note) => column_note_html(note, *anchor),
-        Entry::Findings(group) => findings_text::column_html(group, where_),
-    }
-}
-
-/// The notes that sit under one verse, in a window too narrow for the
-/// column: each as in the column, after the verse in the text.
-#[cfg(test)]
-pub fn under_html(notes: &[(&SelectionNote, Anchor)]) -> String {
-    under_entries_html(&entries(notes, &[]))
-}
-
-/// The entries that sit under one verse, the reader's notes first.
-pub fn under_entries_html(entries: &[(Entry, Anchor)]) -> String {
-    entries
-        .iter()
-        .map(|entry| {
-            format!(
-                r#"<div class="note-under">{}</div>"#,
-                column_entry_html(entry, "under")
-            )
-        })
-        .collect()
-}
-
-/// The narrow window's line for a chapter with no notes, above the text.
-pub fn under_empty_html() -> String {
-    format!(r#"<p class="note-under notes-column-empty">{NO_NOTES}</p>"#)
-}
-
-/// A noted verse's marker, where there's no room for the margin: a small
-/// button after the verse that opens the card with the note.
+/// A noted verse's marker, where there's no room for the margin (or two
+/// panes share the window): a small button after the verse that opens the
+/// card with the note.
 pub fn marker_html(note: &SelectionNote) -> String {
     let label = escape_html(&label(&note.reference));
     format!(
@@ -593,33 +560,7 @@ mod tests {
     }
 
     #[test]
-    fn a_column_note_is_labelled_with_its_own_verses() {
-        assert_eq!(verses_label(16, 16), "16");
-        assert_eq!(verses_label(3, 5), "3\u{2013}5");
-        let all = john3();
-        let one = note(1, 2, 2, "John 3:2", "By night.");
-        let range = note(2, 3, 5, "John 3:3\u{2013}5", "Born again.");
-        let html = column_note_html(&one, anchor(2, 2, &all).unwrap());
-        assert!(html.contains(
-            r#"<button type="button" class="margin-note-ref" data-note-id="1" aria-label="John 3:2">2</button>"#
-        ));
-        assert!(html.contains(r#"aria-label="Note on John 3:2""#));
-        let html = column_note_html(&range, anchor(3, 5, &all).unwrap());
-        assert!(html.contains(
-            r#"<button type="button" class="margin-note-ref" data-note-id="2" aria-label="John 3:3–5">3–5</button>"#
-        ));
-        // Beside a verse it isn't on: its own verses, and why.
-        let bsb: Vec<i64> = (1..=27).filter(|&n| n != 21).collect();
-        let gap = note(3, 21, 22, "Matthew 17:21\u{2013}22", "The gap.");
-        let html = column_note_html(&gap, anchor(21, 22, &bsb).unwrap());
-        assert!(html.contains(r#"class="margin-note is-elsewhere""#));
-        assert!(html.contains(
-            r#"aria-label="Matthew 17:21–22">21–22 <span class="margin-note-where">(not numbered in this translation)</span></button>"#
-        ));
-    }
-
-    #[test]
-    fn the_column_holds_its_notes_in_verse_order_with_a_rule_beside_each_range() {
+    fn the_margin_holds_its_notes_in_verse_order_with_a_rule_beside_each_range() {
         let all = john3();
         let notes = [
             note(5, 16, 16, "John 3:16", "Love."),
@@ -629,12 +570,16 @@ mod tests {
         let placed = in_order(notes.iter().map(|n| (n, n.verse_start, n.verse_end)), &all);
         let ids: Vec<i64> = placed.iter().map(|(n, _)| n.id).collect();
         assert_eq!(ids, [1, 2, 5]);
-        let html = column_html(&placed, true);
+        let html = margin_html(&placed);
         assert_eq!(html.matches("margin-rule").count(), 1);
         assert!(html.starts_with(
-            r#"<section class="notes-column" aria-label="My notes"><span class="margin-rule" data-note-id="1" aria-hidden="true"></span>"#
+            r#"<aside class="margin-notes" role="complementary" aria-label="Your notes"><span class="margin-rule" data-note-id="1" aria-hidden="true"></span>"#
         ));
-        assert!(html.ends_with("</article></section>"));
+        assert!(html.ends_with("</article></aside>"));
+        // Each labelled with its full reference, the one label style.
+        assert!(html.contains(
+            r#"<button type="button" class="margin-note-ref" data-note-id="1">John 3:3–5</button>"#
+        ));
         let at = |id: i64| {
             html.find(&format!(
                 r#"<article class="margin-note" data-note-id="{id}""#
@@ -642,11 +587,11 @@ mod tests {
             .unwrap()
         };
         assert!(at(1) < at(2) && at(2) < at(5));
-        assert!(!html.contains("notes-column-empty"));
+        assert!(!html.contains("margin-notes-empty"));
     }
 
     #[test]
-    fn notes_on_adjacent_verses_stack_downward_in_the_column() {
+    fn notes_on_adjacent_verses_stack_downward() {
         // 3–5 and 4 start a verse apart (verse 3 at 0px, 4 at 94px, 5 at
         // 188px): the 4's note, which would start inside the 3–5's (120px
         // tall), goes 8px below it; 16's, far down, stays at its verse.
@@ -674,36 +619,25 @@ mod tests {
     }
 
     #[test]
-    fn a_long_note_folds_after_ten_lines_in_the_column_and_six_in_the_margin() {
-        assert_eq!(COLUMN_FOLD_LINES, 10);
-        assert_eq!(FOLD_LINES, 6, "the margin's, unchanged");
+    fn a_long_note_folds_after_ten_lines() {
+        assert_eq!(FOLD_LINES, 10, "B5: everywhere");
         // At 0.8rem (12.8px) and a 1.45 line height a note shows at most
-        // `lines` lines: the one line past them is cut short, a note that
-        // fits isn't (a pixel's rounding allowed).
+        // ten lines: the one line past them is cut short, a note that fits
+        // isn't (a pixel's rounding allowed).
         let line = 12.8 * 1.45;
-        let shown = |lines: u32, at_most: u32| line * f64::from(lines.min(at_most));
+        let shown = |lines: u32| line * f64::from(lines.min(FOLD_LINES));
         let full = |lines: u32| line * f64::from(lines);
-        assert!(!cut_short(full(10), shown(10, COLUMN_FOLD_LINES)));
-        assert!(!cut_short(full(10) + 1.0, shown(10, COLUMN_FOLD_LINES)));
-        assert!(cut_short(full(11), shown(11, COLUMN_FOLD_LINES)));
-        assert!(!cut_short(full(6), shown(6, FOLD_LINES)));
-        assert!(cut_short(full(7), shown(7, FOLD_LINES)));
+        assert!(!cut_short(full(10), shown(10)));
+        assert!(!cut_short(full(10) + 1.0, shown(10)));
+        assert!(cut_short(full(11), shown(11)));
+        assert!(!cut_short(full(6), shown(6)));
     }
 
     #[test]
-    fn a_chapter_without_notes_says_how_to_add_one() {
+    fn an_empty_margin_says_how_to_add_a_note() {
         assert_eq!(
-            column_html(&[], true),
-            r#"<section class="notes-column" aria-label="My notes"><p class="notes-column-empty">No notes on this chapter yet. Select verses and choose Add note.</p></section>"#
-        );
-        // Not while they're on their way (or couldn't be read): empty.
-        assert_eq!(
-            column_html(&[], false),
-            r#"<section class="notes-column" aria-label="My notes"></section>"#
-        );
-        assert_eq!(
-            under_empty_html(),
-            r#"<p class="note-under notes-column-empty">No notes on this chapter yet. Select verses and choose Add note.</p>"#
+            empty_html(),
+            r#"<aside class="margin-notes" role="complementary" aria-label="Your notes"><p class="margin-notes-empty">No notes on this chapter yet. Select verses and choose Add note.</p></aside>"#
         );
         assert!(in_order(std::iter::empty::<((), i64, i64)>(), &john3()).is_empty());
     }
@@ -712,7 +646,7 @@ mod tests {
     /// that chapter's), so none starts in the chapter before. What comes
     /// closest, a note that starts before the first verse on screen, sits
     /// as `anchor` says: beside the first verse, saying it isn't on it,
-    /// labelled with its own verses, its rule from that first verse on.
+    /// its rule from that first verse on.
     #[test]
     fn a_note_starting_before_the_first_verse_on_screen_sits_beside_the_first() {
         let from_two: Vec<i64> = (2..=36).collect();
@@ -726,22 +660,98 @@ mod tests {
             }
         );
         let n = note(9, 1, 3, "John 3:1\u{2013}3", "Before.");
-        let html = column_note_html(&n, at);
+        let html = note_html(&n, at);
         assert!(html.contains(
-            r#"aria-label="John 3:1–3">1–3 <span class="margin-note-where">(not numbered in this translation)</span></button>"#
+            r#">John 3:1–3 <span class="margin-note-where">(not numbered in this translation)</span></button>"#
         ));
         let placed = in_order([(&n, 1, 3)], &from_two);
         assert_eq!(placed[0].1.verse, 2);
-        assert_eq!(column_html(&placed, true).matches("margin-rule").count(), 1);
+        assert_eq!(margin_html(&placed).matches("margin-rule").count(), 1);
     }
 
+    /// Every setting, in reading mode or not, comparing or not, with one
+    /// pane or two, with notes or none, with room for the margin or not.
     #[test]
-    fn under_its_verse_a_note_is_labelled_as_in_the_column() {
-        let all = john3();
-        let n = note(4, 7, 8, "John 3:7\u{2013}8", "Outline.");
-        let html = under_html(&[(&n, anchor(7, 8, &all).unwrap())]);
-        assert!(html.starts_with(r#"<div class="note-under"><article class="margin-note" data-note-id="4" aria-label="Note on John 3:7–8">"#));
-        assert!(html.contains(r#">7–8</button>"#));
-        assert!(html.ends_with("</article></div>"));
+    fn what_the_margin_shows() {
+        use NotesBeside::{Always, Off, Reading as InReadingMode};
+        let at = |setting, reading_mode, comparing, split| Reading {
+            setting,
+            reading_mode,
+            comparing,
+            split,
+        };
+        for setting in [Off, InReadingMode, Always] {
+            for reading_mode in [false, true] {
+                for comparing in [false, true] {
+                    for split in [false, true] {
+                        for entries in [false, true] {
+                            for room in [false, true] {
+                                let reading = at(setting, reading_mode, comparing, split);
+                                let got = shown(reading, entries, true, room);
+                                let on = match setting {
+                                    Off => false,
+                                    InReadingMode => reading_mode,
+                                    Always => true,
+                                };
+                                let want = if !on || comparing {
+                                    Shown::Nothing
+                                } else if split && !reading_mode {
+                                    // Two panes side by side: markers in each.
+                                    if entries {
+                                        Shown::Markers
+                                    } else {
+                                        Shown::Nothing
+                                    }
+                                } else if entries {
+                                    if room { Shown::Margin } else { Shown::Markers }
+                                } else if room && !reading_mode {
+                                    Shown::Empty
+                                } else {
+                                    Shown::Nothing
+                                };
+                                assert_eq!(
+                                    got, want,
+                                    "{setting:?} reading mode {reading_mode} comparing \
+                                     {comparing} split {split} notes {entries} room {room}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // The cases the reader sees, by name.
+        let always = at(Always, false, false, false);
+        assert_eq!(shown(always, true, true, true), Shown::Margin);
+        assert_eq!(shown(always, true, true, false), Shown::Markers);
+        assert_eq!(shown(always, false, true, true), Shown::Empty);
+        // Not before the chapter's notes are known to be none.
+        assert_eq!(shown(always, false, false, true), Shown::Nothing);
+        // In reading mode with no notes: its empty space, as ever.
+        assert_eq!(
+            shown(at(Always, true, false, false), false, true, true),
+            Shown::Nothing
+        );
+        assert_eq!(
+            shown(at(InReadingMode, false, false, false), true, true, true),
+            Shown::Nothing,
+            "the default, out of reading mode"
+        );
+        assert_eq!(
+            shown(at(InReadingMode, true, false, true), true, true, true),
+            Shown::Margin,
+            "reading mode with two panes shows the active one alone"
+        );
+        assert_eq!(
+            shown(at(Always, false, false, true), true, true, true),
+            Shown::Markers
+        );
+        assert_eq!(
+            shown(at(Always, false, true, false), true, true, true),
+            Shown::Nothing,
+            "comparing translations"
+        );
+        assert_eq!(Shown::default().name(), "nothing");
+        assert_eq!(Shown::Empty.name(), "empty");
     }
 }

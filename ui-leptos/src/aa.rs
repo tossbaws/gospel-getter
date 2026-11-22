@@ -1,11 +1,12 @@
 //! Aa (text and display) and the translation button's popover: the
-//! translations, Compare and what it compares with (another translation,
-//! or the reader's notes); text size (its stepper,
-//! Ctrl+=, Ctrl+- and Ctrl+0, and the size shown for a moment), line
-//! spacing, width, layout (kept but disabled while comparing) and theme;
-//! reading mode; the Single-key shortcuts switch (the keyboard dispatcher,
-//! `keyboard`, reads it); and the launch check's setting in About. Every
-//! choice goes through the saved settings' store (`prefs`).
+//! translations, Compare and the translation it compares with; text size
+//! (its stepper, Ctrl+=, Ctrl+- and Ctrl+0, and the size shown for a
+//! moment), line spacing, width, layout (kept but disabled while comparing)
+//! and theme; reading mode; "Notes beside the text" (and M, which shows or
+//! hides them where the reader is); the Single-key shortcuts switch (the
+//! keyboard dispatcher, `keyboard`, reads it); and the launch check's
+//! setting in About. Every choice goes through the saved settings' store
+//! (`prefs`).
 //!
 //! The two popovers themselves (`#aa-popover`, `#translation-popover`, with
 //! their headings, the stepper, Compare and Reading mode) are the page's;
@@ -39,7 +40,7 @@ use web_sys::{
 use crate::aa_text::{self as text, Beside, Press};
 use crate::bridge;
 use crate::dom::{self, button, by_id, select};
-use crate::preferences::{self, Preference, Values};
+use crate::preferences::{self, NotesBeside, Preference, Values};
 use crate::prefs::{self, Raw};
 use crate::surfaces::{self, Surface};
 
@@ -48,6 +49,10 @@ const SIZE_SHOWN_MS: i32 = 1500;
 
 /// Aa's "Single-key shortcuts" switch.
 const SINGLE_KEYS_ID: &str = "single-keys-toggle";
+
+/// Aa's "Notes beside the text" row (the palette's commands click its
+/// choices by this id too).
+const NOTES_BESIDE_ID: &str = "notes-beside-choices";
 
 /// The settings with a choice group in Aa, and the group.
 const GROUPS: [(&str, Preference); 3] = [
@@ -157,11 +162,7 @@ pub fn beside() -> Beside {
     if crate::pane::split() {
         return Beside::Nothing;
     }
-    text::beside(
-        prefs::on(&preferences::COMPARE),
-        prefs::on(&preferences::COMPARE_NOTES),
-        prefs::on(&preferences::READER_MODE),
-    )
+    text::beside(prefs::on(&preferences::COMPARE))
 }
 
 /// A second pane opened or closed: Aa shows Compare as it now is (paused
@@ -170,32 +171,41 @@ pub fn split_changed() {
     sync_aa();
 }
 
-/// Compare's "with": chooses `code`, unless it's already the one (and
-/// Notes isn't chosen instead).
+/// Compare's "with": chooses `code`, unless it's already the one.
 pub fn compare_with(code: &str) {
     let chosen = prefs::shown(&preferences::COMPARE_WITH);
-    let notes = prefs::on(&preferences::COMPARE_NOTES);
-    if !notes && partner().as_deref() == Some(code) && chosen.as_deref() == Some(code) {
+    if partner().as_deref() == Some(code) && chosen.as_deref() == Some(code) {
         return;
-    }
-    if notes {
-        prefs::set(&preferences::COMPARE_NOTES, "off");
     }
     prefs::set(&preferences::COMPARE_WITH, code);
     sync_aa();
     crate::reader::compare_changed();
 }
 
-/// Compare's "with" Notes: the reader's notes on the chapter beside the
-/// text, unless they're already chosen. The translation chosen before stays
-/// chosen, for when a translation is chosen again.
-pub fn compare_with_notes() {
-    if prefs::on(&preferences::COMPARE_NOTES) {
-        return;
-    }
-    prefs::set(&preferences::COMPARE_NOTES, "on");
+/// "Notes beside the text" now.
+pub fn notes_beside() -> NotesBeside {
+    NotesBeside::from_value(&prefs::value(&preferences::MARGIN_NOTES))
+        .unwrap_or(NotesBeside::Reading)
+}
+
+/// Sets "Notes beside the text" to `to`, from Aa's row (and the palette's
+/// commands, which click it) or M. The margin (`margin`) and the page's
+/// shape (the stylesheet) follow the setting on `<html>`.
+fn set_notes_beside(to: NotesBeside) {
+    prefs::set(&preferences::MARGIN_NOTES, to.value());
     sync_aa();
-    crate::reader::compare_changed();
+}
+
+/// M: the notes shown or hidden right where the reader is
+/// (`aa_text::notes_toggled`), then the new setting said for a moment in
+/// the toast ("Notes beside the text: Always").
+pub fn toggle_notes_beside() {
+    let to = text::notes_toggled(notes_beside(), prefs::on(&preferences::READER_MODE));
+    set_notes_beside(to);
+    let label = preferences::MARGIN_NOTES
+        .label(to.value())
+        .unwrap_or_default();
+    crate::page::set_data_status(&format!("Notes beside the text: {label}"), false);
 }
 
 /// Reads `code` instead: the translation button's popover's rows, and the
@@ -274,7 +284,6 @@ pub fn text_size_shortcut(step: i8) {
 /// leaving it brings the other back (D6), each keeping its place
 /// (`pane::sync_shape`, inside the reading place logic's keeping).
 pub fn set_reader_mode(on: bool) {
-    let was = beside();
     let set = || prefs::set(&preferences::READER_MODE, if on { "on" } else { "off" });
     if crate::pane::split() {
         surfaces::keep_reading_place(
@@ -287,12 +296,6 @@ pub fn set_reader_mode(on: bool) {
         );
     } else {
         set();
-    }
-    // Compare with Notes shows the text alone in reading mode, where the
-    // margin has the notes: the chapter is drawn again for it.
-    if beside() != was {
-        sync_aa();
-        crate::reader::compare_changed();
     }
     if let Some(toggle) = by_id("reader-mode-btn") {
         let _ = toggle.set_attribute("aria-pressed", &on.to_string());
@@ -420,17 +423,7 @@ fn render_compare_with() {
             ),
         );
     }
-    append(&choices, notes_segment_view());
     sync_aa();
-}
-
-/// Compare's "with" Notes, after the translations: not a translation, so
-/// it has no `data-value`.
-fn notes_segment_view() -> AnyView {
-    view! {
-        <button type="button" class="segment" data-beside="notes" title="Your notes on the chapter, beside the text">"Notes"</button>
-    }
-    .into_any()
 }
 
 fn set_pressed(group: &str, value: Option<&str>) {
@@ -460,19 +453,8 @@ fn sync_aa() {
             radio.set_tab_index(if checked { 0 } else { -1 });
         }
     }
-    let notes = prefs::on(&preferences::COMPARE_NOTES);
-    set_pressed(
-        "compare-with-choices",
-        partner().as_deref().filter(|_| !notes),
-    );
-    if let Some(choice) = by_id("compare-with-choices").and_then(|group| {
-        group
-            .query_selector(r#"[data-beside="notes"]"#)
-            .ok()
-            .flatten()
-    }) {
-        let _ = choice.set_attribute("aria-pressed", &notes.to_string());
-    }
+    set_pressed("compare-with-choices", partner().as_deref());
+    set_pressed(NOTES_BESIDE_ID, Some(notes_beside().value()));
     for (group, pref) in GROUPS
         .iter()
         .chain(&[("theme-choices", preferences::THEME)])
@@ -480,8 +462,7 @@ fn sync_aa() {
         let value = pref.select.and_then(select).map(|s| s.value());
         set_pressed(group, value.as_deref());
     }
-    // Compare's translations keep a verse to a row; its notes leave the
-    // text as the reader set it.
+    // Compare's translations keep a verse to a row.
     let comparing = beside() == Beside::Translations;
     if let Some(layout) = by_id("layout-choices") {
         for btn in buttons(&layout, "button") {
@@ -551,6 +532,16 @@ fn draw_choices() {
     {
         for choice in choices {
             append(&group, swatch_view(choice.value, choice.label));
+        }
+    }
+    if let (Some(group), Values::Choices(choices)) =
+        (by_id(NOTES_BESIDE_ID), preferences::MARGIN_NOTES.values)
+    {
+        for choice in choices {
+            append(
+                &group,
+                segment_view(choice.value.into(), choice.label.into(), None),
+            );
         }
     }
 }
@@ -685,7 +676,6 @@ fn show_toggles() {
     for (id, pref) in [
         ("reader-mode-btn", preferences::READER_MODE),
         ("compare-btn", preferences::COMPARE),
-        ("margin-notes-btn", preferences::MARGIN_NOTES),
     ] {
         if let Some(toggle) = by_id(id) {
             let _ = toggle.set_attribute("aria-pressed", &prefs::on(&pref).to_string());
@@ -869,12 +859,7 @@ pub fn mount() {
     }
     if let Some(el) = by_id("compare-with-choices") {
         dom::on_click(&el, |event| {
-            let Some(btn) = button_hit(&event) else {
-                return;
-            };
-            if btn.get_attribute("data-beside").as_deref() == Some("notes") {
-                compare_with_notes();
-            } else if let Some(code) = data_value(&btn) {
+            if let Some(code) = button_hit(&event).and_then(|btn| data_value(&btn)) {
                 compare_with(&code);
             }
         });
@@ -922,13 +907,14 @@ pub fn mount() {
             );
         });
     }
-    // Notes in the margin, on or off: the margin (`margin`) follows the
-    // setting on `<html>`.
-    if let Some(toggle) = by_id("margin-notes-btn") {
-        dom::on_click(&toggle, |_| {
-            let on = !prefs::on(&preferences::MARGIN_NOTES);
-            prefs::set(&preferences::MARGIN_NOTES, if on { "on" } else { "off" });
-            show_toggles();
+    if let Some(group) = by_id(NOTES_BESIDE_ID) {
+        dom::on_click(&group, |event| {
+            if let Some(to) = button_hit(&event)
+                .and_then(|btn| data_value(&btn))
+                .and_then(|value| NotesBeside::from_value(&value))
+            {
+                set_notes_beside(to);
+            }
         });
     }
     // The launch check's setting: its checkbox is About's (`updates`).

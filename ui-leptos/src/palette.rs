@@ -15,6 +15,7 @@
 use serde::Deserialize;
 use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 
+use crate::preferences::NotesBeside;
 use crate::shortcut_table::shortcut;
 
 /// One choice of one of Aa's settings (an `<option>` of its record): the
@@ -34,11 +35,10 @@ pub struct PaletteState {
     pub comparing: bool,
     /// The translation compared with (or that would be), if there's one.
     pub partner: Option<String>,
-    /// Compare compares with the reader's notes (its "with" Notes), not
-    /// the partner.
-    pub compare_notes: bool,
     /// Reading mode is on.
     pub reader_mode: bool,
+    /// Aa's "Notes beside the text", as saved ("reading", "always", "off").
+    pub notes_beside: String,
     /// The book and chapter picker is the sidebar.
     pub sidebar: bool,
     /// The window is wide enough for the sidebar.
@@ -99,8 +99,6 @@ pub enum Run {
     Translation(String),
     /// Compares with this translation, as Compare's "with" does.
     CompareWith(String),
-    /// Compares with the reader's notes, as Compare's "with" Notes does.
-    CompareNotes,
     /// A command `page::run_command` runs: the command's name there.
     Page(&'static str),
 }
@@ -184,9 +182,6 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         });
     };
     let comparing = state.comparing;
-    // Compare's translations keep a verse to a row; its notes leave the
-    // text as the reader set it.
-    let rows = comparing && !state.compare_notes;
     let reader_mode = state.reader_mode;
 
     add(
@@ -199,8 +194,7 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         .into(),
         "compare",
         "translations side by side",
-        (!comparing && state.partner.is_none() && !state.compare_notes)
-            .then_some("There’s only one translation"),
+        (!comparing && state.partner.is_none()).then_some("There’s only one translation"),
         click("compare-btn"),
     );
     add(
@@ -224,13 +218,28 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
             "reader-mode-btn"
         }),
     );
+    // Aa's three choices, as the theme's are: M toggles where the reader
+    // is, so no one of them is M's.
+    for choice in NotesBeside::CHOICES {
+        add(
+            format!("notes-beside-{}", choice.value),
+            format!("Notes beside the text: {}", choice.label),
+            "",
+            "margin my notes",
+            in_use(choice.value == state.notes_beside),
+            Run::Choice {
+                group: "notes-beside-choices",
+                value: choice.value.into(),
+            },
+        );
+    }
     for o in &state.layouts {
         add(
             format!("layout-{}", o.value),
             format!("Layout: {}", o.label),
             "",
             "",
-            if rows {
+            if comparing {
                 Some("Compare always shows a verse to a row")
             } else {
                 in_use(o.value == state.layout)
@@ -316,25 +325,13 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
             "",
             &o.label,
             if comparing {
-                in_use(!state.compare_notes && state.partner.as_ref() == Some(&o.value))
+                in_use(state.partner.as_ref() == Some(&o.value))
             } else {
                 Some("Only while comparing")
             },
             Run::CompareWith(o.value.clone()),
         );
     }
-    add(
-        "compare-notes".into(),
-        "Compare with: Notes".into(),
-        "",
-        "my notes beside the text",
-        if comparing {
-            in_use(state.compare_notes)
-        } else {
-            Some("Only while comparing")
-        },
-        Run::CompareNotes,
-    );
     add(
         "random-chapter".into(),
         "Random chapter".into(),
@@ -482,10 +479,11 @@ pub fn commands(state: &PaletteState) -> Vec<Command> {
         (!state.forward).then_some("Nothing later in this session"),
         page("forward"),
     );
+    // S, with one pane; with two, S closes the second (as Close's X does).
     add(
         "open-beside".into(),
         "Open this passage beside".into(),
-        "",
+        if state.split { "" } else { "split" },
         "split second pane side by side",
         (!state.chapter_shown).then_some("No chapter is shown"),
         page("open-beside"),
@@ -671,6 +669,7 @@ mod tests {
                 ("bsb", "Berean Standard Bible"),
             ]),
             translation: "kjv".into(),
+            notes_beside: "reading".into(),
             chapter_copy: true,
             chapter_shown: true,
             next_chapter: true,
@@ -703,36 +702,37 @@ mod tests {
         for (i, c) in list.iter().enumerate() {
             assert!(list[..i].iter().all(|o| o.id != c.id), "{} twice", c.id);
         }
-        // 2 + 2 layouts + 2 widths + 3 sizes + 2 themes + 3 translations
-        // + 2 to compare with + Notes + 21 more (one pane: neither Switch
-        // pane nor Close the second pane).
-        assert_eq!(list.len(), 38);
+        // 2 + 3 notes beside the text + 2 layouts + 2 widths + 3 sizes + 2
+        // themes + 3 translations + 2 to compare with + 21 more (one pane:
+        // neither Switch pane nor Close the second pane).
+        assert_eq!(list.len(), 40);
         let ids: Vec<&str> = list.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(
             &ids[..9],
             [
                 "compare",
                 "reader-mode",
+                "notes-beside-off",
+                "notes-beside-reading",
+                "notes-beside-always",
                 "layout-verse",
                 "layout-flowing",
                 "width-narrow",
-                "width-wide",
-                "text-larger",
-                "text-smaller",
-                "text-medium"
+                "width-wide"
             ]
         );
         assert_eq!(
-            labels(&list[11..17]),
+            labels(&list[14..19]),
             [
                 "Translation: KJV",
                 "Translation: WEB",
                 "Translation: BSB",
                 "Compare with: WEB",
-                "Compare with: BSB",
-                "Compare with: Notes"
+                "Compare with: BSB"
             ]
         );
+        // Compare compares translations only (B2).
+        assert!(!ids.iter().any(|id| id.contains("compare-notes")));
     }
 
     #[test]
@@ -749,6 +749,16 @@ mod tests {
             let c = find(&list, id);
             assert_eq!((c.key.as_str(), c.keys), (key, keys), "{id}");
         }
+        // Open this passage beside shows S, as Close the second pane shows
+        // X; with two panes S closes the second, so it isn't shown there.
+        let beside = find(&list, "open-beside");
+        assert_eq!((beside.key.as_str(), beside.keys), ("S", "S"));
+        let two = commands(&PaletteState {
+            split: true,
+            ..john_3()
+        });
+        let beside = find(&two, "open-beside");
+        assert_eq!((beside.key.as_str(), beside.keys), ("", ""));
         let random = find(&list, "random-chapter");
         assert_eq!((random.key.as_str(), random.keys), ("", ""));
         // Off, R turns reading mode on; on, it shows Escape, which leaves
@@ -865,30 +875,6 @@ mod tests {
             reason(&comparing, "layout-flowing"),
             Some("Compare always shows a verse to a row")
         );
-        assert_eq!(reason(&comparing, "compare-notes"), None);
-        assert_eq!(find(&comparing, "compare-notes").run, Run::CompareNotes);
-        assert_eq!(reason(&list, "compare-notes"), Some("Only while comparing"));
-
-        // Comparing with the notes: Notes in use, any translation can be
-        // chosen instead, and the text keeps its layout.
-        let notes = commands(&PaletteState {
-            comparing: true,
-            compare_notes: true,
-            ..john_3()
-        });
-        assert_eq!(reason(&notes, "compare-notes"), Some(IN_USE));
-        assert_eq!(reason(&notes, "compare-with-web"), None);
-        assert_eq!(reason(&notes, "compare-with-bsb"), None);
-        assert_eq!(reason(&notes, "layout-flowing"), None);
-        assert_eq!(reason(&notes, "layout-verse"), Some(IN_USE));
-        // With one translation, the notes can still be compared with.
-        let alone_with_notes = commands(&PaletteState {
-            partner: None,
-            compare_notes: true,
-            ..john_3()
-        });
-        assert_eq!(reason(&alone_with_notes, "compare"), None);
-
         let alone = commands(&PaletteState {
             partner: None,
             ..john_3()
@@ -957,6 +943,44 @@ mod tests {
         );
         assert_eq!(reason(&busy, "check-updates"), Some("Already checking"));
         assert_eq!(reason(&busy, "export-notes"), None);
+    }
+
+    /// B7: Aa's three choices for the notes, as the theme's are: the one in
+    /// use is marked, each clicks its own choice in Aa's row.
+    #[test]
+    fn notes_beside_the_text_has_a_command_for_each_choice() {
+        for now in ["off", "reading", "always"] {
+            let list = commands(&PaletteState {
+                notes_beside: now.into(),
+                ..john_3()
+            });
+            for (value, label) in [
+                ("off", "Notes beside the text: Off"),
+                ("reading", "Notes beside the text: In reading mode"),
+                ("always", "Notes beside the text: Always"),
+            ] {
+                let c = find(&list, &format!("notes-beside-{value}"));
+                assert_eq!(c.label, label);
+                assert_eq!(c.reason, in_use(value == now), "{value} with {now}");
+                assert_eq!(
+                    c.run,
+                    Run::Choice {
+                        group: "notes-beside-choices",
+                        value: value.into()
+                    }
+                );
+                assert_eq!((c.key.as_str(), c.keys), ("", ""));
+            }
+        }
+        let list = commands(&john_3());
+        let matching = |typed: &str| {
+            labels(&shown(&query(typed), list.clone()))
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(matching("notes always"), ["Notes beside the text: Always"]);
+        assert_eq!(matching("margin off"), ["Notes beside the text: Off"]);
     }
 
     #[test]
@@ -1088,9 +1112,11 @@ mod tests {
                 .map(str::to_string)
                 .collect::<Vec<_>>()
         };
-        assert_eq!(matching("rea mo"), ["Reading mode"]);
-        assert_eq!(matching("mo rea"), ["Reading mode"]);
-        assert_eq!(matching("READING"), ["Reading mode"]);
+        // Notes beside the text's "In reading mode" too, after it.
+        let reading = ["Reading mode", "Notes beside the text: In reading mode"];
+        assert_eq!(matching("rea mo"), reading);
+        assert_eq!(matching("mo rea"), reading);
+        assert_eq!(matching("READING"), reading);
         assert_eq!(matching("theme ma"), ["Theme: Matrix"]);
         assert_eq!(matching("thème ma"), ["Theme: Matrix"]);
         assert_eq!(matching("translation berean"), ["Translation: BSB"]);

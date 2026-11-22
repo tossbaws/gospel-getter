@@ -8,13 +8,14 @@
 //! backs out a step; Ctrl+C and Ctrl+Shift+C copy; N writes a note, B
 //! bookmarks and H highlights; `/` and Ctrl+K search; `?` the shortcuts;
 //! Ctrl+B, G, T, C and R the Library, the picker, the translations, Compare
-//! and reading mode; F6, Shift+F6 and P switch panes while two are open,
-//! and X closes the second. Which key does
+//! and reading mode; M shows or hides the notes beside the text; S opens
+//! this passage beside, or closes the second pane; F6, Shift+F6 and P
+//! switch panes while two are open, and X closes the second. Which key does
 //! what, and the selection's steps, are `keyboard_text`'s, tested on the
 //! host. With Aa's "Single-key shortcuts" off
 //! (`preferences::SINGLE_KEY_SHORTCUTS`), the keys that are a character
-//! pressed on its own (G, T, C, R, N, B, H, X, P, j and k, `[` and `]`, `/`
-//! and `?`) are left alone, unprevented, as if unheard; those with Ctrl,
+//! pressed on its own (G, T, C, R, M, N, B, H, S, X, P, j and k, `[` and
+//! `]`, `/` and `?`) are left alone, unprevented, as if unheard; those with Ctrl,
 //! Cmd or Alt, the arrows, F6 and Escape still work. The sheet (☰ → Keyboard shortcuts) and
 //! the palette (Ctrl+K) are reached either way. Every key that acts on a
 //! passage acts on the active pane (`pane::active`); while two panes are
@@ -39,6 +40,7 @@ use crate::dom;
 use crate::keyboard_text::{self as text, Press, Rect, Route, Selected};
 use crate::page;
 use crate::pane;
+use crate::pane_text::{self, SplitKey};
 use crate::preferences;
 use crate::prefs;
 use crate::reader::{self, Load, Request};
@@ -280,6 +282,24 @@ fn on_keydown(event: &KeyboardEvent) {
                 event.prevent_default();
             }
         }
+        Route::Split => {
+            let chapter_shown = reader::chapter_shown(pane::active());
+            match pane_text::split_key(pane::split(), chapter_shown) {
+                SplitKey::OpenBeside => {
+                    spawn(reader::open_here_beside());
+                    event.prevent_default();
+                }
+                SplitKey::CloseSecond => {
+                    pane::close_second();
+                    event.prevent_default();
+                }
+                SplitKey::Nothing => {}
+            }
+        }
+        Route::NotesBeside => {
+            aa::toggle_notes_beside();
+            event.prevent_default();
+        }
         Route::Picker => pane::open_picker(),
         Route::Translation => pane::toggle_translation(),
         Route::Step { step, extend } => step_selection(step, extend),
@@ -293,8 +313,8 @@ fn on_keydown(event: &KeyboardEvent) {
                 compare.click();
             }
         }
-        // The call Aa's button makes, so focus, the sidebar and Compare's
-        // notes follow as they do from it.
+        // The call Aa's button makes, so focus and the sidebar follow as
+        // they do from it.
         Route::ReadingMode => aa::set_reader_mode(!prefs::on(&preferences::READER_MODE)),
         Route::Turn(which) => turn_chapter(which),
         Route::SwitchPane => {
