@@ -1,5 +1,11 @@
 # Release tools
 
+The release's files: the signed bundle, the update manifests and the
+housekeeping after publishing. The rest of a release (when one happens,
+the version bump with `bump.py`, the release-prep pull request, merging,
+the dispatched runs, the tag, the draft and the QA issue) is in
+[RELEASING.md](../../RELEASING.md), whose steps link here.
+
 ## `make_latest_json.py`: the update manifest
 
 The app checks
@@ -243,5 +249,16 @@ python3 tools/release/site_version_gate.py --site site/index.html --published v2
 prints `deploy=true` or `deploy=false`, with the reason on stderr.
 A pre-release's tag (`v2.19.0-beta.1`) is ignored, and publishing a
 pre-release starts no deploy: the site never shows or links a pre-release.
+
+## `bump.py`: the version strings
+
+Moves every version string a release-prep pull request changes, and nothing
+else (RELEASING.md, "The bump"). `--check` prints the edits and writes
+nothing.
+
+```sh
+python3 tools/release/bump.py X.Y.Z --check
+python3 tools/release/bump.py X.Y.Z
+```
 
 Tests: `python3 -m unittest discover -s tools/release` (run in CI).
