@@ -417,11 +417,11 @@ latest version, and, on an install that updates itself, one that names the
 version before yours, so GitHub sees your IP address, as with any download.
 Nothing about your reading or your data is sent.
 
-**Coming from 2.6.0 through 2.35.0?** Each updates itself to 2.36.0: it
+**Coming from 2.6.0 through 2.36.0?** Each updates itself to 2.37.0: it
 offers the update when it starts (or from **Check now**, in **About
 Gospel Getter** from the ☰ menu in 2.7.0 and later, or in the Updates
 section of Settings in 2.6.0), if it's one of the installs above that
-update themselves. The 2.19.0 pre-release updates itself to 2.36.0 the
+update themselves. The 2.19.0 pre-release updates itself to 2.37.0 the
 same way.
 
 **Coming from 2.33.0 on Windows?** 2.33.0 couldn't start on a Windows PC
@@ -431,7 +431,7 @@ current release by hand once, from the
 over 2.33.0. Your data is as it was.
 
 **Coming from 2.5.0 or older?** Those versions can't update themselves.
-Install 2.36.0 by hand once, from the
+Install 2.37.0 by hand once, from the
 [latest release](https://github.com/tossbaws/gospel-getter/releases/latest),
 over your current version; updates after that can come from inside the app.
 Upgrading keeps your data.
