@@ -45,7 +45,10 @@ test('the translation button lists every translation on a line of its own, as a 
             'BSB · Berean Standard Bible · 2023 · public domain',
             'WEB · World English Bible · public domain',
         ]);
-        // The dots are only seen; the code, name, date and licence are read.
+        // Each a radio the stylesheet draws as a choice; the dots between its
+        // parts are only seen; the code, name, date and licence are read.
+        assert.ok(radios(app).every((r) => r.classList.contains('translation-choice')));
+        assert.ok(radios(app).every((r) => r.querySelector('.translation-dot')));
         for (const dot of group.querySelectorAll('.translation-dot')) assert.equal(dot.getAttribute('aria-hidden'), 'true');
         assert.deepEqual(radios(app).map((r) => r.getAttribute('aria-checked')), ['true', 'false', 'false']);
         // One tab stop: the chosen one, which the popover focuses when it opens.
