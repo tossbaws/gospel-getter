@@ -4,7 +4,7 @@ Gospel Getter is a Tauri 2 Bible reader. The Rust backend lives in `src-tauri/`,
 
 ## Rust
 
-- Use the `rust-coding-standards` skill for all Rust coding decisions.
+- Use the `rust-coding-standards` skill (`.claude/skills/rust-coding-standards/`) for all Rust coding decisions.
 - Don't use `unwrap()` or `panic!()` on recoverable errors in library code.
 - Use `anyhow::Context` for error propagation.
 - After every change, run `cargo fmt` and `cargo clippy -- -D warnings`. A build that compiles but fails Clippy isn't done.
@@ -13,7 +13,7 @@ Gospel Getter is a Tauri 2 Bible reader. The Rust backend lives in `src-tauri/`,
 
 ## Scripture text
 
-- Use the `biblical-text-integrity` skill for any work that touches Bible text: seed data, ingestion, translations, verse rendering.
+- Use the `biblical-text-integrity` skill (`.claude/skills/biblical-text-integrity/`) for any work that touches Bible text: seed data, ingestion, translations, verse rendering.
 - Never alter verse wording for any reason, including cleanup or fixing an apparent typo in a source dataset.
 
 ## Comments
