@@ -4,7 +4,7 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [2.37.0] - 2026-11-22
+## [2.37.0] - 2026-11-23
 
 One icon everywhere: the stained-glass Chi-Rho, at every size, in the app
 and on the website.
