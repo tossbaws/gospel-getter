@@ -55,6 +55,9 @@ test('a fresh install opens the welcome card over the first chapter', () =>
         assert.equal(panel(app).getAttribute('aria-modal'), 'true');
         assert.equal(panel(app).getAttribute('aria-labelledby'), 'welcome-title');
         assert.equal(panel(app).getAttribute('aria-describedby'), 'welcome-intro');
+        // The note panel's modal look, under the welcome's own ids and classes.
+        assert.deepEqual([...overlay(app).classList], ['welcome-overlay', 'modal-overlay']);
+        assert.deepEqual([...panel(app).classList], ['welcome-panel', 'modal-panel']);
         assert.equal($(app, 'welcome-title').textContent, 'Welcome to Gospel Getter');
         assert.equal($(app, 'welcome-intro').textContent, 'A quiet place to read the Bible on your computer, offline and with no account.');
         assert.equal(app.document.activeElement, panel(app), 'focus moves into the card');
@@ -65,6 +68,7 @@ test('a fresh install opens the welcome card over the first chapter', () =>
         assert.equal($(app, group.getAttribute('aria-labelledby')).textContent, 'Pick a look');
         // Named by their theme (the preview is hidden from assistive tech).
         assert.deepEqual(looks(app).map((r) => r.querySelector('.welcome-look-name').textContent), ['Chi Rho', 'Vellum']);
+        assert.ok(looks(app).every((r) => r.classList.contains('welcome-look')));
         assert.ok(looks(app).every((r) => r.querySelector('.welcome-look-preview').getAttribute('aria-hidden') === 'true'));
         assert.deepEqual(looks(app).map((r) => r.children.length), [2, 2]);
         assert.deepEqual(checked(app), ['chi-rho']);
@@ -305,6 +309,17 @@ test('with no places to start, the card leaves out that section', () =>
         assert.equal($(app, 'welcome-start-label').hidden, true);
         assert.equal(looks(app).length, 2, 'the looks are still there');
     }));
+
+test('places to start that aren’t a list count as none', async () => {
+    for (const startHere of [null, 'Mark', { bookId: 41, chapter: 1 }]) {
+        await withApp({ fresh: true, alter: { get_home: (home) => ({ ...home, startHere }) } }, async (app) => {
+            await app.until(() => isOpen(app), 'the welcome');
+            assert.equal($(app, 'welcome-start').hidden, true, JSON.stringify(startHere));
+            assert.equal(looks(app).length, 2, 'the looks are still there');
+            assert.deepEqual(app.consoleErrors, []);
+        });
+    }
+});
 
 test('the places to start are text, never markup', () =>
     withApp({

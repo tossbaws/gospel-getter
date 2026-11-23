@@ -15,7 +15,7 @@ use crate::db::models::Book;
 pub use crate::wire::StartHereDto;
 
 /// The bundled list, as written.
-const DATA: &str = include_str!("../data/start_here.json");
+const DATA: &str = include_str!("../../data/start_here.json");
 
 /// One entry of `data/start_here.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -81,9 +81,10 @@ mod tests {
     /// The 66 books as the bundled KJV has them, numbered in order, as the
     /// database seeds them.
     fn books() -> Vec<Book> {
-        let kjv: serde_json::Value =
-            serde_json::from_str(include_str!("../data/kjv.json").trim_start_matches('\u{feff}'))
-                .unwrap();
+        let kjv: serde_json::Value = serde_json::from_str(
+            include_str!("../../data/kjv.json").trim_start_matches('\u{feff}'),
+        )
+        .unwrap();
         kjv.as_array()
             .unwrap()
             .iter()

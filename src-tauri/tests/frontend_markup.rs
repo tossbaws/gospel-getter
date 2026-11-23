@@ -10,6 +10,7 @@ use std::sync::LazyLock;
 
 const HTML: &str = include_str!("../../ui/index.html");
 
+use gospel_getter_lib::constants::HIGHLIGHT_COLORS;
 use gospel_getter_lib::preferences::{self, Preference, Values};
 
 /// Where the page's pieces written in Rust live.
@@ -305,12 +306,6 @@ fn margin_notes_sit_beside_the_text_on_screen_only() {
     // Its words as the card's: Markdown, line breaks as `<br>`, so no
     // `pre-wrap` to break them twice.
     assert!(!body.contains("white-space"));
-    assert!(piece("margin_text.rs").contains("note_markdown::note_html(&note.body, &note.links"));
-    assert!(
-        piece("margin.rs")
-            .contains(r#"set_property("--margin-fold-lines", &text::FOLD_LINES.to_string())"#)
-    );
-    assert!(piece("margin_text.rs").contains("pub const FOLD_LINES: u32 = 10;"));
     // The quiet line of an empty margin ("Always"): quiet by its italic,
     // in --text, which is never less legible on the page than the notes.
     let empty = screen(".margin-notes-empty");
@@ -473,19 +468,9 @@ fn notes_beside_the_text_always_takes_reading_modes_shape_beside_the_sidebar() {
     ] {
         assert_eq!(pref.values.list(), ["off", "on"], "{}", pref.name);
     }
-    assert!(piece("pane.rs").contains("prefs::set(&preferences::SPLIT, \"on\")"));
-    // 16.625rem and 22.625rem are the margin, its gap and its edge.
-    let text = piece("margin_text.rs");
-    for constant in [
-        "pub const MIN_WIDTH_REM: f64 = 14.0;",
-        "pub const MAX_WIDTH_REM: f64 = 20.0;",
-        "pub const GAP_REM: f64 = 1.5;",
-        "pub const EDGE_REM: f64 = 1.125;",
-    ] {
-        assert!(text.contains(constant), "{constant}");
-    }
-    assert!((14.0f64 + 1.5 + 1.125 - 16.625).abs() < f64::EPSILON);
-    assert!((20.0f64 + 1.5 + 1.125 - 22.625).abs() < f64::EPSILON);
+    // 16.625rem and 22.625rem are the margin (14rem to 20rem), its gap and
+    // its edge (2.625rem together): margin_text.rs's constants, which its
+    // `the_margin_needs_14rem_beside_the_text` pins to the same widths.
 
     // The cascade: every other rule on screen that sets the same property
     // of the same thing, and could apply with "Always" (not reading mode's,
@@ -600,12 +585,6 @@ fn frontend_uses_invoke_not_http() {
             "expected a call to the `{command}` Tauri command"
         );
     }
-    // The verses' notes are the selection card's (ui-leptos/src/card.rs),
-    // through the same global `invoke` (ui-leptos/src/ipc.rs).
-    assert!(
-        piece("card.rs").contains(r#"send("list_notes", &args)"#),
-        "expected a call to the `list_notes` Tauri command"
-    );
 }
 
 // ---- Reader comfort, themes and reading mode -------------------------
@@ -1207,13 +1186,6 @@ fn preference_selects_match_the_values_the_script_persists() {
             "#{id} should be a hidden record behind Aa's buttons, filled by Aa"
         );
     }
-    let draw = block_after(piece("aa.rs"), "fn draw_choices(");
-    assert!(
-        draw.contains(
-            "let (Some(id), Values::Choices(choices)) = (pref.select, pref.values) else {"
-        )
-    );
-    assert!(draw.contains("select.set_value(&prefs::load(&pref));"));
 }
 
 /// The saved look is on the page before its first frame: the first script
@@ -1267,7 +1239,6 @@ fn the_pre_paint_script_applies_the_saved_look_from_the_one_table() {
             .iter()
             .all(|p| p.key != preferences::RETIRED_COMPARE_NOTES_KEY)
     );
-    assert!(piece("aa.rs").contains("prefs::set(&preferences::UPDATE_CHECK, value);"));
 }
 
 /// Two panes remembered on restart (S9): `preferences::SPLIT`, which the
@@ -1290,13 +1261,8 @@ fn split_is_remembered_on_this_computer_only() {
             .contains("['gospel-getter-split', 'split', 'off', ['off', 'on'], {}],"),
         "the generated pre-paint row"
     );
-    assert!(piece("aa.rs").contains("let Some(file_name) = pref.file_name else {"));
-
-    assert!(
-        piece("pane_text.rs")
-            .contains(r#"pub const SECOND_PANE_KEY: &str = "gospel-getter-second-pane";"#)
-    );
-    // Not one of the saved settings, which the pre-paint script writes to
+    // The second pane's place (pane_text.rs's `SECOND_PANE_KEY`) is not one
+    // of the saved settings, which the pre-paint script writes to
     // <html> and backups carry.
     assert!(
         preferences::PREFERENCES
@@ -1708,10 +1674,10 @@ fn reader_mode_hides_chrome_but_keeps_reading_content_and_exit() {
 }
 
 /// The exit control must be a real, labeled, keyboard-focusable button,
-/// and Escape must also leave reading mode. None of it was ever the main
-/// script's (now gone): the exit and the toggle are Aa's (the page's Rust
-/// pieces), Escape's last step is the surfaces' (Rust too), which asks Aa,
-/// and the pre-paint script doesn't touch the Tauri bridge. Without the
+/// and Escape must also leave reading mode. The exit, the toggle and
+/// Escape are the page's Rust pieces' (jsdom's reading-mode-key.test.mjs
+/// and header.test.mjs drive them), and the pre-paint script, which only
+/// applies the saved setting, doesn't touch the Tauri bridge. Without the
 /// Rust pieces reading mode can't be left (the exit and Escape do nothing).
 #[test]
 fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
@@ -1743,27 +1709,10 @@ fn reader_mode_exit_is_accessible_and_independent_of_the_main_script() {
         !head_script.contains("__TAURI__.core"),
         "the pre-paint script must not depend on the Tauri bridge"
     );
-    let escape = block_after(piece("surfaces.rs"), "fn on_escape(");
-    for wiring in [
-        r#"event.key() != "Escape""#,
-        "aa::set_reader_mode(false);",
-        "'gospel-getter-reader-mode', 'readerMode', 'off'",
-    ] {
-        assert!(
-            head_script.contains(wiring) || escape.contains(wiring),
-            "the pre-paint script or the surfaces' Escape should contain `{wiring}`"
-        );
-    }
-    let aa = piece("aa.rs");
-    for wiring in [
-        r#"by_id("reader-exit")"#,
-        r#"by_id(if on { "reader-exit" } else { "aa-toggle" })"#,
-        "dom::on_click(&exit, |_| set_reader_mode(false));",
-        "pub fn set_reader_mode(on: bool) {",
-        "prefs::set(&preferences::READER_MODE,",
-    ] {
-        assert!(aa.contains(wiring), "Aa should contain `{wiring}`");
-    }
+    assert!(
+        head_script.contains("'gospel-getter-reader-mode', 'readerMode', 'off'"),
+        "the pre-paint script applies the saved reading mode"
+    );
 }
 
 /// The opening tag of the element with `id`: in the page's markup, or, for
@@ -1894,30 +1843,11 @@ fn the_bar_s_history_and_chapter_controls_are_ghost_svg_buttons() {
     assert!(menu.contains(r#"role="menu""#) && menu.contains(r#"aria-label="Recent places""#));
     assert!(menu.contains(" hidden"));
 
-    let nav = piece("nav.rs");
-    assert!(
-        nav.contains("keyboard::go_history(step)"),
-        "Back and Forward"
-    );
-    assert!(
-        nav.contains("keyboard::go_history(1)"),
-        "the menu's Forward"
-    );
-    assert!(
-        nav.contains("reader::ask(\n        pane,\n        Request::Jump {"),
-        "a recent place"
-    );
-    assert!(nav.contains("keyboard::turn_chapter(which)"), "‹ and ›");
-    assert!(!nav.contains("ipc::send("), "no backend calls");
-    assert!(
-        piece("nav_text.rs").contains(r#"pub const NARROW_QUERY: &str = "(max-width: 759px)";"#)
-    );
-    assert!(
-        piece("nav_text.rs")
-            .contains(r#"pub const RECENT_KEY: &str = "gospel-getter-recent-places";"#)
-    );
-    // Kept on this computer only: not one of the saved settings (which
-    // backups carry).
+    // A lint: the bar's controls ask the backend nothing themselves; what
+    // they read is the keys' paths' (nav.test.mjs runs both and compares).
+    assert!(!piece("nav.rs").contains("ipc::send("), "no backend calls");
+    // Recent places (nav.test.mjs), kept on this computer only: not one of
+    // the saved settings (which backups carry).
     assert!(
         preferences::PREFERENCES
             .iter()
@@ -1996,12 +1926,9 @@ fn the_commentary_prints_alone_from_a_print_only_container() {
     };
     // A chapter's notes hang from one column of verses, as wide as its
     // widest label: the markup gives its width (data-hang), the page sets it
-    // as `--hang`, at least a short label's.
+    // as `--hang` (notes-export.test.mjs's Print… test), at least a short
+    // label's.
     assert_eq!(decl(".print-notes", "--hang"), "2.5em");
-    let export = piece("export_notes.rs");
-    let hang = block_after(export, "async fn print_commentary(");
-    assert!(hang.contains(r#"query_selector_all(".print-notes[data-hang]")"#));
-    assert!(hang.contains(r#"set_property("--hang", &format!("{hang}em"))"#));
     // The hanging indent: each note's text, every line of it, wrapped or
     // after a break, indented past the column, and its verses floated
     // back into it, on one line however long ("119:105–176").
@@ -2056,12 +1983,6 @@ fn the_commentary_prints_alone_from_a_print_only_container() {
         assert!(!print(heading).contains("font-family"));
         assert!(!print(heading).contains("border") && !print(heading).contains("color"));
     }
-    assert!(export.contains(r#"const PRINTING: &str = "data-printing";"#));
-    assert!(export.contains("window.print()"));
-    assert!(export.contains(r#"dom::on(&window, "afterprint", |_| done_printing());"#));
-    assert!(block_after(export, "    fn close(self)").contains("done_printing();"));
-    // What's printed is the backend's commentary, as the file says it.
-    assert!(export.contains(r#"ipc::invoke::<Commentary>("get_notes_commentary", args)"#));
 }
 
 /// Back, ▾, Forward, ‹ and › use the bar button's tested colors in every
@@ -2297,19 +2218,14 @@ fn export_notes_book_list_uses_tested_theme_colors() {
 
 /// The theme swatches in Aa are drawn from the theme definitions
 /// themselves, not from copied colors: one per theme, each previewing its
-/// theme through `[data-theme-preview]`.
+/// theme through `[data-theme-preview]` (header.test.mjs checks Aa draws
+/// them so).
 #[test]
 fn theme_swatches_come_from_the_theme_definitions() {
     let rules = rules();
     let preview = screen_rule(&rules, ".theme-swatch-preview");
     assert!(preview.body.contains("background: var(--bg)"));
     assert!(preview.body.contains("color: var(--accent)"));
-    // Aa draws one swatch per theme in the one table, previewing it.
-    let aa = piece("aa.rs");
-    assert!(aa.contains(
-        r#"<span class="theme-swatch-preview" data-theme-preview=value aria-hidden="true">"#
-    ));
-    assert!(aa.contains("append(&group, swatch_view(choice.value, choice.label));"));
 }
 
 /// Printing stays black on white at the default size and spacing whatever
@@ -2355,8 +2271,6 @@ fn print_ignores_saved_reader_preferences() {
 }
 
 // ---- Highlights
-
-const HIGHLIGHT_COLORS: [&str; 4] = ["yellow", "green", "blue", "pink"];
 
 /// Highlighted verse text must stay readable: `--text` on each of a
 /// theme's highlighter colors meets WCAG AA (4.5:1), in every theme, and
@@ -2696,13 +2610,7 @@ fn notes_use_tested_theme_colors() {
         );
     }
     // The welcome and the note panel share one modal style; the welcome
-    // keeps its own ids and classes.
-    for class in ["welcome-overlay modal-overlay", "welcome-panel modal-panel"] {
-        assert!(
-            piece("welcome.rs").contains(&format!(r#"class="{class}""#)),
-            "{class}"
-        );
-    }
+    // keeps its own ids and classes (welcome.test.mjs checks its classes).
     let note_overlay = tag_of("note-overlay");
     assert!(note_overlay.contains(r#"class="modal-overlay""#));
     assert!(
@@ -3662,37 +3570,15 @@ fn the_reference_button_says_where_the_reader_is() {
         })
         .expect("the reference in reading mode");
     assert!(reading.body.contains("margin-right: auto"));
-    // What it says is the reader's (ui-leptos/src/reader_text.rs).
-    let reference = block_after(piece("reader_text.rs"), "pub fn reference(");
-    assert!(reference.contains(r#"let codes = upper.join(" + ");"#));
-    assert!(reference.contains(r#"let text = format!("{place} · {codes}");"#));
-    // Its translations apart, which a narrow window leaves out.
-    let markup = block_after(piece("reader_text.rs"), "pub fn reference_markup(");
-    assert!(
-        markup.contains(r#"<span class="ref-place">{}</span><span class="ref-codes"> · {}</span>"#)
-    );
-    assert!(
-        block_after(piece("reader.rs"), "fn update_reference(")
-            .contains("ref_text.set_inner_html(&text::reference_markup(&reference));")
-    );
-    assert!(
-        reference.contains(r#"label: format!("{place}, {spoken}. Choose a book and chapter"),"#)
-    );
-    // Updated whenever a chapter is put on screen.
-    let render = block_after(piece("reader.rs"), "fn render_current(pane: PaneId)");
-    assert!(render.contains("update_reference(&here, compare.as_deref());"));
-    assert!(render.contains("crate::picker::show_current(pane, here.book_id, here.chapter);"));
-    // G opens the picker, in the keyboard dispatcher, which leaves keys
-    // typed into a form control alone.
-    assert!(
-        piece("keyboard_text.rs").contains(r#"if plain && !shift && (key == "g" || key == "G") {"#)
-    );
+    // What it says, and that it follows the chapter, and G, are
+    // reader_text.rs's, keyboard_text.rs's and picker.test.mjs's tests.
 }
 
 /// The picker is one `<nav>` landmark, "Books and chapters": Random
 /// chapter, then each testament's books under its heading. As a popover
-/// it's a dialog (the surfaces set the role, ui-leptos/src/surfaces.rs),
-/// and both the reference button and the sidebar's button control it.
+/// it's a dialog (the surfaces set the role; picker.test.mjs checks both
+/// shapes, its books' disclosures and the marks), and both the reference
+/// button and the sidebar's button control it.
 #[test]
 fn the_picker_is_a_navigation_landmark_or_a_dialog() {
     let tag = tag_of("picker");
@@ -3720,33 +3606,10 @@ fn the_picker_is_a_navigation_landmark_or_a_dialog() {
         assert!(toggle.contains(attr), "#sidebar-toggle: {attr}");
     }
     let head = &HTML[..HTML.find("</head>").unwrap()];
-    let surfaces = [piece("surfaces.rs"), piece("surfaces_text.rs")].concat();
-    for wiring in [
-        r#"picker.set_attribute("role", "dialog");"#,
-        r#"picker.remove_attribute("role");"#,
-        r#"ref_btn.set_attribute("aria-haspopup", "dialog");"#,
-        r#"Surface::Picker => Some("ref-btn"),"#,
-        "['gospel-getter-sidebar', 'sidebar', 'open', ['open', 'closed'], {}],",
-    ] {
-        assert!(
-            head.contains(wiring) || surfaces.contains(wiring),
-            "the pre-paint script or the surfaces: {wiring}"
-        );
-    }
-    // A book is a disclosure for its chapters, and the chapter and book
-    // being read are marked (the picker's piece, ui-leptos/src/picker.rs,
-    // draws and marks them).
-    let picker = piece("picker.rs");
-    assert!(picker.contains(
-        "class=\"book-item\"\n                data-book-id=book.id.to_string()\n                data-chapter-count=book.chapter_count.to_string()\n                aria-expanded=\"false\""
-    ));
     assert!(
-        picker.contains(r#"button.set_attribute("aria-controls", CHAPTERS_ID);"#)
-            && picker.contains(r#"const CHAPTERS_ID: &str = "picker-chapters";"#)
+        head.contains("['gospel-getter-sidebar', 'sidebar', 'open', ['open', 'closed'], {}],"),
+        "the pre-paint script lays out the sidebar as saved"
     );
-    assert!(picker.contains(r#"role="group""#));
-    assert!(picker.contains(r#"book.set_attribute("aria-current", "true");"#));
-    assert!(picker.contains(r#"aria-current=(current == Some(n)).then_some("page")"#));
 }
 
 /// Psalms (and any book over 50 chapters) gets a compact numeric grid, ten
@@ -3755,12 +3618,8 @@ fn the_picker_is_a_navigation_landmark_or_a_dialog() {
 #[test]
 fn psalms_get_a_compact_grid_ten_to_a_row() {
     let rules = rules();
-    // The rule is the picker's (ui-leptos/src/picker_text.rs).
-    let picker = piece("picker_text.rs");
-    assert!(picker.contains("pub const COMPACT_OVER: i64 = 50;"));
-    assert!(picker.contains("pub const COMPACT_COLUMNS: usize = 10;"));
-    assert!(picker.contains("pub const PILL_COLUMNS: usize = 6;"));
-    assert!(picker.contains("    count > COMPACT_OVER\n"));
+    // Which books get which grid is picker_text.rs's (its test
+    // `books_over_fifty_chapters_get_the_compact_grid`, and picker.test.mjs).
     let pills = &screen_rule(&rules, ".chapter-grid").body;
     assert!(pills.contains("grid-template-columns: repeat(6, 2rem)"));
     assert!(
@@ -3837,7 +3696,6 @@ fn psalms_get_a_compact_grid_ten_to_a_row() {
 #[test]
 fn the_sidebar_is_for_wide_windows_only() {
     let rules = rules();
-    assert!(piece("surfaces.rs").contains("w.match_media(preferences::WIDE_QUERY)"));
     let html = custom_properties(&screen_rule(&rules, "html").body);
     assert_eq!(property(&html, "--sidebar-width"), "18rem");
     let screen = |selector: &str| -> &Rule {
@@ -3882,12 +3740,9 @@ fn the_sidebar_is_for_wide_windows_only() {
     ] {
         assert!(popover.contains(declaration), "the popover: {declaration}");
     }
-    // Reading mode never shows the sidebar (see sidebar_shown).
-    assert!(
-        piece("surfaces_text.rs")
-            .contains(r#"wide && sidebar != Some("closed") && reader_mode != Some("on")"#)
-    );
-    // It's a setting for this window, not exported with the display ones.
+    // From 1200px, and never in reading mode, is surfaces_text.rs's
+    // `sidebar_shown` (its tests, and picker.test.mjs's). It's a setting
+    // for this window, not exported with the display ones.
     assert_eq!(preferences::SIDEBAR.file_name, None);
 }
 
@@ -3988,57 +3843,15 @@ fn the_chapter_ends_with_buttons_to_the_chapters_around_it() {
 /// chapter). Printing opens both.
 #[test]
 fn footnotes_and_cross_references_are_disclosures_closed_by_default() {
-    // The disclosures are the reader's (ui-leptos/src/reader.rs and
-    // reader_text.rs).
-    let reader = piece("reader_text.rs");
-    let keys = block_after(reader, "pub fn key(self)");
-    assert!(keys.contains(r#"Self::Footnotes => "gospel-getter-footnotes","#));
-    assert!(keys.contains(r#"Self::Xrefs => "gospel-getter-cross-references","#));
-    let open = block_after(piece("reader.rs"), "fn opened()");
-    assert!(
-        open.contains(r#".is_some_and(|value| value == "open")"#),
-        "closed unless saved open"
-    );
-    assert!(
-        open.contains(".and_then(|s| s.get_item(kind.key()).ok().flatten())"),
-        "closed when storage can't be read"
-    );
-    let toggle = block_after(reader, "fn disclosure_toggle(");
-    assert!(toggle.contains(r#"<button type="button" class="disclosure-toggle""#));
-    assert!(toggle.contains(r#"aria-expanded="{open}""#));
-    assert!(toggle.contains(r#"aria-controls="{controls}""#));
-    for (function, kind, title) in [
-        (
-            "fn footnote_summary(",
-            "Disclosure::Footnotes",
-            r#"format!("Footnotes ({count})")"#,
-        ),
-        (
-            "fn xref_summary(",
-            "Disclosure::Xrefs",
-            r#"&format!("Cross references ({count})")"#,
-        ),
-    ] {
-        let body = block_after(reader, function);
-        assert!(
-            body.contains("disclosure_toggle(") && body.contains(kind),
-            "{function}"
-        );
-        assert!(body.contains(title), "{function}");
-        assert!(
-            body.contains(r#"if open { "" } else { " hidden" }"#),
-            "{function}: the list is hidden while closed"
-        );
-    }
-    // A closed list is hidden on screen, though the lists are grids.
+    // The disclosures, their remembered state and what's read for every
+    // chapter are the reader's: reading-flow.test.mjs's tests. Here, a
+    // closed list is hidden on screen, though the lists are grids.
     assert!(
         rules().iter().any(|r| r.at_rule.is_none()
             && r.selector == ".disclosure-body[hidden]"
             && r.body.contains("display: none")),
         "closed lists must not show"
     );
-    let set = block_after(piece("reader.rs"), "fn set_disclosure(");
-    assert!(set.contains("storage.set_item(kind.key()"));
     let print = block_after(HTML, "@media print");
     let open_in_print = print
         .find(".disclosure-body[hidden]")
@@ -4112,53 +3925,18 @@ fn the_chapter_end_uses_tested_theme_colors() {
 
 /// Selecting verses opens one card that floats over the text (absolutely
 /// placed in the reading column, which is its containing block), so the
-/// chapter never reflows: everything that used to sit inline under a
-/// selection is in it, in order (the actions and citation, the footnotes,
-/// the notes, the cross-references as chips), and the verses carry no
-/// popup of their own. It's a labelled group straight after the last
-/// selected verse in the DOM (next in Tab order), at most a set height
-/// with its own scroll, docked to the bottom of the window only when the
-/// selection leaves no room on either side; it isn't printed.
+/// chapter never reflows: everything about a selection is in it, in order
+/// (the actions and citation, the footnotes, the notes, the
+/// cross-references as chips), and the verses carry no popup of their own.
+/// It's a labelled group straight after the last selected verse in the DOM
+/// (next in Tab order), at most a set height with its own scroll, docked to
+/// the bottom of the window only when the selection leaves no room on
+/// either side; it isn't printed. What the card holds, where it goes and
+/// where focus returns are card_text.rs's and reading-flow.test.mjs's
+/// tests; here, its markup and rules.
 #[test]
 fn the_selection_card_floats_over_the_text() {
-    // The card is the selection card's (ui-leptos/src/card.rs, its markup
-    // and rules in card_text.rs).
-    let card_rs = piece("card.rs");
-    assert!(card_rs.contains(r#"card.set_id("selection-card");"#));
-    assert!(card_rs.contains(r#"let _ = card.set_attribute("role", "group");"#));
-    assert!(card_rs.contains("let _ = card.append_with_node_3(&actions, &footnotes, &xrefs);"));
-    let render = block_after(card_rs, "fn render_selection()");
-    assert!(render.contains(r#".set_attribute("aria-label", &format!("Selection: {citation}"));"#));
-    assert!(
-        render.contains("let _ = last.after_with_node_1(&els.card);"),
-        "after the last selected verse"
-    );
-    assert!(
-        !render.contains("last.append"),
-        "nothing goes inside a verse"
-    );
-    assert!(
-        render.contains("dom::focus(&verse);"),
-        "focus returns to the verse"
-    );
-    assert!(
-        card_rs.contains("let _ = els.xrefs.before_with_node_1(&els.notes);"),
-        "notes before the cross-references"
-    );
     assert!(!HTML.contains("renderVersePopup"), "verses carry no popup");
-    let chips = block_after(piece("card_text.rs"), "pub fn xrefs_html(");
-    assert!(chips.contains(r#"<ul class=\"xref-chips\""#));
-    assert!(chips.contains(r#"<li><button type="button" class="xref-citation""#));
-    let place = &block_after(piece("card_text.rs"), "pub fn placement(");
-    let place_card = &block_after(card_rs, "fn place_card()");
-    for (body, rule) in [
-        (place, "below < wanted"),
-        (place, "above >= wanted"),
-        (place_card, r#"card.class_list().add_1("is-above")"#),
-        (place_card, r#"card.class_list().add_1("is-docked")"#),
-    ] {
-        assert!(body.contains(rule), "placeCard: {rule}");
-    }
 
     let rules = rules();
     let main = screen_rule(&rules, ".chapter-main");
@@ -4686,12 +4464,8 @@ fn only_selectable_verses_look_clickable() {
             );
         }
     }
-    // The reader's verses carry the attribute; the fallback's don't.
-    assert!(
-        piece("keyboard.rs")
-            .contains(r#"pub const SELECTABLE: &str = ".chapter-main .verse[data-translation]";"#)
-    );
-    assert!(piece("reader_text.rs").contains(r#"data-translation="{code}""#));
+    // The reader's verses carry the attribute (pieces.test.mjs); the
+    // fallback's don't.
     let fallback = block_after(
         HTML,
         "document.addEventListener('gospel-getter:pieces-failed'",
@@ -4706,11 +4480,10 @@ fn only_selectable_verses_look_clickable() {
 /// described by its one sentence, focusable itself (focus goes there on
 /// open), with × and Skip, "Pick a look" as a radio group of two real theme
 /// previews, and "Where to start" as a list the backend fills. No pages,
-/// no Next or Back, and no key lists.
+/// no Next or Back, and no key lists. Its words, its looks, its keyboard
+/// and its places to start are welcome.test.mjs's; here, its markup.
 #[test]
 fn the_welcome_is_one_accessible_card() {
-    // The card is the welcome piece's (ui-leptos/src/welcome.rs).
-    let card = piece("welcome.rs");
     let panel = tag_of("welcome-panel");
     for attr in [
         r#"class="welcome-panel modal-panel""#,
@@ -4722,13 +4495,9 @@ fn the_welcome_is_one_accessible_card() {
     ] {
         assert!(panel.contains(attr), "{attr}");
     }
-    assert!(card.contains(
-        r#"<h2 id="welcome-title" class="welcome-title">"Welcome to Gospel Getter"</h2>"#
-    ));
+    let title = tag_of("welcome-title");
+    assert!(title.starts_with("<h2") && title.contains(r#"class="welcome-title""#));
     assert!(tag_of("welcome-intro").contains(r#"class="welcome-intro""#));
-    assert!(card.contains(
-        r#""A quiet place to read the Bible on your computer, offline and with no account.""#
-    ));
     let close = tag_of("welcome-close");
     for attr in [
         r#"type="button""#,
@@ -4740,7 +4509,6 @@ fn the_welcome_is_one_accessible_card() {
     }
     let skip = tag_of("welcome-skip");
     assert!(skip.contains(r#"type="button""#) && skip.contains(r#"class="reader-mode-btn""#));
-    assert!(card.contains(r#""Skip""#));
     let looks = tag_of("welcome-looks");
     for attr in [
         r#"class="welcome-looks""#,
@@ -4749,65 +4517,17 @@ fn the_welcome_is_one_accessible_card() {
     ] {
         assert!(looks.contains(attr), "{attr}");
     }
-    assert!(
-        card.contains(r#"<h3 class="section-label" id="welcome-look-label">"Pick a look"</h3>"#)
-    );
-    assert!(card.contains(r#"<p class="welcome-hint">"More themes in Aa."</p>"#));
+    let look_label = tag_of("welcome-look-label");
+    assert!(look_label.starts_with("<h3") && look_label.contains(r#"class="section-label""#));
     assert!(tag_of("welcome-start-label").contains(r#"class="section-label""#));
-    assert!(card.contains(r#""Where to start""#));
     let start = tag_of("welcome-start");
     assert!(start.contains(r#"class="welcome-start""#));
     assert!(start.contains(r#"aria-labelledby="welcome-start-label""#));
-    // The two looks: radios named by theme (as the theme list names them),
-    // each a preview of its own theme, hidden from assistive tech: one
-    // radio's markup, made for each of the two.
+    // The two looks are themes the theme list has, by the same names.
     let themes = select_options("theme-select");
     for (value, name) in [("chi-rho", "Chi Rho"), ("vellum", "Vellum")] {
         assert!(themes.contains(&(value.to_owned(), name.to_owned())));
-        assert!(
-            card.contains(&format!(r#"("{value}", "{name}")"#)),
-            "{value}"
-        );
     }
-    assert!(card.contains(r#"const LOOKS: [(&str, &str); 2] ="#));
-    assert_eq!(card.matches(r#"role="radio""#).count(), 1);
-    for markup in [
-        r#"class="welcome-look""#,
-        "data-value=*value",
-        r#"<span class="welcome-look-preview" data-theme-preview=*value aria-hidden="true">"#,
-        r#"<span class="welcome-look-name">{*name}</span>"#,
-    ] {
-        assert!(card.contains(markup), "{markup}");
-    }
-    for gone in [
-        "welcome-page",
-        "welcome-next",
-        "welcome-back",
-        "welcome-progress",
-        "<kbd>",
-    ] {
-        assert!(!card.contains(gone), "the card has no {gone}");
-    }
-    // Its own keyboard, ahead of the page's (capturing, on window): Escape,
-    // the radios' arrows, and Tab kept inside; focus goes to the card.
-    assert!(card.contains("dom::on_window_keydown("));
-    assert!(card.contains("event.stop_propagation();"));
-    assert!(card.contains(r#"if key == "Escape""#));
-    assert!(card.contains(r#""ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown""#));
-    assert!(card.contains(r#"key == "Tab""#));
-    assert!(card.contains("panel.focus()"));
-    // The places to start are the backend's, kept from boot (`page`) and
-    // shown as text (no markup is made from them).
-    assert!(
-        piece("page.rs").contains("let start_here = if js_sys::Array::is_array(&start_here) {")
-    );
-    assert!(card.contains(r#"<span class="welcome-start-title">{title}</span>"#));
-    assert!(card.contains(r#"<span class="welcome-start-line">{line}</span>"#));
-    assert!(!card.contains("inner_html"));
-    // And the seen flag is the old tour's.
-    assert!(
-        piece("bridge.rs").contains(r#"pub const WELCOME_KEY: &str = "gospel-getter-welcome";"#)
-    );
 }
 
 /// The card adds no colors of its own: --text, --text-dim and --accent on
@@ -5117,12 +4837,10 @@ fn the_translation_chooser_and_credits_are_accessible_and_use_tested_theme_color
     assert!(HTML.contains(
         r#"<div id="compare-with-choices" class="segmented" role="group" aria-label="Compare with"></div>"#
     ));
-    // Aa's rows (`ui-leptos/src/aa.rs`).
-    let render = block_after(piece("aa.rs"), "fn translation_view(");
-    assert!(render.contains(r#"class="translation-choice" role="radio""#));
-    assert!(render.contains(r#"<span class="translation-dot" aria-hidden="true">"#));
-    // About is the Rust pieces' (`ui-leptos/src/about.rs`).
-    assert!(piece("about.rs").contains(r#"<ul id="about-credits" class="about-credits-list">"#));
+    // Aa's rows, each a `.translation-choice` radio with its dot hidden, are
+    // bsb.test.mjs's. About's credits are a list.
+    let credits = tag_of("about-credits");
+    assert!(credits.starts_with("<ul") && credits.contains(r#"class="about-credits-list""#));
 
     let rules = rules();
     // The screen rule naming `selector`, alone or in a list.
@@ -5271,34 +4989,15 @@ fn every_handled_key_is_in_the_shortcuts_table() {
 }
 
 /// Every Open beside goes the one way `gospelGetterPanes.openBeside` goes,
-/// `reader::open_beside` (S8): the card's cross-reference preview
-/// (`clicks`), a Library row, a search result, a note's link and the card's
-/// note row (`note_links`), and the palette (`reader::open_here_beside`).
-/// Nothing else opens the second pane but that and the launch that opens
-/// it again where it was (`pane::reopen`). Each new button takes the focus
-/// ring of the control it sits beside.
+/// `reader::open_beside` (S8): the card's cross-reference preview, a
+/// Library row, a search result, a note's link and the card's note row, and
+/// the palette, each of which open-beside.test.mjs opens beside and checks
+/// it ends the same. A lint keeps it one way: nothing opens the second pane
+/// but `reader::open_beside` and the launch that opens it again where it
+/// was (`pane::reopen`). Each new button takes the focus ring of the
+/// control it sits beside.
 #[test]
 fn every_open_beside_goes_one_way() {
-    for file in [
-        "clicks.rs",
-        "library.rs",
-        "search.rs",
-        "note_links.rs",
-        "pane.rs",
-    ] {
-        assert!(
-            piece(file).contains("reader::open_beside("),
-            "{file} opens beside through reader::open_beside"
-        );
-    }
-    assert!(
-        block_after(piece("reader.rs"), "pub fn open_here_beside(")
-            .contains("open_beside(&passage, None)")
-    );
-    assert!(
-        block_after(piece("reader.rs"), "pub fn open_beside(").contains("pane::open_second();")
-    );
-    assert!(block_after(piece("pane.rs"), "pub fn reopen(").contains("open_second();"));
     for (file, source) in PIECES.iter() {
         let calls = source.matches("open_second()").count();
         let expected = match *file {
@@ -5428,18 +5127,9 @@ fn every_link_out_of_the_app_is_opened_by_the_backend() {
             "{anchor}"
         );
     }
-    // A note's links: a capturing click handler keeps every click on them
-    // from the page, has the backend open a web link, and goes to a
-    // reference's passage itself.
-    let links = piece("note_links.rs");
-    assert!(links.contains(r#"const LINKS: &str = "a.note-ref-link, a.note-web-link";"#));
-    assert!(links.contains("event.prevent_default();"));
-    assert!(links.contains(r#"ipc::send("open_web_link", args)"#));
-    assert!(links.contains("crate::reader::open("));
-    assert!(piece("about.rs").contains(r#"ipc::invoke_value("open_release_notes""#));
-    assert!(piece("about.rs").contains(r#"ipc::invoke_value("open_support_page""#));
-    // The credit links are the reader's (ui-leptos/src/reader.rs).
-    assert!(piece("reader.rs").contains(r#"ipc::send("open_credit_link", args)"#));
+    // That each one's click goes to the backend (or, a note's reference, to
+    // its passage) is note-markdown.test.mjs's, app-version.test.mjs's and
+    // credit-links.test.mjs's.
 }
 
 /// A Check now that times out says what the backend says when GitHub
@@ -5612,11 +5302,8 @@ fn ai_findings_have_their_own_violet_in_every_theme() {
         r#"<input type="checkbox" id="ai-findings-toggle" role="switch" aria-describedby="ai-findings-note"> Let AI agents save findings</label>"#
     ));
     assert!(HTML.contains(r#"<p id="ai-findings-note" class="section-note">An AI agent you ask"#));
-    assert!(piece("findings.rs").contains(r#"const SWITCH_ID: &str = "ai-findings-toggle";"#));
-    assert!(
-        piece("findings_text.rs").contains("Found by <span class=\\\"finding-agent\\\">"),
-        "the words shown are who found it and for what"
-    );
+    // That the switch turns findings on, and the words a finding shows, are
+    // ai-findings.test.mjs's and findings_text.rs's.
 }
 
 /// The reading view's scroll position and the band of it in view are read

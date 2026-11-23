@@ -107,6 +107,7 @@ Shared with the backend, from `../shared/`:
 - `passage_reference`: how a passage is named.
 - `book_aliases`: the books' abbreviations, by which the backend reads a typed reference and the Library's notes search finds a note's book.
 - `wire`: the commands' answers both sides read whole, one definition each, with their JSON pinned by its tests.
+- `constants`: the values both sides must agree on: the highlight colors and the page About's support link opens.
 
 `src/lib.rs` mounts the pieces when the module loads: the page's own
 listeners first (`page`, `clicks`, `keyboard`), then the surfaces, the

@@ -128,7 +128,7 @@ pub fn markdown_quote(translation_code: &str, verses: &[&Verse]) -> String {
 /// italics for supplied words, and its margin notes are left out (see
 /// `domain::kjv_markup`); any other translation's text, and a KJV verse
 /// whose markup isn't well formed, is quoted exactly, escaped.
-pub(crate) fn verse_markdown(translation_code: &str, text: &str) -> String {
+pub fn verse_markdown(translation_code: &str, text: &str) -> String {
     (translation_code == kjv_markup::KJV)
         .then(|| kjv_markdown(text))
         .flatten()

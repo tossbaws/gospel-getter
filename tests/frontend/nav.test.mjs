@@ -326,7 +326,8 @@ test('what’s kept is checked as it’s read back, and a value that isn’t a l
 });
 
 test('a narrow window folds Forward into the menu, first, and leaves the translation off the reference', () =>
-    withApp({ book: 'John', chapter: 3, width: 700 }, async (app) => {
+    // 759px, the widest window that's narrow (nav_text.rs's NARROW_QUERY).
+    withApp({ book: 'John', chapter: 3, width: 759 }, async (app) => {
         const ref = el(app, 'ref-text');
         assert.equal(ref.textContent, 'John 3 · KJV');
         assert.equal(ref.querySelector('.ref-codes').textContent, ' · KJV', 'the part a narrow window hides');
@@ -350,8 +351,8 @@ test('a narrow window folds Forward into the menu, first, and leaves the transla
         await waitFor(app, () => app.click(items(app)[0]));
         assert.equal(app.heading(), 'Psalms 23');
         assert.ok(menu(app).hidden);
-        // Wide again: Forward is the bar's, not the menu's.
-        app.resize(1280);
+        // Wide again, from 760px: Forward is the bar's, not the menu's.
+        app.resize(760);
         openMenu(app);
         assert.equal(el(app, 'recent-forward'), null);
     }));

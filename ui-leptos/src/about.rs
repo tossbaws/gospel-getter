@@ -21,6 +21,7 @@ use wasm_bindgen::JsValue;
 use web_sys::{HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::bridge;
+use crate::constants::SUPPORT_PAGE;
 use crate::dom;
 use crate::ipc;
 use crate::overlays::Overlay;
@@ -208,9 +209,7 @@ pub fn AboutAndUpdates() -> impl IntoView {
                     <span aria-hidden="true" hidden=move || known_version().is_none()>
                         " · "
                     </span>
-                    // The backend's `support_link::SUPPORT_PAGE`, shown as
-                    // the link's address.
-                    <a id="support-link" href="https://ko-fi.com/crcllc" on:click=open_support_page>
+                    <a id="support-link" href=SUPPORT_PAGE on:click=open_support_page>
                         "Support Gospel Getter"
                     </a>
                     " "

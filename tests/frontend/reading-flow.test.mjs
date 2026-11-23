@@ -200,6 +200,27 @@ test('opening or closing one remembers it, for every chapter and after a restart
     });
 });
 
+test('a list whose saved state can’t be read starts closed', () =>
+    withApp({
+        book: 'Psalms',
+        chapter: 23,
+        translation: 'kjv',
+        storage: { 'gospel-getter-footnotes': 'open', 'gospel-getter-cross-references': 'open' },
+        // Reading the footnotes' state throws, as a blocked storage does.
+        setUp: (window) => {
+            const getItem = window.Storage.prototype.getItem;
+            window.Storage.prototype.getItem = function (key) {
+                if (key === 'gospel-getter-footnotes') throw new window.DOMException('blocked', 'SecurityError');
+                return getItem.call(this, key);
+            };
+        },
+    }, async (app) => {
+        const [footnotes] = toggles(app, 'footnotes');
+        assert.equal(footnotes.getAttribute('aria-expanded'), 'false');
+        assert.equal(bodyOf(app, footnotes).hidden, true);
+        assert.equal(toggles(app, 'xrefs')[0].getAttribute('aria-expanded'), 'true', 'the other kind, read, as saved');
+    }));
+
 test('while comparing, both columns’ footnotes open and close together', () =>
     withApp({ book: 'Psalms', chapter: 23, compare: true, storage: { 'gospel-getter-footnotes': 'open' } }, async (app) => {
         const footnotes = toggles(app, 'footnotes');

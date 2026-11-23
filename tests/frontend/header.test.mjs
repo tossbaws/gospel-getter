@@ -187,7 +187,10 @@ test('Aa changes the real preferences live, and they persist across a restart', 
         assert.deepEqual(swatches.map((s) => s.getAttribute('aria-label')),
             [...$(app, 'theme-select').options].map((o) => o.textContent));
         for (const s of swatches) {
-            assert.equal(s.querySelector('[data-theme-preview]').dataset.themePreview, s.dataset.value);
+            const preview = s.querySelector('[data-theme-preview]');
+            assert.equal(preview.dataset.themePreview, s.dataset.value);
+            assert.ok(preview.classList.contains('theme-swatch-preview'), 'drawn as the stylesheet says');
+            assert.equal(preview.getAttribute('aria-hidden'), 'true');
         }
         assert.equal($(app, 'theme-name').textContent, 'Chi Rho');
         app.click(swatches.find((s) => s.dataset.value === 'matrix'));

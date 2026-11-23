@@ -9,8 +9,7 @@
 use crate::commands::AppState;
 use crate::credit_links::messages;
 
-/// The page About's Support Gospel Getter link opens.
-pub const SUPPORT_PAGE: &str = "https://ko-fi.com/crcllc";
+pub use crate::constants::SUPPORT_PAGE;
 
 /// Open [`SUPPORT_PAGE`] in the system browser (About's Support Gospel
 /// Getter link).
@@ -29,14 +28,5 @@ mod tests {
     #[test]
     fn the_support_page_is_the_ko_fi_page() {
         assert_eq!(SUPPORT_PAGE, "https://ko-fi.com/crcllc");
-    }
-
-    /// About's link shows this URL as its `href`, so what the link reads as
-    /// is what it opens.
-    #[test]
-    fn about_shows_the_url_it_opens() {
-        let about = include_str!("../../ui-leptos/src/about.rs");
-        assert!(about.contains(&format!("href=\"{SUPPORT_PAGE}\"")));
-        assert!(about.contains(r#"ipc::invoke_value("open_support_page""#));
     }
 }

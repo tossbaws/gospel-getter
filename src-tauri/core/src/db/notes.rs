@@ -24,7 +24,7 @@ pub const MAX_NOTES: usize = 10_000;
 
 /// The most characters all the notes together may hold (as SQLite's
 /// `length()` counts them), for the same reason: it bounds the size of an
-/// export (see `reader_data::MAX_FILE_BYTES`).
+/// export (see [`MAX_FILE_BYTES`](crate::reader_data::MAX_FILE_BYTES)).
 pub const MAX_TOTAL_NOTE_CHARS: usize = 25_000_000;
 
 /// A passage within one chapter: book, chapter and an inclusive verse
@@ -154,7 +154,8 @@ impl std::error::Error for NoteBodyError {}
 /// whitespace trimmed. It must then be non-empty, at most
 /// `MAX_NOTE_CHARS` characters, and plain text — no control characters
 /// besides tabs and line breaks. (That also bounds how large a note can
-/// grow in an export file; see `reader_data::MAX_FILE_BYTES`.)
+/// grow in an export file; see
+/// [`MAX_FILE_BYTES`](crate::reader_data::MAX_FILE_BYTES).)
 pub fn normalize_body(raw: &str) -> Result<String, NoteBodyError> {
     let body = raw.replace("\r\n", "\n").replace('\r', "\n");
     let body = body.trim();
