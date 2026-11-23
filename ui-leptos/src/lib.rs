@@ -22,6 +22,10 @@ mod bridge;
 mod card;
 mod card_text;
 mod clicks;
+// The values the backend must agree on (the highlight colors, the support
+// page), shared with the backend, which compiles the same file.
+#[path = "../../shared/constants.rs"]
+pub mod constants;
 mod dom;
 mod dto;
 mod export_choice;

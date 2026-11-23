@@ -19,8 +19,8 @@ pub mod window;
 // `gospel-getter-cli` can use it without linking the webview (see core's
 // lib.rs).
 pub use gospel_getter_core::{
-    book_aliases, db, domain, markdown, notes_export, passage_copy, passage_reference, preferences,
-    reader_data, release_notes, start_here, verse_parts, wire,
+    book_aliases, constants, db, domain, markdown, notes_export, passage_copy, passage_reference,
+    preferences, reader_data, release_notes, start_here, verse_parts, wire,
 };
 
 use anyhow::Context;

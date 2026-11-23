@@ -16,9 +16,7 @@ use crate::passage_reference::passage_reference;
 use crate::reader_text::{escape_html, footnote_html, range_note, verse_html};
 use crate::verse_parts::Footnote;
 
-/// The highlighter colors, in the order the swatches show them. The
-/// backend accepts exactly these.
-pub const HIGHLIGHT_COLORS: [&str; 4] = ["yellow", "green", "blue", "pink"];
+pub use crate::constants::HIGHLIGHT_COLORS;
 
 /// How many of the selection's notes show before "Show all".
 pub const NOTES_SHOWN: usize = 3;

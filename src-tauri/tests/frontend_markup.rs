@@ -10,6 +10,7 @@ use std::sync::LazyLock;
 
 const HTML: &str = include_str!("../../ui/index.html");
 
+use gospel_getter_lib::constants::HIGHLIGHT_COLORS;
 use gospel_getter_lib::preferences::{self, Preference, Values};
 
 /// Where the page's pieces written in Rust live.
@@ -2355,8 +2356,6 @@ fn print_ignores_saved_reader_preferences() {
 }
 
 // ---- Highlights
-
-const HIGHLIGHT_COLORS: [&str; 4] = ["yellow", "green", "blue", "pink"];
 
 /// Highlighted verse text must stay readable: `--text` on each of a
 /// theme's highlighter colors meets WCAG AA (4.5:1), in every theme, and

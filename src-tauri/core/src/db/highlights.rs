@@ -386,22 +386,17 @@ mod tests {
         );
     }
 
-    /// The four colors are the same here and in the frontend's swatches.
-    /// (That the database holds no others is `migrate_tests`', on an
-    /// upgraded database.)
+    /// The four colors are the same here and in the frontend's swatches
+    /// (`constants::HIGHLIGHT_COLORS`, which the page compiles too). (That
+    /// the database holds no others is `migrate_tests`', on an upgraded
+    /// database.)
     #[test]
     fn colors_match_the_frontend() {
         let names: Vec<&str> = HighlightColor::ALL.iter().map(|c| c.as_str()).collect();
         assert_eq!(names, ["yellow", "green", "blue", "pink"]);
-
-        // The swatches are the selection card's (ui-leptos/src/card_text.rs).
-        let card = include_str!("../../../../ui-leptos/src/card_text.rs");
-        let double_quoted: Vec<String> = names.iter().map(|n| format!("\"{n}\"")).collect();
-        assert!(
-            card.contains(&format!(
-                "pub const HIGHLIGHT_COLORS: [&str; 4] = [{}];",
-                double_quoted.join(", ")
-            )),
+        assert_eq!(
+            names,
+            crate::constants::HIGHLIGHT_COLORS,
             "the frontend's swatches should offer exactly these colors"
         );
 

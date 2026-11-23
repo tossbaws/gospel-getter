@@ -10,6 +10,11 @@
 // which compile the same file.
 #[path = "../../../shared/book_aliases.rs"]
 pub mod book_aliases;
+// The values the page must agree on (the highlight colors, the support
+// page), shared with the page's Rust pieces (ui-leptos), which compile the
+// same file.
+#[path = "../../../shared/constants.rs"]
+pub mod constants;
 pub mod db;
 pub mod domain;
 pub mod markdown;
