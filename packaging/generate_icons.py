@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
-"""Regenerate every shipped app icon from packaging/icon-source.png.
+"""Regenerate every shipped icon, the app's and the website's, from
+packaging/icon-source.png.
 
 The one source is the Chi Rho Code LLC brand mark (the C2 Chi-Rho, a
-stained-glass window), the same art the website's mark is built from (see
-site/README.md, "Brand"). It is committed byte for byte as the Captain
+stained-glass window). It is committed byte for byte as the Captain
 approved it: Brand_Attempts/2026-10-05_brand_chi-rho_C2_circuit-reliquary_polish.png,
 2048x2048.
 
-Each size is one of two drawings of that mark:
-- 48 px and up, the detailed mark: the source itself, moved so the window is
-  centred in the frame, with everything outside the gold rim made
-  transparent, then downsampled.
-- Below 48 px, the flat-small glyph that tools/site/build_brand_icons.py
-  draws (a bold gold glyph on two dark panes, no rim), drawn at 2048 and
-  downsampled to each size on its own. The stained glass and the circuit
-  traces turn to mush below 48 px; the site's favicon follows the same rule.
+Every size, in the app and on the site, is the same drawing: the source
+itself, moved so the window is centred in the frame, with everything outside
+the gold rim made transparent, then downsampled with Lanczos. The site's
+favicons, Apple touch icon and header icon are written here too, from the
+same frames as the app's, so the two can't drift apart.
+
+Below SHARPEN_BELOW px (the 16 to 40 px frames: the taskbar, the title bar,
+the browser tab) a plain downsample of the stained glass is soft, and the
+gold glyph blurs into the glass behind it. Those frames get a mild unsharp
+mask on their colour only (see SHARPEN). The Captain chose this drawing at
+every size, accepting that its detail softens there; the pass sharpens the
+same drawing, it doesn't redraw or recolour it.
 
 Usage, from anywhere (Python 3 and Pillow, nothing else):
     python3 packaging/generate_icons.py
@@ -32,20 +36,18 @@ import math
 import sys
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "packaging/icon-source.png"
 MANIFEST = "packaging/icons.sha256"
 
-# Importing the site's script runs nothing (it has a __main__ guard); keep
-# Python from leaving a __pycache__ beside it.
-sys.dont_write_bytecode = True
-sys.path.insert(0, str(ROOT / "tools/site"))
-import build_brand_icons as brand  # noqa: E402
-
-W = brand.W
-SMALLEST_DETAILED = 48
+W = 2048
+SHARPEN_BELOW = 48
+# Chosen by eye against plain Lanczos at 16, 24 and 32 px, on dark and light
+# backgrounds: a one-pixel radius at 50% lifts the glyph off the glass; at
+# 60% and more the glyph's edges grow dark halos.
+SHARPEN = ImageFilter.UnsharpMask(radius=1, percent=50, threshold=0)
 
 # The sizes Windows asks an app's .ico for: 16 to 40 for small icons, the
 # title bar and the taskbar at 100% to 250% scale, 48 to 96 for the desktop
@@ -65,7 +67,18 @@ PNGS = {
     "packaging/icon.png": 512,
     # The webview's favicon, and About's icon (56 CSS px, so 112 at 2x).
     "ui/favicon.png": 128,
+    # The website (site/index.html, site/guide.html): the favicons, the
+    # header icon (48, with 180 as its 2x) and the Apple touch icon (180).
+    "site/assets/brand/chirho-code-mark-16.png": 16,
+    "site/assets/brand/chirho-code-mark-32.png": 32,
+    "site/assets/brand/chirho-code-mark-48.png": 48,
+    "site/assets/brand/chirho-code-mark-64.png": 64,
+    "site/assets/brand/chirho-code-mark-180.png": 180,
 }
+
+# The site's favicon.ico: the sizes browsers pick from for a tab, a bookmark
+# and a shortcut.
+SITE_ICO_SIZES = [16, 32, 48, 64]
 
 # The rim's outer edge is where the luminance falls through this level,
 # halfway between the gold rim (about 200) and the black square (about 3).
@@ -182,28 +195,37 @@ def main():
     if src.size != (W, W) or src.mode != "RGB":
         sys.exit(f"expected a {W}x{W} RGB source, got {src.size} {src.mode}")
     src.load()
-    big = detailed(src)
-    small = brand.flat_small(brand.segment(src))
+    master = detailed(src)
 
     cache = {}
 
     def icon(size):
         if size not in cache:
-            master = big if size >= SMALLEST_DETAILED else small
             # Pillow resizes RGBA with premultiplied alpha, so the
             # transparent black outside the rim doesn't bleed in.
-            cache[size] = master.resize((size, size), Image.Resampling.LANCZOS)
+            img = master.resize((size, size), Image.Resampling.LANCZOS)
+            if size < SHARPEN_BELOW:
+                # Colour only: sharpening the alpha would ring the rim's
+                # edge, a dark or light fringe on a light background.
+                alpha = img.getchannel("A")
+                img = img.convert("RGB").filter(SHARPEN).convert("RGBA")
+                img.putalpha(alpha)
+            cache[size] = img
         return cache[size]
+
+    def ico(sizes):
+        frames = [icon(s) for s in sizes]
+        out = io.BytesIO()
+        # The largest frame is the one saved; Pillow leaves out any size above it.
+        frames[-1].save(out, "ICO", sizes=[f.size for f in frames], append_images=frames[:-1])
+        return out.getvalue()
 
     written = {}
     for path, size in PNGS.items():
         written[path] = png_bytes(icon(size))
 
-    frames = [icon(s) for s in ICO_SIZES]
-    out = io.BytesIO()
-    # The largest frame is the one saved; Pillow leaves out any size above it.
-    frames[-1].save(out, "ICO", sizes=[f.size for f in frames], append_images=frames[:-1])
-    written["src-tauri/icons/icon.ico"] = out.getvalue()
+    written["src-tauri/icons/icon.ico"] = ico(ICO_SIZES)
+    written["site/assets/brand/favicon.ico"] = ico(SITE_ICO_SIZES)
 
     out = io.BytesIO()
     icns = [icon(s) for s in ICNS_SIZES]
