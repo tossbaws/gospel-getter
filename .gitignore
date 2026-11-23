@@ -12,6 +12,7 @@ dist/
 *.iml
 node_modules/
 
-# Claude Code: share only the project settings; everything else in .claude/ is local
+# Claude Code: share the project settings and the skills CLAUDE.md requires; everything else in .claude/ is local
 .claude/*
 !.claude/settings.json
+!.claude/skills/

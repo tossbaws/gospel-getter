@@ -417,8 +417,9 @@ mod migration_tests {
 #[cfg(test)]
 mod ipc_tests {
     //! The commands, called through Tauri's own IPC layer (on its mock
-    //! runtime) with exactly the argument objects `ui/index.html` passes
-    //! to `invoke` — so a renamed argument on either side fails here.
+    //! runtime) with exactly the argument objects the page passes to
+    //! `invoke` (ui-leptos, through its `ipc.rs`, and boot's prefetch in
+    //! `ui/index.html`) — so a renamed argument on either side fails here.
 
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};

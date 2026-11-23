@@ -16,6 +16,10 @@ on:
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
+# It reads the lock files and the advisory database, nothing more.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 

@@ -4,16 +4,22 @@ Gospel Getter is a Tauri 2 Bible reader. The Rust backend lives in `src-tauri/`,
 
 ## Rust
 
-- Use the `rust-coding-standards` skill for all Rust coding decisions.
+- Use the `rust-coding-standards` skill (`.claude/skills/rust-coding-standards/`) for all Rust coding decisions.
 - Don't use `unwrap()` or `panic!()` on recoverable errors in library code.
 - Use `anyhow::Context` for error propagation.
-- After every change, run `cargo fmt` and `cargo clippy -- -D warnings`. A build that compiles but fails Clippy isn't done.
-- Run `trunk build --release` from the repository root first: the backend embeds `dist/`, and the frontend tests load it.
-- In `ui-leptos/`, Clippy runs on the WebAssembly target: `cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings`.
+- After every change, run `cargo fmt` and Clippy. A build that compiles but fails Clippy isn't done.
+- Before a change is done, run the gates CI runs (`.github/workflows/ci.yml`), as CI writes them. CI adds `.github/ci/cargo-config.toml` to cargo's config; locally, pass `--config ../.github/ci/cargo-config.toml` to each cargo command but `fmt` for the same builds.
+  1. From the repository root, first: `trunk build --release`. The backend embeds `dist/`, and the frontend tests load it, so everything below that builds `src-tauri/` needs it.
+  2. In `ui-leptos/` (Clippy runs on the WebAssembly target, the tests natively): `cargo fmt --all -- --check`, `cargo clippy --locked --target wasm32-unknown-unknown --all-targets -- -D warnings`, `cargo test --locked`.
+  3. In `src-tauri/`: `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo clippy --all-targets -- -D warnings`, `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps`, `cargo build --all-targets`, `cargo test --all-targets`, `cargo test --doc`. On `main` only, CI also runs `cargo test -p gospel-getter-cli -- --ignored`, the CLI's long sweeps.
+  4. The jsdom suite: `cd tests/frontend && npm ci && npm test`. `npm test` runs the Trunk build and builds the bridge (`cargo build --example frontend_bridge`), then the tests; CI builds both first and runs `npm run test:built`, in two shards.
+  5. The Python tools and the install script, from the root: `python3 -m unittest discover -s tools/release -v`, `python3 -m unittest discover -s tools/ci -v`, `scripts/test-install.sh`.
+  6. In `tests/gui/` (CI runs these on Windows): `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`.
+  7. The GUI suite, for any change a reader can see or reach: `scripts/gui-check.sh <release binary or AppImage>`, which needs a full release build of the app, plus `GUI_CHECK_UPDATER_APP=<build>` for the updater checks (`cargo build --release --locked -p gospel_getter --features gui-test-updater`). On Linux it runs the app on a private Xvfb. CI runs it in `dist.yml`: on Linux in every run, and on Windows in a release's run and on pull requests with the `ci:full` label (see `RELEASING.md`).
 
 ## Scripture text
 
-- Use the `biblical-text-integrity` skill for any work that touches Bible text: seed data, ingestion, translations, verse rendering.
+- Use the `biblical-text-integrity` skill (`.claude/skills/biblical-text-integrity/`) for any work that touches Bible text: seed data, ingestion, translations, verse rendering.
 - Never alter verse wording for any reason, including cleanup or fixing an apparent typo in a source dataset.
 
 ## Comments
