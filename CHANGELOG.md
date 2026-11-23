@@ -4,6 +4,29 @@ What changed in each release of Gospel Getter, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.37.0] - 2026-11-22
+
+One icon everywhere: the stained-glass Chi-Rho, at every size, in the app
+and on the website.
+
+### Changed
+- The app's small icons, in the title bar, the taskbar and the small
+  Start menu and desktop icons, are the same stained-glass window as the
+  large icon, instead of a simpler flat drawing. They're lightly sharpened
+  so they stay as crisp as they can at that size. The large icons are
+  unchanged.
+- The website's icons, in the browser tab, bookmarks, a phone's home
+  screen and beside "Gospel Getter" at the top of each page, are the same
+  stained-glass mark, made from the same artwork as the app's.
+
+On Windows, a taskbar pin or shortcut may keep showing the old small icon
+until Windows refreshes its icons. The setup installer, which the in-app
+update also uses, asks Windows to do that; signing out and back in, or
+restarting, also does it.
+
+No verse changes. Backups keep the same format. Updating keeps your
+bookmarks, highlights, notes, findings, reading position and settings.
+
 ## [2.36.0] - 2026-11-22
 
 Skip an update you don't want, go back to the previous version from
